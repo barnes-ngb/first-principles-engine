@@ -11,12 +11,11 @@ import Stack from '@mui/material/Stack'
 import Step from '@mui/material/Step'
 import StepLabel from '@mui/material/StepLabel'
 import Stepper from '@mui/material/Stepper'
-import Tab from '@mui/material/Tab'
-import Tabs from '@mui/material/Tabs'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { addDoc, doc, getDocs, updateDoc } from 'firebase/firestore'
 
+import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -163,20 +162,12 @@ export default function ProjectBoardPage() {
         Dad Lab
       </Typography>
 
-      <SectionCard title="Select Child">
-        {isLoading ? (
-          <Typography color="text.secondary">Loading...</Typography>
-        ) : (
-          <Tabs
-            value={selectedChildId}
-            onChange={(_, v) => setSelectedChildId(v)}
-          >
-            {children.map((child) => (
-              <Tab key={child.id} value={child.id} label={child.name} />
-            ))}
-          </Tabs>
-        )}
-      </SectionCard>
+      <ChildSelector
+        children={children}
+        selectedChildId={selectedChildId}
+        onSelect={setSelectedChildId}
+        isLoading={isLoading}
+      />
 
       {!isLoading && selectedChildId && (
         <>
