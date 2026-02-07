@@ -32,8 +32,14 @@ import type {
   MilestoneProgress,
   Rung,
 } from '../../core/types/domain'
-
-type RungStatus = 'locked' | 'active' | 'achieved'
+import {
+  canMarkAchieved,
+  getActiveRungId,
+  getRungStatus,
+  rungIdFor,
+  type ProgressByRungId,
+  type RungStatus,
+} from './ladder.logic'
 
 type SelectedRung = {
   ladder: Ladder
@@ -43,7 +49,6 @@ type SelectedRung = {
   achievedAt?: string
 }
 
-const rungIdFor = (rung: Rung) => rung.id ?? `order-${rung.order}`
 const rungRefFor = (ladderId: string, rungId: string) => `${ladderId}:${rungId}`
 
 const getStatusLabel = (status: RungStatus) => {
@@ -181,7 +186,9 @@ export default function KidsPage() {
   }, [artifacts, selectedChildId, selectedRung])
 
   const handleMarkAchieved = useCallback(async () => {
-    if (!selectedRung || linkedArtifacts.length === 0 || !selectedChildId) return
+    if (!selectedRung || !canMarkAchieved(linkedArtifacts) || !selectedChildId) {
+      return
+    }
     const ladderId = selectedRung.ladder.id ?? ''
     const rungRef = rungRefFor(ladderId, selectedRung.rungId)
     const existing = progressByRung[rungRef]
@@ -237,7 +244,7 @@ export default function KidsPage() {
     setIsSaving(false)
   }, [
     familyId,
-    linkedArtifacts.length,
+    linkedArtifacts,
     progressByRung,
     selectedChildId,
     selectedRung,
@@ -248,10 +255,15 @@ export default function KidsPage() {
     const rungs = buildPlaceholderRungs(
       [...ladder.rungs].sort((a, b) => a.order - b.order),
     )
-    const firstUnachievedIndex = rungs.findIndex((rung) => {
-      const progress = progressByRung[rungRefFor(ladderId, rungIdFor(rung))]
-      return !(progress?.status === 'achieved' || progress?.achieved)
-    })
+    const progressByRungId = rungs.reduce<ProgressByRungId>((acc, rung) => {
+      const rungId = rungIdFor(rung)
+      acc[rungId] = progressByRung[rungRefFor(ladderId, rungId)]
+      return acc
+    }, {})
+    const activeRungId = getActiveRungId(
+      rungs.filter((rung) => !rung.id?.startsWith('placeholder-')),
+      progressByRungId,
+    )
 
     return (
       <Card key={ladderId} variant="outlined">
@@ -266,18 +278,11 @@ export default function KidsPage() {
               )}
             </Stack>
             <Stack direction="row" spacing={2} flexWrap="wrap">
-              {rungs.map((rung, index) => {
+              {rungs.map((rung) => {
                 const rungId = rungIdFor(rung)
-                const progress = progressByRung[rungRefFor(ladderId, rungId)]
                 const isPlaceholder = rung.id?.startsWith('placeholder-')
-                const isAchieved = progress?.status === 'achieved' || progress?.achieved
-                const isActive =
-                  !isAchieved && index === firstUnachievedIndex && !isPlaceholder
-                const status: RungStatus = isAchieved
-                  ? 'achieved'
-                  : isActive
-                    ? 'active'
-                    : 'locked'
+                const progress = progressByRungId[rungId]
+                const status = getRungStatus(rung, progressByRungId, activeRungId)
                 const achievedAt = progress?.achievedAt
 
                 return (
@@ -414,7 +419,7 @@ export default function KidsPage() {
               <Button onClick={() => setSelectedRung(null)}>Close</Button>
               <Button
                 variant="contained"
-                disabled={linkedArtifacts.length === 0 || isSaving}
+                disabled={!canMarkAchieved(linkedArtifacts) || isSaving}
                 onClick={handleMarkAchieved}
               >
                 Mark Achieved
