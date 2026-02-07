@@ -1,5 +1,11 @@
 import { Navigate, Outlet, RouterProvider, createBrowserRouter } from 'react-router-dom'
 import { AppShell } from './AppShell'
+import EnginePage from '../features/engine/EnginePage'
+import KidsPage from '../features/kids/KidsPage'
+import RecordsPage from '../features/records/RecordsPage'
+import SettingsPage from '../features/settings/SettingsPage'
+import TodayPage from '../features/today/TodayPage'
+import WeekPage from '../features/week/WeekPage'
 
 const routes = [
   {
@@ -10,26 +16,17 @@ const routes = [
     ),
     children: [
       { index: true, element: <Navigate to="/today" replace /> },
-      { path: '/today', element: <Page title="Today" /> },
-      { path: '/week', element: <Page title="This Week" /> },
-      { path: '/engine', element: <Page title="Engine" /> },
-      { path: '/kids', element: <Page title="Kids" /> },
-      { path: '/records', element: <Page title="Records" /> },
-      { path: '/settings', element: <Page title="Settings" /> },
+      { path: '/today', element: <TodayPage /> },
+      { path: '/week', element: <WeekPage /> },
+      { path: '/engine', element: <EnginePage /> },
+      { path: '/kids', element: <KidsPage /> },
+      { path: '/records', element: <RecordsPage /> },
+      { path: '/settings', element: <SettingsPage /> },
     ],
   },
 ]
 
 const router = createBrowserRouter(routes)
-
-function Page({ title }: { title: string }) {
-  return (
-    <section className="page">
-      <h1>{title}</h1>
-      <p>Content for {title.toLowerCase()} goes here.</p>
-    </section>
-  )
-}
 
 export function AppRouter() {
   return <RouterProvider router={router} />
