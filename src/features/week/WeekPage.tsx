@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import CircularProgress from '@mui/material/CircularProgress'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
 import Stack from '@mui/material/Stack'
@@ -9,6 +11,8 @@ import { doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
 import { useNavigate } from 'react-router-dom'
 
 import Page from '../../components/Page'
+import SaveIndicator from '../../components/SaveIndicator'
+import type { SaveState } from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
@@ -16,6 +20,7 @@ import {
   weeksCollection,
 } from '../../core/firebase/firestore'
 import type { Child, WeekPlan } from '../../core/types/domain'
+import { useDebounce } from '../../lib/useDebounce'
 import { getWeekRange } from '../engine/engine.logic'
 
 const createDefaultWeekPlan = (
@@ -55,18 +60,23 @@ export default function WeekPage() {
   )
   const [newMaterial, setNewMaterial] = useState('')
   const [newStep, setNewStep] = useState('')
+  const [saveState, setSaveState] = useState<SaveState>('idle')
 
   useEffect(() => {
     let isMounted = true
 
     const loadChildren = async () => {
-      const snapshot = await getDocs(childrenCollection(familyId))
-      if (!isMounted) return
-      const loaded = snapshot.docs.map((docSnapshot) => ({
-        ...(docSnapshot.data() as Child),
-        id: docSnapshot.id,
-      }))
-      setChildren(loaded)
+      try {
+        const snapshot = await getDocs(childrenCollection(familyId))
+        if (!isMounted) return
+        const loaded = snapshot.docs.map((docSnapshot) => ({
+          ...(docSnapshot.data() as Child),
+          id: docSnapshot.id,
+        }))
+        setChildren(loaded)
+      } catch (err) {
+        console.error('Failed to load children', err)
+      }
     }
 
     loadChildren()
@@ -80,22 +90,26 @@ export default function WeekPage() {
     let isMounted = true
 
     const loadWeekPlan = async () => {
-      const snapshot = await getDoc(weekPlanRef)
-      if (!isMounted) return
+      try {
+        const snapshot = await getDoc(weekPlanRef)
+        if (!isMounted) return
 
-      if (snapshot.exists()) {
-        setWeekPlan(snapshot.data())
-        return
-      }
+        if (snapshot.exists()) {
+          setWeekPlan(snapshot.data())
+          return
+        }
 
-      const defaultWeekPlan = createDefaultWeekPlan(
-        weekRange.start,
-        weekRange.end,
-        children,
-      )
-      await setDoc(weekPlanRef, defaultWeekPlan)
-      if (isMounted) {
-        setWeekPlan(defaultWeekPlan)
+        const defaultWeekPlan = createDefaultWeekPlan(
+          weekRange.start,
+          weekRange.end,
+          children,
+        )
+        await setDoc(weekPlanRef, defaultWeekPlan)
+        if (isMounted) {
+          setWeekPlan(defaultWeekPlan)
+        }
+      } catch (err) {
+        console.error('Failed to load week plan', err)
       }
     }
 
@@ -123,63 +137,106 @@ export default function WeekPage() {
     })
   }, [children, weekPlan, weekPlanRef])
 
-  const updateWeekField = useCallback(
-    async (field: keyof WeekPlan, value: WeekPlan[keyof WeekPlan]) => {
-      if (!weekPlan) return
-      const updated = { ...weekPlan, [field]: value }
-      setWeekPlan(updated)
-      await updateDoc(weekPlanRef, { [field]: value })
+  // --- Save helpers with debounce + status tracking ---
+
+  const writeField = useCallback(
+    async (field: string, value: unknown) => {
+      setSaveState('saving')
+      try {
+        await updateDoc(weekPlanRef, { [field]: value })
+        setSaveState('saved')
+      } catch (err) {
+        console.error('Failed to save week plan field', err)
+        setSaveState('error')
+      }
     },
-    [weekPlan, weekPlanRef],
+    [weekPlanRef],
+  )
+
+  const debouncedWriteField = useDebounce(
+    (field: string, value: unknown) => void writeField(field, value),
+    800,
+  )
+
+  const updateWeekField = useCallback(
+    (field: keyof WeekPlan, value: WeekPlan[keyof WeekPlan]) => {
+      if (!weekPlan) return
+      setWeekPlan({ ...weekPlan, [field]: value })
+      debouncedWriteField(field, value)
+    },
+    [weekPlan, debouncedWriteField],
+  )
+
+  const writeBuildLab = useCallback(
+    async (updatedBuildLab: WeekPlan['buildLab']) => {
+      setSaveState('saving')
+      try {
+        await updateDoc(weekPlanRef, { buildLab: updatedBuildLab })
+        setSaveState('saved')
+      } catch (err) {
+        console.error('Failed to save build lab', err)
+        setSaveState('error')
+      }
+    },
+    [weekPlanRef],
+  )
+
+  const debouncedWriteBuildLab = useDebounce(
+    (updatedBuildLab: WeekPlan['buildLab']) => void writeBuildLab(updatedBuildLab),
+    800,
   )
 
   const updateBuildLab = useCallback(
-    async (field: keyof WeekPlan['buildLab'], value: string | string[]) => {
+    (field: keyof WeekPlan['buildLab'], value: string | string[]) => {
       if (!weekPlan) return
       const updatedBuildLab = { ...weekPlan.buildLab, [field]: value }
-      const updated = { ...weekPlan, buildLab: updatedBuildLab }
-      setWeekPlan(updated)
-      await updateDoc(weekPlanRef, { buildLab: updatedBuildLab })
+      setWeekPlan({ ...weekPlan, buildLab: updatedBuildLab })
+      // Debounce title changes; persist list mutations immediately
+      if (field === 'title') {
+        debouncedWriteBuildLab(updatedBuildLab)
+      } else {
+        void writeBuildLab(updatedBuildLab)
+      }
     },
-    [weekPlan, weekPlanRef],
+    [weekPlan, debouncedWriteBuildLab, writeBuildLab],
   )
 
-  const handleAddMaterial = useCallback(async () => {
+  const handleAddMaterial = useCallback(() => {
     if (!weekPlan) return
     const trimmed = newMaterial.trim()
     if (!trimmed) return
     const updatedMaterials = [...weekPlan.buildLab.materials, trimmed]
     setNewMaterial('')
-    await updateBuildLab('materials', updatedMaterials)
+    updateBuildLab('materials', updatedMaterials)
   }, [newMaterial, updateBuildLab, weekPlan])
 
   const handleRemoveMaterial = useCallback(
-    async (index: number) => {
+    (index: number) => {
       if (!weekPlan) return
       const updatedMaterials = weekPlan.buildLab.materials.filter(
         (_, itemIndex) => itemIndex !== index,
       )
-      await updateBuildLab('materials', updatedMaterials)
+      updateBuildLab('materials', updatedMaterials)
     },
     [updateBuildLab, weekPlan],
   )
 
-  const handleAddStep = useCallback(async () => {
+  const handleAddStep = useCallback(() => {
     if (!weekPlan) return
     const trimmed = newStep.trim()
     if (!trimmed) return
     const updatedSteps = [...weekPlan.buildLab.steps, trimmed]
     setNewStep('')
-    await updateBuildLab('steps', updatedSteps)
+    updateBuildLab('steps', updatedSteps)
   }, [newStep, updateBuildLab, weekPlan])
 
   const handleRemoveStep = useCallback(
-    async (index: number) => {
+    (index: number) => {
       if (!weekPlan) return
       const updatedSteps = weekPlan.buildLab.steps.filter(
         (_, itemIndex) => itemIndex !== index,
       )
-      await updateBuildLab('steps', updatedSteps)
+      updateBuildLab('steps', updatedSteps)
     },
     [updateBuildLab, weekPlan],
   )
@@ -201,7 +258,14 @@ export default function WeekPage() {
       )
       setNewGoalByChild((prev) => ({ ...prev, [childId]: '' }))
       setWeekPlan({ ...weekPlan, childGoals: updatedChildGoals })
-      await updateDoc(weekPlanRef, { childGoals: updatedChildGoals })
+      setSaveState('saving')
+      try {
+        await updateDoc(weekPlanRef, { childGoals: updatedChildGoals })
+        setSaveState('saved')
+      } catch (err) {
+        console.error('Failed to save goal', err)
+        setSaveState('error')
+      }
     },
     [newGoalByChild, weekPlan, weekPlanRef],
   )
@@ -217,7 +281,14 @@ export default function WeekPage() {
         }
       })
       setWeekPlan({ ...weekPlan, childGoals: updatedChildGoals })
-      await updateDoc(weekPlanRef, { childGoals: updatedChildGoals })
+      setSaveState('saving')
+      try {
+        await updateDoc(weekPlanRef, { childGoals: updatedChildGoals })
+        setSaveState('saved')
+      } catch (err) {
+        console.error('Failed to remove goal', err)
+        setSaveState('error')
+      }
     },
     [weekPlan, weekPlanRef],
   )
@@ -226,7 +297,10 @@ export default function WeekPage() {
     return (
       <Page>
         <SectionCard title="Week">
-          <Typography color="text.secondary">Loading week plan...</Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <CircularProgress size={20} />
+            <Typography color="text.secondary">Loading week plan...</Typography>
+          </Box>
         </SectionCard>
       </Page>
     )
@@ -236,9 +310,12 @@ export default function WeekPage() {
     <Page>
       <SectionCard title={`Week Plan (${weekPlan.startDate})`}>
         <Stack spacing={2}>
-          <Typography color="text.secondary">
-            Review the week plan, then jump into quick capture mode when ready.
-          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+            <Typography color="text.secondary" variant="body2">
+              Review the week plan, then jump into quick capture mode when ready.
+            </Typography>
+            <SaveIndicator state={saveState} />
+          </Stack>
           <TextField
             label="Theme"
             value={weekPlan.theme}

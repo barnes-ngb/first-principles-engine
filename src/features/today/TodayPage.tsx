@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
 import Divider from '@mui/material/Divider'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
 import MenuItem from '@mui/material/MenuItem'
+import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
@@ -25,6 +28,8 @@ import {
 import AudioRecorder from '../../components/AudioRecorder'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
+import SaveIndicator from '../../components/SaveIndicator'
+import type { SaveState } from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
@@ -45,6 +50,7 @@ import {
   LearningLocation,
   SubjectBucket,
 } from '../../core/types/enums'
+import { useDebounce } from '../../lib/useDebounce'
 import { createDefaultDayLog } from './daylog.model'
 
 export default function TodayPage() {
@@ -63,6 +69,8 @@ export default function TodayPage() {
   const [linkingLadderId, setLinkingLadderId] = useState('')
   const [linkingRungId, setLinkingRungId] = useState('')
   const [mediaUploading, setMediaUploading] = useState(false)
+  const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
   const [artifactForm, setArtifactForm] = useState({
     childId: '',
     evidenceType: EvidenceType.Note as EvidenceType,
@@ -75,36 +83,67 @@ export default function TodayPage() {
     rungId: '',
   })
 
-  const placeholderChildren = [
-    { id: 'placeholder-1', name: 'Sample Child 1' },
-    { id: 'placeholder-2', name: 'Sample Child 2' },
-  ]
-  const selectableChildren = children.length > 0 ? children : placeholderChildren
+  const selectableChildren = children
 
-  const persistDayLog = useCallback(
+  // --- Persist helpers with save-state tracking ---
+
+  const writeDayLog = useCallback(
     async (updated: DayLog) => {
-      setDayLog(updated)
-      await setDoc(dayLogRef, updated)
+      setSaveState('saving')
+      try {
+        await setDoc(dayLogRef, updated)
+        setSaveState('saved')
+      } catch (err) {
+        console.error('Failed to save day log', err)
+        setSaveState('error')
+      }
     },
     [dayLogRef],
   )
+
+  const debouncedWrite = useDebounce(writeDayLog, 800)
+
+  const persistDayLog = useCallback(
+    (updated: DayLog) => {
+      setDayLog(updated)
+      debouncedWrite(updated)
+    },
+    [debouncedWrite],
+  )
+
+  const persistDayLogImmediate = useCallback(
+    (updated: DayLog) => {
+      setDayLog(updated)
+      void writeDayLog(updated)
+    },
+    [writeDayLog],
+  )
+
+  // --- Data loading ---
 
   useEffect(() => {
     let isMounted = true
 
     const loadDayLog = async () => {
-      const snapshot = await getDoc(dayLogRef)
-      if (!isMounted) return
+      try {
+        const snapshot = await getDoc(dayLogRef)
+        if (!isMounted) return
 
-      if (snapshot.exists()) {
-        setDayLog(snapshot.data())
-        return
-      }
+        if (snapshot.exists()) {
+          setDayLog(snapshot.data())
+          return
+        }
 
-      const defaultLog = createDefaultDayLog(today)
-      await setDoc(dayLogRef, defaultLog)
-      if (isMounted) {
-        setDayLog(defaultLog)
+        const defaultLog = createDefaultDayLog(today)
+        await setDoc(dayLogRef, defaultLog)
+        if (isMounted) {
+          setDayLog(defaultLog)
+        }
+      } catch (err) {
+        console.error('Failed to load day log', err)
+        if (isMounted) {
+          setSnackMessage({ text: 'Could not load today\u2019s log.', severity: 'error' })
+        }
       }
     }
 
@@ -184,15 +223,23 @@ export default function TodayPage() {
     [ladders, linkingLadderId],
   )
 
+  // --- Block field handlers ---
+
   const handleBlockFieldChange = useCallback(
     (index: number, field: keyof DayLog['blocks'][number], value: unknown) => {
       if (!dayLog) return
       const updatedBlocks = dayLog.blocks.map((block, blockIndex) =>
         blockIndex === index ? { ...block, [field]: value } : block,
       )
-      void persistDayLog({ ...dayLog, blocks: updatedBlocks })
+      const updated = { ...dayLog, blocks: updatedBlocks }
+      // Debounce text fields; persist selects/numbers immediately
+      if (field === 'notes') {
+        persistDayLog(updated)
+      } else {
+        persistDayLogImmediate(updated)
+      }
     },
-    [dayLog, persistDayLog],
+    [dayLog, persistDayLog, persistDayLogImmediate],
   )
 
   const handleChecklistToggle = useCallback(
@@ -209,10 +256,12 @@ export default function TodayPage() {
         )
         return { ...block, checklist: updatedChecklist }
       })
-      void persistDayLog({ ...dayLog, blocks: updatedBlocks })
+      persistDayLogImmediate({ ...dayLog, blocks: updatedBlocks })
     },
-    [dayLog, persistDayLog],
+    [dayLog, persistDayLogImmediate],
   )
+
+  // --- Artifact handlers ---
 
   const handleArtifactChange = useCallback(
     (
@@ -262,10 +311,15 @@ export default function TodayPage() {
       content: artifactForm.content,
     }
 
-    const docRef = await addDoc(artifactsCollection(familyId), artifact)
-
-    setTodayArtifacts((prev) => [{ ...artifact, id: docRef.id }, ...prev])
-    setArtifactForm((prev) => ({ ...prev, domain: '', content: '' }))
+    try {
+      const docRef = await addDoc(artifactsCollection(familyId), artifact)
+      setTodayArtifacts((prev) => [{ ...artifact, id: docRef.id }, ...prev])
+      setArtifactForm((prev) => ({ ...prev, domain: '', content: '' }))
+      setSnackMessage({ text: 'Note saved.', severity: 'success' })
+    } catch (err) {
+      console.error('Failed to save artifact', err)
+      setSnackMessage({ text: 'Failed to save note.', severity: 'error' })
+    }
   }, [artifactForm, buildArtifactBase, familyId, today])
 
   const handlePhotoCapture = useCallback(
@@ -275,18 +329,20 @@ export default function TodayPage() {
         const domain = artifactForm.domain.trim()
         const title = domain || `Photo ${today}`
         const artifact = buildArtifactBase(title, EvidenceType.Photo)
-        // Create the Firestore doc first to get an ID for the storage path
         const docRef = await addDoc(artifactsCollection(familyId), artifact)
         const ext = file.name.split('.').pop() ?? 'jpg'
         const filename = generateFilename(ext)
         const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        // Update the doc with the download URL
         await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
         setTodayArtifacts((prev) => [
           { ...artifact, id: docRef.id, uri: downloadUrl },
           ...prev,
         ])
         setArtifactForm((prev) => ({ ...prev, domain: '' }))
+        setSnackMessage({ text: 'Photo uploaded.', severity: 'success' })
+      } catch (err) {
+        console.error('Photo upload failed', err)
+        setSnackMessage({ text: 'Photo upload failed.', severity: 'error' })
       } finally {
         setMediaUploading(false)
       }
@@ -310,6 +366,10 @@ export default function TodayPage() {
           ...prev,
         ])
         setArtifactForm((prev) => ({ ...prev, domain: '' }))
+        setSnackMessage({ text: 'Audio uploaded.', severity: 'success' })
+      } catch (err) {
+        console.error('Audio upload failed', err)
+        setSnackMessage({ text: 'Audio upload failed.', severity: 'error' })
       } finally {
         setMediaUploading(false)
       }
@@ -332,25 +392,30 @@ export default function TodayPage() {
     async (value: string) => {
       setLinkingRungId(value)
       if (!linkingArtifactId || !linkingLadderId || !value) return
-      await updateDoc(doc(artifactsCollection(familyId), linkingArtifactId), {
-        'tags.ladderRef': { ladderId: linkingLadderId, rungId: value },
-      })
-      setTodayArtifacts((prev) =>
-        prev.map((artifact) =>
-          artifact.id === linkingArtifactId
-            ? {
-                ...artifact,
-                tags: {
-                  ...artifact.tags,
-                  ladderRef: { ladderId: linkingLadderId, rungId: value },
-                },
-              }
-            : artifact,
-        ),
-      )
-      setLinkingArtifactId(null)
-      setLinkingLadderId('')
-      setLinkingRungId('')
+      try {
+        await updateDoc(doc(artifactsCollection(familyId), linkingArtifactId), {
+          'tags.ladderRef': { ladderId: linkingLadderId, rungId: value },
+        })
+        setTodayArtifacts((prev) =>
+          prev.map((artifact) =>
+            artifact.id === linkingArtifactId
+              ? {
+                  ...artifact,
+                  tags: {
+                    ...artifact.tags,
+                    ladderRef: { ladderId: linkingLadderId, rungId: value },
+                  },
+                }
+              : artifact,
+          ),
+        )
+        setLinkingArtifactId(null)
+        setLinkingLadderId('')
+        setLinkingRungId('')
+      } catch (err) {
+        console.error('Failed to link artifact', err)
+        setSnackMessage({ text: 'Failed to link artifact.', severity: 'error' })
+      }
     },
     [familyId, linkingArtifactId, linkingLadderId],
   )
@@ -361,16 +426,21 @@ export default function TodayPage() {
       if (!ladderRef) return 'Unlinked'
       const ladder = ladders.find((item) => item.id === ladderRef.ladderId)
       const rung = ladder?.rungs.find((item) => item.id === ladderRef.rungId)
-      return `${ladder?.title ?? 'Ladder'} · ${rung?.title ?? 'Rung'}`
+      return `${ladder?.title ?? 'Ladder'} \u00b7 ${rung?.title ?? 'Rung'}`
     },
     [ladders],
   )
+
+  // --- Loading state ---
 
   if (!dayLog) {
     return (
       <Page>
         <SectionCard title="DayLog">
-          <Typography color="text.secondary">Loading today&apos;s log...</Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <CircularProgress size={20} />
+            <Typography color="text.secondary">Loading today&apos;s log...</Typography>
+          </Box>
         </SectionCard>
       </Page>
     )
@@ -379,9 +449,12 @@ export default function TodayPage() {
   return (
     <Page>
       <SectionCard title={`DayLog (${dayLog.date})`}>
-        <Typography color="text.secondary" gutterBottom>
-          Use the editor below to capture today&apos;s highlights and reflections.
-        </Typography>
+        <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+          <Typography color="text.secondary" variant="body2">
+            Capture today&apos;s highlights and reflections.
+          </Typography>
+          <SaveIndicator state={saveState} />
+        </Stack>
         <List dense>
           {dayLog.blocks.map((block, index) => (
             <ListItem key={`${block.type}-${index}`} disableGutters>
@@ -755,6 +828,22 @@ export default function TodayPage() {
           )}
         </Stack>
       </SectionCard>
+
+      <Snackbar
+        open={snackMessage !== null}
+        autoHideDuration={4000}
+        onClose={() => setSnackMessage(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackMessage(null)}
+          severity={snackMessage?.severity ?? 'success'}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackMessage?.text}
+        </Alert>
+      </Snackbar>
     </Page>
   )
 }
