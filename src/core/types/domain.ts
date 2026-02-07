@@ -104,7 +104,10 @@ export interface Rung {
 export interface MilestoneProgress {
   id?: string
   label: string
-  achieved: boolean
+  childId: string
+  ladderId: string
+  rungId: string
+  status: 'locked' | 'active' | 'achieved'
   achievedAt?: string
   notes?: string
 }

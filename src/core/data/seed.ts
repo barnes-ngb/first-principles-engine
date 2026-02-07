@@ -4,6 +4,7 @@ import {
   artifactsCollection,
   childrenCollection,
   laddersCollection,
+  milestoneProgressCollection,
   weeksCollection,
 } from '../firebase/firestore'
 import {
@@ -54,8 +55,8 @@ export const seedDemoFamily = async (familyId: string): Promise<void> => {
       title: 'Lincoln Reading Ladder',
       description: 'Foundational reading practice.',
       rungs: [
-        { title: 'Sound it out', order: 1 },
-        { title: 'Read with rhythm', order: 2 },
+        { id: 'sound-it-out', title: 'Sound it out', order: 1 },
+        { id: 'read-with-rhythm', title: 'Read with rhythm', order: 2 },
       ],
     }),
     ensureDocument(doc(laddersCollection(familyId), 'london-math'), {
@@ -63,8 +64,8 @@ export const seedDemoFamily = async (familyId: string): Promise<void> => {
       title: 'London Math Ladder',
       description: 'Daily math fluency steps.',
       rungs: [
-        { title: 'Count to 100', order: 1 },
-        { title: 'Solve quick sums', order: 2 },
+        { id: 'count-to-100', title: 'Count to 100', order: 1 },
+        { id: 'solve-quick-sums', title: 'Solve quick sums', order: 2 },
       ],
     }),
   ])
@@ -114,5 +115,64 @@ export const seedDemoFamily = async (familyId: string): Promise<void> => {
         domain: 'Geometry',
       },
     }),
+    ensureDocument(
+      doc(
+        milestoneProgressCollection(familyId),
+        'lincoln-lincoln-reading-sound-it-out',
+      ),
+      {
+        id: 'lincoln-lincoln-reading-sound-it-out',
+        childId: 'lincoln',
+        ladderId: 'lincoln-reading',
+        rungId: 'sound-it-out',
+        label: 'Sound it out',
+        status: 'achieved',
+        achievedAt: createdAt,
+        notes: 'Sounded out short vowel words.',
+      },
+    ),
+    ensureDocument(
+      doc(
+        milestoneProgressCollection(familyId),
+        'lincoln-lincoln-reading-read-with-rhythm',
+      ),
+      {
+        id: 'lincoln-lincoln-reading-read-with-rhythm',
+        childId: 'lincoln',
+        ladderId: 'lincoln-reading',
+        rungId: 'read-with-rhythm',
+        label: 'Read with rhythm',
+        status: 'active',
+      },
+    ),
+    ensureDocument(
+      doc(
+        milestoneProgressCollection(familyId),
+        'london-london-math-count-to-100',
+      ),
+      {
+        id: 'london-london-math-count-to-100',
+        childId: 'london',
+        ladderId: 'london-math',
+        rungId: 'count-to-100',
+        label: 'Count to 100',
+        status: 'achieved',
+        achievedAt: createdAt,
+      },
+    ),
+    ensureDocument(
+      doc(
+        milestoneProgressCollection(familyId),
+        'london-london-math-solve-quick-sums',
+      ),
+      {
+        id: 'london-london-math-solve-quick-sums',
+        childId: 'london',
+        ladderId: 'london-math',
+        rungId: 'solve-quick-sums',
+        label: 'Solve quick sums',
+        status: 'locked',
+      },
+    ),
   ])
 }
