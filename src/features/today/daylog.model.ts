@@ -52,10 +52,11 @@ const cloneChecklistItems = (
   return items.map((item) => ({ ...item }))
 }
 
-export const createDefaultDayLog = (date: string): DayLog => {
+export const createDefaultDayLog = (childId: string, date: string): DayLog => {
   const checklist = cloneChecklistItems(defaultDayLogChecklistItems)
 
   return {
+    childId,
     date,
     blocks: defaultBlocks.map((block) => ({
       ...block,

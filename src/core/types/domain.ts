@@ -45,15 +45,14 @@ export interface WeekPlan {
     childId: string
     goals: string[]
   }>
-  days?: DayLog[]
 }
 
 export interface DayLog {
+  childId: string
   date: string
   blocks: DayBlock[]
   retro?: string
   checklist?: ChecklistItem[]
-  artifacts?: Artifact[]
 }
 
 export interface DayBlock {
@@ -69,6 +68,8 @@ export interface DayBlock {
   notes?: string
   quickCapture?: boolean
   checklist?: ChecklistItem[]
+  sessionIds?: string[]
+  artifactIds?: string[]
 }
 
 export interface ChecklistItem {
@@ -87,13 +88,13 @@ export interface ArtifactTags {
 
 export interface Artifact {
   id?: string
-  childId?: string
+  childId: string
   dayLogId?: string
   weekPlanId?: string
   title: string
   type: EvidenceType
   uri?: string
-  createdAt?: string
+  createdAt: string
   content?: string
   tags: ArtifactTags
   notes?: string
@@ -123,14 +124,15 @@ export interface MilestoneProgress {
   ladderId: string
   rungId: string
   label: string
-  achieved: boolean
   status: 'locked' | 'active' | 'achieved'
   achievedAt?: string
   notes?: string
+  attemptsToAchieve?: number
 }
 
 export interface HoursEntry {
   id?: string
+  childId?: string
   date: string
   hours?: number
   minutes: number
@@ -139,6 +141,8 @@ export interface HoursEntry {
   location?: string
   quickCapture?: boolean
   notes?: string
+  dayLogId?: string
+  blockId?: string
 }
 
 export interface Evaluation {

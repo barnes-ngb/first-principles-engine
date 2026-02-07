@@ -21,7 +21,6 @@ const achieved = (ladderId: string, rungId: string) => ({
   ladderId,
   rungId,
   label: `Rung`,
-  achieved: true,
   status: 'achieved' as const,
   achievedAt: '2026-02-04T12:00:00',
 })
@@ -88,7 +87,7 @@ describe('getRungStatus', () => {
     expect(getRungStatus(r, progress, 'r1')).toBe('achieved')
   })
 
-  it('returns achieved when milestone uses legacy achieved boolean', () => {
+  it('returns locked when status is active but not the active rung', () => {
     const r = rung(1, 'r1')
     const progress: ProgressByRungId = {
       r1: {
@@ -96,12 +95,11 @@ describe('getRungStatus', () => {
         ladderId: 'ladder',
         rungId: 'r1',
         label: 'Rung',
-        achieved: true,
         status: 'active',
       },
     }
 
-    expect(getRungStatus(r, progress, undefined)).toBe('achieved')
+    expect(getRungStatus(r, progress, 'r2')).toBe('locked')
   })
 
   it('returns active when rung matches the active rung id', () => {
@@ -121,8 +119,10 @@ describe('canMarkAchieved', () => {
   it('returns true when there are linked artifacts', () => {
     const artifacts = [
       {
+        childId: 'child-a',
         title: 'Note',
         type: EvidenceType.Note,
+        createdAt: '2026-02-04T12:00:00',
         tags: {
           engineStage: 'Wonder' as never,
           domain: 'Science',
