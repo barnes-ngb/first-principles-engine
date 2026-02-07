@@ -51,6 +51,16 @@ const getSchoolYearRange = (today = new Date()) => {
 const sumMinutes = (log: DayLog) =>
   log.blocks.reduce((total, block) => total + (block.actualMinutes ?? 0), 0)
 
+const entryMinutes = (entry: HoursEntry) => {
+  if (entry.minutes != null) {
+    return entry.minutes
+  }
+  if (entry.hours != null) {
+    return Math.round(entry.hours * 60)
+  }
+  return 0
+}
+
 const computeDayLogTotals = (logs: DayLog[]): DayLogTotals => {
   return logs.reduce<DayLogTotals>(
     (totals, log) => {
@@ -76,6 +86,38 @@ const computeDayLogTotals = (logs: DayLog[]): DayLogTotals => {
       totals.coreMinutes += coreTotal
       totals.coreHomeMinutes += coreHomeTotal
       totals.byDateMinutes[log.date] = dayTotal
+      return totals
+    },
+    {
+      totalMinutes: 0,
+      coreMinutes: 0,
+      coreHomeMinutes: 0,
+      byDateMinutes: {},
+    },
+  )
+}
+
+const computeHoursEntryTotals = (entries: HoursEntry[]): DayLogTotals => {
+  return entries.reduce<DayLogTotals>(
+    (totals, entry) => {
+      const minutes = entryMinutes(entry)
+      if (minutes <= 0) {
+        return totals
+      }
+      const subjectBucket = entry.subjectBucket
+      const location = entry.location
+      const isCore = subjectBucket != null && coreBuckets.has(subjectBucket)
+      const isCoreHome = isCore && location === LearningLocation.Home
+
+      totals.totalMinutes += minutes
+      if (isCore) {
+        totals.coreMinutes += minutes
+      }
+      if (isCoreHome) {
+        totals.coreHomeMinutes += minutes
+      }
+      totals.byDateMinutes[entry.date] =
+        (totals.byDateMinutes[entry.date] ?? 0) + minutes
       return totals
     },
     {
@@ -125,10 +167,16 @@ export default function RecordsPage() {
       getDocs(daysQuery),
     ])
 
-    const hours = hoursSnapshot.docs.map((docSnapshot) => ({
-      id: docSnapshot.id,
-      ...(docSnapshot.data() as HoursEntry),
-    }))
+    const hours = hoursSnapshot.docs.map((docSnapshot) => {
+      const data = docSnapshot.data() as HoursEntry
+      const minutes = entryMinutes(data)
+      return {
+        ...data,
+        id: data.id ?? docSnapshot.id,
+        date: data.date ?? docSnapshot.id,
+        minutes,
+      }
+    })
     const logs = daysSnapshot.docs.map((docSnapshot) => {
       const data = docSnapshot.data() as DayLog
       return { ...data, date: data.date ?? docSnapshot.id }
@@ -148,16 +196,21 @@ export default function RecordsPage() {
   }, [loadRecords])
 
   const totalsFromLogs = useMemo(() => computeDayLogTotals(dayLogs), [dayLogs])
+  const totalsFromEntries = useMemo(
+    () => computeHoursEntryTotals(hoursEntries),
+    [hoursEntries],
+  )
+  const hasHoursEntries = hoursEntries.length > 0
+  const totals = hasHoursEntries ? totalsFromEntries : totalsFromLogs
   const totalHours = useMemo(() => {
     if (hoursEntries.length > 0) {
-      return hoursEntries.reduce((total, entry) => total + entry.hours, 0)
+      return totalsFromEntries.totalMinutes / 60
     }
     return totalsFromLogs.totalMinutes / 60
-  }, [hoursEntries, totalsFromLogs.totalMinutes])
+  }, [hoursEntries.length, totalsFromEntries.totalMinutes, totalsFromLogs.totalMinutes])
 
-  const coreHours = totalsFromLogs.coreMinutes / 60
-  const coreHomeHours = totalsFromLogs.coreHomeMinutes / 60
-  const hasHoursEntries = hoursEntries.length > 0
+  const coreHours = totals.coreMinutes / 60
+  const coreHomeHours = totals.coreHomeMinutes / 60
   const showGenerate = !hasHoursEntries && dayLogs.length > 0
 
   const handleGenerateHours = useCallback(async () => {
@@ -166,38 +219,56 @@ export default function RecordsPage() {
 
     const batch = writeBatch(db)
     dayLogs.forEach((log) => {
-      const totalMinutes = totalsFromLogs.byDateMinutes[log.date] ?? sumMinutes(log)
-      if (totalMinutes <= 0) {
-        return
-      }
-      const hours = Number((totalMinutes / 60).toFixed(2))
-      const entryRef = doc(hoursCollection(familyId), log.date)
-      batch.set(entryRef, {
-        date: log.date,
-        hours,
-        notes: 'Generated from daily logs',
+      log.blocks.forEach((block) => {
+        const minutes = block.actualMinutes ?? 0
+        if (minutes <= 0) {
+          return
+        }
+        const entryRef = doc(hoursCollection(familyId))
+        batch.set(entryRef, {
+          date: log.date,
+          minutes,
+          blockType: block.type,
+          subjectBucket: block.subjectBucket,
+          location: block.location,
+          quickCapture: block.quickCapture,
+          notes: block.notes,
+        })
       })
     })
 
     await batch.commit()
     await loadRecords()
     setIsGenerating(false)
-  }, [dayLogs, familyId, loadRecords, totalsFromLogs.byDateMinutes])
+  }, [dayLogs, familyId, loadRecords])
 
   const handleExportCsv = useCallback(() => {
-    const sortedLogs = [...dayLogs].sort((a, b) => a.date.localeCompare(b.date))
-    const rows = sortedLogs.flatMap((log) =>
-      log.blocks
-        .filter((block) => block.actualMinutes != null)
-        .map((block) => ({
-          date: log.date,
-          blockType: block.type,
-          subjectBucket: block.subjectBucket ?? '',
-          location: block.location ?? '',
-          minutes: block.actualMinutes ?? '',
-          quickCapture: block.notes ?? block.title ?? '',
-        })),
-    )
+    const rows = hasHoursEntries
+      ? [...hoursEntries]
+          .sort((a, b) => a.date.localeCompare(b.date))
+          .filter((entry) => entryMinutes(entry) > 0)
+          .map((entry) => ({
+            date: entry.date,
+            blockType: entry.blockType ?? '',
+            subjectBucket: entry.subjectBucket ?? '',
+            location: entry.location ?? '',
+            minutes: entryMinutes(entry) || '',
+            quickCapture: entry.quickCapture ?? '',
+          }))
+      : [...dayLogs]
+          .sort((a, b) => a.date.localeCompare(b.date))
+          .flatMap((log) =>
+            log.blocks
+              .filter((block) => block.actualMinutes != null)
+              .map((block) => ({
+                date: log.date,
+                blockType: block.type,
+                subjectBucket: block.subjectBucket ?? '',
+                location: block.location ?? '',
+                minutes: block.actualMinutes ?? '',
+                quickCapture: block.quickCapture ?? '',
+              })),
+          )
 
     const header = [
       'date',
@@ -232,7 +303,7 @@ export default function RecordsPage() {
     link.click()
     link.remove()
     window.URL.revokeObjectURL(url)
-  }, [dayLogs, endDate, startDate])
+  }, [dayLogs, endDate, hasHoursEntries, hoursEntries, startDate])
 
   return (
     <Page>
@@ -256,7 +327,7 @@ export default function RecordsPage() {
             <Button
               variant="outlined"
               onClick={handleExportCsv}
-              disabled={dayLogs.length === 0}
+              disabled={!hasHoursEntries && dayLogs.length === 0}
             >
               Export Daily Log CSV
             </Button>
