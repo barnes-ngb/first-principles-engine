@@ -5,6 +5,7 @@ import KidsPage from '../features/kids/KidsPage'
 import RecordsPage from '../features/records/RecordsPage'
 import SettingsPage from '../features/settings/SettingsPage'
 import TodayPage from '../features/today/TodayPage'
+import LabModePage from '../features/week/LabModePage'
 import WeekPage from '../features/week/WeekPage'
 
 const routes = [
@@ -18,6 +19,7 @@ const routes = [
       { index: true, element: <Navigate to="/today" replace /> },
       { path: '/today', element: <TodayPage /> },
       { path: '/week', element: <WeekPage /> },
+      { path: '/week/lab', element: <LabModePage /> },
       { path: '/engine', element: <EnginePage /> },
       { path: '/kids', element: <KidsPage /> },
       { path: '/records', element: <RecordsPage /> },
