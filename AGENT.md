@@ -188,5 +188,5 @@ Aim for commits that:
 - [x] Phase 1 — MVP v0.1
 - [x] Phase 2 — Engine + Ladders
 - [x] Phase 3 — Records + Compliance Pack
-- [ ] Phase 4 — Media Capture
+- [x] Phase 4 — Media Capture
 - [ ] Phase 5 — Deployment + Ops

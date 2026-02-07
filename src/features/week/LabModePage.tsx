@@ -3,16 +3,24 @@ import Button from '@mui/material/Button'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
+import ToggleButton from '@mui/material/ToggleButton'
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
-import { addDoc, getDocs } from 'firebase/firestore'
+import { addDoc, doc, getDocs, updateDoc } from 'firebase/firestore'
 
+import AudioRecorder from '../../components/AudioRecorder'
 import Page from '../../components/Page'
+import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
 import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
 import {
   artifactsCollection,
   childrenCollection,
 } from '../../core/firebase/firestore'
+import {
+  generateFilename,
+  uploadArtifactFile,
+} from '../../core/firebase/upload'
 import type { Child } from '../../core/types/domain'
 import {
   EngineStage,
@@ -23,6 +31,7 @@ import {
 
 type ArtifactFormState = {
   childId: string
+  evidenceType: EvidenceType
   engineStage: EngineStage
   subjectBucket: SubjectBucket
   location: LearningLocation
@@ -32,6 +41,7 @@ type ArtifactFormState = {
 
 const defaultFormState = (engineStage: EngineStage): ArtifactFormState => ({
   childId: '',
+  evidenceType: EvidenceType.Note,
   engineStage,
   subjectBucket: SubjectBucket.Science,
   location: LearningLocation.Home,
@@ -43,6 +53,7 @@ export default function LabModePage() {
   const familyId = DEFAULT_FAMILY_ID
   const [children, setChildren] = useState<Child[]>([])
   const [selectedStage, setSelectedStage] = useState<EngineStage | null>(null)
+  const [mediaUploading, setMediaUploading] = useState(false)
   const [artifactForm, setArtifactForm] = useState<ArtifactFormState>(() =>
     defaultFormState(EngineStage.Wonder),
   )
@@ -88,6 +99,28 @@ export default function LabModePage() {
     [],
   )
 
+  const buildBase = useCallback(
+    (title: string, evidenceType: EvidenceType) => {
+      const createdAt = new Date().toISOString()
+      const dayLogId = createdAt.slice(0, 10)
+      return {
+        title,
+        type: evidenceType,
+        createdAt,
+        childId: artifactForm.childId || undefined,
+        dayLogId,
+        tags: {
+          engineStage: artifactForm.engineStage,
+          domain: artifactForm.domain,
+          subjectBucket: artifactForm.subjectBucket,
+          location: artifactForm.location,
+        },
+        notes: '',
+      }
+    },
+    [artifactForm],
+  )
+
   const handleSave = useCallback(async () => {
     const content = artifactForm.content.trim()
     const domain = artifactForm.domain.trim()
@@ -95,28 +128,56 @@ export default function LabModePage() {
       content.slice(0, 60) ||
       domain ||
       `${artifactForm.engineStage} Lab Note`
-    const createdAt = new Date().toISOString()
-    const dayLogId = createdAt.slice(0, 10)
 
     await addDoc(artifactsCollection(familyId), {
-      title,
-      type: EvidenceType.Note,
-      createdAt,
+      ...buildBase(title, EvidenceType.Note),
       content: artifactForm.content,
-      childId: artifactForm.childId || undefined,
-      dayLogId,
-      tags: {
-        engineStage: artifactForm.engineStage,
-        domain: artifactForm.domain,
-        subjectBucket: artifactForm.subjectBucket,
-        location: artifactForm.location,
-      },
-      notes: '',
     })
 
     setSelectedStage(null)
     setArtifactForm(defaultFormState(EngineStage.Wonder))
-  }, [artifactForm, familyId])
+  }, [artifactForm, buildBase, familyId])
+
+  const handlePhotoCapture = useCallback(
+    async (file: File) => {
+      setMediaUploading(true)
+      try {
+        const domain = artifactForm.domain.trim()
+        const title = domain || `${artifactForm.engineStage} Lab Photo`
+        const artifact = buildBase(title, EvidenceType.Photo)
+        const docRef = await addDoc(artifactsCollection(familyId), artifact)
+        const ext = file.name.split('.').pop() ?? 'jpg'
+        const filename = generateFilename(ext)
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+        setSelectedStage(null)
+        setArtifactForm(defaultFormState(EngineStage.Wonder))
+      } finally {
+        setMediaUploading(false)
+      }
+    },
+    [artifactForm, buildBase, familyId],
+  )
+
+  const handleAudioCapture = useCallback(
+    async (blob: Blob) => {
+      setMediaUploading(true)
+      try {
+        const domain = artifactForm.domain.trim()
+        const title = domain || `${artifactForm.engineStage} Lab Audio`
+        const artifact = buildBase(title, EvidenceType.Audio)
+        const docRef = await addDoc(artifactsCollection(familyId), artifact)
+        const filename = generateFilename('webm')
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, blob, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+        setSelectedStage(null)
+        setArtifactForm(defaultFormState(EngineStage.Wonder))
+      } finally {
+        setMediaUploading(false)
+      }
+    },
+    [artifactForm, buildBase, familyId],
+  )
 
   const stageButtons = useMemo(
     () =>
@@ -137,8 +198,21 @@ export default function LabModePage() {
   return (
     <Page>
       {selectedStage ? (
-        <SectionCard title={`Capture ${selectedStage} Note`}>
+        <SectionCard title={`Capture ${selectedStage} Artifact`}>
           <Stack spacing={2}>
+            <ToggleButtonGroup
+              value={artifactForm.evidenceType}
+              exclusive
+              onChange={(_event, value) => {
+                if (value) handleFormChange('evidenceType', value)
+              }}
+              fullWidth
+              size="large"
+            >
+              <ToggleButton value={EvidenceType.Note}>Note</ToggleButton>
+              <ToggleButton value={EvidenceType.Photo}>Photo</ToggleButton>
+              <ToggleButton value={EvidenceType.Audio}>Audio</ToggleButton>
+            </ToggleButtonGroup>
             <TextField
               label="Child"
               select
@@ -199,30 +273,50 @@ export default function LabModePage() {
               value={artifactForm.domain}
               onChange={(event) => handleFormChange('domain', event.target.value)}
             />
-            <TextField
-              label="Note"
-              multiline
-              minRows={3}
-              value={artifactForm.content}
-              onChange={(event) =>
-                handleFormChange('content', event.target.value)
-              }
-            />
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-              <Button variant="contained" onClick={handleSave}>
-                Save Note
-              </Button>
-              <Button variant="outlined" onClick={() => setSelectedStage(null)}>
-                Cancel
-              </Button>
-            </Stack>
+            {artifactForm.evidenceType === EvidenceType.Note && (
+              <>
+                <TextField
+                  label="Note"
+                  multiline
+                  minRows={3}
+                  value={artifactForm.content}
+                  onChange={(event) =>
+                    handleFormChange('content', event.target.value)
+                  }
+                />
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                  <Button variant="contained" onClick={handleSave}>
+                    Save Note
+                  </Button>
+                  <Button variant="outlined" onClick={() => setSelectedStage(null)}>
+                    Cancel
+                  </Button>
+                </Stack>
+              </>
+            )}
+            {artifactForm.evidenceType === EvidenceType.Photo && (
+              <Stack spacing={2}>
+                <PhotoCapture onCapture={handlePhotoCapture} uploading={mediaUploading} />
+                <Button variant="outlined" onClick={() => setSelectedStage(null)}>
+                  Cancel
+                </Button>
+              </Stack>
+            )}
+            {artifactForm.evidenceType === EvidenceType.Audio && (
+              <Stack spacing={2}>
+                <AudioRecorder onCapture={handleAudioCapture} uploading={mediaUploading} />
+                <Button variant="outlined" onClick={() => setSelectedStage(null)}>
+                  Cancel
+                </Button>
+              </Stack>
+            )}
           </Stack>
         </SectionCard>
       ) : (
         <SectionCard title="Lab Mode">
           <Stack spacing={2}>
             <Typography color="text.secondary">
-              Tap a stage to capture a quick note.
+              Tap a stage to capture a quick artifact.
             </Typography>
             <Stack spacing={2}>{stageButtons}</Stack>
           </Stack>
