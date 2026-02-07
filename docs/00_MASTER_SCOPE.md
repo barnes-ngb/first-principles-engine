@@ -38,13 +38,13 @@ Doc: `01_MVP_V0_1.md`
 
 Doc: `02_ENGINE_LADDERS.md`
 
-### Phase 3 — Records + Compliance Pack
+### Phase 3 — Records + Compliance Pack ✅
 - Hours generation from logs, robust reporting
 - "MO Pack" export: hours summary + daily log + eval + portfolio highlights
 
 Doc: `03_RECORDS_COMPLIANCE.md`
 
-### Phase 4 — Media Capture (Photos/Audio) + Storage
+### Phase 4 — Media Capture (Photos/Audio) + Storage ✅
 - Add photo/audio capture + upload to Firebase Storage
 - Artifact gallery improvements + offline-friendly capture patterns
 

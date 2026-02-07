@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
+import Chip from '@mui/material/Chip'
 import Divider from '@mui/material/Divider'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import List from '@mui/material/List'
@@ -8,6 +10,8 @@ import ListItem from '@mui/material/ListItem'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
+import ToggleButton from '@mui/material/ToggleButton'
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import {
   addDoc,
@@ -18,7 +22,9 @@ import {
   updateDoc,
 } from 'firebase/firestore'
 
+import AudioRecorder from '../../components/AudioRecorder'
 import Page from '../../components/Page'
+import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
 import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
 import {
@@ -28,6 +34,10 @@ import {
   laddersCollection,
   weeksCollection,
 } from '../../core/firebase/firestore'
+import {
+  generateFilename,
+  uploadArtifactFile,
+} from '../../core/firebase/upload'
 import type { Artifact, Child, DayLog, Ladder } from '../../core/types/domain'
 import {
   EngineStage,
@@ -52,8 +62,10 @@ export default function TodayPage() {
   const [linkingArtifactId, setLinkingArtifactId] = useState<string | null>(null)
   const [linkingLadderId, setLinkingLadderId] = useState('')
   const [linkingRungId, setLinkingRungId] = useState('')
+  const [mediaUploading, setMediaUploading] = useState(false)
   const [artifactForm, setArtifactForm] = useState({
     childId: '',
+    evidenceType: EvidenceType.Note as EvidenceType,
     engineStage: EngineStage.Wonder,
     subjectBucket: SubjectBucket.Reading,
     location: LearningLocation.Home,
@@ -212,42 +224,17 @@ export default function TodayPage() {
     [],
   )
 
-  const handleArtifactSave = useCallback(async () => {
-    const content = artifactForm.content.trim()
-    const domain = artifactForm.domain.trim()
-    const title =
-      content.slice(0, 60) || domain || `Artifact for ${today}`
-    const createdAt = new Date().toISOString()
-    const ladderRef =
-      artifactForm.ladderId && artifactForm.rungId
-        ? { ladderId: artifactForm.ladderId, rungId: artifactForm.rungId }
-        : undefined
-
-    const docRef = await addDoc(artifactsCollection(familyId), {
-      title,
-      type: EvidenceType.Note,
-      createdAt,
-      content: artifactForm.content,
-      childId: artifactForm.childId || undefined,
-      dayLogId: today,
-      weekPlanId,
-      tags: {
-        engineStage: artifactForm.engineStage,
-        domain: artifactForm.domain,
-        subjectBucket: artifactForm.subjectBucket,
-        location: artifactForm.location,
-        ...(ladderRef ? { ladderRef } : {}),
-      },
-      notes: '',
-    })
-
-    setTodayArtifacts((prev) => [
-      {
-        id: docRef.id,
+  const buildArtifactBase = useCallback(
+    (title: string, evidenceType: EvidenceType) => {
+      const createdAt = new Date().toISOString()
+      const ladderRef =
+        artifactForm.ladderId && artifactForm.rungId
+          ? { ladderId: artifactForm.ladderId, rungId: artifactForm.rungId }
+          : undefined
+      return {
         title,
-        type: EvidenceType.Note,
+        type: evidenceType,
         createdAt,
-        content: artifactForm.content,
         childId: artifactForm.childId || undefined,
         dayLogId: today,
         weekPlanId,
@@ -259,16 +246,76 @@ export default function TodayPage() {
           ...(ladderRef ? { ladderRef } : {}),
         },
         notes: '',
-      },
-      ...prev,
-    ])
+      }
+    },
+    [artifactForm, today, weekPlanId],
+  )
 
-    setArtifactForm((prev) => ({
-      ...prev,
-      domain: '',
-      content: '',
-    }))
-  }, [artifactForm, familyId, today, weekPlanId])
+  const handleArtifactSave = useCallback(async () => {
+    const content = artifactForm.content.trim()
+    const domain = artifactForm.domain.trim()
+    const title =
+      content.slice(0, 60) || domain || `Artifact for ${today}`
+
+    const artifact = {
+      ...buildArtifactBase(title, EvidenceType.Note),
+      content: artifactForm.content,
+    }
+
+    const docRef = await addDoc(artifactsCollection(familyId), artifact)
+
+    setTodayArtifacts((prev) => [{ ...artifact, id: docRef.id }, ...prev])
+    setArtifactForm((prev) => ({ ...prev, domain: '', content: '' }))
+  }, [artifactForm, buildArtifactBase, familyId, today])
+
+  const handlePhotoCapture = useCallback(
+    async (file: File) => {
+      setMediaUploading(true)
+      try {
+        const domain = artifactForm.domain.trim()
+        const title = domain || `Photo ${today}`
+        const artifact = buildArtifactBase(title, EvidenceType.Photo)
+        // Create the Firestore doc first to get an ID for the storage path
+        const docRef = await addDoc(artifactsCollection(familyId), artifact)
+        const ext = file.name.split('.').pop() ?? 'jpg'
+        const filename = generateFilename(ext)
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+        // Update the doc with the download URL
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+        setTodayArtifacts((prev) => [
+          { ...artifact, id: docRef.id, uri: downloadUrl },
+          ...prev,
+        ])
+        setArtifactForm((prev) => ({ ...prev, domain: '' }))
+      } finally {
+        setMediaUploading(false)
+      }
+    },
+    [artifactForm, buildArtifactBase, familyId, today],
+  )
+
+  const handleAudioCapture = useCallback(
+    async (blob: Blob) => {
+      setMediaUploading(true)
+      try {
+        const domain = artifactForm.domain.trim()
+        const title = domain || `Audio ${today}`
+        const artifact = buildArtifactBase(title, EvidenceType.Audio)
+        const docRef = await addDoc(artifactsCollection(familyId), artifact)
+        const filename = generateFilename('webm')
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, blob, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+        setTodayArtifacts((prev) => [
+          { ...artifact, id: docRef.id, uri: downloadUrl },
+          ...prev,
+        ])
+        setArtifactForm((prev) => ({ ...prev, domain: '' }))
+      } finally {
+        setMediaUploading(false)
+      }
+    },
+    [artifactForm, buildArtifactBase, familyId, today],
+  )
 
   const handleStartLinking = useCallback((artifact: Artifact) => {
     setLinkingArtifactId(artifact.id ?? null)
@@ -453,6 +500,19 @@ export default function TodayPage() {
       </SectionCard>
       <SectionCard title="Capture Artifact">
         <Stack spacing={2}>
+          <ToggleButtonGroup
+            value={artifactForm.evidenceType}
+            exclusive
+            onChange={(_event, value) => {
+              if (value) handleArtifactChange('evidenceType', value)
+            }}
+            fullWidth
+            size="large"
+          >
+            <ToggleButton value={EvidenceType.Note}>Note</ToggleButton>
+            <ToggleButton value={EvidenceType.Photo}>Photo</ToggleButton>
+            <ToggleButton value={EvidenceType.Audio}>Audio</ToggleButton>
+          </ToggleButtonGroup>
           <TextField
             label="Child"
             select
@@ -569,16 +629,26 @@ export default function TodayPage() {
                 ))}
             </TextField>
           )}
-          <TextField
-            label="Content"
-            multiline
-            minRows={3}
-            value={artifactForm.content}
-            onChange={(event) => handleArtifactChange('content', event.target.value)}
-          />
-          <Button variant="contained" onClick={handleArtifactSave}>
-            Save
-          </Button>
+          {artifactForm.evidenceType === EvidenceType.Note && (
+            <>
+              <TextField
+                label="Content"
+                multiline
+                minRows={3}
+                value={artifactForm.content}
+                onChange={(event) => handleArtifactChange('content', event.target.value)}
+              />
+              <Button variant="contained" onClick={handleArtifactSave}>
+                Save Note
+              </Button>
+            </>
+          )}
+          {artifactForm.evidenceType === EvidenceType.Photo && (
+            <PhotoCapture onCapture={handlePhotoCapture} uploading={mediaUploading} />
+          )}
+          {artifactForm.evidenceType === EvidenceType.Audio && (
+            <AudioRecorder onCapture={handleAudioCapture} uploading={mediaUploading} />
+          )}
         </Stack>
       </SectionCard>
       <SectionCard title="Artifacts">
@@ -598,13 +668,34 @@ export default function TodayPage() {
                       alignItems="center"
                       justifyContent="space-between"
                     >
-                      <Typography variant="body2" sx={{ flex: 1 }}>
-                        {artifact.title}
-                      </Typography>
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: 1 }}>
+                        <Typography variant="body2">
+                          {artifact.title}
+                        </Typography>
+                        <Chip size="small" label={artifact.type} />
+                      </Stack>
                       <Typography variant="caption" color="text.secondary">
                         {getArtifactLinkLabel(artifact)}
                       </Typography>
                     </Stack>
+                    {artifact.type === EvidenceType.Photo && artifact.uri && (
+                      <Box
+                        component="img"
+                        src={artifact.uri}
+                        alt={artifact.title}
+                        sx={{
+                          width: '100%',
+                          maxHeight: 180,
+                          objectFit: 'contain',
+                          borderRadius: 1,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                        }}
+                      />
+                    )}
+                    {artifact.type === EvidenceType.Audio && artifact.uri && (
+                      <Box component="audio" controls src={artifact.uri} sx={{ width: '100%' }} />
+                    )}
                     <Button
                       size="small"
                       variant="outlined"

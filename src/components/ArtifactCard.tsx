@@ -1,3 +1,4 @@
+import Box from '@mui/material/Box'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
@@ -5,6 +6,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import type { Artifact } from '../core/types/domain'
+import { EvidenceType } from '../core/types/enums'
 
 interface ArtifactCardProps {
   artifact: Artifact
@@ -43,6 +45,33 @@ export default function ArtifactCard({ artifact }: ArtifactCardProps) {
               </Typography>
             )}
           </Stack>
+
+          {artifact.type === EvidenceType.Photo && artifact.uri && (
+            <Box
+              component="img"
+              src={artifact.uri}
+              alt={artifact.title}
+              sx={{
+                width: '100%',
+                maxHeight: 240,
+                objectFit: 'contain',
+                borderRadius: 1,
+                border: '1px solid',
+                borderColor: 'divider',
+              }}
+            />
+          )}
+
+          {artifact.type === EvidenceType.Audio && artifact.uri && (
+            <Box component="audio" controls src={artifact.uri} sx={{ width: '100%' }} />
+          )}
+
+          {artifact.content && (
+            <Typography variant="body2" color="text.secondary">
+              {artifact.content}
+            </Typography>
+          )}
+
           <Stack direction="row" spacing={1} flexWrap="wrap">
             {artifact.tags?.domain && (
               <Chip size="small" variant="outlined" label={artifact.tags.domain} />
