@@ -38,6 +38,17 @@ const artifactConverter: FirestoreDataConverter<Artifact> = {
   },
 }
 
+const hoursConverter: FirestoreDataConverter<HoursEntry> = {
+  toFirestore: (data) => data,
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as HoursEntry
+    return {
+      ...data,
+      id: data.id ?? snapshot.id,
+    }
+  },
+}
+
 export const childrenCollection = (familyId: string): CollectionReference<Child> =>
   collection(db, `families/${familyId}/children`) as CollectionReference<Child>
 
@@ -59,7 +70,9 @@ export const artifactsCollection = (
 export const hoursCollection = (
   familyId: string,
 ): CollectionReference<HoursEntry> =>
-  collection(db, `families/${familyId}/hours`) as CollectionReference<HoursEntry>
+  collection(db, `families/${familyId}/hours`).withConverter(
+    hoursConverter,
+  ) as CollectionReference<HoursEntry>
 
 export const evaluationsCollection = (
   familyId: string,

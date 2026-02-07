@@ -51,6 +51,7 @@ export interface DayBlock {
   location?: string
   plannedMinutes?: number
   actualMinutes?: number
+  quickCapture?: boolean
   startTime?: string
   endTime?: string
   notes?: string
@@ -111,7 +112,11 @@ export interface MilestoneProgress {
 export interface HoursEntry {
   id?: string
   date: string
-  hours: number
+  blockType: DayBlockType
+  subjectBucket?: SubjectBucket
+  location?: string
+  minutes: number
+  quickCapture?: boolean
   notes?: string
 }
 
