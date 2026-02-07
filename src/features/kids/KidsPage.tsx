@@ -82,6 +82,12 @@ const isLadderForChild = (ladder: Ladder, childId: string) => {
   return ladder.id?.startsWith(`${childId}-`) ?? false
 }
 
+const ladderRefKey = (ladderRef?: Artifact['tags']['ladderRef']) => {
+  if (!ladderRef) return undefined
+  if (typeof ladderRef === 'string') return ladderRef
+  return `${ladderRef.ladderId}:${ladderRef.rungId}`
+}
+
 export default function KidsPage() {
   const familyId = DEFAULT_FAMILY_ID
   const [children, setChildren] = useState<Child[]>([])
@@ -212,7 +218,7 @@ export default function KidsPage() {
     return artifacts.filter(
       (artifact) =>
         artifact.childId === selectedChildId &&
-        artifact.tags?.ladderRef === rungRef,
+        ladderRefKey(artifact.tags?.ladderRef) === rungRef,
     )
   }, [artifacts, selectedChildId, selectedRung])
 
