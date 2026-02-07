@@ -4,6 +4,7 @@ import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
 import Stack from '@mui/material/Stack'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
+import FileUploadIcon from '@mui/icons-material/FileUpload'
 
 interface PhotoCaptureProps {
   /** Called with the captured File when the user confirms the photo. */
@@ -13,7 +14,8 @@ interface PhotoCaptureProps {
 }
 
 export default function PhotoCapture({ onCapture, uploading }: PhotoCaptureProps) {
-  const inputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [file, setFile] = useState<File | null>(null)
 
@@ -32,35 +34,54 @@ export default function PhotoCapture({ onCapture, uploading }: PhotoCaptureProps
     if (preview) URL.revokeObjectURL(preview)
     setPreview(null)
     setFile(null)
-    if (inputRef.current) inputRef.current.value = ''
+    if (cameraInputRef.current) cameraInputRef.current.value = ''
+    if (uploadInputRef.current) uploadInputRef.current.value = ''
   }, [file, onCapture, preview])
 
   const handleCancel = useCallback(() => {
     if (preview) URL.revokeObjectURL(preview)
     setPreview(null)
     setFile(null)
-    if (inputRef.current) inputRef.current.value = ''
+    if (cameraInputRef.current) cameraInputRef.current.value = ''
+    if (uploadInputRef.current) uploadInputRef.current.value = ''
   }, [preview])
 
   return (
     <Stack spacing={2}>
       <input
-        ref={inputRef}
+        ref={cameraInputRef}
         type="file"
         accept="image/*"
         capture="environment"
         onChange={handleFileChange}
         style={{ display: 'none' }}
       />
+      <input
+        ref={uploadInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        style={{ display: 'none' }}
+      />
       {!preview && (
-        <Button
-          variant="outlined"
-          startIcon={<PhotoCameraIcon />}
-          onClick={() => inputRef.current?.click()}
-          sx={{ height: 56 }}
-        >
-          Take / Choose Photo
-        </Button>
+        <Stack direction="row" spacing={2}>
+          <Button
+            variant="outlined"
+            startIcon={<PhotoCameraIcon />}
+            onClick={() => cameraInputRef.current?.click()}
+            sx={{ height: 56, flex: 1 }}
+          >
+            Take Photo
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<FileUploadIcon />}
+            onClick={() => uploadInputRef.current?.click()}
+            sx={{ height: 56, flex: 1 }}
+          >
+            Upload Image
+          </Button>
+        </Stack>
       )}
       {preview && (
         <>
