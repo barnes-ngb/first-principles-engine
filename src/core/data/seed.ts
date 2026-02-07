@@ -4,6 +4,7 @@ import {
   artifactsCollection,
   childrenCollection,
   laddersCollection,
+  milestoneProgressCollection,
   weeksCollection,
 } from '../firebase/firestore'
 import {
@@ -86,6 +87,7 @@ export const seedDemoFamily = async (familyId: string): Promise<void> => {
   })
 
   const createdAt = formatDateYmd(today)
+  const achievedAt = new Date().toISOString()
 
   await Promise.all([
     ensureDocument(doc(artifactsCollection(familyId), 'lincoln-wonder-note'), {
@@ -114,5 +116,30 @@ export const seedDemoFamily = async (familyId: string): Promise<void> => {
         domain: 'Geometry',
       },
     }),
+    ensureDocument(
+      doc(milestoneProgressCollection(familyId), 'lincoln-lincoln-reading-order-1'),
+      {
+        id: 'lincoln-lincoln-reading-order-1',
+        childId: 'lincoln',
+        ladderId: 'lincoln-reading',
+        rungId: 'order-1',
+        label: 'Sound it out',
+        achieved: true,
+        status: 'achieved',
+        achievedAt,
+      },
+    ),
+    ensureDocument(
+      doc(milestoneProgressCollection(familyId), 'london-london-math-order-1'),
+      {
+        id: 'london-london-math-order-1',
+        childId: 'london',
+        ladderId: 'london-math',
+        rungId: 'order-1',
+        label: 'Count to 100',
+        achieved: false,
+        status: 'active',
+      },
+    ),
   ])
 }

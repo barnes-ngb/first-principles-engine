@@ -13,7 +13,7 @@ import Stack from '@mui/material/Stack'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDocs, updateDoc } from 'firebase/firestore'
+import { doc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
 
 import ArtifactCard from '../../components/ArtifactCard'
 import Page from '../../components/Page'
@@ -45,6 +45,8 @@ type SelectedRung = {
 
 const rungIdFor = (rung: Rung) => rung.id ?? `order-${rung.order}`
 const rungRefFor = (ladderId: string, rungId: string) => `${ladderId}:${rungId}`
+const milestoneDocIdFor = (childId: string, ladderId: string, rungId: string) =>
+  `${childId}-${ladderId}-${rungId}`
 
 const getStatusLabel = (status: RungStatus) => {
   if (status === 'achieved') return 'Achieved'
@@ -106,7 +108,11 @@ export default function KidsPage() {
     })
     const loadedMilestones = milestoneSnapshot.docs.map((docSnapshot) => {
       const data = docSnapshot.data() as MilestoneProgress
-      return { ...data, id: data.id ?? docSnapshot.id }
+      return {
+        ...data,
+        status: data.status ?? (data.achieved ? 'achieved' : 'locked'),
+        id: data.id ?? docSnapshot.id,
+      }
     })
     const loadedArtifacts = artifactsSnapshot.docs.map((docSnapshot) => {
       const data = docSnapshot.data() as Artifact
@@ -115,7 +121,32 @@ export default function KidsPage() {
 
     setChildren(loadedChildren)
     setLadders(loadedLadders)
-    setMilestoneProgress(loadedMilestones)
+    const dedupedMilestones = Object.values(
+      loadedMilestones.reduce<Record<string, MilestoneProgress>>((acc, entry) => {
+        if (!entry.childId || !entry.ladderId || !entry.rungId) {
+          return acc
+        }
+        const key = rungRefFor(entry.ladderId, entry.rungId)
+        const existing = acc[`${entry.childId}:${key}`]
+        if (!existing) {
+          acc[`${entry.childId}:${key}`] = entry
+          return acc
+        }
+        const existingAchievedAt = existing.achievedAt
+          ? Date.parse(existing.achievedAt)
+          : 0
+        const incomingAchievedAt = entry.achievedAt ? Date.parse(entry.achievedAt) : 0
+        const shouldReplace =
+          (entry.achieved && !existing.achieved) ||
+          incomingAchievedAt > existingAchievedAt
+        if (shouldReplace) {
+          acc[`${entry.childId}:${key}`] = entry
+        }
+        return acc
+      }, {}),
+    )
+
+    setMilestoneProgress(dedupedMilestones)
     setArtifacts(loadedArtifacts)
     setSelectedChildId((current) => current || loadedChildren[0]?.id || '')
     setIsLoading(false)
@@ -186,11 +217,19 @@ export default function KidsPage() {
     const rungRef = rungRefFor(ladderId, selectedRung.rungId)
     const existing = progressByRung[rungRef]
     const achievedAt = new Date().toISOString()
+    const milestoneDocId = milestoneDocIdFor(
+      selectedChildId,
+      ladderId,
+      selectedRung.rungId,
+    )
 
     setIsSaving(true)
 
     if (existing?.id) {
       await updateDoc(doc(milestoneProgressCollection(familyId), existing.id), {
+        childId: selectedChildId,
+        ladderId,
+        rungId: selectedRung.rungId,
         achieved: true,
         status: 'achieved',
         achievedAt,
@@ -201,6 +240,9 @@ export default function KidsPage() {
           entry.id === existing.id
             ? {
                 ...entry,
+                childId: selectedChildId,
+                ladderId,
+                rungId: selectedRung.rungId,
                 achieved: true,
                 status: 'achieved',
                 achievedAt,
@@ -210,7 +252,7 @@ export default function KidsPage() {
         ),
       )
     } else {
-      const docRef = await addDoc(milestoneProgressCollection(familyId), {
+      await setDoc(doc(milestoneProgressCollection(familyId), milestoneDocId), {
         childId: selectedChildId,
         ladderId,
         rungId: selectedRung.rungId,
@@ -218,11 +260,11 @@ export default function KidsPage() {
         achieved: true,
         status: 'achieved',
         achievedAt,
-      } as MilestoneProgress)
+      })
       setMilestoneProgress((prev) => [
         ...prev,
         {
-          id: docRef.id,
+          id: milestoneDocId,
           childId: selectedChildId,
           ladderId,
           rungId: selectedRung.rungId,
