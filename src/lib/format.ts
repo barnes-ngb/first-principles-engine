@@ -41,3 +41,11 @@ export const formatDateForInput = (value: Date | string) => {
 export const formatDateForCsv = (value: Date | string) => formatDateForInput(value)
 
 export const parseDateInput = (value: string) => parseDateYmd(value)
+
+export const toCsvValue = (value: string | number | null | undefined) => {
+  const stringValue = `${value ?? ''}`
+  if (/[",\n]/.test(stringValue)) {
+    return `"${stringValue.replace(/"/g, '""')}"`
+  }
+  return stringValue
+}

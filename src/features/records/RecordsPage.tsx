@@ -16,7 +16,7 @@ import {
 } from '../../core/firebase/firestore'
 import type { DayLog, HoursEntry } from '../../core/types/domain'
 import { LearningLocation, SubjectBucket } from '../../core/types/enums'
-import { formatDateForCsv, formatDateForInput } from '../../lib/format'
+import { formatDateForCsv, formatDateForInput, toCsvValue } from '../../lib/format'
 import { getSchoolYearRange } from '../../lib/time'
 
 type DayLogTotals = {
@@ -116,14 +116,6 @@ const computeHoursEntryTotals = (entries: HoursEntry[]): DayLogTotals => {
 }
 
 const formatHours = (hours: number) => hours.toFixed(2)
-
-const toCsvValue = (value: string | number | null | undefined) => {
-  const stringValue = `${value ?? ''}`
-  if (/[",\n]/.test(stringValue)) {
-    return `"${stringValue.replace(/"/g, '""')}"`
-  }
-  return stringValue
-}
 
 export default function RecordsPage() {
   const familyId = DEFAULT_FAMILY_ID
