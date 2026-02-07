@@ -1,23 +1,43 @@
+/*
+ * AppShell layout.
+ *
+ * Uses rgba/inherit so colours stay in sync with the active MUI theme.
+ * Breakpoint at 900px matches MUI's `md` breakpoint so the CSS media
+ * query and the sx={{ display: { xs, md } }} props agree.
+ */
+
 .app-shell {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 240px 1fr;
   min-height: 100vh;
-  background: #f8f8fb;
-  color: #1f1f1f;
+}
+
+/* ---- Responsive: collapse sidebar below md (900px) ---- */
+@media (max-width: 899.95px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+  .app-shell__nav {
+    display: none;
+  }
 }
 
 .app-shell__nav {
-  padding: 24px;
-  background: #ffffff;
-  border-right: 1px solid #e6e6ef;
+  padding: 24px 16px;
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
 
 .app-shell__nav h2 {
-  margin: 0 0 16px;
-  font-size: 1rem;
-  letter-spacing: 0.08em;
+  margin: 0 0 20px;
+  padding: 0 12px;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #60646c;
+  opacity: 0.55;
 }
 
 .app-shell__nav ul {
@@ -25,7 +45,7 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .app-shell__nav a {
@@ -35,25 +55,63 @@
   color: inherit;
   text-decoration: none;
   font-weight: 500;
+  font-size: 0.95rem;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.app-shell__nav a:hover {
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .app-shell__nav a.active {
-  background: #edf1ff;
-  color: #2f4bd7;
+  background: rgba(0, 0, 0, 0.06);
+  font-weight: 600;
 }
 
 .app-shell__content {
-  padding: 32px 40px;
+  padding: 24px 32px;
+  min-width: 0; /* prevent grid blowout on long content */
 }
 
-.page {
-  background: #ffffff;
-  padding: 32px;
-  border-radius: 16px;
-  box-shadow: 0 12px 24px rgba(18, 22, 33, 0.08);
+@media (max-width: 899.95px) {
+  .app-shell__content {
+    padding: 16px;
+  }
 }
 
-.page h1 {
-  margin-top: 0;
-  font-size: 2rem;
+/* Style nav links inside the MUI Drawer the same as the sidebar */
+.MuiDrawer-paper h2 {
+  margin: 0 0 20px;
+  padding: 0 12px;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.MuiDrawer-paper ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.MuiDrawer-paper a {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+.MuiDrawer-paper a:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.MuiDrawer-paper a.active {
+  background: rgba(0, 0, 0, 0.06);
+  font-weight: 600;
 }
