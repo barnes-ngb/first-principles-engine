@@ -5,12 +5,17 @@ import {
   childrenCollection,
   laddersCollection,
   milestoneProgressCollection,
+  projectsCollection,
+  sessionsCollection,
   weeksCollection,
 } from '../firebase/firestore'
 import {
   EngineStage,
   EvidenceType,
   LearningLocation,
+  ProjectPhase,
+  SessionResult,
+  StreamId,
   SubjectBucket,
   TrackType,
 } from '../types/enums'
@@ -675,4 +680,82 @@ export const seedDemoFamily = async (familyId: string): Promise<void> => {
       },
     ),
   ])
+
+  // ── Sample sessions for Lincoln ──────────────────────────────
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const twoDaysAgo = new Date(today)
+  twoDaysAgo.setDate(twoDaysAgo.getDate() - 2)
+
+  await Promise.all([
+    ensureDocument(doc(sessionsCollection(familyId), 'lincoln-reading-1'), {
+      id: 'lincoln-reading-1',
+      childId: 'lincoln',
+      date: formatDateYmd(twoDaysAgo),
+      streamId: StreamId.Reading,
+      ladderId: 'lincoln-reading',
+      targetRungOrder: 3,
+      result: SessionResult.Hit,
+      durationSeconds: 720,
+      createdAt: twoDaysAgo.toISOString(),
+    }),
+    ensureDocument(doc(sessionsCollection(familyId), 'lincoln-reading-2'), {
+      id: 'lincoln-reading-2',
+      childId: 'lincoln',
+      date: formatDateYmd(yesterday),
+      streamId: StreamId.Reading,
+      ladderId: 'lincoln-reading',
+      targetRungOrder: 3,
+      result: SessionResult.Hit,
+      durationSeconds: 600,
+      createdAt: yesterday.toISOString(),
+    }),
+    ensureDocument(doc(sessionsCollection(familyId), 'lincoln-reading-3'), {
+      id: 'lincoln-reading-3',
+      childId: 'lincoln',
+      date: formatDateYmd(today),
+      streamId: StreamId.Reading,
+      ladderId: 'lincoln-reading',
+      targetRungOrder: 3,
+      result: SessionResult.Hit,
+      durationSeconds: 540,
+      createdAt: today.toISOString(),
+    }),
+    ensureDocument(doc(sessionsCollection(familyId), 'lincoln-math-1'), {
+      id: 'lincoln-math-1',
+      childId: 'lincoln',
+      date: formatDateYmd(yesterday),
+      streamId: StreamId.Math,
+      ladderId: 'lincoln-math',
+      targetRungOrder: 2,
+      result: SessionResult.Near,
+      durationSeconds: 900,
+      createdAt: yesterday.toISOString(),
+    }),
+    ensureDocument(doc(sessionsCollection(familyId), 'lincoln-math-2'), {
+      id: 'lincoln-math-2',
+      childId: 'lincoln',
+      date: formatDateYmd(today),
+      streamId: StreamId.Math,
+      ladderId: 'lincoln-math',
+      targetRungOrder: 2,
+      result: SessionResult.Hit,
+      durationSeconds: 840,
+      createdAt: today.toISOString(),
+    }),
+  ])
+
+  // ── Sample Dad Lab project for Lincoln ───────────────────────
+  await ensureDocument(doc(projectsCollection(familyId), 'lincoln-ramp-build'), {
+    id: 'lincoln-ramp-build',
+    childId: 'lincoln',
+    title: 'Cardboard Ramp Experiment',
+    phase: ProjectPhase.Test,
+    planNotes: 'Build a ramp from cardboard and test how far a marble rolls.',
+    buildNotes: 'Used 3 pieces of cardboard taped together. Added side rails.',
+    testNotes: 'Marble went 4 feet on carpet. Trying tile floor next.',
+    createdAt: twoDaysAgo.toISOString(),
+    updatedAt: today.toISOString(),
+    completed: false,
+  })
 }
