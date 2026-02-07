@@ -1,3 +1,5 @@
+import LabModePage from './LabModePage'
+
 export default function WeekPage() {
-  return <h1>This Week</h1>
+  return <LabModePage />
 }
