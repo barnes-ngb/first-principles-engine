@@ -19,8 +19,8 @@ This plan keeps testing lightweight but real. We focus on:
 ### What we test first
 - [x] `engine.logic.ts` (flywheel counts + status + suggestions)
 - [x] date helpers in `lib/time.ts`
-- [ ] records CSV builder in `lib/format.ts`
-- [ ] ladder gating logic (can't mark achieved without evidence)
+- [x] date formatting + CSV escaping in `lib/format.ts`
+- [x] ladder gating logic (can't mark achieved without evidence)
 
 ---
 
@@ -36,16 +36,22 @@ This plan keeps testing lightweight but real. We focus on:
 2. `src/lib/time.ts` ✅
    - [x] `getSchoolYearRange()` (Jul 1 → Jun 30)
 
-3. `src/lib/format.ts`
-   - [ ] CSV output escapes commas/quotes/newlines
+3. `src/lib/format.ts` ✅
+   - [x] `formatDateYmd()`
+   - [x] `parseDateYmd()` (valid, invalid, impossible dates)
+   - [x] `normalizeDateString()`
+   - [x] `formatDateForInput()` / `formatDateForCsv()`
+   - [x] `toCsvValue()` — escapes commas/quotes/newlines
 
-4. `src/features/kids/ladder.logic.ts`
-   - [ ] `getActiveRungId()`
-   - [ ] `canMarkAchieved(linkedArtifacts)` → requires >= 1 artifact link
+4. `src/features/kids/ladder.logic.ts` ✅
+   - [x] `rungIdFor()` (explicit id + fallback)
+   - [x] `getActiveRungId()` (first unachieved, all achieved, sort order, fallback ids)
+   - [x] `getRungStatus()` (achieved/active/locked, legacy boolean)
+   - [x] `canMarkAchieved(linkedArtifacts)` → requires >= 1 artifact link
 
 ### Minimal success bar
-- 10–25 tests total (currently ~10 assertions across 2 test files)
-- Under 1 second to run locally
+- 10–25 tests total → **33 tests across 4 test files** ✅
+- Under 1 second to run locally ✅
 
 ---
 
