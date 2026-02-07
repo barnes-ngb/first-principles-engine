@@ -88,8 +88,10 @@ export interface Artifact {
 
 export interface Ladder {
   id?: string
+  childId?: string
   title: string
   description?: string
+  domain?: string
   rungs: Rung[]
 }
 
@@ -98,13 +100,18 @@ export interface Rung {
   title: string
   description?: string
   order: number
+  proofExamples?: string[]
   milestones?: MilestoneProgress[]
 }
 
 export interface MilestoneProgress {
   id?: string
+  childId?: string
+  ladderId?: string
+  rungId?: string
   label: string
   achieved: boolean
+  status?: 'locked' | 'active' | 'achieved'
   achievedAt?: string
   notes?: string
 }
