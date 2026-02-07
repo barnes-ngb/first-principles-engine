@@ -15,6 +15,7 @@ import {
   getDoc,
   getDocs,
   setDoc,
+  updateDoc,
 } from 'firebase/firestore'
 
 import Page from '../../components/Page'
@@ -24,9 +25,10 @@ import {
   artifactsCollection,
   childrenCollection,
   daysCollection,
+  laddersCollection,
   weeksCollection,
 } from '../../core/firebase/firestore'
-import type { Child, DayLog } from '../../core/types/domain'
+import type { Artifact, Child, DayLog, Ladder, Rung } from '../../core/types/domain'
 import {
   EngineStage,
   EvidenceType,
@@ -45,6 +47,12 @@ export default function TodayPage() {
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
   const [children, setChildren] = useState<Child[]>([])
   const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
+  const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const [ladders, setLadders] = useState<Ladder[]>([])
+  const [linkingArtifactId, setLinkingArtifactId] = useState<string | null>(null)
+  const [linkSelections, setLinkSelections] = useState<
+    Record<string, { ladderId: string; rungId: string }>
+  >({})
   const [artifactForm, setArtifactForm] = useState({
     childId: '',
     engineStage: EngineStage.Wonder,
@@ -131,6 +139,40 @@ export default function TodayPage() {
     }
   }, [familyId, today])
 
+  useEffect(() => {
+    let isMounted = true
+
+    const loadArtifacts = async () => {
+      const snapshot = await getDocs(artifactsCollection(familyId))
+      if (!isMounted) return
+      const loadedArtifacts = snapshot.docs
+        .map((docSnapshot) => ({
+          id: docSnapshot.id,
+          ...(docSnapshot.data() as Artifact),
+        }))
+        .filter((artifact) => artifact.dayLogId === today)
+        .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+      setArtifacts(loadedArtifacts)
+    }
+
+    const loadLadders = async () => {
+      const snapshot = await getDocs(laddersCollection(familyId))
+      if (!isMounted) return
+      const loadedLadders = snapshot.docs.map((docSnapshot) => ({
+        id: docSnapshot.id,
+        ...(docSnapshot.data() as Ladder),
+      }))
+      setLadders(loadedLadders)
+    }
+
+    loadArtifacts()
+    loadLadders()
+
+    return () => {
+      isMounted = false
+    }
+  }, [familyId, today])
+
   const handleBlockFieldChange = useCallback(
     (index: number, field: keyof DayLog['blocks'][number], value: unknown) => {
       if (!dayLog) return
@@ -178,7 +220,7 @@ export default function TodayPage() {
       content.slice(0, 60) || domain || `Artifact for ${today}`
     const createdAt = new Date().toISOString()
 
-    await addDoc(artifactsCollection(familyId), {
+    const docRef = await addDoc(artifactsCollection(familyId), {
       title,
       type: EvidenceType.Note,
       createdAt,
@@ -195,12 +237,101 @@ export default function TodayPage() {
       notes: '',
     })
 
+    const updatedArtifact: Artifact = {
+      id: docRef.id,
+      title,
+      type: EvidenceType.Note,
+      createdAt,
+      content: artifactForm.content,
+      childId: artifactForm.childId || undefined,
+      dayLogId: today,
+      weekPlanId,
+      tags: {
+        engineStage: artifactForm.engineStage,
+        domain: artifactForm.domain,
+        subjectBucket: artifactForm.subjectBucket,
+        location: artifactForm.location,
+      },
+      notes: '',
+    }
+    setArtifacts((prev) => [updatedArtifact, ...prev])
+
     setArtifactForm((prev) => ({
       ...prev,
       domain: '',
       content: '',
     }))
   }, [artifactForm, familyId, today, weekPlanId])
+
+  const getRungId = useCallback(
+    (rung: Rung) => rung.id ?? `order-${rung.order}`,
+    [],
+  )
+
+  const handleLinkToggle = useCallback((artifactId: string) => {
+    setLinkingArtifactId((prev) => (prev === artifactId ? null : artifactId))
+  }, [])
+
+  const handleLinkSelectionChange = useCallback(
+    (artifactId: string, ladderId: string) => {
+      setLinkSelections((prev) => ({
+        ...prev,
+        [artifactId]: { ladderId, rungId: '' },
+      }))
+    },
+    [],
+  )
+
+  const handleRungSelection = useCallback(
+    async (artifact: Artifact, ladderId: string, rungId: string) => {
+      if (!artifact.id) return
+      await updateDoc(doc(artifactsCollection(familyId), artifact.id), {
+        tags: {
+          ...artifact.tags,
+          ladderRef: { ladderId, rungId },
+        },
+      })
+      setArtifacts((prev) =>
+        prev.map((entry) =>
+          entry.id === artifact.id
+            ? {
+                ...entry,
+                tags: {
+                  ...entry.tags,
+                  ladderRef: { ladderId, rungId },
+                },
+              }
+            : entry,
+        ),
+      )
+      setLinkSelections((prev) => ({
+        ...prev,
+        [artifact.id as string]: { ladderId, rungId },
+      }))
+      setLinkingArtifactId(null)
+    },
+    [familyId],
+  )
+
+  const laddersForArtifact = useCallback(
+    (artifact: Artifact) => {
+      if (!artifact.childId) return ladders
+      return ladders.filter((ladder) => {
+        if (!ladder.childId && ladder.id?.startsWith(`${artifact.childId}-`)) {
+          return true
+        }
+        return ladder.childId === artifact.childId
+      })
+    },
+    [ladders],
+  )
+
+  const rungLabelFor = useCallback((ladder: Ladder, rungId: string) => {
+    const match = ladder.rungs.find(
+      (rung) => (rung.id ?? `order-${rung.order}`) === rungId,
+    )
+    return match?.title ?? 'Selected rung'
+  }, [])
 
   if (!dayLog) {
     return (
@@ -419,6 +550,133 @@ export default function TodayPage() {
           <Button variant="contained" onClick={handleArtifactSave}>
             Save
           </Button>
+        </Stack>
+      </SectionCard>
+      <SectionCard title="Artifacts">
+        <Stack spacing={1}>
+          {artifacts.length === 0 ? (
+            <Typography color="text.secondary">
+              No artifacts captured yet today.
+            </Typography>
+          ) : (
+            <List dense disablePadding>
+              {artifacts.map((artifact) => {
+                const availableLadders = laddersForArtifact(artifact)
+                const activeSelection =
+                  (artifact.id && linkSelections[artifact.id]) ||
+                  artifact.tags?.ladderRef
+                const selectedLadder = availableLadders.find(
+                  (ladder) => ladder.id === activeSelection?.ladderId,
+                )
+                const linkedLabel =
+                  selectedLadder && activeSelection?.rungId
+                    ? `${selectedLadder.title} · ${rungLabelFor(
+                        selectedLadder,
+                        activeSelection.rungId,
+                      )}`
+                    : undefined
+                return (
+                  <ListItem
+                    key={artifact.id}
+                    disableGutters
+                    sx={{ py: 1 }}
+                  >
+                    <Stack spacing={1.5} sx={{ width: '100%' }}>
+                      <Stack
+                        direction="row"
+                        alignItems="center"
+                        justifyContent="space-between"
+                        spacing={2}
+                      >
+                        <Stack spacing={0.5} sx={{ flex: 1 }}>
+                          <Typography variant="subtitle2">
+                            {artifact.title}
+                          </Typography>
+                          {artifact.content && (
+                            <Typography variant="body2" color="text.secondary">
+                              {artifact.content.slice(0, 80)}
+                            </Typography>
+                          )}
+                          {linkedLabel && (
+                            <Typography variant="caption" color="text.secondary">
+                              Linked to {linkedLabel}
+                            </Typography>
+                          )}
+                        </Stack>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => handleLinkToggle(artifact.id ?? '')}
+                        >
+                          Link to rung
+                        </Button>
+                      </Stack>
+                      {linkingArtifactId === artifact.id && (
+                        <Stack
+                          spacing={1}
+                          direction={{ xs: 'column', sm: 'row' }}
+                        >
+                          <TextField
+                            label="Ladder"
+                            select
+                            fullWidth
+                            value={activeSelection?.ladderId ?? ''}
+                            onChange={(event) =>
+                              handleLinkSelectionChange(
+                                artifact.id ?? '',
+                                event.target.value,
+                              )
+                            }
+                          >
+                            <MenuItem value="" disabled>
+                              Select ladder
+                            </MenuItem>
+                            {availableLadders.map((ladder) => (
+                              <MenuItem key={ladder.id} value={ladder.id}>
+                                {ladder.title}
+                              </MenuItem>
+                            ))}
+                          </TextField>
+                          <TextField
+                            label="Rung"
+                            select
+                            fullWidth
+                            disabled={!activeSelection?.ladderId}
+                            value={activeSelection?.rungId ?? ''}
+                            onChange={(event) => {
+                              const ladderId = activeSelection?.ladderId ?? ''
+                              if (!ladderId) return
+                              handleRungSelection(
+                                artifact,
+                                ladderId,
+                                event.target.value,
+                              )
+                            }}
+                          >
+                            <MenuItem value="" disabled>
+                              Select rung
+                            </MenuItem>
+                            {(selectedLadder?.rungs ?? [])
+                              .slice()
+                              .sort((a, b) => a.order - b.order)
+                              .map((rung) => {
+                                const rungId = getRungId(rung)
+                                return (
+                                  <MenuItem key={rungId} value={rungId}>
+                                    {rung.title}
+                                  </MenuItem>
+                                )
+                              })}
+                          </TextField>
+                        </Stack>
+                      )}
+                      <Divider />
+                    </Stack>
+                  </ListItem>
+                )
+              })}
+            </List>
+          )}
         </Stack>
       </SectionCard>
     </Page>
