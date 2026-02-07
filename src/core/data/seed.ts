@@ -83,7 +83,19 @@ export const seedDemoFamily = async (familyId: string): Promise<void> => {
     heartQuestion: 'What do we notice about God today?',
     tracks: [TrackType.Support, TrackType.Stretch],
     flywheelPlan: 'Daily wonder walk with short reflections.',
-    buildLab: 'Build Lab: gather materials and tinker together.',
+    buildLab: {
+      title: 'Build Lab: gather materials and tinker together.',
+      materials: ['Cardboard', 'Tape', 'Markers'],
+      steps: [
+        'Sketch a simple build idea.',
+        'Gather materials and build together.',
+        'Share what worked and what you would try next.',
+      ],
+    },
+    childGoals: [
+      { childId: 'lincoln', goals: ['Read aloud for 10 minutes'] },
+      { childId: 'london', goals: ['Practice quick sums for 5 minutes'] },
+    ],
   })
 
   const createdAt = formatDateYmd(today)
