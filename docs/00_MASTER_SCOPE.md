@@ -21,26 +21,26 @@ A tool that makes the right thing easy:
 ---
 
 ## Scopes (Phased)
-### Phase 1 — MVP v0.1 (Use daily)
-- App shell + nav
-- Today: DayLog + blocks + checklists + quick notes
-- Artifact capture (Notes only)
-- Engine page: flywheel status per child (weekly)
-- Records page: hours totals + CSV exports
+### Phase 1 — MVP v0.1 (Use daily) ✅
+- [x] App shell + nav
+- [x] Today: DayLog + blocks + checklists + quick notes
+- [x] Artifact capture (Notes only)
+- [x] Engine page: flywheel status per child (weekly)
+- [x] Records page: hours totals + CSV exports
 
 Doc: `01_MVP_V0_1.md`
 
-### Phase 2 — Engine + Ladders (Progress clarity)
-- Ladder definitions + per-child progress tracking
-- Link artifacts → ladder rungs
-- Engine overlays: “rungs touched this week”
-- Better weekly planning + track goals
+### Phase 2 — Engine + Ladders (Progress clarity) ✅
+- [x] Ladder definitions + per-child progress tracking
+- [x] Link artifacts → ladder rungs
+- [x] Engine overlays: "rungs touched this week"
+- [x] Better weekly planning + track goals
 
 Doc: `02_ENGINE_LADDERS.md`
 
 ### Phase 3 — Records + Compliance Pack
 - Hours generation from logs, robust reporting
-- “MO Pack” export: hours summary + daily log + eval + portfolio highlights
+- "MO Pack" export: hours summary + daily log + eval + portfolio highlights
 
 Doc: `03_RECORDS_COMPLIANCE.md`
 

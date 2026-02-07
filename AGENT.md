@@ -159,12 +159,12 @@ Aim for commits that:
 ---
 
 ## 10) Where to Look (Alignment Docs)
-- `first-principles-engine-agent-plans/00_MASTER_SCOPE.md`
-- `first-principles-engine-agent-plans/01_MVP_V0_1.md`
-- `first-principles-engine-agent-plans/02_ENGINE_LADDERS.md`
-- `first-principles-engine-agent-plans/03_RECORDS_COMPLIANCE.md`
-- `first-principles-engine-agent-plans/04_MEDIA_CAPTURE.md`
-- `first-principles-engine-agent-plans/05_DEPLOYMENT_OPERATIONS.md`
+- `docs/00_MASTER_SCOPE.md`
+- `docs/01_MVP_V0_1.md`
+- `docs/02_ENGINE_LADDERS.md`
+- `docs/03_RECORDS_COMPLIANCE.md`
+- `docs/04_MEDIA_CAPTURE.md`
+- `docs/05_DEPLOYMENT_OPERATIONS.md`
 
 ---
 
@@ -185,8 +185,8 @@ Aim for commits that:
 ---
 
 ## 12) Current Phase (set this as you work)
-- [ ] Phase 1 — MVP v0.1
-- [ ] Phase 2 — Engine + Ladders
+- [x] Phase 1 — MVP v0.1
+- [x] Phase 2 — Engine + Ladders
 - [ ] Phase 3 — Records + Compliance Pack
 - [ ] Phase 4 — Media Capture
 - [ ] Phase 5 — Deployment + Ops
