@@ -41,7 +41,7 @@ const themeModeLabels: Record<ThemeMode, string> = {
 
 export default function SettingsPage() {
   const familyId = useFamilyId()
-  const { profile, themeMode, setThemeMode, logout } = useProfile()
+  const { themeMode, setThemeMode } = useProfile()
   const [snackbar, setSnackbar] = useState<SnackbarState>(defaultSnackbarState)
 
   const handleSeedDemoData = async () => {
@@ -81,14 +81,6 @@ export default function SettingsPage() {
     <Page>
       <SectionCard title="Settings">
         <Stack spacing={3}>
-          {profile && (
-            <Typography color="text.secondary">
-              Logged in as <strong>{profile.charAt(0).toUpperCase() + profile.slice(1)}</strong>
-            </Typography>
-          )}
-
-          <Divider />
-
           <Stack spacing={2}>
             <Typography variant="h6">Appearance</Typography>
             <FormControl size="small" sx={{ maxWidth: 240 }}>
@@ -123,11 +115,6 @@ export default function SettingsPage() {
             </Button>
           </Stack>
 
-          <Divider />
-
-          <Button variant="outlined" color="secondary" onClick={logout}>
-            Switch Profile
-          </Button>
         </Stack>
       </SectionCard>
 

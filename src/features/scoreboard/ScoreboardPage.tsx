@@ -5,12 +5,11 @@ import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
-import Tab from '@mui/material/Tab'
-import Tabs from '@mui/material/Tabs'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { addDoc, doc, getDocs, query, setDoc, where } from 'firebase/firestore'
 
+import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -228,20 +227,12 @@ export default function ScoreboardPage() {
         Week of {weekStart}
       </Typography>
 
-      <SectionCard title="Select Child">
-        {isLoading ? (
-          <Typography color="text.secondary">Loading...</Typography>
-        ) : (
-          <Tabs
-            value={selectedChildId}
-            onChange={(_, v) => setSelectedChildId(v)}
-          >
-            {children.map((child) => (
-              <Tab key={child.id} value={child.id} label={child.name} />
-            ))}
-          </Tabs>
-        )}
-      </SectionCard>
+      <ChildSelector
+        children={children}
+        selectedChildId={selectedChildId}
+        onSelect={setSelectedChildId}
+        isLoading={isLoading}
+      />
 
       {!isLoading && selectedChildId && (
         <>

@@ -20,6 +20,7 @@ import {
   where,
 } from 'firebase/firestore'
 
+import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -245,22 +246,11 @@ export default function EvaluationsPage() {
                 ))}
               </Select>
             </FormControl>
-            {children.length > 1 && (
-              <FormControl size="small" sx={{ minWidth: 140 }}>
-                <InputLabel>Child</InputLabel>
-                <Select
-                  value={selectedChildId}
-                  label="Child"
-                  onChange={(e) => setSelectedChildId(e.target.value)}
-                >
-                  {children.map((c) => (
-                    <MenuItem key={c.id} value={c.id}>
-                      {c.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            )}
+            <ChildSelector
+              children={children}
+              selectedChildId={selectedChildId}
+              onSelect={setSelectedChildId}
+            />
           </Stack>
 
           <Typography variant="subtitle2" color="text.secondary">

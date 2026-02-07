@@ -10,12 +10,11 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
-import Tab from '@mui/material/Tab'
-import Tabs from '@mui/material/Tabs'
 import Typography from '@mui/material/Typography'
 import { doc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
 
 import ArtifactCard from '../../components/ArtifactCard'
+import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -372,24 +371,13 @@ export default function KidsPage() {
       <Typography variant="h4" component="h1">
         Kids
       </Typography>
-      <SectionCard title="Select Child">
-        {isLoading ? (
-          <Typography color="text.secondary">Loading kids...</Typography>
-        ) : children.length === 0 ? (
-          <Typography color="text.secondary">
-            No children added yet. Add a child to see ladders.
-          </Typography>
-        ) : (
-          <Tabs
-            value={selectedChildId}
-            onChange={(_, value) => setSelectedChildId(value)}
-          >
-            {children.map((child) => (
-              <Tab key={child.id} value={child.id} label={child.name} />
-            ))}
-          </Tabs>
-        )}
-      </SectionCard>
+      <ChildSelector
+        children={children}
+        selectedChildId={selectedChildId}
+        onSelect={setSelectedChildId}
+        isLoading={isLoading}
+        emptyMessage="No children added yet. Add a child to see ladders."
+      />
       {!isLoading && activeChild && (
         <Stack spacing={3}>
           {Object.entries(laddersByDomain).length === 0 ? (
