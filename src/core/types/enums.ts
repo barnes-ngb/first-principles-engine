@@ -40,3 +40,11 @@ export enum TrackType {
   Stretch = 'Stretch',
   Custom = 'Custom',
 }
+
+export enum LearningLocation {
+  Home = 'Home',
+  CoOp = 'CoOp',
+  FieldTrip = 'FieldTrip',
+  Community = 'Community',
+  Other = 'Other',
+}
