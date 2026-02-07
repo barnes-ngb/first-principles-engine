@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import AccessTimeIcon from '@mui/icons-material/AccessTime'
+import ChecklistIcon from '@mui/icons-material/Checklist'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import Accordion from '@mui/material/Accordion'
+import AccordionDetails from '@mui/material/AccordionDetails'
+import AccordionSummary from '@mui/material/AccordionSummary'
 import Alert from '@mui/material/Alert'
+import Avatar from '@mui/material/Avatar'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
-import Divider from '@mui/material/Divider'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
@@ -51,6 +57,7 @@ import {
   SubjectBucket,
 } from '../../core/types/enums'
 import { useDebounce } from '../../lib/useDebounce'
+import { blockMeta } from './blockMeta'
 import { createDefaultDayLog } from './daylog.model'
 
 export default function TodayPage() {
@@ -455,121 +462,183 @@ export default function TodayPage() {
           </Typography>
           <SaveIndicator state={saveState} />
         </Stack>
-        <List dense>
-          {dayLog.blocks.map((block, index) => (
-            <ListItem key={`${block.type}-${index}`} disableGutters>
-              <Stack spacing={2} sx={{ width: '100%' }}>
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                  <Typography variant="subtitle1" sx={{ minWidth: 140 }}>
-                    {block.type}
-                  </Typography>
-                  <TextField
-                    label="Subject bucket"
-                    select
-                    fullWidth
-                    value={block.subjectBucket ?? ''}
-                    onChange={(event) =>
-                      handleBlockFieldChange(
-                        index,
-                        'subjectBucket',
-                        event.target.value || undefined,
-                      )
-                    }
-                  >
-                    <MenuItem value="">Unassigned</MenuItem>
-                    {Object.values(SubjectBucket).map((bucket) => (
-                      <MenuItem key={bucket} value={bucket}>
-                        {bucket}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                  <TextField
-                    label="Location"
-                    select
-                    fullWidth
-                    value={block.location ?? ''}
-                    onChange={(event) =>
-                      handleBlockFieldChange(
-                        index,
-                        'location',
-                        event.target.value || undefined,
-                      )
-                    }
-                  >
-                    <MenuItem value="">Unassigned</MenuItem>
-                    {Object.values(LearningLocation).map((location) => (
-                      <MenuItem key={location} value={location}>
-                        {location}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                </Stack>
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                  <TextField
-                    label="Planned minutes"
-                    type="number"
-                    value={block.plannedMinutes ?? ''}
-                    onChange={(event) =>
-                      handleBlockFieldChange(
-                        index,
-                        'plannedMinutes',
-                        event.target.value === ''
-                          ? undefined
-                          : Number(event.target.value),
-                      )
-                    }
-                  />
-                  <TextField
-                    label="Actual minutes"
-                    type="number"
-                    value={block.actualMinutes ?? ''}
-                    onChange={(event) =>
-                      handleBlockFieldChange(
-                        index,
-                        'actualMinutes',
-                        event.target.value === ''
-                          ? undefined
-                          : Number(event.target.value),
-                      )
-                    }
-                  />
-                </Stack>
-                <TextField
-                  label="Quick note"
-                  multiline
-                  minRows={2}
-                  value={block.notes ?? ''}
-                  onChange={(event) =>
-                    handleBlockFieldChange(index, 'notes', event.target.value)
-                  }
-                />
-                <Stack spacing={1}>
-                  {block.checklist && block.checklist.length > 0 ? (
-                    block.checklist.map((item, itemIndex) => (
-                      <FormControlLabel
-                        key={`${item.label}-${itemIndex}`}
-                        control={
-                          <Checkbox
-                            checked={item.completed}
-                            onChange={() =>
-                              handleChecklistToggle(index, itemIndex)
+        <Stack spacing={1}>
+          {dayLog.blocks.map((block, index) => {
+            const meta = blockMeta[block.type]
+            const checklistDone = block.checklist?.filter((i) => i.completed).length ?? 0
+            const checklistTotal = block.checklist?.length ?? 0
+            const hasTime = block.actualMinutes != null || block.plannedMinutes != null
+            return (
+              <Accordion
+                key={`${block.type}-${index}`}
+                disableGutters
+                sx={{
+                  '&::before': { display: 'none' },
+                  borderLeft: `4px solid ${meta.color}`,
+                  borderRadius: 1,
+                }}
+              >
+                <AccordionSummary
+                  expandIcon={<ExpandMoreIcon />}
+                  sx={{ px: 2, py: 0.5 }}
+                >
+                  <Stack direction="row" spacing={1.5} alignItems="center" sx={{ width: '100%' }}>
+                    <Avatar
+                      sx={{
+                        bgcolor: `${meta.color}20`,
+                        color: meta.color,
+                        width: 40,
+                        height: 40,
+                      }}
+                    >
+                      {meta.icon}
+                    </Avatar>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1 }}>
+                      {meta.label}
+                    </Typography>
+                    {hasTime && (
+                      <Chip
+                        icon={<AccessTimeIcon />}
+                        size="small"
+                        label={
+                          block.actualMinutes != null
+                            ? `${block.actualMinutes}m`
+                            : `${block.plannedMinutes ?? 0}m planned`
+                        }
+                        variant="outlined"
+                        sx={{ borderColor: meta.color, color: meta.color }}
+                      />
+                    )}
+                    {checklistTotal > 0 && (
+                      <Chip
+                        icon={<ChecklistIcon />}
+                        size="small"
+                        label={`${checklistDone}/${checklistTotal}`}
+                        variant="outlined"
+                        color={checklistDone === checklistTotal ? 'success' : 'default'}
+                      />
+                    )}
+                  </Stack>
+                </AccordionSummary>
+                <AccordionDetails sx={{ px: 2, pb: 2 }}>
+                  <Stack spacing={2}>
+                    <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                      <TextField
+                        label="Subject bucket"
+                        select
+                        fullWidth
+                        size="small"
+                        value={block.subjectBucket ?? ''}
+                        onChange={(event) =>
+                          handleBlockFieldChange(
+                            index,
+                            'subjectBucket',
+                            event.target.value || undefined,
+                          )
+                        }
+                      >
+                        <MenuItem value="">Unassigned</MenuItem>
+                        {Object.values(SubjectBucket).map((bucket) => (
+                          <MenuItem key={bucket} value={bucket}>
+                            {bucket}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                      <TextField
+                        label="Location"
+                        select
+                        fullWidth
+                        size="small"
+                        value={block.location ?? ''}
+                        onChange={(event) =>
+                          handleBlockFieldChange(
+                            index,
+                            'location',
+                            event.target.value || undefined,
+                          )
+                        }
+                      >
+                        <MenuItem value="">Unassigned</MenuItem>
+                        {Object.values(LearningLocation).map((location) => (
+                          <MenuItem key={location} value={location}>
+                            {location}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    </Stack>
+                    <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                      <TextField
+                        label="Planned minutes"
+                        type="number"
+                        size="small"
+                        value={block.plannedMinutes ?? ''}
+                        onChange={(event) =>
+                          handleBlockFieldChange(
+                            index,
+                            'plannedMinutes',
+                            event.target.value === ''
+                              ? undefined
+                              : Number(event.target.value),
+                          )
+                        }
+                      />
+                      <TextField
+                        label="Actual minutes"
+                        type="number"
+                        size="small"
+                        value={block.actualMinutes ?? ''}
+                        onChange={(event) =>
+                          handleBlockFieldChange(
+                            index,
+                            'actualMinutes',
+                            event.target.value === ''
+                              ? undefined
+                              : Number(event.target.value),
+                          )
+                        }
+                      />
+                    </Stack>
+                    <TextField
+                      label="Quick note"
+                      multiline
+                      minRows={2}
+                      size="small"
+                      value={block.notes ?? ''}
+                      onChange={(event) =>
+                        handleBlockFieldChange(index, 'notes', event.target.value)
+                      }
+                    />
+                    {block.checklist && block.checklist.length > 0 ? (
+                      <Stack spacing={0.5}>
+                        {block.checklist.map((item, itemIndex) => (
+                          <FormControlLabel
+                            key={`${item.label}-${itemIndex}`}
+                            control={
+                              <Checkbox
+                                checked={item.completed}
+                                size="small"
+                                onChange={() =>
+                                  handleChecklistToggle(index, itemIndex)
+                                }
+                              />
+                            }
+                            label={
+                              <Typography variant="body2">{item.label}</Typography>
                             }
                           />
-                        }
-                        label={item.label}
-                      />
-                    ))
-                  ) : (
-                    <Typography color="text.secondary">
-                      No checklist items yet.
-                    </Typography>
-                  )}
-                </Stack>
-                <Divider />
-              </Stack>
-            </ListItem>
-          ))}
-        </List>
+                        ))}
+                      </Stack>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">
+                        No checklist items yet.
+                      </Typography>
+                    )}
+                  </Stack>
+                </AccordionDetails>
+              </Accordion>
+            )
+          })}
+        </Stack>
       </SectionCard>
       <SectionCard title="Capture Artifact">
         <Stack spacing={2}>
