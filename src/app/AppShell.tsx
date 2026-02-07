@@ -9,10 +9,13 @@ import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
 
 const navItems = [
+  { label: 'Dashboard', to: '/dashboard' },
+  { label: 'Scoreboard', to: '/scoreboard' },
+  { label: 'Dad Lab', to: '/projects' },
+  { label: 'Ladders', to: '/kids' },
   { label: 'Today', to: '/today' },
   { label: 'This Week', to: '/week' },
   { label: 'Engine', to: '/engine' },
-  { label: 'Kids', to: '/kids' },
   { label: 'Records', to: '/records' },
   { label: 'Evaluations', to: '/records/evaluations', parentOnly: true },
   { label: 'Portfolio', to: '/records/portfolio', parentOnly: true },

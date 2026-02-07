@@ -1,8 +1,13 @@
 import type {
   DayBlockType,
+  EnergyLevel,
   EngineStage,
   EvidenceType,
+  ProjectPhase,
+  SessionResult,
+  StreamId,
   SubjectBucket,
+  SupportTag,
   TrackType,
 } from './enums'
 
@@ -157,4 +162,69 @@ export interface HoursAdjustment {
   subjectBucket?: SubjectBucket
   location?: string
   createdAt?: string
+}
+
+export interface Session {
+  id?: string
+  childId: string
+  date: string
+  streamId: StreamId
+  ladderId: string
+  targetRungOrder: number
+  result: SessionResult
+  durationSeconds?: number
+  notes?: string
+  supports?: SupportTag[]
+  createdAt?: string
+}
+
+export interface PlannedSession {
+  streamId: StreamId
+  ladderId: string
+  targetRungOrder: number
+  plannedMinutes?: number
+  label?: string
+}
+
+export interface DailyPlan {
+  id?: string
+  childId: string
+  date: string
+  energy: EnergyLevel
+  planType: 'A' | 'B'
+  sessions: PlannedSession[]
+  completedSessionIds?: string[]
+}
+
+export interface Project {
+  id?: string
+  childId: string
+  title: string
+  phase: ProjectPhase
+  planNotes?: string
+  buildNotes?: string
+  testNotes?: string
+  improveNotes?: string
+  whatChanged?: string
+  teachBack?: string
+  photoUrls?: string[]
+  createdAt?: string
+  updatedAt?: string
+  completed?: boolean
+}
+
+export interface WeeklyScore {
+  id?: string
+  childId: string
+  weekStart: string
+  metrics: ScoreMetric[]
+  reflectionWorked?: string
+  reflectionFriction?: string
+  reflectionTweak?: string
+  createdAt?: string
+}
+
+export interface ScoreMetric {
+  label: string
+  result: SessionResult | 'na'
 }

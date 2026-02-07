@@ -10,13 +10,17 @@ import {
 import type {
   Artifact,
   Child,
+  DailyPlan,
   DayLog,
   Evaluation,
   HoursAdjustment,
   HoursEntry,
   Ladder,
   MilestoneProgress,
+  Project,
+  Session,
   WeekPlan,
+  WeeklyScore,
 } from '../types/domain'
 import { app } from './firebase'
 
@@ -119,3 +123,19 @@ export const hoursAdjustmentsCollection = (
     db,
     `families/${familyId}/hoursAdjustments`,
   ) as CollectionReference<HoursAdjustment>
+
+export const sessionsCollection = (familyId: string): CollectionReference<Session> =>
+  collection(db, `families/${familyId}/sessions`) as CollectionReference<Session>
+
+export const dailyPlansCollection = (
+  familyId: string,
+): CollectionReference<DailyPlan> =>
+  collection(db, `families/${familyId}/dailyPlans`) as CollectionReference<DailyPlan>
+
+export const projectsCollection = (familyId: string): CollectionReference<Project> =>
+  collection(db, `families/${familyId}/projects`) as CollectionReference<Project>
+
+export const weeklyScoresCollection = (
+  familyId: string,
+): CollectionReference<WeeklyScore> =>
+  collection(db, `families/${familyId}/weeklyScores`) as CollectionReference<WeeklyScore>
