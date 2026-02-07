@@ -69,7 +69,7 @@ export interface ArtifactTags {
   domain: string
   subjectBucket: SubjectBucket
   location: string
-  ladderRef?: string
+  ladderRef?: { ladderId: string; rungId: string }
 }
 
 export interface Artifact {
