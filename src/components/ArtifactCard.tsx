@@ -14,25 +14,27 @@ const formatDate = (value?: string) => (value ? new Date(value).toLocaleDateStri
 
 export default function ArtifactCard({ artifact }: ArtifactCardProps) {
   return (
-    <Card variant="outlined">
+    <Card variant="outlined" sx={{ width: '100%' }}>
       <CardContent>
-        <Stack spacing={1}>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Typography variant="subtitle1" fontWeight={600}>
-              {artifact.title}
-            </Typography>
-            <Chip size="small" label={artifact.type} />
+        <Stack spacing={1.5}>
+          <Stack spacing={0.5}>
+            <Stack
+              direction="row"
+              spacing={1}
+              alignItems="center"
+              flexWrap="wrap"
+            >
+              <Typography variant="subtitle1" fontWeight={600}>
+                {artifact.title}
+              </Typography>
+              <Chip size="small" label={artifact.type} />
+            </Stack>
+            {artifact.createdAt && (
+              <Typography variant="caption" color="text.secondary">
+                Created {formatDate(artifact.createdAt)}
+              </Typography>
+            )}
           </Stack>
-          {artifact.createdAt && (
-            <Typography variant="caption" color="text.secondary">
-              {formatDate(artifact.createdAt)}
-            </Typography>
-          )}
-          {artifact.content && (
-            <Typography variant="body2" color="text.secondary">
-              {artifact.content}
-            </Typography>
-          )}
           <Stack direction="row" spacing={1} flexWrap="wrap">
             {artifact.tags?.domain && (
               <Chip size="small" variant="outlined" label={artifact.tags.domain} />
