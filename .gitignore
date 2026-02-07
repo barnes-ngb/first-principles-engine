@@ -13,6 +13,7 @@ dist-ssr
 *.local
 .env
 .env.*
+FIREBASE_SERVICE_ACCOUNT.json
 
 # Editor directories and files
 .vscode/*
