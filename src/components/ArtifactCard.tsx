@@ -13,6 +13,14 @@ interface ArtifactCardProps {
 const formatDate = (value?: string) => (value ? new Date(value).toLocaleDateString() : '')
 
 export default function ArtifactCard({ artifact }: ArtifactCardProps) {
+  const ladderRef = artifact.tags?.ladderRef
+  const [ladderId, rungId] = ladderRef?.split(':') ?? []
+  const ladderLabel = ladderRef
+    ? rungId
+      ? `Ladder: ${ladderId} / Rung: ${rungId}`
+      : `Ladder: ${ladderId}`
+    : ''
+
   return (
     <Card variant="outlined" sx={{ width: '100%' }}>
       <CardContent>
@@ -42,6 +50,7 @@ export default function ArtifactCard({ artifact }: ArtifactCardProps) {
             {artifact.tags?.engineStage && (
               <Chip size="small" variant="outlined" label={artifact.tags.engineStage} />
             )}
+            {ladderLabel && <Chip size="small" variant="outlined" label={ladderLabel} />}
           </Stack>
         </Stack>
       </CardContent>
