@@ -50,10 +50,11 @@ Doc: `03_RECORDS_COMPLIANCE.md`
 
 Doc: `04_MEDIA_CAPTURE.md`
 
-### Phase 5 — Deployment + Ops
-- Hosting (Firebase Hosting or Vercel)
-- Basic auth, environment management, backups
-- Operational runbook
+### Phase 5 — Deployment + Ops ✅
+- [x] Hosting (Firebase Hosting + GitHub Actions CI/CD)
+- [x] Auth (Anonymous → Email/Password upgrade path)
+- [x] Firestore + Storage security rules
+- [x] Operational runbook (`docs/RUNBOOK.md`)
 
 Doc: `05_DEPLOYMENT_OPERATIONS.md`
 

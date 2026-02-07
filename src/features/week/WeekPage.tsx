@@ -10,7 +10,7 @@ import { useNavigate } from 'react-router-dom'
 
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
-import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
+import { useFamilyId } from '../../core/auth/useAuth'
 import {
   childrenCollection,
   weeksCollection,
@@ -41,7 +41,7 @@ const createDefaultWeekPlan = (
 
 export default function WeekPage() {
   const navigate = useNavigate()
-  const familyId = DEFAULT_FAMILY_ID
+  const familyId = useFamilyId()
   const weekRange = useMemo(() => getWeekRange(new Date()), [])
   const weekPlanRef = useMemo(
     () => doc(weeksCollection(familyId), weekRange.start),

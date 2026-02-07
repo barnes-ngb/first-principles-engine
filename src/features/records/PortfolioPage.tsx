@@ -13,7 +13,7 @@ import { getDocs, query, where } from 'firebase/firestore'
 
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
-import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
+import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   childrenCollection,
@@ -31,7 +31,7 @@ const currentYear = currentDate.getFullYear()
 const currentMonth = currentDate.getMonth() + 1
 
 export default function PortfolioPage() {
-  const familyId = DEFAULT_FAMILY_ID
+  const familyId = useFamilyId()
   const [year, setYear] = useState(currentYear)
   const [month, setMonth] = useState(currentMonth)
   const [children, setChildren] = useState<Child[]>([])

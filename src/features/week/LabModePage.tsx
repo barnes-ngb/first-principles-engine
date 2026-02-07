@@ -12,7 +12,7 @@ import AudioRecorder from '../../components/AudioRecorder'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
-import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
+import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   childrenCollection,
@@ -50,7 +50,7 @@ const defaultFormState = (engineStage: EngineStage): ArtifactFormState => ({
 })
 
 export default function LabModePage() {
-  const familyId = DEFAULT_FAMILY_ID
+  const familyId = useFamilyId()
   const [children, setChildren] = useState<Child[]>([])
   const [selectedStage, setSelectedStage] = useState<EngineStage | null>(null)
   const [mediaUploading, setMediaUploading] = useState(false)

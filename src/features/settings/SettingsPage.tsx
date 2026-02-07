@@ -1,8 +1,9 @@
 import { type SyntheticEvent, useState } from 'react'
-import { Alert, Button, Snackbar, Stack, Typography } from '@mui/material'
+import { Alert, Button, Divider, Snackbar, Stack, Typography } from '@mui/material'
 
+import { useFamilyId } from '../../core/auth/useAuth'
 import { seedDemoFamily } from '../../core/data/seed'
-import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
+import AccountSection from './AccountSection'
 
 type SnackbarState = {
   open: boolean
@@ -17,11 +18,12 @@ const defaultSnackbarState: SnackbarState = {
 }
 
 export default function SettingsPage() {
+  const familyId = useFamilyId()
   const [snackbar, setSnackbar] = useState<SnackbarState>(defaultSnackbarState)
 
   const handleSeedDemoData = async () => {
     try {
-      await seedDemoFamily(DEFAULT_FAMILY_ID)
+      await seedDemoFamily(familyId)
       setSnackbar({
         open: true,
         severity: 'success',
@@ -52,13 +54,17 @@ export default function SettingsPage() {
     <Stack spacing={3} sx={{ maxWidth: 480 }}>
       <Stack spacing={1}>
         <Typography variant="h4">Settings</Typography>
-        <Typography color="text.secondary">
-          Use the button below to seed demo data for the default family.
-        </Typography>
       </Stack>
-      <Button variant="contained" onClick={handleSeedDemoData}>
-        Seed Demo Data
-      </Button>
+      <AccountSection />
+      <Divider />
+      <Stack spacing={1}>
+        <Typography color="text.secondary">
+          Use the button below to seed demo data for your family.
+        </Typography>
+        <Button variant="contained" onClick={handleSeedDemoData}>
+          Seed Demo Data
+        </Button>
+      </Stack>
       <Snackbar
         open={snackbar.open}
         autoHideDuration={6000}

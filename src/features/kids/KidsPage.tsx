@@ -18,7 +18,7 @@ import { doc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
 import ArtifactCard from '../../components/ArtifactCard'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
-import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
+import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   childrenCollection,
@@ -83,7 +83,7 @@ const isLadderForChild = (ladder: Ladder, childId: string) => {
 }
 
 export default function KidsPage() {
-  const familyId = DEFAULT_FAMILY_ID
+  const familyId = useFamilyId()
   const [children, setChildren] = useState<Child[]>([])
   const [ladders, setLadders] = useState<Ladder[]>([])
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
