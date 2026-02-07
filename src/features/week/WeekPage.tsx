@@ -63,8 +63,8 @@ export default function WeekPage() {
       const snapshot = await getDocs(childrenCollection(familyId))
       if (!isMounted) return
       const loaded = snapshot.docs.map((docSnapshot) => ({
-        id: docSnapshot.id,
         ...(docSnapshot.data() as Child),
+        id: docSnapshot.id,
       }))
       setChildren(loaded)
     }
@@ -118,8 +118,9 @@ export default function WeekPage() {
       ...weekPlan,
       childGoals: [...weekPlan.childGoals, ...additions],
     }
-    setWeekPlan(updated)
-    void updateDoc(weekPlanRef, { childGoals: updated.childGoals })
+    void updateDoc(weekPlanRef, { childGoals: updated.childGoals }).then(() => {
+      setWeekPlan(updated)
+    })
   }, [children, weekPlan, weekPlanRef])
 
   const updateWeekField = useCallback(

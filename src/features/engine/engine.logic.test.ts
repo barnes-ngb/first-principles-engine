@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import type { MilestoneProgress } from '../../core/types/domain'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import {
   computeLoopStatus,
@@ -139,7 +140,7 @@ describe('countMilestonesAchievedInRange', () => {
   const range = { start: '2026-02-02', end: '2026-02-08' }
 
   it('counts milestone achievements within the week range', () => {
-    const milestones = [
+    const milestones: MilestoneProgress[] = [
       {
         childId: 'child-a',
         ladderId: 'ladder-1',

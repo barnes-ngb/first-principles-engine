@@ -1,50 +1,56 @@
-export enum SubjectBucket {
-  Reading = 'Reading',
-  LanguageArts = 'LanguageArts',
-  Math = 'Math',
-  Science = 'Science',
-  SocialStudies = 'SocialStudies',
-  Other = 'Other',
-}
+export const SubjectBucket = {
+  Reading: 'Reading',
+  LanguageArts: 'LanguageArts',
+  Math: 'Math',
+  Science: 'Science',
+  SocialStudies: 'SocialStudies',
+  Other: 'Other',
+} as const
+export type SubjectBucket = (typeof SubjectBucket)[keyof typeof SubjectBucket]
 
-export enum EngineStage {
-  Wonder = 'Wonder',
-  Build = 'Build',
-  Explain = 'Explain',
-  Reflect = 'Reflect',
-  Share = 'Share',
-}
+export const EngineStage = {
+  Wonder: 'Wonder',
+  Build: 'Build',
+  Explain: 'Explain',
+  Reflect: 'Reflect',
+  Share: 'Share',
+} as const
+export type EngineStage = (typeof EngineStage)[keyof typeof EngineStage]
 
-export enum EvidenceType {
-  Photo = 'Photo',
-  Audio = 'Audio',
-  Note = 'Note',
-  Video = 'Video',
-  Worksheet = 'Worksheet',
-}
+export const EvidenceType = {
+  Photo: 'Photo',
+  Audio: 'Audio',
+  Note: 'Note',
+  Video: 'Video',
+  Worksheet: 'Worksheet',
+} as const
+export type EvidenceType = (typeof EvidenceType)[keyof typeof EvidenceType]
 
-export enum DayBlockType {
-  Formation = 'Formation',
-  Reading = 'Reading',
-  Speech = 'Speech',
-  Math = 'Math',
-  Together = 'Together',
-  Movement = 'Movement',
-  Project = 'Project',
-  FieldTrip = 'FieldTrip',
-  Other = 'Other',
-}
+export const DayBlockType = {
+  Formation: 'Formation',
+  Reading: 'Reading',
+  Speech: 'Speech',
+  Math: 'Math',
+  Together: 'Together',
+  Movement: 'Movement',
+  Project: 'Project',
+  FieldTrip: 'FieldTrip',
+  Other: 'Other',
+} as const
+export type DayBlockType = (typeof DayBlockType)[keyof typeof DayBlockType]
 
-export enum TrackType {
-  Support = 'Support',
-  Stretch = 'Stretch',
-  Custom = 'Custom',
-}
+export const TrackType = {
+  Support: 'Support',
+  Stretch: 'Stretch',
+  Custom: 'Custom',
+} as const
+export type TrackType = (typeof TrackType)[keyof typeof TrackType]
 
-export enum LearningLocation {
-  Home = 'Home',
-  CoOp = 'CoOp',
-  FieldTrip = 'FieldTrip',
-  Community = 'Community',
-  Other = 'Other',
-}
+export const LearningLocation = {
+  Home: 'Home',
+  CoOp: 'CoOp',
+  FieldTrip: 'FieldTrip',
+  Community: 'Community',
+  Other: 'Other',
+} as const
+export type LearningLocation = (typeof LearningLocation)[keyof typeof LearningLocation]

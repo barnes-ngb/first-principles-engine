@@ -110,8 +110,8 @@ export default function TodayPage() {
       const snapshot = await getDocs(childrenCollection(familyId))
       if (!isMounted) return
       const loadedChildren = snapshot.docs.map((docSnapshot) => ({
-        id: docSnapshot.id,
         ...(docSnapshot.data() as Child),
+        id: docSnapshot.id,
       }))
       setChildren(loadedChildren)
     }
