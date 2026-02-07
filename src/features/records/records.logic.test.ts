@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, expect, it } from 'vitest'
 
 import type {
   Artifact,
@@ -31,24 +30,24 @@ import {
 describe('entryMinutes', () => {
   it('returns minutes when present', () => {
     const entry: HoursEntry = { date: '2026-01-01', minutes: 45 }
-    assert.equal(entryMinutes(entry), 45)
+    expect(entryMinutes(entry)).toBe(45)
   })
 
   it('converts hours to minutes when minutes is missing', () => {
     const entry: HoursEntry = { date: '2026-01-01', minutes: 0, hours: 1.5 }
     // minutes is 0 which is falsy but not null, so it returns 0
     // Actually: minutes != null is true (0 != null), so it returns 0
-    assert.equal(entryMinutes(entry), 0)
+    expect(entryMinutes(entry)).toBe(0)
   })
 
   it('converts hours to minutes when minutes is undefined', () => {
     const entry = { date: '2026-01-01', hours: 1.5 } as HoursEntry
-    assert.equal(entryMinutes(entry), 90)
+    expect(entryMinutes(entry)).toBe(90)
   })
 
   it('returns 0 when neither is present', () => {
     const entry = { date: '2026-01-01' } as HoursEntry
-    assert.equal(entryMinutes(entry), 0)
+    expect(entryMinutes(entry)).toBe(0)
   })
 })
 
@@ -78,12 +77,12 @@ describe('computeHoursSummary', () => {
 
     const summary = computeHoursSummary(logs, [], [])
 
-    assert.equal(summary.totalMinutes, 75)
-    assert.equal(summary.coreMinutes, 75)
-    assert.equal(summary.coreHomeMinutes, 75)
-    assert.equal(summary.adjustmentMinutes, 0)
-    assert.equal(summary.bySubject.length, 2)
-    assert.equal(summary.byDate['2026-01-10'], 75)
+    expect(summary.totalMinutes).toBe(75)
+    expect(summary.coreMinutes).toBe(75)
+    expect(summary.coreHomeMinutes).toBe(75)
+    expect(summary.adjustmentMinutes).toBe(0)
+    expect(summary.bySubject.length).toBe(2)
+    expect(summary.byDate['2026-01-10']).toBe(75)
   })
 
   it('prefers hours entries over dayLogs when entries exist', () => {
@@ -113,7 +112,7 @@ describe('computeHoursSummary', () => {
     const summary = computeHoursSummary(logs, entries, [])
 
     // Should use entries (30), not logs (999)
-    assert.equal(summary.totalMinutes, 30)
+    expect(summary.totalMinutes).toBe(30)
   })
 
   it('applies adjustments', () => {
@@ -142,9 +141,9 @@ describe('computeHoursSummary', () => {
 
     const summary = computeHoursSummary(logs, [], adjustments)
 
-    assert.equal(summary.totalMinutes, 75) // 60 + 15
-    assert.equal(summary.adjustmentMinutes, 15)
-    assert.equal(summary.coreMinutes, 75)
+    expect(summary.totalMinutes).toBe(75) // 60 + 15
+    expect(summary.adjustmentMinutes).toBe(15)
+    expect(summary.coreMinutes).toBe(75)
   })
 
   it('handles negative adjustments', () => {
@@ -173,8 +172,8 @@ describe('computeHoursSummary', () => {
 
     const summary = computeHoursSummary(logs, [], adjustments)
 
-    assert.equal(summary.totalMinutes, 40) // 60 - 20
-    assert.equal(summary.adjustmentMinutes, -20)
+    expect(summary.totalMinutes).toBe(40) // 60 - 20
+    expect(summary.adjustmentMinutes).toBe(-20)
   })
 
   it('separates core and non-core subjects', () => {
@@ -200,17 +199,17 @@ describe('computeHoursSummary', () => {
 
     const summary = computeHoursSummary(logs, [], [])
 
-    assert.equal(summary.totalMinutes, 50)
-    assert.equal(summary.coreMinutes, 30)
-    assert.equal(summary.coreHomeMinutes, 30)
+    expect(summary.totalMinutes).toBe(50)
+    expect(summary.coreMinutes).toBe(30)
+    expect(summary.coreHomeMinutes).toBe(30)
   })
 
   it('returns empty summary for no data', () => {
     const summary = computeHoursSummary([], [], [])
 
-    assert.equal(summary.totalMinutes, 0)
-    assert.equal(summary.coreMinutes, 0)
-    assert.equal(summary.bySubject.length, 0)
+    expect(summary.totalMinutes).toBe(0)
+    expect(summary.coreMinutes).toBe(0)
+    expect(summary.bySubject.length).toBe(0)
   })
 })
 
@@ -239,10 +238,10 @@ describe('generateHoursSummaryCsv', () => {
     const csv = generateHoursSummaryCsv(summary)
     const lines = csv.split('\n')
 
-    assert.equal(lines[0], 'Subject,Total Hours,Home Hours')
-    assert.ok(lines[1].startsWith('Reading'))
-    assert.ok(csv.includes('TOTAL'))
-    assert.ok(csv.includes('CORE TOTAL'))
+    expect(lines[0]).toBe('Subject,Total Hours,Home Hours')
+    expect(lines[1].startsWith('Reading')).toBe(true)
+    expect(csv).toContain('TOTAL')
+    expect(csv).toContain('CORE TOTAL')
   })
 })
 
@@ -268,10 +267,10 @@ describe('generateDailyLogCsv', () => {
     const csv = generateDailyLogCsv(logs, [])
     const lines = csv.split('\n')
 
-    assert.equal(lines[0], 'Date,Block Type,Subject,Location,Minutes,Notes')
-    assert.ok(lines[1].includes('2026-01-10'))
-    assert.ok(lines[1].includes('Reading'))
-    assert.ok(lines[1].includes('Read chapter 5'))
+    expect(lines[0]).toBe('Date,Block Type,Subject,Location,Minutes,Notes')
+    expect(lines[1]).toContain('2026-01-10')
+    expect(lines[1]).toContain('Reading')
+    expect(lines[1]).toContain('Read chapter 5')
   })
 
   it('prefers hours entries when present', () => {
@@ -288,8 +287,8 @@ describe('generateDailyLogCsv', () => {
     const csv = generateDailyLogCsv([], entries)
     const lines = csv.split('\n')
 
-    assert.equal(lines.length, 2) // header + 1 row
-    assert.ok(lines[1].includes('30'))
+    expect(lines.length).toBe(2) // header + 1 row
+    expect(lines[1]).toContain('30')
   })
 
   it('escapes commas and quotes in notes', () => {
@@ -311,7 +310,7 @@ describe('generateDailyLogCsv', () => {
     const csv = generateDailyLogCsv(logs, [])
 
     // Notes with commas and quotes should be properly escaped
-    assert.ok(csv.includes('""To Kill a Mockingbird""'))
+    expect(csv).toContain('""To Kill a Mockingbird""')
   })
 })
 
@@ -350,16 +349,16 @@ describe('generateEvaluationMarkdown', () => {
 
     const md = generateEvaluationMarkdown(evaluations, children, artifacts)
 
-    assert.ok(md.includes('# Monthly Evaluations'))
-    assert.ok(md.includes('## Lincoln'))
-    assert.ok(md.includes('### Wins'))
-    assert.ok(md.includes('Finished reading chapter book'))
-    assert.ok(md.includes('### Struggles'))
-    assert.ok(md.includes('Focus during read-aloud'))
-    assert.ok(md.includes('### Next Steps'))
-    assert.ok(md.includes('Start multiplication'))
-    assert.ok(md.includes('### Sample Artifacts'))
-    assert.ok(md.includes('Book Report'))
+    expect(md).toContain('# Monthly Evaluations')
+    expect(md).toContain('## Lincoln')
+    expect(md).toContain('### Wins')
+    expect(md).toContain('Finished reading chapter book')
+    expect(md).toContain('### Struggles')
+    expect(md).toContain('Focus during read-aloud')
+    expect(md).toContain('### Next Steps')
+    expect(md).toContain('Start multiplication')
+    expect(md).toContain('### Sample Artifacts')
+    expect(md).toContain('Book Report')
   })
 
   it('uses childId when child not found', () => {
@@ -377,7 +376,7 @@ describe('generateEvaluationMarkdown', () => {
 
     const md = generateEvaluationMarkdown(evaluations, [], [])
 
-    assert.ok(md.includes('## unknown-child'))
+    expect(md).toContain('## unknown-child')
   })
 })
 
@@ -410,11 +409,11 @@ describe('generatePortfolioMarkdown', () => {
       '2026-01-31',
     )
 
-    assert.ok(md.includes('# Portfolio Index'))
-    assert.ok(md.includes('## Lincoln'))
-    assert.ok(md.includes('Butterfly Observation'))
-    assert.ok(md.includes('Wonder'))
-    assert.ok(md.includes('Science'))
+    expect(md).toContain('# Portfolio Index')
+    expect(md).toContain('## Lincoln')
+    expect(md).toContain('Butterfly Observation')
+    expect(md).toContain('Wonder')
+    expect(md).toContain('Science')
   })
 })
 
@@ -451,8 +450,8 @@ describe('scoreArtifactsForPortfolio', () => {
     const scored = scoreArtifactsForPortfolio(artifacts)
 
     // First result should be the one with ladder ref (higher score)
-    assert.equal(scored[0].artifact.id, 'a1')
-    assert.ok(scored[0].score > scored[1].score)
+    expect(scored[0].artifact.id).toBe('a1')
+    expect(scored[0].score).toBeGreaterThan(scored[1].score)
   })
 
   it('scores higher for artifacts with content', () => {
@@ -484,7 +483,7 @@ describe('scoreArtifactsForPortfolio', () => {
 
     const scored = scoreArtifactsForPortfolio(artifacts)
 
-    assert.equal(scored[0].artifact.id, 'a1')
+    expect(scored[0].artifact.id).toBe('a1')
   })
 
   it('returns sorted by score descending', () => {
@@ -518,8 +517,8 @@ describe('scoreArtifactsForPortfolio', () => {
 
     const scored = scoreArtifactsForPortfolio(artifacts)
 
-    assert.equal(scored[0].artifact.id, 'high')
-    assert.equal(scored[1].artifact.id, 'low')
+    expect(scored[0].artifact.id).toBe('high')
+    expect(scored[1].artifact.id).toBe('low')
   })
 })
 
@@ -529,29 +528,29 @@ describe('getMonthRange', () => {
   it('returns correct range for January', () => {
     const range = getMonthRange(2026, 1)
 
-    assert.equal(range.start, '2026-01-01')
-    assert.equal(range.end, '2026-01-31')
+    expect(range.start).toBe('2026-01-01')
+    expect(range.end).toBe('2026-01-31')
   })
 
   it('returns correct range for February in non-leap year', () => {
     const range = getMonthRange(2025, 2)
 
-    assert.equal(range.start, '2025-02-01')
-    assert.equal(range.end, '2025-02-28')
+    expect(range.start).toBe('2025-02-01')
+    expect(range.end).toBe('2025-02-28')
   })
 
   it('returns correct range for February in leap year', () => {
     const range = getMonthRange(2028, 2)
 
-    assert.equal(range.start, '2028-02-01')
-    assert.equal(range.end, '2028-02-29')
+    expect(range.start).toBe('2028-02-01')
+    expect(range.end).toBe('2028-02-29')
   })
 
   it('returns correct range for December', () => {
     const range = getMonthRange(2026, 12)
 
-    assert.equal(range.start, '2026-12-01')
-    assert.equal(range.end, '2026-12-31')
+    expect(range.start).toBe('2026-12-01')
+    expect(range.end).toBe('2026-12-31')
   })
 })
 
@@ -561,12 +560,12 @@ describe('getMonthLabel', () => {
   it('returns human-readable month label', () => {
     const label = getMonthLabel(2026, 1)
 
-    assert.equal(label, 'January 2026')
+    expect(label).toBe('January 2026')
   })
 
   it('returns correct label for December', () => {
     const label = getMonthLabel(2026, 12)
 
-    assert.equal(label, 'December 2026')
+    expect(label).toBe('December 2026')
   })
 })
