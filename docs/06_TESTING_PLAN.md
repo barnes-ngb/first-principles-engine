@@ -8,43 +8,43 @@ This plan keeps testing lightweight but real. We focus on:
 
 ---
 
-## 1) Add Test Tooling (recommended)
-### Packages
-- `vitest`
-- `@testing-library/react`
-- `@testing-library/user-event`
-- `@testing-library/jest-dom`
-- `jsdom`
+## 1) Test Tooling ✅
+### Packages (all installed)
+- [x] `vitest`
+- [x] `@testing-library/react`
+- [x] `@testing-library/user-event`
+- [x] `@testing-library/jest-dom`
+- [x] `jsdom`
 
 ### What we test first
-- `engine.logic.ts` (flywheel counts + status + suggestions)
-- date helpers in `lib/time.ts`
-- records CSV builder in `lib/format.ts`
-- ladder gating logic (can’t mark achieved without evidence)
+- [x] `engine.logic.ts` (flywheel counts + status + suggestions)
+- [x] date helpers in `lib/time.ts`
+- [ ] records CSV builder in `lib/format.ts`
+- [ ] ladder gating logic (can't mark achieved without evidence)
 
 ---
 
 ## 2) Unit Tests (Vitest)
 ### Target modules
-1. `src/features/engine/engine.logic.ts`
-   - `getWeekRange()`
-   - `computeStageCounts()`
-   - `computeLoopStatus()`
-   - `suggestNextStage()`
+1. `src/features/engine/engine.logic.ts` ✅
+   - [x] `getWeekRange()`
+   - [x] `computeLoopStatus()`
+   - [x] `suggestNextStage()`
+   - [x] `countUniqueRungsInRange()`
+   - [x] `countMilestonesAchievedInRange()`
 
-2. `src/lib/time.ts`
-   - `getSchoolYearRange()` (Jul 1 → Jun 30)
-   - `isInRange()`
+2. `src/lib/time.ts` ✅
+   - [x] `getSchoolYearRange()` (Jul 1 → Jun 30)
 
 3. `src/lib/format.ts`
-   - CSV output escapes commas/quotes/newlines
+   - [ ] CSV output escapes commas/quotes/newlines
 
-4. `src/features/kids/ladder.logic.ts` (Phase 2)
-   - `getActiveRung()`
-   - `canAchieveRung(evidenceCount)` → requires >= 1 artifact link
+4. `src/features/kids/ladder.logic.ts`
+   - [ ] `getActiveRungId()`
+   - [ ] `canMarkAchieved(linkedArtifacts)` → requires >= 1 artifact link
 
 ### Minimal success bar
-- 10–25 tests total
+- 10–25 tests total (currently ~10 assertions across 2 test files)
 - Under 1 second to run locally
 
 ---
