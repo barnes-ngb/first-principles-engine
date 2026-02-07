@@ -24,7 +24,7 @@ import {
 
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
-import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
+import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   childrenCollection,
@@ -70,7 +70,7 @@ function downloadFile(content: string, filename: string, mimeType: string) {
 const subjectBucketOptions = Object.values(SubjectBucket)
 
 export default function RecordsPage() {
-  const familyId = DEFAULT_FAMILY_ID
+  const familyId = useFamilyId()
   const { start, end } = useMemo(() => getSchoolYearRange(), [])
   const [startDate, setStartDate] = useState(start)
   const [endDate, setEndDate] = useState(end)

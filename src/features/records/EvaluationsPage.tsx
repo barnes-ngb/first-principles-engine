@@ -22,7 +22,7 @@ import {
 
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
-import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
+import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   childrenCollection,
@@ -50,7 +50,7 @@ const emptyDraft = (): EvaluationDraft => ({
 })
 
 export default function EvaluationsPage() {
-  const familyId = DEFAULT_FAMILY_ID
+  const familyId = useFamilyId()
   const [year, setYear] = useState(currentYear)
   const [month, setMonth] = useState(currentMonth)
   const [children, setChildren] = useState<Child[]>([])

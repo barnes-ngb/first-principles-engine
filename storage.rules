@@ -1,0 +1,13 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /families/{familyId}/artifacts/{allPaths=**} {
+      allow read: if request.auth != null
+                  && request.auth.uid == familyId;
+      allow write: if request.auth != null
+                   && request.auth.uid == familyId
+                   && request.resource.size < 25 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*|audio/.*|video/.*');
+    }
+  }
+}

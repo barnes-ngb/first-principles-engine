@@ -54,3 +54,17 @@ export const LearningLocation = {
   Other: 'Other',
 } as const
 export type LearningLocation = (typeof LearningLocation)[keyof typeof LearningLocation]
+
+export const UserProfile = {
+  Lincoln: 'lincoln',
+  London: 'london',
+  Parents: 'parents',
+} as const
+export type UserProfile = (typeof UserProfile)[keyof typeof UserProfile]
+
+export const ThemeMode = {
+  Family: 'family',
+  Lincoln: 'lincoln',
+  London: 'london',
+} as const
+export type ThemeMode = (typeof ThemeMode)[keyof typeof ThemeMode]

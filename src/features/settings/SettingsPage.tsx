@@ -1,8 +1,23 @@
 import { type SyntheticEvent, useState } from 'react'
-import { Alert, Button, Snackbar, Stack, Typography } from '@mui/material'
+import {
+  Alert,
+  Button,
+  Divider,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Snackbar,
+  Stack,
+  Typography,
+} from '@mui/material'
+import type { SelectChangeEvent } from '@mui/material'
 
+import { useFamilyId } from '../../core/auth/useAuth'
+import { useProfile } from '../../core/profile/useProfile'
+import { ThemeMode } from '../../core/types/enums'
 import { seedDemoFamily } from '../../core/data/seed'
-import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
+import AccountSection from './AccountSection'
 
 type SnackbarState = {
   open: boolean
@@ -16,12 +31,20 @@ const defaultSnackbarState: SnackbarState = {
   message: '',
 }
 
+const themeModeLabels: Record<ThemeMode, string> = {
+  [ThemeMode.Family]: 'Family',
+  [ThemeMode.Lincoln]: 'Lincoln',
+  [ThemeMode.London]: 'London',
+}
+
 export default function SettingsPage() {
+  const familyId = useFamilyId()
+  const { profile, themeMode, setThemeMode, logout } = useProfile()
   const [snackbar, setSnackbar] = useState<SnackbarState>(defaultSnackbarState)
 
   const handleSeedDemoData = async () => {
     try {
-      await seedDemoFamily(DEFAULT_FAMILY_ID)
+      await seedDemoFamily(familyId)
       setSnackbar({
         open: true,
         severity: 'success',
@@ -48,17 +71,63 @@ export default function SettingsPage() {
     setSnackbar((prev) => ({ ...prev, open: false }))
   }
 
+  const handleThemeModeChange = (event: SelectChangeEvent) => {
+    setThemeMode(event.target.value as ThemeMode)
+  }
+
   return (
     <Stack spacing={3} sx={{ maxWidth: 480 }}>
       <Stack spacing={1}>
         <Typography variant="h4">Settings</Typography>
-        <Typography color="text.secondary">
-          Use the button below to seed demo data for the default family.
-        </Typography>
+        {profile && (
+          <Typography color="text.secondary">
+            Logged in as <strong>{profile.charAt(0).toUpperCase() + profile.slice(1)}</strong>
+          </Typography>
+        )}
       </Stack>
-      <Button variant="contained" onClick={handleSeedDemoData}>
-        Seed Demo Data
+
+      <Divider />
+
+      <Stack spacing={2}>
+        <Typography variant="h6">Appearance</Typography>
+        <FormControl size="small" sx={{ maxWidth: 240 }}>
+          <InputLabel id="theme-mode-label">Theme</InputLabel>
+          <Select
+            labelId="theme-mode-label"
+            value={themeMode}
+            label="Theme"
+            onChange={handleThemeModeChange}
+          >
+            {Object.values(ThemeMode).map((mode) => (
+              <MenuItem key={mode} value={mode}>
+                {themeModeLabels[mode]}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Stack>
+
+      <Divider />
+
+      <AccountSection />
+
+      <Divider />
+
+      <Stack spacing={1}>
+        <Typography color="text.secondary">
+          Use the button below to seed demo data for your family.
+        </Typography>
+        <Button variant="contained" onClick={handleSeedDemoData}>
+          Seed Demo Data
+        </Button>
+      </Stack>
+
+      <Divider />
+
+      <Button variant="outlined" color="secondary" onClick={logout}>
+        Switch Profile
       </Button>
+
       <Snackbar
         open={snackbar.open}
         autoHideDuration={6000}

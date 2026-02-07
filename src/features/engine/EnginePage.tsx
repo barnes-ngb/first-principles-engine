@@ -7,7 +7,7 @@ import { getDocs } from 'firebase/firestore'
 
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
-import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
+import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   childrenCollection,
@@ -77,7 +77,7 @@ const getStatusColor = (status: ReturnType<typeof computeLoopStatus>) => {
 }
 
 export default function EnginePage() {
-  const familyId = DEFAULT_FAMILY_ID
+  const familyId = useFamilyId()
   const [children, setChildren] = useState<Child[]>([])
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
