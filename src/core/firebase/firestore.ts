@@ -22,14 +22,34 @@ import { app } from './firebase'
 
 export const db = getFirestore(app)
 
+/** Recursively strip `undefined` values, which Firestore rejects. */
+function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) continue
+    if (Array.isArray(value)) {
+      result[key] = value.map((item) =>
+        typeof item === 'object' && item !== null
+          ? stripUndefined(item as Record<string, unknown>)
+          : item,
+      )
+    } else if (typeof value === 'object' && value !== null) {
+      result[key] = stripUndefined(value as Record<string, unknown>)
+    } else {
+      result[key] = value
+    }
+  }
+  return result
+}
+
 const dayLogConverter: FirestoreDataConverter<DayLog> = {
-  toFirestore: (data) => data,
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
   fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) =>
     snapshot.data(options) as DayLog,
 }
 
 const artifactConverter: FirestoreDataConverter<Artifact> = {
-  toFirestore: (data) => data,
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
   fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
     const data = snapshot.data(options) as Artifact
     return {
@@ -40,7 +60,7 @@ const artifactConverter: FirestoreDataConverter<Artifact> = {
 }
 
 const hoursEntryConverter: FirestoreDataConverter<HoursEntry> = {
-  toFirestore: (data) => data,
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
   fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
     const data = snapshot.data(options) as HoursEntry
     return {
