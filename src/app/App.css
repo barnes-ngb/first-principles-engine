@@ -31,13 +31,9 @@
   overflow-y: auto;
 }
 
-.app-shell__nav h2 {
+.app-shell__profile-row {
   margin: 0 0 20px;
-  padding: 0 12px;
-  font-size: 0.8rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  opacity: 0.55;
+  padding: 0 4px;
 }
 
 .app-shell__nav ul {
@@ -80,13 +76,9 @@
 }
 
 /* Style nav links inside the MUI Drawer the same as the sidebar */
-.MuiDrawer-paper h2 {
+.MuiDrawer-paper .app-shell__profile-row {
   margin: 0 0 20px;
-  padding: 0 12px;
-  font-size: 0.8rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  opacity: 0.55;
+  padding: 0 4px;
 }
 
 .MuiDrawer-paper ul {

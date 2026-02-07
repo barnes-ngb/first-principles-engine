@@ -5,6 +5,7 @@ import Box from '@mui/material/Box'
 import Drawer from '@mui/material/Drawer'
 import IconButton from '@mui/material/IconButton'
 import MenuIcon from '@mui/icons-material/Menu'
+import ProfileMenu from '../components/ProfileMenu'
 import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
 
@@ -19,7 +20,6 @@ const navItems = [
   { label: 'Records', to: '/records' },
   { label: 'Evaluations', to: '/records/evaluations', parentOnly: true },
   { label: 'Portfolio', to: '/records/portfolio', parentOnly: true },
-  { label: 'Settings', to: '/settings' },
 ]
 
 type AppShellProps = {
@@ -27,17 +27,17 @@ type AppShellProps = {
 }
 
 function NavContent({
-  displayName,
   isParent,
   onNavigate,
 }: {
-  displayName: string
   isParent: boolean
   onNavigate?: () => void
 }) {
   return (
     <>
-      <h2>{displayName}</h2>
+      <div className="app-shell__profile-row">
+        <ProfileMenu />
+      </div>
       <nav>
         <ul>
           {navItems.map((item) => {
@@ -61,10 +61,6 @@ export function AppShell({ children }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const location = useLocation()
 
-  const displayName = profile
-    ? profile.charAt(0).toUpperCase() + profile.slice(1)
-    : 'Planner'
-
   const isParent = profile === UserProfile.Parents
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
@@ -79,7 +75,7 @@ export function AppShell({ children }: AppShellProps) {
     <div className="app-shell">
       {/* Desktop sidebar (hidden on mobile via CSS) */}
       <aside className="app-shell__nav">
-        <NavContent displayName={displayName} isParent={isParent} />
+        <NavContent isParent={isParent} />
       </aside>
 
       {/* Mobile header + drawer (hidden on desktop via CSS) */}
@@ -106,9 +102,10 @@ export function AppShell({ children }: AppShellProps) {
         >
           <MenuIcon />
         </IconButton>
-        <Box component="span" sx={{ fontWeight: 600, fontSize: '1rem' }}>
+        <Box component="span" sx={{ fontWeight: 600, fontSize: '1rem', flex: 1 }}>
           {currentLabel}
         </Box>
+        <ProfileMenu />
       </Box>
 
       <Drawer
@@ -123,7 +120,6 @@ export function AppShell({ children }: AppShellProps) {
         }}
       >
         <NavContent
-          displayName={displayName}
           isParent={isParent}
           onNavigate={closeDrawer}
         />
