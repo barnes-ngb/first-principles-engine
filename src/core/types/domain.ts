@@ -48,6 +48,9 @@ export interface DayBlock {
   type: DayBlockType
   title?: string
   subjectBucket?: SubjectBucket
+  location?: string
+  plannedMinutes?: number
+  actualMinutes?: number
   startTime?: string
   endTime?: string
   notes?: string
@@ -70,10 +73,14 @@ export interface ArtifactTags {
 
 export interface Artifact {
   id?: string
+  childId?: string
+  dayLogId?: string
+  weekPlanId?: string
   title: string
   type: EvidenceType
   uri?: string
   createdAt?: string
+  content?: string
   tags: ArtifactTags
   notes?: string
 }
