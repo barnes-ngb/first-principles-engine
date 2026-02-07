@@ -1,129 +1,73 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Button from '@mui/material/Button'
 import Divider from '@mui/material/Divider'
+import FormControl from '@mui/material/FormControl'
+import InputLabel from '@mui/material/InputLabel'
+import MenuItem from '@mui/material/MenuItem'
+import Select from '@mui/material/Select'
 import Stack from '@mui/material/Stack'
+import Table from '@mui/material/Table'
+import TableBody from '@mui/material/TableBody'
+import TableCell from '@mui/material/TableCell'
+import TableHead from '@mui/material/TableHead'
+import TableRow from '@mui/material/TableRow'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { doc, getDocs, query, where, writeBatch } from 'firebase/firestore'
+import {
+  addDoc,
+  doc,
+  getDocs,
+  query,
+  where,
+  writeBatch,
+} from 'firebase/firestore'
 
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
 import {
+  artifactsCollection,
+  childrenCollection,
   db,
   daysCollection,
+  evaluationsCollection,
+  hoursAdjustmentsCollection,
   hoursCollection,
 } from '../../core/firebase/firestore'
-import type { DayLog, HoursEntry } from '../../core/types/domain'
-import { LearningLocation, SubjectBucket } from '../../core/types/enums'
-import { formatDateForCsv, formatDateForInput } from '../../lib/format'
+import type {
+  Artifact,
+  Child,
+  DayLog,
+  Evaluation,
+  HoursAdjustment,
+  HoursEntry,
+} from '../../core/types/domain'
+import { SubjectBucket } from '../../core/types/enums'
+import { formatDateForInput } from '../../lib/format'
 import { getSchoolYearRange } from '../../lib/time'
+import {
+  computeHoursSummary,
+  generateDailyLogCsv,
+  generateEvaluationMarkdown,
+  generateHoursSummaryCsv,
+  generatePortfolioMarkdown,
+} from './records.logic'
 
-type DayLogTotals = {
-  totalMinutes: number
-  coreMinutes: number
-  coreHomeMinutes: number
-  byDateMinutes: Record<string, number>
+const formatHours = (minutes: number) => (minutes / 60).toFixed(2)
+
+function downloadFile(content: string, filename: string, mimeType: string) {
+  const blob = new Blob([content], { type: `${mimeType};charset=utf-8;` })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
 }
 
-const coreBuckets = new Set<SubjectBucket>([
-  SubjectBucket.Reading,
-  SubjectBucket.LanguageArts,
-  SubjectBucket.Math,
-  SubjectBucket.Science,
-  SubjectBucket.SocialStudies,
-])
-
-const sumMinutes = (log: DayLog) =>
-  log.blocks.reduce((total, block) => total + (block.actualMinutes ?? 0), 0)
-
-const entryMinutes = (entry: HoursEntry) => {
-  if (entry.minutes != null) {
-    return entry.minutes
-  }
-  if (entry.hours != null) {
-    return Math.round(entry.hours * 60)
-  }
-  return 0
-}
-
-const computeDayLogTotals = (logs: DayLog[]): DayLogTotals => {
-  return logs.reduce<DayLogTotals>(
-    (totals, log) => {
-      const dayTotal = sumMinutes(log)
-      const coreTotal = log.blocks.reduce((total, block) => {
-        if (!block.subjectBucket || !coreBuckets.has(block.subjectBucket)) {
-          return total
-        }
-        return total + (block.actualMinutes ?? 0)
-      }, 0)
-      const coreHomeTotal = log.blocks.reduce((total, block) => {
-        if (
-          !block.subjectBucket ||
-          !coreBuckets.has(block.subjectBucket) ||
-          block.location !== LearningLocation.Home
-        ) {
-          return total
-        }
-        return total + (block.actualMinutes ?? 0)
-      }, 0)
-
-      totals.totalMinutes += dayTotal
-      totals.coreMinutes += coreTotal
-      totals.coreHomeMinutes += coreHomeTotal
-      totals.byDateMinutes[log.date] = dayTotal
-      return totals
-    },
-    {
-      totalMinutes: 0,
-      coreMinutes: 0,
-      coreHomeMinutes: 0,
-      byDateMinutes: {},
-    },
-  )
-}
-
-const computeHoursEntryTotals = (entries: HoursEntry[]): DayLogTotals => {
-  return entries.reduce<DayLogTotals>(
-    (totals, entry) => {
-      const minutes = entryMinutes(entry)
-      if (minutes <= 0) {
-        return totals
-      }
-      const subjectBucket = entry.subjectBucket
-      const location = entry.location
-      const isCore = subjectBucket != null && coreBuckets.has(subjectBucket)
-      const isCoreHome = isCore && location === LearningLocation.Home
-
-      totals.totalMinutes += minutes
-      if (isCore) {
-        totals.coreMinutes += minutes
-      }
-      if (isCoreHome) {
-        totals.coreHomeMinutes += minutes
-      }
-      totals.byDateMinutes[entry.date] =
-        (totals.byDateMinutes[entry.date] ?? 0) + minutes
-      return totals
-    },
-    {
-      totalMinutes: 0,
-      coreMinutes: 0,
-      coreHomeMinutes: 0,
-      byDateMinutes: {},
-    },
-  )
-}
-
-const formatHours = (hours: number) => hours.toFixed(2)
-
-const toCsvValue = (value: string | number | null | undefined) => {
-  const stringValue = `${value ?? ''}`
-  if (/[",\n]/.test(stringValue)) {
-    return `"${stringValue.replace(/"/g, '""')}"`
-  }
-  return stringValue
-}
+const subjectBucketOptions = Object.values(SubjectBucket)
 
 export default function RecordsPage() {
   const familyId = DEFAULT_FAMILY_ID
@@ -132,11 +76,23 @@ export default function RecordsPage() {
   const [endDate, setEndDate] = useState(end)
   const [hoursEntries, setHoursEntries] = useState<HoursEntry[]>([])
   const [dayLogs, setDayLogs] = useState<DayLog[]>([])
+  const [adjustments, setAdjustments] = useState<HoursAdjustment[]>([])
+  const [children, setChildren] = useState<Child[]>([])
+  const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const [evaluations, setEvaluations] = useState<Evaluation[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
 
+  // Adjustment form
+  const [adjDate, setAdjDate] = useState(formatDateForInput(new Date()))
+  const [adjMinutes, setAdjMinutes] = useState('')
+  const [adjReason, setAdjReason] = useState('')
+  const [adjSubject, setAdjSubject] = useState<SubjectBucket | ''>('')
+  const [adjSaving, setAdjSaving] = useState(false)
+
   const loadRecords = useCallback(async () => {
     setIsLoading(true)
+
     const hoursQuery = query(
       hoursCollection(familyId),
       where('date', '>=', startDate),
@@ -147,56 +103,73 @@ export default function RecordsPage() {
       where('date', '>=', startDate),
       where('date', '<=', endDate),
     )
+    const adjQuery = query(
+      hoursAdjustmentsCollection(familyId),
+      where('date', '>=', startDate),
+      where('date', '<=', endDate),
+    )
+    const evalsQuery = query(
+      evaluationsCollection(familyId),
+      where('monthStart', '>=', startDate),
+      where('monthStart', '<=', endDate),
+    )
 
-    const [hoursSnapshot, daysSnapshot] = await Promise.all([
-      getDocs(hoursQuery),
-      getDocs(daysQuery),
-    ])
+    const [hoursSnap, daysSnap, adjSnap, childSnap, artSnap, evalSnap] =
+      await Promise.all([
+        getDocs(hoursQuery),
+        getDocs(daysQuery),
+        getDocs(adjQuery),
+        getDocs(childrenCollection(familyId)),
+        getDocs(
+          query(
+            artifactsCollection(familyId),
+            where('createdAt', '>=', startDate),
+            where('createdAt', '<=', endDate + 'T23:59:59'),
+          ),
+        ),
+        getDocs(evalsQuery),
+      ])
 
-    const hours = hoursSnapshot.docs.map((docSnapshot) => {
-      const data = docSnapshot.data() as HoursEntry
-      const minutes = entryMinutes(data)
-      return {
-        ...data,
-        id: data.id ?? docSnapshot.id,
-        date: data.date ?? docSnapshot.id,
-        minutes,
-      }
-    })
-    const logs = daysSnapshot.docs.map((docSnapshot) => {
-      const data = docSnapshot.data() as DayLog
-      return { ...data, date: data.date ?? docSnapshot.id }
-    })
+    setHoursEntries(
+      hoursSnap.docs.map((d) => {
+        const data = d.data() as HoursEntry
+        return { ...data, id: data.id ?? d.id, date: data.date ?? d.id }
+      }),
+    )
+    setDayLogs(
+      daysSnap.docs.map((d) => {
+        const data = d.data() as DayLog
+        return { ...data, date: data.date ?? d.id }
+      }),
+    )
+    setAdjustments(
+      adjSnap.docs.map((d) => {
+        const data = d.data() as HoursAdjustment
+        return { ...data, id: d.id }
+      }),
+    )
+    setChildren(childSnap.docs.map((d) => ({ ...d.data(), id: d.id })))
+    setArtifacts(artSnap.docs.map((d) => ({ ...d.data(), id: d.id })))
+    setEvaluations(
+      evalSnap.docs.map((d) => {
+        const data = d.data() as Evaluation
+        return { ...data, id: d.id }
+      }),
+    )
 
-    setHoursEntries(hours)
-    setDayLogs(logs)
     setIsLoading(false)
   }, [endDate, familyId, startDate])
 
   useEffect(() => {
-    const load = async () => {
-      await loadRecords()
-    }
-
-    void load()
+    void loadRecords()
   }, [loadRecords])
 
-  const totalsFromLogs = useMemo(() => computeDayLogTotals(dayLogs), [dayLogs])
-  const totalsFromEntries = useMemo(
-    () => computeHoursEntryTotals(hoursEntries),
-    [hoursEntries],
+  const summary = useMemo(
+    () => computeHoursSummary(dayLogs, hoursEntries, adjustments),
+    [dayLogs, hoursEntries, adjustments],
   )
-  const hasHoursEntries = hoursEntries.length > 0
-  const totals = hasHoursEntries ? totalsFromEntries : totalsFromLogs
-  const totalHours = useMemo(() => {
-    if (hoursEntries.length > 0) {
-      return totalsFromEntries.totalMinutes / 60
-    }
-    return totalsFromLogs.totalMinutes / 60
-  }, [hoursEntries.length, totalsFromEntries.totalMinutes, totalsFromLogs.totalMinutes])
 
-  const coreHours = totals.coreMinutes / 60
-  const coreHomeHours = totals.coreHomeMinutes / 60
+  const hasHoursEntries = hoursEntries.length > 0
   const showGenerate = !hasHoursEntries && dayLogs.length > 0
 
   const handleGenerateHours = useCallback(async () => {
@@ -207,9 +180,7 @@ export default function RecordsPage() {
     dayLogs.forEach((log) => {
       log.blocks.forEach((block) => {
         const minutes = block.actualMinutes ?? 0
-        if (minutes <= 0) {
-          return
-        }
+        if (minutes <= 0) return
         const entryRef = doc(hoursCollection(familyId))
         batch.set(entryRef, {
           date: log.date,
@@ -228,128 +199,142 @@ export default function RecordsPage() {
     setIsGenerating(false)
   }, [dayLogs, familyId, loadRecords])
 
-  const handleExportCsv = useCallback(() => {
-    const rows = hasHoursEntries
-      ? [...hoursEntries]
-          .sort((a, b) => a.date.localeCompare(b.date))
-          .filter((entry) => entryMinutes(entry) > 0)
-          .map((entry) => ({
-            date: formatDateForCsv(entry.date),
-            blockType: entry.blockType ?? '',
-            subjectBucket: entry.subjectBucket ?? '',
-            location: entry.location ?? '',
-            minutes: entryMinutes(entry) || '',
-            quickCapture: entry.quickCapture ?? '',
-          }))
-      : [...dayLogs]
-          .sort((a, b) => a.date.localeCompare(b.date))
-          .flatMap((log) =>
-            log.blocks
-              .filter((block) => block.actualMinutes != null)
-              .map((block) => ({
-                date: formatDateForCsv(log.date),
-                blockType: block.type,
-                subjectBucket: block.subjectBucket ?? '',
-                location: block.location ?? '',
-                minutes: block.actualMinutes ?? '',
-                quickCapture: block.quickCapture ?? '',
-              })),
-          )
+  // Manual adjustment
+  const handleAddAdjustment = useCallback(async () => {
+    if (!adjMinutes || !adjReason.trim()) return
+    setAdjSaving(true)
 
-    const header = [
-      'date',
-      'blockType',
-      'subjectBucket',
-      'location',
-      'minutes',
-      'quickCapture',
-    ]
-    const csv = [
-      header.map(toCsvValue).join(','),
-      ...rows.map((row) =>
-        [
-          formatDateForCsv(row.date),
-          row.blockType,
-          row.subjectBucket,
-          row.location,
-          row.minutes,
-          row.quickCapture,
-        ]
-          .map(toCsvValue)
-          .join(','),
-      ),
-    ].join('\n')
+    await addDoc(hoursAdjustmentsCollection(familyId), {
+      date: adjDate,
+      minutes: Number(adjMinutes),
+      reason: adjReason.trim(),
+      subjectBucket: adjSubject || undefined,
+      createdAt: new Date().toISOString(),
+    })
 
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute(
-      'download',
-      `daily-logs-${formatDateForInput(startDate)}-to-${formatDateForInput(endDate)}.csv`,
+    setAdjMinutes('')
+    setAdjReason('')
+    setAdjSubject('')
+    await loadRecords()
+    setAdjSaving(false)
+  }, [adjDate, adjMinutes, adjReason, adjSubject, familyId, loadRecords])
+
+  // Export handlers
+  const handleExportHoursCsv = useCallback(() => {
+    downloadFile(
+      generateHoursSummaryCsv(summary),
+      `hours-summary-${startDate}-to-${endDate}.csv`,
+      'text/csv',
     )
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.URL.revokeObjectURL(url)
-  }, [dayLogs, endDate, hasHoursEntries, hoursEntries, startDate])
+  }, [summary, startDate, endDate])
+
+  const handleExportDailyLogCsv = useCallback(() => {
+    downloadFile(
+      generateDailyLogCsv(dayLogs, hoursEntries),
+      `daily-logs-${startDate}-to-${endDate}.csv`,
+      'text/csv',
+    )
+  }, [dayLogs, hoursEntries, startDate, endDate])
+
+  const handleExportEvaluationMd = useCallback(() => {
+    const md = generateEvaluationMarkdown(
+      evaluations,
+      children.map((c) => ({ id: c.id, name: c.name })),
+      artifacts,
+    )
+    downloadFile(
+      md,
+      `evaluations-${startDate}-to-${endDate}.md`,
+      'text/markdown',
+    )
+  }, [evaluations, children, artifacts, startDate, endDate])
+
+  const handleExportPortfolioMd = useCallback(() => {
+    const md = generatePortfolioMarkdown(
+      artifacts,
+      children.map((c) => ({ id: c.id, name: c.name })),
+      startDate,
+      endDate,
+    )
+    downloadFile(
+      md,
+      `portfolio-${startDate}-to-${endDate}.md`,
+      'text/markdown',
+    )
+  }, [artifacts, children, startDate, endDate])
+
+  const handleExportPack = useCallback(() => {
+    handleExportHoursCsv()
+    handleExportDailyLogCsv()
+    if (evaluations.length > 0) handleExportEvaluationMd()
+    if (artifacts.length > 0) handleExportPortfolioMd()
+  }, [
+    handleExportHoursCsv,
+    handleExportDailyLogCsv,
+    handleExportEvaluationMd,
+    handleExportPortfolioMd,
+    evaluations.length,
+    artifacts.length,
+  ])
+
+  const hasData = hasHoursEntries || dayLogs.length > 0
 
   return (
     <Page>
+      {/* Date Range & Totals */}
       <SectionCard title="Records">
         <Stack spacing={2}>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
             <TextField
               label="Start date"
               type="date"
+              size="small"
               value={startDate}
-              onChange={(event) =>
-                setStartDate(formatDateForInput(event.target.value))
+              onChange={(e) =>
+                setStartDate(formatDateForInput(e.target.value))
               }
               InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="End date"
               type="date"
+              size="small"
               value={endDate}
-              onChange={(event) =>
-                setEndDate(formatDateForInput(event.target.value))
-              }
+              onChange={(e) => setEndDate(formatDateForInput(e.target.value))}
               InputLabelProps={{ shrink: true }}
             />
-            <Button
-              variant="outlined"
-              onClick={handleExportCsv}
-              disabled={!hasHoursEntries && dayLogs.length === 0}
-            >
-              Export Daily Log CSV
-            </Button>
           </Stack>
-          <Typography color="text.secondary">
+          <Typography color="text.secondary" variant="body2">
             Showing records for {startDate} through {endDate}.
           </Typography>
-          <Divider />
+
           {isLoading ? (
             <Typography color="text.secondary">Loading records...</Typography>
           ) : (
             <Stack spacing={1}>
               <Typography variant="subtitle1">
-                Total hours: {formatHours(totalHours)}
+                Total hours: {formatHours(summary.totalMinutes)}
               </Typography>
               <Typography variant="subtitle1">
-                Core hours (Reading, Language Arts, Math, Science, Social Studies):{' '}
-                {formatHours(coreHours)}
+                Core hours: {formatHours(summary.coreMinutes)}
               </Typography>
               <Typography variant="subtitle1">
-                Core hours at Home: {formatHours(coreHomeHours)}
+                Core hours at Home: {formatHours(summary.coreHomeMinutes)}
               </Typography>
-              <Typography color="text.secondary">
-                Hours entries found: {hoursEntries.length}. Day logs found:{' '}
-                {dayLogs.length}.
+              {summary.adjustmentMinutes !== 0 && (
+                <Typography variant="body2" color="text.secondary">
+                  Includes {summary.adjustmentMinutes > 0 ? '+' : ''}
+                  {summary.adjustmentMinutes} minutes in manual adjustments
+                </Typography>
+              )}
+              <Typography color="text.secondary" variant="body2">
+                Hours entries: {hoursEntries.length} | Day logs: {dayLogs.length}{' '}
+                | Adjustments: {adjustments.length}
               </Typography>
               {showGenerate && (
                 <Button
                   variant="contained"
+                  size="small"
                   onClick={handleGenerateHours}
                   disabled={isGenerating}
                 >
@@ -358,6 +343,190 @@ export default function RecordsPage() {
               )}
             </Stack>
           )}
+        </Stack>
+      </SectionCard>
+
+      {/* Hours Breakdown by Subject */}
+      {!isLoading && hasData && (
+        <SectionCard title="Hours by Subject">
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Subject</TableCell>
+                <TableCell align="right">Total Hours</TableCell>
+                <TableCell align="right">Home Hours</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {summary.bySubject.map((row) => (
+                <TableRow key={row.subjectBucket}>
+                  <TableCell>{row.subjectBucket}</TableCell>
+                  <TableCell align="right">
+                    {formatHours(row.totalMinutes)}
+                  </TableCell>
+                  <TableCell align="right">
+                    {formatHours(row.homeMinutes)}
+                  </TableCell>
+                </TableRow>
+              ))}
+              <TableRow>
+                <TableCell>
+                  <strong>Total</strong>
+                </TableCell>
+                <TableCell align="right">
+                  <strong>{formatHours(summary.totalMinutes)}</strong>
+                </TableCell>
+                <TableCell align="right">
+                  <strong>{formatHours(summary.coreHomeMinutes)}</strong>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </SectionCard>
+      )}
+
+      {/* Manual Adjustment */}
+      <SectionCard title="Manual Hours Adjustment">
+        <Stack spacing={2}>
+          <Typography variant="body2" color="text.secondary">
+            Add or subtract hours manually. Use negative minutes to reduce.
+            Each adjustment is tracked for audit.
+          </Typography>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <TextField
+              label="Date"
+              type="date"
+              size="small"
+              value={adjDate}
+              onChange={(e) =>
+                setAdjDate(formatDateForInput(e.target.value))
+              }
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              label="Minutes (+/-)"
+              type="number"
+              size="small"
+              value={adjMinutes}
+              onChange={(e) => setAdjMinutes(e.target.value)}
+              sx={{ maxWidth: 120 }}
+            />
+            <FormControl size="small" sx={{ minWidth: 140 }}>
+              <InputLabel>Subject (optional)</InputLabel>
+              <Select
+                value={adjSubject}
+                label="Subject (optional)"
+                onChange={(e) =>
+                  setAdjSubject(e.target.value as SubjectBucket | '')
+                }
+              >
+                <MenuItem value="">None</MenuItem>
+                {subjectBucketOptions.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {s}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Stack>
+          <TextField
+            label="Reason"
+            size="small"
+            fullWidth
+            value={adjReason}
+            onChange={(e) => setAdjReason(e.target.value)}
+            placeholder="Why is this adjustment needed?"
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={handleAddAdjustment}
+            disabled={adjSaving || !adjMinutes || !adjReason.trim()}
+            sx={{ alignSelf: 'flex-start' }}
+          >
+            Add Adjustment
+          </Button>
+
+          {adjustments.length > 0 && (
+            <>
+              <Divider />
+              <Typography variant="subtitle2">Adjustment History</Typography>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Date</TableCell>
+                    <TableCell align="right">Minutes</TableCell>
+                    <TableCell>Subject</TableCell>
+                    <TableCell>Reason</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {adjustments.map((adj) => (
+                    <TableRow key={adj.id ?? adj.date + adj.reason}>
+                      <TableCell>{adj.date}</TableCell>
+                      <TableCell align="right">
+                        {adj.minutes > 0 ? '+' : ''}
+                        {adj.minutes}
+                      </TableCell>
+                      <TableCell>{adj.subjectBucket ?? '—'}</TableCell>
+                      <TableCell>{adj.reason}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </>
+          )}
+        </Stack>
+      </SectionCard>
+
+      {/* Export Pack */}
+      <SectionCard title="Export Pack">
+        <Stack spacing={2}>
+          <Typography variant="body2" color="text.secondary">
+            Download your compliance records. "Export All" downloads every
+            available file at once.
+          </Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap">
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleExportHoursCsv}
+              disabled={!hasData}
+            >
+              Hours Summary CSV
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleExportDailyLogCsv}
+              disabled={!hasData}
+            >
+              Daily Log CSV
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleExportEvaluationMd}
+              disabled={evaluations.length === 0}
+            >
+              Evaluations Markdown
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleExportPortfolioMd}
+              disabled={artifacts.length === 0}
+            >
+              Portfolio Index Markdown
+            </Button>
+          </Stack>
+          <Button
+            variant="contained"
+            onClick={handleExportPack}
+            disabled={!hasData}
+          >
+            Export All
+          </Button>
         </Stack>
       </SectionCard>
     </Page>

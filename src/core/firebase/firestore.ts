@@ -12,6 +12,7 @@ import type {
   Child,
   DayLog,
   Evaluation,
+  HoursAdjustment,
   HoursEntry,
   Ladder,
   MilestoneProgress,
@@ -90,3 +91,11 @@ export const milestoneProgressCollection = (
     db,
     `families/${familyId}/milestoneProgress`,
   ) as CollectionReference<MilestoneProgress>
+
+export const hoursAdjustmentsCollection = (
+  familyId: string,
+): CollectionReference<HoursAdjustment> =>
+  collection(
+    db,
+    `families/${familyId}/hoursAdjustments`,
+  ) as CollectionReference<HoursAdjustment>
