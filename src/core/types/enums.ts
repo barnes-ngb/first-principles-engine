@@ -68,3 +68,45 @@ export const ThemeMode = {
   London: 'london',
 } as const
 export type ThemeMode = (typeof ThemeMode)[keyof typeof ThemeMode]
+
+export const SessionResult = {
+  Hit: 'hit',
+  Near: 'near',
+  Miss: 'miss',
+} as const
+export type SessionResult = (typeof SessionResult)[keyof typeof SessionResult]
+
+export const EnergyLevel = {
+  Normal: 'normal',
+  Low: 'low',
+  Overwhelmed: 'overwhelmed',
+} as const
+export type EnergyLevel = (typeof EnergyLevel)[keyof typeof EnergyLevel]
+
+export const SupportTag = {
+  Prompts: 'Prompts',
+  FingerTracking: 'FingerTracking',
+  Manipulatives: 'Manipulatives',
+  SentenceFrames: 'SentenceFrames',
+  VisualAid: 'VisualAid',
+  Timer: 'Timer',
+} as const
+export type SupportTag = (typeof SupportTag)[keyof typeof SupportTag]
+
+export const ProjectPhase = {
+  Plan: 'Plan',
+  Build: 'Build',
+  Test: 'Test',
+  Improve: 'Improve',
+} as const
+export type ProjectPhase = (typeof ProjectPhase)[keyof typeof ProjectPhase]
+
+export const StreamId = {
+  Reading: 'reading',
+  Writing: 'writing',
+  Communication: 'communication',
+  Math: 'math',
+  Independence: 'independence',
+  DadLab: 'dadlab',
+} as const
+export type StreamId = (typeof StreamId)[keyof typeof StreamId]
