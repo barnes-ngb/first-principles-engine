@@ -24,9 +24,10 @@ import {
   artifactsCollection,
   childrenCollection,
   daysCollection,
+  laddersCollection,
   weeksCollection,
 } from '../../core/firebase/firestore'
-import type { Child, DayLog } from '../../core/types/domain'
+import type { Child, DayLog, Ladder } from '../../core/types/domain'
 import {
   EngineStage,
   EvidenceType,
@@ -44,6 +45,7 @@ export default function TodayPage() {
   )
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
   const [children, setChildren] = useState<Child[]>([])
+  const [ladders, setLadders] = useState<Ladder[]>([])
   const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
   const [artifactForm, setArtifactForm] = useState({
     childId: '',
@@ -52,6 +54,8 @@ export default function TodayPage() {
     location: LearningLocation.Home,
     domain: '',
     content: '',
+    ladderId: '',
+    rungId: '',
   })
 
   const placeholderChildren = [
@@ -123,13 +127,29 @@ export default function TodayPage() {
       setWeekPlanId(matching?.id)
     }
 
+    const loadLadders = async () => {
+      const snapshot = await getDocs(laddersCollection(familyId))
+      if (!isMounted) return
+      const loadedLadders = snapshot.docs.map((docSnapshot) => ({
+        id: docSnapshot.id,
+        ...(docSnapshot.data() as Ladder),
+      }))
+      setLadders(loadedLadders)
+    }
+
     loadChildren()
     loadWeekPlan()
+    loadLadders()
 
     return () => {
       isMounted = false
     }
   }, [familyId, today])
+
+  const selectedLadder = useMemo(
+    () => ladders.find((ladder) => ladder.id === artifactForm.ladderId),
+    [artifactForm.ladderId, ladders],
+  )
 
   const handleBlockFieldChange = useCallback(
     (index: number, field: keyof DayLog['blocks'][number], value: unknown) => {
@@ -177,6 +197,10 @@ export default function TodayPage() {
     const title =
       content.slice(0, 60) || domain || `Artifact for ${today}`
     const createdAt = new Date().toISOString()
+    const ladderRef =
+      artifactForm.ladderId && artifactForm.rungId
+        ? { ladderId: artifactForm.ladderId, rungId: artifactForm.rungId }
+        : undefined
 
     await addDoc(artifactsCollection(familyId), {
       title,
@@ -191,6 +215,7 @@ export default function TodayPage() {
         domain: artifactForm.domain,
         subjectBucket: artifactForm.subjectBucket,
         location: artifactForm.location,
+        ...(ladderRef ? { ladderRef } : {}),
       },
       notes: '',
     })
@@ -409,6 +434,49 @@ export default function TodayPage() {
             value={artifactForm.domain}
             onChange={(event) => handleArtifactChange('domain', event.target.value)}
           />
+          <TextField
+            label="Ladder"
+            select
+            value={artifactForm.ladderId}
+            onChange={(event) => {
+              const ladderId = event.target.value
+              setArtifactForm((prev) => ({
+                ...prev,
+                ladderId,
+                rungId: '',
+              }))
+            }}
+          >
+            <MenuItem value="">No ladder</MenuItem>
+            {ladders.map((ladder) => (
+              <MenuItem key={ladder.id} value={ladder.id}>
+                {ladder.title}
+              </MenuItem>
+            ))}
+          </TextField>
+          {selectedLadder && selectedLadder.rungs.length > 0 && (
+            <TextField
+              label="Rung"
+              select
+              value={artifactForm.rungId}
+              onChange={(event) =>
+                handleArtifactChange('rungId', event.target.value)
+              }
+            >
+              <MenuItem value="">Select rung</MenuItem>
+              {selectedLadder.rungs
+                .slice()
+                .sort((a, b) => a.order - b.order)
+                .map((rung) => (
+                  <MenuItem
+                    key={rung.id ?? rung.title}
+                    value={rung.id ?? rung.title}
+                  >
+                    {rung.title}
+                  </MenuItem>
+                ))}
+            </TextField>
+          )}
           <TextField
             label="Content"
             multiline
