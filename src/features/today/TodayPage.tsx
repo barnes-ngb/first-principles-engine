@@ -141,7 +141,7 @@ export default function TodayPage() {
           return
         }
 
-        const defaultLog = createDefaultDayLog(today)
+        const defaultLog = createDefaultDayLog('', today)
         await setDoc(dayLogRef, defaultLog)
         if (isMounted) {
           setDayLog(defaultLog)
@@ -206,7 +206,7 @@ export default function TodayPage() {
       const loadedArtifacts = snapshot.docs
         .map((docSnapshot) => docSnapshot.data())
         .filter((artifact) => artifact.dayLogId === today)
-        .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       setTodayArtifacts(loadedArtifacts)
     }
 
@@ -291,7 +291,7 @@ export default function TodayPage() {
         title,
         type: evidenceType,
         createdAt,
-        childId: artifactForm.childId || undefined,
+        childId: artifactForm.childId,
         dayLogId: today,
         weekPlanId,
         tags: {

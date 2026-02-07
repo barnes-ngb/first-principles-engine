@@ -57,6 +57,7 @@ describe('computeHoursSummary', () => {
   it('computes summary from dayLogs when no hours entries', () => {
     const logs: DayLog[] = [
       {
+        childId: 'child-a',
         date: '2026-01-10',
         blocks: [
           {
@@ -88,6 +89,7 @@ describe('computeHoursSummary', () => {
   it('prefers hours entries over dayLogs when entries exist', () => {
     const logs: DayLog[] = [
       {
+        childId: 'child-a',
         date: '2026-01-10',
         blocks: [
           {
@@ -118,6 +120,7 @@ describe('computeHoursSummary', () => {
   it('applies adjustments', () => {
     const logs: DayLog[] = [
       {
+        childId: 'child-a',
         date: '2026-01-10',
         blocks: [
           {
@@ -149,6 +152,7 @@ describe('computeHoursSummary', () => {
   it('handles negative adjustments', () => {
     const logs: DayLog[] = [
       {
+        childId: 'child-a',
         date: '2026-01-10',
         blocks: [
           {
@@ -179,6 +183,7 @@ describe('computeHoursSummary', () => {
   it('separates core and non-core subjects', () => {
     const logs: DayLog[] = [
       {
+        childId: 'child-a',
         date: '2026-01-10',
         blocks: [
           {
@@ -220,6 +225,7 @@ describe('generateHoursSummaryCsv', () => {
     const summary = computeHoursSummary(
       [
         {
+          childId: 'child-a',
           date: '2026-01-10',
           blocks: [
             {
@@ -251,6 +257,7 @@ describe('generateDailyLogCsv', () => {
   it('generates CSV from dayLogs when no hours entries', () => {
     const logs: DayLog[] = [
       {
+        childId: 'child-a',
         date: '2026-01-10',
         blocks: [
           {
@@ -294,6 +301,7 @@ describe('generateDailyLogCsv', () => {
   it('escapes commas and quotes in notes', () => {
     const logs: DayLog[] = [
       {
+        childId: 'child-a',
         date: '2026-01-10',
         blocks: [
           {
@@ -338,6 +346,7 @@ describe('generateEvaluationMarkdown', () => {
         childId: 'lincoln',
         title: 'Book Report',
         type: EvidenceType.Note,
+        createdAt: '2026-01-15T10:00:00',
         tags: {
           engineStage: EngineStage.Explain,
           domain: 'Reading',
@@ -424,8 +433,10 @@ describe('scoreArtifactsForPortfolio', () => {
     const artifacts: Artifact[] = [
       {
         id: 'a1',
+        childId: 'child-a',
         title: 'With Ladder',
         type: EvidenceType.Note,
+        createdAt: '2026-01-15T10:00:00',
         tags: {
           engineStage: EngineStage.Build,
           domain: 'Math',
@@ -436,8 +447,10 @@ describe('scoreArtifactsForPortfolio', () => {
       },
       {
         id: 'a2',
+        childId: 'child-a',
         title: 'Without Ladder',
         type: EvidenceType.Note,
+        createdAt: '2026-01-15T11:00:00',
         tags: {
           engineStage: EngineStage.Build,
           domain: 'Math',
@@ -458,8 +471,10 @@ describe('scoreArtifactsForPortfolio', () => {
     const artifacts: Artifact[] = [
       {
         id: 'a1',
+        childId: 'child-a',
         title: 'Rich',
         type: EvidenceType.Note,
+        createdAt: '2026-01-15T10:00:00',
         content: 'This is a detailed observation about the butterfly lifecycle.',
         tags: {
           engineStage: EngineStage.Wonder,
@@ -470,8 +485,10 @@ describe('scoreArtifactsForPortfolio', () => {
       },
       {
         id: 'a2',
+        childId: 'child-a',
         title: 'Sparse',
         type: EvidenceType.Note,
+        createdAt: '2026-01-15T11:00:00',
         tags: {
           engineStage: EngineStage.Wonder,
           domain: 'Science',
@@ -490,8 +507,10 @@ describe('scoreArtifactsForPortfolio', () => {
     const artifacts: Artifact[] = [
       {
         id: 'low',
+        childId: 'child-a',
         title: 'Low',
         type: EvidenceType.Note,
+        createdAt: '2026-01-15T10:00:00',
         tags: {
           engineStage: EngineStage.Wonder,
           domain: '',
@@ -501,8 +520,10 @@ describe('scoreArtifactsForPortfolio', () => {
       },
       {
         id: 'high',
+        childId: 'child-a',
         title: 'High',
         type: EvidenceType.Photo,
+        createdAt: '2026-01-15T11:00:00',
         content: 'This is a long enough content to count for scoring purposes',
         notes: 'Extra notes',
         tags: {

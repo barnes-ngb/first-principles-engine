@@ -107,7 +107,7 @@ export default function LabModePage() {
         title,
         type: evidenceType,
         createdAt,
-        childId: artifactForm.childId || undefined,
+        childId: artifactForm.childId,
         dayLogId,
         tags: {
           engineStage: artifactForm.engineStage,
