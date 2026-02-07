@@ -14,11 +14,10 @@ const formatDate = (value?: string) => (value ? new Date(value).toLocaleDateStri
 
 export default function ArtifactCard({ artifact }: ArtifactCardProps) {
   const ladderRef = artifact.tags?.ladderRef
-  const [ladderId, rungId] = ladderRef?.split(':') ?? []
   const ladderLabel = ladderRef
-    ? rungId
-      ? `Ladder: ${ladderId} / Rung: ${rungId}`
-      : `Ladder: ${ladderId}`
+    ? ladderRef.rungId
+      ? `Ladder: ${ladderRef.ladderId} / Rung: ${ladderRef.rungId}`
+      : `Ladder: ${ladderRef.ladderId}`
     : ''
 
   return (

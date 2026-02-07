@@ -63,8 +63,8 @@ export default function WeekPage() {
       const snapshot = await getDocs(childrenCollection(familyId))
       if (!isMounted) return
       const loaded = snapshot.docs.map((docSnapshot) => ({
-        id: docSnapshot.id,
         ...(docSnapshot.data() as Child),
+        id: docSnapshot.id,
       }))
       setChildren(loaded)
     }
