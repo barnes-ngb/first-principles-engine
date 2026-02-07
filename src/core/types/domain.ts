@@ -138,8 +138,23 @@ export interface HoursEntry {
 
 export interface Evaluation {
   id?: string
+  childId: string
+  monthStart: string
+  monthEnd: string
+  wins: string[]
+  struggles: string[]
+  nextSteps: string[]
+  sampleArtifactIds: string[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface HoursAdjustment {
+  id?: string
   date: string
-  summary: string
-  strengths?: string[]
-  nextSteps?: string[]
+  minutes: number
+  reason: string
+  subjectBucket?: SubjectBucket
+  location?: string
+  createdAt?: string
 }

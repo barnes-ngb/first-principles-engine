@@ -187,6 +187,6 @@ Aim for commits that:
 ## 12) Current Phase (set this as you work)
 - [x] Phase 1 — MVP v0.1
 - [x] Phase 2 — Engine + Ladders
-- [ ] Phase 3 — Records + Compliance Pack
+- [x] Phase 3 — Records + Compliance Pack
 - [ ] Phase 4 — Media Capture
 - [ ] Phase 5 — Deployment + Ops
