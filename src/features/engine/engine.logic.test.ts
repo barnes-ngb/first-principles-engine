@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, expect, it } from 'vitest'
 
 import type { MilestoneProgress } from '../../core/types/domain'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
@@ -15,7 +14,7 @@ describe('getWeekRange', () => {
   it('returns the Monday-Sunday range for a fixed date', () => {
     const range = getWeekRange(new Date(2026, 1, 4))
 
-    assert.deepEqual(range, {
+    expect(range).toEqual({
       start: '2026-02-02',
       end: '2026-02-08',
     })
@@ -32,7 +31,7 @@ describe('computeLoopStatus', () => {
       [EngineStage.Share]: 1,
     })
 
-    assert.equal(status, 'complete')
+    expect(status).toBe('complete')
   })
 
   it('returns incomplete when minimum loop is missing', () => {
@@ -41,7 +40,7 @@ describe('computeLoopStatus', () => {
       [EngineStage.Explain]: 1,
     })
 
-    assert.equal(status, 'incomplete')
+    expect(status).toBe('incomplete')
   })
 })
 
@@ -49,7 +48,7 @@ describe('suggestNextStage', () => {
   it('suggests Wonder when nothing is captured yet', () => {
     const suggestion = suggestNextStage({})
 
-    assert.equal(suggestion, EngineStage.Wonder)
+    expect(suggestion).toBe(EngineStage.Wonder)
   })
 
   it('suggests Build once the minimum loop is complete', () => {
@@ -59,7 +58,7 @@ describe('suggestNextStage', () => {
       [EngineStage.Reflect]: 1,
     })
 
-    assert.equal(suggestion, EngineStage.Build)
+    expect(suggestion).toBe(EngineStage.Build)
   })
 
   it('returns null when all stages are already covered', () => {
@@ -71,7 +70,7 @@ describe('suggestNextStage', () => {
       [EngineStage.Share]: 1,
     })
 
-    assert.equal(suggestion, null)
+    expect(suggestion).toBeNull()
   })
 })
 
@@ -132,7 +131,7 @@ describe('countUniqueRungsInRange', () => {
 
     const count = countUniqueRungsInRange(artifacts, 'child-a', range)
 
-    assert.equal(count, 2)
+    expect(count).toBe(2)
   })
 })
 
@@ -189,6 +188,6 @@ describe('countMilestonesAchievedInRange', () => {
 
     const count = countMilestonesAchievedInRange(milestones, 'child-a', range)
 
-    assert.equal(count, 2)
+    expect(count).toBe(2)
   })
 })
