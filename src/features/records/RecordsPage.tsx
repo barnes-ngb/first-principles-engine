@@ -90,9 +90,7 @@ export default function RecordsPage() {
   const [adjSubject, setAdjSubject] = useState<SubjectBucket | ''>('')
   const [adjSaving, setAdjSaving] = useState(false)
 
-  const loadRecords = useCallback(async () => {
-    setIsLoading(true)
-
+  const fetchRecords = useCallback(async () => {
     const hoursQuery = query(
       hoursCollection(familyId),
       where('date', '>=', startDate),
@@ -130,39 +128,45 @@ export default function RecordsPage() {
         getDocs(evalsQuery),
       ])
 
-    setHoursEntries(
-      hoursSnap.docs.map((d) => {
+    return {
+      hoursEntries: hoursSnap.docs.map((d) => {
         const data = d.data() as HoursEntry
         return { ...data, id: data.id ?? d.id, date: data.date ?? d.id }
       }),
-    )
-    setDayLogs(
-      daysSnap.docs.map((d) => {
+      dayLogs: daysSnap.docs.map((d) => {
         const data = d.data() as DayLog
         return { ...data, date: data.date ?? d.id }
       }),
-    )
-    setAdjustments(
-      adjSnap.docs.map((d) => {
+      adjustments: adjSnap.docs.map((d) => {
         const data = d.data() as HoursAdjustment
         return { ...data, id: d.id }
       }),
-    )
-    setChildren(childSnap.docs.map((d) => ({ ...d.data(), id: d.id })))
-    setArtifacts(artSnap.docs.map((d) => ({ ...d.data(), id: d.id })))
-    setEvaluations(
-      evalSnap.docs.map((d) => {
+      children: childSnap.docs.map((d) => ({ ...d.data(), id: d.id })),
+      artifacts: artSnap.docs.map((d) => ({ ...d.data(), id: d.id })),
+      evaluations: evalSnap.docs.map((d) => {
         const data = d.data() as Evaluation
         return { ...data, id: d.id }
       }),
-    )
-
-    setIsLoading(false)
+    }
   }, [endDate, familyId, startDate])
 
+  const applyRecords = useCallback((data: Awaited<ReturnType<typeof fetchRecords>>) => {
+    setHoursEntries(data.hoursEntries)
+    setDayLogs(data.dayLogs)
+    setAdjustments(data.adjustments)
+    setChildren(data.children)
+    setArtifacts(data.artifacts)
+    setEvaluations(data.evaluations)
+    setIsLoading(false)
+  }, [])
+
   useEffect(() => {
-    void loadRecords()
-  }, [loadRecords])
+    let cancelled = false
+    fetchRecords().then((data) => {
+      if (!cancelled) applyRecords(data)
+    })
+    return () => { cancelled = true }
+  }, [fetchRecords, applyRecords])
 
   const summary = useMemo(
     () => computeHoursSummary(dayLogs, hoursEntries, adjustments),
@@ -195,9 +199,10 @@ export default function RecordsPage() {
     })
 
     await batch.commit()
-    await loadRecords()
+    const data = await fetchRecords()
+    applyRecords(data)
     setIsGenerating(false)
-  }, [dayLogs, familyId, loadRecords])
+  }, [dayLogs, familyId, fetchRecords, applyRecords])
 
   // Manual adjustment
   const handleAddAdjustment = useCallback(async () => {
@@ -215,9 +220,10 @@ export default function RecordsPage() {
     setAdjMinutes('')
     setAdjReason('')
     setAdjSubject('')
-    await loadRecords()
+    const data = await fetchRecords()
+    applyRecords(data)
     setAdjSaving(false)
-  }, [adjDate, adjMinutes, adjReason, adjSubject, familyId, loadRecords])
+  }, [adjDate, adjMinutes, adjReason, adjSubject, familyId, fetchRecords, applyRecords])
 
   // Export handlers
   const handleExportHoursCsv = useCallback(() => {

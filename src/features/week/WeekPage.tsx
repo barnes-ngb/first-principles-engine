@@ -118,8 +118,9 @@ export default function WeekPage() {
       ...weekPlan,
       childGoals: [...weekPlan.childGoals, ...additions],
     }
-    setWeekPlan(updated)
-    void updateDoc(weekPlanRef, { childGoals: updated.childGoals })
+    void updateDoc(weekPlanRef, { childGoals: updated.childGoals }).then(() => {
+      setWeekPlan(updated)
+    })
   }, [children, weekPlan, weekPlanRef])
 
   const updateWeekField = useCallback(
