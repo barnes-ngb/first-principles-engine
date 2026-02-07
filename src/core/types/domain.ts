@@ -54,6 +54,7 @@ export interface DayBlock {
   startTime?: string
   endTime?: string
   notes?: string
+  quickCapture?: boolean
   checklist?: ChecklistItem[]
 }
 
@@ -111,7 +112,12 @@ export interface MilestoneProgress {
 export interface HoursEntry {
   id?: string
   date: string
-  hours: number
+  hours?: number
+  minutes: number
+  blockType?: DayBlockType
+  subjectBucket?: SubjectBucket
+  location?: string
+  quickCapture?: boolean
   notes?: string
 }
 
