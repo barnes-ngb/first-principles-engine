@@ -93,8 +93,7 @@ export default function KidsPage() {
   const [selectedRung, setSelectedRung] = useState<SelectedRung | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true)
+  const fetchData = useCallback(async () => {
     const [childrenSnapshot, laddersSnapshot, milestoneSnapshot, artifactsSnapshot] =
       await Promise.all([
         getDocs(childrenCollection(familyId)),
@@ -124,8 +123,6 @@ export default function KidsPage() {
       return { ...data, id: data.id ?? docSnapshot.id }
     })
 
-    setChildren(loadedChildren)
-    setLadders(loadedLadders)
     const dedupedMilestones = Object.values(
       loadedMilestones.reduce<Record<string, MilestoneProgress>>((acc, entry) => {
         if (!entry.childId || !entry.ladderId || !entry.rungId) {
@@ -151,15 +148,23 @@ export default function KidsPage() {
       }, {}),
     )
 
-    setMilestoneProgress(dedupedMilestones)
-    setArtifacts(loadedArtifacts)
-    setSelectedChildId((current) => current || loadedChildren[0]?.id || '')
-    setIsLoading(false)
+    return { loadedChildren, loadedLadders, dedupedMilestones, loadedArtifacts }
   }, [familyId])
 
   useEffect(() => {
-    void loadData()
-  }, [loadData])
+    let cancelled = false
+    fetchData().then((data) => {
+      if (!cancelled) {
+        setChildren(data.loadedChildren)
+        setLadders(data.loadedLadders)
+        setMilestoneProgress(data.dedupedMilestones)
+        setArtifacts(data.loadedArtifacts)
+        setSelectedChildId((current) => current || data.loadedChildren[0]?.id || '')
+        setIsLoading(false)
+      }
+    })
+    return () => { cancelled = true }
+  }, [fetchData])
 
   const activeChild = useMemo(
     () => children.find((child) => child.id === selectedChildId),

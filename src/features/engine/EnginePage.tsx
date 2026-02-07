@@ -83,8 +83,7 @@ export default function EnginePage() {
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true)
+  const fetchData = useCallback(async () => {
     const [childrenSnapshot, artifactsSnapshot, milestoneSnapshot] = await Promise.all(
       [
         getDocs(childrenCollection(familyId)),
@@ -106,15 +105,21 @@ export default function EnginePage() {
       return { ...data, id: data.id ?? docSnapshot.id }
     })
 
-    setChildren(loadedChildren)
-    setArtifacts(loadedArtifacts)
-    setMilestoneProgress(loadedMilestones)
-    setIsLoading(false)
+    return { loadedChildren, loadedArtifacts, loadedMilestones }
   }, [familyId])
 
   useEffect(() => {
-    void loadData()
-  }, [loadData])
+    let cancelled = false
+    fetchData().then((data) => {
+      if (!cancelled) {
+        setChildren(data.loadedChildren)
+        setArtifacts(data.loadedArtifacts)
+        setMilestoneProgress(data.loadedMilestones)
+        setIsLoading(false)
+      }
+    })
+    return () => { cancelled = true }
+  }, [fetchData])
 
   const weekStartIndex = useMemo(() => {
     const configured = children.find((child) => child.settings?.weekStartDay)
