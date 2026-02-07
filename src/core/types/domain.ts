@@ -31,7 +31,15 @@ export interface WeekPlan {
   heartQuestion: string
   tracks: TrackType[]
   flywheelPlan: string
-  buildLab: string
+  buildLab: {
+    title: string
+    materials: string[]
+    steps: string[]
+  }
+  childGoals: Array<{
+    childId: string
+    goals: string[]
+  }>
   days?: DayLog[]
 }
 
