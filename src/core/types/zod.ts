@@ -87,9 +87,21 @@ export const weekPlanSchema = z
     virtue: z.string(),
     scriptureRef: z.string(),
     heartQuestion: z.string(),
+    childGoals: z
+      .array(
+        z.object({
+          childId: z.string(),
+          goals: z.array(z.string()),
+        }),
+      )
+      .optional(),
     tracks: z.array(z.string()),
     flywheelPlan: z.string(),
-    buildLab: z.string(),
+    buildLab: z.object({
+      title: z.string(),
+      materials: z.array(z.string()),
+      steps: z.array(z.string()),
+    }),
     days: z.array(dayLogSchema).optional(),
   })
   .passthrough()

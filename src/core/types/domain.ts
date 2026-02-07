@@ -29,10 +29,22 @@ export interface WeekPlan {
   virtue: string
   scriptureRef: string
   heartQuestion: string
+  childGoals?: ChildGoal[]
   tracks: TrackType[]
   flywheelPlan: string
-  buildLab: string
+  buildLab: BuildLabPlan
   days?: DayLog[]
+}
+
+export interface ChildGoal {
+  childId: string
+  goals: string[]
+}
+
+export interface BuildLabPlan {
+  title: string
+  materials: string[]
+  steps: string[]
 }
 
 export interface DayLog {
