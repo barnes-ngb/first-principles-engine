@@ -24,5 +24,6 @@ dist-ssr
 *.sw?
 
 .env*
+!.env.example
 .env
 FIREBASE_SERVICE_ACCOUNT.json

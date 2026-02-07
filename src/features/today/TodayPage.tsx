@@ -26,7 +26,7 @@ import AudioRecorder from '../../components/AudioRecorder'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
-import { DEFAULT_FAMILY_ID } from '../../core/firebase/config'
+import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   childrenCollection,
@@ -49,7 +49,7 @@ import { createDefaultDayLog } from './daylog.model'
 
 export default function TodayPage() {
   const today = new Date().toISOString().slice(0, 10)
-  const familyId = DEFAULT_FAMILY_ID
+  const familyId = useFamilyId()
   const dayLogRef = useMemo(
     () => doc(daysCollection(familyId), today),
     [familyId, today],

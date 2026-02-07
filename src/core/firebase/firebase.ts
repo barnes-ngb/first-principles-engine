@@ -1,4 +1,6 @@
 import { initializeApp } from 'firebase/app'
+import type { Auth } from 'firebase/auth'
+import { getAuth } from 'firebase/auth'
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -11,3 +13,11 @@ const firebaseConfig = {
 }
 
 export const app = initializeApp(firebaseConfig)
+
+// Auth is initialized lazily to avoid failures when firebase.ts is
+// imported in test files that don't provide a valid API key.
+let _auth: Auth | null = null
+export function getFirebaseAuth(): Auth {
+  if (!_auth) _auth = getAuth(app)
+  return _auth
+}
