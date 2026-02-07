@@ -2,6 +2,7 @@ import type {
   DayBlockType,
   EngineStage,
   EvidenceType,
+  Location,
   SubjectBucket,
   TrackType,
 } from './enums'
@@ -50,6 +51,9 @@ export interface DayBlock {
   subjectBucket?: SubjectBucket
   startTime?: string
   endTime?: string
+  plannedMinutes?: number
+  actualMinutes?: number
+  location?: Location
   notes?: string
   checklist?: ChecklistItem[]
 }
@@ -64,7 +68,7 @@ export interface ArtifactTags {
   engineStage: EngineStage
   domain: string
   subjectBucket: SubjectBucket
-  location: string
+  location: Location
   ladderRef?: string
 }
 
@@ -76,6 +80,9 @@ export interface Artifact {
   createdAt?: string
   tags: ArtifactTags
   notes?: string
+  childId?: string
+  dayLogId?: string
+  weekPlanId?: string
 }
 
 export interface Ladder {

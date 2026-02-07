@@ -7,6 +7,14 @@ export enum SubjectBucket {
   Other = 'Other',
 }
 
+export enum Location {
+  Home = 'Home',
+  Community = 'Community',
+  Outdoors = 'Outdoors',
+  FieldTrip = 'FieldTrip',
+  Other = 'Other',
+}
+
 export enum EngineStage {
   Wonder = 'Wonder',
   Build = 'Build',
