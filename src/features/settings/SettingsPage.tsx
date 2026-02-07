@@ -13,6 +13,8 @@ import {
 } from '@mui/material'
 import type { SelectChangeEvent } from '@mui/material'
 
+import Page from '../../components/Page'
+import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useProfile } from '../../core/profile/useProfile'
 import { ThemeMode } from '../../core/types/enums'
@@ -76,57 +78,58 @@ export default function SettingsPage() {
   }
 
   return (
-    <Stack spacing={3} sx={{ maxWidth: 480 }}>
-      <Stack spacing={1}>
-        <Typography variant="h4">Settings</Typography>
-        {profile && (
-          <Typography color="text.secondary">
-            Logged in as <strong>{profile.charAt(0).toUpperCase() + profile.slice(1)}</strong>
-          </Typography>
-        )}
-      </Stack>
+    <Page>
+      <SectionCard title="Settings">
+        <Stack spacing={3}>
+          {profile && (
+            <Typography color="text.secondary">
+              Logged in as <strong>{profile.charAt(0).toUpperCase() + profile.slice(1)}</strong>
+            </Typography>
+          )}
 
-      <Divider />
+          <Divider />
 
-      <Stack spacing={2}>
-        <Typography variant="h6">Appearance</Typography>
-        <FormControl size="small" sx={{ maxWidth: 240 }}>
-          <InputLabel id="theme-mode-label">Theme</InputLabel>
-          <Select
-            labelId="theme-mode-label"
-            value={themeMode}
-            label="Theme"
-            onChange={handleThemeModeChange}
-          >
-            {Object.values(ThemeMode).map((mode) => (
-              <MenuItem key={mode} value={mode}>
-                {themeModeLabels[mode]}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Stack>
+          <Stack spacing={2}>
+            <Typography variant="h6">Appearance</Typography>
+            <FormControl size="small" sx={{ maxWidth: 240 }}>
+              <InputLabel id="theme-mode-label">Theme</InputLabel>
+              <Select
+                labelId="theme-mode-label"
+                value={themeMode}
+                label="Theme"
+                onChange={handleThemeModeChange}
+              >
+                {Object.values(ThemeMode).map((mode) => (
+                  <MenuItem key={mode} value={mode}>
+                    {themeModeLabels[mode]}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Stack>
 
-      <Divider />
+          <Divider />
 
-      <AccountSection />
+          <AccountSection />
 
-      <Divider />
+          <Divider />
 
-      <Stack spacing={1}>
-        <Typography color="text.secondary">
-          Use the button below to seed demo data for your family.
-        </Typography>
-        <Button variant="contained" onClick={handleSeedDemoData}>
-          Seed Demo Data
-        </Button>
-      </Stack>
+          <Stack spacing={1}>
+            <Typography color="text.secondary">
+              Use the button below to seed demo data for your family.
+            </Typography>
+            <Button variant="contained" onClick={handleSeedDemoData}>
+              Seed Demo Data
+            </Button>
+          </Stack>
 
-      <Divider />
+          <Divider />
 
-      <Button variant="outlined" color="secondary" onClick={logout}>
-        Switch Profile
-      </Button>
+          <Button variant="outlined" color="secondary" onClick={logout}>
+            Switch Profile
+          </Button>
+        </Stack>
+      </SectionCard>
 
       <Snackbar
         open={snackbar.open}
@@ -143,6 +146,6 @@ export default function SettingsPage() {
           {snackbar.message}
         </Alert>
       </Snackbar>
-    </Stack>
+    </Page>
   )
 }
