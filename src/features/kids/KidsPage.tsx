@@ -208,11 +208,11 @@ export default function KidsPage() {
   const linkedArtifacts = useMemo(() => {
     if (!selectedRung || !selectedChildId) return []
     const ladderId = selectedRung.ladder.id ?? ''
-    const rungRef = rungRefFor(ladderId, selectedRung.rungId)
     return artifacts.filter(
       (artifact) =>
         artifact.childId === selectedChildId &&
-        artifact.tags?.ladderRef === rungRef,
+        artifact.tags?.ladderRef?.ladderId === ladderId &&
+        artifact.tags?.ladderRef?.rungId === selectedRung.rungId,
     )
   }, [artifacts, selectedChildId, selectedRung])
 
