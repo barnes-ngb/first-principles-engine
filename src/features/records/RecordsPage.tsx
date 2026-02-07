@@ -16,6 +16,8 @@ import {
 } from '../../core/firebase/firestore'
 import type { DayLog, HoursEntry } from '../../core/types/domain'
 import { LearningLocation, SubjectBucket } from '../../core/types/enums'
+import { formatDateForCsv, formatDateForInput } from '../../lib/format'
+import { getSchoolYearRange } from '../../lib/time'
 
 type DayLogTotals = {
   totalMinutes: number
@@ -31,22 +33,6 @@ const coreBuckets = new Set<SubjectBucket>([
   SubjectBucket.Science,
   SubjectBucket.SocialStudies,
 ])
-
-const formatYmd = (year: number, month: number, day: number) =>
-  `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-
-const getSchoolYearRange = (today = new Date()) => {
-  const year = today.getFullYear()
-  const monthIndex = today.getMonth()
-  const isAfterJune = monthIndex >= 6
-  const startYear = isAfterJune ? year : year - 1
-  const endYear = isAfterJune ? year + 1 : year
-
-  return {
-    start: formatYmd(startYear, 7, 1),
-    end: formatYmd(endYear, 6, 30),
-  }
-}
 
 const sumMinutes = (log: DayLog) =>
   log.blocks.reduce((total, block) => total + (block.actualMinutes ?? 0), 0)
@@ -248,7 +234,7 @@ export default function RecordsPage() {
           .sort((a, b) => a.date.localeCompare(b.date))
           .filter((entry) => entryMinutes(entry) > 0)
           .map((entry) => ({
-            date: entry.date,
+            date: formatDateForCsv(entry.date),
             blockType: entry.blockType ?? '',
             subjectBucket: entry.subjectBucket ?? '',
             location: entry.location ?? '',
@@ -261,7 +247,7 @@ export default function RecordsPage() {
             log.blocks
               .filter((block) => block.actualMinutes != null)
               .map((block) => ({
-                date: log.date,
+                date: formatDateForCsv(log.date),
                 blockType: block.type,
                 subjectBucket: block.subjectBucket ?? '',
                 location: block.location ?? '',
@@ -282,7 +268,7 @@ export default function RecordsPage() {
       header.map(toCsvValue).join(','),
       ...rows.map((row) =>
         [
-          row.date,
+          formatDateForCsv(row.date),
           row.blockType,
           row.subjectBucket,
           row.location,
@@ -298,7 +284,10 @@ export default function RecordsPage() {
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.setAttribute('download', `daily-logs-${startDate}-to-${endDate}.csv`)
+    link.setAttribute(
+      'download',
+      `daily-logs-${formatDateForInput(startDate)}-to-${formatDateForInput(endDate)}.csv`,
+    )
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -314,14 +303,18 @@ export default function RecordsPage() {
               label="Start date"
               type="date"
               value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
+              onChange={(event) =>
+                setStartDate(formatDateForInput(event.target.value))
+              }
               InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="End date"
               type="date"
               value={endDate}
-              onChange={(event) => setEndDate(event.target.value)}
+              onChange={(event) =>
+                setEndDate(formatDateForInput(event.target.value))
+              }
               InputLabelProps={{ shrink: true }}
             />
             <Button
