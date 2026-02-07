@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
+import { useProfile } from '../core/profile/useProfile'
+import { UserProfile } from '../core/types/enums'
 
 const navItems = [
   { label: 'Today', to: '/today' },
@@ -17,17 +19,31 @@ type AppShellProps = {
 }
 
 export function AppShell({ children }: AppShellProps) {
+  const { profile } = useProfile()
+
+  const displayName = profile
+    ? profile.charAt(0).toUpperCase() + profile.slice(1)
+    : 'Planner'
+
+  const isParent = profile === UserProfile.Parents
+
   return (
     <div className="app-shell">
       <aside className="app-shell__nav">
-        <h2>Planner</h2>
+        <h2>{displayName}</h2>
         <nav>
           <ul>
-            {navItems.map((item) => (
-              <li key={item.to}>
-                <NavLink to={item.to}>{item.label}</NavLink>
-              </li>
-            ))}
+            {navItems.map((item) => {
+              // Non-parent profiles: hide Evaluations and Portfolio
+              if (!isParent && (item.to === '/records/evaluations' || item.to === '/records/portfolio')) {
+                return null
+              }
+              return (
+                <li key={item.to}>
+                  <NavLink to={item.to}>{item.label}</NavLink>
+                </li>
+              )
+            })}
           </ul>
         </nav>
       </aside>
