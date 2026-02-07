@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
 import Divider from '@mui/material/Divider'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
@@ -15,6 +19,7 @@ import {
   getDoc,
   getDocs,
   setDoc,
+  updateDoc,
 } from 'firebase/firestore'
 
 import Page from '../../components/Page'
@@ -24,9 +29,10 @@ import {
   artifactsCollection,
   childrenCollection,
   daysCollection,
+  laddersCollection,
   weeksCollection,
 } from '../../core/firebase/firestore'
-import type { Child, DayLog } from '../../core/types/domain'
+import type { Artifact, Child, DayLog, Ladder, Rung } from '../../core/types/domain'
 import {
   EngineStage,
   EvidenceType,
@@ -44,7 +50,13 @@ export default function TodayPage() {
   )
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
   const [children, setChildren] = useState<Child[]>([])
+  const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const [ladders, setLadders] = useState<Ladder[]>([])
   const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
+  const [linkingArtifact, setLinkingArtifact] = useState<Artifact | null>(null)
+  const [selectedLadderId, setSelectedLadderId] = useState('')
+  const [selectedRungId, setSelectedRungId] = useState('')
+  const [isLinking, setIsLinking] = useState(false)
   const [artifactForm, setArtifactForm] = useState({
     childId: '',
     engineStage: EngineStage.Wonder,
@@ -59,6 +71,22 @@ export default function TodayPage() {
     { id: 'placeholder-2', name: 'Sample Child 2' },
   ]
   const selectableChildren = children.length > 0 ? children : placeholderChildren
+
+  const ladderById = useMemo(() => {
+    return ladders.reduce<Record<string, Ladder>>((acc, ladder) => {
+      if (ladder.id) {
+        acc[ladder.id] = ladder
+      }
+      return acc
+    }, {})
+  }, [ladders])
+
+  const rungsForSelectedLadder = useMemo(() => {
+    if (!selectedLadderId) return []
+    const ladder = ladderById[selectedLadderId]
+    if (!ladder) return []
+    return [...ladder.rungs].sort((a, b) => a.order - b.order)
+  }, [ladderById, selectedLadderId])
 
   const persistDayLog = useCallback(
     async (updated: DayLog) => {
@@ -131,6 +159,39 @@ export default function TodayPage() {
     }
   }, [familyId, today])
 
+  useEffect(() => {
+    let isMounted = true
+
+    const loadArtifactsAndLadders = async () => {
+      const [artifactSnapshot, ladderSnapshot] = await Promise.all([
+        getDocs(artifactsCollection(familyId)),
+        getDocs(laddersCollection(familyId)),
+      ])
+
+      if (!isMounted) return
+
+      const loadedArtifacts = artifactSnapshot.docs
+        .map((docSnapshot) => ({
+          id: docSnapshot.id,
+          ...(docSnapshot.data() as Artifact),
+        }))
+        .filter((artifact) => artifact.dayLogId === today)
+      const loadedLadders = ladderSnapshot.docs.map((docSnapshot) => ({
+        id: docSnapshot.id,
+        ...(docSnapshot.data() as Ladder),
+      }))
+
+      setArtifacts(loadedArtifacts)
+      setLadders(loadedLadders)
+    }
+
+    void loadArtifactsAndLadders()
+
+    return () => {
+      isMounted = false
+    }
+  }, [familyId, today])
+
   const handleBlockFieldChange = useCallback(
     (index: number, field: keyof DayLog['blocks'][number], value: unknown) => {
       if (!dayLog) return
@@ -177,8 +238,7 @@ export default function TodayPage() {
     const title =
       content.slice(0, 60) || domain || `Artifact for ${today}`
     const createdAt = new Date().toISOString()
-
-    await addDoc(artifactsCollection(familyId), {
+    const newArtifact: Artifact = {
       title,
       type: EvidenceType.Note,
       createdAt,
@@ -193,7 +253,10 @@ export default function TodayPage() {
         location: artifactForm.location,
       },
       notes: '',
-    })
+    }
+
+    const docRef = await addDoc(artifactsCollection(familyId), newArtifact)
+    setArtifacts((prev) => [...prev, { ...newArtifact, id: docRef.id }])
 
     setArtifactForm((prev) => ({
       ...prev,
@@ -201,6 +264,72 @@ export default function TodayPage() {
       content: '',
     }))
   }, [artifactForm, familyId, today, weekPlanId])
+
+  const ladderRefForArtifact = useCallback(
+    (artifact: Artifact) => {
+      const ladderRef = artifact.tags?.ladderRef
+      if (!ladderRef) return undefined
+      if (typeof ladderRef === 'string') {
+        const [ladderId, rungId] = ladderRef.split(':')
+        if (!ladderId || !rungId) return undefined
+        return { ladderId, rungId }
+      }
+      return ladderRef
+    },
+    [],
+  )
+
+  const ladderLabelForArtifact = useCallback(
+    (artifact: Artifact) => {
+      const ladderRef = ladderRefForArtifact(artifact)
+      if (!ladderRef) return ''
+      const ladder = ladderById[ladderRef.ladderId]
+      const rung = ladder?.rungs.find((item: Rung) => item.id === ladderRef.rungId)
+      if (!ladder || !rung) return 'Linked to ladder rung'
+      return `${ladder.title} • ${rung.title}`
+    },
+    [ladderById, ladderRefForArtifact],
+  )
+
+  const handleOpenLinkDialog = useCallback(
+    (artifact: Artifact) => {
+      const ladderRef = ladderRefForArtifact(artifact)
+      setSelectedLadderId(ladderRef?.ladderId ?? '')
+      setSelectedRungId(ladderRef?.rungId ?? '')
+      setLinkingArtifact(artifact)
+    },
+    [ladderRefForArtifact],
+  )
+
+  const handleCloseLinkDialog = useCallback(() => {
+    setLinkingArtifact(null)
+    setSelectedLadderId('')
+    setSelectedRungId('')
+  }, [])
+
+  const handleSaveLink = useCallback(async () => {
+    if (!linkingArtifact?.id || !selectedLadderId || !selectedRungId) return
+    setIsLinking(true)
+    const ladderRef = { ladderId: selectedLadderId, rungId: selectedRungId }
+    await updateDoc(doc(artifactsCollection(familyId), linkingArtifact.id), {
+      'tags.ladderRef': ladderRef,
+    })
+    setArtifacts((prev) =>
+      prev.map((artifact) =>
+        artifact.id === linkingArtifact.id
+          ? { ...artifact, tags: { ...artifact.tags, ladderRef } }
+          : artifact,
+      ),
+    )
+    setIsLinking(false)
+    handleCloseLinkDialog()
+  }, [
+    familyId,
+    handleCloseLinkDialog,
+    linkingArtifact,
+    selectedLadderId,
+    selectedRungId,
+  ])
 
   if (!dayLog) {
     return (
@@ -421,6 +550,114 @@ export default function TodayPage() {
           </Button>
         </Stack>
       </SectionCard>
+      <SectionCard title="Artifacts">
+        {artifacts.length === 0 ? (
+          <Typography color="text.secondary">
+            No artifacts captured yet.
+          </Typography>
+        ) : (
+          <List dense>
+            {artifacts.map((artifact) => {
+              const ladderLabel = ladderLabelForArtifact(artifact)
+              return (
+                <ListItem key={artifact.id ?? artifact.title} disableGutters>
+                  <Stack
+                    spacing={1}
+                    direction={{ xs: 'column', sm: 'row' }}
+                    alignItems={{ sm: 'center' }}
+                    justifyContent="space-between"
+                    sx={{ width: '100%' }}
+                  >
+                    <Stack spacing={0.5}>
+                      <Typography variant="subtitle2">{artifact.title}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {artifact.tags?.engineStage} · {artifact.tags?.domain || 'No domain'}
+                      </Typography>
+                      {ladderLabel ? (
+                        <Typography variant="caption" color="text.secondary">
+                          Linked to {ladderLabel}
+                        </Typography>
+                      ) : null}
+                    </Stack>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => handleOpenLinkDialog(artifact)}
+                      sx={{ alignSelf: { xs: 'flex-start', sm: 'center' } }}
+                    >
+                      Link to rung
+                    </Button>
+                  </Stack>
+                </ListItem>
+              )
+            })}
+          </List>
+        )}
+      </SectionCard>
+      <Dialog
+        open={Boolean(linkingArtifact)}
+        onClose={handleCloseLinkDialog}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Link to ladder rung</DialogTitle>
+        <DialogContent>
+          {ladders.length === 0 ? (
+            <Typography color="text.secondary">
+              No ladders available yet.
+            </Typography>
+          ) : (
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <TextField
+                label="Ladder"
+                select
+                value={selectedLadderId}
+                onChange={(event) => {
+                  setSelectedLadderId(event.target.value)
+                  setSelectedRungId('')
+                }}
+              >
+                <MenuItem value="" disabled>
+                  Select ladder
+                </MenuItem>
+                {ladders.map((ladder) => (
+                  <MenuItem key={ladder.id} value={ladder.id}>
+                    {ladder.title}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                label="Rung"
+                select
+                value={selectedRungId}
+                onChange={(event) => setSelectedRungId(event.target.value)}
+                disabled={!selectedLadderId}
+              >
+                <MenuItem value="" disabled>
+                  Select rung
+                </MenuItem>
+                {rungsForSelectedLadder.map((rung) => (
+                  <MenuItem key={rung.id} value={rung.id}>
+                    {rung.title}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseLinkDialog}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleSaveLink}
+            disabled={
+              isLinking || !selectedLadderId || !selectedRungId || ladders.length === 0
+            }
+          >
+            Save link
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Page>
   )
 }

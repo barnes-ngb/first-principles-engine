@@ -52,6 +52,13 @@ type SelectedRung = {
 const rungRefFor = (ladderId: string, rungId: string) => `${ladderId}:${rungId}`
 const milestoneDocIdFor = (childId: string, ladderId: string, rungId: string) =>
   `${childId}-${ladderId}-${rungId}`
+const ladderRefKeyFor = (
+  ladderRef?: { ladderId: string; rungId: string } | string,
+) => {
+  if (!ladderRef) return undefined
+  if (typeof ladderRef === 'string') return ladderRef
+  return `${ladderRef.ladderId}:${ladderRef.rungId}`
+}
 
 const getStatusLabel = (status: RungStatus) => {
   if (status === 'achieved') return 'Achieved'
@@ -212,7 +219,7 @@ export default function KidsPage() {
     return artifacts.filter(
       (artifact) =>
         artifact.childId === selectedChildId &&
-        artifact.tags?.ladderRef === rungRef,
+        ladderRefKeyFor(artifact.tags?.ladderRef) === rungRef,
     )
   }, [artifacts, selectedChildId, selectedRung])
 

@@ -43,7 +43,15 @@ export const artifactTagsSchema = z
     domain: z.string(),
     subjectBucket: subjectBucketSchema,
     location: z.string(),
-    ladderRef: z.string().optional(),
+    ladderRef: z
+      .union([
+        z.string(),
+        z.object({
+          ladderId: z.string(),
+          rungId: z.string(),
+        }),
+      ])
+      .optional(),
   })
   .passthrough()
 
