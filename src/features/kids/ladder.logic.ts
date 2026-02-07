@@ -7,7 +7,7 @@ export type ProgressByRungId = Record<string, MilestoneProgress | undefined>
 export const rungIdFor = (rung: Rung) => rung.id ?? `order-${rung.order}`
 
 const isAchieved = (progress?: MilestoneProgress) =>
-  progress?.status === 'achieved' || progress?.achieved
+  progress?.status === 'achieved'
 
 export const getActiveRungId = (
   rungs: Rung[],

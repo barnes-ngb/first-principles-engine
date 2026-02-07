@@ -38,11 +38,9 @@ export default function ArtifactCard({ artifact }: ArtifactCardProps) {
               </Typography>
               <Chip size="small" label={artifact.type} />
             </Stack>
-            {artifact.createdAt && (
-              <Typography variant="caption" color="text.secondary">
-                Created {formatDate(artifact.createdAt)}
-              </Typography>
-            )}
+            <Typography variant="caption" color="text.secondary">
+              Created {formatDate(artifact.createdAt)}
+            </Typography>
           </Stack>
 
           {artifact.type === EvidenceType.Photo && artifact.uri && (

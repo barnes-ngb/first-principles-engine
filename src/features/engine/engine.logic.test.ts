@@ -145,7 +145,7 @@ describe('countMilestonesAchievedInRange', () => {
         ladderId: 'ladder-1',
         rungId: 'rung-1',
         label: 'Milestone 1',
-        achieved: true,
+
         status: 'achieved',
         achievedAt: '2026-02-02T09:00:00',
       },
@@ -154,7 +154,7 @@ describe('countMilestonesAchievedInRange', () => {
         ladderId: 'ladder-1',
         rungId: 'rung-2',
         label: 'Milestone 2',
-        achieved: true,
+
         status: 'achieved',
         achievedAt: '2026-02-08T18:00:00',
       },
@@ -163,7 +163,7 @@ describe('countMilestonesAchievedInRange', () => {
         ladderId: 'ladder-1',
         rungId: 'rung-3',
         label: 'Outside week',
-        achieved: true,
+
         status: 'achieved',
         achievedAt: '2026-02-09T10:00:00',
       },
@@ -172,7 +172,7 @@ describe('countMilestonesAchievedInRange', () => {
         ladderId: 'ladder-1',
         rungId: 'rung-4',
         label: 'Missing date',
-        achieved: true,
+
         status: 'achieved',
       },
       {
@@ -180,7 +180,7 @@ describe('countMilestonesAchievedInRange', () => {
         ladderId: 'ladder-1',
         rungId: 'rung-5',
         label: 'Other child',
-        achieved: true,
+
         status: 'achieved',
         achievedAt: '2026-02-04T12:00:00',
       },

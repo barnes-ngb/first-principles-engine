@@ -114,7 +114,7 @@ export default function KidsPage() {
       const data = docSnapshot.data() as MilestoneProgress
       return {
         ...data,
-        status: data.status ?? (data.achieved ? 'achieved' : 'locked'),
+        status: data.status ?? 'locked',
         id: data.id ?? docSnapshot.id,
       }
     })
@@ -139,7 +139,7 @@ export default function KidsPage() {
           : 0
         const incomingAchievedAt = entry.achievedAt ? Date.parse(entry.achievedAt) : 0
         const shouldReplace =
-          (entry.achieved && !existing.achieved) ||
+          (entry.status === 'achieved' && existing.status !== 'achieved') ||
           incomingAchievedAt > existingAchievedAt
         if (shouldReplace) {
           acc[`${entry.childId}:${key}`] = entry
@@ -242,7 +242,6 @@ export default function KidsPage() {
         childId: selectedChildId,
         ladderId,
         rungId: selectedRung.rungId,
-        achieved: true,
         status: 'achieved',
         achievedAt,
         label: selectedRung.rung.title,
@@ -255,8 +254,7 @@ export default function KidsPage() {
                 childId: selectedChildId,
                 ladderId,
                 rungId: selectedRung.rungId,
-                achieved: true,
-                status: 'achieved',
+                status: 'achieved' as const,
                 achievedAt,
                 label: selectedRung.rung.title,
               }
@@ -269,7 +267,6 @@ export default function KidsPage() {
         ladderId,
         rungId: selectedRung.rungId,
         label: selectedRung.rung.title,
-        achieved: true,
         status: 'achieved',
         achievedAt,
       })
@@ -281,8 +278,7 @@ export default function KidsPage() {
           ladderId,
           rungId: selectedRung.rungId,
           label: selectedRung.rung.title,
-          achieved: true,
-          status: 'achieved',
+          status: 'achieved' as const,
           achievedAt,
         },
       ])

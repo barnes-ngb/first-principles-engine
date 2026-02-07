@@ -272,7 +272,7 @@ export const generatePortfolioMarkdown = (
   // Group by child
   const byChild = new Map<string, Artifact[]>()
   for (const art of artifacts) {
-    const childId = art.childId ?? 'unknown'
+    const childId = art.childId
     const list = byChild.get(childId) ?? []
     list.push(art)
     byChild.set(childId, list)
@@ -286,13 +286,11 @@ export const generatePortfolioMarkdown = (
     lines.push(`|---|------|-------|------|-------|---------|--------|`)
 
     const sorted = [...childArtifacts].sort((a, b) =>
-      (a.createdAt ?? '').localeCompare(b.createdAt ?? ''),
+      a.createdAt.localeCompare(b.createdAt),
     )
 
     sorted.forEach((art, i) => {
-      const date = art.createdAt
-        ? new Date(art.createdAt).toLocaleDateString()
-        : ''
+      const date = new Date(art.createdAt).toLocaleDateString()
       lines.push(
         `| ${i + 1} | ${date} | ${art.title} | ${art.type} | ${art.tags?.engineStage ?? ''} | ${art.tags?.subjectBucket ?? ''} | ${art.tags?.domain ?? ''} |`,
       )
