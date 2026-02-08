@@ -29,6 +29,7 @@ import type {
 } from '../../core/types/domain'
 import { SessionResult, StreamId } from '../../core/types/enums'
 import type { SessionResult as SessionResultType } from '../../core/types/enums'
+import { getWeekRange } from '../engine/engine.logic'
 import { checkLevelUp, resultEmoji } from '../sessions/sessions.logic'
 import {
   defaultWeeklyMetricLabels,
@@ -37,28 +38,14 @@ import {
   streamLabel,
 } from '../sessions/sessions.model'
 
-function getWeekStart(date: Date): string {
-  const d = new Date(date)
-  const day = d.getDay()
-  const diff = (day + 6) % 7
-  d.setDate(d.getDate() - diff)
-  return d.toISOString().slice(0, 10)
-}
-
-function getWeekEnd(weekStart: string): string {
-  const d = new Date(weekStart)
-  d.setDate(d.getDate() + 6)
-  return d.toISOString().slice(0, 10)
-}
-
 const allStreams = Object.values(StreamId) as StreamId[]
 
 export default function ScoreboardPage() {
   const familyId = useFamilyId()
   const { canEdit } = useProfile()
-  const today = new Date()
-  const weekStart = getWeekStart(today)
-  const weekEnd = getWeekEnd(weekStart)
+  const weekRange = useMemo(() => getWeekRange(new Date()), [])
+  const weekStart = weekRange.start
+  const weekEnd = weekRange.end
 
   const [children, setChildren] = useState<Child[]>([])
   const [selectedChildId, setSelectedChildId] = useState('')
