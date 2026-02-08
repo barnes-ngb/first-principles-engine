@@ -15,10 +15,11 @@ import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
+  dailyPlansCollection,
   laddersCollection,
   sessionsCollection,
 } from '../../core/firebase/firestore'
-import type { Ladder, Rung, Session } from '../../core/types/domain'
+import type { DailyPlan, Ladder, Rung, Session } from '../../core/types/domain'
 import { SessionResult, SupportTag } from '../../core/types/enums'
 import type {
   SessionResult as SessionResultType,
@@ -70,6 +71,7 @@ export default function SessionRunnerPage() {
   const [supports, setSupports] = useState<SupportTagType[]>([])
   const [isSaving, setIsSaving] = useState(false)
   const [levelUpTriggered, setLevelUpTriggered] = useState(false)
+  const [nextSessionUrl, setNextSessionUrl] = useState<string | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -147,12 +149,12 @@ export default function SessionRunnerPage() {
 
     // Check level-up
     if (result === SessionResult.Hit) {
-      const q = query(
+      const levelUpQ = query(
         sessionsCollection(familyId),
         where('childId', '==', childId),
         where('ladderId', '==', ladderId),
       )
-      const snap = await getDocs(q)
+      const snap = await getDocs(levelUpQ)
       const allSessions = snap.docs.map((d) => ({
         ...(d.data() as Session),
         id: d.id,
@@ -161,6 +163,34 @@ export default function SessionRunnerPage() {
       allSessions.push({ ...session, id: 'new' })
       if (checkLevelUp(allSessions, ladderId, targetRungOrder)) {
         setLevelUpTriggered(true)
+      }
+    }
+
+    // Find next planned session
+    const today = new Date().toISOString().slice(0, 10)
+    const planQ = query(
+      dailyPlansCollection(familyId),
+      where('childId', '==', childId),
+      where('date', '==', today),
+    )
+    const planSnap = await getDocs(planQ)
+    if (planSnap.docs.length > 0) {
+      const plan = planSnap.docs[0].data() as DailyPlan
+      // Get all completed streams for today (including current one)
+      const sessionsQ = query(
+        sessionsCollection(familyId),
+        where('childId', '==', childId),
+        where('date', '==', today),
+      )
+      const todaySnap = await getDocs(sessionsQ)
+      const doneStreams = new Set(todaySnap.docs.map((d) => (d.data() as Session).streamId))
+      doneStreams.add(streamId) // include the one we just finished
+
+      const next = plan.sessions.find((ps) => !doneStreams.has(ps.streamId))
+      if (next) {
+        setNextSessionUrl(
+          `/sessions/run?child=${childId}&stream=${next.streamId}&ladder=${next.ladderId}&rung=${next.targetRungOrder}`,
+        )
       }
     }
 
@@ -179,8 +209,12 @@ export default function SessionRunnerPage() {
   ])
 
   const handleNext = useCallback(() => {
-    navigate('/dashboard')
-  }, [navigate])
+    if (nextSessionUrl) {
+      navigate(nextSessionUrl)
+    } else {
+      navigate('/dashboard')
+    }
+  }, [navigate, nextSessionUrl])
 
   return (
     <Page>
@@ -363,7 +397,7 @@ export default function SessionRunnerPage() {
                 Back to Dashboard
               </Button>
               <Button variant="contained" onClick={handleNext}>
-                Next Session
+                {nextSessionUrl ? 'Next Session' : 'Done'}
               </Button>
             </Stack>
           </Stack>
