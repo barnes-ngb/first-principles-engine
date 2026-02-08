@@ -7,7 +7,7 @@ import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDocs, query, setDoc, where } from 'firebase/firestore'
+import { addDoc, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -16,10 +16,12 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import {
   childrenCollection,
   sessionsCollection,
+  weeksCollection,
   weeklyScoresCollection,
 } from '../../core/firebase/firestore'
 import type {
   Child,
+  GoalResult,
   ScoreMetric,
   Session,
   WeeklyScore,
@@ -60,6 +62,7 @@ export default function ScoreboardPage() {
   const [selectedChildId, setSelectedChildId] = useState('')
   const [sessions, setSessions] = useState<Session[]>([])
   const [weeklyScore, setWeeklyScore] = useState<WeeklyScore | null>(null)
+  const [childGoals, setChildGoals] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
 
@@ -92,23 +95,38 @@ export default function ScoreboardPage() {
     return () => { cancelled = true }
   }, [fetchData])
 
-  // Load weekly score for selected child
+  // Load weekly score + goals for selected child
   useEffect(() => {
     if (!selectedChildId) return
     let cancelled = false
     const load = async () => {
-      const q = query(
-        weeklyScoresCollection(familyId),
-        where('childId', '==', selectedChildId),
-        where('weekStart', '==', weekStart),
-      )
-      const snap = await getDocs(q)
+      const [scoreSnap, weekPlanSnap] = await Promise.all([
+        getDocs(
+          query(
+            weeklyScoresCollection(familyId),
+            where('childId', '==', selectedChildId),
+            where('weekStart', '==', weekStart),
+          ),
+        ),
+        getDoc(doc(weeksCollection(familyId), weekStart)),
+      ])
       if (cancelled) return
-      if (snap.docs.length > 0) {
-        const d = snap.docs[0]
+
+      if (scoreSnap.docs.length > 0) {
+        const d = scoreSnap.docs[0]
         setWeeklyScore({ ...(d.data() as WeeklyScore), id: d.id })
       } else {
         setWeeklyScore(null)
+      }
+
+      if (weekPlanSnap.exists()) {
+        const plan = weekPlanSnap.data()
+        const goals =
+          plan.childGoals?.find((g) => g.childId === selectedChildId)?.goals ??
+          []
+        setChildGoals(goals)
+      } else {
+        setChildGoals([])
       }
     }
     load()
@@ -168,6 +186,38 @@ export default function ScoreboardPage() {
     })
   }, [weekSessions, selectedChildId, sessions])
 
+  // Goal results — merge saved results with current week's goals
+  const goalResults: GoalResult[] = useMemo(() => {
+    const saved = weeklyScore?.goalResults ?? []
+    return childGoals.map((goal) => {
+      const existing = saved.find((g) => g.goal === goal)
+      return existing ?? { goal, result: 'na' as const }
+    })
+  }, [childGoals, weeklyScore?.goalResults])
+
+  const handleGoalResultChange = useCallback(
+    (index: number, result: SessionResultType | 'na') => {
+      const updated = goalResults.map((g, i) =>
+        i === index ? { ...g, result } : g,
+      )
+      setWeeklyScore((prev) =>
+        prev
+          ? { ...prev, goalResults: updated }
+          : {
+              childId: selectedChildId,
+              weekStart,
+              metrics: defaultWeeklyMetricLabels.map((label) => ({
+                label,
+                result: 'na' as const,
+              })),
+              goalResults: updated,
+              createdAt: new Date().toISOString(),
+            },
+      )
+    },
+    [goalResults, selectedChildId, weekStart],
+  )
+
   // Metrics (from weekly score or defaults)
   const metrics: ScoreMetric[] = weeklyScore?.metrics ??
     defaultWeeklyMetricLabels.map((label) => ({ label, result: 'na' as const }))
@@ -201,6 +251,7 @@ export default function ScoreboardPage() {
       childId: selectedChildId,
       weekStart,
       metrics,
+      goalResults: goalResults.length > 0 ? goalResults : undefined,
       reflectionWorked: weeklyScore?.reflectionWorked ?? '',
       reflectionFriction: weeklyScore?.reflectionFriction ?? '',
       reflectionTweak: weeklyScore?.reflectionTweak ?? '',
@@ -216,7 +267,7 @@ export default function ScoreboardPage() {
     }
 
     setIsSaving(false)
-  }, [familyId, metrics, selectedChildId, weekStart, weeklyScore])
+  }, [familyId, goalResults, metrics, selectedChildId, weekStart, weeklyScore])
 
   return (
     <Page>
@@ -311,6 +362,48 @@ export default function ScoreboardPage() {
                   </Typography>
                 ))}
             </Alert>
+          )}
+
+          {goalResults.length > 0 && (
+            <SectionCard title="Weekly Goals">
+              <Stack spacing={2}>
+                {goalResults.map((g, idx) => (
+                  <Stack
+                    key={idx}
+                    direction="row"
+                    spacing={2}
+                    alignItems="center"
+                    justifyContent="space-between"
+                  >
+                    <Typography variant="body2" sx={{ flex: 1 }}>
+                      {g.goal}
+                    </Typography>
+                    <Stack direction="row" spacing={0.5}>
+                      {(['hit', 'near', 'miss', 'na'] as const).map((r) => (
+                        <Chip
+                          key={r}
+                          size="small"
+                          label={r === 'na' ? '\u2014' : resultEmoji(r as SessionResultType)}
+                          variant={g.result === r ? 'filled' : 'outlined'}
+                          color={
+                            r === 'hit'
+                              ? 'success'
+                              : r === 'near'
+                                ? 'warning'
+                                : r === 'miss'
+                                  ? 'error'
+                                  : 'default'
+                          }
+                          onClick={() =>
+                            handleGoalResultChange(idx, r as SessionResultType | 'na')
+                          }
+                        />
+                      ))}
+                    </Stack>
+                  </Stack>
+                ))}
+              </Stack>
+            </SectionCard>
           )}
 
           <SectionCard title="Weekly Metrics">
