@@ -1,5 +1,6 @@
 import { Navigate, Outlet, RouterProvider, createBrowserRouter } from 'react-router-dom'
 import { AppShell } from './AppShell'
+import AppCopyPage from '../features/copy/AppCopyPage'
 import EnginePage from '../features/engine/EnginePage'
 import KidsPage from '../features/kids/KidsPage'
 import NotFoundPage from '../features/NotFoundPage'
@@ -36,6 +37,7 @@ const routes = [
       { path: '/records', element: <RecordsPage /> },
       { path: '/records/evaluations', element: <EvaluationsPage /> },
       { path: '/records/portfolio', element: <PortfolioPage /> },
+      { path: '/about', element: <AppCopyPage /> },
       { path: '/settings', element: <SettingsPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],

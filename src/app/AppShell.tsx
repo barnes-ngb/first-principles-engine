@@ -20,6 +20,7 @@ const navItems = [
   { label: 'Records', to: '/records', parentOnly: true },
   { label: 'Evaluations', to: '/records/evaluations', parentOnly: true },
   { label: 'Portfolio', to: '/records/portfolio', parentOnly: true },
+  { label: 'About', to: '/about' },
 ]
 
 type AppShellProps = {
