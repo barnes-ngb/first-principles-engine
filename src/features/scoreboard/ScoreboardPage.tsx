@@ -13,6 +13,7 @@ import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useProfile } from '../../core/profile/useProfile'
 import {
   childrenCollection,
   sessionsCollection,
@@ -28,6 +29,7 @@ import type {
 } from '../../core/types/domain'
 import { SessionResult, StreamId } from '../../core/types/enums'
 import type { SessionResult as SessionResultType } from '../../core/types/enums'
+import { getWeekRange } from '../engine/engine.logic'
 import { checkLevelUp, resultEmoji } from '../sessions/sessions.logic'
 import {
   defaultWeeklyMetricLabels,
@@ -36,27 +38,14 @@ import {
   streamLabel,
 } from '../sessions/sessions.model'
 
-function getWeekStart(date: Date): string {
-  const d = new Date(date)
-  const day = d.getDay()
-  const diff = (day + 6) % 7
-  d.setDate(d.getDate() - diff)
-  return d.toISOString().slice(0, 10)
-}
-
-function getWeekEnd(weekStart: string): string {
-  const d = new Date(weekStart)
-  d.setDate(d.getDate() + 6)
-  return d.toISOString().slice(0, 10)
-}
-
 const allStreams = Object.values(StreamId) as StreamId[]
 
 export default function ScoreboardPage() {
   const familyId = useFamilyId()
-  const today = new Date()
-  const weekStart = getWeekStart(today)
-  const weekEnd = getWeekEnd(weekStart)
+  const { canEdit } = useProfile()
+  const weekRange = useMemo(() => getWeekRange(new Date()), [])
+  const weekStart = weekRange.start
+  const weekEnd = weekRange.end
 
   const [children, setChildren] = useState<Child[]>([])
   const [selectedChildId, setSelectedChildId] = useState('')
@@ -379,12 +368,72 @@ export default function ScoreboardPage() {
                       {g.goal}
                     </Typography>
                     <Stack direction="row" spacing={0.5}>
+                      {canEdit ? (
+                        (['hit', 'near', 'miss', 'na'] as const).map((r) => (
+                          <Chip
+                            key={r}
+                            size="small"
+                            label={r === 'na' ? '\u2014' : resultEmoji(r as SessionResultType)}
+                            variant={g.result === r ? 'filled' : 'outlined'}
+                            color={
+                              r === 'hit'
+                                ? 'success'
+                                : r === 'near'
+                                  ? 'warning'
+                                  : r === 'miss'
+                                    ? 'error'
+                                    : 'default'
+                            }
+                            onClick={() =>
+                              handleGoalResultChange(idx, r as SessionResultType | 'na')
+                            }
+                          />
+                        ))
+                      ) : (
+                        g.result !== 'na' && (
+                          <Chip
+                            size="small"
+                            label={resultEmoji(g.result as SessionResultType)}
+                            color={
+                              g.result === 'hit'
+                                ? 'success'
+                                : g.result === 'near'
+                                  ? 'warning'
+                                  : g.result === 'miss'
+                                    ? 'error'
+                                    : 'default'
+                            }
+                          />
+                        )
+                      )}
+                    </Stack>
+                  </Stack>
+                ))}
+              </Stack>
+            </SectionCard>
+          )}
+
+          {canEdit && (
+            <SectionCard title="Weekly Metrics">
+              <Stack spacing={2}>
+                {metrics.map((metric, idx) => (
+                  <Stack
+                    key={idx}
+                    direction="row"
+                    spacing={2}
+                    alignItems="center"
+                    justifyContent="space-between"
+                  >
+                    <Typography variant="body2" sx={{ flex: 1 }}>
+                      {metric.label}
+                    </Typography>
+                    <Stack direction="row" spacing={0.5}>
                       {(['hit', 'near', 'miss', 'na'] as const).map((r) => (
                         <Chip
                           key={r}
                           size="small"
                           label={r === 'na' ? '\u2014' : resultEmoji(r as SessionResultType)}
-                          variant={g.result === r ? 'filled' : 'outlined'}
+                          variant={metric.result === r ? 'filled' : 'outlined'}
                           color={
                             r === 'hit'
                               ? 'success'
@@ -395,7 +444,7 @@ export default function ScoreboardPage() {
                                   : 'default'
                           }
                           onClick={() =>
-                            handleGoalResultChange(idx, r as SessionResultType | 'na')
+                            handleMetricChange(idx, r as SessionResultType | 'na')
                           }
                         />
                       ))}
@@ -406,87 +455,49 @@ export default function ScoreboardPage() {
             </SectionCard>
           )}
 
-          <SectionCard title="Weekly Metrics">
-            <Stack spacing={2}>
-              {metrics.map((metric, idx) => (
-                <Stack
-                  key={idx}
-                  direction="row"
-                  spacing={2}
-                  alignItems="center"
-                  justifyContent="space-between"
+          {canEdit && (
+            <SectionCard title="Weekly Reflection">
+              <Stack spacing={2}>
+                <TextField
+                  label="What worked?"
+                  multiline
+                  minRows={2}
+                  value={weeklyScore?.reflectionWorked ?? ''}
+                  onChange={(e) =>
+                    handleReflectionChange('reflectionWorked', e.target.value)
+                  }
+                  fullWidth
+                />
+                <TextField
+                  label="What caused friction?"
+                  multiline
+                  minRows={2}
+                  value={weeklyScore?.reflectionFriction ?? ''}
+                  onChange={(e) =>
+                    handleReflectionChange('reflectionFriction', e.target.value)
+                  }
+                  fullWidth
+                />
+                <TextField
+                  label="One tweak for next week"
+                  multiline
+                  minRows={2}
+                  value={weeklyScore?.reflectionTweak ?? ''}
+                  onChange={(e) =>
+                    handleReflectionChange('reflectionTweak', e.target.value)
+                  }
+                  fullWidth
+                />
+                <Button
+                  variant="contained"
+                  onClick={handleSaveScoreboard}
+                  disabled={isSaving}
                 >
-                  <Typography variant="body2" sx={{ flex: 1 }}>
-                    {metric.label}
-                  </Typography>
-                  <Stack direction="row" spacing={0.5}>
-                    {(['hit', 'near', 'miss', 'na'] as const).map((r) => (
-                      <Chip
-                        key={r}
-                        size="small"
-                        label={r === 'na' ? '\u2014' : resultEmoji(r as SessionResultType)}
-                        variant={metric.result === r ? 'filled' : 'outlined'}
-                        color={
-                          r === 'hit'
-                            ? 'success'
-                            : r === 'near'
-                              ? 'warning'
-                              : r === 'miss'
-                                ? 'error'
-                                : 'default'
-                        }
-                        onClick={() =>
-                          handleMetricChange(idx, r as SessionResultType | 'na')
-                        }
-                      />
-                    ))}
-                  </Stack>
-                </Stack>
-              ))}
-            </Stack>
-          </SectionCard>
-
-          <SectionCard title="Weekly Reflection">
-            <Stack spacing={2}>
-              <TextField
-                label="What worked?"
-                multiline
-                minRows={2}
-                value={weeklyScore?.reflectionWorked ?? ''}
-                onChange={(e) =>
-                  handleReflectionChange('reflectionWorked', e.target.value)
-                }
-                fullWidth
-              />
-              <TextField
-                label="What caused friction?"
-                multiline
-                minRows={2}
-                value={weeklyScore?.reflectionFriction ?? ''}
-                onChange={(e) =>
-                  handleReflectionChange('reflectionFriction', e.target.value)
-                }
-                fullWidth
-              />
-              <TextField
-                label="One tweak for next week"
-                multiline
-                minRows={2}
-                value={weeklyScore?.reflectionTweak ?? ''}
-                onChange={(e) =>
-                  handleReflectionChange('reflectionTweak', e.target.value)
-                }
-                fullWidth
-              />
-              <Button
-                variant="contained"
-                onClick={handleSaveScoreboard}
-                disabled={isSaving}
-              >
-                {isSaving ? 'Saving...' : 'Save Scoreboard'}
-              </Button>
-            </Stack>
-          </SectionCard>
+                  {isSaving ? 'Saving...' : 'Save Scoreboard'}
+                </Button>
+              </Stack>
+            </SectionCard>
+          )}
         </>
       )}
     </Page>

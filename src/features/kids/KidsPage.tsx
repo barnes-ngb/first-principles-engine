@@ -18,6 +18,7 @@ import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useProfile } from '../../core/profile/useProfile'
 import {
   artifactsCollection,
   childrenCollection,
@@ -83,6 +84,7 @@ const isLadderForChild = (ladder: Ladder, childId: string) => {
 
 export default function KidsPage() {
   const familyId = useFamilyId()
+  const { canEdit } = useProfile()
   const [children, setChildren] = useState<Child[]>([])
   const [ladders, setLadders] = useState<Ladder[]>([])
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
@@ -448,13 +450,15 @@ export default function KidsPage() {
             </DialogContent>
             <DialogActions>
               <Button onClick={() => setSelectedRung(null)}>Close</Button>
-              <Button
-                variant="contained"
-                disabled={!canMarkAchieved(linkedArtifacts) || isSaving}
-                onClick={handleMarkAchieved}
-              >
-                Mark Achieved
-              </Button>
+              {canEdit && (
+                <Button
+                  variant="contained"
+                  disabled={!canMarkAchieved(linkedArtifacts) || isSaving}
+                  onClick={handleMarkAchieved}
+                >
+                  Mark Achieved
+                </Button>
+              )}
             </DialogActions>
           </>
         )}

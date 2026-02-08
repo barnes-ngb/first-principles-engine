@@ -17,6 +17,7 @@ import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useProfile } from '../../core/profile/useProfile'
 import {
   childrenCollection,
   dailyPlansCollection,
@@ -63,6 +64,7 @@ function getActiveRungOrder(
 
 export default function DashboardPage() {
   const familyId = useFamilyId()
+  const { canEdit } = useProfile()
   const navigate = useNavigate()
   const today = new Date().toISOString().slice(0, 10)
 
@@ -259,31 +261,33 @@ export default function DashboardPage() {
 
       {!isLoading && selectedChildId && (
         <>
-          <SectionCard title="How's the energy today?">
-            <ToggleButtonGroup
-              value={energy}
-              exclusive
-              onChange={handleEnergyChange}
-              fullWidth
-              size="large"
-            >
-              {energyOptions.map((opt) => (
-                <ToggleButton key={opt.value} value={opt.value}>
-                  <Stack alignItems="center" spacing={0.5}>
-                    <Typography variant="h5">{opt.icon}</Typography>
-                    <Typography variant="body2">{opt.label}</Typography>
-                  </Stack>
-                </ToggleButton>
-              ))}
-            </ToggleButtonGroup>
-            {energy !== EnergyLevel.Normal && (
-              <Alert severity="info" sx={{ mt: 1 }}>
-                {energy === EnergyLevel.Low
-                  ? 'Plan B: shorter sessions to keep momentum.'
-                  : 'Just Formation today. Keep it gentle.'}
-              </Alert>
-            )}
-          </SectionCard>
+          {canEdit && (
+            <SectionCard title="How's the energy today?">
+              <ToggleButtonGroup
+                value={energy}
+                exclusive
+                onChange={handleEnergyChange}
+                fullWidth
+                size="large"
+              >
+                {energyOptions.map((opt) => (
+                  <ToggleButton key={opt.value} value={opt.value}>
+                    <Stack alignItems="center" spacing={0.5}>
+                      <Typography variant="h5">{opt.icon}</Typography>
+                      <Typography variant="body2">{opt.label}</Typography>
+                    </Stack>
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+              {energy !== EnergyLevel.Normal && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  {energy === EnergyLevel.Low
+                    ? 'Plan B: shorter sessions to keep momentum.'
+                    : 'Just Formation today. Keep it gentle.'}
+                </Alert>
+              )}
+            </SectionCard>
+          )}
 
           {streak > 0 && (
             <Box sx={{ textAlign: 'center' }}>
@@ -296,7 +300,7 @@ export default function DashboardPage() {
             </Box>
           )}
 
-          {levelUpCandidates.length > 0 && (
+          {canEdit && levelUpCandidates.length > 0 && (
             <Alert severity="success">
               <Typography variant="subtitle2" gutterBottom>
                 Level-up candidates
@@ -316,16 +320,20 @@ export default function DashboardPage() {
             {planSessions.length === 0 ? (
               <Stack spacing={2} alignItems="center">
                 <Typography color="text.secondary">
-                  No plan set yet. Pick an energy level above to generate today's plan.
+                  {canEdit
+                    ? "No plan set yet. Pick an energy level above to generate today's plan."
+                    : 'No plan set for today yet. Ask a parent to set one up.'}
                 </Typography>
-                <Button
-                  variant="contained"
-                  onClick={() =>
-                    handleEnergyChange(null, energy)
-                  }
-                >
-                  Generate Plan
-                </Button>
+                {canEdit && (
+                  <Button
+                    variant="contained"
+                    onClick={() =>
+                      handleEnergyChange(null, energy)
+                    }
+                  >
+                    Generate Plan
+                  </Button>
+                )}
               </Stack>
             ) : (
               <Stack spacing={1.5}>
@@ -372,25 +380,27 @@ export default function DashboardPage() {
             )}
           </SectionCard>
 
-          <SectionCard title="Quick Start">
-            <Stack
-              direction="row"
-              spacing={1.5}
-              flexWrap="wrap"
-              useFlexGap
-            >
-              {allStreams.map((stream) => (
-                <Button
-                  key={stream}
-                  variant="outlined"
-                  onClick={() => handleStartSession(stream)}
-                  sx={{ minWidth: 140 }}
-                >
-                  {streamIcon[stream]} {streamLabel[stream]}
-                </Button>
-              ))}
-            </Stack>
-          </SectionCard>
+          {canEdit && (
+            <SectionCard title="Quick Start">
+              <Stack
+                direction="row"
+                spacing={1.5}
+                flexWrap="wrap"
+                useFlexGap
+              >
+                {allStreams.map((stream) => (
+                  <Button
+                    key={stream}
+                    variant="outlined"
+                    onClick={() => handleStartSession(stream)}
+                    sx={{ minWidth: 140 }}
+                  >
+                    {streamIcon[stream]} {streamLabel[stream]}
+                  </Button>
+                ))}
+              </Stack>
+            </SectionCard>
+          )}
 
           {todaySessions.length > 0 && (
             <SectionCard title="Completed Today">
