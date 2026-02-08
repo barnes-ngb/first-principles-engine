@@ -19,6 +19,7 @@ import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useProfile } from '../../core/profile/useProfile'
 import {
   childrenCollection,
   projectsCollection,
@@ -39,6 +40,7 @@ const phaseIndex = (phase: ProjectPhaseType): number =>
 
 export default function ProjectBoardPage() {
   const familyId = useFamilyId()
+  const { canEdit } = useProfile()
   const [children, setChildren] = useState<Child[]>([])
   const [selectedChildId, setSelectedChildId] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
@@ -213,13 +215,15 @@ export default function ProjectBoardPage() {
                 ))}
               </Stack>
             )}
-            <Button
-              variant="contained"
-              onClick={() => setShowNewDialog(true)}
-              sx={{ mt: 1 }}
-            >
-              New Project
-            </Button>
+            {canEdit && (
+              <Button
+                variant="contained"
+                onClick={() => setShowNewDialog(true)}
+                sx={{ mt: 1 }}
+              >
+                New Project
+              </Button>
+            )}
           </SectionCard>
 
           {completedProjects.length > 0 && (
@@ -316,6 +320,7 @@ export default function ProjectBoardPage() {
                     handleProjectFieldSave('planNotes', e.target.value)
                   }
                   fullWidth
+                  slotProps={{ input: { readOnly: !canEdit } }}
                 />
 
                 <TextField
@@ -332,6 +337,7 @@ export default function ProjectBoardPage() {
                     handleProjectFieldSave('buildNotes', e.target.value)
                   }
                   fullWidth
+                  slotProps={{ input: { readOnly: !canEdit } }}
                 />
 
                 <TextField
@@ -348,6 +354,7 @@ export default function ProjectBoardPage() {
                     handleProjectFieldSave('testNotes', e.target.value)
                   }
                   fullWidth
+                  slotProps={{ input: { readOnly: !canEdit } }}
                 />
 
                 <TextField
@@ -364,6 +371,7 @@ export default function ProjectBoardPage() {
                     handleProjectFieldSave('improveNotes', e.target.value)
                   }
                   fullWidth
+                  slotProps={{ input: { readOnly: !canEdit } }}
                 />
 
                 <TextField
@@ -381,6 +389,7 @@ export default function ProjectBoardPage() {
                     handleProjectFieldSave('whatChanged', e.target.value)
                   }
                   fullWidth
+                  slotProps={{ input: { readOnly: !canEdit } }}
                 />
 
                 <TextField
@@ -398,12 +407,13 @@ export default function ProjectBoardPage() {
                     handleProjectFieldSave('teachBack', e.target.value)
                   }
                   fullWidth
+                  slotProps={{ input: { readOnly: !canEdit } }}
                 />
               </Stack>
             </DialogContent>
             <DialogActions>
               <Button onClick={() => setSelectedProject(null)}>Close</Button>
-              {!selectedProject.completed && (
+              {canEdit && !selectedProject.completed && (
                 <>
                   {phaseIndex(selectedProject.phase) < phases.length - 1 && (
                     <Button

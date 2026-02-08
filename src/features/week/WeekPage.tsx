@@ -15,6 +15,7 @@ import SaveIndicator from '../../components/SaveIndicator'
 import type { SaveState } from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useProfile } from '../../core/profile/useProfile'
 import {
   childrenCollection,
   weeksCollection,
@@ -47,6 +48,7 @@ const createDefaultWeekPlan = (
 export default function WeekPage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
+  const { canEdit } = useProfile()
   const weekRange = useMemo(() => getWeekRange(new Date()), [])
   const weekPlanRef = useMemo(
     () => doc(weeksCollection(familyId), weekRange.start),
@@ -312,36 +314,54 @@ export default function WeekPage() {
         <Stack spacing={2}>
           <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
             <Typography color="text.secondary" variant="body2">
-              Review the week plan, then jump into quick capture mode when ready.
+              {canEdit
+                ? 'Review the week plan, then jump into quick capture mode when ready.'
+                : 'This week\u2019s plan.'}
             </Typography>
-            <SaveIndicator state={saveState} />
+            {canEdit && <SaveIndicator state={saveState} />}
           </Stack>
-          <TextField
-            label="Theme"
-            value={weekPlan.theme}
-            onChange={(event) => updateWeekField('theme', event.target.value)}
-          />
-          <TextField
-            label="Virtue"
-            value={weekPlan.virtue}
-            onChange={(event) => updateWeekField('virtue', event.target.value)}
-          />
-          <TextField
-            label="Scripture reference"
-            value={weekPlan.scriptureRef}
-            onChange={(event) =>
-              updateWeekField('scriptureRef', event.target.value)
-            }
-          />
-          <TextField
-            label="Heart question"
-            multiline
-            minRows={2}
-            value={weekPlan.heartQuestion}
-            onChange={(event) =>
-              updateWeekField('heartQuestion', event.target.value)
-            }
-          />
+          {canEdit ? (
+            <>
+              <TextField
+                label="Theme"
+                value={weekPlan.theme}
+                onChange={(event) => updateWeekField('theme', event.target.value)}
+              />
+              <TextField
+                label="Virtue"
+                value={weekPlan.virtue}
+                onChange={(event) => updateWeekField('virtue', event.target.value)}
+              />
+              <TextField
+                label="Scripture reference"
+                value={weekPlan.scriptureRef}
+                onChange={(event) =>
+                  updateWeekField('scriptureRef', event.target.value)
+                }
+              />
+              <TextField
+                label="Heart question"
+                multiline
+                minRows={2}
+                value={weekPlan.heartQuestion}
+                onChange={(event) =>
+                  updateWeekField('heartQuestion', event.target.value)
+                }
+              />
+            </>
+          ) : (
+            <>
+              {weekPlan.theme && (
+                <Typography><strong>Theme:</strong> {weekPlan.theme}</Typography>
+              )}
+              {weekPlan.virtue && (
+                <Typography><strong>Virtue:</strong> {weekPlan.virtue}</Typography>
+              )}
+              {weekPlan.heartQuestion && (
+                <Typography><strong>Heart question:</strong> {weekPlan.heartQuestion}</Typography>
+              )}
+            </>
+          )}
         </Stack>
       </SectionCard>
 
@@ -349,7 +369,7 @@ export default function WeekPage() {
         <Stack spacing={2}>
           {children.length === 0 ? (
             <Typography color="text.secondary">
-              Add children to set weekly goals.
+              {canEdit ? 'Add children to set weekly goals.' : 'No goals set this week.'}
             </Typography>
           ) : (
             children.map((child) => {
@@ -375,34 +395,38 @@ export default function WeekPage() {
                             sx={{ width: '100%' }}
                           >
                             <Typography variant="body2">{goal}</Typography>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              onClick={() => handleRemoveGoal(child.id, index)}
-                            >
-                              Remove
-                            </Button>
+                            {canEdit && (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => handleRemoveGoal(child.id, index)}
+                              >
+                                Remove
+                              </Button>
+                            )}
                           </Stack>
                         </ListItem>
                       ))}
                     </List>
                   )}
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                    <TextField
-                      label="Add goal"
-                      fullWidth
-                      value={newGoalByChild[child.id] ?? ''}
-                      onChange={(event) =>
-                        handleGoalInputChange(child.id, event.target.value)
-                      }
-                    />
-                    <Button
-                      variant="contained"
-                      onClick={() => handleAddGoal(child.id)}
-                    >
-                      Add
-                    </Button>
-                  </Stack>
+                  {canEdit && (
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                      <TextField
+                        label="Add goal"
+                        fullWidth
+                        value={newGoalByChild[child.id] ?? ''}
+                        onChange={(event) =>
+                          handleGoalInputChange(child.id, event.target.value)
+                        }
+                      />
+                      <Button
+                        variant="contained"
+                        onClick={() => handleAddGoal(child.id)}
+                      >
+                        Add
+                      </Button>
+                    </Stack>
+                  )}
                 </Stack>
               )
             })
@@ -410,114 +434,118 @@ export default function WeekPage() {
         </Stack>
       </SectionCard>
 
-      <SectionCard title="Build Lab">
-        <Stack spacing={2}>
-          <TextField
-            label="Title"
-            value={weekPlan.buildLab.title}
-            onChange={(event) => updateBuildLab('title', event.target.value)}
-          />
+      {canEdit && (
+        <SectionCard title="Build Lab">
+          <Stack spacing={2}>
+            <TextField
+              label="Title"
+              value={weekPlan.buildLab.title}
+              onChange={(event) => updateBuildLab('title', event.target.value)}
+            />
 
-          <Stack spacing={1}>
-            <Typography variant="subtitle1">Materials</Typography>
-            {weekPlan.buildLab.materials.length === 0 ? (
-              <Typography color="text.secondary">
-                No materials yet.
-              </Typography>
-            ) : (
-              <List dense>
-                {weekPlan.buildLab.materials.map((material, index) => (
-                  <ListItem key={`${material}-${index}`} disableGutters>
-                    <Stack
-                      direction="row"
-                      spacing={1}
-                      alignItems="center"
-                      justifyContent="space-between"
-                      sx={{ width: '100%' }}
-                    >
-                      <Typography variant="body2">{material}</Typography>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => handleRemoveMaterial(index)}
+            <Stack spacing={1}>
+              <Typography variant="subtitle1">Materials</Typography>
+              {weekPlan.buildLab.materials.length === 0 ? (
+                <Typography color="text.secondary">
+                  No materials yet.
+                </Typography>
+              ) : (
+                <List dense>
+                  {weekPlan.buildLab.materials.map((material, index) => (
+                    <ListItem key={`${material}-${index}`} disableGutters>
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        alignItems="center"
+                        justifyContent="space-between"
+                        sx={{ width: '100%' }}
                       >
-                        Remove
-                      </Button>
-                    </Stack>
-                  </ListItem>
-                ))}
-              </List>
-            )}
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <TextField
-                label="Add material"
-                fullWidth
-                value={newMaterial}
-                onChange={(event) => setNewMaterial(event.target.value)}
-              />
-              <Button variant="contained" onClick={handleAddMaterial}>
-                Add
-              </Button>
+                        <Typography variant="body2">{material}</Typography>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => handleRemoveMaterial(index)}
+                        >
+                          Remove
+                        </Button>
+                      </Stack>
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <TextField
+                  label="Add material"
+                  fullWidth
+                  value={newMaterial}
+                  onChange={(event) => setNewMaterial(event.target.value)}
+                />
+                <Button variant="contained" onClick={handleAddMaterial}>
+                  Add
+                </Button>
+              </Stack>
+            </Stack>
+
+            <Stack spacing={1}>
+              <Typography variant="subtitle1">Steps</Typography>
+              {weekPlan.buildLab.steps.length === 0 ? (
+                <Typography color="text.secondary">No steps yet.</Typography>
+              ) : (
+                <List dense>
+                  {weekPlan.buildLab.steps.map((step, index) => (
+                    <ListItem key={`${step}-${index}`} disableGutters>
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        alignItems="center"
+                        justifyContent="space-between"
+                        sx={{ width: '100%' }}
+                      >
+                        <Typography variant="body2">{step}</Typography>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => handleRemoveStep(index)}
+                        >
+                          Remove
+                        </Button>
+                      </Stack>
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <TextField
+                  label="Add step"
+                  fullWidth
+                  value={newStep}
+                  onChange={(event) => setNewStep(event.target.value)}
+                />
+                <Button variant="contained" onClick={handleAddStep}>
+                  Add
+                </Button>
+              </Stack>
             </Stack>
           </Stack>
+        </SectionCard>
+      )}
 
-          <Stack spacing={1}>
-            <Typography variant="subtitle1">Steps</Typography>
-            {weekPlan.buildLab.steps.length === 0 ? (
-              <Typography color="text.secondary">No steps yet.</Typography>
-            ) : (
-              <List dense>
-                {weekPlan.buildLab.steps.map((step, index) => (
-                  <ListItem key={`${step}-${index}`} disableGutters>
-                    <Stack
-                      direction="row"
-                      spacing={1}
-                      alignItems="center"
-                      justifyContent="space-between"
-                      sx={{ width: '100%' }}
-                    >
-                      <Typography variant="body2">{step}</Typography>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => handleRemoveStep(index)}
-                      >
-                        Remove
-                      </Button>
-                    </Stack>
-                  </ListItem>
-                ))}
-              </List>
-            )}
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <TextField
-                label="Add step"
-                fullWidth
-                value={newStep}
-                onChange={(event) => setNewStep(event.target.value)}
-              />
-              <Button variant="contained" onClick={handleAddStep}>
-                Add
-              </Button>
-            </Stack>
+      {canEdit && (
+        <SectionCard title="Lab Mode">
+          <Stack spacing={2}>
+            <Typography color="text.secondary">
+              Ready to jump into quick capture mode for this week?
+            </Typography>
+            <Button
+              variant="contained"
+              size="large"
+              onClick={() => navigate('/week/lab')}
+            >
+              Start Lab Mode
+            </Button>
           </Stack>
-        </Stack>
-      </SectionCard>
-
-      <SectionCard title="Lab Mode">
-        <Stack spacing={2}>
-          <Typography color="text.secondary">
-            Ready to jump into quick capture mode for this week?
-          </Typography>
-          <Button
-            variant="contained"
-            size="large"
-            onClick={() => navigate('/week/lab')}
-          >
-            Start Lab Mode
-          </Button>
-        </Stack>
-      </SectionCard>
+        </SectionCard>
+      )}
     </Page>
   )
 }
