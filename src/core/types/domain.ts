@@ -217,11 +217,17 @@ export interface Project {
   completed?: boolean
 }
 
+export interface GoalResult {
+  goal: string
+  result: SessionResult | 'na'
+}
+
 export interface WeeklyScore {
   id?: string
   childId: string
   weekStart: string
   metrics: ScoreMetric[]
+  goalResults?: GoalResult[]
   reflectionWorked?: string
   reflectionFriction?: string
   reflectionTweak?: string
