@@ -9,6 +9,7 @@ import Typography from '@mui/material/Typography'
 import { addDoc, doc, getDocs, updateDoc } from 'firebase/firestore'
 
 import AudioRecorder from '../../components/AudioRecorder'
+import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
@@ -39,8 +40,11 @@ type ArtifactFormState = {
   content: string
 }
 
-const defaultFormState = (engineStage: EngineStage): ArtifactFormState => ({
-  childId: '',
+const defaultFormState = (
+  engineStage: EngineStage,
+  childId = '',
+): ArtifactFormState => ({
+  childId,
   evidenceType: EvidenceType.Note,
   engineStage,
   subjectBucket: SubjectBucket.Science,
@@ -75,6 +79,10 @@ export default function LabModePage() {
         id: docSnapshot.id,
       }))
       setChildren(loadedChildren)
+      // Auto-select if there is exactly one child
+      if (loadedChildren.length === 1) {
+        setArtifactForm((prev) => ({ ...prev, childId: loadedChildren[0].id }))
+      }
     }
 
     loadChildren()
@@ -86,7 +94,7 @@ export default function LabModePage() {
 
   const handleStageSelect = useCallback((stage: EngineStage) => {
     setSelectedStage(stage)
-    setArtifactForm(defaultFormState(stage))
+    setArtifactForm((prev) => defaultFormState(stage, prev.childId))
   }, [])
 
   const handleFormChange = useCallback(
@@ -135,7 +143,7 @@ export default function LabModePage() {
     })
 
     setSelectedStage(null)
-    setArtifactForm(defaultFormState(EngineStage.Wonder))
+    setArtifactForm((prev) => defaultFormState(EngineStage.Wonder, prev.childId))
   }, [artifactForm, buildBase, familyId])
 
   const handlePhotoCapture = useCallback(
@@ -151,7 +159,7 @@ export default function LabModePage() {
         const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
         await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
         setSelectedStage(null)
-        setArtifactForm(defaultFormState(EngineStage.Wonder))
+        setArtifactForm((prev) => defaultFormState(EngineStage.Wonder, prev.childId))
       } finally {
         setMediaUploading(false)
       }
@@ -171,7 +179,7 @@ export default function LabModePage() {
         const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, blob, filename)
         await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
         setSelectedStage(null)
-        setArtifactForm(defaultFormState(EngineStage.Wonder))
+        setArtifactForm((prev) => defaultFormState(EngineStage.Wonder, prev.childId))
       } finally {
         setMediaUploading(false)
       }
@@ -195,133 +203,130 @@ export default function LabModePage() {
     [handleStageSelect],
   )
 
+  const handleChildSelect = useCallback(
+    (childId: string) => {
+      handleFormChange('childId', childId)
+    },
+    [handleFormChange],
+  )
+
   return (
     <Page>
-      {selectedStage ? (
-        <SectionCard title={`Capture ${selectedStage} Artifact`}>
-          <Stack spacing={2}>
-            <ToggleButtonGroup
-              value={artifactForm.evidenceType}
-              exclusive
-              onChange={(_event, value) => {
-                if (value) handleFormChange('evidenceType', value)
-              }}
-              fullWidth
-              size="large"
-            >
-              <ToggleButton value={EvidenceType.Note}>Note</ToggleButton>
-              <ToggleButton value={EvidenceType.Photo}>Photo</ToggleButton>
-              <ToggleButton value={EvidenceType.Audio}>Audio</ToggleButton>
-            </ToggleButtonGroup>
-            <TextField
-              label="Child"
-              select
-              value={artifactForm.childId}
-              onChange={(event) =>
-                handleFormChange('childId', event.target.value)
-              }
-            >
-              <MenuItem value="" disabled>
-                Select child
-              </MenuItem>
-              {selectableChildren.map((child) => (
-                <MenuItem key={child.id} value={child.id}>
-                  {child.name}
-                </MenuItem>
-              ))}
-            </TextField>
-            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-              <TextField
-                label="Subject bucket"
-                select
+      <Stack spacing={2}>
+        <ChildSelector
+          children={selectableChildren as Child[]}
+          selectedChildId={artifactForm.childId}
+          onSelect={handleChildSelect}
+        />
+        {selectedStage ? (
+          <SectionCard title={`Capture ${selectedStage} Artifact`}>
+            <Stack spacing={2}>
+              <ToggleButtonGroup
+                value={artifactForm.evidenceType}
+                exclusive
+                onChange={(_event, value) => {
+                  if (value) handleFormChange('evidenceType', value)
+                }}
                 fullWidth
-                value={artifactForm.subjectBucket}
-                onChange={(event) =>
-                  handleFormChange(
-                    'subjectBucket',
-                    event.target.value as SubjectBucket,
-                  )
-                }
+                size="large"
               >
-                {Object.values(SubjectBucket).map((bucket) => (
-                  <MenuItem key={bucket} value={bucket}>
-                    {bucket}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                label="Location"
-                select
-                fullWidth
-                value={artifactForm.location}
-                onChange={(event) =>
-                  handleFormChange(
-                    'location',
-                    event.target.value as LearningLocation,
-                  )
-                }
-              >
-                {Object.values(LearningLocation).map((location) => (
-                  <MenuItem key={location} value={location}>
-                    {location}
-                  </MenuItem>
-                ))}
-              </TextField>
-            </Stack>
-            <TextField
-              label="Domain"
-              value={artifactForm.domain}
-              onChange={(event) => handleFormChange('domain', event.target.value)}
-            />
-            {artifactForm.evidenceType === EvidenceType.Note && (
-              <>
+                <ToggleButton value={EvidenceType.Note}>Note</ToggleButton>
+                <ToggleButton value={EvidenceType.Photo}>Photo</ToggleButton>
+                <ToggleButton value={EvidenceType.Audio}>Audio</ToggleButton>
+              </ToggleButtonGroup>
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
                 <TextField
-                  label="Note"
-                  multiline
-                  minRows={3}
-                  value={artifactForm.content}
+                  label="Subject bucket"
+                  select
+                  fullWidth
+                  value={artifactForm.subjectBucket}
                   onChange={(event) =>
-                    handleFormChange('content', event.target.value)
+                    handleFormChange(
+                      'subjectBucket',
+                      event.target.value as SubjectBucket,
+                    )
                   }
-                />
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                  <Button variant="contained" onClick={handleSave}>
-                    Save Note
-                  </Button>
+                >
+                  {Object.values(SubjectBucket).map((bucket) => (
+                    <MenuItem key={bucket} value={bucket}>
+                      {bucket}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                <TextField
+                  label="Location"
+                  select
+                  fullWidth
+                  value={artifactForm.location}
+                  onChange={(event) =>
+                    handleFormChange(
+                      'location',
+                      event.target.value as LearningLocation,
+                    )
+                  }
+                >
+                  {Object.values(LearningLocation).map((location) => (
+                    <MenuItem key={location} value={location}>
+                      {location}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Stack>
+              <TextField
+                label="Domain"
+                value={artifactForm.domain}
+                onChange={(event) => handleFormChange('domain', event.target.value)}
+              />
+              {artifactForm.evidenceType === EvidenceType.Note && (
+                <>
+                  <TextField
+                    label="Note"
+                    multiline
+                    minRows={3}
+                    value={artifactForm.content}
+                    onChange={(event) =>
+                      handleFormChange('content', event.target.value)
+                    }
+                  />
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                    <Button variant="contained" onClick={handleSave}>
+                      Save Note
+                    </Button>
+                    <Button variant="outlined" onClick={() => setSelectedStage(null)}>
+                      Cancel
+                    </Button>
+                  </Stack>
+                </>
+              )}
+              {artifactForm.evidenceType === EvidenceType.Photo && (
+                <Stack spacing={2}>
+                  <PhotoCapture onCapture={handlePhotoCapture} uploading={mediaUploading} />
                   <Button variant="outlined" onClick={() => setSelectedStage(null)}>
                     Cancel
                   </Button>
                 </Stack>
-              </>
-            )}
-            {artifactForm.evidenceType === EvidenceType.Photo && (
-              <Stack spacing={2}>
-                <PhotoCapture onCapture={handlePhotoCapture} uploading={mediaUploading} />
-                <Button variant="outlined" onClick={() => setSelectedStage(null)}>
-                  Cancel
-                </Button>
-              </Stack>
-            )}
-            {artifactForm.evidenceType === EvidenceType.Audio && (
-              <Stack spacing={2}>
-                <AudioRecorder onCapture={handleAudioCapture} uploading={mediaUploading} />
-                <Button variant="outlined" onClick={() => setSelectedStage(null)}>
-                  Cancel
-                </Button>
-              </Stack>
-            )}
-          </Stack>
-        </SectionCard>
-      ) : (
-        <SectionCard title="Lab Mode">
-          <Stack spacing={2}>
-            <Typography color="text.secondary">
-              Tap a stage to capture a quick artifact.
-            </Typography>
-            <Stack spacing={2}>{stageButtons}</Stack>
-          </Stack>
-        </SectionCard>
-      )}
+              )}
+              {artifactForm.evidenceType === EvidenceType.Audio && (
+                <Stack spacing={2}>
+                  <AudioRecorder onCapture={handleAudioCapture} uploading={mediaUploading} />
+                  <Button variant="outlined" onClick={() => setSelectedStage(null)}>
+                    Cancel
+                  </Button>
+                </Stack>
+              )}
+            </Stack>
+          </SectionCard>
+        ) : (
+          <SectionCard title="Lab Mode">
+            <Stack spacing={2}>
+              <Typography color="text.secondary">
+                Tap a stage to capture a quick artifact.
+              </Typography>
+              <Stack spacing={2}>{stageButtons}</Stack>
+            </Stack>
+          </SectionCard>
+        )}
+      </Stack>
     </Page>
   )
 }
