@@ -139,6 +139,30 @@ The app uses Firebase Authentication:
 
 ---
 
+## Firestore Indexes
+
+All queries use single-field range or equality filters, which Firestore auto-indexes. The `firestore.indexes.json` file declares explicit `fieldOverrides` for the fields used in scoped queries:
+
+| Collection | Field | Used by |
+|---|---|---|
+| `artifacts` | `dayLogId` | TodayPage (equality) |
+| `artifacts` | `createdAt` | EnginePage, RecordsPage, EvaluationsPage, PortfolioPage (range) |
+| `milestoneProgress` | `achievedAt` | EnginePage (range) |
+| `hours` | `date` | RecordsPage (range) |
+| `days` | `date` | RecordsPage (range) |
+| `hoursAdjustments` | `date` | RecordsPage (range) |
+| `evaluations` | `monthStart` | RecordsPage (range) |
+
+Deploy indexes:
+
+```bash
+firebase deploy --only firestore:indexes
+```
+
+No composite indexes are currently required (all queries filter on a single field).
+
+---
+
 ## Monitoring
 
 - **Firebase Console > Hosting** — view deploy history, traffic

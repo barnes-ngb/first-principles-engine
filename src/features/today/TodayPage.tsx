@@ -27,8 +27,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore'
 
 import AudioRecorder from '../../components/AudioRecorder'
@@ -192,39 +194,60 @@ export default function TodayPage() {
     let isMounted = true
 
     const loadWeekPlan = async () => {
-      const snapshot = await getDocs(weeksCollection(familyId))
-      if (!isMounted) return
-      const matching = snapshot.docs
-        .map((docSnapshot) => ({
-          id: docSnapshot.id,
-          ...docSnapshot.data(),
-        }))
-        .find((plan) => {
-          const start = plan.startDate as string
-          const end = plan.endDate as string | undefined
-          return start <= today && (!end || today <= end)
-        })
-      setWeekPlanId(matching?.id)
+      try {
+        const snapshot = await getDocs(weeksCollection(familyId))
+        if (!isMounted) return
+        const matching = snapshot.docs
+          .map((docSnapshot) => ({
+            id: docSnapshot.id,
+            ...docSnapshot.data(),
+          }))
+          .find((plan) => {
+            const start = plan.startDate as string
+            const end = plan.endDate as string | undefined
+            return start <= today && (!end || today <= end)
+          })
+        setWeekPlanId(matching?.id)
+      } catch (err) {
+        console.error('Failed to load week plan', err)
+        if (isMounted) {
+          setSnackMessage({ text: 'Could not load week plan.', severity: 'error' })
+        }
+      }
     }
 
     const loadLadders = async () => {
-      const snapshot = await getDocs(laddersCollection(familyId))
-      if (!isMounted) return
-      const loadedLadders = snapshot.docs.map((docSnapshot) => ({
-        id: docSnapshot.id,
-        ...(docSnapshot.data() as Ladder),
-      }))
-      setLadders(loadedLadders)
+      try {
+        const snapshot = await getDocs(laddersCollection(familyId))
+        if (!isMounted) return
+        const loadedLadders = snapshot.docs.map((docSnapshot) => ({
+          id: docSnapshot.id,
+          ...(docSnapshot.data() as Ladder),
+        }))
+        setLadders(loadedLadders)
+      } catch (err) {
+        console.error('Failed to load ladders', err)
+        if (isMounted) {
+          setSnackMessage({ text: 'Could not load ladders.', severity: 'error' })
+        }
+      }
     }
 
     const loadArtifacts = async () => {
-      const snapshot = await getDocs(artifactsCollection(familyId))
-      if (!isMounted) return
-      const loadedArtifacts = snapshot.docs
-        .map((docSnapshot) => docSnapshot.data())
-        .filter((artifact) => artifact.dayLogId === today)
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      setTodayArtifacts(loadedArtifacts)
+      try {
+        const q = query(artifactsCollection(familyId), where('dayLogId', '==', today))
+        const snapshot = await getDocs(q)
+        if (!isMounted) return
+        const loadedArtifacts = snapshot.docs
+          .map((docSnapshot) => docSnapshot.data())
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        setTodayArtifacts(loadedArtifacts)
+      } catch (err) {
+        console.error('Failed to load artifacts', err)
+        if (isMounted) {
+          setSnackMessage({ text: 'Could not load artifacts.', severity: 'error' })
+        }
+      }
     }
 
     loadWeekPlan()
