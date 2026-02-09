@@ -54,6 +54,7 @@ import {
 } from '../../core/firebase/upload'
 import type { Artifact, DayLog, Ladder } from '../../core/types/domain'
 import {
+  DayBlockType,
   EngineStage,
   EvidenceType,
   LearningLocation,
@@ -91,6 +92,8 @@ export default function TodayPage() {
   const [linkingLadderId, setLinkingLadderId] = useState('')
   const [linkingRungId, setLinkingRungId] = useState('')
   const [mediaUploading, setMediaUploading] = useState(false)
+  const [planType, setPlanType] = useState<'A' | 'B'>('A')
+  const [showAllBlocks, setShowAllBlocks] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
   const [artifactForm, setArtifactForm] = useState({
@@ -543,10 +546,31 @@ export default function TodayPage() {
           <Typography color="text.secondary" variant="body2">
             Capture today&apos;s highlights and reflections.
           </Typography>
-          <SaveIndicator state={saveState} />
+          <Stack direction="row" spacing={1} alignItems="center">
+            <ToggleButtonGroup
+              value={planType}
+              exclusive
+              size="small"
+              onChange={(_e, value) => { if (value) setPlanType(value) }}
+            >
+              <ToggleButton value="A">Plan A</ToggleButton>
+              <ToggleButton value="B">Plan B</ToggleButton>
+            </ToggleButtonGroup>
+            <SaveIndicator state={saveState} />
+          </Stack>
         </Stack>
         <Stack spacing={1}>
-          {dayLog.blocks.map((block, index) => {
+          {dayLog.blocks
+          .map((block, originalIndex) => ({ block, originalIndex }))
+          .filter(({ block }) =>
+            planType === 'B'
+              ? block.type === DayBlockType.Reading || block.type === DayBlockType.Math
+              : true,
+          )
+          .filter((_entry, filteredIndex) =>
+            planType === 'A' ? showAllBlocks || filteredIndex < 4 : true,
+          )
+          .map(({ block, originalIndex: index }) => {
             const meta = blockMeta[block.type]
             const checklistDone = block.checklist?.filter((i) => i.completed).length ?? 0
             const checklistTotal = block.checklist?.length ?? 0
@@ -721,6 +745,24 @@ export default function TodayPage() {
               </Accordion>
             )
           })}
+          {planType === 'A' && !showAllBlocks && dayLog.blocks.length > 4 && (
+            <Button
+              size="small"
+              onClick={() => setShowAllBlocks(true)}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              Show more ({dayLog.blocks.length - 4} more)
+            </Button>
+          )}
+          {planType === 'A' && showAllBlocks && dayLog.blocks.length > 4 && (
+            <Button
+              size="small"
+              onClick={() => setShowAllBlocks(false)}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              Show less
+            </Button>
+          )}
         </Stack>
       </SectionCard>
       <SectionCard title="Capture Artifact">

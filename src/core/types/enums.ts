@@ -119,5 +119,15 @@ export const RoutineItemKey = {
   ReadingEggs: 'readingEggs',
   Math: 'math',
   Speech: 'speech',
+  // Lincoln Literacy Engine
+  PhonemicAwareness: 'phonemicAwareness',
+  PhonicsLesson: 'phonicsLesson',
+  DecodableReading: 'decodableReading',
+  SpellingDictation: 'spellingDictation',
+  // Lincoln Math Engine
+  NumberSenseOrFacts: 'numberSenseOrFacts',
+  WordProblemsModeled: 'wordProblemsModeled',
+  // Lincoln Speech Micro
+  NarrationOrSoundReps: 'narrationOrSoundReps',
 } as const
 export type RoutineItemKey = (typeof RoutineItemKey)[keyof typeof RoutineItemKey]

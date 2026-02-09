@@ -9,6 +9,7 @@ import type {
   DayLog,
   MathRoutine,
   ReadingRoutine,
+  RoutineItem,
   SpeechRoutine,
 } from '../../core/types/domain'
 import { RoutineItemKey } from '../../core/types/enums'
@@ -44,24 +45,39 @@ export default function RoutineSection({
   const math = useMemo(() => dayLog.math ?? { done: false }, [dayLog.math])
   const speech = useMemo(() => dayLog.speech ?? { done: false }, [dayLog.speech])
 
-  const hasReading =
+  const hasLegacyReading =
     items.has(RoutineItemKey.Handwriting) ||
     items.has(RoutineItemKey.Spelling) ||
     items.has(RoutineItemKey.SightWords) ||
     items.has(RoutineItemKey.MinecraftReading) ||
     items.has(RoutineItemKey.ReadingEggs)
-  const hasMath = items.has(RoutineItemKey.Math)
-  const hasSpeech = items.has(RoutineItemKey.Speech)
+  const hasNewLiteracy =
+    items.has(RoutineItemKey.PhonemicAwareness) ||
+    items.has(RoutineItemKey.PhonicsLesson) ||
+    items.has(RoutineItemKey.DecodableReading) ||
+    items.has(RoutineItemKey.SpellingDictation)
+  const hasReading = hasLegacyReading || hasNewLiteracy
+  const hasMath =
+    items.has(RoutineItemKey.Math) ||
+    items.has(RoutineItemKey.NumberSenseOrFacts) ||
+    items.has(RoutineItemKey.WordProblemsModeled)
+  const hasSpeech =
+    items.has(RoutineItemKey.Speech) ||
+    items.has(RoutineItemKey.NarrationOrSoundReps)
+
+  // Use "Literacy" heading when new engine items are present
+  const literacyHeading = hasNewLiteracy ? 'Literacy' : 'Reading & Literacy'
 
   const xp = calculateXp(dayLog)
 
   const updateReading = useCallback(
-    (field: keyof ReadingRoutine, value: Partial<ReadingRoutine[keyof ReadingRoutine]>) => {
+    (field: keyof ReadingRoutine, value: Record<string, unknown>) => {
+      const current = reading[field] ?? { done: false }
       const updated: DayLog = {
         ...dayLog,
         reading: {
           ...reading,
-          [field]: { ...reading[field], ...value },
+          [field]: { ...current, ...value },
         },
       }
       if ('done' in value) {
@@ -88,11 +104,43 @@ export default function RoutineSection({
     [dayLog, math, onUpdate, onUpdateImmediate],
   )
 
+  const updateMathItem = useCallback(
+    (field: 'numberSense' | 'wordProblems', value: Partial<RoutineItem>) => {
+      const current = (math as MathRoutine)[field] ?? { done: false }
+      const updated: DayLog = {
+        ...dayLog,
+        math: { ...math, [field]: { ...current, ...value } },
+      }
+      if ('done' in value) {
+        onUpdateImmediate(updated)
+      } else {
+        onUpdate(updated)
+      }
+    },
+    [dayLog, math, onUpdate, onUpdateImmediate],
+  )
+
   const updateSpeech = useCallback(
     (value: Partial<SpeechRoutine>) => {
       const updated: DayLog = {
         ...dayLog,
         speech: { ...speech, ...value },
+      }
+      if ('done' in value) {
+        onUpdateImmediate(updated)
+      } else {
+        onUpdate(updated)
+      }
+    },
+    [dayLog, speech, onUpdate, onUpdateImmediate],
+  )
+
+  const updateSpeechItem = useCallback(
+    (field: 'narrationReps', value: Partial<RoutineItem>) => {
+      const current = (speech as SpeechRoutine)[field] ?? { done: false }
+      const updated: DayLog = {
+        ...dayLog,
+        speech: { ...speech, [field]: { ...current, ...value } },
       }
       if ('done' in value) {
         onUpdateImmediate(updated)
@@ -115,10 +163,222 @@ export default function RoutineSection({
         />
       </Stack>
 
-      {/* Reading Routine */}
+      {/* Reading / Literacy Routine */}
       {hasReading && (
-      <SectionCard title="Reading & Literacy">
+      <SectionCard title={literacyHeading}>
         <Stack spacing={1.5}>
+          {/* --- New Lincoln Literacy Engine items --- */}
+
+          {/* Phonemic Awareness */}
+          {items.has(RoutineItemKey.PhonemicAwareness) && (
+          <Stack spacing={0.5}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={reading.phonemicAwareness?.done ?? false}
+                  onChange={(e) =>
+                    updateReading('phonemicAwareness', { done: e.target.checked })
+                  }
+                />
+              }
+              label={
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="body2" fontWeight={600}>
+                    Phonemic Awareness (5 min)
+                  </Typography>
+                  <Chip size="small" label={`+${XP_VALUES.phonemicAwareness} XP`} variant="outlined" />
+                </Stack>
+              }
+            />
+            {reading.phonemicAwareness?.done && (
+              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+                <TextField
+                  label="Minutes"
+                  type="number"
+                  size="small"
+                  value={reading.phonemicAwareness.minutes ?? ''}
+                  onChange={(e) =>
+                    updateReading('phonemicAwareness', {
+                      minutes: e.target.value ? Number(e.target.value) : undefined,
+                    })
+                  }
+                  sx={{ width: 100 }}
+                />
+                <TextField
+                  label="Note"
+                  size="small"
+                  value={reading.phonemicAwareness.note ?? ''}
+                  onChange={(e) =>
+                    updateReading('phonemicAwareness', { note: e.target.value })
+                  }
+                  sx={{ flex: 1, minWidth: 120 }}
+                />
+              </Stack>
+            )}
+          </Stack>
+          )}
+
+          {/* Phonics Lesson */}
+          {items.has(RoutineItemKey.PhonicsLesson) && (
+          <Stack spacing={0.5}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={reading.phonicsLesson?.done ?? false}
+                  onChange={(e) =>
+                    updateReading('phonicsLesson', { done: e.target.checked })
+                  }
+                />
+              }
+              label={
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="body2" fontWeight={600}>
+                    Phonics Lesson (15-20 min)
+                  </Typography>
+                  <Chip size="small" label={`+${XP_VALUES.phonicsLesson} XP`} variant="outlined" />
+                </Stack>
+              }
+            />
+            {reading.phonicsLesson?.done && (
+              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+                <TextField
+                  label="Minutes"
+                  type="number"
+                  size="small"
+                  value={reading.phonicsLesson.minutes ?? ''}
+                  onChange={(e) =>
+                    updateReading('phonicsLesson', {
+                      minutes: e.target.value ? Number(e.target.value) : undefined,
+                    })
+                  }
+                  sx={{ width: 100 }}
+                />
+                <TextField
+                  label="Note"
+                  size="small"
+                  value={reading.phonicsLesson.note ?? ''}
+                  onChange={(e) =>
+                    updateReading('phonicsLesson', { note: e.target.value })
+                  }
+                  sx={{ flex: 1, minWidth: 120 }}
+                />
+              </Stack>
+            )}
+          </Stack>
+          )}
+
+          {/* Decodable Reading */}
+          {items.has(RoutineItemKey.DecodableReading) && (
+          <Stack spacing={0.5}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={reading.decodableReading?.done ?? false}
+                  onChange={(e) =>
+                    updateReading('decodableReading', { done: e.target.checked })
+                  }
+                />
+              }
+              label={
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="body2" fontWeight={600}>
+                    Decodable Reading (10 min + reread)
+                  </Typography>
+                  <Chip size="small" label={`+${XP_VALUES.decodableReading} XP`} variant="outlined" />
+                </Stack>
+              }
+            />
+            {reading.decodableReading?.done && (
+              <Stack direction="row" spacing={1} sx={{ pl: 4 }} alignItems="center">
+                <TextField
+                  label="Minutes"
+                  type="number"
+                  size="small"
+                  value={reading.decodableReading.minutes ?? ''}
+                  onChange={(e) =>
+                    updateReading('decodableReading', {
+                      minutes: e.target.value ? Number(e.target.value) : undefined,
+                    })
+                  }
+                  sx={{ width: 100 }}
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={reading.decodableReading.rereadDone ?? false}
+                      size="small"
+                      onChange={(e) =>
+                        updateReading('decodableReading', { rereadDone: e.target.checked })
+                      }
+                    />
+                  }
+                  label={<Typography variant="body2">1-min reread</Typography>}
+                />
+                <TextField
+                  label="Note"
+                  size="small"
+                  value={reading.decodableReading.note ?? ''}
+                  onChange={(e) =>
+                    updateReading('decodableReading', { note: e.target.value })
+                  }
+                  sx={{ flex: 1, minWidth: 120 }}
+                />
+              </Stack>
+            )}
+          </Stack>
+          )}
+
+          {/* Spelling / Dictation */}
+          {items.has(RoutineItemKey.SpellingDictation) && (
+          <Stack spacing={0.5}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={reading.spellingDictation?.done ?? false}
+                  onChange={(e) =>
+                    updateReading('spellingDictation', { done: e.target.checked })
+                  }
+                />
+              }
+              label={
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="body2" fontWeight={600}>
+                    Spelling / Dictation (2-3 lines)
+                  </Typography>
+                  <Chip size="small" label={`+${XP_VALUES.spellingDictation} XP`} variant="outlined" />
+                </Stack>
+              }
+            />
+            {reading.spellingDictation?.done && (
+              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+                <TextField
+                  label="Lines"
+                  type="number"
+                  size="small"
+                  value={reading.spellingDictation.lines ?? ''}
+                  onChange={(e) =>
+                    updateReading('spellingDictation', {
+                      lines: e.target.value ? Number(e.target.value) : undefined,
+                    })
+                  }
+                  sx={{ width: 100 }}
+                />
+                <TextField
+                  label="Note"
+                  size="small"
+                  value={reading.spellingDictation.note ?? ''}
+                  onChange={(e) =>
+                    updateReading('spellingDictation', { note: e.target.value })
+                  }
+                  sx={{ flex: 1, minWidth: 120 }}
+                />
+              </Stack>
+            )}
+          </Stack>
+          )}
+
+          {/* --- Legacy reading items --- */}
+
           {/* Handwriting */}
           {items.has(RoutineItemKey.Handwriting) && (
           <Stack spacing={0.5}>
@@ -405,56 +665,171 @@ export default function RoutineSection({
       {hasMath && (
       <SectionCard title="Math">
         <Stack spacing={1.5}>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={math.done}
-                onChange={(e) => updateMath({ done: e.target.checked })}
-              />
-            }
-            label={
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Typography variant="body2" fontWeight={600}>
-                  Math completed
-                </Typography>
-                <Chip size="small" label={`+${XP_VALUES.math} XP`} variant="outlined" />
+          {/* Legacy single math toggle */}
+          {items.has(RoutineItemKey.Math) && (
+          <>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={math.done}
+                  onChange={(e) => updateMath({ done: e.target.checked })}
+                />
+              }
+              label={
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="body2" fontWeight={600}>
+                    Math completed
+                  </Typography>
+                  <Chip size="small" label={`+${XP_VALUES.math} XP`} variant="outlined" />
+                </Stack>
+              }
+            />
+            {math.done && (
+              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+                <TextField
+                  label="Problems"
+                  type="number"
+                  size="small"
+                  value={math.problems ?? ''}
+                  onChange={(e) =>
+                    updateMath({
+                      problems: e.target.value ? Number(e.target.value) : undefined,
+                    })
+                  }
+                  sx={{ width: 110 }}
+                />
+                <TextField
+                  label="Pages"
+                  type="number"
+                  size="small"
+                  value={math.pages ?? ''}
+                  onChange={(e) =>
+                    updateMath({
+                      pages: e.target.value ? Number(e.target.value) : undefined,
+                    })
+                  }
+                  sx={{ width: 100 }}
+                />
+                <TextField
+                  label="Note"
+                  size="small"
+                  value={math.note ?? ''}
+                  onChange={(e) => updateMath({ note: e.target.value })}
+                  sx={{ flex: 1, minWidth: 120 }}
+                />
               </Stack>
-            }
-          />
-          {math.done && (
-            <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
-              <TextField
-                label="Problems"
-                type="number"
-                size="small"
-                value={math.problems ?? ''}
-                onChange={(e) =>
-                  updateMath({
-                    problems: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-                sx={{ width: 110 }}
-              />
-              <TextField
-                label="Pages"
-                type="number"
-                size="small"
-                value={math.pages ?? ''}
-                onChange={(e) =>
-                  updateMath({
-                    pages: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-                sx={{ width: 100 }}
-              />
-              <TextField
-                label="Note"
-                size="small"
-                value={math.note ?? ''}
-                onChange={(e) => updateMath({ note: e.target.value })}
-                sx={{ flex: 1, minWidth: 120 }}
-              />
-            </Stack>
+            )}
+          </>
+          )}
+
+          {/* Number Sense / Facts */}
+          {items.has(RoutineItemKey.NumberSenseOrFacts) && (
+          <Stack spacing={0.5}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={(math as MathRoutine).numberSense?.done ?? false}
+                  onChange={(e) =>
+                    updateMathItem('numberSense', { done: e.target.checked })
+                  }
+                />
+              }
+              label={
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="body2" fontWeight={600}>
+                    Number Sense / Facts (10 min)
+                  </Typography>
+                  <Chip size="small" label={`+${XP_VALUES.numberSenseOrFacts} XP`} variant="outlined" />
+                </Stack>
+              }
+            />
+            {(math as MathRoutine).numberSense?.done && (
+              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+                <TextField
+                  label="Minutes"
+                  type="number"
+                  size="small"
+                  value={(math as MathRoutine).numberSense?.minutes ?? ''}
+                  onChange={(e) =>
+                    updateMathItem('numberSense', {
+                      minutes: e.target.value ? Number(e.target.value) : undefined,
+                    } as Partial<RoutineItem>)
+                  }
+                  sx={{ width: 100 }}
+                />
+                <TextField
+                  label="Note"
+                  size="small"
+                  value={(math as MathRoutine).numberSense?.note ?? ''}
+                  onChange={(e) =>
+                    updateMathItem('numberSense', { note: e.target.value })
+                  }
+                  sx={{ flex: 1, minWidth: 120 }}
+                />
+              </Stack>
+            )}
+          </Stack>
+          )}
+
+          {/* Word Problems (Modeled) */}
+          {items.has(RoutineItemKey.WordProblemsModeled) && (
+          <Stack spacing={0.5}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={(math as MathRoutine).wordProblems?.done ?? false}
+                  onChange={(e) =>
+                    updateMathItem('wordProblems', { done: e.target.checked })
+                  }
+                />
+              }
+              label={
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="body2" fontWeight={600}>
+                    Word Problems &ndash; Modeled (10-15 min)
+                  </Typography>
+                  <Chip size="small" label={`+${XP_VALUES.wordProblemsModeled} XP`} variant="outlined" />
+                </Stack>
+              }
+            />
+            {(math as MathRoutine).wordProblems?.done && (
+              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+                <TextField
+                  label="Minutes"
+                  type="number"
+                  size="small"
+                  value={(math as MathRoutine).wordProblems?.minutes ?? ''}
+                  onChange={(e) =>
+                    updateMathItem('wordProblems', {
+                      minutes: e.target.value ? Number(e.target.value) : undefined,
+                    } as Partial<RoutineItem>)
+                  }
+                  sx={{ width: 100 }}
+                />
+                <TextField
+                  label="Count"
+                  type="number"
+                  size="small"
+                  value={(math as MathRoutine).wordProblems?.count ?? ''}
+                  onChange={(e) =>
+                    updateMathItem('wordProblems', {
+                      count: e.target.value ? Number(e.target.value) : undefined,
+                    } as Partial<RoutineItem>)
+                  }
+                  sx={{ width: 100 }}
+                />
+                <TextField
+                  label="Note"
+                  size="small"
+                  value={(math as MathRoutine).wordProblems?.note ?? ''}
+                  onChange={(e) =>
+                    updateMathItem('wordProblems', { note: e.target.value })
+                  }
+                  sx={{ flex: 1, minWidth: 120 }}
+                />
+              </Stack>
+            )}
+          </Stack>
           )}
         </Stack>
       </SectionCard>
@@ -462,31 +837,85 @@ export default function RoutineSection({
 
       {/* Speech */}
       {hasSpeech && (
-      <SectionCard title="Speech (optional)">
+      <SectionCard title="Speech">
         <Stack spacing={1.5}>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={speech.done}
-                onChange={(e) => updateSpeech({ done: e.target.checked })}
-              />
-            }
-            label={
-              <Typography variant="body2" fontWeight={600}>
-                Sentence routine (2-5 min)
-              </Typography>
-            }
-          />
-          {speech.done && (
-            <TextField
-              label="Notes"
-              size="small"
-              multiline
-              minRows={2}
-              value={speech.note ?? ''}
-              onChange={(e) => updateSpeech({ note: e.target.value })}
-              sx={{ pl: 4 }}
+          {/* Legacy speech toggle */}
+          {items.has(RoutineItemKey.Speech) && (
+          <>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={speech.done}
+                  onChange={(e) => updateSpeech({ done: e.target.checked })}
+                />
+              }
+              label={
+                <Typography variant="body2" fontWeight={600}>
+                  Sentence routine (2-5 min)
+                </Typography>
+              }
             />
+            {speech.done && (
+              <TextField
+                label="Notes"
+                size="small"
+                multiline
+                minRows={2}
+                value={speech.note ?? ''}
+                onChange={(e) => updateSpeech({ note: e.target.value })}
+                sx={{ pl: 4 }}
+              />
+            )}
+          </>
+          )}
+
+          {/* Narration / Sound Reps */}
+          {items.has(RoutineItemKey.NarrationOrSoundReps) && (
+          <Stack spacing={0.5}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={(speech as SpeechRoutine).narrationReps?.done ?? false}
+                  onChange={(e) =>
+                    updateSpeechItem('narrationReps', { done: e.target.checked })
+                  }
+                />
+              }
+              label={
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="body2" fontWeight={600}>
+                    Narration / Sound Reps (1-3 min)
+                  </Typography>
+                  <Chip size="small" label={`+${XP_VALUES.narrationOrSoundReps} XP`} variant="outlined" />
+                </Stack>
+              }
+            />
+            {(speech as SpeechRoutine).narrationReps?.done && (
+              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+                <TextField
+                  label="Minutes"
+                  type="number"
+                  size="small"
+                  value={(speech as SpeechRoutine).narrationReps?.minutes ?? ''}
+                  onChange={(e) =>
+                    updateSpeechItem('narrationReps', {
+                      minutes: e.target.value ? Number(e.target.value) : undefined,
+                    } as Partial<RoutineItem>)
+                  }
+                  sx={{ width: 100 }}
+                />
+                <TextField
+                  label="Note"
+                  size="small"
+                  value={(speech as SpeechRoutine).narrationReps?.note ?? ''}
+                  onChange={(e) =>
+                    updateSpeechItem('narrationReps', { note: e.target.value })
+                  }
+                  sx={{ flex: 1, minWidth: 120 }}
+                />
+              </Stack>
+            )}
+          </Stack>
           )}
         </Stack>
       </SectionCard>

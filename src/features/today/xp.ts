@@ -8,6 +8,16 @@ export const XP_VALUES = {
   minecraft: 2,
   readingEggs: 1,
   math: 2,
+  // Lincoln Literacy Engine
+  phonemicAwareness: 1,
+  phonicsLesson: 2,
+  decodableReading: 2,
+  spellingDictation: 1,
+  // Lincoln Math Engine
+  numberSenseOrFacts: 2,
+  wordProblemsModeled: 2,
+  // Lincoln Speech Micro
+  narrationOrSoundReps: 1,
 } as const
 
 /** Calculate total XP from a DayLog's routine fields. */
@@ -20,8 +30,15 @@ export function calculateXp(dayLog: DayLog): number {
     if (reading.sightWords?.done) xp += XP_VALUES.sightWords
     if (reading.minecraft?.done) xp += XP_VALUES.minecraft
     if (reading.readingEggs?.done) xp += XP_VALUES.readingEggs
+    if (reading.phonemicAwareness?.done) xp += XP_VALUES.phonemicAwareness
+    if (reading.phonicsLesson?.done) xp += XP_VALUES.phonicsLesson
+    if (reading.decodableReading?.done) xp += XP_VALUES.decodableReading
+    if (reading.spellingDictation?.done) xp += XP_VALUES.spellingDictation
   }
   if (dayLog.math?.done) xp += XP_VALUES.math
+  if (dayLog.math?.numberSense?.done) xp += XP_VALUES.numberSenseOrFacts
+  if (dayLog.math?.wordProblems?.done) xp += XP_VALUES.wordProblemsModeled
+  if (dayLog.speech?.narrationReps?.done) xp += XP_VALUES.narrationOrSoundReps
   return xp
 }
 
@@ -35,13 +52,17 @@ export function countLoggedCategories(dayLog: DayLog): number {
       reading.spelling?.done ||
       reading.sightWords?.done ||
       reading.minecraft?.done ||
-      reading.readingEggs?.done
+      reading.readingEggs?.done ||
+      reading.phonemicAwareness?.done ||
+      reading.phonicsLesson?.done ||
+      reading.decodableReading?.done ||
+      reading.spellingDictation?.done
     ) {
       count += 1
     }
   }
-  if (dayLog.math?.done) count += 1
-  if (dayLog.speech?.done) count += 1
+  if (dayLog.math?.done || dayLog.math?.numberSense?.done || dayLog.math?.wordProblems?.done) count += 1
+  if (dayLog.speech?.done || dayLog.speech?.narrationReps?.done) count += 1
   if (dayLog.formation?.done) count += 1
   if (dayLog.together?.done) count += 1
   if (dayLog.movement?.done) count += 1

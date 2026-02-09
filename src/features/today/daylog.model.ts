@@ -91,7 +91,20 @@ export const createDefaultDayLog = (
     items.has(RoutineItemKey.Spelling) ||
     items.has(RoutineItemKey.SightWords) ||
     items.has(RoutineItemKey.MinecraftReading) ||
-    items.has(RoutineItemKey.ReadingEggs)
+    items.has(RoutineItemKey.ReadingEggs) ||
+    items.has(RoutineItemKey.PhonemicAwareness) ||
+    items.has(RoutineItemKey.PhonicsLesson) ||
+    items.has(RoutineItemKey.DecodableReading) ||
+    items.has(RoutineItemKey.SpellingDictation)
+
+  const hasMath =
+    items.has(RoutineItemKey.Math) ||
+    items.has(RoutineItemKey.NumberSenseOrFacts) ||
+    items.has(RoutineItemKey.WordProblemsModeled)
+
+  const hasSpeech =
+    items.has(RoutineItemKey.Speech) ||
+    items.has(RoutineItemKey.NarrationOrSoundReps)
 
   return {
     childId,
@@ -101,8 +114,8 @@ export const createDefaultDayLog = (
       checklist: cloneChecklistItems(block.checklist),
     })),
     ...(hasReading ? { reading: emptyReadingRoutine() } : {}),
-    ...(items.has(RoutineItemKey.Math) ? { math: emptyMathRoutine() } : {}),
-    ...(items.has(RoutineItemKey.Speech) ? { speech: emptySpeechRoutine() } : {}),
+    ...(hasMath ? { math: emptyMathRoutine() } : {}),
+    ...(hasSpeech ? { speech: emptySpeechRoutine() } : {}),
     ...(checklist ? { checklist } : {}),
   }
 }
