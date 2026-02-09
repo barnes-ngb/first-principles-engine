@@ -142,10 +142,18 @@ export const weeklyScoresCollection = (
 ): CollectionReference<WeeklyScore> =>
   collection(db, `families/${familyId}/weeklyScores`) as CollectionReference<WeeklyScore>
 
+const labSessionConverter: FirestoreDataConverter<LabSession> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) =>
+    snapshot.data(options) as LabSession,
+}
+
 export const labSessionsCollection = (
   familyId: string,
 ): CollectionReference<LabSession> =>
-  collection(db, `families/${familyId}/labSessions`) as CollectionReference<LabSession>
+  collection(db, `families/${familyId}/labSessions`).withConverter(
+    labSessionConverter,
+  ) as CollectionReference<LabSession>
 
 export const dadLabCollection = (
   familyId: string,
