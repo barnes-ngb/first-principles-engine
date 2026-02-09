@@ -32,6 +32,7 @@ import {
 } from 'firebase/firestore'
 
 import AudioRecorder from '../../components/AudioRecorder'
+import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
@@ -59,13 +60,21 @@ import {
 import { useDebounce } from '../../lib/useDebounce'
 import { blockMeta } from './blockMeta'
 import { createDefaultDayLog } from './daylog.model'
+import RoutineSection from './RoutineSection'
+import { calculateXp } from './xp'
 
 export default function TodayPage() {
   const today = new Date().toISOString().slice(0, 10)
   const familyId = useFamilyId()
+  const [selectedChildId, setSelectedChildId] = useState('')
+  const [isLoadingChildren, setIsLoadingChildren] = useState(true)
+  const dayLogDocId = useMemo(
+    () => (selectedChildId ? `${selectedChildId}_${today}` : today),
+    [selectedChildId, today],
+  )
   const dayLogRef = useMemo(
-    () => doc(daysCollection(familyId), today),
-    [familyId, today],
+    () => doc(daysCollection(familyId), dayLogDocId),
+    [familyId, dayLogDocId],
   )
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
   const [children, setChildren] = useState<Child[]>([])
@@ -128,7 +137,12 @@ export default function TodayPage() {
 
   // --- Data loading ---
 
+  // Load DayLog for selected child + date
   useEffect(() => {
+    if (!selectedChildId) {
+      setDayLog(null)
+      return
+    }
     let isMounted = true
 
     const loadDayLog = async () => {
@@ -141,7 +155,7 @@ export default function TodayPage() {
           return
         }
 
-        const defaultLog = createDefaultDayLog('', today)
+        const defaultLog = createDefaultDayLog(selectedChildId, today)
         await setDoc(dayLogRef, defaultLog)
         if (isMounted) {
           setDayLog(defaultLog)
@@ -159,7 +173,7 @@ export default function TodayPage() {
     return () => {
       isMounted = false
     }
-  }, [dayLogRef, today])
+  }, [dayLogRef, today, selectedChildId])
 
   useEffect(() => {
     let isMounted = true
@@ -172,6 +186,8 @@ export default function TodayPage() {
         id: docSnapshot.id,
       }))
       setChildren(loadedChildren)
+      setSelectedChildId((cur) => cur || loadedChildren[0]?.id || '')
+      setIsLoadingChildren(false)
     }
 
     const loadWeekPlan = async () => {
@@ -440,21 +456,71 @@ export default function TodayPage() {
 
   // --- Loading state ---
 
+  const handleRoutineUpdate = useCallback(
+    (updated: DayLog) => {
+      const withXp = { ...updated, xpTotal: calculateXp(updated) }
+      persistDayLog(withXp)
+    },
+    [persistDayLog],
+  )
+
+  const handleRoutineUpdateImmediate = useCallback(
+    (updated: DayLog) => {
+      const withXp = { ...updated, xpTotal: calculateXp(updated) }
+      persistDayLogImmediate(withXp)
+    },
+    [persistDayLogImmediate],
+  )
+
   if (!dayLog) {
     return (
       <Page>
-        <SectionCard title="DayLog">
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <CircularProgress size={20} />
-            <Typography color="text.secondary">Loading today&apos;s log...</Typography>
-          </Box>
-        </SectionCard>
+        <Typography variant="h4" component="h1">Today</Typography>
+        <ChildSelector
+          children={children}
+          selectedChildId={selectedChildId}
+          onSelect={setSelectedChildId}
+          onChildAdded={(child) => {
+            setChildren((prev) => [...prev, child])
+            setSelectedChildId(child.id)
+          }}
+          isLoading={isLoadingChildren}
+          emptyMessage="Add a child to start logging."
+        />
+        {selectedChildId && (
+          <SectionCard title="DayLog">
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <CircularProgress size={20} />
+              <Typography color="text.secondary">Loading today&apos;s log...</Typography>
+            </Box>
+          </SectionCard>
+        )}
       </Page>
     )
   }
 
   return (
     <Page>
+      <Typography variant="h4" component="h1">Today</Typography>
+      <ChildSelector
+        children={children}
+        selectedChildId={selectedChildId}
+        onSelect={setSelectedChildId}
+        onChildAdded={(child) => {
+          setChildren((prev) => [...prev, child])
+          setSelectedChildId(child.id)
+        }}
+        isLoading={isLoadingChildren}
+        emptyMessage="Add a child to start logging."
+      />
+
+      {/* Lincoln's daily routine section */}
+      <RoutineSection
+        dayLog={dayLog}
+        onUpdate={handleRoutineUpdate}
+        onUpdateImmediate={handleRoutineUpdateImmediate}
+      />
+
       <SectionCard title={`DayLog (${dayLog.date})`}>
         <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
           <Typography color="text.secondary" variant="body2">
