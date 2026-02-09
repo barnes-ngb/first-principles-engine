@@ -152,6 +152,8 @@ export interface DayLog {
   xpTotal?: number
   retro?: string
   checklist?: ChecklistItem[]
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface DayBlock {
