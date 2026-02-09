@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -10,6 +11,7 @@ import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import LinearProgress from '@mui/material/LinearProgress'
+import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { doc, getDocs, setDoc } from 'firebase/firestore'
@@ -40,7 +42,7 @@ import {
 } from '../kids/ladder.logic'
 import { streamIcon, streamLabel, streamLadderSuffix } from '../sessions/sessions.model'
 import type { StreamId } from '../../core/types/enums'
-import { createLiteracyLadder, createMathLadder } from './ladder.templates'
+import { createDefaultLadders } from './ladder.templates'
 
 const rungRefFor = (ladderId: string, rungId: string) => `${ladderId}:${rungId}`
 
@@ -60,6 +62,12 @@ const streamForLadder = (ladder: Ladder, childId: string): StreamId | undefined 
   return entry ? (entry[0] as StreamId) : undefined
 }
 
+type SnackbarState = {
+  open: boolean
+  severity: 'success' | 'error'
+  message: string
+}
+
 export default function LaddersPage() {
   const familyId = useFamilyId()
   const { canEdit, profile } = useProfile()
@@ -76,35 +84,51 @@ export default function LaddersPage() {
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [seeding, setSeeding] = useState(false)
   const [selectedRung, setSelectedRung] = useState<{
     ladder: Ladder
     rung: Rung
     rungId: string
   } | null>(null)
+  const [snackbar, setSnackbar] = useState<SnackbarState>({
+    open: false,
+    severity: 'success',
+    message: '',
+  })
 
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      const [laddersSnap, milestoneSnap, artifactsSnap] = await Promise.all([
-        getDocs(laddersCollection(familyId)),
-        getDocs(milestoneProgressCollection(familyId)),
-        getDocs(artifactsCollection(familyId)),
-      ])
-      if (cancelled) return
-      setLadders(laddersSnap.docs.map((d) => ({ ...(d.data() as Ladder), id: d.id })))
-      setMilestoneProgress(
-        milestoneSnap.docs.map((d) => ({
-          ...(d.data() as MilestoneProgress),
-          id: d.id,
-          status: (d.data() as MilestoneProgress).status ?? 'locked',
-        })),
-      )
-      setArtifacts(artifactsSnap.docs.map((d) => ({ ...(d.data() as Artifact), id: d.id })))
+      try {
+        const [laddersSnap, milestoneSnap, artifactsSnap] = await Promise.all([
+          getDocs(laddersCollection(familyId)),
+          getDocs(milestoneProgressCollection(familyId)),
+          getDocs(artifactsCollection(familyId)),
+        ])
+        if (cancelled) return
+        setLadders(laddersSnap.docs.map((d) => ({ ...(d.data() as Ladder), id: d.id })))
+        setMilestoneProgress(
+          milestoneSnap.docs.map((d) => ({
+            ...(d.data() as MilestoneProgress),
+            id: d.id,
+            status: (d.data() as MilestoneProgress).status ?? 'locked',
+          })),
+        )
+        setArtifacts(artifactsSnap.docs.map((d) => ({ ...(d.data() as Artifact), id: d.id })))
+      } catch (err) {
+        console.error('Failed to load ladders', err)
+        setSnackbar({ open: true, severity: 'error', message: 'Failed to load ladders.' })
+      }
       setIsLoading(false)
     }
     load()
     return () => { cancelled = true }
   }, [familyId])
+
+  const selectedChild = useMemo(
+    () => children.find((c) => c.id === selectedChildId),
+    [children, selectedChildId],
+  )
 
   const laddersForChild = useMemo(
     () => ladders.filter((l) => isLadderForChild(l, selectedChildId)),
@@ -166,6 +190,40 @@ export default function LaddersPage() {
         a.tags?.ladderRef?.rungId === selectedRung.rungId,
     )
   }, [artifacts, selectedChildId, selectedRung])
+
+  const handleCreateDefaults = async () => {
+    if (!selectedChildId || seeding) return
+    setSeeding(true)
+    try {
+      const defaults = createDefaultLadders(selectedChildId)
+      // Only create ladders that don't already exist locally
+      const existing = new Set(laddersForChild.map((l) => l.id))
+      const toCreate = defaults.filter((l) => !existing.has(l.id))
+      if (toCreate.length === 0) {
+        setSnackbar({ open: true, severity: 'success', message: 'Default ladders already exist.' })
+        setSeeding(false)
+        return
+      }
+      await Promise.all(
+        toCreate.map((ladder) =>
+          setDoc(doc(laddersCollection(familyId), ladder.id), ladder),
+        ),
+      )
+      setLadders((prev) => [...prev, ...toCreate])
+      setSnackbar({
+        open: true,
+        severity: 'success',
+        message: `Created ${toCreate.length} default ladder${toCreate.length > 1 ? 's' : ''}.`,
+      })
+    } catch (err) {
+      console.error('Failed to create default ladders', err)
+      setSnackbar({ open: true, severity: 'error', message: 'Failed to create ladders.' })
+    }
+    setSeeding(false)
+  }
+
+  const handleCloseSnackbar = () =>
+    setSnackbar((prev) => ({ ...prev, open: false }))
 
   if (isLoading) {
     return (
@@ -329,23 +387,12 @@ export default function LaddersPage() {
               {canEdit && (
                 <Button
                   variant="contained"
-                  onClick={async () => {
-                    const literacy = createLiteracyLadder(selectedChildId)
-                    const math = createMathLadder(selectedChildId)
-                    await Promise.all([
-                      setDoc(
-                        doc(laddersCollection(familyId), literacy.id),
-                        literacy,
-                      ),
-                      setDoc(
-                        doc(laddersCollection(familyId), math.id),
-                        math,
-                      ),
-                    ])
-                    setLadders((prev) => [...prev, literacy, math])
-                  }}
+                  disabled={seeding}
+                  onClick={handleCreateDefaults}
                 >
-                  Create Starter Ladders
+                  {seeding
+                    ? 'Creating...'
+                    : `Create Default Ladders for ${selectedChild?.name ?? 'Child'}`}
                 </Button>
               )}
             </Stack>
@@ -489,6 +536,22 @@ export default function LaddersPage() {
           </>
         )}
       </Dialog>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={handleCloseSnackbar}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Page>
   )
 }
