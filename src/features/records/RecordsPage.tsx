@@ -27,16 +27,15 @@ import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
-  childrenCollection,
   db,
   daysCollection,
   evaluationsCollection,
   hoursAdjustmentsCollection,
   hoursCollection,
 } from '../../core/firebase/firestore'
+import { useChildren } from '../../core/hooks/useChildren'
 import type {
   Artifact,
-  Child,
   DayLog,
   Evaluation,
   HoursAdjustment,
@@ -77,7 +76,7 @@ export default function RecordsPage() {
   const [hoursEntries, setHoursEntries] = useState<HoursEntry[]>([])
   const [dayLogs, setDayLogs] = useState<DayLog[]>([])
   const [adjustments, setAdjustments] = useState<HoursAdjustment[]>([])
-  const [children, setChildren] = useState<Child[]>([])
+  const { children } = useChildren()
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [evaluations, setEvaluations] = useState<Evaluation[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -112,12 +111,11 @@ export default function RecordsPage() {
       where('monthStart', '<=', endDate),
     )
 
-    const [hoursSnap, daysSnap, adjSnap, childSnap, artSnap, evalSnap] =
+    const [hoursSnap, daysSnap, adjSnap, artSnap, evalSnap] =
       await Promise.all([
         getDocs(hoursQuery),
         getDocs(daysQuery),
         getDocs(adjQuery),
-        getDocs(childrenCollection(familyId)),
         getDocs(
           query(
             artifactsCollection(familyId),
@@ -141,7 +139,6 @@ export default function RecordsPage() {
         const data = d.data() as HoursAdjustment
         return { ...data, id: d.id }
       }),
-      children: childSnap.docs.map((d) => ({ ...d.data(), id: d.id })),
       artifacts: artSnap.docs.map((d) => ({ ...d.data(), id: d.id })),
       evaluations: evalSnap.docs.map((d) => {
         const data = d.data() as Evaluation
@@ -154,7 +151,6 @@ export default function RecordsPage() {
     setHoursEntries(data.hoursEntries)
     setDayLogs(data.dayLogs)
     setAdjustments(data.adjustments)
-    setChildren(data.children)
     setArtifacts(data.artifacts)
     setEvaluations(data.evaluations)
     setIsLoading(false)

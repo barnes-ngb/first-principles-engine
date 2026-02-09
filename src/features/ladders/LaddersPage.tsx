@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -18,16 +18,15 @@ import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useChildren } from '../../core/hooks/useChildren'
 import { useProfile } from '../../core/profile/useProfile'
 import {
   artifactsCollection,
-  childrenCollection,
   laddersCollection,
   milestoneProgressCollection,
 } from '../../core/firebase/firestore'
 import type {
   Artifact,
-  Child,
   Ladder,
   MilestoneProgress,
   Rung,
@@ -64,13 +63,18 @@ const streamForLadder = (ladder: Ladder, childId: string): StreamId | undefined 
 export default function LaddersPage() {
   const familyId = useFamilyId()
   const { canEdit, profile } = useProfile()
+  const {
+    children,
+    selectedChildId,
+    setSelectedChildId,
+    isLoading: childrenLoading,
+    addChild,
+  } = useChildren()
   const isKid = profile === UserProfile.Lincoln || profile === UserProfile.London
 
-  const [children, setChildren] = useState<Child[]>([])
   const [ladders, setLadders] = useState<Ladder[]>([])
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
-  const [selectedChildId, setSelectedChildId] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [selectedRung, setSelectedRung] = useState<{
     ladder: Ladder
@@ -78,49 +82,29 @@ export default function LaddersPage() {
     rungId: string
   } | null>(null)
 
-  const fetchData = useCallback(async () => {
-    const [childrenSnap, laddersSnap, milestoneSnap, artifactsSnap] = await Promise.all([
-      getDocs(childrenCollection(familyId)),
-      getDocs(laddersCollection(familyId)),
-      getDocs(milestoneProgressCollection(familyId)),
-      getDocs(artifactsCollection(familyId)),
-    ])
-
-    return {
-      children: childrenSnap.docs.map((d) => ({ ...(d.data() as Child), id: d.id })),
-      ladders: laddersSnap.docs.map((d) => ({ ...(d.data() as Ladder), id: d.id })),
-      milestones: milestoneSnap.docs.map((d) => ({
-        ...(d.data() as MilestoneProgress),
-        id: d.id,
-        status: (d.data() as MilestoneProgress).status ?? 'locked',
-      })),
-      artifacts: artifactsSnap.docs.map((d) => ({ ...(d.data() as Artifact), id: d.id })),
-    }
-  }, [familyId])
-
   useEffect(() => {
     let cancelled = false
-    fetchData().then((data) => {
+    const load = async () => {
+      const [laddersSnap, milestoneSnap, artifactsSnap] = await Promise.all([
+        getDocs(laddersCollection(familyId)),
+        getDocs(milestoneProgressCollection(familyId)),
+        getDocs(artifactsCollection(familyId)),
+      ])
       if (cancelled) return
-      setChildren(data.children)
-      setLadders(data.ladders)
-      setMilestoneProgress(data.milestones)
-      setArtifacts(data.artifacts)
-
-      // Auto-select child matching profile, or first child
-      if (profile === UserProfile.Lincoln) {
-        const link = data.children.find((c) => c.name?.toLowerCase() === 'lincoln')
-        setSelectedChildId((cur) => cur || link?.id || data.children[0]?.id || '')
-      } else if (profile === UserProfile.London) {
-        const lon = data.children.find((c) => c.name?.toLowerCase() === 'london')
-        setSelectedChildId((cur) => cur || lon?.id || data.children[0]?.id || '')
-      } else {
-        setSelectedChildId((cur) => cur || data.children[0]?.id || '')
-      }
+      setLadders(laddersSnap.docs.map((d) => ({ ...(d.data() as Ladder), id: d.id })))
+      setMilestoneProgress(
+        milestoneSnap.docs.map((d) => ({
+          ...(d.data() as MilestoneProgress),
+          id: d.id,
+          status: (d.data() as MilestoneProgress).status ?? 'locked',
+        })),
+      )
+      setArtifacts(artifactsSnap.docs.map((d) => ({ ...(d.data() as Artifact), id: d.id })))
       setIsLoading(false)
-    })
+    }
+    load()
     return () => { cancelled = true }
-  }, [fetchData, profile])
+  }, [familyId])
 
   const laddersForChild = useMemo(
     () => ladders.filter((l) => isLadderForChild(l, selectedChildId)),
@@ -331,11 +315,8 @@ export default function LaddersPage() {
         children={children}
         selectedChildId={selectedChildId}
         onSelect={setSelectedChildId}
-        onChildAdded={(child) => {
-          setChildren((prev) => [...prev, child])
-          setSelectedChildId(child.id)
-        }}
-        isLoading={isLoading}
+        onChildAdded={addChild}
+        isLoading={childrenLoading}
       />
 
       {selectedChildId && (

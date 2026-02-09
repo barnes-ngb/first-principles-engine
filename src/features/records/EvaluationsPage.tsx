@@ -26,10 +26,10 @@ import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
-  childrenCollection,
   evaluationsCollection,
 } from '../../core/firebase/firestore'
-import type { Artifact, Child, Evaluation } from '../../core/types/domain'
+import { useChildren } from '../../core/hooks/useChildren'
+import type { Artifact, Evaluation } from '../../core/types/domain'
 import { getMonthLabel, getMonthRange } from './records.logic'
 
 const currentDate = new Date()
@@ -54,8 +54,7 @@ export default function EvaluationsPage() {
   const familyId = useFamilyId()
   const [year, setYear] = useState(currentYear)
   const [month, setMonth] = useState(currentMonth)
-  const [children, setChildren] = useState<Child[]>([])
-  const [selectedChildId, setSelectedChildId] = useState('')
+  const { children, selectedChildId, setSelectedChildId, isLoading: childrenLoading, addChild } = useChildren()
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [existingEval, setExistingEval] = useState<Evaluation | null>(null)
   const [draft, setDraft] = useState<EvaluationDraft>(emptyDraft())
@@ -68,19 +67,6 @@ export default function EvaluationsPage() {
   )
 
   const monthLabel = useMemo(() => getMonthLabel(year, month), [year, month])
-
-  // Load children
-  useEffect(() => {
-    const load = async () => {
-      const snap = await getDocs(childrenCollection(familyId))
-      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
-      setChildren(list)
-      if (list.length > 0 && !selectedChildId) {
-        setSelectedChildId(list[0].id)
-      }
-    }
-    void load()
-  }, [familyId, selectedChildId])
 
   // Load artifacts for the month
   useEffect(() => {
@@ -250,6 +236,8 @@ export default function EvaluationsPage() {
               children={children}
               selectedChildId={selectedChildId}
               onSelect={setSelectedChildId}
+              onChildAdded={addChild}
+              isLoading={childrenLoading}
             />
           </Stack>
 

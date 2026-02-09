@@ -6,7 +6,7 @@ import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDocs, updateDoc } from 'firebase/firestore'
+import { addDoc, doc, updateDoc } from 'firebase/firestore'
 
 import AudioRecorder from '../../components/AudioRecorder'
 import ChildSelector from '../../components/ChildSelector'
@@ -16,13 +16,12 @@ import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
-  childrenCollection,
 } from '../../core/firebase/firestore'
 import {
   generateFilename,
   uploadArtifactFile,
 } from '../../core/firebase/upload'
-import type { Child } from '../../core/types/domain'
+import { useChildren } from '../../core/hooks/useChildren'
 import {
   EngineStage,
   EvidenceType,
@@ -55,42 +54,22 @@ const defaultFormState = (
 
 export default function LabModePage() {
   const familyId = useFamilyId()
-  const [children, setChildren] = useState<Child[]>([])
+  const { children, selectedChildId, isLoading: childrenLoading, addChild } = useChildren()
   const [selectedStage, setSelectedStage] = useState<EngineStage | null>(null)
   const [mediaUploading, setMediaUploading] = useState(false)
   const [artifactForm, setArtifactForm] = useState<ArtifactFormState>(() =>
     defaultFormState(EngineStage.Wonder),
   )
 
-  const placeholderChildren = [
-    { id: 'placeholder-1', name: 'Sample Child 1' },
-    { id: 'placeholder-2', name: 'Sample Child 2' },
-  ]
-  const selectableChildren = children.length > 0 ? children : placeholderChildren
-
+  // Sync hook's auto-selected child into the artifact form
   useEffect(() => {
-    let isMounted = true
-
-    const loadChildren = async () => {
-      const snapshot = await getDocs(childrenCollection(familyId))
-      if (!isMounted) return
-      const loadedChildren = snapshot.docs.map((docSnapshot) => ({
-        ...(docSnapshot.data() as Child),
-        id: docSnapshot.id,
-      }))
-      setChildren(loadedChildren)
-      // Auto-select if there is exactly one child
-      if (loadedChildren.length === 1) {
-        setArtifactForm((prev) => ({ ...prev, childId: loadedChildren[0].id }))
-      }
+    if (selectedChildId) {
+      setArtifactForm((prev) => {
+        if (prev.childId) return prev
+        return { ...prev, childId: selectedChildId }
+      })
     }
-
-    loadChildren()
-
-    return () => {
-      isMounted = false
-    }
-  }, [familyId])
+  }, [selectedChildId])
 
   const handleStageSelect = useCallback((stage: EngineStage) => {
     setSelectedStage(stage)
@@ -214,9 +193,11 @@ export default function LabModePage() {
     <Page>
       <Stack spacing={2}>
         <ChildSelector
-          children={selectableChildren as Child[]}
+          children={children}
           selectedChildId={artifactForm.childId}
           onSelect={handleChildSelect}
+          onChildAdded={addChild}
+          isLoading={childrenLoading}
         />
         {selectedStage ? (
           <SectionCard title={`Capture ${selectedStage} Artifact`}>

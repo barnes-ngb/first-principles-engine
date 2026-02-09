@@ -14,16 +14,15 @@ import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useChildren } from '../../core/hooks/useChildren'
 import { useProfile } from '../../core/profile/useProfile'
 import {
-  childrenCollection,
   daysCollection,
   sessionsCollection,
   weeksCollection,
   weeklyScoresCollection,
 } from '../../core/firebase/firestore'
 import type {
-  Child,
   DayLog,
   GoalResult,
   ScoreMetric,
@@ -51,8 +50,13 @@ export default function ScoreboardPage() {
   const weekStart = weekRange.start
   const weekEnd = weekRange.end
 
-  const [children, setChildren] = useState<Child[]>([])
-  const [selectedChildId, setSelectedChildId] = useState('')
+  const {
+    children,
+    selectedChildId,
+    setSelectedChildId,
+    isLoading: childrenLoading,
+    addChild,
+  } = useChildren()
   const [sessions, setSessions] = useState<Session[]>([])
   const [dayLogs, setDayLogs] = useState<DayLog[]>([])
   const [weeklyScore, setWeeklyScore] = useState<WeeklyScore | null>(null)
@@ -60,37 +64,26 @@ export default function ScoreboardPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
 
-  const fetchData = useCallback(async () => {
-    const [childrenSnap, sessionsSnap, dayLogsSnap] = await Promise.all([
-      getDocs(childrenCollection(familyId)),
-      getDocs(sessionsCollection(familyId)),
-      getDocs(daysCollection(familyId)),
-    ])
-    return {
-      children: childrenSnap.docs.map((d) => ({
-        ...(d.data() as Child),
-        id: d.id,
-      })),
-      sessions: sessionsSnap.docs.map((d) => ({
-        ...(d.data() as Session),
-        id: d.id,
-      })),
-      dayLogs: dayLogsSnap.docs.map((d) => d.data()),
-    }
-  }, [familyId])
-
   useEffect(() => {
     let cancelled = false
-    fetchData().then((data) => {
+    const load = async () => {
+      const [sessionsSnap, dayLogsSnap] = await Promise.all([
+        getDocs(sessionsCollection(familyId)),
+        getDocs(daysCollection(familyId)),
+      ])
       if (cancelled) return
-      setChildren(data.children)
-      setSessions(data.sessions)
-      setDayLogs(data.dayLogs)
-      setSelectedChildId((cur) => cur || data.children[0]?.id || '')
+      setSessions(
+        sessionsSnap.docs.map((d) => ({
+          ...(d.data() as Session),
+          id: d.id,
+        })),
+      )
+      setDayLogs(dayLogsSnap.docs.map((d) => d.data()))
       setIsLoading(false)
-    })
+    }
+    load()
     return () => { cancelled = true }
-  }, [fetchData])
+  }, [familyId])
 
   // Load weekly score + goals for selected child
   useEffect(() => {
@@ -325,14 +318,11 @@ export default function ScoreboardPage() {
         children={children}
         selectedChildId={selectedChildId}
         onSelect={setSelectedChildId}
-        onChildAdded={(child) => {
-          setChildren((prev) => [...prev, child])
-          setSelectedChildId(child.id)
-        }}
-        isLoading={isLoading}
+        onChildAdded={addChild}
+        isLoading={childrenLoading}
       />
 
-      {!isLoading && selectedChildId && (
+      {!childrenLoading && !isLoading && selectedChildId && (
         <>
           {/* XP Summary */}
           <SectionCard title="XP Score">

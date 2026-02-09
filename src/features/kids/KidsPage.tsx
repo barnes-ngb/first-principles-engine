@@ -21,13 +21,12 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { useProfile } from '../../core/profile/useProfile'
 import {
   artifactsCollection,
-  childrenCollection,
   laddersCollection,
   milestoneProgressCollection,
 } from '../../core/firebase/firestore'
+import { useChildren } from '../../core/hooks/useChildren'
 import type {
   Artifact,
-  Child,
   Ladder,
   MilestoneProgress,
   Rung,
@@ -85,28 +84,22 @@ const isLadderForChild = (ladder: Ladder, childId: string) => {
 export default function KidsPage() {
   const familyId = useFamilyId()
   const { canEdit } = useProfile()
-  const [children, setChildren] = useState<Child[]>([])
+  const { children, selectedChildId, setSelectedChildId, isLoading: childrenLoading, addChild } = useChildren()
   const [ladders, setLadders] = useState<Ladder[]>([])
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
-  const [selectedChildId, setSelectedChildId] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [selectedRung, setSelectedRung] = useState<SelectedRung | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 
   const fetchData = useCallback(async () => {
-    const [childrenSnapshot, laddersSnapshot, milestoneSnapshot, artifactsSnapshot] =
+    const [laddersSnapshot, milestoneSnapshot, artifactsSnapshot] =
       await Promise.all([
-        getDocs(childrenCollection(familyId)),
         getDocs(laddersCollection(familyId)),
         getDocs(milestoneProgressCollection(familyId)),
         getDocs(artifactsCollection(familyId)),
       ])
 
-    const loadedChildren = childrenSnapshot.docs.map((docSnapshot) => {
-      const data = docSnapshot.data() as Child
-      return { ...data, id: data.id ?? docSnapshot.id }
-    })
     const loadedLadders = laddersSnapshot.docs.map((docSnapshot) => {
       const data = docSnapshot.data() as Ladder
       return { ...data, id: data.id ?? docSnapshot.id }
@@ -149,18 +142,16 @@ export default function KidsPage() {
       }, {}),
     )
 
-    return { loadedChildren, loadedLadders, dedupedMilestones, loadedArtifacts }
+    return { loadedLadders, dedupedMilestones, loadedArtifacts }
   }, [familyId])
 
   useEffect(() => {
     let cancelled = false
     fetchData().then((data) => {
       if (!cancelled) {
-        setChildren(data.loadedChildren)
         setLadders(data.loadedLadders)
         setMilestoneProgress(data.dedupedMilestones)
         setArtifacts(data.loadedArtifacts)
-        setSelectedChildId((current) => current || data.loadedChildren[0]?.id || '')
         setIsLoading(false)
       }
     })
@@ -373,10 +364,11 @@ export default function KidsPage() {
         children={children}
         selectedChildId={selectedChildId}
         onSelect={setSelectedChildId}
-        isLoading={isLoading}
+        onChildAdded={addChild}
+        isLoading={childrenLoading || isLoading}
         emptyMessage="No children added yet. Add a child to see ladders."
       />
-      {!isLoading && activeChild && (
+      {!childrenLoading && !isLoading && activeChild && (
         <Stack spacing={3}>
           {Object.entries(laddersByDomain).length === 0 ? (
             <SectionCard title="Ladders">
