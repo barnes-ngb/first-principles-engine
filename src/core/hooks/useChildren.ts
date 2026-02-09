@@ -8,7 +8,7 @@ import type { Child } from '../types/domain'
 import { UserProfile } from '../types/enums'
 
 /** Canonical child names that correspond to profiles. */
-const PROFILE_CHILDREN: Array<{ profile: UserProfile; name: string }> = [
+export const PROFILE_CHILDREN: Array<{ profile: UserProfile; name: string }> = [
   { profile: UserProfile.Lincoln, name: 'Lincoln' },
   { profile: UserProfile.London, name: 'London' },
 ]
