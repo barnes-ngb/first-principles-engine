@@ -24,7 +24,6 @@ import {
   writeBatch,
 } from 'firebase/firestore'
 
-import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -36,7 +35,7 @@ import {
   hoursAdjustmentsCollection,
   hoursCollection,
 } from '../../core/firebase/firestore'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type {
   Artifact,
   DayLog,
@@ -51,6 +50,7 @@ import { parseDateFromDocId } from '../today/daylog.model'
 import {
   buildComplianceZip,
   computeHoursSummary,
+  deriveChildIdFromDocId,
   generateDailyLogCsv,
   generateEvaluationMarkdown,
   generateHoursSummaryCsv,
@@ -81,39 +81,35 @@ export default function RecordsPage() {
   const [allHoursEntries, setAllHoursEntries] = useState<HoursEntry[]>([])
   const [allDayLogs, setAllDayLogs] = useState<DayLog[]>([])
   const [allAdjustments, setAllAdjustments] = useState<HoursAdjustment[]>([])
-  const { children, selectedChildId, setSelectedChildId } = useChildren()
+  const { activeChildId, activeChild, children } = useActiveChild()
   const [allArtifacts, setAllArtifacts] = useState<Artifact[]>([])
   const [allEvaluations, setAllEvaluations] = useState<Evaluation[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
   const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
 
-  const selectedChild = useMemo(
-    () => children.find((c) => c.id === selectedChildId),
-    [children, selectedChildId],
-  )
-  const childNameLower = selectedChild?.name.toLowerCase() ?? ''
+  const childNameLower = activeChild?.name.toLowerCase() ?? ''
 
-  // Filter data by selected child
+  // Filter data by active child
   const hoursEntries = useMemo(
-    () => allHoursEntries.filter((e) => e.childId === selectedChildId),
-    [allHoursEntries, selectedChildId],
+    () => allHoursEntries.filter((e) => e.childId === activeChildId),
+    [allHoursEntries, activeChildId],
   )
   const dayLogs = useMemo(
-    () => allDayLogs.filter((l) => l.childId === selectedChildId),
-    [allDayLogs, selectedChildId],
+    () => allDayLogs.filter((l) => l.childId === activeChildId),
+    [allDayLogs, activeChildId],
   )
   const adjustments = useMemo(
-    () => allAdjustments.filter((a) => !a.childId || a.childId === selectedChildId),
-    [allAdjustments, selectedChildId],
+    () => allAdjustments.filter((a) => !a.childId || a.childId === activeChildId),
+    [allAdjustments, activeChildId],
   )
   const artifacts = useMemo(
-    () => allArtifacts.filter((a) => a.childId === selectedChildId),
-    [allArtifacts, selectedChildId],
+    () => allArtifacts.filter((a) => a.childId === activeChildId),
+    [allArtifacts, activeChildId],
   )
   const evaluations = useMemo(
-    () => allEvaluations.filter((e) => e.childId === selectedChildId),
-    [allEvaluations, selectedChildId],
+    () => allEvaluations.filter((e) => e.childId === activeChildId),
+    [allEvaluations, activeChildId],
   )
 
   // Adjustment form
@@ -163,11 +159,20 @@ export default function RecordsPage() {
     return {
       hoursEntries: hoursSnap.docs.map((d) => {
         const data = d.data() as HoursEntry
-        return { ...data, id: data.id ?? d.id, date: data.date ?? d.id }
+        return {
+          ...data,
+          id: data.id ?? d.id,
+          date: data.date ?? d.id,
+          childId: data.childId ?? (data.dayLogId ? deriveChildIdFromDocId(data.dayLogId) : undefined),
+        }
       }),
       dayLogs: daysSnap.docs.map((d) => {
         const data = d.data() as DayLog
-        return { ...data, date: data.date ?? parseDateFromDocId(d.id) }
+        return {
+          ...data,
+          date: data.date ?? parseDateFromDocId(d.id),
+          childId: data.childId ?? deriveChildIdFromDocId(d.id) ?? '',
+        }
       }),
       adjustments: adjSnap.docs.map((d) => {
         const data = d.data() as HoursAdjustment
@@ -206,8 +211,8 @@ export default function RecordsPage() {
   }, [fetchRecords, applyRecords])
 
   const summary = useMemo(
-    () => computeHoursSummary(dayLogs, hoursEntries, adjustments),
-    [dayLogs, hoursEntries, adjustments],
+    () => computeHoursSummary(dayLogs, hoursEntries, adjustments, activeChildId),
+    [dayLogs, hoursEntries, adjustments, activeChildId],
   )
 
   const hasHoursEntries = hoursEntries.length > 0
@@ -254,7 +259,7 @@ export default function RecordsPage() {
     setAdjSaving(true)
     try {
       await addDoc(hoursAdjustmentsCollection(familyId), {
-        childId: selectedChildId || undefined,
+        childId: activeChildId,
         date: adjDate,
         minutes: Number(adjMinutes),
         reason: adjReason.trim(),
@@ -273,7 +278,7 @@ export default function RecordsPage() {
     } finally {
       setAdjSaving(false)
     }
-  }, [adjDate, adjMinutes, adjReason, adjSubject, familyId, selectedChildId, fetchRecords, applyRecords])
+  }, [adjDate, adjMinutes, adjReason, adjSubject, familyId, activeChildId, fetchRecords, applyRecords])
 
   // Export handlers
   const filePrefix = childNameLower ? `${childNameLower}-` : ''
@@ -335,7 +340,7 @@ export default function RecordsPage() {
         children: children.map((c) => ({ id: c.id, name: c.name })),
         startDate,
         endDate,
-        childName: selectedChild?.name,
+        childName: activeChild?.name ?? '',
       })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -351,7 +356,7 @@ export default function RecordsPage() {
     } finally {
       setIsZipping(false)
     }
-  }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, selectedChild, filePrefix, startDate, endDate])
+  }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, activeChild, filePrefix, startDate, endDate])
 
   const hasData = hasHoursEntries || dayLogs.length > 0
 
@@ -380,18 +385,28 @@ export default function RecordsPage() {
               InputLabelProps={{ shrink: true }}
             />
           </Stack>
-          <ChildSelector
-            children={children}
-            selectedChildId={selectedChildId}
-            onSelect={setSelectedChildId}
-          />
-          <Typography color="text.secondary" variant="body2">
-            Showing records for {selectedChild?.name ?? 'child'} from {startDate} through {endDate}.
-          </Typography>
+          {!activeChildId ? (
+            <Stack spacing={2} alignItems="center" sx={{ py: 4 }}>
+              <Typography variant="h6" color="text.secondary">
+                Select a profile to view Records
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Use the profile menu to choose a child, or visit Settings.
+              </Typography>
+            </Stack>
+          ) : null}
 
-          {isLoading ? (
+          {activeChildId && (
+            <Typography color="text.secondary" variant="body2">
+              Showing records for {activeChild?.name ?? 'child'} from {startDate} through {endDate}.
+            </Typography>
+          )}
+
+          {activeChildId && isLoading && (
             <Typography color="text.secondary">Loading records...</Typography>
-          ) : (
+          )}
+
+          {activeChildId && !isLoading && (
             <Stack spacing={1}>
               <Typography variant="subtitle1">
                 Total hours: {formatHours(summary.totalMinutes)}
@@ -428,7 +443,7 @@ export default function RecordsPage() {
       </SectionCard>
 
       {/* Hours Breakdown by Subject */}
-      {!isLoading && hasData && (
+      {activeChildId && !isLoading && hasData && (
         <SectionCard title="Hours by Subject">
           <Table size="small">
             <TableHead>
@@ -467,7 +482,7 @@ export default function RecordsPage() {
       )}
 
       {/* Manual Adjustment */}
-      <SectionCard title="Manual Hours Adjustment">
+      {activeChildId && <SectionCard title="Manual Hours Adjustment">
         <Stack spacing={2}>
           <Typography variant="body2" color="text.secondary">
             Add or subtract hours manually. Use negative minutes to reduce.
@@ -558,10 +573,10 @@ export default function RecordsPage() {
             </>
           )}
         </Stack>
-      </SectionCard>
+      </SectionCard>}
 
       {/* Export Pack */}
-      <SectionCard title="Export Pack">
+      {activeChildId && <SectionCard title="Export Pack">
         <Stack spacing={2}>
           <Typography variant="body2" color="text.secondary">
             Download a single zip with all compliance records, or use the
@@ -613,7 +628,7 @@ export default function RecordsPage() {
             </Button>
           </Stack>
         </Stack>
-      </SectionCard>
+      </SectionCard>}
 
       <Snackbar
         open={snackMessage !== null}

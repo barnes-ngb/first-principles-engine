@@ -11,13 +11,16 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { getDocs, query, where } from 'firebase/firestore'
 
+import Alert from '@mui/material/Alert'
+import Snackbar from '@mui/material/Snackbar'
+
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
 } from '../../core/firebase/firestore'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Artifact } from '../../core/types/domain'
 import {
   generatePortfolioMarkdown,
@@ -34,10 +37,17 @@ export default function PortfolioPage() {
   const familyId = useFamilyId()
   const [year, setYear] = useState(currentYear)
   const [month, setMonth] = useState(currentMonth)
-  const { children } = useChildren()
-  const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const { activeChildId, activeChild, children } = useActiveChild()
+  const [allArtifacts, setAllArtifacts] = useState<Artifact[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [showAutoSuggest, setShowAutoSuggest] = useState(false)
+  const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
+
+  // Filter artifacts by active child
+  const artifacts = useMemo(
+    () => activeChildId ? allArtifacts.filter((a) => a.childId === activeChildId) : allArtifacts,
+    [allArtifacts, activeChildId],
+  )
 
   const { start: monthStart, end: monthEnd } = useMemo(
     () => getMonthRange(year, month),
@@ -49,16 +59,20 @@ export default function PortfolioPage() {
   // Load artifacts for the month
   useEffect(() => {
     const load = async () => {
-      const q = query(
-        artifactsCollection(familyId),
-        where('createdAt', '>=', monthStart),
-        where('createdAt', '<=', monthEnd + 'T23:59:59'),
-      )
-      const snap = await getDocs(q)
-      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
-      setArtifacts(list)
-      setSelectedIds(new Set())
-      setShowAutoSuggest(false)
+      try {
+        const q = query(
+          artifactsCollection(familyId),
+          where('createdAt', '>=', monthStart),
+          where('createdAt', '<=', monthEnd + 'T23:59:59'),
+        )
+        const snap = await getDocs(q)
+        const list = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
+        setAllArtifacts(list)
+        setSelectedIds(new Set())
+        setShowAutoSuggest(false)
+      } catch (err) {
+        setSnackMessage({ text: `Failed to load artifacts: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+      }
     }
     void load()
   }, [familyId, monthStart, monthEnd])
@@ -110,12 +124,13 @@ export default function PortfolioPage() {
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.setAttribute('download', `portfolio-${monthStart}-to-${monthEnd}.md`)
+    const prefix = activeChild ? `${activeChild.name.toLowerCase()}-` : ''
+    link.setAttribute('download', `${prefix}portfolio-${monthStart}-to-${monthEnd}.md`)
     document.body.appendChild(link)
     link.click()
     link.remove()
     window.URL.revokeObjectURL(url)
-  }, [artifacts, selectedIds, children, monthStart, monthEnd])
+  }, [artifacts, selectedIds, children, activeChild, monthStart, monthEnd])
 
   const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1)
   const yearOptions = [currentYear - 1, currentYear, currentYear + 1]
@@ -155,11 +170,23 @@ export default function PortfolioPage() {
             </FormControl>
           </Stack>
 
-          <Typography variant="subtitle2" color="text.secondary">
-            {artifacts.length} artifacts in {monthLabel} — {selectedIds.size}{' '}
-            selected for portfolio
-          </Typography>
+          {!activeChildId ? (
+            <Stack spacing={2} alignItems="center" sx={{ py: 4 }}>
+              <Typography variant="h6" color="text.secondary">
+                Select a profile to view Portfolio
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Use the profile menu to choose a child, or visit Settings.
+              </Typography>
+            </Stack>
+          ) : (
+            <Typography variant="subtitle2" color="text.secondary">
+              {artifacts.length} artifacts for {activeChild?.name ?? 'child'} in {monthLabel} — {selectedIds.size}{' '}
+              selected for portfolio
+            </Typography>
+          )}
 
+          {activeChildId && <>
           <Stack direction="row" spacing={1}>
             <Button size="small" variant="outlined" onClick={handleAutoSuggest}>
               Auto-Suggest Best
@@ -269,8 +296,25 @@ export default function PortfolioPage() {
           >
             Export Portfolio Markdown ({selectedIds.size} artifacts)
           </Button>
+          </>}
         </Stack>
       </SectionCard>
+
+      <Snackbar
+        open={snackMessage !== null}
+        autoHideDuration={4000}
+        onClose={() => setSnackMessage(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackMessage(null)}
+          severity={snackMessage?.severity ?? 'success'}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackMessage?.text}
+        </Alert>
+      </Snackbar>
     </Page>
   )
 }
