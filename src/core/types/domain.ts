@@ -261,6 +261,7 @@ export interface Evaluation {
 
 export interface HoursAdjustment {
   id?: string
+  childId?: string
   date: string
   minutes: number
   reason: string

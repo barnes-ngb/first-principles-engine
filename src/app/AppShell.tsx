@@ -14,7 +14,7 @@ const navItems = [
   { label: 'Scoreboard', to: '/scoreboard' },
   { label: 'Dad Lab', to: '/projects' },
   { label: 'Ladders', to: '/ladders' },
-  { label: 'Today', to: '/today', parentOnly: true },
+  { label: 'Today', to: '/today' },
   { label: 'This Week', to: '/week', parentOnly: true },
   { label: 'Engine', to: '/engine', parentOnly: true },
   { label: 'Records', to: '/records', parentOnly: true },

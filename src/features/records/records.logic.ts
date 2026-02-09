@@ -372,6 +372,7 @@ export type CompliancePackInput = {
   children: Array<{ id: string; name: string }>
   startDate: string
   endDate: string
+  childName?: string
 }
 
 export async function buildComplianceZip(
@@ -386,30 +387,32 @@ export async function buildComplianceZip(
     children,
     startDate,
     endDate,
+    childName,
   } = input
 
   const zip = new JSZip()
+  const prefix = childName ? `${childName.toLowerCase()}-` : ''
 
   zip.file(
-    `hours-summary-${startDate}-to-${endDate}.csv`,
+    `${prefix}hours-summary-${startDate}-to-${endDate}.csv`,
     generateHoursSummaryCsv(summary),
   )
 
   zip.file(
-    `daily-logs-${startDate}-to-${endDate}.csv`,
+    `${prefix}daily-logs-${startDate}-to-${endDate}.csv`,
     generateDailyLogCsv(dayLogs, hoursEntries),
   )
 
   if (evaluations.length > 0) {
     zip.file(
-      `evaluations-${startDate}-to-${endDate}.md`,
+      `${prefix}evaluations-${startDate}-to-${endDate}.md`,
       generateEvaluationMarkdown(evaluations, children, artifacts),
     )
   }
 
   if (artifacts.length > 0) {
     zip.file(
-      `portfolio-${startDate}-to-${endDate}.md`,
+      `${prefix}portfolio-${startDate}-to-${endDate}.md`,
       generatePortfolioMarkdown(artifacts, children, startDate, endDate),
     )
   }
