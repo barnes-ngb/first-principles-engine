@@ -10,6 +10,27 @@ import type {
 import { LearningLocation, SubjectBucket } from '../../core/types/enums'
 import { formatDateForCsv } from '../../lib/format'
 
+// ─── Child ID Derivation ────────────────────────────────────────────────────
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * Derive a childId from a Firestore document ID that encodes both date and
+ * childId separated by `_`.  Handles both `${date}_${childId}` and
+ * `${childId}_${date}` formats.
+ */
+export function deriveChildIdFromDocId(docId: string): string | undefined {
+  const idx = docId.indexOf('_')
+  if (idx === -1) return undefined
+
+  const first = docId.slice(0, idx)
+  const rest = docId.slice(idx + 1)
+
+  if (DATE_RE.test(first) && rest.length > 0) return rest
+  if (DATE_RE.test(rest) && first.length > 0) return first
+  return undefined
+}
+
 // ─── Hours Summary ───────────────────────────────────────────────────────────
 
 const coreBuckets = new Set<SubjectBucket>([
@@ -45,14 +66,26 @@ export const computeHoursSummary = (
   dayLogs: DayLog[],
   hoursEntries: HoursEntry[],
   adjustments: HoursAdjustment[],
+  childId?: string,
 ): HoursSummary => {
+  // When childId is provided, enforce filtering as a safety net
+  const filteredLogs = childId
+    ? dayLogs.filter((l) => l.childId === childId)
+    : dayLogs
+  const filteredEntries = childId
+    ? hoursEntries.filter((e) => e.childId === childId)
+    : hoursEntries
+  const filteredAdj = childId
+    ? adjustments.filter((a) => !a.childId || a.childId === childId)
+    : adjustments
+
   const bySubjectMap = new Map<string, { total: number; home: number }>()
   const byDate: Record<string, number> = {}
 
-  const useEntries = hoursEntries.length > 0
+  const useEntries = filteredEntries.length > 0
 
   if (useEntries) {
-    for (const entry of hoursEntries) {
+    for (const entry of filteredEntries) {
       const minutes = entryMinutes(entry)
       if (minutes <= 0) continue
       const bucket = entry.subjectBucket ?? 'Other'
@@ -63,7 +96,7 @@ export const computeHoursSummary = (
       byDate[entry.date] = (byDate[entry.date] ?? 0) + minutes
     }
   } else {
-    for (const log of dayLogs) {
+    for (const log of filteredLogs) {
       for (const block of log.blocks) {
         const minutes = block.actualMinutes ?? 0
         if (minutes <= 0) continue
@@ -79,7 +112,7 @@ export const computeHoursSummary = (
 
   // Apply adjustments
   let adjustmentMinutes = 0
-  for (const adj of adjustments) {
+  for (const adj of filteredAdj) {
     adjustmentMinutes += adj.minutes
     const bucket = adj.subjectBucket ?? 'Other'
     const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
@@ -372,7 +405,7 @@ export type CompliancePackInput = {
   children: Array<{ id: string; name: string }>
   startDate: string
   endDate: string
-  childName?: string
+  childName: string
 }
 
 export async function buildComplianceZip(

@@ -16,6 +16,7 @@ import {
 import {
   buildComplianceZip,
   computeHoursSummary,
+  deriveChildIdFromDocId,
   entryMinutes,
   generateDailyLogCsv,
   generateEvaluationMarkdown,
@@ -49,6 +50,30 @@ describe('entryMinutes', () => {
   it('returns 0 when neither is present', () => {
     const entry = { date: '2026-01-01' } as HoursEntry
     expect(entryMinutes(entry)).toBe(0)
+  })
+})
+
+// ─── deriveChildIdFromDocId ──────────────────────────────────────────────────
+
+describe('deriveChildIdFromDocId', () => {
+  it('extracts childId from date_childId format', () => {
+    expect(deriveChildIdFromDocId('2026-01-10_child123')).toBe('child123')
+  })
+
+  it('extracts childId from childId_date format', () => {
+    expect(deriveChildIdFromDocId('child123_2026-01-10')).toBe('child123')
+  })
+
+  it('returns undefined for plain date (no underscore)', () => {
+    expect(deriveChildIdFromDocId('2026-01-10')).toBeUndefined()
+  })
+
+  it('returns undefined for empty string', () => {
+    expect(deriveChildIdFromDocId('')).toBeUndefined()
+  })
+
+  it('returns undefined for id without valid date part', () => {
+    expect(deriveChildIdFromDocId('abc_def')).toBeUndefined()
   })
 })
 
@@ -216,6 +241,42 @@ describe('computeHoursSummary', () => {
     expect(summary.totalMinutes).toBe(0)
     expect(summary.coreMinutes).toBe(0)
     expect(summary.bySubject.length).toBe(0)
+  })
+
+  it('filters by childId when provided', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 30,
+            location: 'Home',
+          },
+        ],
+      },
+      {
+        childId: 'child-b',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Math,
+            subjectBucket: SubjectBucket.Math,
+            actualMinutes: 45,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [], 'child-a')
+
+    // Should only include child-a's 30 minutes
+    expect(summary.totalMinutes).toBe(30)
+    expect(summary.bySubject.length).toBe(1)
+    expect(summary.bySubject[0].subjectBucket).toBe('Reading')
   })
 })
 
@@ -624,6 +685,7 @@ describe('buildComplianceZip', () => {
       children: [{ id: 'child-a', name: 'Alice' }],
       startDate: '2026-01-01',
       endDate: '2026-01-31',
+      childName: 'Alice',
     })
 
     expect(blob).toBeInstanceOf(Blob)
@@ -632,11 +694,11 @@ describe('buildComplianceZip', () => {
     const zip = await JSZip.loadAsync(blob)
     const names = Object.keys(zip.files)
 
-    expect(names).toContain('hours-summary-2026-01-01-to-2026-01-31.csv')
-    expect(names).toContain('daily-logs-2026-01-01-to-2026-01-31.csv')
+    expect(names).toContain('alice-hours-summary-2026-01-01-to-2026-01-31.csv')
+    expect(names).toContain('alice-daily-logs-2026-01-01-to-2026-01-31.csv')
     // No evaluations or artifacts → those files should be absent
-    expect(names).not.toContain('evaluations-2026-01-01-to-2026-01-31.md')
-    expect(names).not.toContain('portfolio-2026-01-01-to-2026-01-31.md')
+    expect(names).not.toContain('alice-evaluations-2026-01-01-to-2026-01-31.md')
+    expect(names).not.toContain('alice-portfolio-2026-01-01-to-2026-01-31.md')
   })
 
   it('uses per-child filename prefix when childName is provided', async () => {
@@ -735,18 +797,19 @@ describe('buildComplianceZip', () => {
       children: [{ id: 'child-a', name: 'Alice' }],
       startDate: '2026-01-01',
       endDate: '2026-01-31',
+      childName: 'Alice',
     })
 
     const zip = await JSZip.loadAsync(blob)
     const names = Object.keys(zip.files)
 
-    expect(names).toContain('evaluations-2026-01-01-to-2026-01-31.md')
-    expect(names).toContain('portfolio-2026-01-01-to-2026-01-31.md')
+    expect(names).toContain('alice-evaluations-2026-01-01-to-2026-01-31.md')
+    expect(names).toContain('alice-portfolio-2026-01-01-to-2026-01-31.md')
 
-    const evalContent = await zip.files['evaluations-2026-01-01-to-2026-01-31.md'].async('string')
+    const evalContent = await zip.files['alice-evaluations-2026-01-01-to-2026-01-31.md'].async('string')
     expect(evalContent).toContain('Great progress')
 
-    const portfolioContent = await zip.files['portfolio-2026-01-01-to-2026-01-31.md'].async('string')
+    const portfolioContent = await zip.files['alice-portfolio-2026-01-01-to-2026-01-31.md'].async('string')
     expect(portfolioContent).toContain('Test Artifact')
   })
 

@@ -20,7 +20,9 @@ import {
   where,
 } from 'firebase/firestore'
 
-import ChildSelector from '../../components/ChildSelector'
+import Alert from '@mui/material/Alert'
+import Snackbar from '@mui/material/Snackbar'
+
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -28,7 +30,7 @@ import {
   artifactsCollection,
   evaluationsCollection,
 } from '../../core/firebase/firestore'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Artifact, Evaluation } from '../../core/types/domain'
 import { getMonthLabel, getMonthRange } from './records.logic'
 
@@ -54,12 +56,13 @@ export default function EvaluationsPage() {
   const familyId = useFamilyId()
   const [year, setYear] = useState(currentYear)
   const [month, setMonth] = useState(currentMonth)
-  const { children, selectedChildId, setSelectedChildId, isLoading: childrenLoading, addChild } = useChildren()
+  const { activeChildId, activeChild } = useActiveChild()
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [existingEval, setExistingEval] = useState<Evaluation | null>(null)
   const [draft, setDraft] = useState<EvaluationDraft>(emptyDraft())
   const [isSaving, setIsSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState('')
+  const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
 
   const { start: monthStart, end: monthEnd } = useMemo(
     () => getMonthRange(year, month),
@@ -71,49 +74,57 @@ export default function EvaluationsPage() {
   // Load artifacts for the month
   useEffect(() => {
     const load = async () => {
-      const q = query(
-        artifactsCollection(familyId),
-        where('createdAt', '>=', monthStart),
-        where('createdAt', '<=', monthEnd + 'T23:59:59'),
-      )
-      const snap = await getDocs(q)
-      setArtifacts(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
+      try {
+        const q = query(
+          artifactsCollection(familyId),
+          where('createdAt', '>=', monthStart),
+          where('createdAt', '<=', monthEnd + 'T23:59:59'),
+        )
+        const snap = await getDocs(q)
+        setArtifacts(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
+      } catch (err) {
+        setSnackMessage({ text: `Failed to load artifacts: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+      }
     }
     void load()
   }, [familyId, monthStart, monthEnd])
 
   // Load existing evaluation for child + month
   useEffect(() => {
-    if (!selectedChildId) return
+    if (!activeChildId) return
 
     const load = async () => {
-      const q = query(
-        evaluationsCollection(familyId),
-        where('childId', '==', selectedChildId),
-        where('monthStart', '==', monthStart),
-      )
-      const snap = await getDocs(q)
-      if (snap.docs.length > 0) {
-        const data = snap.docs[0].data() as Evaluation
-        const ev = { ...data, id: snap.docs[0].id }
-        setExistingEval(ev)
-        setDraft({
-          wins: ev.wins.length > 0 ? ev.wins : [''],
-          struggles: ev.struggles.length > 0 ? ev.struggles : [''],
-          nextSteps: ev.nextSteps.length > 0 ? ev.nextSteps : [''],
-          sampleArtifactIds: ev.sampleArtifactIds ?? [],
-        })
-      } else {
-        setExistingEval(null)
-        setDraft(emptyDraft())
+      try {
+        const q = query(
+          evaluationsCollection(familyId),
+          where('childId', '==', activeChildId),
+          where('monthStart', '==', monthStart),
+        )
+        const snap = await getDocs(q)
+        if (snap.docs.length > 0) {
+          const data = snap.docs[0].data() as Evaluation
+          const ev = { ...data, id: snap.docs[0].id }
+          setExistingEval(ev)
+          setDraft({
+            wins: ev.wins.length > 0 ? ev.wins : [''],
+            struggles: ev.struggles.length > 0 ? ev.struggles : [''],
+            nextSteps: ev.nextSteps.length > 0 ? ev.nextSteps : [''],
+            sampleArtifactIds: ev.sampleArtifactIds ?? [],
+          })
+        } else {
+          setExistingEval(null)
+          setDraft(emptyDraft())
+        }
+      } catch (err) {
+        setSnackMessage({ text: `Failed to load evaluation: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
       }
     }
     void load()
-  }, [familyId, selectedChildId, monthStart])
+  }, [familyId, activeChildId, monthStart])
 
   const childArtifacts = useMemo(
-    () => artifacts.filter((a) => a.childId === selectedChildId),
-    [artifacts, selectedChildId],
+    () => artifacts.filter((a) => a.childId === activeChildId),
+    [artifacts, activeChildId],
   )
 
   const updateListItem = (
@@ -155,40 +166,45 @@ export default function EvaluationsPage() {
   }
 
   const handleSave = useCallback(async () => {
-    if (!selectedChildId) return
+    if (!activeChildId) return
     setIsSaving(true)
     setSaveMessage('')
 
-    const clean = (items: string[]) => items.filter((s) => s.trim().length > 0)
-    const now = new Date().toISOString()
+    try {
+      const clean = (items: string[]) => items.filter((s) => s.trim().length > 0)
+      const now = new Date().toISOString()
 
-    const evalData: Omit<Evaluation, 'id'> = {
-      childId: selectedChildId,
-      monthStart,
-      monthEnd,
-      wins: clean(draft.wins),
-      struggles: clean(draft.struggles),
-      nextSteps: clean(draft.nextSteps),
-      sampleArtifactIds: draft.sampleArtifactIds,
-      updatedAt: now,
+      const evalData: Omit<Evaluation, 'id'> = {
+        childId: activeChildId,
+        monthStart,
+        monthEnd,
+        wins: clean(draft.wins),
+        struggles: clean(draft.struggles),
+        nextSteps: clean(draft.nextSteps),
+        sampleArtifactIds: draft.sampleArtifactIds,
+        updatedAt: now,
+      }
+
+      if (existingEval?.id) {
+        await updateDoc(
+          doc(evaluationsCollection(familyId), existingEval.id),
+          evalData,
+        )
+      } else {
+        await addDoc(evaluationsCollection(familyId), {
+          ...evalData,
+          createdAt: now,
+        })
+      }
+
+      setSaveMessage('Evaluation saved.')
+    } catch (err) {
+      setSnackMessage({ text: `Failed to save evaluation: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+    } finally {
+      setIsSaving(false)
     }
-
-    if (existingEval?.id) {
-      await updateDoc(
-        doc(evaluationsCollection(familyId), existingEval.id),
-        evalData,
-      )
-    } else {
-      await addDoc(evaluationsCollection(familyId), {
-        ...evalData,
-        createdAt: now,
-      })
-    }
-
-    setSaveMessage('Evaluation saved.')
-    setIsSaving(false)
   }, [
-    selectedChildId,
+    activeChildId,
     monthStart,
     monthEnd,
     draft,
@@ -232,22 +248,27 @@ export default function EvaluationsPage() {
                 ))}
               </Select>
             </FormControl>
-            <ChildSelector
-              children={children}
-              selectedChildId={selectedChildId}
-              onSelect={setSelectedChildId}
-              onChildAdded={addChild}
-              isLoading={childrenLoading}
-            />
           </Stack>
 
-          <Typography variant="subtitle2" color="text.secondary">
-            Evaluation for {monthLabel}
-            {existingEval ? ' (editing existing)' : ' (new)'}
-          </Typography>
+          {!activeChildId ? (
+            <Stack spacing={2} alignItems="center" sx={{ py: 4 }}>
+              <Typography variant="h6" color="text.secondary">
+                Select a profile to create evaluations
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Use the profile menu to choose a child, or visit Settings.
+              </Typography>
+            </Stack>
+          ) : (
+            <Typography variant="subtitle2" color="text.secondary">
+              Evaluation for {activeChild?.name ?? 'child'} — {monthLabel}
+              {existingEval ? ' (editing existing)' : ' (new)'}
+            </Typography>
+          )}
 
-          <Divider />
+          {activeChildId && <Divider />}
 
+          {activeChildId && <>
           {/* Wins */}
           <Typography variant="subtitle1" fontWeight={600}>
             Wins
@@ -398,8 +419,25 @@ export default function EvaluationsPage() {
               </Typography>
             )}
           </Stack>
+          </>}
         </Stack>
       </SectionCard>
+
+      <Snackbar
+        open={snackMessage !== null}
+        autoHideDuration={4000}
+        onClose={() => setSnackMessage(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackMessage(null)}
+          severity={snackMessage?.severity ?? 'success'}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackMessage?.text}
+        </Alert>
+      </Snackbar>
     </Page>
   )
 }
