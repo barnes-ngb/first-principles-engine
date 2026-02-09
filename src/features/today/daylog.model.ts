@@ -1,5 +1,12 @@
 import { DayBlockType } from '../../core/types/enums'
-import type { ChecklistItem, DayBlock, DayLog } from '../../core/types/domain'
+import type {
+  ChecklistItem,
+  DayBlock,
+  DayLog,
+  MathRoutine,
+  ReadingRoutine,
+  SpeechRoutine,
+} from '../../core/types/domain'
 
 const defaultDayLogChecklistItems: ChecklistItem[] = []
 
@@ -52,6 +59,22 @@ const cloneChecklistItems = (
   return items.map((item) => ({ ...item }))
 }
 
+export const emptyReadingRoutine = (): ReadingRoutine => ({
+  handwriting: { done: false },
+  spelling: { done: false },
+  sightWords: { done: false },
+  minecraft: { done: false },
+  readingEggs: { done: false },
+})
+
+export const emptyMathRoutine = (): MathRoutine => ({
+  done: false,
+})
+
+export const emptySpeechRoutine = (): SpeechRoutine => ({
+  done: false,
+})
+
 export const createDefaultDayLog = (childId: string, date: string): DayLog => {
   const checklist = cloneChecklistItems(defaultDayLogChecklistItems)
 
@@ -62,6 +85,9 @@ export const createDefaultDayLog = (childId: string, date: string): DayLog => {
       ...block,
       checklist: cloneChecklistItems(block.checklist),
     })),
+    reading: emptyReadingRoutine(),
+    math: emptyMathRoutine(),
+    speech: emptySpeechRoutine(),
     ...(checklist ? { checklist } : {}),
   }
 }

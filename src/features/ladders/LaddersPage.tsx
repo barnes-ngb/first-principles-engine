@@ -12,7 +12,7 @@ import DialogTitle from '@mui/material/DialogTitle'
 import LinearProgress from '@mui/material/LinearProgress'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { getDocs } from 'firebase/firestore'
+import { doc, getDocs, setDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -41,6 +41,7 @@ import {
 } from '../kids/ladder.logic'
 import { streamIcon, streamLabel, streamLadderSuffix } from '../sessions/sessions.model'
 import type { StreamId } from '../../core/types/enums'
+import { createLiteracyLadder, createMathLadder } from './ladder.templates'
 
 const rungRefFor = (ladderId: string, rungId: string) => `${ladderId}:${rungId}`
 
@@ -330,15 +331,43 @@ export default function LaddersPage() {
         children={children}
         selectedChildId={selectedChildId}
         onSelect={setSelectedChildId}
+        onChildAdded={(child) => {
+          setChildren((prev) => [...prev, child])
+          setSelectedChildId(child.id)
+        }}
         isLoading={isLoading}
       />
 
       {selectedChildId && (
         <Stack spacing={3}>
           {ladderSummaries.length === 0 ? (
-            <Typography color="text.secondary">
-              No ladders found. Seed demo data in Settings.
-            </Typography>
+            <Stack spacing={1.5} alignItems="flex-start">
+              <Typography color="text.secondary">
+                No ladders found for this child.
+              </Typography>
+              {canEdit && (
+                <Button
+                  variant="contained"
+                  onClick={async () => {
+                    const literacy = createLiteracyLadder(selectedChildId)
+                    const math = createMathLadder(selectedChildId)
+                    await Promise.all([
+                      setDoc(
+                        doc(laddersCollection(familyId), literacy.id),
+                        literacy,
+                      ),
+                      setDoc(
+                        doc(laddersCollection(familyId), math.id),
+                        math,
+                      ),
+                    ])
+                    setLadders((prev) => [...prev, literacy, math])
+                  }}
+                >
+                  Create Starter Ladders
+                </Button>
+              )}
+            </Stack>
           ) : (
             ladderSummaries.map((s) => {
               const icon = s.stream ? streamIcon[s.stream] : ''

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -14,7 +14,8 @@ import StepLabel from '@mui/material/StepLabel'
 import Stepper from '@mui/material/Stepper'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDocs, updateDoc } from 'firebase/firestore'
+import MenuItem from '@mui/material/MenuItem'
+import { addDoc, doc, getDocs, getDoc, setDoc, updateDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -23,12 +24,14 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { useProfile } from '../../core/profile/useProfile'
 import {
   childrenCollection,
+  dadLabCollection,
   labSessionsCollection,
   projectsCollection,
 } from '../../core/firebase/firestore'
-import type { Child, LabSession, LabStageCapture, Project } from '../../core/types/domain'
+import type { Child, DadDailyReport, DadLabWeek, LabSession, LabStageCapture, Project, WeeklyExperiment } from '../../core/types/domain'
 import { EngineStage, ProjectPhase } from '../../core/types/enums'
 import type { EngineStage as EngineStageType, ProjectPhase as ProjectPhaseType } from '../../core/types/enums'
+import { getWeekRange } from '../engine/engine.logic'
 
 const phases: ProjectPhaseType[] = [
   ProjectPhase.Plan,
@@ -68,9 +71,20 @@ function emptyStages(): LabStageCapture[] {
   return labStages.map((stage) => ({ stage }))
 }
 
+const emptyDadReport = (): DadDailyReport => ({
+  win: '',
+  hardThing: '',
+  whatHeTried: '',
+  energy: 'medium',
+  adjustmentForTomorrow: '',
+})
+
 export default function ProjectBoardPage() {
   const familyId = useFamilyId()
   const { canEdit } = useProfile()
+  const weekRange = useMemo(() => getWeekRange(new Date()), [])
+  const weekKey = weekRange.start
+  const today = new Date().toISOString().slice(0, 10)
   const [children, setChildren] = useState<Child[]>([])
   const [selectedChildId, setSelectedChildId] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
@@ -88,6 +102,12 @@ export default function ProjectBoardPage() {
   const [labStageCaptures, setLabStageCaptures] = useState<LabStageCapture[]>(emptyStages())
   const [labStory, setLabStory] = useState('')
   const [labSaved, setLabSaved] = useState(false)
+
+  // Dad Lab: Weekly experiment + daily report
+  const [dadLabWeek, setDadLabWeek] = useState<DadLabWeek | null>(null)
+  const [experimentForm, setExperimentForm] = useState<Partial<WeeklyExperiment>>({})
+  const [todayReport, setTodayReport] = useState<DadDailyReport>(emptyDadReport())
+  const [dadLabSaving, setDadLabSaving] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -115,6 +135,68 @@ export default function ProjectBoardPage() {
     load()
     return () => { cancelled = true }
   }, [familyId])
+
+  // Load Dad Lab week data for selected child
+  useEffect(() => {
+    if (!selectedChildId) return
+    let cancelled = false
+    const docId = `${selectedChildId}_${weekKey}`
+    const loadDadLab = async () => {
+      const snap = await getDoc(doc(dadLabCollection(familyId), docId))
+      if (cancelled) return
+      if (snap.exists()) {
+        const data = snap.data() as DadLabWeek
+        setDadLabWeek({ ...data, id: snap.id })
+        setExperimentForm(data.experiment ?? {})
+        setTodayReport(data.dailyReports?.[today] ?? emptyDadReport())
+      } else {
+        setDadLabWeek(null)
+        setExperimentForm({})
+        setTodayReport(emptyDadReport())
+      }
+    }
+    loadDadLab()
+    return () => { cancelled = true }
+  }, [familyId, selectedChildId, weekKey, today])
+
+  const saveDadLabWeek = useCallback(
+    async (experiment: Partial<WeeklyExperiment>, report: DadDailyReport) => {
+      if (!selectedChildId) return
+      setDadLabSaving(true)
+      const docId = `${selectedChildId}_${weekKey}`
+      const existing = dadLabWeek ?? {
+        childId: selectedChildId,
+        weekKey,
+        dailyReports: {},
+        createdAt: new Date().toISOString(),
+      }
+      const updated: DadLabWeek = {
+        ...existing,
+        childId: selectedChildId,
+        weekKey,
+        experiment: {
+          childId: selectedChildId,
+          weekKey,
+          hypothesis: experiment.hypothesis ?? '',
+          intervention: experiment.intervention ?? '',
+          measurement: experiment.measurement ?? '',
+          startDate: experiment.startDate,
+          endDate: experiment.endDate,
+          result: experiment.result,
+          updatedAt: new Date().toISOString(),
+        },
+        dailyReports: {
+          ...(existing.dailyReports ?? {}),
+          [today]: report,
+        },
+        updatedAt: new Date().toISOString(),
+      }
+      await setDoc(doc(dadLabCollection(familyId), docId), updated)
+      setDadLabWeek({ ...updated, id: docId })
+      setDadLabSaving(false)
+    },
+    [dadLabWeek, familyId, selectedChildId, today, weekKey],
+  )
 
   const childProjects = projects.filter(
     (p) => p.childId === selectedChildId,
@@ -261,6 +343,10 @@ export default function ProjectBoardPage() {
         children={children}
         selectedChildId={selectedChildId}
         onSelect={setSelectedChildId}
+        onChildAdded={(child) => {
+          setChildren((prev) => [...prev, child])
+          setSelectedChildId(child.id)
+        }}
         isLoading={isLoading}
       />
 
@@ -468,6 +554,161 @@ export default function ProjectBoardPage() {
               </Stack>
             </SectionCard>
           )}
+
+          {/* Weekly Experiment */}
+          <SectionCard title={`Weekly Experiment (${weekKey})`}>
+            <Stack spacing={2}>
+              <TextField
+                label="Hypothesis"
+                placeholder="If I change X, then Y will happen because..."
+                value={experimentForm.hypothesis ?? ''}
+                onChange={(e) =>
+                  setExperimentForm((prev) => ({ ...prev, hypothesis: e.target.value }))
+                }
+                fullWidth
+                multiline
+                minRows={2}
+                size="small"
+                slotProps={{ input: { readOnly: !canEdit } }}
+              />
+              <TextField
+                label="Intervention"
+                placeholder="What will you change this week?"
+                value={experimentForm.intervention ?? ''}
+                onChange={(e) =>
+                  setExperimentForm((prev) => ({ ...prev, intervention: e.target.value }))
+                }
+                fullWidth
+                size="small"
+                slotProps={{ input: { readOnly: !canEdit } }}
+              />
+              <TextField
+                label="Measurement"
+                placeholder="How will you know it worked?"
+                value={experimentForm.measurement ?? ''}
+                onChange={(e) =>
+                  setExperimentForm((prev) => ({ ...prev, measurement: e.target.value }))
+                }
+                fullWidth
+                size="small"
+                slotProps={{ input: { readOnly: !canEdit } }}
+              />
+              <Stack direction="row" spacing={2}>
+                <TextField
+                  label="Start date"
+                  type="date"
+                  value={experimentForm.startDate ?? weekKey}
+                  onChange={(e) =>
+                    setExperimentForm((prev) => ({ ...prev, startDate: e.target.value }))
+                  }
+                  size="small"
+                  slotProps={{ inputLabel: { shrink: true }, input: { readOnly: !canEdit } }}
+                />
+                <TextField
+                  label="End date"
+                  type="date"
+                  value={experimentForm.endDate ?? ''}
+                  onChange={(e) =>
+                    setExperimentForm((prev) => ({ ...prev, endDate: e.target.value }))
+                  }
+                  size="small"
+                  slotProps={{ inputLabel: { shrink: true }, input: { readOnly: !canEdit } }}
+                />
+              </Stack>
+              <TextField
+                label="Result (fill at end of week)"
+                placeholder="What actually happened?"
+                value={experimentForm.result ?? ''}
+                onChange={(e) =>
+                  setExperimentForm((prev) => ({ ...prev, result: e.target.value }))
+                }
+                fullWidth
+                multiline
+                minRows={2}
+                size="small"
+                slotProps={{ input: { readOnly: !canEdit } }}
+              />
+            </Stack>
+          </SectionCard>
+
+          {/* Daily Dad Report */}
+          <SectionCard title={`Daily Dad Report (${today})`}>
+            <Stack spacing={2}>
+              <TextField
+                label="Win"
+                placeholder="What went well today?"
+                value={todayReport.win}
+                onChange={(e) =>
+                  setTodayReport((prev) => ({ ...prev, win: e.target.value }))
+                }
+                fullWidth
+                size="small"
+                slotProps={{ input: { readOnly: !canEdit } }}
+              />
+              <TextField
+                label="Hard thing"
+                placeholder="What was hard today?"
+                value={todayReport.hardThing}
+                onChange={(e) =>
+                  setTodayReport((prev) => ({ ...prev, hardThing: e.target.value }))
+                }
+                fullWidth
+                size="small"
+                slotProps={{ input: { readOnly: !canEdit } }}
+              />
+              <TextField
+                label="What he tried"
+                placeholder="What did he attempt or explore?"
+                value={todayReport.whatHeTried}
+                onChange={(e) =>
+                  setTodayReport((prev) => ({ ...prev, whatHeTried: e.target.value }))
+                }
+                fullWidth
+                size="small"
+                slotProps={{ input: { readOnly: !canEdit } }}
+              />
+              <TextField
+                label="Energy level"
+                select
+                value={todayReport.energy}
+                onChange={(e) =>
+                  setTodayReport((prev) => ({
+                    ...prev,
+                    energy: e.target.value as DadDailyReport['energy'],
+                  }))
+                }
+                size="small"
+                sx={{ maxWidth: 200 }}
+                slotProps={{ input: { readOnly: !canEdit } }}
+              >
+                <MenuItem value="high">High</MenuItem>
+                <MenuItem value="medium">Medium</MenuItem>
+                <MenuItem value="low">Low</MenuItem>
+              </TextField>
+              <TextField
+                label="Adjustment for tomorrow"
+                placeholder="What will you try differently tomorrow?"
+                value={todayReport.adjustmentForTomorrow}
+                onChange={(e) =>
+                  setTodayReport((prev) => ({ ...prev, adjustmentForTomorrow: e.target.value }))
+                }
+                fullWidth
+                multiline
+                minRows={2}
+                size="small"
+                slotProps={{ input: { readOnly: !canEdit } }}
+              />
+              {canEdit && (
+                <Button
+                  variant="contained"
+                  onClick={() => saveDadLabWeek(experimentForm, todayReport)}
+                  disabled={dadLabSaving}
+                >
+                  {dadLabSaving ? 'Saving...' : 'Save Experiment & Report'}
+                </Button>
+              )}
+            </Stack>
+          </SectionCard>
         </>
       )}
 

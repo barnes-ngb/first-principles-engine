@@ -1,12 +1,17 @@
+import { useState } from 'react'
+import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import PersonAddIcon from '@mui/icons-material/PersonAdd'
 import type { Child } from '../core/types/domain'
+import AddChildDialog from './AddChildDialog'
 
 interface ChildSelectorProps {
   children: Child[]
   selectedChildId: string
   onSelect: (childId: string) => void
+  onChildAdded?: (child: Child) => void
   isLoading?: boolean
   emptyMessage?: string
 }
@@ -15,9 +20,12 @@ export default function ChildSelector({
   children,
   selectedChildId,
   onSelect,
+  onChildAdded,
   isLoading,
-  emptyMessage = 'No children found.',
+  emptyMessage = 'No children added yet.',
 }: ChildSelectorProps) {
+  const [showAddDialog, setShowAddDialog] = useState(false)
+
   if (isLoading) {
     return (
       <Typography color="text.secondary" variant="body2">
@@ -28,17 +36,35 @@ export default function ChildSelector({
 
   if (children.length === 0) {
     return (
-      <Typography color="text.secondary" variant="body2">
-        {emptyMessage}
-      </Typography>
+      <Stack spacing={1.5} alignItems="flex-start">
+        <Typography color="text.secondary" variant="body2">
+          {emptyMessage}
+        </Typography>
+        {onChildAdded && (
+          <>
+            <Button
+              variant="contained"
+              startIcon={<PersonAddIcon />}
+              onClick={() => setShowAddDialog(true)}
+            >
+              Add Child
+            </Button>
+            <AddChildDialog
+              open={showAddDialog}
+              onClose={() => setShowAddDialog(false)}
+              onChildAdded={(child) => {
+                onChildAdded(child)
+                onSelect(child.id)
+              }}
+            />
+          </>
+        )}
+      </Stack>
     )
   }
 
-  // Don't render if there's only one child — the page implicitly works for that child
-  if (children.length === 1) return null
-
   return (
-    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
       {children.map((child) => {
         const selected = child.id === selectedChildId
         return (
@@ -56,6 +82,25 @@ export default function ChildSelector({
           />
         )
       })}
+      {onChildAdded && (
+        <>
+          <Chip
+            icon={<PersonAddIcon />}
+            label="Add"
+            variant="outlined"
+            onClick={() => setShowAddDialog(true)}
+            sx={{ fontSize: '0.9rem', py: 2 }}
+          />
+          <AddChildDialog
+            open={showAddDialog}
+            onClose={() => setShowAddDialog(false)}
+            onChildAdded={(child) => {
+              onChildAdded(child)
+              onSelect(child.id)
+            }}
+          />
+        </>
+      )}
     </Stack>
   )
 }
