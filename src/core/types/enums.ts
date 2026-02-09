@@ -110,3 +110,14 @@ export const StreamId = {
   DadLab: 'dadlab',
 } as const
 export type StreamId = (typeof StreamId)[keyof typeof StreamId]
+
+export const RoutineItemKey = {
+  Handwriting: 'handwriting',
+  Spelling: 'spelling',
+  SightWords: 'sightWords',
+  MinecraftReading: 'minecraft',
+  ReadingEggs: 'readingEggs',
+  Math: 'math',
+  Speech: 'speech',
+} as const
+export type RoutineItemKey = (typeof RoutineItemKey)[keyof typeof RoutineItemKey]

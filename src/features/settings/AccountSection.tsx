@@ -1,6 +1,11 @@
 import { useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
@@ -13,6 +18,7 @@ export default function AccountSection() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   const isAnonymous = user?.isAnonymous ?? true
 
@@ -44,7 +50,16 @@ export default function AccountSection() {
     }
   }
 
+  const handleSignOutClick = () => {
+    if (isAnonymous) {
+      setConfirmOpen(true)
+      return
+    }
+    handleSignOut()
+  }
+
   const handleSignOut = async () => {
+    setConfirmOpen(false)
     setError(null)
     setSuccess(null)
     await signOut()
@@ -73,10 +88,13 @@ export default function AccountSection() {
               <Button variant="outlined" size="small" onClick={() => setMode('signin')}>
                 Sign In
               </Button>
+              <Button variant="outlined" size="small" color="warning" onClick={handleSignOutClick}>
+                Sign Out
+              </Button>
             </>
           )}
           {!isAnonymous && (
-            <Button variant="outlined" size="small" onClick={handleSignOut}>
+            <Button variant="outlined" size="small" onClick={handleSignOutClick}>
               Sign Out
             </Button>
           )}
@@ -121,6 +139,31 @@ export default function AccountSection() {
           </Stack>
         </Stack>
       )}
+
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
+        <DialogTitle>Sign out of anonymous account?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            You are using a temporary anonymous account. Signing out will lose
+            access to this family's data. Upgrade to email/password before
+            signing out.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
+          <Button
+            onClick={() => {
+              setConfirmOpen(false)
+              setMode('upgrade')
+            }}
+          >
+            Upgrade account
+          </Button>
+          <Button onClick={handleSignOut} color="error">
+            Sign out anyway
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   )
 }

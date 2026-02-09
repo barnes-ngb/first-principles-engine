@@ -11,20 +11,29 @@ import type {
   ReadingRoutine,
   SpeechRoutine,
 } from '../../core/types/domain'
+import { RoutineItemKey } from '../../core/types/enums'
 import SectionCard from '../../components/SectionCard'
+import { ALL_ROUTINE_ITEMS } from './daylog.model'
 import { calculateXp, XP_VALUES } from './xp'
 
 interface RoutineSectionProps {
   dayLog: DayLog
   onUpdate: (updated: DayLog) => void
   onUpdateImmediate: (updated: DayLog) => void
+  /** Which routine items to show, in priority order. Defaults to all. */
+  routineItems?: RoutineItemKey[]
 }
 
 export default function RoutineSection({
   dayLog,
   onUpdate,
   onUpdateImmediate,
+  routineItems,
 }: RoutineSectionProps) {
+  const items = useMemo(
+    () => new Set(routineItems ?? ALL_ROUTINE_ITEMS),
+    [routineItems],
+  )
   const reading = useMemo(() => dayLog.reading ?? {
     handwriting: { done: false },
     spelling: { done: false },
@@ -34,6 +43,15 @@ export default function RoutineSection({
   }, [dayLog.reading])
   const math = useMemo(() => dayLog.math ?? { done: false }, [dayLog.math])
   const speech = useMemo(() => dayLog.speech ?? { done: false }, [dayLog.speech])
+
+  const hasReading =
+    items.has(RoutineItemKey.Handwriting) ||
+    items.has(RoutineItemKey.Spelling) ||
+    items.has(RoutineItemKey.SightWords) ||
+    items.has(RoutineItemKey.MinecraftReading) ||
+    items.has(RoutineItemKey.ReadingEggs)
+  const hasMath = items.has(RoutineItemKey.Math)
+  const hasSpeech = items.has(RoutineItemKey.Speech)
 
   const xp = calculateXp(dayLog)
 
@@ -98,9 +116,11 @@ export default function RoutineSection({
       </Stack>
 
       {/* Reading Routine */}
+      {hasReading && (
       <SectionCard title="Reading & Literacy">
         <Stack spacing={1.5}>
           {/* Handwriting */}
+          {items.has(RoutineItemKey.Handwriting) && (
           <Stack spacing={0.5}>
             <FormControlLabel
               control={
@@ -158,8 +178,10 @@ export default function RoutineSection({
               </Stack>
             )}
           </Stack>
+          )}
 
           {/* Spelling */}
+          {items.has(RoutineItemKey.Spelling) && (
           <Stack spacing={0.5}>
             <FormControlLabel
               control={
@@ -202,8 +224,10 @@ export default function RoutineSection({
               </Stack>
             )}
           </Stack>
+          )}
 
           {/* Sight Words */}
+          {items.has(RoutineItemKey.SightWords) && (
           <Stack spacing={0.5}>
             <FormControlLabel
               control={
@@ -250,8 +274,10 @@ export default function RoutineSection({
               </Stack>
             )}
           </Stack>
+          )}
 
           {/* Minecraft Reading */}
+          {items.has(RoutineItemKey.MinecraftReading) && (
           <Stack spacing={0.5}>
             <FormControlLabel
               control={
@@ -309,8 +335,10 @@ export default function RoutineSection({
               </Stack>
             )}
           </Stack>
+          )}
 
           {/* Reading Eggs */}
+          {items.has(RoutineItemKey.ReadingEggs) && (
           <Stack spacing={0.5}>
             <FormControlLabel
               control={
@@ -368,10 +396,13 @@ export default function RoutineSection({
               </Stack>
             )}
           </Stack>
+          )}
         </Stack>
       </SectionCard>
+      )}
 
       {/* Math */}
+      {hasMath && (
       <SectionCard title="Math">
         <Stack spacing={1.5}>
           <FormControlLabel
@@ -427,8 +458,10 @@ export default function RoutineSection({
           )}
         </Stack>
       </SectionCard>
+      )}
 
       {/* Speech */}
+      {hasSpeech && (
       <SectionCard title="Speech (optional)">
         <Stack spacing={1.5}>
           <FormControlLabel
@@ -457,6 +490,7 @@ export default function RoutineSection({
           )}
         </Stack>
       </SectionCard>
+      )}
     </Stack>
   )
 }
