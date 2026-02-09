@@ -1,4 +1,4 @@
-import { DayBlockType, RoutineItemKey } from '../../core/types/enums'
+import { DayBlockType, RoutineItemKey, SubjectBucket } from '../../core/types/enums'
 import type {
   ChecklistItem,
   DayBlock,
@@ -79,8 +79,19 @@ const blockLabel: Record<DayBlockType, string> = {
   [DayBlockType.Other]: 'Other',
 }
 
+/** Map block types to a natural default subject bucket where unambiguous. */
+const defaultSubjectBucket: Partial<Record<DayBlockType, SubjectBucket>> = {
+  [DayBlockType.Reading]: SubjectBucket.Reading,
+  [DayBlockType.Math]: SubjectBucket.Math,
+  [DayBlockType.Speech]: SubjectBucket.LanguageArts,
+}
+
 const buildBlocks = (blockTypes: DayBlockType[]): DayBlock[] =>
-  blockTypes.map((type) => ({ type, title: blockLabel[type] }))
+  blockTypes.map((type) => ({
+    type,
+    title: blockLabel[type],
+    ...(defaultSubjectBucket[type] ? { subjectBucket: defaultSubjectBucket[type] } : {}),
+  }))
 
 const cloneChecklistItems = (
   items?: ChecklistItem[],
