@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Divider from '@mui/material/Divider'
 import FormControl from '@mui/material/FormControl'
 import InputLabel from '@mui/material/InputLabel'
 import MenuItem from '@mui/material/MenuItem'
 import Select from '@mui/material/Select'
+import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import Table from '@mui/material/Table'
 import TableBody from '@mui/material/TableBody'
@@ -22,6 +24,7 @@ import {
   writeBatch,
 } from 'firebase/firestore'
 
+import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -75,14 +78,43 @@ export default function RecordsPage() {
   const { start, end } = useMemo(() => getSchoolYearRange(), [])
   const [startDate, setStartDate] = useState(start)
   const [endDate, setEndDate] = useState(end)
-  const [hoursEntries, setHoursEntries] = useState<HoursEntry[]>([])
-  const [dayLogs, setDayLogs] = useState<DayLog[]>([])
-  const [adjustments, setAdjustments] = useState<HoursAdjustment[]>([])
-  const { children } = useChildren()
-  const [artifacts, setArtifacts] = useState<Artifact[]>([])
-  const [evaluations, setEvaluations] = useState<Evaluation[]>([])
+  const [allHoursEntries, setAllHoursEntries] = useState<HoursEntry[]>([])
+  const [allDayLogs, setAllDayLogs] = useState<DayLog[]>([])
+  const [allAdjustments, setAllAdjustments] = useState<HoursAdjustment[]>([])
+  const { children, selectedChildId, setSelectedChildId } = useChildren()
+  const [allArtifacts, setAllArtifacts] = useState<Artifact[]>([])
+  const [allEvaluations, setAllEvaluations] = useState<Evaluation[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
+
+  const selectedChild = useMemo(
+    () => children.find((c) => c.id === selectedChildId),
+    [children, selectedChildId],
+  )
+  const childNameLower = selectedChild?.name.toLowerCase() ?? ''
+
+  // Filter data by selected child
+  const hoursEntries = useMemo(
+    () => allHoursEntries.filter((e) => e.childId === selectedChildId),
+    [allHoursEntries, selectedChildId],
+  )
+  const dayLogs = useMemo(
+    () => allDayLogs.filter((l) => l.childId === selectedChildId),
+    [allDayLogs, selectedChildId],
+  )
+  const adjustments = useMemo(
+    () => allAdjustments.filter((a) => !a.childId || a.childId === selectedChildId),
+    [allAdjustments, selectedChildId],
+  )
+  const artifacts = useMemo(
+    () => allArtifacts.filter((a) => a.childId === selectedChildId),
+    [allArtifacts, selectedChildId],
+  )
+  const evaluations = useMemo(
+    () => allEvaluations.filter((e) => e.childId === selectedChildId),
+    [allEvaluations, selectedChildId],
+  )
 
   // Adjustment form
   const [adjDate, setAdjDate] = useState(formatDateForInput(new Date()))
@@ -150,19 +182,26 @@ export default function RecordsPage() {
   }, [endDate, familyId, startDate])
 
   const applyRecords = useCallback((data: Awaited<ReturnType<typeof fetchRecords>>) => {
-    setHoursEntries(data.hoursEntries)
-    setDayLogs(data.dayLogs)
-    setAdjustments(data.adjustments)
-    setArtifacts(data.artifacts)
-    setEvaluations(data.evaluations)
+    setAllHoursEntries(data.hoursEntries)
+    setAllDayLogs(data.dayLogs)
+    setAllAdjustments(data.adjustments)
+    setAllArtifacts(data.artifacts)
+    setAllEvaluations(data.evaluations)
     setIsLoading(false)
   }, [])
 
   useEffect(() => {
     let cancelled = false
-    fetchRecords().then((data) => {
-      if (!cancelled) applyRecords(data)
-    })
+    fetchRecords()
+      .then((data) => {
+        if (!cancelled) applyRecords(data)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setIsLoading(false)
+          setSnackMessage({ text: `Failed to load records: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+        }
+      })
     return () => { cancelled = true }
   }, [fetchRecords, applyRecords])
 
@@ -177,70 +216,83 @@ export default function RecordsPage() {
   const handleGenerateHours = useCallback(async () => {
     if (dayLogs.length === 0) return
     setIsGenerating(true)
-
-    const batch = writeBatch(db)
-    dayLogs.forEach((log) => {
-      log.blocks.forEach((block) => {
-        const minutes = block.actualMinutes ?? 0
-        if (minutes <= 0) return
-        const entryRef = doc(hoursCollection(familyId))
-        batch.set(entryRef, {
-          childId: log.childId,
-          date: log.date,
-          minutes,
-          blockType: block.type,
-          subjectBucket: block.subjectBucket,
-          location: block.location,
-          quickCapture: block.quickCapture,
-          notes: block.notes,
-          dayLogId: log.childId ? `${log.date}_${log.childId}` : log.date,
+    try {
+      const batch = writeBatch(db)
+      dayLogs.forEach((log) => {
+        log.blocks.forEach((block) => {
+          const minutes = block.actualMinutes ?? 0
+          if (minutes <= 0) return
+          const entryRef = doc(hoursCollection(familyId))
+          batch.set(entryRef, {
+            childId: log.childId,
+            date: log.date,
+            minutes,
+            blockType: block.type,
+            subjectBucket: block.subjectBucket,
+            location: block.location,
+            quickCapture: block.quickCapture,
+            notes: block.notes,
+            dayLogId: log.childId ? `${log.date}_${log.childId}` : log.date,
+          })
         })
       })
-    })
 
-    await batch.commit()
-    const data = await fetchRecords()
-    applyRecords(data)
-    setIsGenerating(false)
+      await batch.commit()
+      const data = await fetchRecords()
+      applyRecords(data)
+      setSnackMessage({ text: 'Hours generated successfully', severity: 'success' })
+    } catch (err) {
+      setSnackMessage({ text: `Failed to generate hours: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+    } finally {
+      setIsGenerating(false)
+    }
   }, [dayLogs, familyId, fetchRecords, applyRecords])
 
   // Manual adjustment
   const handleAddAdjustment = useCallback(async () => {
     if (!adjMinutes || !adjReason.trim()) return
     setAdjSaving(true)
+    try {
+      await addDoc(hoursAdjustmentsCollection(familyId), {
+        childId: selectedChildId || undefined,
+        date: adjDate,
+        minutes: Number(adjMinutes),
+        reason: adjReason.trim(),
+        subjectBucket: adjSubject || undefined,
+        createdAt: new Date().toISOString(),
+      })
 
-    await addDoc(hoursAdjustmentsCollection(familyId), {
-      date: adjDate,
-      minutes: Number(adjMinutes),
-      reason: adjReason.trim(),
-      subjectBucket: adjSubject || undefined,
-      createdAt: new Date().toISOString(),
-    })
-
-    setAdjMinutes('')
-    setAdjReason('')
-    setAdjSubject('')
-    const data = await fetchRecords()
-    applyRecords(data)
-    setAdjSaving(false)
-  }, [adjDate, adjMinutes, adjReason, adjSubject, familyId, fetchRecords, applyRecords])
+      setAdjMinutes('')
+      setAdjReason('')
+      setAdjSubject('')
+      const data = await fetchRecords()
+      applyRecords(data)
+      setSnackMessage({ text: 'Adjustment saved', severity: 'success' })
+    } catch (err) {
+      setSnackMessage({ text: `Failed to save adjustment: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+    } finally {
+      setAdjSaving(false)
+    }
+  }, [adjDate, adjMinutes, adjReason, adjSubject, familyId, selectedChildId, fetchRecords, applyRecords])
 
   // Export handlers
+  const filePrefix = childNameLower ? `${childNameLower}-` : ''
+
   const handleExportHoursCsv = useCallback(() => {
     downloadFile(
       generateHoursSummaryCsv(summary),
-      `hours-summary-${startDate}-to-${endDate}.csv`,
+      `${filePrefix}hours-summary-${startDate}-to-${endDate}.csv`,
       'text/csv',
     )
-  }, [summary, startDate, endDate])
+  }, [summary, filePrefix, startDate, endDate])
 
   const handleExportDailyLogCsv = useCallback(() => {
     downloadFile(
       generateDailyLogCsv(dayLogs, hoursEntries),
-      `daily-logs-${startDate}-to-${endDate}.csv`,
+      `${filePrefix}daily-logs-${startDate}-to-${endDate}.csv`,
       'text/csv',
     )
-  }, [dayLogs, hoursEntries, startDate, endDate])
+  }, [dayLogs, hoursEntries, filePrefix, startDate, endDate])
 
   const handleExportEvaluationMd = useCallback(() => {
     const md = generateEvaluationMarkdown(
@@ -250,10 +302,10 @@ export default function RecordsPage() {
     )
     downloadFile(
       md,
-      `evaluations-${startDate}-to-${endDate}.md`,
+      `${filePrefix}evaluations-${startDate}-to-${endDate}.md`,
       'text/markdown',
     )
-  }, [evaluations, children, artifacts, startDate, endDate])
+  }, [evaluations, children, artifacts, filePrefix, startDate, endDate])
 
   const handleExportPortfolioMd = useCallback(() => {
     const md = generatePortfolioMarkdown(
@@ -264,10 +316,10 @@ export default function RecordsPage() {
     )
     downloadFile(
       md,
-      `portfolio-${startDate}-to-${endDate}.md`,
+      `${filePrefix}portfolio-${startDate}-to-${endDate}.md`,
       'text/markdown',
     )
-  }, [artifacts, children, startDate, endDate])
+  }, [artifacts, children, filePrefix, startDate, endDate])
 
   const [isZipping, setIsZipping] = useState(false)
 
@@ -283,19 +335,23 @@ export default function RecordsPage() {
         children: children.map((c) => ({ id: c.id, name: c.name })),
         startDate,
         endDate,
+        childName: selectedChild?.name,
       })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `compliance-pack-${startDate}-to-${endDate}.zip`
+      link.download = `${filePrefix}compliance-pack-${startDate}-to-${endDate}.zip`
       document.body.appendChild(link)
       link.click()
       link.remove()
       URL.revokeObjectURL(url)
+      setSnackMessage({ text: 'Compliance pack downloaded', severity: 'success' })
+    } catch (err) {
+      setSnackMessage({ text: `Failed to build zip: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
     } finally {
       setIsZipping(false)
     }
-  }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, startDate, endDate])
+  }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, selectedChild, filePrefix, startDate, endDate])
 
   const hasData = hasHoursEntries || dayLogs.length > 0
 
@@ -324,8 +380,13 @@ export default function RecordsPage() {
               InputLabelProps={{ shrink: true }}
             />
           </Stack>
+          <ChildSelector
+            children={children}
+            selectedChildId={selectedChildId}
+            onSelect={setSelectedChildId}
+          />
           <Typography color="text.secondary" variant="body2">
-            Showing records for {startDate} through {endDate}.
+            Showing records for {selectedChild?.name ?? 'child'} from {startDate} through {endDate}.
           </Typography>
 
           {isLoading ? (
@@ -553,6 +614,22 @@ export default function RecordsPage() {
           </Stack>
         </Stack>
       </SectionCard>
+
+      <Snackbar
+        open={snackMessage !== null}
+        autoHideDuration={4000}
+        onClose={() => setSnackMessage(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackMessage(null)}
+          severity={snackMessage?.severity ?? 'success'}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackMessage?.text}
+        </Alert>
+      </Snackbar>
     </Page>
   )
 }

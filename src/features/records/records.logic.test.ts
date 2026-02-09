@@ -639,6 +639,45 @@ describe('buildComplianceZip', () => {
     expect(names).not.toContain('portfolio-2026-01-01-to-2026-01-31.md')
   })
 
+  it('uses per-child filename prefix when childName is provided', async () => {
+    const { default: JSZip } = await import('jszip')
+
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 30,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    const blob = await buildComplianceZip({
+      summary,
+      dayLogs: logs,
+      hoursEntries: [],
+      evaluations: [],
+      artifacts: [],
+      children: [{ id: 'child-a', name: 'Lincoln' }],
+      startDate: '2026-01-01',
+      endDate: '2026-01-31',
+      childName: 'Lincoln',
+    })
+
+    const zip = await JSZip.loadAsync(blob)
+    const names = Object.keys(zip.files)
+
+    expect(names).toContain('lincoln-hours-summary-2026-01-01-to-2026-01-31.csv')
+    expect(names).toContain('lincoln-daily-logs-2026-01-01-to-2026-01-31.csv')
+  })
+
   it('includes evaluation and portfolio markdown when data exists', async () => {
     const { default: JSZip } = await import('jszip')
 
@@ -709,5 +748,72 @@ describe('buildComplianceZip', () => {
 
     const portfolioContent = await zip.files['portfolio-2026-01-01-to-2026-01-31.md'].async('string')
     expect(portfolioContent).toContain('Test Artifact')
+  })
+
+  it('includes per-child prefixed evaluations and portfolio when childName is given', async () => {
+    const { default: JSZip } = await import('jszip')
+
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 30,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const evaluations: Evaluation[] = [
+      {
+        childId: 'child-a',
+        monthStart: '2026-01-01',
+        monthEnd: '2026-01-31',
+        wins: ['Great progress'],
+        struggles: [],
+        nextSteps: [],
+        sampleArtifactIds: [],
+      },
+    ]
+
+    const artifacts: Artifact[] = [
+      {
+        id: 'art-1',
+        childId: 'child-a',
+        title: 'Test Artifact',
+        type: EvidenceType.Note,
+        createdAt: '2026-01-15T10:00:00',
+        tags: {
+          engineStage: EngineStage.Wonder,
+          domain: 'Science',
+          subjectBucket: SubjectBucket.Science,
+          location: 'Home',
+        },
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    const blob = await buildComplianceZip({
+      summary,
+      dayLogs: logs,
+      hoursEntries: [],
+      evaluations,
+      artifacts,
+      children: [{ id: 'child-a', name: 'Lincoln' }],
+      startDate: '2026-01-01',
+      endDate: '2026-01-31',
+      childName: 'Lincoln',
+    })
+
+    const zip = await JSZip.loadAsync(blob)
+    const names = Object.keys(zip.files)
+
+    expect(names).toContain('lincoln-evaluations-2026-01-01-to-2026-01-31.md')
+    expect(names).toContain('lincoln-portfolio-2026-01-01-to-2026-01-31.md')
   })
 })
