@@ -2,6 +2,7 @@ import { Component } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Link from '@mui/material/Link'
 import Typography from '@mui/material/Typography'
 
 interface Props {
@@ -23,8 +24,29 @@ export default class ErrorBoundary extends Component<Props, State> {
     return { hasError: true, error }
   }
 
+  componentDidMount() {
+    window.addEventListener('unhandledrejection', this.handleUnhandledRejection)
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener(
+      'unhandledrejection',
+      this.handleUnhandledRejection,
+    )
+  }
+
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, info.componentStack)
+  }
+
+  handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+    event.preventDefault()
+    const error =
+      event.reason instanceof Error
+        ? event.reason
+        : new Error(String(event.reason ?? 'Unhandled promise rejection'))
+    console.error('Unhandled promise rejection:', error)
+    this.setState({ hasError: true, error })
   }
 
   handleReload = () => {
@@ -80,6 +102,9 @@ export default class ErrorBoundary extends Component<Props, State> {
               Reload Page
             </Button>
           </Box>
+          <Link href="/settings" underline="hover" sx={{ mt: 1 }}>
+            Go to Settings
+          </Link>
         </Box>
       )
     }
