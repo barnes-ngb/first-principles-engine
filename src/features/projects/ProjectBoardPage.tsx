@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
@@ -22,11 +23,12 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { useProfile } from '../../core/profile/useProfile'
 import {
   childrenCollection,
+  labSessionsCollection,
   projectsCollection,
 } from '../../core/firebase/firestore'
-import type { Child, Project } from '../../core/types/domain'
-import { ProjectPhase } from '../../core/types/enums'
-import type { ProjectPhase as ProjectPhaseType } from '../../core/types/enums'
+import type { Child, LabSession, LabStageCapture, Project } from '../../core/types/domain'
+import { EngineStage, ProjectPhase } from '../../core/types/enums'
+import type { EngineStage as EngineStageType, ProjectPhase as ProjectPhaseType } from '../../core/types/enums'
 
 const phases: ProjectPhaseType[] = [
   ProjectPhase.Plan,
@@ -37,6 +39,34 @@ const phases: ProjectPhaseType[] = [
 
 const phaseIndex = (phase: ProjectPhaseType): number =>
   phases.indexOf(phase)
+
+const labStages: EngineStageType[] = [
+  EngineStage.Wonder,
+  EngineStage.Build,
+  EngineStage.Explain,
+  EngineStage.Reflect,
+  EngineStage.Share,
+]
+
+const stageIcon: Record<EngineStageType, string> = {
+  [EngineStage.Wonder]: '\uD83E\uDD14',
+  [EngineStage.Build]: '\uD83D\uDD28',
+  [EngineStage.Explain]: '\uD83D\uDDE3\uFE0F',
+  [EngineStage.Reflect]: '\uD83D\uDCAD',
+  [EngineStage.Share]: '\uD83C\uDF1F',
+}
+
+const stagePrompt: Record<EngineStageType, string> = {
+  [EngineStage.Wonder]: 'What are you wondering about? What question are you exploring?',
+  [EngineStage.Build]: 'What did you build, make, or try?',
+  [EngineStage.Explain]: 'Explain what happened. What did you discover?',
+  [EngineStage.Reflect]: 'What would you change next time? What surprised you?',
+  [EngineStage.Share]: 'Share your result. Who would want to see this?',
+}
+
+function emptyStages(): LabStageCapture[] {
+  return labStages.map((stage) => ({ stage }))
+}
 
 export default function ProjectBoardPage() {
   const familyId = useFamilyId()
@@ -49,6 +79,15 @@ export default function ProjectBoardPage() {
   const [newTitle, setNewTitle] = useState('')
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+
+  // Lab Session capture state
+  const [labActive, setLabActive] = useState(false)
+  const [labMission, setLabMission] = useState('')
+  const [labConstraints, setLabConstraints] = useState('')
+  const [labRoles, setLabRoles] = useState('')
+  const [labStageCaptures, setLabStageCaptures] = useState<LabStageCapture[]>(emptyStages())
+  const [labStory, setLabStory] = useState('')
+  const [labSaved, setLabSaved] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -158,6 +197,60 @@ export default function ProjectBoardPage() {
     [familyId, selectedProject],
   )
 
+  const handleStartLab = useCallback(() => {
+    setLabActive(true)
+    setLabMission('')
+    setLabConstraints('')
+    setLabRoles('')
+    setLabStageCaptures(emptyStages())
+    setLabStory('')
+    setLabSaved(false)
+  }, [])
+
+  const handleLabStageNote = useCallback(
+    (stageIdx: number, notes: string) => {
+      setLabStageCaptures((prev) =>
+        prev.map((s, i) => (i === stageIdx ? { ...s, notes } : s)),
+      )
+    },
+    [],
+  )
+
+  const handleLabStageComplete = useCallback(
+    (stageIdx: number) => {
+      setLabStageCaptures((prev) =>
+        prev.map((s, i) =>
+          i === stageIdx ? { ...s, completedAt: new Date().toISOString() } : s,
+        ),
+      )
+    },
+    [],
+  )
+
+  const handleSaveLabSession = useCallback(async () => {
+    if (!selectedChildId) return
+    setIsSaving(true)
+
+    try {
+      const session: Omit<LabSession, 'id'> = {
+        childId: selectedChildId,
+        date: new Date().toISOString().slice(0, 10),
+        mission: labMission.trim() || undefined,
+        constraints: labConstraints.trim() || undefined,
+        roles: labRoles.trim() || undefined,
+        stages: labStageCaptures,
+        story: labStory.trim() || undefined,
+        createdAt: new Date().toISOString(),
+      }
+
+      await addDoc(labSessionsCollection(familyId), session)
+      setLabSaved(true)
+    } catch {
+      // Error handled by setting isSaving false
+    }
+    setIsSaving(false)
+  }, [familyId, labConstraints, labMission, labRoles, labStageCaptures, labStory, selectedChildId])
+
   return (
     <Page>
       <Typography variant="h4" component="h1">
@@ -247,6 +340,131 @@ export default function ProjectBoardPage() {
                     />
                   </Stack>
                 ))}
+              </Stack>
+            </SectionCard>
+          )}
+
+          {/* Lab Session Capture */}
+          {!labActive ? (
+            <SectionCard title="Lab Session">
+              <Stack spacing={1.5} alignItems="flex-start">
+                <Typography variant="body2" color="text.secondary">
+                  Run a hands-on lab session with 5 stages: Wonder, Build, Explain, Reflect, Share.
+                </Typography>
+                <Button variant="contained" onClick={handleStartLab}>
+                  Start Lab Session
+                </Button>
+              </Stack>
+            </SectionCard>
+          ) : labSaved ? (
+            <SectionCard title="Lab Session">
+              <Alert severity="success" sx={{ mb: 1 }}>
+                Lab session saved!
+              </Alert>
+              <Button variant="outlined" onClick={() => setLabActive(false)}>
+                Done
+              </Button>
+            </SectionCard>
+          ) : (
+            <SectionCard title="Lab Session">
+              <Stack spacing={3}>
+                <Stack spacing={2}>
+                  <TextField
+                    label="Mission"
+                    placeholder="What are we exploring today?"
+                    value={labMission}
+                    onChange={(e) => setLabMission(e.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Constraints"
+                    placeholder="Rules or limits for today"
+                    value={labConstraints}
+                    onChange={(e) => setLabConstraints(e.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Roles"
+                    placeholder="Who does what?"
+                    value={labRoles}
+                    onChange={(e) => setLabRoles(e.target.value)}
+                    fullWidth
+                  />
+                </Stack>
+
+                <Typography variant="subtitle2">Stage Capture</Typography>
+                <Stack spacing={2}>
+                  {labStageCaptures.map((capture, idx) => (
+                    <Card
+                      key={capture.stage}
+                      variant="outlined"
+                      sx={{
+                        borderColor: capture.completedAt ? 'success.main' : undefined,
+                        borderWidth: capture.completedAt ? 2 : 1,
+                      }}
+                    >
+                      <CardContent>
+                        <Stack spacing={1.5}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Typography variant="h6">
+                              {stageIcon[capture.stage]}
+                            </Typography>
+                            <Typography variant="subtitle1">
+                              {capture.stage}
+                            </Typography>
+                            {capture.completedAt && (
+                              <Chip label="Done" color="success" size="small" />
+                            )}
+                          </Stack>
+                          <TextField
+                            placeholder={stagePrompt[capture.stage]}
+                            multiline
+                            minRows={2}
+                            value={capture.notes ?? ''}
+                            onChange={(e) => handleLabStageNote(idx, e.target.value)}
+                            fullWidth
+                            size="small"
+                          />
+                          {!capture.completedAt && (
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => handleLabStageComplete(idx)}
+                            >
+                              Mark Done
+                            </Button>
+                          )}
+                        </Stack>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </Stack>
+
+                <TextField
+                  label="Tell the story"
+                  placeholder="In 3 sentences, what happened today in the lab?"
+                  multiline
+                  minRows={3}
+                  value={labStory}
+                  onChange={(e) => setLabStory(e.target.value)}
+                  fullWidth
+                />
+
+                <Stack direction="row" spacing={2}>
+                  <Button
+                    variant="outlined"
+                    onClick={() => setLabActive(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="contained"
+                    onClick={handleSaveLabSession}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? 'Saving...' : 'Save Lab Session'}
+                  </Button>
+                </Stack>
               </Stack>
             </SectionCard>
           )}

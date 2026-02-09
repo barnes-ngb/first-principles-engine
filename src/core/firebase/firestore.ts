@@ -15,6 +15,7 @@ import type {
   Evaluation,
   HoursAdjustment,
   HoursEntry,
+  LabSession,
   Ladder,
   MilestoneProgress,
   Project,
@@ -139,3 +140,8 @@ export const weeklyScoresCollection = (
   familyId: string,
 ): CollectionReference<WeeklyScore> =>
   collection(db, `families/${familyId}/weeklyScores`) as CollectionReference<WeeklyScore>
+
+export const labSessionsCollection = (
+  familyId: string,
+): CollectionReference<LabSession> =>
+  collection(db, `families/${familyId}/labSessions`) as CollectionReference<LabSession>
