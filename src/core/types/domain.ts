@@ -4,6 +4,7 @@ import type {
   EngineStage,
   EvidenceType,
   ProjectPhase,
+  RoutineItemKey,
   SessionResult,
   StreamId,
   SubjectBucket,
@@ -24,6 +25,10 @@ export interface Child {
   birthdate?: string
   grade?: string
   settings?: FamilySettings
+  /** Ordered list of day-block types this child uses (priority order). */
+  dayBlocks?: DayBlockType[]
+  /** Ordered list of routine items this child logs (priority order). */
+  routineItems?: RoutineItemKey[]
 }
 
 export interface WeekPlan {

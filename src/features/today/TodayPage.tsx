@@ -104,6 +104,10 @@ export default function TodayPage() {
   })
 
   const selectableChildren = children
+  const selectedChild = useMemo(
+    () => children.find((c) => c.id === selectedChildId),
+    [children, selectedChildId],
+  )
 
   // --- Persist helpers with save-state tracking ---
 
@@ -159,7 +163,12 @@ export default function TodayPage() {
           return
         }
 
-        const defaultLog = createDefaultDayLog(selectedChildId, today)
+        const defaultLog = createDefaultDayLog(
+          selectedChildId,
+          today,
+          selectedChild?.dayBlocks,
+          selectedChild?.routineItems,
+        )
         await setDoc(dayLogRef, defaultLog)
         if (isMounted) {
           setDayLog(defaultLog)
@@ -177,7 +186,7 @@ export default function TodayPage() {
     return () => {
       isMounted = false
     }
-  }, [dayLogRef, today, selectedChildId])
+  }, [dayLogRef, today, selectedChildId, selectedChild])
 
   useEffect(() => {
     let isMounted = true
@@ -499,11 +508,11 @@ export default function TodayPage() {
         emptyMessage="Add a child to start logging."
       />
 
-      {/* Lincoln's daily routine section */}
       <RoutineSection
         dayLog={dayLog}
         onUpdate={handleRoutineUpdate}
         onUpdateImmediate={handleRoutineUpdateImmediate}
+        routineItems={selectedChild?.routineItems}
       />
 
       <SectionCard title={`DayLog (${dayLog.date})`}>
