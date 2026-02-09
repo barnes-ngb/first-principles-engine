@@ -1,3 +1,5 @@
+import JSZip from 'jszip'
+
 import type {
   Artifact,
   DayLog,
@@ -357,4 +359,60 @@ export const getMonthRange = (
 export const getMonthLabel = (year: number, month: number): string => {
   const date = new Date(year, month - 1, 1)
   return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
+}
+
+// ─── Compliance Pack Zip ────────────────────────────────────────────────────
+
+export type CompliancePackInput = {
+  summary: HoursSummary
+  dayLogs: DayLog[]
+  hoursEntries: HoursEntry[]
+  evaluations: Evaluation[]
+  artifacts: Artifact[]
+  children: Array<{ id: string; name: string }>
+  startDate: string
+  endDate: string
+}
+
+export async function buildComplianceZip(
+  input: CompliancePackInput,
+): Promise<Blob> {
+  const {
+    summary,
+    dayLogs,
+    hoursEntries,
+    evaluations,
+    artifacts,
+    children,
+    startDate,
+    endDate,
+  } = input
+
+  const zip = new JSZip()
+
+  zip.file(
+    `hours-summary-${startDate}-to-${endDate}.csv`,
+    generateHoursSummaryCsv(summary),
+  )
+
+  zip.file(
+    `daily-logs-${startDate}-to-${endDate}.csv`,
+    generateDailyLogCsv(dayLogs, hoursEntries),
+  )
+
+  if (evaluations.length > 0) {
+    zip.file(
+      `evaluations-${startDate}-to-${endDate}.md`,
+      generateEvaluationMarkdown(evaluations, children, artifacts),
+    )
+  }
+
+  if (artifacts.length > 0) {
+    zip.file(
+      `portfolio-${startDate}-to-${endDate}.md`,
+      generatePortfolioMarkdown(artifacts, children, startDate, endDate),
+    )
+  }
+
+  return zip.generateAsync({ type: 'blob' })
 }

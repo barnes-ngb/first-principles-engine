@@ -14,6 +14,7 @@ import {
   SubjectBucket,
 } from '../../core/types/enums'
 import {
+  buildComplianceZip,
   computeHoursSummary,
   entryMinutes,
   generateDailyLogCsv,
@@ -588,5 +589,125 @@ describe('getMonthLabel', () => {
     const label = getMonthLabel(2026, 12)
 
     expect(label).toBe('December 2026')
+  })
+})
+
+// ─── buildComplianceZip ─────────────────────────────────────────────────────
+
+describe('buildComplianceZip', () => {
+  it('produces a zip blob containing hours and daily-log CSVs', async () => {
+    const { default: JSZip } = await import('jszip')
+
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 30,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    const blob = await buildComplianceZip({
+      summary,
+      dayLogs: logs,
+      hoursEntries: [],
+      evaluations: [],
+      artifacts: [],
+      children: [{ id: 'child-a', name: 'Alice' }],
+      startDate: '2026-01-01',
+      endDate: '2026-01-31',
+    })
+
+    expect(blob).toBeInstanceOf(Blob)
+    expect(blob.size).toBeGreaterThan(0)
+
+    const zip = await JSZip.loadAsync(blob)
+    const names = Object.keys(zip.files)
+
+    expect(names).toContain('hours-summary-2026-01-01-to-2026-01-31.csv')
+    expect(names).toContain('daily-logs-2026-01-01-to-2026-01-31.csv')
+    // No evaluations or artifacts → those files should be absent
+    expect(names).not.toContain('evaluations-2026-01-01-to-2026-01-31.md')
+    expect(names).not.toContain('portfolio-2026-01-01-to-2026-01-31.md')
+  })
+
+  it('includes evaluation and portfolio markdown when data exists', async () => {
+    const { default: JSZip } = await import('jszip')
+
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 30,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const evaluations: Evaluation[] = [
+      {
+        childId: 'child-a',
+        monthStart: '2026-01-01',
+        monthEnd: '2026-01-31',
+        wins: ['Great progress'],
+        struggles: [],
+        nextSteps: [],
+        sampleArtifactIds: [],
+      },
+    ]
+
+    const artifacts: Artifact[] = [
+      {
+        id: 'art-1',
+        childId: 'child-a',
+        title: 'Test Artifact',
+        type: EvidenceType.Note,
+        createdAt: '2026-01-15T10:00:00',
+        tags: {
+          engineStage: EngineStage.Wonder,
+          domain: 'Science',
+          subjectBucket: SubjectBucket.Science,
+          location: 'Home',
+        },
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    const blob = await buildComplianceZip({
+      summary,
+      dayLogs: logs,
+      hoursEntries: [],
+      evaluations,
+      artifacts,
+      children: [{ id: 'child-a', name: 'Alice' }],
+      startDate: '2026-01-01',
+      endDate: '2026-01-31',
+    })
+
+    const zip = await JSZip.loadAsync(blob)
+    const names = Object.keys(zip.files)
+
+    expect(names).toContain('evaluations-2026-01-01-to-2026-01-31.md')
+    expect(names).toContain('portfolio-2026-01-01-to-2026-01-31.md')
+
+    const evalContent = await zip.files['evaluations-2026-01-01-to-2026-01-31.md'].async('string')
+    expect(evalContent).toContain('Great progress')
+
+    const portfolioContent = await zip.files['portfolio-2026-01-01-to-2026-01-31.md'].async('string')
+    expect(portfolioContent).toContain('Test Artifact')
   })
 })
