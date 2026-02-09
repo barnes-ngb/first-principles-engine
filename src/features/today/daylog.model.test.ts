@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DayBlockType, SubjectBucket } from '../../core/types/enums'
 import {
   createDefaultDayLog,
   dayLogDocId,
@@ -52,5 +53,36 @@ describe('createDefaultDayLog', () => {
     const log = createDefaultDayLog('child-1', '2026-02-09')
     expect(log.childId).toBe('child-1')
     expect(log.date).toBe('2026-02-09')
+  })
+
+  it('pre-populates subjectBucket for Reading, Math, and Speech blocks', () => {
+    const log = createDefaultDayLog('child-1', '2026-02-09', [
+      DayBlockType.Reading,
+      DayBlockType.Math,
+      DayBlockType.Speech,
+    ])
+
+    const reading = log.blocks.find((b) => b.type === DayBlockType.Reading)
+    const math = log.blocks.find((b) => b.type === DayBlockType.Math)
+    const speech = log.blocks.find((b) => b.type === DayBlockType.Speech)
+
+    expect(reading?.subjectBucket).toBe(SubjectBucket.Reading)
+    expect(math?.subjectBucket).toBe(SubjectBucket.Math)
+    expect(speech?.subjectBucket).toBe(SubjectBucket.LanguageArts)
+  })
+
+  it('does not set subjectBucket for blocks without a natural mapping', () => {
+    const log = createDefaultDayLog('child-1', '2026-02-09', [
+      DayBlockType.Formation,
+      DayBlockType.Together,
+      DayBlockType.Movement,
+      DayBlockType.Project,
+      DayBlockType.FieldTrip,
+      DayBlockType.Other,
+    ])
+
+    for (const block of log.blocks) {
+      expect(block.subjectBucket).toBeUndefined()
+    }
   })
 })
