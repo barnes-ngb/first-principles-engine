@@ -21,14 +21,14 @@ import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useChildren } from '../../core/hooks/useChildren'
 import { useProfile } from '../../core/profile/useProfile'
 import {
-  childrenCollection,
   dadLabCollection,
   labSessionsCollection,
   projectsCollection,
 } from '../../core/firebase/firestore'
-import type { Child, DadDailyReport, DadLabWeek, LabSession, LabStageCapture, Project, WeeklyExperiment } from '../../core/types/domain'
+import type { DadDailyReport, DadLabWeek, LabSession, LabStageCapture, Project, WeeklyExperiment } from '../../core/types/domain'
 import { EngineStage, ProjectPhase } from '../../core/types/enums'
 import type { EngineStage as EngineStageType, ProjectPhase as ProjectPhaseType } from '../../core/types/enums'
 import { getWeekRange } from '../engine/engine.logic'
@@ -82,11 +82,16 @@ const emptyDadReport = (): DadDailyReport => ({
 export default function ProjectBoardPage() {
   const familyId = useFamilyId()
   const { canEdit } = useProfile()
+  const {
+    children,
+    selectedChildId,
+    setSelectedChildId,
+    isLoading: childrenLoading,
+    addChild,
+  } = useChildren()
   const weekRange = useMemo(() => getWeekRange(new Date()), [])
   const weekKey = weekRange.start
   const today = new Date().toISOString().slice(0, 10)
-  const [children, setChildren] = useState<Child[]>([])
-  const [selectedChildId, setSelectedChildId] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showNewDialog, setShowNewDialog] = useState(false)
@@ -112,24 +117,14 @@ export default function ProjectBoardPage() {
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      const [childrenSnap, projectsSnap] = await Promise.all([
-        getDocs(childrenCollection(familyId)),
-        getDocs(projectsCollection(familyId)),
-      ])
+      const projectsSnap = await getDocs(projectsCollection(familyId))
       if (cancelled) return
-      setChildren(
-        childrenSnap.docs.map((d) => ({
-          ...(d.data() as Child),
-          id: d.id,
-        })),
-      )
       setProjects(
         projectsSnap.docs.map((d) => ({
           ...(d.data() as Project),
           id: d.id,
         })),
       )
-      setSelectedChildId((cur) => cur || childrenSnap.docs[0]?.id || '')
       setIsLoading(false)
     }
     load()
@@ -343,14 +338,11 @@ export default function ProjectBoardPage() {
         children={children}
         selectedChildId={selectedChildId}
         onSelect={setSelectedChildId}
-        onChildAdded={(child) => {
-          setChildren((prev) => [...prev, child])
-          setSelectedChildId(child.id)
-        }}
-        isLoading={isLoading}
+        onChildAdded={addChild}
+        isLoading={childrenLoading}
       />
 
-      {!isLoading && selectedChildId && (
+      {!childrenLoading && !isLoading && selectedChildId && (
         <>
           <SectionCard title="Active Projects">
             {activeProjects.length === 0 ? (

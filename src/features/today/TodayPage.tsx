@@ -39,9 +39,9 @@ import SaveIndicator from '../../components/SaveIndicator'
 import type { SaveState } from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useChildren } from '../../core/hooks/useChildren'
 import {
   artifactsCollection,
-  childrenCollection,
   daysCollection,
   laddersCollection,
   weeksCollection,
@@ -50,7 +50,7 @@ import {
   generateFilename,
   uploadArtifactFile,
 } from '../../core/firebase/upload'
-import type { Artifact, Child, DayLog, Ladder } from '../../core/types/domain'
+import type { Artifact, DayLog, Ladder } from '../../core/types/domain'
 import {
   EngineStage,
   EvidenceType,
@@ -66,8 +66,13 @@ import { calculateXp } from './xp'
 export default function TodayPage() {
   const today = new Date().toISOString().slice(0, 10)
   const familyId = useFamilyId()
-  const [selectedChildId, setSelectedChildId] = useState('')
-  const [isLoadingChildren, setIsLoadingChildren] = useState(true)
+  const {
+    children,
+    selectedChildId,
+    setSelectedChildId,
+    isLoading: isLoadingChildren,
+    addChild,
+  } = useChildren()
   const dayLogDocId = useMemo(
     () => (selectedChildId ? `${selectedChildId}_${today}` : today),
     [selectedChildId, today],
@@ -77,7 +82,6 @@ export default function TodayPage() {
     [familyId, dayLogDocId],
   )
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
-  const [children, setChildren] = useState<Child[]>([])
   const [ladders, setLadders] = useState<Ladder[]>([])
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
   const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
@@ -178,18 +182,6 @@ export default function TodayPage() {
   useEffect(() => {
     let isMounted = true
 
-    const loadChildren = async () => {
-      const snapshot = await getDocs(childrenCollection(familyId))
-      if (!isMounted) return
-      const loadedChildren = snapshot.docs.map((docSnapshot) => ({
-        ...(docSnapshot.data() as Child),
-        id: docSnapshot.id,
-      }))
-      setChildren(loadedChildren)
-      setSelectedChildId((cur) => cur || loadedChildren[0]?.id || '')
-      setIsLoadingChildren(false)
-    }
-
     const loadWeekPlan = async () => {
       const snapshot = await getDocs(weeksCollection(familyId))
       if (!isMounted) return
@@ -226,7 +218,6 @@ export default function TodayPage() {
       setTodayArtifacts(loadedArtifacts)
     }
 
-    loadChildren()
     loadWeekPlan()
     loadLadders()
     loadArtifacts()
@@ -480,10 +471,7 @@ export default function TodayPage() {
           children={children}
           selectedChildId={selectedChildId}
           onSelect={setSelectedChildId}
-          onChildAdded={(child) => {
-            setChildren((prev) => [...prev, child])
-            setSelectedChildId(child.id)
-          }}
+          onChildAdded={addChild}
           isLoading={isLoadingChildren}
           emptyMessage="Add a child to start logging."
         />
@@ -506,10 +494,7 @@ export default function TodayPage() {
         children={children}
         selectedChildId={selectedChildId}
         onSelect={setSelectedChildId}
-        onChildAdded={(child) => {
-          setChildren((prev) => [...prev, child])
-          setSelectedChildId(child.id)
-        }}
+        onChildAdded={addChild}
         isLoading={isLoadingChildren}
         emptyMessage="Add a child to start logging."
       />

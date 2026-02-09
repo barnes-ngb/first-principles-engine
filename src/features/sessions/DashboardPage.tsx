@@ -19,13 +19,13 @@ import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useProfile } from '../../core/profile/useProfile'
 import {
-  childrenCollection,
   dailyPlansCollection,
   laddersCollection,
   milestoneProgressCollection,
   sessionsCollection,
 } from '../../core/firebase/firestore'
-import type { Child, DailyPlan, Ladder, MilestoneProgress, Session } from '../../core/types/domain'
+import { useChildren } from '../../core/hooks/useChildren'
+import type { DailyPlan, Ladder, MilestoneProgress, Session } from '../../core/types/domain'
 import { EnergyLevel, StreamId } from '../../core/types/enums'
 import type { EnergyLevel as EnergyLevelType } from '../../core/types/enums'
 import type { ProgressByRungId } from '../kids/ladder.logic'
@@ -68,8 +68,7 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const today = new Date().toISOString().slice(0, 10)
 
-  const [children, setChildren] = useState<Child[]>([])
-  const [selectedChildId, setSelectedChildId] = useState('')
+  const { children, selectedChildId, setSelectedChildId, isLoading: childrenLoading, addChild } = useChildren()
   const [energy, setEnergy] = useState<EnergyLevelType>(EnergyLevel.Normal)
   const [dailyPlan, setDailyPlan] = useState<DailyPlan | null>(null)
   const [sessions, setSessions] = useState<Session[]>([])
@@ -78,17 +77,12 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true)
 
   const fetchData = useCallback(async () => {
-    const [childrenSnap, sessionsSnap, laddersSnap, progressSnap] = await Promise.all([
-      getDocs(childrenCollection(familyId)),
+    const [sessionsSnap, laddersSnap, progressSnap] = await Promise.all([
       getDocs(sessionsCollection(familyId)),
       getDocs(laddersCollection(familyId)),
       getDocs(milestoneProgressCollection(familyId)),
     ])
 
-    const loadedChildren = childrenSnap.docs.map((d) => ({
-      ...(d.data() as Child),
-      id: d.id,
-    }))
     const loadedSessions = sessionsSnap.docs.map((d) => ({
       ...(d.data() as Session),
       id: d.id,
@@ -102,7 +96,7 @@ export default function DashboardPage() {
       id: d.id,
     }))
 
-    return { loadedChildren, loadedSessions, loadedLadders, loadedProgress }
+    return { loadedSessions, loadedLadders, loadedProgress }
   }, [familyId])
 
   // Fetch counter triggers re-loads (bumped on window focus)
@@ -112,11 +106,9 @@ export default function DashboardPage() {
     let cancelled = false
     fetchData().then((data) => {
       if (cancelled) return
-      setChildren(data.loadedChildren)
       setSessions(data.loadedSessions)
       setLadders(data.loadedLadders)
       setMilestoneProgress(data.loadedProgress)
-      setSelectedChildId((cur) => cur || data.loadedChildren[0]?.id || '')
       setIsLoading(false)
     })
     return () => { cancelled = true }
@@ -255,11 +247,12 @@ export default function DashboardPage() {
         children={children}
         selectedChildId={selectedChildId}
         onSelect={setSelectedChildId}
-        isLoading={isLoading}
+        onChildAdded={addChild}
+        isLoading={childrenLoading || isLoading}
         emptyMessage="No children found. Seed demo data in Settings."
       />
 
-      {!isLoading && selectedChildId && (
+      {!childrenLoading && !isLoading && selectedChildId && (
         <>
           {canEdit && (
             <SectionCard title="How's the energy today?">
