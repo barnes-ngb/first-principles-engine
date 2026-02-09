@@ -80,12 +80,46 @@ export interface ReadingEggsLog extends RoutineItem {
   lessons?: number
 }
 
+export interface PhonemicAwarenessLog extends RoutineItem {
+  minutes?: number
+}
+
+export interface PhonicsLessonLog extends RoutineItem {
+  minutes?: number
+}
+
+export interface DecodableReadingLog extends RoutineItem {
+  minutes?: number
+  rereadDone?: boolean
+}
+
+export interface SpellingDictationLog extends RoutineItem {
+  lines?: number
+}
+
+export interface NumberSenseLog extends RoutineItem {
+  minutes?: number
+}
+
+export interface WordProblemsLog extends RoutineItem {
+  minutes?: number
+  count?: number
+}
+
+export interface NarrationRepsLog extends RoutineItem {
+  minutes?: number
+}
+
 export interface ReadingRoutine {
   handwriting: HandwritingLog
   spelling: SpellingLog
   sightWords: SightWordsLog
   minecraft: MinecraftReadingLog
   readingEggs: ReadingEggsLog
+  phonemicAwareness?: PhonemicAwarenessLog
+  phonicsLesson?: PhonicsLessonLog
+  decodableReading?: DecodableReadingLog
+  spellingDictation?: SpellingDictationLog
 }
 
 export interface MathRoutine {
@@ -93,12 +127,15 @@ export interface MathRoutine {
   problems?: number
   pages?: number
   note?: string
+  numberSense?: NumberSenseLog
+  wordProblems?: WordProblemsLog
 }
 
 export interface SpeechRoutine {
   done: boolean
   routine?: string
   note?: string
+  narrationReps?: NarrationRepsLog
 }
 
 export interface DayLog {
