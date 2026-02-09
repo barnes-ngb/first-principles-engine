@@ -10,10 +10,10 @@ import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
-  childrenCollection,
   milestoneProgressCollection,
 } from '../../core/firebase/firestore'
-import type { Artifact, Child, MilestoneProgress } from '../../core/types/domain'
+import { useChildren } from '../../core/hooks/useChildren'
+import type { Artifact, MilestoneProgress } from '../../core/types/domain'
 import { EngineStage } from '../../core/types/enums'
 import {
   computeLoopStatus,
@@ -78,24 +78,19 @@ const getStatusColor = (status: ReturnType<typeof computeLoopStatus>) => {
 
 export default function EnginePage() {
   const familyId = useFamilyId()
-  const [children, setChildren] = useState<Child[]>([])
+  const { children, isLoading: childrenLoading } = useChildren()
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
   const fetchData = useCallback(async () => {
-    const [childrenSnapshot, artifactsSnapshot, milestoneSnapshot] = await Promise.all(
+    const [artifactsSnapshot, milestoneSnapshot] = await Promise.all(
       [
-        getDocs(childrenCollection(familyId)),
         getDocs(artifactsCollection(familyId)),
         getDocs(milestoneProgressCollection(familyId)),
       ],
     )
 
-    const loadedChildren = childrenSnapshot.docs.map((docSnapshot) => {
-      const data = docSnapshot.data() as Child
-      return { ...data, id: data.id ?? docSnapshot.id }
-    })
     const loadedArtifacts = artifactsSnapshot.docs.map((docSnapshot) => {
       const data = docSnapshot.data() as Artifact
       return { ...data, id: data.id ?? docSnapshot.id }
@@ -105,14 +100,13 @@ export default function EnginePage() {
       return { ...data, id: data.id ?? docSnapshot.id }
     })
 
-    return { loadedChildren, loadedArtifacts, loadedMilestones }
+    return { loadedArtifacts, loadedMilestones }
   }, [familyId])
 
   useEffect(() => {
     let cancelled = false
     fetchData().then((data) => {
       if (!cancelled) {
-        setChildren(data.loadedChildren)
         setArtifacts(data.loadedArtifacts)
         setMilestoneProgress(data.loadedMilestones)
         setIsLoading(false)
@@ -210,7 +204,7 @@ export default function EnginePage() {
         </Stack>
       </SectionCard>
 
-      {isLoading ? (
+      {childrenLoading || isLoading ? (
         <SectionCard title="Loading">
           <Typography color="text.secondary">Loading engine stats...</Typography>
         </SectionCard>

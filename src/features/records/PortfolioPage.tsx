@@ -16,9 +16,9 @@ import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
-  childrenCollection,
 } from '../../core/firebase/firestore'
-import type { Artifact, Child } from '../../core/types/domain'
+import { useChildren } from '../../core/hooks/useChildren'
+import type { Artifact } from '../../core/types/domain'
 import {
   generatePortfolioMarkdown,
   getMonthLabel,
@@ -34,7 +34,7 @@ export default function PortfolioPage() {
   const familyId = useFamilyId()
   const [year, setYear] = useState(currentYear)
   const [month, setMonth] = useState(currentMonth)
-  const [children, setChildren] = useState<Child[]>([])
+  const { children } = useChildren()
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [showAutoSuggest, setShowAutoSuggest] = useState(false)
@@ -45,15 +45,6 @@ export default function PortfolioPage() {
   )
 
   const monthLabel = useMemo(() => getMonthLabel(year, month), [year, month])
-
-  // Load children
-  useEffect(() => {
-    const load = async () => {
-      const snap = await getDocs(childrenCollection(familyId))
-      setChildren(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
-    }
-    void load()
-  }, [familyId])
 
   // Load artifacts for the month
   useEffect(() => {

@@ -91,9 +91,9 @@ export const buildPlanBSessions = (
 ]
 
 export const defaultWeeklyMetricLabels = [
-  'Decodable accuracy',
-  'Retell 2 details',
-  'Dictation sentence',
-  'Word problem + explain',
-  'Independent minutes (best)',
+  'Phonics mastery count',
+  'Decodable fluency (WCPM)',
+  'Spelling % (8-10 words)',
+  'Math mixed review (/10)',
+  'Independence start (Y/N)',
 ]

@@ -47,10 +47,67 @@ export interface WeekPlan {
   }>
 }
 
+export interface RoutineItem {
+  done: boolean
+  note?: string
+}
+
+export interface HandwritingLog extends RoutineItem {
+  minutes?: number
+  lines?: number
+}
+
+export interface SpellingLog extends RoutineItem {
+  words?: string
+}
+
+export interface SightWordsLog extends RoutineItem {
+  count?: number
+}
+
+export interface MinecraftReadingLog extends RoutineItem {
+  pages?: number
+  points?: number
+}
+
+export interface ReadingEggsLog extends RoutineItem {
+  minutes?: number
+  lessons?: number
+}
+
+export interface ReadingRoutine {
+  handwriting: HandwritingLog
+  spelling: SpellingLog
+  sightWords: SightWordsLog
+  minecraft: MinecraftReadingLog
+  readingEggs: ReadingEggsLog
+}
+
+export interface MathRoutine {
+  done: boolean
+  problems?: number
+  pages?: number
+  note?: string
+}
+
+export interface SpeechRoutine {
+  done: boolean
+  routine?: string
+  note?: string
+}
+
 export interface DayLog {
   childId: string
   date: string
   blocks: DayBlock[]
+  reading?: ReadingRoutine
+  math?: MathRoutine
+  speech?: SpeechRoutine
+  formation?: { done: boolean; gratitude?: string; verse?: string; note?: string }
+  together?: { done: boolean; note?: string; mediaUrl?: string }
+  movement?: { done: boolean; note?: string }
+  project?: { done: boolean; note?: string; mediaUrl?: string }
+  xpTotal?: number
   retro?: string
   checklist?: ChecklistItem[]
 }
@@ -217,6 +274,26 @@ export interface Project {
   completed?: boolean
 }
 
+export interface LabSession {
+  id?: string
+  childId: string
+  projectId?: string
+  date: string
+  mission?: string
+  constraints?: string
+  roles?: string
+  stages: LabStageCapture[]
+  story?: string
+  createdAt?: string
+}
+
+export interface LabStageCapture {
+  stage: EngineStage
+  notes?: string
+  artifactIds?: string[]
+  completedAt?: string
+}
+
 export interface GoalResult {
   goal: string
   result: SessionResult | 'na'
@@ -237,4 +314,36 @@ export interface WeeklyScore {
 export interface ScoreMetric {
   label: string
   result: SessionResult | 'na'
+}
+
+export interface WeeklyExperiment {
+  id?: string
+  childId: string
+  weekKey: string
+  hypothesis: string
+  intervention: string
+  measurement: string
+  startDate?: string
+  endDate?: string
+  result?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface DadDailyReport {
+  win: string
+  hardThing: string
+  whatHeTried: string
+  energy: 'high' | 'medium' | 'low'
+  adjustmentForTomorrow: string
+}
+
+export interface DadLabWeek {
+  id?: string
+  childId: string
+  weekKey: string
+  experiment?: WeeklyExperiment
+  dailyReports: Record<string, DadDailyReport>
+  createdAt?: string
+  updatedAt?: string
 }

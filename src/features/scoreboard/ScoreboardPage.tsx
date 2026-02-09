@@ -7,21 +7,23 @@ import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
+import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment'
 import { addDoc, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useChildren } from '../../core/hooks/useChildren'
 import { useProfile } from '../../core/profile/useProfile'
 import {
-  childrenCollection,
+  daysCollection,
   sessionsCollection,
   weeksCollection,
   weeklyScoresCollection,
 } from '../../core/firebase/firestore'
 import type {
-  Child,
+  DayLog,
   GoalResult,
   ScoreMetric,
   Session,
@@ -37,6 +39,7 @@ import {
   streamIcon,
   streamLabel,
 } from '../sessions/sessions.model'
+import { calculateXp, countLoggedCategories } from '../today/xp'
 
 const allStreams = Object.values(StreamId) as StreamId[]
 
@@ -47,42 +50,40 @@ export default function ScoreboardPage() {
   const weekStart = weekRange.start
   const weekEnd = weekRange.end
 
-  const [children, setChildren] = useState<Child[]>([])
-  const [selectedChildId, setSelectedChildId] = useState('')
+  const {
+    children,
+    selectedChildId,
+    setSelectedChildId,
+    isLoading: childrenLoading,
+    addChild,
+  } = useChildren()
   const [sessions, setSessions] = useState<Session[]>([])
+  const [dayLogs, setDayLogs] = useState<DayLog[]>([])
   const [weeklyScore, setWeeklyScore] = useState<WeeklyScore | null>(null)
   const [childGoals, setChildGoals] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
 
-  const fetchData = useCallback(async () => {
-    const [childrenSnap, sessionsSnap] = await Promise.all([
-      getDocs(childrenCollection(familyId)),
-      getDocs(sessionsCollection(familyId)),
-    ])
-    return {
-      children: childrenSnap.docs.map((d) => ({
-        ...(d.data() as Child),
-        id: d.id,
-      })),
-      sessions: sessionsSnap.docs.map((d) => ({
-        ...(d.data() as Session),
-        id: d.id,
-      })),
-    }
-  }, [familyId])
-
   useEffect(() => {
     let cancelled = false
-    fetchData().then((data) => {
+    const load = async () => {
+      const [sessionsSnap, dayLogsSnap] = await Promise.all([
+        getDocs(sessionsCollection(familyId)),
+        getDocs(daysCollection(familyId)),
+      ])
       if (cancelled) return
-      setChildren(data.children)
-      setSessions(data.sessions)
-      setSelectedChildId((cur) => cur || data.children[0]?.id || '')
+      setSessions(
+        sessionsSnap.docs.map((d) => ({
+          ...(d.data() as Session),
+          id: d.id,
+        })),
+      )
+      setDayLogs(dayLogsSnap.docs.map((d) => d.data()))
       setIsLoading(false)
-    })
+    }
+    load()
     return () => { cancelled = true }
-  }, [fetchData])
+  }, [familyId])
 
   // Load weekly score + goals for selected child
   useEffect(() => {
@@ -132,6 +133,52 @@ export default function ScoreboardPage() {
       ),
     [sessions, selectedChildId, weekStart, weekEnd],
   )
+
+  // XP from DayLogs
+  const today = new Date().toISOString().slice(0, 10)
+
+  const todayLog = useMemo(
+    () =>
+      dayLogs.find(
+        (d) => d.childId === selectedChildId && d.date === today,
+      ),
+    [dayLogs, selectedChildId, today],
+  )
+
+  const weekDayLogs = useMemo(
+    () =>
+      dayLogs.filter(
+        (d) =>
+          d.childId === selectedChildId &&
+          d.date >= weekStart &&
+          d.date <= weekEnd,
+      ),
+    [dayLogs, selectedChildId, weekStart, weekEnd],
+  )
+
+  const todayXp = todayLog ? calculateXp(todayLog) : 0
+  const weeklyXp = weekDayLogs.reduce((sum, d) => sum + calculateXp(d), 0)
+
+  // Streak: count consecutive days (going backwards from today) with >= 1 logged category
+  const streak = useMemo(() => {
+    const childLogs = dayLogs
+      .filter((d) => d.childId === selectedChildId)
+      .sort((a, b) => b.date.localeCompare(a.date))
+
+    let count = 0
+    const currentDate = new Date(today)
+    for (let i = 0; i < 365; i++) {
+      const dateStr = currentDate.toISOString().slice(0, 10)
+      const log = childLogs.find((d) => d.date === dateStr)
+      if (log && countLoggedCategories(log) >= 1) {
+        count++
+      } else if (i > 0) {
+        break
+      }
+      currentDate.setDate(currentDate.getDate() - 1)
+    }
+    return count
+  }, [dayLogs, selectedChildId, today])
 
   // Per-stream summary
   const streamSummaries = useMemo(() => {
@@ -271,11 +318,54 @@ export default function ScoreboardPage() {
         children={children}
         selectedChildId={selectedChildId}
         onSelect={setSelectedChildId}
-        isLoading={isLoading}
+        onChildAdded={addChild}
+        isLoading={childrenLoading}
       />
 
-      {!isLoading && selectedChildId && (
+      {!childrenLoading && !isLoading && selectedChildId && (
         <>
+          {/* XP Summary */}
+          <SectionCard title="XP Score">
+            <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+              <Card variant="outlined" sx={{ flex: 1, minWidth: 100 }}>
+                <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
+                  <Typography variant="h4" color="primary.main" fontWeight={700}>
+                    {todayXp}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Today XP
+                  </Typography>
+                </CardContent>
+              </Card>
+              <Card variant="outlined" sx={{ flex: 1, minWidth: 100 }}>
+                <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
+                  <Typography variant="h4" color="secondary.main" fontWeight={700}>
+                    {weeklyXp}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    This Week
+                  </Typography>
+                </CardContent>
+              </Card>
+              <Card variant="outlined" sx={{ flex: 1, minWidth: 100 }}>
+                <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
+                  <Stack direction="row" alignItems="center" justifyContent="center" spacing={0.5}>
+                    <LocalFireDepartmentIcon
+                      color={streak > 0 ? 'error' : 'disabled'}
+                      fontSize="small"
+                    />
+                    <Typography variant="h4" fontWeight={700}>
+                      {streak}
+                    </Typography>
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary">
+                    Day Streak
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Stack>
+          </SectionCard>
+
           <SectionCard title="Stream Progress">
             <Stack spacing={1.5}>
               {streamSummaries.map((s) => (

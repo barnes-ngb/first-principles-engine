@@ -2,6 +2,7 @@ import { Navigate, Outlet, RouterProvider, createBrowserRouter } from 'react-rou
 import { AppShell } from './AppShell'
 import EnginePage from '../features/engine/EnginePage'
 import KidsPage from '../features/kids/KidsPage'
+import LaddersPage from '../features/ladders/LaddersPage'
 import NotFoundPage from '../features/NotFoundPage'
 import ProjectBoardPage from '../features/projects/ProjectBoardPage'
 import EvaluationsPage from '../features/records/EvaluationsPage'
@@ -32,6 +33,7 @@ const routes = [
       { path: '/week', element: <WeekPage /> },
       { path: '/week/lab', element: <LabModePage /> },
       { path: '/engine', element: <EnginePage /> },
+      { path: '/ladders', element: <LaddersPage /> },
       { path: '/kids', element: <KidsPage /> },
       { path: '/records', element: <RecordsPage /> },
       { path: '/records/evaluations', element: <EvaluationsPage /> },

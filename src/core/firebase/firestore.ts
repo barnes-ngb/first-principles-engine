@@ -10,11 +10,13 @@ import {
 import type {
   Artifact,
   Child,
+  DadLabWeek,
   DailyPlan,
   DayLog,
   Evaluation,
   HoursAdjustment,
   HoursEntry,
+  LabSession,
   Ladder,
   MilestoneProgress,
   Project,
@@ -139,3 +141,13 @@ export const weeklyScoresCollection = (
   familyId: string,
 ): CollectionReference<WeeklyScore> =>
   collection(db, `families/${familyId}/weeklyScores`) as CollectionReference<WeeklyScore>
+
+export const labSessionsCollection = (
+  familyId: string,
+): CollectionReference<LabSession> =>
+  collection(db, `families/${familyId}/labSessions`) as CollectionReference<LabSession>
+
+export const dadLabCollection = (
+  familyId: string,
+): CollectionReference<DadLabWeek> =>
+  collection(db, `families/${familyId}/dadLab`) as CollectionReference<DadLabWeek>

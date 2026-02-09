@@ -7,7 +7,7 @@ import ListItem from '@mui/material/ListItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore'
 import { useNavigate } from 'react-router-dom'
 
 import Page from '../../components/Page'
@@ -17,9 +17,9 @@ import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useProfile } from '../../core/profile/useProfile'
 import {
-  childrenCollection,
   weeksCollection,
 } from '../../core/firebase/firestore'
+import { useChildren } from '../../core/hooks/useChildren'
 import type { Child, WeekPlan } from '../../core/types/domain'
 import { useDebounce } from '../../lib/useDebounce'
 import { getWeekRange } from '../engine/engine.logic'
@@ -56,37 +56,13 @@ export default function WeekPage() {
   )
 
   const [weekPlan, setWeekPlan] = useState<WeekPlan | null>(null)
-  const [children, setChildren] = useState<Child[]>([])
+  const { children } = useChildren()
   const [newGoalByChild, setNewGoalByChild] = useState<Record<string, string>>(
     {},
   )
   const [newMaterial, setNewMaterial] = useState('')
   const [newStep, setNewStep] = useState('')
   const [saveState, setSaveState] = useState<SaveState>('idle')
-
-  useEffect(() => {
-    let isMounted = true
-
-    const loadChildren = async () => {
-      try {
-        const snapshot = await getDocs(childrenCollection(familyId))
-        if (!isMounted) return
-        const loaded = snapshot.docs.map((docSnapshot) => ({
-          ...(docSnapshot.data() as Child),
-          id: docSnapshot.id,
-        }))
-        setChildren(loaded)
-      } catch (err) {
-        console.error('Failed to load children', err)
-      }
-    }
-
-    loadChildren()
-
-    return () => {
-      isMounted = false
-    }
-  }, [familyId])
 
   useEffect(() => {
     let isMounted = true
