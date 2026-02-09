@@ -13,7 +13,7 @@ const navItems = [
   { label: 'Dashboard', to: '/dashboard' },
   { label: 'Scoreboard', to: '/scoreboard' },
   { label: 'Dad Lab', to: '/projects' },
-  { label: 'Ladders', to: '/kids' },
+  { label: 'Ladders', to: '/ladders' },
   { label: 'Today', to: '/today', parentOnly: true },
   { label: 'This Week', to: '/week', parentOnly: true },
   { label: 'Engine', to: '/engine', parentOnly: true },

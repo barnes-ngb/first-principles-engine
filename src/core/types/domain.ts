@@ -217,6 +217,26 @@ export interface Project {
   completed?: boolean
 }
 
+export interface LabSession {
+  id?: string
+  childId: string
+  projectId?: string
+  date: string
+  mission?: string
+  constraints?: string
+  roles?: string
+  stages: LabStageCapture[]
+  story?: string
+  createdAt?: string
+}
+
+export interface LabStageCapture {
+  stage: EngineStage
+  notes?: string
+  artifactIds?: string[]
+  completedAt?: string
+}
+
 export interface GoalResult {
   goal: string
   result: SessionResult | 'na'
