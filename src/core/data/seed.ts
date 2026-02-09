@@ -10,10 +10,12 @@ import {
   weeksCollection,
 } from '../firebase/firestore'
 import {
+  DayBlockType,
   EngineStage,
   EvidenceType,
   LearningLocation,
   ProjectPhase,
+  RoutineItemKey,
   SessionResult,
   StreamId,
   SubjectBucket,
@@ -41,8 +43,36 @@ const ensureDocument = async <T>(ref: DocumentReference<T>, data: T) => {
 
 export const seedDemoFamily = async (familyId: string): Promise<void> => {
   const children = [
-    { id: 'lincoln', name: 'Lincoln' },
-    { id: 'london', name: 'London' },
+    {
+      id: 'lincoln',
+      name: 'Lincoln',
+      dayBlocks: [
+        DayBlockType.Formation,
+        DayBlockType.Reading,
+        DayBlockType.Math,
+        DayBlockType.Together,
+        DayBlockType.Project,
+      ],
+      routineItems: [
+        RoutineItemKey.PhonemicAwareness,
+        RoutineItemKey.PhonicsLesson,
+        RoutineItemKey.DecodableReading,
+        RoutineItemKey.SpellingDictation,
+        RoutineItemKey.NumberSenseOrFacts,
+        RoutineItemKey.WordProblemsModeled,
+        RoutineItemKey.NarrationOrSoundReps,
+      ],
+    },
+    {
+      id: 'london',
+      name: 'London',
+      dayBlocks: [
+        DayBlockType.Formation,
+        DayBlockType.Reading,
+        DayBlockType.Project,
+        DayBlockType.Together,
+      ],
+    },
   ]
 
   await Promise.all(

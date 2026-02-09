@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Chip from '@mui/material/Chip'
 import Divider from '@mui/material/Divider'
+import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { getDocs } from 'firebase/firestore'
+import { getDocs, query, where } from 'firebase/firestore'
 
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
@@ -53,17 +55,6 @@ const getWeekStartIndex = (value?: string) => {
   return null
 }
 
-const parseDateValue = (value?: string) => {
-  if (!value) return null
-  const normalized = value.includes('T') ? value : `${value}T00:00:00`
-  const time = Date.parse(normalized)
-  if (Number.isNaN(time)) return null
-  return new Date(time)
-}
-
-const isDateInRange = (value: Date, start: Date, end: Date) =>
-  value.getTime() >= start.getTime() && value.getTime() <= end.getTime()
-
 const getStatusLabel = (status: ReturnType<typeof computeLoopStatus>) => {
   if (status === 'complete') return 'Complete loop'
   if (status === 'minimum') return 'Minimum loop'
@@ -82,38 +73,7 @@ export default function EnginePage() {
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
   const [isLoading, setIsLoading] = useState(true)
-
-  const fetchData = useCallback(async () => {
-    const [artifactsSnapshot, milestoneSnapshot] = await Promise.all(
-      [
-        getDocs(artifactsCollection(familyId)),
-        getDocs(milestoneProgressCollection(familyId)),
-      ],
-    )
-
-    const loadedArtifacts = artifactsSnapshot.docs.map((docSnapshot) => {
-      const data = docSnapshot.data() as Artifact
-      return { ...data, id: data.id ?? docSnapshot.id }
-    })
-    const loadedMilestones = milestoneSnapshot.docs.map((docSnapshot) => {
-      const data = docSnapshot.data() as MilestoneProgress
-      return { ...data, id: data.id ?? docSnapshot.id }
-    })
-
-    return { loadedArtifacts, loadedMilestones }
-  }, [familyId])
-
-  useEffect(() => {
-    let cancelled = false
-    fetchData().then((data) => {
-      if (!cancelled) {
-        setArtifacts(data.loadedArtifacts)
-        setMilestoneProgress(data.loadedMilestones)
-        setIsLoading(false)
-      }
-    })
-    return () => { cancelled = true }
-  }, [fetchData])
+  const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
 
   const weekStartIndex = useMemo(() => {
     const configured = children.find((child) => child.settings?.weekStartDay)
@@ -126,30 +86,60 @@ export default function EnginePage() {
     [weekStartIndex],
   )
 
-  const rangeStart = useMemo(
-    () => new Date(`${weekRange.start}T00:00:00`),
-    [weekRange.start],
-  )
-  const rangeEnd = useMemo(
-    () => new Date(`${weekRange.end}T23:59:59.999`),
-    [weekRange.end],
-  )
+  const weekStart = weekRange.start
+  const weekEnd = weekRange.end
 
-  const artifactsInRange = useMemo(() => {
-    return artifacts.filter((artifact) => {
-      const created = parseDateValue(artifact.createdAt)
-      if (!created) return false
-      return isDateInRange(created, rangeStart, rangeEnd)
-    })
-  }, [artifacts, rangeEnd, rangeStart])
+  const fetchData = useCallback(async () => {
+    const weekStartISO = `${weekStart}T00:00:00`
+    const weekEndISO = `${weekEnd}T23:59:59.999`
 
-  const milestonesInRange = useMemo(() => {
-    return milestoneProgress.filter((entry) => {
-      const achieved = parseDateValue(entry.achievedAt)
-      if (!achieved) return false
-      return isDateInRange(achieved, rangeStart, rangeEnd)
+    const artifactsQuery = query(
+      artifactsCollection(familyId),
+      where('createdAt', '>=', weekStartISO),
+      where('createdAt', '<=', weekEndISO),
+    )
+    const milestonesQuery = query(
+      milestoneProgressCollection(familyId),
+      where('achievedAt', '>=', weekStart),
+      where('achievedAt', '<=', `${weekEnd}T23:59:59.999`),
+    )
+
+    const [artifactsSnapshot, milestoneSnapshot] = await Promise.all([
+      getDocs(artifactsQuery),
+      getDocs(milestonesQuery),
+    ])
+
+    const loadedArtifacts = artifactsSnapshot.docs.map((docSnapshot) => {
+      const data = docSnapshot.data() as Artifact
+      return { ...data, id: data.id ?? docSnapshot.id }
     })
-  }, [milestoneProgress, rangeEnd, rangeStart])
+    const loadedMilestones = milestoneSnapshot.docs.map((docSnapshot) => {
+      const data = docSnapshot.data() as MilestoneProgress
+      return { ...data, id: data.id ?? docSnapshot.id }
+    })
+
+    return { loadedArtifacts, loadedMilestones }
+  }, [familyId, weekStart, weekEnd])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchData()
+      .then((data) => {
+        if (!cancelled) {
+          setArtifacts(data.loadedArtifacts)
+          setMilestoneProgress(data.loadedMilestones)
+          setIsLoading(false)
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load engine data', err)
+        if (!cancelled) {
+          setSnackMessage({ text: 'Could not load engine data.', severity: 'error' })
+          setIsLoading(false)
+        }
+      })
+    return () => { cancelled = true }
+  }, [fetchData])
 
   const metricsByChild = useMemo(() => {
     return children.reduce<Record<string, {
@@ -158,7 +148,7 @@ export default function EnginePage() {
       stageCounts: StageCounts
     }>>((acc, child) => {
       if (!child.id) return acc
-      const childArtifacts = artifactsInRange.filter(
+      const childArtifacts = artifacts.filter(
         (artifact) => artifact.childId === child.id,
       )
       const rungIds = new Set(
@@ -174,7 +164,7 @@ export default function EnginePage() {
         return counts
       }, {})
 
-      const newlyAchieved = milestonesInRange.filter(
+      const newlyAchieved = milestoneProgress.filter(
         (entry) => entry.childId === child.id,
       ).length
 
@@ -185,7 +175,7 @@ export default function EnginePage() {
       }
       return acc
     }, {})
-  }, [artifactsInRange, children, milestonesInRange])
+  }, [artifacts, children, milestoneProgress])
 
   const weekStartLabel = weekStartIndex !== null ? weekDayLabels[weekStartIndex] : null
 
@@ -268,6 +258,22 @@ export default function EnginePage() {
           )
         })
       )}
+
+      <Snackbar
+        open={snackMessage !== null}
+        autoHideDuration={4000}
+        onClose={() => setSnackMessage(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackMessage(null)}
+          severity={snackMessage?.severity ?? 'error'}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackMessage?.text}
+        </Alert>
+      </Snackbar>
     </Page>
   )
 }

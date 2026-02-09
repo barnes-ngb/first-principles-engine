@@ -27,8 +27,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore'
 
 import AudioRecorder from '../../components/AudioRecorder'
@@ -52,6 +54,7 @@ import {
 } from '../../core/firebase/upload'
 import type { Artifact, DayLog, Ladder } from '../../core/types/domain'
 import {
+  DayBlockType,
   EngineStage,
   EvidenceType,
   LearningLocation,
@@ -89,6 +92,8 @@ export default function TodayPage() {
   const [linkingLadderId, setLinkingLadderId] = useState('')
   const [linkingRungId, setLinkingRungId] = useState('')
   const [mediaUploading, setMediaUploading] = useState(false)
+  const [planType, setPlanType] = useState<'A' | 'B'>('A')
+  const [showAllBlocks, setShowAllBlocks] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
   const [artifactForm, setArtifactForm] = useState({
@@ -192,39 +197,60 @@ export default function TodayPage() {
     let isMounted = true
 
     const loadWeekPlan = async () => {
-      const snapshot = await getDocs(weeksCollection(familyId))
-      if (!isMounted) return
-      const matching = snapshot.docs
-        .map((docSnapshot) => ({
-          id: docSnapshot.id,
-          ...docSnapshot.data(),
-        }))
-        .find((plan) => {
-          const start = plan.startDate as string
-          const end = plan.endDate as string | undefined
-          return start <= today && (!end || today <= end)
-        })
-      setWeekPlanId(matching?.id)
+      try {
+        const snapshot = await getDocs(weeksCollection(familyId))
+        if (!isMounted) return
+        const matching = snapshot.docs
+          .map((docSnapshot) => ({
+            id: docSnapshot.id,
+            ...docSnapshot.data(),
+          }))
+          .find((plan) => {
+            const start = plan.startDate as string
+            const end = plan.endDate as string | undefined
+            return start <= today && (!end || today <= end)
+          })
+        setWeekPlanId(matching?.id)
+      } catch (err) {
+        console.error('Failed to load week plan', err)
+        if (isMounted) {
+          setSnackMessage({ text: 'Could not load week plan.', severity: 'error' })
+        }
+      }
     }
 
     const loadLadders = async () => {
-      const snapshot = await getDocs(laddersCollection(familyId))
-      if (!isMounted) return
-      const loadedLadders = snapshot.docs.map((docSnapshot) => ({
-        id: docSnapshot.id,
-        ...(docSnapshot.data() as Ladder),
-      }))
-      setLadders(loadedLadders)
+      try {
+        const snapshot = await getDocs(laddersCollection(familyId))
+        if (!isMounted) return
+        const loadedLadders = snapshot.docs.map((docSnapshot) => ({
+          id: docSnapshot.id,
+          ...(docSnapshot.data() as Ladder),
+        }))
+        setLadders(loadedLadders)
+      } catch (err) {
+        console.error('Failed to load ladders', err)
+        if (isMounted) {
+          setSnackMessage({ text: 'Could not load ladders.', severity: 'error' })
+        }
+      }
     }
 
     const loadArtifacts = async () => {
-      const snapshot = await getDocs(artifactsCollection(familyId))
-      if (!isMounted) return
-      const loadedArtifacts = snapshot.docs
-        .map((docSnapshot) => docSnapshot.data())
-        .filter((artifact) => artifact.dayLogId === today)
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      setTodayArtifacts(loadedArtifacts)
+      try {
+        const q = query(artifactsCollection(familyId), where('dayLogId', '==', today))
+        const snapshot = await getDocs(q)
+        if (!isMounted) return
+        const loadedArtifacts = snapshot.docs
+          .map((docSnapshot) => docSnapshot.data())
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        setTodayArtifacts(loadedArtifacts)
+      } catch (err) {
+        console.error('Failed to load artifacts', err)
+        if (isMounted) {
+          setSnackMessage({ text: 'Could not load artifacts.', severity: 'error' })
+        }
+      }
     }
 
     loadWeekPlan()
@@ -520,10 +546,31 @@ export default function TodayPage() {
           <Typography color="text.secondary" variant="body2">
             Capture today&apos;s highlights and reflections.
           </Typography>
-          <SaveIndicator state={saveState} />
+          <Stack direction="row" spacing={1} alignItems="center">
+            <ToggleButtonGroup
+              value={planType}
+              exclusive
+              size="small"
+              onChange={(_e, value) => { if (value) setPlanType(value) }}
+            >
+              <ToggleButton value="A">Plan A</ToggleButton>
+              <ToggleButton value="B">Plan B</ToggleButton>
+            </ToggleButtonGroup>
+            <SaveIndicator state={saveState} />
+          </Stack>
         </Stack>
         <Stack spacing={1}>
-          {dayLog.blocks.map((block, index) => {
+          {dayLog.blocks
+          .map((block, originalIndex) => ({ block, originalIndex }))
+          .filter(({ block }) =>
+            planType === 'B'
+              ? block.type === DayBlockType.Reading || block.type === DayBlockType.Math
+              : true,
+          )
+          .filter((_entry, filteredIndex) =>
+            planType === 'A' ? showAllBlocks || filteredIndex < 4 : true,
+          )
+          .map(({ block, originalIndex: index }) => {
             const meta = blockMeta[block.type]
             const checklistDone = block.checklist?.filter((i) => i.completed).length ?? 0
             const checklistTotal = block.checklist?.length ?? 0
@@ -698,6 +745,24 @@ export default function TodayPage() {
               </Accordion>
             )
           })}
+          {planType === 'A' && !showAllBlocks && dayLog.blocks.length > 4 && (
+            <Button
+              size="small"
+              onClick={() => setShowAllBlocks(true)}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              Show more ({dayLog.blocks.length - 4} more)
+            </Button>
+          )}
+          {planType === 'A' && showAllBlocks && dayLog.blocks.length > 4 && (
+            <Button
+              size="small"
+              onClick={() => setShowAllBlocks(false)}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              Show less
+            </Button>
+          )}
         </Stack>
       </SectionCard>
       <SectionCard title="Capture Artifact">
