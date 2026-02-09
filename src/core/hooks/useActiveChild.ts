@@ -63,7 +63,7 @@ export function useActiveChild(): UseActiveChildResult {
 
   // Child profiles cannot switch — provide a no-op setter
   const setActiveChildId = isChildProfile
-    ? (_id: string) => {}
+    ? () => {}
     : setSelectedChildId
 
   return {
