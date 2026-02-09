@@ -52,6 +52,7 @@ import {
   generateFilename,
   uploadArtifactFile,
 } from '../../core/firebase/upload'
+import { useProfile } from '../../core/profile/useProfile'
 import type { Artifact, DayLog, Ladder } from '../../core/types/domain'
 import {
   DayBlockType,
@@ -59,16 +60,20 @@ import {
   EvidenceType,
   LearningLocation,
   SubjectBucket,
+  UserProfile,
 } from '../../core/types/enums'
 import { useDebounce } from '../../lib/useDebounce'
 import { blockMeta } from './blockMeta'
-import { createDefaultDayLog } from './daylog.model'
+import { createDefaultDayLog, dayLogDocId, legacyDayLogDocId } from './daylog.model'
 import RoutineSection from './RoutineSection'
 import { calculateXp } from './xp'
 
 export default function TodayPage() {
   const today = new Date().toISOString().slice(0, 10)
   const familyId = useFamilyId()
+  const { profile } = useProfile()
+  const isKidProfile =
+    profile === UserProfile.Lincoln || profile === UserProfile.London
   const {
     children,
     selectedChildId,
@@ -76,13 +81,13 @@ export default function TodayPage() {
     isLoading: isLoadingChildren,
     addChild,
   } = useChildren()
-  const dayLogDocId = useMemo(
-    () => (selectedChildId ? `${selectedChildId}_${today}` : today),
+  const currentDocId = useMemo(
+    () => (selectedChildId ? dayLogDocId(today, selectedChildId) : ''),
     [selectedChildId, today],
   )
   const dayLogRef = useMemo(
-    () => doc(daysCollection(familyId), dayLogDocId),
-    [familyId, dayLogDocId],
+    () => (currentDocId ? doc(daysCollection(familyId), currentDocId) : null),
+    [familyId, currentDocId],
   )
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
   const [ladders, setLadders] = useState<Ladder[]>([])
@@ -118,9 +123,10 @@ export default function TodayPage() {
 
   const writeDayLog = useCallback(
     async (updated: DayLog) => {
+      if (!dayLogRef) return
       setSaveState('saving')
       try {
-        await setDoc(dayLogRef, updated)
+        await setDoc(dayLogRef, { ...updated, updatedAt: new Date().toISOString() })
         setSaveState('saved')
       } catch (err) {
         console.error('Failed to save day log', err)
@@ -150,9 +156,9 @@ export default function TodayPage() {
 
   // --- Data loading ---
 
-  // Load DayLog for selected child + date
+  // Load DayLog for selected child + date (with legacy doc ID migration)
   useEffect(() => {
-    if (!selectedChildId) {
+    if (!selectedChildId || !dayLogRef) {
       setDayLog(null)
       return
     }
@@ -160,6 +166,7 @@ export default function TodayPage() {
 
     const loadDayLog = async () => {
       try {
+        // Try new format: {date}_{childId}
         const snapshot = await getDoc(dayLogRef)
         if (!isMounted) return
 
@@ -168,6 +175,37 @@ export default function TodayPage() {
           return
         }
 
+        // Backward compat: try legacy format {childId}_{date}
+        const legacyId = legacyDayLogDocId(selectedChildId, today)
+        const legacyRef = doc(daysCollection(familyId), legacyId)
+        const legacySnap = await getDoc(legacyRef)
+        if (!isMounted) return
+
+        if (legacySnap.exists()) {
+          // Migrate: copy to new doc ID, keep old doc intact
+          const legacyData = legacySnap.data()
+          await setDoc(dayLogRef, { ...legacyData, updatedAt: new Date().toISOString() })
+          if (isMounted) setDayLog(legacyData)
+          return
+        }
+
+        // Also check bare date doc (oldest legacy — no childId in ID)
+        const bareDateRef = doc(daysCollection(familyId), today)
+        const bareDateSnap = await getDoc(bareDateRef)
+        if (!isMounted) return
+
+        if (bareDateSnap.exists()) {
+          const bareData = bareDateSnap.data()
+          // Only adopt if the doc has no childId or matches this child
+          if (!bareData.childId || bareData.childId === selectedChildId) {
+            const migrated = { ...bareData, childId: selectedChildId, updatedAt: new Date().toISOString() }
+            await setDoc(dayLogRef, migrated)
+            if (isMounted) setDayLog(migrated)
+            return
+          }
+        }
+
+        // No existing doc — create fresh
         const defaultLog = createDefaultDayLog(
           selectedChildId,
           today,
@@ -191,7 +229,7 @@ export default function TodayPage() {
     return () => {
       isMounted = false
     }
-  }, [dayLogRef, today, selectedChildId, selectedChild])
+  }, [dayLogRef, today, selectedChildId, selectedChild, familyId])
 
   useEffect(() => {
     let isMounted = true
@@ -502,14 +540,20 @@ export default function TodayPage() {
     return (
       <Page>
         <Typography variant="h4" component="h1">Today</Typography>
-        <ChildSelector
-          children={children}
-          selectedChildId={selectedChildId}
-          onSelect={setSelectedChildId}
-          onChildAdded={addChild}
-          isLoading={isLoadingChildren}
-          emptyMessage="Add a child to start logging."
-        />
+        {isKidProfile ? (
+          <Typography variant="subtitle1" color="text.secondary">
+            {selectedChild?.name ?? 'Loading...'}
+          </Typography>
+        ) : (
+          <ChildSelector
+            children={children}
+            selectedChildId={selectedChildId}
+            onSelect={setSelectedChildId}
+            onChildAdded={addChild}
+            isLoading={isLoadingChildren}
+            emptyMessage="Add a child to start logging."
+          />
+        )}
         {selectedChildId && (
           <SectionCard title="DayLog">
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -525,14 +569,20 @@ export default function TodayPage() {
   return (
     <Page>
       <Typography variant="h4" component="h1">Today</Typography>
-      <ChildSelector
-        children={children}
-        selectedChildId={selectedChildId}
-        onSelect={setSelectedChildId}
-        onChildAdded={addChild}
-        isLoading={isLoadingChildren}
-        emptyMessage="Add a child to start logging."
-      />
+      {isKidProfile ? (
+        <Typography variant="subtitle1" color="text.secondary">
+          {selectedChild?.name}
+        </Typography>
+      ) : (
+        <ChildSelector
+          children={children}
+          selectedChildId={selectedChildId}
+          onSelect={setSelectedChildId}
+          onChildAdded={addChild}
+          isLoading={isLoadingChildren}
+          emptyMessage="Add a child to start logging."
+        />
+      )}
 
       <RoutineSection
         dayLog={dayLog}

@@ -44,6 +44,7 @@ import type {
 import { SubjectBucket } from '../../core/types/enums'
 import { formatDateForInput } from '../../lib/format'
 import { getSchoolYearRange } from '../../lib/time'
+import { parseDateFromDocId } from '../today/daylog.model'
 import {
   buildComplianceZip,
   computeHoursSummary,
@@ -134,7 +135,7 @@ export default function RecordsPage() {
       }),
       dayLogs: daysSnap.docs.map((d) => {
         const data = d.data() as DayLog
-        return { ...data, date: data.date ?? d.id }
+        return { ...data, date: data.date ?? parseDateFromDocId(d.id) }
       }),
       adjustments: adjSnap.docs.map((d) => {
         const data = d.data() as HoursAdjustment
@@ -184,6 +185,7 @@ export default function RecordsPage() {
         if (minutes <= 0) return
         const entryRef = doc(hoursCollection(familyId))
         batch.set(entryRef, {
+          childId: log.childId,
           date: log.date,
           minutes,
           blockType: block.type,
@@ -191,6 +193,7 @@ export default function RecordsPage() {
           location: block.location,
           quickCapture: block.quickCapture,
           notes: block.notes,
+          dayLogId: log.childId ? `${log.date}_${log.childId}` : log.date,
         })
       })
     })

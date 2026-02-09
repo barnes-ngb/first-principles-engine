@@ -8,6 +8,38 @@ import type {
   SpeechRoutine,
 } from '../../core/types/domain'
 
+// ─── DayLog document ID helpers ─────────────────────────────────────────────
+
+/** Build the canonical DayLog document ID: `{date}_{childId}`. */
+export const dayLogDocId = (date: string, childId: string): string =>
+  `${date}_${childId}`
+
+/**
+ * Build the legacy document ID used before the per-child migration.
+ * Format was `{childId}_{date}`.
+ */
+export const legacyDayLogDocId = (childId: string, date: string): string =>
+  `${childId}_${date}`
+
+/**
+ * Extract the `date` portion from a DayLog document ID.
+ * Handles both `{date}_{childId}` (new) and `{childId}_{date}` (legacy)
+ * formats by checking which segment looks like a YYYY-MM-DD date.
+ */
+export const parseDateFromDocId = (docId: string): string => {
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/
+  // New format: date is the prefix (before first `_` that is followed by non-date)
+  // e.g. "2026-02-09_abc123" → date is "2026-02-09"
+  const prefix = docId.slice(0, 10)
+  if (datePattern.test(prefix)) return prefix
+  // Legacy format: date is the suffix after last `_`
+  // e.g. "abc123_2026-02-09" → date is "2026-02-09"
+  const suffix = docId.slice(-10)
+  if (datePattern.test(suffix)) return suffix
+  // Fallback — return the full ID (best effort)
+  return docId
+}
+
 const defaultDayLogChecklistItems: ChecklistItem[] = []
 
 /** All block types in default priority order. */
@@ -117,5 +149,6 @@ export const createDefaultDayLog = (
     ...(hasMath ? { math: emptyMathRoutine() } : {}),
     ...(hasSpeech ? { speech: emptySpeechRoutine() } : {}),
     ...(checklist ? { checklist } : {}),
+    createdAt: new Date().toISOString(),
   }
 }
