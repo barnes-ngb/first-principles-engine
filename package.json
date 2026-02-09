@@ -21,6 +21,7 @@
     "@mui/material": "^7.3.7",
     "date-fns": "^4.1.0",
     "firebase": "^12.9.0",
+    "jszip": "^3.10.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.0",

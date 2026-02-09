@@ -45,6 +45,7 @@ import { SubjectBucket } from '../../core/types/enums'
 import { formatDateForInput } from '../../lib/format'
 import { getSchoolYearRange } from '../../lib/time'
 import {
+  buildComplianceZip,
   computeHoursSummary,
   generateDailyLogCsv,
   generateEvaluationMarkdown,
@@ -265,19 +266,33 @@ export default function RecordsPage() {
     )
   }, [artifacts, children, startDate, endDate])
 
-  const handleExportPack = useCallback(() => {
-    handleExportHoursCsv()
-    handleExportDailyLogCsv()
-    if (evaluations.length > 0) handleExportEvaluationMd()
-    if (artifacts.length > 0) handleExportPortfolioMd()
-  }, [
-    handleExportHoursCsv,
-    handleExportDailyLogCsv,
-    handleExportEvaluationMd,
-    handleExportPortfolioMd,
-    evaluations.length,
-    artifacts.length,
-  ])
+  const [isZipping, setIsZipping] = useState(false)
+
+  const handleDownloadZip = useCallback(async () => {
+    setIsZipping(true)
+    try {
+      const blob = await buildComplianceZip({
+        summary,
+        dayLogs,
+        hoursEntries,
+        evaluations,
+        artifacts,
+        children: children.map((c) => ({ id: c.id, name: c.name })),
+        startDate,
+        endDate,
+      })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `compliance-pack-${startDate}-to-${endDate}.zip`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } finally {
+      setIsZipping(false)
+    }
+  }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, startDate, endDate])
 
   const hasData = hasHoursEntries || dayLogs.length > 0
 
@@ -485,8 +500,19 @@ export default function RecordsPage() {
       <SectionCard title="Export Pack">
         <Stack spacing={2}>
           <Typography variant="body2" color="text.secondary">
-            Download your compliance records. "Export All" downloads every
-            available file at once.
+            Download a single zip with all compliance records, or use the
+            individual buttons below for a specific file.
+          </Typography>
+          <Button
+            variant="contained"
+            onClick={handleDownloadZip}
+            disabled={!hasData || isZipping}
+          >
+            {isZipping ? 'Building zip\u2026' : 'Download Compliance Pack (.zip)'}
+          </Button>
+          <Divider />
+          <Typography variant="body2" color="text.secondary">
+            Individual exports
           </Typography>
           <Stack direction="row" spacing={1} flexWrap="wrap">
             <Button
@@ -522,13 +548,6 @@ export default function RecordsPage() {
               Portfolio Index Markdown
             </Button>
           </Stack>
-          <Button
-            variant="contained"
-            onClick={handleExportPack}
-            disabled={!hasData}
-          >
-            Export All
-          </Button>
         </Stack>
       </SectionCard>
     </Page>
