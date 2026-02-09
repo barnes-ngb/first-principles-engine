@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Alert from '@mui/material/Alert'
+import Avatar from '@mui/material/Avatar'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
-import CardActionArea from '@mui/material/CardActionArea'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
+import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
-import ToggleButton from '@mui/material/ToggleButton'
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDocs, query, setDoc, where } from 'firebase/firestore'
+import { doc, getDoc, getDocs, setDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -19,31 +18,28 @@ import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useProfile } from '../../core/profile/useProfile'
 import {
-  dailyPlansCollection,
+  daysCollection,
   laddersCollection,
   milestoneProgressCollection,
   sessionsCollection,
+  weeksCollection,
 } from '../../core/firebase/firestore'
 import { useChildren } from '../../core/hooks/useChildren'
-import type { DailyPlan, Ladder, MilestoneProgress, Session } from '../../core/types/domain'
-import { EnergyLevel, StreamId } from '../../core/types/enums'
-import type { EnergyLevel as EnergyLevelType } from '../../core/types/enums'
+import type { DayLog, Ladder, MilestoneProgress, Session, WeekPlan } from '../../core/types/domain'
+import { StreamId } from '../../core/types/enums'
 import type { ProgressByRungId } from '../kids/ladder.logic'
 import { getActiveRungId, rungIdFor } from '../kids/ladder.logic'
+import { getWeekRange } from '../engine/engine.logic'
+import { blockMeta } from '../today/blockMeta'
+import { dayLogDocId, legacyDayLogDocId } from '../today/daylog.model'
 import { calculateStreak, findLevelUpCandidates } from './sessions.logic'
 import {
-  buildPlanASessions,
-  buildPlanBSessions,
   ladderIdForChild,
   streamIcon,
   streamLabel,
 } from './sessions.model'
-
-const energyOptions: Array<{ value: EnergyLevelType; label: string; icon: string }> = [
-  { value: EnergyLevel.Normal, label: 'Normal', icon: '\uD83D\uDFE2' },
-  { value: EnergyLevel.Low, label: 'Low', icon: '\uD83D\uDFE1' },
-  { value: EnergyLevel.Overwhelmed, label: 'Overwhelmed', icon: '\uD83D\uDD34' },
-]
+import type { TodayBlock } from './weekplan-today'
+import { buildTodayBlocks, createMinimalWeekPlan } from './weekplan-today'
 
 const allStreams = Object.values(StreamId) as StreamId[]
 
@@ -67,14 +63,26 @@ export default function DashboardPage() {
   const { canEdit } = useProfile()
   const navigate = useNavigate()
   const today = new Date().toISOString().slice(0, 10)
+  const weekRange = useMemo(() => getWeekRange(new Date()), [])
 
   const { children, selectedChildId, setSelectedChildId, isLoading: childrenLoading, addChild } = useChildren()
-  const [energy, setEnergy] = useState<EnergyLevelType>(EnergyLevel.Normal)
-  const [dailyPlan, setDailyPlan] = useState<DailyPlan | null>(null)
+  const [weekPlan, setWeekPlan] = useState<WeekPlan | null | undefined>(undefined) // undefined = loading
+  const [dayLog, setDayLog] = useState<DayLog | null>(null)
   const [sessions, setSessions] = useState<Session[]>([])
   const [ladders, setLadders] = useState<Ladder[]>([])
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [snackMessage, setSnackMessage] = useState<{
+    text: string
+    severity: 'success' | 'error'
+  } | null>(null)
+
+  const selectedChild = useMemo(
+    () => children.find((c) => c.id === selectedChildId),
+    [children, selectedChildId],
+  )
+
+  // ─── Load sessions, ladders, milestone progress ─────────────────────────────
 
   const fetchData = useCallback(async () => {
     const [sessionsSnap, laddersSnap, progressSnap] = await Promise.all([
@@ -99,7 +107,6 @@ export default function DashboardPage() {
     return { loadedSessions, loadedLadders, loadedProgress }
   }, [familyId])
 
-  // Fetch counter triggers re-loads (bumped on window focus)
   const [fetchKey, setFetchKey] = useState(0)
 
   useEffect(() => {
@@ -114,35 +121,76 @@ export default function DashboardPage() {
     return () => { cancelled = true }
   }, [fetchData, fetchKey])
 
-  // Re-fetch when page regains focus (e.g. returning from session runner)
   useEffect(() => {
     const handleFocus = () => setFetchKey((k) => k + 1)
     window.addEventListener('focus', handleFocus)
     return () => window.removeEventListener('focus', handleFocus)
   }, [])
 
-  // Load today's plan for selected child
+  // ─── Load WeekPlan for current week ─────────────────────────────────────────
+
   useEffect(() => {
-    if (!selectedChildId) return
     let cancelled = false
-    const loadPlan = async () => {
-      const q = query(
-        dailyPlansCollection(familyId),
-        where('childId', '==', selectedChildId),
-        where('date', '==', today),
-      )
-      const snap = await getDocs(q)
-      if (cancelled) return
-      if (snap.docs.length > 0) {
-        const d = snap.docs[0]
-        setDailyPlan({ ...(d.data() as DailyPlan), id: d.id })
-      } else {
-        setDailyPlan(null)
+    const loadWeekPlan = async () => {
+      try {
+        const ref = doc(weeksCollection(familyId), weekRange.start)
+        const snap = await getDoc(ref)
+        if (cancelled) return
+        if (snap.exists()) {
+          setWeekPlan(snap.data())
+        } else {
+          setWeekPlan(null)
+        }
+      } catch (err) {
+        console.error('Failed to load week plan', err)
+        if (!cancelled) {
+          setWeekPlan(null)
+          setSnackMessage({ text: 'Could not load week plan.', severity: 'error' })
+        }
       }
     }
-    loadPlan()
+    loadWeekPlan()
     return () => { cancelled = true }
-  }, [familyId, selectedChildId, today])
+  }, [familyId, weekRange.start])
+
+  // ─── Load today's DayLog for selected child ─────────────────────────────────
+
+  useEffect(() => {
+    let cancelled = false
+    const loadDayLog = async () => {
+      if (!selectedChildId) {
+        if (!cancelled) setDayLog(null)
+        return
+      }
+      try {
+        const docId = dayLogDocId(today, selectedChildId)
+        const ref = doc(daysCollection(familyId), docId)
+        const snap = await getDoc(ref)
+        if (cancelled) return
+        if (snap.exists()) {
+          setDayLog(snap.data())
+          return
+        }
+        // Try legacy format
+        const legacyId = legacyDayLogDocId(selectedChildId, today)
+        const legacyRef = doc(daysCollection(familyId), legacyId)
+        const legacySnap = await getDoc(legacyRef)
+        if (cancelled) return
+        if (legacySnap.exists()) {
+          setDayLog(legacySnap.data())
+          return
+        }
+        setDayLog(null)
+      } catch (err) {
+        console.error('Failed to load day log', err)
+        if (!cancelled) setDayLog(null)
+      }
+    }
+    loadDayLog()
+    return () => { cancelled = true }
+  }, [familyId, selectedChildId, today, fetchKey])
+
+  // ─── Derived data ───────────────────────────────────────────────────────────
 
   const streak = useMemo(
     () => calculateStreak(sessions, selectedChildId),
@@ -157,12 +205,6 @@ export default function DashboardPage() {
     [sessions, selectedChildId, today],
   )
 
-  const completedStreams = useMemo(
-    () => new Set(todaySessions.map((s) => s.streamId)),
-    [todaySessions],
-  )
-
-  // Build a per-ladder progress map from milestone data
   const progressByLadder = useMemo(() => {
     const result: Record<string, ProgressByRungId> = {}
     for (const mp of milestoneProgress) {
@@ -194,34 +236,35 @@ export default function DashboardPage() {
     return findLevelUpCandidates(sessions, selectedChildId, streamLadderIds)
   }, [sessions, selectedChildId, rungsByStream])
 
-  const handleEnergyChange = useCallback(
-    async (_: unknown, value: EnergyLevelType | null) => {
-      if (!value || !selectedChildId) return
-      setEnergy(value)
+  // ─── Today's Plan blocks (derived from WeekPlan + child) ───────────────────
 
-      const planType = value === EnergyLevel.Normal ? 'A' : 'B'
-      const plannedSessions =
-        planType === 'A'
-          ? buildPlanASessions(selectedChildId, rungsByStream)
-          : buildPlanBSessions(selectedChildId, rungsByStream)
+  const todayBlocks: TodayBlock[] = useMemo(() => {
+    if (!weekPlan || !selectedChild) return []
+    return buildTodayBlocks(weekPlan, selectedChild, dayLog)
+  }, [weekPlan, selectedChild, dayLog])
 
-      const plan: DailyPlan = {
-        childId: selectedChildId,
-        date: today,
-        energy: value,
-        planType,
-        sessions: plannedSessions,
-      }
+  // ─── Handlers ───────────────────────────────────────────────────────────────
 
-      if (dailyPlan?.id) {
-        await setDoc(doc(dailyPlansCollection(familyId), dailyPlan.id), plan)
-        setDailyPlan({ ...plan, id: dailyPlan.id })
-      } else {
-        const ref = await addDoc(dailyPlansCollection(familyId), plan)
-        setDailyPlan({ ...plan, id: ref.id })
-      }
+  const handleCreateWeekPlan = useCallback(async () => {
+    try {
+      const childIds = children.map((c) => c.id)
+      const plan = createMinimalWeekPlan(weekRange.start, weekRange.end, childIds)
+      const ref = doc(weeksCollection(familyId), weekRange.start)
+      await setDoc(ref, plan)
+      setWeekPlan(plan)
+      setSnackMessage({ text: 'Week plan created!', severity: 'success' })
+      navigate('/week')
+    } catch (err) {
+      console.error('Failed to create week plan', err)
+      setSnackMessage({ text: 'Could not create week plan.', severity: 'error' })
+    }
+  }, [children, familyId, navigate, weekRange])
+
+  const handleLogBlock = useCallback(
+    (blockType: string) => {
+      navigate(`/today#${blockType}`)
     },
-    [dailyPlan, familyId, rungsByStream, selectedChildId, today],
+    [navigate],
   )
 
   const handleStartSession = useCallback(
@@ -235,7 +278,7 @@ export default function DashboardPage() {
     [navigate, rungsByStream, selectedChildId],
   )
 
-  const planSessions = dailyPlan?.sessions ?? []
+  // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <Page>
@@ -254,34 +297,6 @@ export default function DashboardPage() {
 
       {!childrenLoading && !isLoading && selectedChildId && (
         <>
-          {canEdit && (
-            <SectionCard title="How's the energy today?">
-              <ToggleButtonGroup
-                value={energy}
-                exclusive
-                onChange={handleEnergyChange}
-                fullWidth
-                size="large"
-              >
-                {energyOptions.map((opt) => (
-                  <ToggleButton key={opt.value} value={opt.value}>
-                    <Stack alignItems="center" spacing={0.5}>
-                      <Typography variant="h5">{opt.icon}</Typography>
-                      <Typography variant="body2">{opt.label}</Typography>
-                    </Stack>
-                  </ToggleButton>
-                ))}
-              </ToggleButtonGroup>
-              {energy !== EnergyLevel.Normal && (
-                <Alert severity="info" sx={{ mt: 1 }}>
-                  {energy === EnergyLevel.Low
-                    ? 'Plan B: shorter sessions to keep momentum.'
-                    : 'Just Formation today. Keep it gentle.'}
-                </Alert>
-              )}
-            </SectionCard>
-          )}
-
           {streak > 0 && (
             <Box sx={{ textAlign: 'center' }}>
               <Chip
@@ -307,68 +322,101 @@ export default function DashboardPage() {
             </Alert>
           )}
 
-          <SectionCard
-            title={`Today's Plan ${dailyPlan ? `(Plan ${dailyPlan.planType})` : ''}`}
-          >
-            {planSessions.length === 0 ? (
+          {/* Today's Plan — derived from WeekPlan */}
+          <SectionCard title="Today's Plan">
+            {weekPlan === undefined ? (
+              <Typography color="text.secondary">Loading plan...</Typography>
+            ) : weekPlan === null ? (
               <Stack spacing={2} alignItems="center">
-                <Typography color="text.secondary">
-                  {canEdit
-                    ? "No plan set yet. Pick an energy level above to generate today's plan."
-                    : 'No plan set for today yet. Ask a parent to set one up.'}
-                </Typography>
-                {canEdit && (
-                  <Button
-                    variant="contained"
-                    onClick={() =>
-                      handleEnergyChange(null, energy)
-                    }
-                  >
-                    Generate Plan
-                  </Button>
+                {canEdit ? (
+                  <>
+                    <Typography color="text.secondary">
+                      No plan for this week yet.
+                    </Typography>
+                    <Button variant="contained" onClick={handleCreateWeekPlan}>
+                      Create this week&apos;s plan
+                    </Button>
+                  </>
+                ) : (
+                  <Typography color="text.secondary">
+                    Ask a parent to set up the plan.
+                  </Typography>
                 )}
               </Stack>
             ) : (
               <Stack spacing={1.5}>
-                {planSessions.map((ps, idx) => {
-                  const done = completedStreams.has(ps.streamId)
+                {todayBlocks.map((tb) => {
+                  const meta = blockMeta[tb.type]
                   return (
-                    <Card key={idx} variant="outlined">
-                      <CardActionArea
-                        disabled={done}
-                        onClick={() => handleStartSession(ps.streamId)}
-                      >
-                        <CardContent>
+                    <Card key={tb.type} variant="outlined">
+                      <CardContent sx={{ '&:last-child': { pb: 2 } }}>
+                        <Stack spacing={1}>
                           <Stack
                             direction="row"
                             alignItems="center"
                             justifyContent="space-between"
                           >
                             <Stack direction="row" spacing={1.5} alignItems="center">
-                              <Typography variant="h6">
-                                {streamIcon[ps.streamId]}
-                              </Typography>
+                              <Avatar
+                                sx={{
+                                  bgcolor: `${meta.color}20`,
+                                  color: meta.color,
+                                  width: 36,
+                                  height: 36,
+                                }}
+                              >
+                                {meta.icon}
+                              </Avatar>
                               <Stack>
-                                <Typography variant="subtitle1">
-                                  {ps.label ?? streamLabel[ps.streamId]}
+                                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                                  {tb.title}
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  Rung {ps.targetRungOrder}{' '}
-                                  {ps.plannedMinutes
-                                    ? `\u00b7 ${ps.plannedMinutes} min`
-                                    : ''}
+                                  {tb.suggestedMinutes} min
                                 </Typography>
                               </Stack>
                             </Stack>
-                            {done && (
+                            {tb.done && (
                               <Chip label="Done" color="success" size="small" />
                             )}
                           </Stack>
-                        </CardContent>
-                      </CardActionArea>
+                          <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+                            {tb.instructions.map((inst, i) => (
+                              <Typography
+                                key={i}
+                                component="li"
+                                variant="body2"
+                                color="text.secondary"
+                              >
+                                {inst}
+                              </Typography>
+                            ))}
+                          </Box>
+                          {!tb.done && (
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              sx={{ alignSelf: 'flex-start', borderColor: meta.color, color: meta.color }}
+                              onClick={() => handleLogBlock(tb.type)}
+                            >
+                              Log this
+                            </Button>
+                          )}
+                        </Stack>
+                      </CardContent>
                     </Card>
                   )
                 })}
+                {canEdit && (
+                  <Button
+                    variant="text"
+                    size="small"
+                    onClick={() => navigate('/week')}
+                    sx={{ alignSelf: 'flex-start' }}
+                  >
+                    Edit week plan
+                  </Button>
+                )}
               </Stack>
             )}
           </SectionCard>
@@ -432,6 +480,22 @@ export default function DashboardPage() {
           )}
         </>
       )}
+
+      <Snackbar
+        open={snackMessage !== null}
+        autoHideDuration={4000}
+        onClose={() => setSnackMessage(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackMessage(null)}
+          severity={snackMessage?.severity ?? 'success'}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackMessage?.text}
+        </Alert>
+      </Snackbar>
     </Page>
   )
 }

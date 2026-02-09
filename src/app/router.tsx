@@ -1,5 +1,6 @@
 import { Navigate, Outlet, RouterProvider, createBrowserRouter } from 'react-router-dom'
 import { AppShell } from './AppShell'
+import RequireParent from '../components/RequireParent'
 import EnginePage from '../features/engine/EnginePage'
 import KidsPage from '../features/kids/KidsPage'
 import LaddersPage from '../features/ladders/LaddersPage'
@@ -30,8 +31,13 @@ const routes = [
       { path: '/scoreboard', element: <ScoreboardPage /> },
       { path: '/projects', element: <ProjectBoardPage /> },
       { path: '/today', element: <TodayPage /> },
-      { path: '/week', element: <WeekPage /> },
-      { path: '/week/lab', element: <LabModePage /> },
+      {
+        element: <RequireParent />,
+        children: [
+          { path: '/week', element: <WeekPage /> },
+          { path: '/week/lab', element: <LabModePage /> },
+        ],
+      },
       { path: '/engine', element: <EnginePage /> },
       { path: '/ladders', element: <LaddersPage /> },
       { path: '/kids', element: <KidsPage /> },
