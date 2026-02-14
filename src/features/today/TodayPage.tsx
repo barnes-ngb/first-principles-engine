@@ -94,6 +94,12 @@ export default function TodayPage() {
     [familyId, currentDocId],
   )
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
+  // Track which child the current dayLog belongs to; clear stale data on switch
+  const [dayLogChildId, setDayLogChildId] = useState(selectedChildId)
+  if (dayLogChildId !== selectedChildId) {
+    setDayLogChildId(selectedChildId)
+    setDayLog(null)
+  }
   const [ladders, setLadders] = useState<Ladder[]>([])
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
   const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
@@ -106,7 +112,7 @@ export default function TodayPage() {
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
   const [artifactForm, setArtifactForm] = useState({
-    childId: '',
+    childId: selectedChildId,
     evidenceType: EvidenceType.Note as EvidenceType,
     engineStage: EngineStage.Wonder,
     subjectBucket: SubjectBucket.Reading,
@@ -116,6 +122,11 @@ export default function TodayPage() {
     ladderId: '',
     rungId: '',
   })
+
+  // Keep artifact form childId in sync with active child
+  useEffect(() => {
+    setArtifactForm((prev) => ({ ...prev, childId: selectedChildId }))
+  }, [selectedChildId])
 
   const selectableChildren = children
   const selectedChild = useMemo(
@@ -584,6 +595,7 @@ export default function TodayPage() {
       <HelperPanel template={selectedChild ? getTemplateForChild(selectedChild.name) : undefined} />
 
       <RoutineSection
+        key={`${selectedChildId}_${today}`}
         dayLog={dayLog}
         onUpdate={handleRoutineUpdate}
         onUpdateImmediate={handleRoutineUpdateImmediate}
