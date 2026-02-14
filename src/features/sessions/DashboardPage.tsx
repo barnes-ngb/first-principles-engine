@@ -68,6 +68,11 @@ export default function DashboardPage() {
   const { children, selectedChildId, setSelectedChildId, isLoading: childrenLoading, addChild } = useChildren()
   const [weekPlan, setWeekPlan] = useState<WeekPlan | null | undefined>(undefined) // undefined = loading
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
+  const [dayLogChildId, setDayLogChildId] = useState(selectedChildId)
+  if (dayLogChildId !== selectedChildId) {
+    setDayLogChildId(selectedChildId)
+    setDayLog(null)
+  }
   const [sessions, setSessions] = useState<Session[]>([])
   const [ladders, setLadders] = useState<Ladder[]>([])
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
@@ -148,10 +153,7 @@ export default function DashboardPage() {
   // ─── Load today's DayLog for selected child (real-time) ─────────────────────
 
   useEffect(() => {
-    if (!selectedChildId) {
-      setDayLog(null)
-      return
-    }
+    if (!selectedChildId) return
 
     const docId = dayLogDocId(today, selectedChildId)
     const ref = doc(daysCollection(familyId), docId)
