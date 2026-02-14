@@ -41,6 +41,7 @@ import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
 import type { SaveState } from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
+import { formatDateYmd } from '../../lib/format'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import {
@@ -73,7 +74,7 @@ import RoutineSection from './RoutineSection'
 import { calculateXp } from './xp'
 
 export default function TodayPage() {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = formatDateYmd(new Date())
   const familyId = useFamilyId()
   const { profile } = useProfile()
   const isKidProfile =
