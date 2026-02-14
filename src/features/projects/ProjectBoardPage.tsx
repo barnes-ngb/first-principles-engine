@@ -20,7 +20,7 @@ import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import {
   labSessionsCollection,
@@ -73,11 +73,11 @@ export default function ProjectBoardPage() {
   const { canEdit } = useProfile()
   const {
     children,
-    selectedChildId,
-    setSelectedChildId,
+    activeChildId: selectedChildId,
+    setActiveChildId: setSelectedChildId,
     isLoading: childrenLoading,
     addChild,
-  } = useChildren()
+  } = useActiveChild()
   const [projects, setProjects] = useState<Project[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showNewDialog, setShowNewDialog] = useState(false)

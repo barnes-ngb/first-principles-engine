@@ -24,7 +24,7 @@ import {
   sessionsCollection,
   weeksCollection,
 } from '../../core/firebase/firestore'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { DayLog, Ladder, MilestoneProgress, Session, WeekPlan } from '../../core/types/domain'
 import { StreamId } from '../../core/types/enums'
 import type { ProgressByRungId } from '../kids/ladder.logic'
@@ -39,7 +39,7 @@ import {
   streamLabel,
 } from './sessions.model'
 import type { TodayBlock } from './weekplan-today'
-import { buildTodayBlocks, createMinimalWeekPlan } from './weekplan-today'
+import { BlockStatus, buildTodayBlocks, createMinimalWeekPlan } from './weekplan-today'
 
 const allStreams = Object.values(StreamId) as StreamId[]
 
@@ -65,7 +65,7 @@ export default function DashboardPage() {
   const today = new Date().toISOString().slice(0, 10)
   const weekRange = useMemo(() => getWeekRange(new Date()), [])
 
-  const { children, selectedChildId, setSelectedChildId, isLoading: childrenLoading, addChild } = useChildren()
+  const { children, activeChildId: selectedChildId, setActiveChildId: setSelectedChildId, isLoading: childrenLoading, addChild } = useActiveChild()
   const [weekPlan, setWeekPlan] = useState<WeekPlan | null | undefined>(undefined) // undefined = loading
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
   const [dayLogChildId, setDayLogChildId] = useState(selectedChildId)
@@ -379,8 +379,11 @@ export default function DashboardPage() {
                                 </Typography>
                               </Stack>
                             </Stack>
-                            {tb.done && (
-                              <Chip label="Done" color="success" size="small" />
+                            {tb.status === BlockStatus.Logged && (
+                              <Chip label="Logged" color="success" size="small" />
+                            )}
+                            {tb.status === BlockStatus.InProgress && (
+                              <Chip label="In Progress" color="warning" size="small" variant="outlined" />
                             )}
                           </Stack>
                           <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
@@ -395,16 +398,18 @@ export default function DashboardPage() {
                               </Typography>
                             ))}
                           </Box>
-                          {!tb.done && (
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              sx={{ alignSelf: 'flex-start', borderColor: meta.color, color: meta.color }}
-                              onClick={() => handleLogBlock(tb.type)}
-                            >
-                              Log this
-                            </Button>
-                          )}
+                          <Button
+                            variant={tb.status === BlockStatus.Logged ? 'text' : 'outlined'}
+                            size="small"
+                            sx={{ alignSelf: 'flex-start', borderColor: meta.color, color: meta.color }}
+                            onClick={() => handleLogBlock(tb.type)}
+                          >
+                            {tb.status === BlockStatus.Logged
+                              ? 'View Log'
+                              : tb.status === BlockStatus.InProgress
+                                ? 'Continue'
+                                : 'Log'}
+                          </Button>
                         </Stack>
                       </CardContent>
                     </Card>

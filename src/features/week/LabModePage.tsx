@@ -21,7 +21,7 @@ import {
   generateFilename,
   uploadArtifactFile,
 } from '../../core/firebase/upload'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import {
   EngineStage,
   EvidenceType,
@@ -54,7 +54,7 @@ const defaultFormState = (
 
 export default function LabModePage() {
   const familyId = useFamilyId()
-  const { children, selectedChildId, isLoading: childrenLoading, addChild } = useChildren()
+  const { children, activeChildId: selectedChildId, isLoading: childrenLoading, addChild } = useActiveChild()
   const [selectedStage, setSelectedStage] = useState<EngineStage | null>(null)
   const [mediaUploading, setMediaUploading] = useState(false)
   const [artifactForm, setArtifactForm] = useState<ArtifactFormState>(() =>

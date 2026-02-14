@@ -20,7 +20,7 @@ import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import {
   artifactsCollection,
@@ -73,11 +73,11 @@ export default function LaddersPage() {
   const { canEdit, profile } = useProfile()
   const {
     children,
-    selectedChildId,
-    setSelectedChildId,
+    activeChildId: selectedChildId,
+    setActiveChildId: setSelectedChildId,
     isLoading: childrenLoading,
     addChild,
-  } = useChildren()
+  } = useActiveChild()
   const isKid = profile === UserProfile.Lincoln || profile === UserProfile.London
 
   const [ladders, setLadders] = useState<Ladder[]>([])

@@ -14,7 +14,7 @@ import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import {
   daysCollection,
@@ -52,11 +52,11 @@ export default function ScoreboardPage() {
 
   const {
     children,
-    selectedChildId,
-    setSelectedChildId,
+    activeChildId: selectedChildId,
+    setActiveChildId: setSelectedChildId,
     isLoading: childrenLoading,
     addChild,
-  } = useChildren()
+  } = useActiveChild()
   const [sessions, setSessions] = useState<Session[]>([])
   const [dayLogs, setDayLogs] = useState<DayLog[]>([])
   const [weeklyScore, setWeeklyScore] = useState<WeeklyScore | null>(null)

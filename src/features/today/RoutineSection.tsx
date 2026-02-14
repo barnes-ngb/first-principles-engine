@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react'
+import Box from '@mui/material/Box'
 import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
 import FormControlLabel from '@mui/material/FormControlLabel'
@@ -153,15 +154,27 @@ export default function RoutineSection({
 
   return (
     <Stack spacing={2}>
-      {/* XP Summary */}
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Typography variant="h6">Daily Routine</Typography>
-        <Chip
-          label={`${xp} XP`}
-          color={xp > 0 ? 'success' : 'default'}
-          variant={xp > 0 ? 'filled' : 'outlined'}
-        />
-      </Stack>
+      {/* XP Summary — sticky on mobile so it stays visible while scrolling */}
+      <Box
+        sx={{
+          position: { xs: 'sticky', md: 'static' },
+          top: { xs: 56, md: 'auto' },
+          zIndex: { xs: 10, md: 'auto' },
+          bgcolor: 'background.default',
+          py: { xs: 1, md: 0 },
+          mx: { xs: -2, md: 0 },
+          px: { xs: 2, md: 0 },
+        }}
+      >
+        <Stack direction="row" alignItems="center" justifyContent="space-between">
+          <Typography variant="h6">Daily Routine</Typography>
+          <Chip
+            label={`${xp} XP`}
+            color={xp > 0 ? 'success' : 'default'}
+            variant={xp > 0 ? 'filled' : 'outlined'}
+          />
+        </Stack>
+      </Box>
 
       {/* Reading / Literacy Routine */}
       {hasReading && (

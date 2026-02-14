@@ -2,6 +2,14 @@ import type { Child, DayLog, WeekPlan } from '../../core/types/domain'
 import { DayBlockType } from '../../core/types/enums'
 import type { DayBlockType as DayBlockTypeValue } from '../../core/types/enums'
 import { ALL_DAY_BLOCKS } from '../today/daylog.model'
+import { getTemplateForChild } from '../today/dailyPlanTemplates'
+
+export const BlockStatus = {
+  NotStarted: 'not_started',
+  InProgress: 'in_progress',
+  Logged: 'logged',
+} as const
+export type BlockStatus = (typeof BlockStatus)[keyof typeof BlockStatus]
 
 export interface TodayBlock {
   type: DayBlockTypeValue
@@ -9,6 +17,7 @@ export interface TodayBlock {
   suggestedMinutes: number
   instructions: string[]
   done: boolean
+  status: BlockStatus
 }
 
 /** Default suggested minutes per block type. */
@@ -51,16 +60,22 @@ const blockTitle: Record<DayBlockTypeValue, string> = {
 }
 
 /**
- * Derive 1-2 instructions for a block type from the WeekPlan.
- * Falls back to defaults when the plan doesn't have relevant content.
+ * Derive instructions for a block type from the WeekPlan.
+ * Falls back to child-specific template instructions, then generic defaults.
  */
 function deriveInstructions(
   type: DayBlockTypeValue,
   weekPlan: WeekPlan,
-  childId: string,
+  child: Child,
 ): string[] {
   const childGoals =
-    weekPlan.childGoals.find((cg) => cg.childId === childId)?.goals ?? []
+    weekPlan.childGoals.find((cg) => cg.childId === child.id)?.goals ?? []
+  const template = getTemplateForChild(child.name)
+  const templateInstructions = template?.blockInstructions[type]
+
+  // Helper to pick fallback: template-specific > generic defaults
+  const fallback = () =>
+    templateInstructions ?? defaultInstructions[type] ?? ['Complete scheduled activities']
 
   switch (type) {
     case DayBlockType.Formation: {
@@ -70,45 +85,52 @@ function deriveInstructions(
         items.push(weekPlan.heartQuestion)
       if (weekPlan.scriptureRef && items.length < 2)
         items.push(weekPlan.scriptureRef)
-      return items.length > 0 ? items.slice(0, 2) : defaultInstructions[type]
+      return items.length > 0 ? items.slice(0, 2) : fallback()
     }
     case DayBlockType.Together: {
       const items: string[] = []
       if (weekPlan.theme) items.push(`Theme: ${weekPlan.theme}`)
       if (weekPlan.flywheelPlan) items.push(weekPlan.flywheelPlan)
-      return items.length > 0 ? items.slice(0, 2) : defaultInstructions[type]
+      return items.length > 0 ? items.slice(0, 2) : fallback()
     }
     case DayBlockType.Project: {
       const items: string[] = []
       if (weekPlan.buildLab.title) items.push(weekPlan.buildLab.title)
       if (weekPlan.buildLab.steps.length > 0)
         items.push(weekPlan.buildLab.steps[0])
-      return items.length > 0 ? items.slice(0, 2) : defaultInstructions[type]
+      return items.length > 0 ? items.slice(0, 2) : fallback()
     }
     default: {
-      // For Reading, Math, Speech, etc. — pull from child goals if available
+      // For Reading, Math, Speech, etc. — child goals > template > generic
       if (childGoals.length > 0) {
         return childGoals.slice(0, 2)
       }
-      return defaultInstructions[type] ?? ['Complete scheduled activities']
+      return fallback()
     }
   }
 }
 
 /**
- * Check whether a block type is "done" in today's DayLog.
- * Checks both section-level done flags and block actualMinutes.
+ * Determine the status of a block in today's DayLog.
+ *
+ * - Logged: section-level done flag is set OR block has actualMinutes
+ * - InProgress: block has notes or some checklist items completed (but not "done")
+ * - NotStarted: no data recorded
  */
-function isBlockDone(type: DayBlockTypeValue, dayLog: DayLog | null): boolean {
-  if (!dayLog) return false
+function getBlockStatus(type: DayBlockTypeValue, dayLog: DayLog | null): BlockStatus {
+  if (!dayLog) return BlockStatus.NotStarted
 
-  // Check section-level done flags
+  // Check section-level done flags → Logged
+  let sectionDone = false
+  let hasPartialData = false
+
   switch (type) {
     case DayBlockType.Formation:
-      if (dayLog.formation?.done) return true
+      sectionDone = !!dayLog.formation?.done
+      hasPartialData = !!(dayLog.formation?.gratitude || dayLog.formation?.verse || dayLog.formation?.note)
       break
     case DayBlockType.Reading:
-      if (
+      sectionDone = !!(
         dayLog.reading?.handwriting?.done ||
         dayLog.reading?.spelling?.done ||
         dayLog.reading?.sightWords?.done ||
@@ -119,28 +141,42 @@ function isBlockDone(type: DayBlockTypeValue, dayLog: DayLog | null): boolean {
         dayLog.reading?.decodableReading?.done ||
         dayLog.reading?.spellingDictation?.done
       )
-        return true
       break
     case DayBlockType.Speech:
-      if (dayLog.speech?.done) return true
+      sectionDone = !!dayLog.speech?.done
+      hasPartialData = !!(dayLog.speech?.note || dayLog.speech?.narrationReps?.done)
+      if (dayLog.speech?.narrationReps?.done) sectionDone = true
       break
     case DayBlockType.Math:
-      if (dayLog.math?.done) return true
+      sectionDone = !!(dayLog.math?.done || dayLog.math?.numberSense?.done || dayLog.math?.wordProblems?.done)
+      hasPartialData = !!(dayLog.math?.note || dayLog.math?.problems)
       break
     case DayBlockType.Together:
-      if (dayLog.together?.done) return true
+      sectionDone = !!dayLog.together?.done
+      hasPartialData = !!dayLog.together?.note
       break
     case DayBlockType.Movement:
-      if (dayLog.movement?.done) return true
+      sectionDone = !!dayLog.movement?.done
+      hasPartialData = !!dayLog.movement?.note
       break
     case DayBlockType.Project:
-      if (dayLog.project?.done) return true
+      sectionDone = !!dayLog.project?.done
+      hasPartialData = !!dayLog.project?.note
       break
   }
 
+  if (sectionDone) return BlockStatus.Logged
+
   // Check block-level actualMinutes
   const block = dayLog.blocks.find((b) => b.type === type)
-  return (block?.actualMinutes ?? 0) > 0
+  if ((block?.actualMinutes ?? 0) > 0) return BlockStatus.Logged
+
+  // Check for partial data in block (notes, checklist)
+  if (hasPartialData) return BlockStatus.InProgress
+  if (block?.notes) return BlockStatus.InProgress
+  if (block?.checklist?.some((i) => i.completed)) return BlockStatus.InProgress
+
+  return BlockStatus.NotStarted
 }
 
 /**
@@ -155,13 +191,17 @@ export function buildTodayBlocks(
   dayLog: DayLog | null,
 ): TodayBlock[] {
   const blockTypes = child.dayBlocks ?? ALL_DAY_BLOCKS
-  return blockTypes.map((type) => ({
-    type,
-    title: blockTitle[type],
-    suggestedMinutes: defaultMinutes[type],
-    instructions: deriveInstructions(type, weekPlan, child.id),
-    done: isBlockDone(type, dayLog),
-  }))
+  return blockTypes.map((type) => {
+    const status = getBlockStatus(type, dayLog)
+    return {
+      type,
+      title: blockTitle[type],
+      suggestedMinutes: defaultMinutes[type],
+      instructions: deriveInstructions(type, weekPlan, child),
+      done: status === BlockStatus.Logged,
+      status,
+    }
+  })
 }
 
 /**
