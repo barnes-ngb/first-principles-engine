@@ -173,6 +173,13 @@ export default function TodayPage() {
     [writeDayLog],
   )
 
+  // Show a brief "Saved" toast when save completes (mobile-friendly feedback)
+  useEffect(() => {
+    if (saveState === 'saved') {
+      setSnackMessage({ text: 'Saved', severity: 'success' })
+    }
+  }, [saveState])
+
   // --- Data loading ---
 
   // Load DayLog for selected child + date (real-time, with legacy migration)
@@ -283,9 +290,28 @@ export default function TodayPage() {
       }
     }
 
+    loadLadders()
+
+    return () => {
+      isMounted = false
+    }
+  }, [familyId])
+
+  // Load artifacts scoped to child + date (reload when child changes)
+  useEffect(() => {
+    if (!selectedChildId) {
+      setTodayArtifacts([])
+      return
+    }
+    let isMounted = true
+
     const loadArtifacts = async () => {
       try {
-        const q = query(artifactsCollection(familyId), where('dayLogId', '==', today))
+        const q = query(
+          artifactsCollection(familyId),
+          where('dayLogId', '==', today),
+          where('childId', '==', selectedChildId),
+        )
         const snapshot = await getDocs(q)
         if (!isMounted) return
         const loadedArtifacts = snapshot.docs
@@ -300,13 +326,12 @@ export default function TodayPage() {
       }
     }
 
-    loadLadders()
     loadArtifacts()
 
     return () => {
       isMounted = false
     }
-  }, [familyId, today])
+  }, [familyId, today, selectedChildId])
 
   const selectedLadder = useMemo(
     () => ladders.find((ladder) => ladder.id === artifactForm.ladderId),
@@ -1086,7 +1111,7 @@ export default function TodayPage() {
 
       <Snackbar
         open={snackMessage !== null}
-        autoHideDuration={4000}
+        autoHideDuration={snackMessage?.text === 'Saved' ? 1500 : 4000}
         onClose={() => setSnackMessage(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >

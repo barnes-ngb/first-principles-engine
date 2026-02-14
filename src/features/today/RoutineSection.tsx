@@ -204,27 +204,28 @@ export default function RoutineSection({
               }
             />
             {reading.phonemicAwareness?.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Minutes"
                   type="number"
                   size="small"
+                  fullWidth
                   value={reading.phonemicAwareness.minutes ?? ''}
                   onChange={(e) =>
                     updateReading('phonemicAwareness', {
                       minutes: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={reading.phonemicAwareness.note ?? ''}
                   onChange={(e) =>
                     updateReading('phonemicAwareness', { note: e.target.value })
                   }
-                  sx={{ flex: 1, minWidth: 120 }}
                 />
               </Stack>
             )}
@@ -253,27 +254,28 @@ export default function RoutineSection({
               }
             />
             {reading.phonicsLesson?.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Minutes"
                   type="number"
                   size="small"
+                  fullWidth
                   value={reading.phonicsLesson.minutes ?? ''}
                   onChange={(e) =>
                     updateReading('phonicsLesson', {
                       minutes: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={reading.phonicsLesson.note ?? ''}
                   onChange={(e) =>
                     updateReading('phonicsLesson', { note: e.target.value })
                   }
-                  sx={{ flex: 1, minWidth: 120 }}
                 />
               </Stack>
             )}
@@ -302,18 +304,19 @@ export default function RoutineSection({
               }
             />
             {reading.decodableReading?.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }} alignItems="center">
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }} alignItems={{ sm: 'center' }}>
                 <TextField
                   label="Minutes"
                   type="number"
                   size="small"
+                  fullWidth
                   value={reading.decodableReading.minutes ?? ''}
                   onChange={(e) =>
                     updateReading('decodableReading', {
                       minutes: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <FormControlLabel
                   control={
@@ -330,11 +333,11 @@ export default function RoutineSection({
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={reading.decodableReading.note ?? ''}
                   onChange={(e) =>
                     updateReading('decodableReading', { note: e.target.value })
                   }
-                  sx={{ flex: 1, minWidth: 120 }}
                 />
               </Stack>
             )}
@@ -363,27 +366,28 @@ export default function RoutineSection({
               }
             />
             {reading.spellingDictation?.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Lines"
                   type="number"
                   size="small"
+                  fullWidth
                   value={reading.spellingDictation.lines ?? ''}
                   onChange={(e) =>
                     updateReading('spellingDictation', {
                       lines: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={reading.spellingDictation.note ?? ''}
                   onChange={(e) =>
                     updateReading('spellingDictation', { note: e.target.value })
                   }
-                  sx={{ flex: 1, minWidth: 120 }}
                 />
               </Stack>
             )}
@@ -414,39 +418,41 @@ export default function RoutineSection({
               }
             />
             {reading.handwriting.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Minutes"
                   type="number"
                   size="small"
+                  fullWidth
                   value={reading.handwriting.minutes ?? ''}
                   onChange={(e) =>
                     updateReading('handwriting', {
                       minutes: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Lines"
                   type="number"
                   size="small"
+                  fullWidth
                   value={reading.handwriting.lines ?? ''}
                   onChange={(e) =>
                     updateReading('handwriting', {
                       lines: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={reading.handwriting.note ?? ''}
                   onChange={(e) =>
                     updateReading('handwriting', { note: e.target.value })
                   }
-                  sx={{ flex: 1, minWidth: 120 }}
                 />
               </Stack>
             )}
@@ -475,24 +481,24 @@ export default function RoutineSection({
               }
             />
             {reading.spelling.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Word(s) practiced"
                   size="small"
+                  fullWidth
                   value={reading.spelling.words ?? ''}
                   onChange={(e) =>
                     updateReading('spelling', { words: e.target.value })
                   }
-                  sx={{ flex: 1 }}
                 />
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={reading.spelling.note ?? ''}
                   onChange={(e) =>
                     updateReading('spelling', { note: e.target.value })
                   }
-                  sx={{ flex: 1 }}
                 />
               </Stack>
             )}
@@ -521,28 +527,29 @@ export default function RoutineSection({
               }
             />
             {reading.sightWords.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Count"
                   type="number"
                   size="small"
+                  fullWidth
                   value={reading.sightWords.count ?? ''}
                   onChange={(e) =>
                     updateReading('sightWords', {
                       count: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                   placeholder="5 or 10"
                 />
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={reading.sightWords.note ?? ''}
                   onChange={(e) =>
                     updateReading('sightWords', { note: e.target.value })
                   }
-                  sx={{ flex: 1 }}
                 />
               </Stack>
             )}
@@ -571,39 +578,41 @@ export default function RoutineSection({
               }
             />
             {reading.minecraft.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Pages"
                   type="number"
                   size="small"
+                  fullWidth
                   value={reading.minecraft.pages ?? ''}
                   onChange={(e) =>
                     updateReading('minecraft', {
                       pages: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Book points"
                   type="number"
                   size="small"
+                  fullWidth
                   value={reading.minecraft.points ?? ''}
                   onChange={(e) =>
                     updateReading('minecraft', {
                       points: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 120 }}
+                  sx={{ maxWidth: { sm: 120 } }}
                 />
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={reading.minecraft.note ?? ''}
                   onChange={(e) =>
                     updateReading('minecraft', { note: e.target.value })
                   }
-                  sx={{ flex: 1, minWidth: 120 }}
                 />
               </Stack>
             )}
@@ -632,39 +641,41 @@ export default function RoutineSection({
               }
             />
             {reading.readingEggs.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Minutes"
                   type="number"
                   size="small"
+                  fullWidth
                   value={reading.readingEggs.minutes ?? ''}
                   onChange={(e) =>
                     updateReading('readingEggs', {
                       minutes: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Lessons"
                   type="number"
                   size="small"
+                  fullWidth
                   value={reading.readingEggs.lessons ?? ''}
                   onChange={(e) =>
                     updateReading('readingEggs', {
                       lessons: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={reading.readingEggs.note ?? ''}
                   onChange={(e) =>
                     updateReading('readingEggs', { note: e.target.value })
                   }
-                  sx={{ flex: 1, minWidth: 120 }}
                 />
               </Stack>
             )}
@@ -698,37 +709,39 @@ export default function RoutineSection({
               }
             />
             {math.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Problems"
                   type="number"
                   size="small"
+                  fullWidth
                   value={math.problems ?? ''}
                   onChange={(e) =>
                     updateMath({
                       problems: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 110 }}
+                  sx={{ maxWidth: { sm: 110 } }}
                 />
                 <TextField
                   label="Pages"
                   type="number"
                   size="small"
+                  fullWidth
                   value={math.pages ?? ''}
                   onChange={(e) =>
                     updateMath({
                       pages: e.target.value ? Number(e.target.value) : undefined,
                     })
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={math.note ?? ''}
                   onChange={(e) => updateMath({ note: e.target.value })}
-                  sx={{ flex: 1, minWidth: 120 }}
                 />
               </Stack>
             )}
@@ -757,27 +770,28 @@ export default function RoutineSection({
               }
             />
             {(math as MathRoutine).numberSense?.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Minutes"
                   type="number"
                   size="small"
+                  fullWidth
                   value={(math as MathRoutine).numberSense?.minutes ?? ''}
                   onChange={(e) =>
                     updateMathItem('numberSense', {
                       minutes: e.target.value ? Number(e.target.value) : undefined,
                     } as Partial<RoutineItem>)
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={(math as MathRoutine).numberSense?.note ?? ''}
                   onChange={(e) =>
                     updateMathItem('numberSense', { note: e.target.value })
                   }
-                  sx={{ flex: 1, minWidth: 120 }}
                 />
               </Stack>
             )}
@@ -806,39 +820,41 @@ export default function RoutineSection({
               }
             />
             {(math as MathRoutine).wordProblems?.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Minutes"
                   type="number"
                   size="small"
+                  fullWidth
                   value={(math as MathRoutine).wordProblems?.minutes ?? ''}
                   onChange={(e) =>
                     updateMathItem('wordProblems', {
                       minutes: e.target.value ? Number(e.target.value) : undefined,
                     } as Partial<RoutineItem>)
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Count"
                   type="number"
                   size="small"
+                  fullWidth
                   value={(math as MathRoutine).wordProblems?.count ?? ''}
                   onChange={(e) =>
                     updateMathItem('wordProblems', {
                       count: e.target.value ? Number(e.target.value) : undefined,
                     } as Partial<RoutineItem>)
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={(math as MathRoutine).wordProblems?.note ?? ''}
                   onChange={(e) =>
                     updateMathItem('wordProblems', { note: e.target.value })
                   }
-                  sx={{ flex: 1, minWidth: 120 }}
                 />
               </Stack>
             )}
@@ -904,27 +920,28 @@ export default function RoutineSection({
               }
             />
             {(speech as SpeechRoutine).narrationReps?.done && (
-              <Stack direction="row" spacing={1} sx={{ pl: 4 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Minutes"
                   type="number"
                   size="small"
+                  fullWidth
                   value={(speech as SpeechRoutine).narrationReps?.minutes ?? ''}
                   onChange={(e) =>
                     updateSpeechItem('narrationReps', {
                       minutes: e.target.value ? Number(e.target.value) : undefined,
                     } as Partial<RoutineItem>)
                   }
-                  sx={{ width: 100 }}
+                  sx={{ maxWidth: { sm: 100 } }}
                 />
                 <TextField
                   label="Note"
                   size="small"
+                  fullWidth
                   value={(speech as SpeechRoutine).narrationReps?.note ?? ''}
                   onChange={(e) =>
                     updateSpeechItem('narrationReps', { note: e.target.value })
                   }
-                  sx={{ flex: 1, minWidth: 120 }}
                 />
               </Stack>
             )}
