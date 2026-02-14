@@ -42,7 +42,7 @@ import SaveIndicator from '../../components/SaveIndicator'
 import type { SaveState } from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import {
   artifactsCollection,
   daysCollection,
@@ -66,7 +66,9 @@ import {
 import { useDebounce } from '../../lib/useDebounce'
 import { getWeekRange } from '../engine/engine.logic'
 import { blockMeta } from './blockMeta'
+import { getTemplateForChild } from './dailyPlanTemplates'
 import { createDefaultDayLog, dayLogDocId, legacyDayLogDocId } from './daylog.model'
+import HelperPanel from './HelperPanel'
 import RoutineSection from './RoutineSection'
 import { calculateXp } from './xp'
 
@@ -78,11 +80,11 @@ export default function TodayPage() {
     profile === UserProfile.Lincoln || profile === UserProfile.London
   const {
     children,
-    selectedChildId,
-    setSelectedChildId,
+    activeChildId: selectedChildId,
+    setActiveChildId: setSelectedChildId,
     isLoading: isLoadingChildren,
     addChild,
-  } = useChildren()
+  } = useActiveChild()
   const currentDocId = useMemo(
     () => (selectedChildId ? dayLogDocId(today, selectedChildId) : ''),
     [selectedChildId, today],
@@ -125,17 +127,21 @@ export default function TodayPage() {
 
   const writeDayLog = useCallback(
     async (updated: DayLog) => {
-      if (!dayLogRef) return
+      if (!dayLogRef || !selectedChildId) return
+      // Ensure childId is always correct (defense in depth)
+      const safeLog = updated.childId === selectedChildId
+        ? updated
+        : { ...updated, childId: selectedChildId }
       setSaveState('saving')
       try {
-        await setDoc(dayLogRef, { ...updated, updatedAt: new Date().toISOString() })
+        await setDoc(dayLogRef, { ...safeLog, updatedAt: new Date().toISOString() })
         setSaveState('saved')
       } catch (err) {
         console.error('Failed to save day log', err)
         setSaveState('error')
       }
     },
-    [dayLogRef],
+    [dayLogRef, selectedChildId],
   )
 
   const debouncedWrite = useDebounce(writeDayLog, 800)
@@ -574,6 +580,8 @@ export default function TodayPage() {
           emptyMessage="Add a child to start logging."
         />
       )}
+
+      <HelperPanel template={selectedChild ? getTemplateForChild(selectedChild.name) : undefined} />
 
       <RoutineSection
         dayLog={dayLog}

@@ -19,7 +19,7 @@ import { useProfile } from '../../core/profile/useProfile'
 import {
   weeksCollection,
 } from '../../core/firebase/firestore'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Child, WeekPlan } from '../../core/types/domain'
 import { useDebounce } from '../../lib/useDebounce'
 import { getWeekRange } from '../engine/engine.logic'
@@ -56,7 +56,7 @@ export default function WeekPage() {
   )
 
   const [weekPlan, setWeekPlan] = useState<WeekPlan | null>(null)
-  const { children } = useChildren()
+  const { children } = useActiveChild()
   const [newGoalByChild, setNewGoalByChild] = useState<Record<string, string>>(
     {},
   )
