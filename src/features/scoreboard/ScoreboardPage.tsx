@@ -8,7 +8,7 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment'
-import { addDoc, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore'
+import { addDoc, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -85,21 +85,18 @@ export default function ScoreboardPage() {
     return () => { cancelled = true }
   }, [familyId])
 
-  // Load weekly score + goals for selected child
+  // Load weekly score for selected child
   useEffect(() => {
     if (!selectedChildId) return
     let cancelled = false
     const load = async () => {
-      const [scoreSnap, weekPlanSnap] = await Promise.all([
-        getDocs(
-          query(
-            weeklyScoresCollection(familyId),
-            where('childId', '==', selectedChildId),
-            where('weekStart', '==', weekStart),
-          ),
+      const scoreSnap = await getDocs(
+        query(
+          weeklyScoresCollection(familyId),
+          where('childId', '==', selectedChildId),
+          where('weekStart', '==', weekStart),
         ),
-        getDoc(doc(weeksCollection(familyId), weekStart)),
-      ])
+      )
       if (cancelled) return
 
       if (scoreSnap.docs.length > 0) {
@@ -108,19 +105,34 @@ export default function ScoreboardPage() {
       } else {
         setWeeklyScore(null)
       }
-
-      if (weekPlanSnap.exists()) {
-        const plan = weekPlanSnap.data()
-        const goals =
-          plan.childGoals?.find((g) => g.childId === selectedChildId)?.goals ??
-          []
-        setChildGoals(goals)
-      } else {
-        setChildGoals([])
-      }
     }
     load()
     return () => { cancelled = true }
+  }, [familyId, selectedChildId, weekStart])
+
+  // Load child goals from WeekPlan (real-time)
+  useEffect(() => {
+    if (!selectedChildId) return
+    const ref = doc(weeksCollection(familyId), weekStart)
+    const unsubscribe = onSnapshot(
+      ref,
+      (snap) => {
+        if (snap.exists()) {
+          const plan = snap.data()
+          const goals =
+            plan.childGoals?.find((g) => g.childId === selectedChildId)?.goals ??
+            []
+          setChildGoals(goals)
+        } else {
+          setChildGoals([])
+        }
+      },
+      (err) => {
+        console.error('Failed to load week plan', err)
+        setChildGoals([])
+      },
+    )
+    return unsubscribe
   }, [familyId, selectedChildId, weekStart])
 
   const weekSessions = useMemo(

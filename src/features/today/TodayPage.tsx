@@ -27,6 +27,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   query,
   setDoc,
   updateDoc,
@@ -63,6 +64,7 @@ import {
   UserProfile,
 } from '../../core/types/enums'
 import { useDebounce } from '../../lib/useDebounce'
+import { getWeekRange } from '../engine/engine.logic'
 import { blockMeta } from './blockMeta'
 import { createDefaultDayLog, dayLogDocId, legacyDayLogDocId } from './daylog.model'
 import RoutineSection from './RoutineSection'
@@ -156,106 +158,96 @@ export default function TodayPage() {
 
   // --- Data loading ---
 
-  // Load DayLog for selected child + date (with legacy doc ID migration)
+  // Load DayLog for selected child + date (real-time, with legacy migration)
   useEffect(() => {
     if (!selectedChildId || !dayLogRef) {
       setDayLog(null)
       return
     }
-    let isMounted = true
+    let migratedOrCreated = false
 
-    const loadDayLog = async () => {
-      try {
-        // Try new format: {date}_{childId}
-        const snapshot = await getDoc(dayLogRef)
-        if (!isMounted) return
-
+    const unsubscribe = onSnapshot(
+      dayLogRef,
+      async (snapshot) => {
         if (snapshot.exists()) {
           setDayLog(snapshot.data())
           return
         }
 
-        // Backward compat: try legacy format {childId}_{date}
-        const legacyId = legacyDayLogDocId(selectedChildId, today)
-        const legacyRef = doc(daysCollection(familyId), legacyId)
-        const legacySnap = await getDoc(legacyRef)
-        if (!isMounted) return
+        // Doc doesn't exist — try legacy fallback / create default (once)
+        if (migratedOrCreated) return
+        migratedOrCreated = true
 
-        if (legacySnap.exists()) {
-          // Migrate: copy to new doc ID, keep old doc intact
-          const legacyData = legacySnap.data()
-          await setDoc(dayLogRef, { ...legacyData, updatedAt: new Date().toISOString() })
-          if (isMounted) setDayLog(legacyData)
-          return
-        }
-
-        // Also check bare date doc (oldest legacy — no childId in ID)
-        const bareDateRef = doc(daysCollection(familyId), today)
-        const bareDateSnap = await getDoc(bareDateRef)
-        if (!isMounted) return
-
-        if (bareDateSnap.exists()) {
-          const bareData = bareDateSnap.data()
-          // Only adopt if the doc has no childId or matches this child
-          if (!bareData.childId || bareData.childId === selectedChildId) {
-            const migrated = { ...bareData, childId: selectedChildId, updatedAt: new Date().toISOString() }
-            await setDoc(dayLogRef, migrated)
-            if (isMounted) setDayLog(migrated)
+        try {
+          // Backward compat: try legacy format {childId}_{date}
+          const legacyId = legacyDayLogDocId(selectedChildId, today)
+          const legacyRef = doc(daysCollection(familyId), legacyId)
+          const legacySnap = await getDoc(legacyRef)
+          if (legacySnap.exists()) {
+            const legacyData = legacySnap.data()
+            await setDoc(dayLogRef, { ...legacyData, updatedAt: new Date().toISOString() })
+            // onSnapshot will fire again with the migrated doc
             return
           }
-        }
 
-        // No existing doc — create fresh
-        const defaultLog = createDefaultDayLog(
-          selectedChildId,
-          today,
-          selectedChild?.dayBlocks,
-          selectedChild?.routineItems,
-        )
-        await setDoc(dayLogRef, defaultLog)
-        if (isMounted) {
-          setDayLog(defaultLog)
-        }
-      } catch (err) {
-        console.error('Failed to load day log', err)
-        if (isMounted) {
+          // Also check bare date doc (oldest legacy — no childId in ID)
+          const bareDateRef = doc(daysCollection(familyId), today)
+          const bareDateSnap = await getDoc(bareDateRef)
+          if (bareDateSnap.exists()) {
+            const bareData = bareDateSnap.data()
+            if (!bareData.childId || bareData.childId === selectedChildId) {
+              const migrated = { ...bareData, childId: selectedChildId, updatedAt: new Date().toISOString() }
+              await setDoc(dayLogRef, migrated)
+              // onSnapshot will fire again
+              return
+            }
+          }
+
+          // No existing doc — create fresh
+          const defaultLog = createDefaultDayLog(
+            selectedChildId,
+            today,
+            selectedChild?.dayBlocks,
+            selectedChild?.routineItems,
+          )
+          await setDoc(dayLogRef, defaultLog)
+          // onSnapshot will fire again with the new doc
+        } catch (err) {
+          console.error('Failed to load day log', err)
+          migratedOrCreated = false
           setSnackMessage({ text: 'Could not load today\u2019s log.', severity: 'error' })
         }
-      }
-    }
+      },
+      (err) => {
+        console.error('Failed to load day log', err)
+        setSnackMessage({ text: 'Could not load today\u2019s log.', severity: 'error' })
+      },
+    )
 
-    loadDayLog()
-
-    return () => {
-      isMounted = false
-    }
+    return unsubscribe
   }, [dayLogRef, today, selectedChildId, selectedChild, familyId])
 
+  // Load WeekPlan ID for current week (real-time)
+  const weekRange = useMemo(() => getWeekRange(new Date()), [])
+
+  useEffect(() => {
+    const ref = doc(weeksCollection(familyId), weekRange.start)
+    const unsubscribe = onSnapshot(
+      ref,
+      (snap) => {
+        setWeekPlanId(snap.exists() ? snap.id : undefined)
+      },
+      (err) => {
+        console.error('Failed to load week plan', err)
+        setSnackMessage({ text: 'Could not load week plan.', severity: 'error' })
+      },
+    )
+    return unsubscribe
+  }, [familyId, weekRange.start])
+
+  // Load ladders and artifacts (one-shot, non-plan data)
   useEffect(() => {
     let isMounted = true
-
-    const loadWeekPlan = async () => {
-      try {
-        const snapshot = await getDocs(weeksCollection(familyId))
-        if (!isMounted) return
-        const matching = snapshot.docs
-          .map((docSnapshot) => ({
-            id: docSnapshot.id,
-            ...docSnapshot.data(),
-          }))
-          .find((plan) => {
-            const start = plan.startDate as string
-            const end = plan.endDate as string | undefined
-            return start <= today && (!end || today <= end)
-          })
-        setWeekPlanId(matching?.id)
-      } catch (err) {
-        console.error('Failed to load week plan', err)
-        if (isMounted) {
-          setSnackMessage({ text: 'Could not load week plan.', severity: 'error' })
-        }
-      }
-    }
 
     const loadLadders = async () => {
       try {
@@ -291,7 +283,6 @@ export default function TodayPage() {
       }
     }
 
-    loadWeekPlan()
     loadLadders()
     loadArtifacts()
 
