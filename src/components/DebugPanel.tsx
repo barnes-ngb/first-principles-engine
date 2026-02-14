@@ -3,8 +3,13 @@ import { useLocation, useSearchParams } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import { useActiveChild } from '../core/hooks/useActiveChild'
+import { dayLogDocId } from '../features/today/daylog.model'
+import { formatDateYmd } from '../lib/format'
 
 declare const __BUILD_TIMESTAMP__: string
+
+/** localStorage key used by useChildren to persist the selected child. */
+const LS_CHILD_KEY = 'fpe_active_child_id'
 
 function getInitialSwStatus() {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
@@ -43,11 +48,14 @@ export default function DebugPanel() {
   const location = useLocation()
   const { activeChildId, activeChild } = useActiveChild()
   const swStatus = useServiceWorkerStatus()
+  const [minimized, setMinimized] = useState(false)
 
   const isVisible = searchParams.get('debug') === '1'
 
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
-  const dayLogKey = activeChildId ? `${today}_${activeChildId}` : '(none)'
+  // Use local date (not UTC) to match TodayPage / daylog.model
+  const dateKey = useMemo(() => formatDateYmd(new Date()), [])
+  const dayLogKey = activeChildId ? dayLogDocId(dateKey, activeChildId) : '(none)'
+  const lsChildId = useMemo(() => localStorage.getItem(LS_CHILD_KEY) ?? '(unset)', [])
   const buildId = typeof __BUILD_TIMESTAMP__ !== 'undefined' ? __BUILD_TIMESTAMP__ : 'dev'
 
   if (!isVisible) return null
@@ -63,21 +71,38 @@ export default function DebugPanel() {
         bgcolor: 'rgba(0, 0, 0, 0.85)',
         color: '#0f0',
         px: 2,
-        py: 1,
+        py: 0.5,
         fontFamily: 'monospace',
-        fontSize: '0.75rem',
-        lineHeight: 1.6,
+        fontSize: '0.7rem',
+        lineHeight: 1.5,
+        cursor: 'pointer',
+        maxHeight: minimized ? '1.5em' : undefined,
+        overflow: 'hidden',
       }}
+      onClick={() => setMinimized((prev) => !prev)}
     >
-      <Typography variant="caption" component="div" sx={{ fontFamily: 'inherit', color: 'inherit' }}>
-        <strong>DEBUG</strong>{' | '}
-        build: {buildId}{' | '}
-        child: {activeChild?.name ?? '?'} ({activeChildId || 'none'}){' | '}
-        route: {location.pathname}{' | '}
-        dayLog: {dayLogKey}{' | '}
-        sw: {swStatus}{' | '}
-        ts: {new Date().toISOString()}
-      </Typography>
+      {minimized ? (
+        <Typography variant="caption" component="div" sx={{ fontFamily: 'inherit', color: 'inherit' }}>
+          <strong>DEBUG</strong> (tap to expand)
+        </Typography>
+      ) : (
+        <Typography variant="caption" component="div" sx={{ fontFamily: 'inherit', color: 'inherit', whiteSpace: 'pre-wrap' }}>
+          <strong>DEBUG</strong>{' | '}
+          build: {buildId}{' | '}
+          sw: {swStatus}
+          {'\n'}
+          child: {activeChild?.name ?? '?'} ({activeChildId || 'none'}){' | '}
+          ls: {lsChildId}
+          {'\n'}
+          dateKey: {dateKey}{' | '}
+          dayLog: {dayLogKey}
+          {'\n'}
+          route: {location.pathname}{' | '}
+          ts: {new Date().toLocaleString()}
+          {'\n'}
+          <em style={{ color: '#888' }}>(tap to minimize)</em>
+        </Typography>
+      )}
     </Box>
   )
 }
