@@ -7,7 +7,7 @@ import ListItem from '@mui/material/ListItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore'
+import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore'
 import { useNavigate } from 'react-router-dom'
 
 import Page from '../../components/Page'
@@ -65,37 +65,38 @@ export default function WeekPage() {
   const [saveState, setSaveState] = useState<SaveState>('idle')
 
   useEffect(() => {
-    let isMounted = true
+    let creatingDefault = false
 
-    const loadWeekPlan = async () => {
-      try {
-        const snapshot = await getDoc(weekPlanRef)
-        if (!isMounted) return
-
+    const unsubscribe = onSnapshot(
+      weekPlanRef,
+      async (snapshot) => {
         if (snapshot.exists()) {
           setWeekPlan(snapshot.data())
           return
         }
 
-        const defaultWeekPlan = createDefaultWeekPlan(
-          weekRange.start,
-          weekRange.end,
-          children,
-        )
-        await setDoc(weekPlanRef, defaultWeekPlan)
-        if (isMounted) {
-          setWeekPlan(defaultWeekPlan)
+        // Document doesn't exist yet — create a default (guard against double-fire)
+        if (creatingDefault) return
+        creatingDefault = true
+        try {
+          const defaultWeekPlan = createDefaultWeekPlan(
+            weekRange.start,
+            weekRange.end,
+            children,
+          )
+          await setDoc(weekPlanRef, defaultWeekPlan)
+          // onSnapshot will fire again with the new doc
+        } catch (err) {
+          console.error('Failed to create default week plan', err)
+          creatingDefault = false
         }
-      } catch (err) {
+      },
+      (err) => {
         console.error('Failed to load week plan', err)
-      }
-    }
+      },
+    )
 
-    loadWeekPlan()
-
-    return () => {
-      isMounted = false
-    }
+    return unsubscribe
   }, [children, weekPlanRef, weekRange.end, weekRange.start])
 
   useEffect(() => {

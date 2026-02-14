@@ -10,7 +10,7 @@ import Chip from '@mui/material/Chip'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { doc, getDoc, getDocs, setDoc } from 'firebase/firestore'
+import { doc, getDoc, getDocs, onSnapshot, setDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -127,68 +127,69 @@ export default function DashboardPage() {
     return () => window.removeEventListener('focus', handleFocus)
   }, [])
 
-  // ─── Load WeekPlan for current week ─────────────────────────────────────────
+  // ─── Load WeekPlan for current week (real-time) ────────────────────────────
 
   useEffect(() => {
-    let cancelled = false
-    const loadWeekPlan = async () => {
-      try {
-        const ref = doc(weeksCollection(familyId), weekRange.start)
-        const snap = await getDoc(ref)
-        if (cancelled) return
-        if (snap.exists()) {
-          setWeekPlan(snap.data())
-        } else {
-          setWeekPlan(null)
-        }
-      } catch (err) {
+    const ref = doc(weeksCollection(familyId), weekRange.start)
+    const unsubscribe = onSnapshot(
+      ref,
+      (snap) => {
+        setWeekPlan(snap.exists() ? snap.data() : null)
+      },
+      (err) => {
         console.error('Failed to load week plan', err)
-        if (!cancelled) {
-          setWeekPlan(null)
-          setSnackMessage({ text: 'Could not load week plan.', severity: 'error' })
-        }
-      }
-    }
-    loadWeekPlan()
-    return () => { cancelled = true }
+        setWeekPlan(null)
+        setSnackMessage({ text: 'Could not load week plan.', severity: 'error' })
+      },
+    )
+    return unsubscribe
   }, [familyId, weekRange.start])
 
-  // ─── Load today's DayLog for selected child ─────────────────────────────────
+  // ─── Load today's DayLog for selected child (real-time) ─────────────────────
 
   useEffect(() => {
-    let cancelled = false
-    const loadDayLog = async () => {
-      if (!selectedChildId) {
-        if (!cancelled) setDayLog(null)
-        return
-      }
-      try {
-        const docId = dayLogDocId(today, selectedChildId)
-        const ref = doc(daysCollection(familyId), docId)
-        const snap = await getDoc(ref)
-        if (cancelled) return
+    if (!selectedChildId) {
+      setDayLog(null)
+      return
+    }
+
+    const docId = dayLogDocId(today, selectedChildId)
+    const ref = doc(daysCollection(familyId), docId)
+    let resolvedWithLegacy = false
+
+    const unsubscribe = onSnapshot(
+      ref,
+      async (snap) => {
         if (snap.exists()) {
           setDayLog(snap.data())
           return
         }
-        // Try legacy format
-        const legacyId = legacyDayLogDocId(selectedChildId, today)
-        const legacyRef = doc(daysCollection(familyId), legacyId)
-        const legacySnap = await getDoc(legacyRef)
-        if (cancelled) return
-        if (legacySnap.exists()) {
-          setDayLog(legacySnap.data())
+        // Only attempt legacy fallback once (not on every snapshot)
+        if (resolvedWithLegacy) {
+          setDayLog(null)
           return
         }
+        resolvedWithLegacy = true
+        try {
+          const legacyId = legacyDayLogDocId(selectedChildId, today)
+          const legacyRef = doc(daysCollection(familyId), legacyId)
+          const legacySnap = await getDoc(legacyRef)
+          if (legacySnap.exists()) {
+            setDayLog(legacySnap.data())
+            return
+          }
+        } catch {
+          // ignore legacy fallback errors
+        }
         setDayLog(null)
-      } catch (err) {
+      },
+      (err) => {
         console.error('Failed to load day log', err)
-        if (!cancelled) setDayLog(null)
-      }
-    }
-    loadDayLog()
-    return () => { cancelled = true }
-  }, [familyId, selectedChildId, today, fetchKey])
+        setDayLog(null)
+      },
+    )
+    return unsubscribe
+  }, [familyId, selectedChildId, today])
 
   // ─── Derived data ───────────────────────────────────────────────────────────
 
