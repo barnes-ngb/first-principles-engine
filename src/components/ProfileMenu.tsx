@@ -15,8 +15,8 @@ const profileMeta: Record<
   UserProfile,
   { label: string; color: string; initial: string }
 > = {
-  [UserProfile.Lincoln]: { label: 'Lincoln', color: '#43a047', initial: 'L' },
-  [UserProfile.London]: { label: 'London', color: '#e91e63', initial: 'L' },
+  [UserProfile.Lincoln]: { label: 'Lincoln', color: '#5A8C32', initial: 'L' },
+  [UserProfile.London]: { label: 'London', color: '#E52521', initial: 'L' },
   [UserProfile.Parents]: { label: 'Parents', color: '#5c6bc0', initial: 'P' },
 }
 
