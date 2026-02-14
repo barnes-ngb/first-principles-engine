@@ -94,14 +94,15 @@ export default function TodayPage() {
     [familyId, currentDocId],
   )
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
+  const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
   // Track which child the current dayLog belongs to; clear stale data on switch
   const [dayLogChildId, setDayLogChildId] = useState(selectedChildId)
   if (dayLogChildId !== selectedChildId) {
     setDayLogChildId(selectedChildId)
     setDayLog(null)
+    setTodayArtifacts([])
   }
   const [ladders, setLadders] = useState<Ladder[]>([])
-  const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
   const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
   const [linkingArtifactId, setLinkingArtifactId] = useState<string | null>(null)
   const [linkingLadderId, setLinkingLadderId] = useState('')
@@ -127,6 +128,15 @@ export default function TodayPage() {
   useEffect(() => {
     setArtifactForm((prev) => ({ ...prev, childId: selectedChildId }))
   }, [selectedChildId])
+
+  // Show a brief "Saved" snackbar on mobile after successful save
+  useEffect(() => {
+    if (saveState === 'saved') {
+      setSnackMessage({ text: 'Saved', severity: 'success' })
+      const timer = setTimeout(() => setSaveState('idle'), 2000)
+      return () => clearTimeout(timer)
+    }
+  }, [saveState])
 
   const selectableChildren = children
   const selectedChild = useMemo(
@@ -285,7 +295,11 @@ export default function TodayPage() {
 
     const loadArtifacts = async () => {
       try {
-        const q = query(artifactsCollection(familyId), where('dayLogId', '==', today))
+        const q = query(
+          artifactsCollection(familyId),
+          where('dayLogId', '==', today),
+          where('childId', '==', selectedChildId),
+        )
         const snapshot = await getDocs(q)
         if (!isMounted) return
         const loadedArtifacts = snapshot.docs
@@ -301,12 +315,12 @@ export default function TodayPage() {
     }
 
     loadLadders()
-    loadArtifacts()
+    if (selectedChildId) loadArtifacts()
 
     return () => {
       isMounted = false
     }
-  }, [familyId, today])
+  }, [familyId, today, selectedChildId])
 
   const selectedLadder = useMemo(
     () => ladders.find((ladder) => ladder.id === artifactForm.ladderId),

@@ -13,16 +13,16 @@ import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
 
 const navItems = [
-  { label: 'Dashboard', to: '/dashboard' },
-  { label: 'Scoreboard', to: '/scoreboard' },
-  { label: 'Dad Lab', to: '/projects' },
-  { label: 'Ladders', to: '/ladders' },
-  { label: 'Today', to: '/today' },
-  { label: 'This Week', to: '/week', parentOnly: true },
-  { label: 'Engine', to: '/engine', parentOnly: true },
+  { label: 'Dashboard', to: '/dashboard', end: true },
+  { label: 'Scoreboard', to: '/scoreboard', end: true },
+  { label: 'Dad Lab', to: '/projects', end: true },
+  { label: 'Ladders', to: '/ladders', end: true },
+  { label: 'Today', to: '/today', end: true },
+  { label: 'This Week', to: '/week', parentOnly: true, end: true },
+  { label: 'Engine', to: '/engine', parentOnly: true, end: true },
   { label: 'Records', to: '/records', parentOnly: true, end: true },
-  { label: 'Evaluations', to: '/records/evaluations', parentOnly: true },
-  { label: 'Portfolio', to: '/records/portfolio', parentOnly: true },
+  { label: 'Evaluations', to: '/records/evaluations', parentOnly: true, end: true },
+  { label: 'Portfolio', to: '/records/portfolio', parentOnly: true, end: true },
 ]
 
 type AppShellProps = {
@@ -49,7 +49,7 @@ function NavContent({
               <li key={item.to}>
                 <NavLink
                   to={item.to}
-                  end={'end' in item ? item.end : undefined}
+                  end={item.end}
                   onClick={onNavigate}
                 >
                   {item.label}
@@ -73,10 +73,12 @@ export function AppShell({ children }: AppShellProps) {
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
 
-  // Find the current page label for the mobile header
+  // Find the current page label for the mobile header (exact match first, then longest prefix)
   const currentLabel =
     navItems.find((item) => location.pathname === item.to)?.label ??
-    navItems.find((item) => location.pathname.startsWith(item.to) && item.to !== '/')?.label ??
+    [...navItems]
+      .filter((item) => location.pathname.startsWith(item.to) && item.to !== '/')
+      .sort((a, b) => b.to.length - a.to.length)[0]?.label ??
     'Planner'
 
   return (
