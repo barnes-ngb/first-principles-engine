@@ -55,7 +55,10 @@ export default function DebugPanel() {
   // Use local date (not UTC) to match TodayPage / daylog.model
   const dateKey = useMemo(() => formatDateYmd(new Date()), [])
   const dayLogKey = activeChildId ? dayLogDocId(dateKey, activeChildId) : '(none)'
-  const lsChildId = useMemo(() => localStorage.getItem(LS_CHILD_KEY) ?? '(unset)', [])
+  // Re-read localStorage whenever the active child changes so the debug
+  // panel always reflects the persisted value (not a stale mount-time read).
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- activeChildId triggers re-read
+  const lsChildId = useMemo(() => localStorage.getItem(LS_CHILD_KEY) ?? '(unset)', [activeChildId])
   const buildId = typeof __BUILD_TIMESTAMP__ !== 'undefined' ? __BUILD_TIMESTAMP__ : 'dev'
 
   if (!isVisible) return null

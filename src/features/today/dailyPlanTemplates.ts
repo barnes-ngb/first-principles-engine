@@ -82,7 +82,14 @@ export const lincolnTemplate: DailyPlanTemplate = {
 }
 
 /**
- * London's daily routine template (placeholder — younger child, less structured).
+ * London's daily routine template (younger child, simpler routine).
+ *
+ * Reading & Literacy:
+ *   Read aloud 10 min (+1 XP), Sight words 5 min (+1 XP)
+ * Math:
+ *   5-minute counting / number practice (+1 XP)
+ * Speech:
+ *   Optional — practice if energy allows (+1 XP)
  */
 export const londonTemplate: DailyPlanTemplate = {
   label: 'London',
@@ -90,31 +97,40 @@ export const londonTemplate: DailyPlanTemplate = {
     DayBlockType.Formation,
     DayBlockType.Reading,
     DayBlockType.Math,
+    DayBlockType.Speech,
     DayBlockType.Together,
     DayBlockType.Movement,
   ],
-  routineItems: [],
+  routineItems: [
+    RoutineItemKey.SightWords,
+    RoutineItemKey.Math,
+    RoutineItemKey.Speech,
+  ],
   blockInstructions: {
     [DayBlockType.Formation]: [
       'Gratitude (1 thing)',
     ],
     [DayBlockType.Reading]: [
-      'Read-aloud with parent',
-      'Letter or sound practice',
+      'Read aloud 10 min (+1 XP)',
+      'Sight words 5 min (+1 XP)',
     ],
     [DayBlockType.Math]: [
-      'Counting or number games',
+      '5-minute counting or number practice (+1 XP)',
+    ],
+    [DayBlockType.Speech]: [
+      'Optional \u2014 practice if energy allows (+1 XP)',
     ],
     [DayBlockType.Together]: [
-      'Family activity',
+      'Family activity or read-aloud',
     ],
     [DayBlockType.Movement]: [
-      'Outdoor play',
+      'Outdoor play or movement break',
     ],
   },
   minimumViableDay: [
-    'Read-aloud: 1 book or 5 min',
-    'Counting or number game: 5 min',
+    'Read-aloud: 1 book or 10 min',
+    'Sight words: 5 min',
+    'Counting or number practice: 5 min',
     'Gratitude (Formation)',
   ],
 }

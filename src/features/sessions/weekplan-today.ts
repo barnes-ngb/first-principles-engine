@@ -101,9 +101,14 @@ function deriveInstructions(
       return items.length > 0 ? items.slice(0, 2) : fallback()
     }
     default: {
-      // For Reading, Math, Speech, etc. — child goals > template > generic
+      // For Reading, Math, Speech, etc. — template instructions (the child's
+      // actual routine) take priority over WeekPlan childGoals so Dashboard
+      // bullets always match the real routine.
+      if (templateInstructions && templateInstructions.length > 0) {
+        return templateInstructions
+      }
       if (childGoals.length > 0) {
-        return childGoals.slice(0, 2)
+        return childGoals.slice(0, 3)
       }
       return fallback()
     }
