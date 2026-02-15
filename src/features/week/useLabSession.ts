@@ -10,33 +10,33 @@ import type { LabSession } from '../../core/types/domain'
 import { EngineStage, LabSessionStatus } from '../../core/types/enums'
 
 export interface UseLabSessionResult {
-  /** The lab session for the current child + week, or null if none exists. */
+  /** The lab session for the current child + week + project, or null if none exists. */
   labSession: LabSession | null
   /** True while the initial snapshot is loading. */
   isLoading: boolean
   /** Start or continue a lab session (upsert). */
   startOrContinue: () => Promise<void>
   /** Update mutable fields on the lab session. */
-  updateSession: (fields: Partial<Pick<LabSession, 'stage' | 'status' | 'mission' | 'constraints' | 'roles' | 'stageNotes'>>) => Promise<void>
+  updateSession: (fields: Partial<Pick<LabSession, 'stage' | 'status' | 'mission' | 'constraints' | 'roles' | 'stageNotes' | 'stageDone'>>) => Promise<void>
 }
 
 /**
- * Real-time listener for a single lab session doc keyed by weekKey + childId.
- * Re-subscribes whenever childId or weekKey changes.
+ * Real-time listener for a single lab session doc keyed by weekKey + childId + projectId.
+ * Re-subscribes whenever childId, weekKey, or projectId changes.
  */
-export function useLabSession(childId: string, weekKey: string): UseLabSessionResult {
+export function useLabSession(childId: string, weekKey: string, projectId?: string): UseLabSessionResult {
   const familyId = useFamilyId()
   const [snapshot, setSnapshot] = useState<{ session: LabSession | null; loaded: boolean }>({
     session: null,
     loaded: false,
   })
 
-  const canSubscribe = Boolean(childId && weekKey && familyId)
+  const canSubscribe = Boolean(childId && weekKey && familyId && projectId)
 
   useEffect(() => {
     if (!canSubscribe) return
 
-    const docId = labSessionDocId(weekKey, childId)
+    const docId = labSessionDocId(weekKey, childId, projectId)
     const docRef = doc(labSessionsCollection(familyId), docId)
 
     const unsubscribe = onSnapshot(
@@ -58,15 +58,15 @@ export function useLabSession(childId: string, weekKey: string): UseLabSessionRe
       unsubscribe()
       setSnapshot({ session: null, loaded: false })
     }
-  }, [familyId, childId, weekKey, canSubscribe])
+  }, [familyId, childId, weekKey, projectId, canSubscribe])
 
   const labSession = canSubscribe ? snapshot.session : null
   const isLoading = canSubscribe ? !snapshot.loaded : false
 
   const startOrContinue = useCallback(async () => {
-    if (!childId || !weekKey || !familyId) return
+    if (!childId || !weekKey || !familyId || !projectId) return
 
-    const docId = labSessionDocId(weekKey, childId)
+    const docId = labSessionDocId(weekKey, childId, projectId)
     const docRef = doc(labSessionsCollection(familyId), docId)
     const now = new Date().toISOString()
 
@@ -80,6 +80,7 @@ export function useLabSession(childId: string, weekKey: string): UseLabSessionRe
       const newSession: Omit<LabSession, 'id'> = {
         childId,
         weekKey,
+        projectId,
         status: LabSessionStatus.InProgress,
         stage: EngineStage.Wonder,
         createdAt: now,
@@ -87,20 +88,20 @@ export function useLabSession(childId: string, weekKey: string): UseLabSessionRe
       }
       await setDoc(docRef, newSession)
     }
-  }, [familyId, childId, weekKey, labSession])
+  }, [familyId, childId, weekKey, projectId, labSession])
 
   const updateSession = useCallback(
-    async (fields: Partial<Pick<LabSession, 'stage' | 'status' | 'mission' | 'constraints' | 'roles' | 'stageNotes'>>) => {
-      if (!childId || !weekKey || !familyId) return
+    async (fields: Partial<Pick<LabSession, 'stage' | 'status' | 'mission' | 'constraints' | 'roles' | 'stageNotes' | 'stageDone'>>) => {
+      if (!childId || !weekKey || !familyId || !projectId) return
 
-      const docId = labSessionDocId(weekKey, childId)
+      const docId = labSessionDocId(weekKey, childId, projectId)
       const docRef = doc(labSessionsCollection(familyId), docId)
       await updateDoc(docRef, {
         ...fields,
         updatedAt: new Date().toISOString(),
       })
     },
-    [familyId, childId, weekKey],
+    [familyId, childId, weekKey, projectId],
   )
 
   return useMemo(
