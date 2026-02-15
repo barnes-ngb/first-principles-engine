@@ -73,6 +73,7 @@ import { blockMeta } from './blockMeta'
 import { getTemplateForChild } from './dailyPlanTemplates'
 import { createDefaultDayLog, dayLogDocId, legacyDayLogDocId } from './daylog.model'
 import HelperPanel from './HelperPanel'
+import LadderQuickLog from './LadderQuickLog'
 import RoutineSection from './RoutineSection'
 import { calculateXp } from './xp'
 
@@ -692,6 +693,14 @@ export default function TodayPage() {
         onUpdateImmediate={handleRoutineUpdateImmediate}
         routineItems={activeRoutineItems}
       />
+
+      {cardLadders.length > 0 && selectedChildId && (
+        <LadderQuickLog
+          familyId={familyId}
+          childId={selectedChildId}
+          ladders={cardLadders}
+        />
+      )}
 
       <SectionCard title={`DayLog (${dayLog.date})`}>
         <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
