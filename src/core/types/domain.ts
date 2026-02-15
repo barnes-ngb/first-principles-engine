@@ -215,6 +215,8 @@ export interface Artifact {
   labStage?: EngineStage
   /** Optional link to a project */
   projectId?: string
+  /** Week key (YYYY-MM-DD) for the week this artifact belongs to */
+  weekKey?: string
 }
 
 export interface Ladder {
@@ -339,12 +341,16 @@ export interface LabSession {
   id?: string
   childId: string
   weekKey: string
+  /** The project this session belongs to (required for new sessions). */
+  projectId?: string
   status: LabSessionStatus
   stage: EngineStage
   mission?: string
   constraints?: string
   roles?: string
   stageNotes?: Partial<Record<EngineStage, string>>
+  /** Per-stage done toggles. */
+  stageDone?: Partial<Record<EngineStage, boolean>>
   createdAt?: string
   updatedAt?: string
 }

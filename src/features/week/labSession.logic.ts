@@ -2,11 +2,12 @@ import { EngineStage } from '../../core/types/enums'
 import type { EngineStage as EngineStageType } from '../../core/types/enums'
 
 /**
- * Build a deterministic lab session doc ID: `{weekKey}_{childId}`.
- * One lab session per child per week.
+ * Build a deterministic lab session doc ID.
+ * With projectId: `{weekKey}_{childId}_{projectId}` (one session per project per week).
+ * Without: `{weekKey}_{childId}` (legacy).
  */
-export const buildLabSessionDocId = (weekKey: string, childId: string): string =>
-  `${weekKey}_${childId}`
+export const buildLabSessionDocId = (weekKey: string, childId: string, projectId?: string): string =>
+  projectId ? `${weekKey}_${childId}_${projectId}` : `${weekKey}_${childId}`
 
 /**
  * Default stage for a new lab session.
