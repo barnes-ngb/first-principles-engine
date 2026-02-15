@@ -793,14 +793,12 @@ export default function LabModePage() {
                 <Typography color="text.secondary">
                   No active projects yet. Create a project to get started.
                 </Typography>
-                {canEdit && (
-                  <Button
-                    variant="contained"
-                    onClick={() => setShowNewProjectDialog(true)}
-                  >
-                    New Project
-                  </Button>
-                )}
+                <Button
+                  variant="contained"
+                  onClick={() => setShowNewProjectDialog(true)}
+                >
+                  New Project
+                </Button>
               </Stack>
             ) : (
               <Stack spacing={1.5}>
@@ -828,15 +826,13 @@ export default function LabModePage() {
                         </Stack>
 
                         <Stack direction="row" spacing={1} flexWrap="wrap">
-                          {canEdit && (
-                            <Button
-                              variant="contained"
-                              size="small"
-                              onClick={() => handleStartSession(p.id!)}
-                            >
-                              Start Session
-                            </Button>
-                          )}
+                          <Button
+                            variant="contained"
+                            size="small"
+                            onClick={() => handleStartSession(p.id!)}
+                          >
+                            Start Session
+                          </Button>
                           <Button
                             variant="outlined"
                             size="small"
@@ -853,15 +849,13 @@ export default function LabModePage() {
                   </Card>
                 ))}
 
-                {canEdit && (
-                  <Button
-                    variant="outlined"
-                    onClick={() => setShowNewProjectDialog(true)}
-                    sx={{ alignSelf: 'flex-start' }}
-                  >
-                    New Project
-                  </Button>
-                )}
+                <Button
+                  variant="outlined"
+                  onClick={() => setShowNewProjectDialog(true)}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  New Project
+                </Button>
               </Stack>
             )}
           </SectionCard>
@@ -920,15 +914,13 @@ export default function LabModePage() {
                     <Typography color="text.secondary">
                       No session yet this week for {selectedProject.title}.
                     </Typography>
-                    {canEdit && (
-                      <Button
-                        variant="contained"
-                        size="large"
-                        onClick={() => handleStartSession(selectedProject.id!)}
-                      >
-                        Start Lab Session
-                      </Button>
-                    )}
+                    <Button
+                      variant="contained"
+                      size="large"
+                      onClick={() => handleStartSession(selectedProject.id!)}
+                    >
+                      Start Lab Session
+                    </Button>
                   </Stack>
                 )}
               </SectionCard>
