@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Alert from '@mui/material/Alert'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
@@ -18,30 +19,32 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import {
   daysCollection,
-  sessionsCollection,
+  ladderProgressCollection,
   weeksCollection,
   weeklyScoresCollection,
 } from '../../core/firebase/firestore'
 import type {
   DayLog,
   GoalResult,
+  LadderCardDefinition,
+  LadderProgress,
   ScoreMetric,
-  Session,
   WeeklyScore,
 } from '../../core/types/domain'
-import { SessionResult, StreamId } from '../../core/types/enums'
-import type { SessionResult as SessionResultType } from '../../core/types/enums'
+import type { SessionResult as SessionResultType, StreamKey } from '../../core/types/enums'
 import { getWeekRange } from '../engine/engine.logic'
-import { checkLevelUp, resultEmoji } from '../sessions/sessions.logic'
-import {
-  defaultWeeklyMetricLabels,
-  ladderIdForChild,
-  streamIcon,
-  streamLabel,
-} from '../sessions/sessions.model'
+import { resultEmoji } from '../sessions/sessions.logic'
+import { defaultWeeklyMetricLabels } from '../sessions/sessions.model'
 import { calculateXp, countLoggedCategories } from '../today/xp'
-
-const allStreams = Object.values(StreamId) as StreamId[]
+import { getLaddersForChild } from '../ladders/laddersCatalog'
+import { createInitialProgress } from '../ladders/ladderProgress'
+import {
+  buildLadderStreamSummary,
+  getStreamLadders,
+  streamKeyIcon,
+  streamKeyLabel,
+  type LadderStreamSummary,
+} from '../ladders/ladderStreamHelpers'
 
 export default function ScoreboardPage() {
   const familyId = useFamilyId()
@@ -53,37 +56,73 @@ export default function ScoreboardPage() {
   const {
     children,
     activeChildId: selectedChildId,
+    activeChild: selectedChild,
     setActiveChildId: setSelectedChildId,
     isLoading: childrenLoading,
     addChild,
   } = useActiveChild()
-  const [sessions, setSessions] = useState<Session[]>([])
   const [dayLogs, setDayLogs] = useState<DayLog[]>([])
+  const [progressMap, setProgressMap] = useState<Record<string, LadderProgress>>({})
   const [weeklyScore, setWeeklyScore] = useState<WeeklyScore | null>(null)
   const [childGoals, setChildGoals] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
 
+  // Resolve ladder definitions for the active child
+  const ladderDefinitions = useMemo(
+    () => (selectedChild ? getLaddersForChild(selectedChild.name) : undefined),
+    [selectedChild],
+  )
+  const streamLadders = useMemo(
+    () => (ladderDefinitions ? getStreamLadders(ladderDefinitions) : []),
+    [ladderDefinitions],
+  )
+
+  // Track which child progress is loaded for; clear stale data on switch
+  const [progressChildId, setProgressChildId] = useState(selectedChildId)
+  if (progressChildId !== selectedChildId) {
+    setProgressChildId(selectedChildId)
+    setProgressMap({})
+  }
+
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      const [sessionsSnap, dayLogsSnap] = await Promise.all([
-        getDocs(sessionsCollection(familyId)),
-        getDocs(daysCollection(familyId)),
-      ])
+      const dayLogsSnap = await getDocs(daysCollection(familyId))
       if (cancelled) return
-      setSessions(
-        sessionsSnap.docs.map((d) => ({
-          ...(d.data() as Session),
-          id: d.id,
-        })),
-      )
       setDayLogs(dayLogsSnap.docs.map((d) => d.data()))
       setIsLoading(false)
     }
     load()
     return () => { cancelled = true }
   }, [familyId])
+
+  // Load ladder progress for active child
+  useEffect(() => {
+    if (!selectedChildId || !familyId) return
+
+    let cancelled = false
+    const load = async () => {
+      try {
+        const q = query(
+          ladderProgressCollection(familyId),
+          where('childId', '==', selectedChildId),
+        )
+        const snapshot = await getDocs(q)
+        if (cancelled) return
+        const map: Record<string, LadderProgress> = {}
+        for (const d of snapshot.docs) {
+          const data = d.data() as LadderProgress
+          map[data.ladderKey] = data
+        }
+        setProgressMap(map)
+      } catch (err) {
+        console.error('Failed to load ladder progress', err)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [familyId, selectedChildId])
 
   // Load weekly score for selected child
   useEffect(() => {
@@ -135,17 +174,6 @@ export default function ScoreboardPage() {
     return unsubscribe
   }, [familyId, selectedChildId, weekStart])
 
-  const weekSessions = useMemo(
-    () =>
-      sessions.filter(
-        (s) =>
-          s.childId === selectedChildId &&
-          s.date >= weekStart &&
-          s.date <= weekEnd,
-      ),
-    [sessions, selectedChildId, weekStart, weekEnd],
-  )
-
   // XP from DayLogs
   const today = new Date().toISOString().slice(0, 10)
 
@@ -192,47 +220,19 @@ export default function ScoreboardPage() {
     return count
   }, [dayLogs, selectedChildId, today])
 
-  // Per-stream summary
-  const streamSummaries = useMemo(() => {
-    return allStreams.map((stream) => {
-      const lid = ladderIdForChild(selectedChildId, stream)
-      const streamSessions = weekSessions.filter((s) => s.streamId === stream)
-      const hits = streamSessions.filter(
-        (s) => s.result === SessionResult.Hit,
-      ).length
-      const nears = streamSessions.filter(
-        (s) => s.result === SessionResult.Near,
-      ).length
-      const misses = streamSessions.filter(
-        (s) => s.result === SessionResult.Miss,
-      ).length
-      const total = streamSessions.length
-
-      // Find current rung (most common targetRungOrder this week)
-      const rungCounts = new Map<number, number>()
-      for (const s of streamSessions) {
-        rungCounts.set(s.targetRungOrder, (rungCounts.get(s.targetRungOrder) ?? 0) + 1)
-      }
-      const currentRung = [...rungCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 1
-
-      const isLevelUp = checkLevelUp(
-        sessions.filter((s) => s.childId === selectedChildId),
-        lid,
-        currentRung,
+  // Per-stream summary from card-based ladder progress
+  const ladderSummaries: LadderStreamSummary[] = useMemo(() => {
+    return streamLadders.map((ladder) => {
+      const progress = progressMap[ladder.ladderKey]
+        ?? createInitialProgress(selectedChildId, ladder)
+      return buildLadderStreamSummary(
+        ladder as LadderCardDefinition & { streamKey: StreamKey },
+        progress,
+        weekStart,
+        weekEnd,
       )
-
-      return {
-        stream,
-        ladderId: lid,
-        hits,
-        nears,
-        misses,
-        total,
-        currentRung,
-        isLevelUp,
-      }
     })
-  }, [weekSessions, selectedChildId, sessions])
+  }, [streamLadders, progressMap, selectedChildId, weekStart, weekEnd])
 
   // Goal results — merge saved results with current week's goals
   const goalResults: GoalResult[] = useMemo(() => {
@@ -380,76 +380,110 @@ export default function ScoreboardPage() {
 
           <SectionCard title="Stream Progress">
             <Stack spacing={1.5}>
-              {streamSummaries.map((s) => (
-                <Card key={s.stream} variant="outlined">
-                  <CardContent>
-                    <Stack
-                      direction="row"
-                      alignItems="center"
-                      justifyContent="space-between"
-                      flexWrap="wrap"
-                      spacing={1}
-                    >
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <Typography>{streamIcon[s.stream]}</Typography>
-                        <Typography variant="subtitle2">
-                          {streamLabel[s.stream]}
-                        </Typography>
+              {ladderSummaries.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No stream ladders defined for this child.
+                </Typography>
+              ) : (
+                ladderSummaries.map((s) => (
+                  <Card key={s.ladderKey} variant="outlined">
+                    <CardContent>
+                      <Stack spacing={1}>
+                        <Stack
+                          direction="row"
+                          alignItems="center"
+                          justifyContent="space-between"
+                          flexWrap="wrap"
+                          spacing={1}
+                        >
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Typography>{streamKeyIcon[s.streamKey]}</Typography>
+                            <Typography variant="subtitle2">
+                              {streamKeyLabel[s.streamKey]}
+                            </Typography>
+                            <Chip
+                              size="small"
+                              label={`${s.currentRungId}: ${s.currentRungName}`}
+                              color="primary"
+                              variant="outlined"
+                            />
+                          </Stack>
+                        </Stack>
+                        <Stack
+                          direction="row"
+                          spacing={1.5}
+                          alignItems="center"
+                          flexWrap="wrap"
+                        >
+                          {s.weekSessionCount === 0 ? (
+                            <Typography variant="caption" color="text.secondary">
+                              No sessions
+                            </Typography>
+                          ) : (
+                            <>
+                              <Typography variant="caption" color="text.secondary">
+                                This week: {s.weekSessionCount}
+                              </Typography>
+                              <Chip
+                                size="small"
+                                label={`${s.weekPasses} \u2714`}
+                                color="success"
+                                variant="outlined"
+                              />
+                              <Chip
+                                size="small"
+                                label={`${s.weekPartials} \u25B3`}
+                                color="warning"
+                                variant="outlined"
+                              />
+                              <Chip
+                                size="small"
+                                label={`${s.weekMisses} \u2716`}
+                                color="error"
+                                variant="outlined"
+                              />
+                            </>
+                          )}
+                          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 'auto' }}>
+                            <Typography variant="caption" color="text.secondary">
+                              Streak: {s.streakCount}/3
+                            </Typography>
+                            {Array.from({ length: 3 }).map((_, i) => (
+                              <Box
+                                key={i}
+                                sx={{
+                                  width: 8,
+                                  height: 8,
+                                  borderRadius: '50%',
+                                  bgcolor:
+                                    i < s.streakCount
+                                      ? 'success.main'
+                                      : 'action.disabledBackground',
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        </Stack>
                         <Typography variant="caption" color="text.secondary">
-                          Rung {s.currentRung}
+                          {s.title}
                         </Typography>
                       </Stack>
-                      <Stack direction="row" spacing={0.5}>
-                        {s.total === 0 ? (
-                          <Typography variant="caption" color="text.secondary">
-                            No sessions
-                          </Typography>
-                        ) : (
-                          <>
-                            <Chip
-                              size="small"
-                              label={`${s.hits} \u2714`}
-                              color="success"
-                              variant="outlined"
-                            />
-                            <Chip
-                              size="small"
-                              label={`${s.nears} \u25B3`}
-                              color="warning"
-                              variant="outlined"
-                            />
-                            <Chip
-                              size="small"
-                              label={`${s.misses} \u2716`}
-                              color="error"
-                              variant="outlined"
-                            />
-                          </>
-                        )}
-                        {s.isLevelUp && (
-                          <Chip
-                            size="small"
-                            label="Level up!"
-                            color="success"
-                          />
-                        )}
-                      </Stack>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              ))}
+                    </CardContent>
+                  </Card>
+                ))
+              )}
             </Stack>
           </SectionCard>
 
-          {streamSummaries.some((s) => s.isLevelUp) && (
+          {ladderSummaries.some((s) => s.streakCount >= 3) && (
             <Alert severity="success">
               <Typography variant="subtitle2">Level-up candidates:</Typography>
-              {streamSummaries
-                .filter((s) => s.isLevelUp)
+              {ladderSummaries
+                .filter((s) => s.streakCount >= 3)
                 .map((s) => (
-                  <Typography key={s.stream} variant="body2">
-                    {streamIcon[s.stream]} {streamLabel[s.stream]} — 3 hits in a row at Rung{' '}
-                    {s.currentRung}
+                  <Typography key={s.ladderKey} variant="body2">
+                    {streamKeyIcon[s.streamKey]} {streamKeyLabel[s.streamKey]} — 3{' '}
+                    passes in a row at {s.currentRungId}
                   </Typography>
                 ))}
             </Alert>
