@@ -117,6 +117,7 @@ export const RoutineItemKey = {
   SightWords: 'sightWords',
   MinecraftReading: 'minecraft',
   ReadingEggs: 'readingEggs',
+  ReadAloud: 'readAloud',
   Math: 'math',
   Speech: 'speech',
   // Lincoln Literacy Engine

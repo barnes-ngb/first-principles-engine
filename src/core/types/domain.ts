@@ -97,6 +97,10 @@ export interface SpellingDictationLog extends RoutineItem {
   lines?: number
 }
 
+export interface ReadAloudLog extends RoutineItem {
+  minutes?: number
+}
+
 export interface NumberSenseLog extends RoutineItem {
   minutes?: number
 }
@@ -116,6 +120,7 @@ export interface ReadingRoutine {
   sightWords: SightWordsLog
   minecraft: MinecraftReadingLog
   readingEggs: ReadingEggsLog
+  readAloud?: ReadAloudLog
   phonemicAwareness?: PhonemicAwarenessLog
   phonicsLesson?: PhonicsLessonLog
   decodableReading?: DecodableReadingLog

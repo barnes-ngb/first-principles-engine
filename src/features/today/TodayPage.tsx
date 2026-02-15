@@ -135,6 +135,17 @@ export default function TodayPage() {
     [children, selectedChildId],
   )
 
+  // Resolve the active template and routine items for the selected child.
+  // Priority: child.routineItems (Firestore) → template.routineItems → undefined (all).
+  const activeTemplate = useMemo(
+    () => (selectedChild ? getTemplateForChild(selectedChild.name) : undefined),
+    [selectedChild],
+  )
+  const activeRoutineItems = useMemo(
+    () => selectedChild?.routineItems ?? activeTemplate?.routineItems,
+    [selectedChild?.routineItems, activeTemplate?.routineItems],
+  )
+
   // --- Persist helpers with save-state tracking ---
 
   const writeDayLog = useCallback(
@@ -228,12 +239,12 @@ export default function TodayPage() {
             }
           }
 
-          // No existing doc — create fresh
+          // No existing doc — create fresh (use template fallback for blocks/items)
           const defaultLog = createDefaultDayLog(
             selectedChildId,
             today,
-            selectedChild?.dayBlocks,
-            selectedChild?.routineItems,
+            selectedChild?.dayBlocks ?? activeTemplate?.dayBlocks,
+            activeRoutineItems,
           )
           await setDoc(dayLogRef, defaultLog)
           // onSnapshot will fire again with the new doc
@@ -250,7 +261,7 @@ export default function TodayPage() {
     )
 
     return unsubscribe
-  }, [dayLogRef, today, selectedChildId, selectedChild, familyId])
+  }, [dayLogRef, today, selectedChildId, selectedChild, familyId, activeRoutineItems, activeTemplate?.dayBlocks])
 
   // Load WeekPlan ID for current week (real-time)
   const weekRange = useMemo(() => getWeekRange(new Date()), [])
@@ -556,18 +567,18 @@ export default function TodayPage() {
 
   const handleRoutineUpdate = useCallback(
     (updated: DayLog) => {
-      const withXp = { ...updated, xpTotal: calculateXp(updated) }
+      const withXp = { ...updated, xpTotal: calculateXp(updated, activeRoutineItems) }
       persistDayLog(withXp)
     },
-    [persistDayLog],
+    [persistDayLog, activeRoutineItems],
   )
 
   const handleRoutineUpdateImmediate = useCallback(
     (updated: DayLog) => {
-      const withXp = { ...updated, xpTotal: calculateXp(updated) }
+      const withXp = { ...updated, xpTotal: calculateXp(updated, activeRoutineItems) }
       persistDayLogImmediate(withXp)
     },
-    [persistDayLogImmediate],
+    [persistDayLogImmediate, activeRoutineItems],
   )
 
   if (!dayLog) {
@@ -618,14 +629,14 @@ export default function TodayPage() {
         />
       )}
 
-      <HelperPanel template={selectedChild ? getTemplateForChild(selectedChild.name) : undefined} />
+      <HelperPanel template={activeTemplate} />
 
       <RoutineSection
         key={`${selectedChildId}_${today}`}
         dayLog={dayLog}
         onUpdate={handleRoutineUpdate}
         onUpdateImmediate={handleRoutineUpdateImmediate}
-        routineItems={selectedChild?.routineItems}
+        routineItems={activeRoutineItems}
       />
 
       <SectionCard title={`DayLog (${dayLog.date})`}>

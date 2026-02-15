@@ -51,7 +51,8 @@ export default function RoutineSection({
     items.has(RoutineItemKey.Spelling) ||
     items.has(RoutineItemKey.SightWords) ||
     items.has(RoutineItemKey.MinecraftReading) ||
-    items.has(RoutineItemKey.ReadingEggs)
+    items.has(RoutineItemKey.ReadingEggs) ||
+    items.has(RoutineItemKey.ReadAloud)
   const hasNewLiteracy =
     items.has(RoutineItemKey.PhonemicAwareness) ||
     items.has(RoutineItemKey.PhonicsLesson) ||
@@ -69,7 +70,7 @@ export default function RoutineSection({
   // Use "Literacy" heading when new engine items are present
   const literacyHeading = hasNewLiteracy ? 'Literacy' : 'Reading & Literacy'
 
-  const xp = calculateXp(dayLog)
+  const xp = calculateXp(dayLog, routineItems)
 
   const updateReading = useCallback(
     (field: keyof ReadingRoutine, value: Record<string, unknown>) => {
@@ -387,6 +388,56 @@ export default function RoutineSection({
                   value={reading.spellingDictation.note ?? ''}
                   onChange={(e) =>
                     updateReading('spellingDictation', { note: e.target.value })
+                  }
+                />
+              </Stack>
+            )}
+          </Stack>
+          )}
+
+          {/* Read Aloud */}
+          {items.has(RoutineItemKey.ReadAloud) && (
+          <Stack spacing={0.5}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={reading.readAloud?.done ?? false}
+                  onChange={(e) =>
+                    updateReading('readAloud', { done: e.target.checked })
+                  }
+                />
+              }
+              label={
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="body2" fontWeight={600}>
+                    Read Aloud (10 min)
+                  </Typography>
+                  <Chip size="small" label={`+${XP_VALUES.readAloud} XP`} variant="outlined" />
+                </Stack>
+              }
+            />
+            {reading.readAloud?.done && (
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
+                <TextField
+                  label="Minutes"
+                  type="number"
+                  size="small"
+                  fullWidth
+                  value={reading.readAloud.minutes ?? ''}
+                  onChange={(e) =>
+                    updateReading('readAloud', {
+                      minutes: e.target.value ? Number(e.target.value) : undefined,
+                    })
+                  }
+                  sx={{ maxWidth: { sm: 100 } }}
+                />
+                <TextField
+                  label="Note"
+                  size="small"
+                  fullWidth
+                  value={reading.readAloud.note ?? ''}
+                  onChange={(e) =>
+                    updateReading('readAloud', { note: e.target.value })
                   }
                 />
               </Stack>
