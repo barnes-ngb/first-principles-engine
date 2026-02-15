@@ -102,6 +102,7 @@ export const londonTemplate: DailyPlanTemplate = {
     DayBlockType.Movement,
   ],
   routineItems: [
+    RoutineItemKey.ReadAloud,
     RoutineItemKey.SightWords,
     RoutineItemKey.Math,
     RoutineItemKey.Speech,
