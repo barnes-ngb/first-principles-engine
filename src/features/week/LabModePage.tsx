@@ -24,7 +24,6 @@ import {
   addDoc,
   doc,
   getDocs,
-  limit,
   orderBy,
   query,
   setDoc,
@@ -44,7 +43,6 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   labSessionDocId,
-  labSessionsCollection,
   ladderProgressCollection,
   ladderProgressDocId,
   projectsCollection,
@@ -78,6 +76,7 @@ import {
 import { getLaddersForChild } from '../ladders/laddersCatalog'
 import { LAB_STAGES, labStageIndex } from './labSession.logic'
 import { useLabSession } from './useLabSession'
+import { useWeekSessions } from './useWeekSessions'
 
 // ── Constants ──────────────────────────────────────────────────
 
@@ -161,14 +160,6 @@ async function resolvePhotoUrl(artifact: Artifact, familyId: string): Promise<st
   return null
 }
 
-/** Calculate completion percentage for a lab session. */
-function sessionCompletion(session: LabSession): number {
-  if (session.status === LabSessionStatus.Complete) return 100
-  const done = session.stageDone ?? {}
-  const count = LAB_STAGES.filter((s) => done[s]).length
-  return Math.round((count / LAB_STAGES.length) * 100)
-}
-
 // ── Component ──────────────────────────────────────────────────
 
 export default function LabModePage() {
@@ -199,6 +190,8 @@ export default function LabModePage() {
   const [newProjectTitle, setNewProjectTitle] = useState('')
   const [projectSaving, setProjectSaving] = useState(false)
   const [showProjectNotesDialog, setShowProjectNotesDialog] = useState(false)
+  /** Tracks which project the notes dialog is open for. */
+  const [notesProjectId, setNotesProjectId] = useState<string | null>(null)
 
   // Load projects for the selected child
   useEffect(() => {
@@ -249,6 +242,24 @@ export default function LabModePage() {
     () => projects.find((p) => p.id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
   )
+
+  const notesProject = useMemo(
+    () => projects.find((p) => p.id === notesProjectId) ?? null,
+    [projects, notesProjectId],
+  )
+
+  // ── This Week's Lab Sessions (across all projects) ──────────
+  const { sessions: weekSessions, isLoading: weekSessionsLoading, refresh: refreshWeekSessions } =
+    useWeekSessions(selectedChildId, weekKey)
+
+  // Build a map of projectId → project for display
+  const projectById = useMemo(() => {
+    const map: Record<string, Project> = {}
+    for (const p of projects) {
+      if (p.id) map[p.id] = p
+    }
+    return map
+  }, [projects])
 
   // ── Lab session hook — scoped to child + week + project ────
   const { labSession, isLoading: labLoading, startOrContinue, updateSession } =
@@ -325,36 +336,6 @@ export default function LabModePage() {
     }
     return map
   }, [sessionArtifacts])
-
-  // ── Recent sessions for selected project ───────────────────
-  const [recentSessions, setRecentSessions] = useState<LabSession[]>([])
-
-  useEffect(() => {
-    if (!familyId || !selectedChildId || !selectedProjectId) {
-      setRecentSessions([])
-      return
-    }
-    let cancelled = false
-    const load = async () => {
-      try {
-        const q = query(
-          labSessionsCollection(familyId),
-          where('childId', '==', selectedChildId),
-          where('projectId', '==', selectedProjectId),
-          orderBy('weekKey', 'desc'),
-          limit(6),
-        )
-        const snap = await getDocs(q)
-        if (cancelled) return
-        setRecentSessions(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
-      } catch (err) {
-        console.error('Failed to load recent sessions', err)
-        if (!cancelled) setRecentSessions([])
-      }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [familyId, selectedChildId, selectedProjectId, labSession])
 
   // ── Artifact capture state ─────────────────────────────────
   const [captureStage, setCaptureStage] = useState<EngineStage | null>(null)
@@ -553,11 +534,28 @@ export default function LabModePage() {
     [artifactForm, buildBase, captureStage, familyId, logLadderSessionForArtifact],
   )
 
-  const handleStartOrContinue = useCallback(async () => {
-    await startOrContinue()
-    setTimeout(() => {
-      labSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 100)
+  const handleStartSession = useCallback(async (projectId: string) => {
+    setSelectedProjectId(projectId)
+    // Wait a tick for useLabSession to re-subscribe with new projectId, then start
+    setTimeout(async () => {
+      await startOrContinue()
+      refreshWeekSessions()
+      setTimeout(() => {
+        labSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 100)
+    }, 50)
+  }, [startOrContinue, refreshWeekSessions])
+
+  const handleContinueSession = useCallback(async (session: LabSession) => {
+    if (session.projectId) {
+      setSelectedProjectId(session.projectId)
+    }
+    setTimeout(async () => {
+      await startOrContinue()
+      setTimeout(() => {
+        labSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 100)
+    }, 50)
   }, [startOrContinue])
 
   const handleStageAdvance = useCallback(
@@ -585,7 +583,8 @@ export default function LabModePage() {
 
   const handleMarkComplete = useCallback(async () => {
     await updateSession({ status: LabSessionStatus.Complete })
-  }, [updateSession])
+    refreshWeekSessions()
+  }, [updateSession, refreshWeekSessions])
 
   const handleMissionSave = useCallback(
     async (mission: string) => { await updateSession({ mission }) },
@@ -604,53 +603,59 @@ export default function LabModePage() {
 
   // ── Project management ─────────────────────────────────────
   const handleCreateProject = useCallback(async () => {
-    if (!newProjectTitle.trim() || !selectedChildId) return
+    if (!newProjectTitle.trim() || !selectedChildId || projectSaving) return
     setProjectSaving(true)
-    const project: Omit<Project, 'id'> = {
-      childId: selectedChildId,
-      title: newProjectTitle.trim(),
-      phase: ProjectPhase.Plan,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      completed: false,
+    try {
+      const project: Omit<Project, 'id'> = {
+        childId: selectedChildId,
+        title: newProjectTitle.trim(),
+        phase: ProjectPhase.Plan,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        completed: false,
+      }
+      const docRef = await addDoc(projectsCollection(familyId), project)
+      const created = { ...project, id: docRef.id }
+      setProjects((prev) => [...prev, created])
+      setSelectedProjectId(docRef.id)
+      setNewProjectTitle('')
+      setShowNewProjectDialog(false)
+    } finally {
+      setProjectSaving(false)
     }
-    const docRef = await addDoc(projectsCollection(familyId), project)
-    const created = { ...project, id: docRef.id }
-    setProjects((prev) => [...prev, created])
-    setSelectedProjectId(docRef.id)
-    setNewProjectTitle('')
-    setShowNewProjectDialog(false)
-    setProjectSaving(false)
-  }, [familyId, newProjectTitle, selectedChildId])
+  }, [familyId, newProjectTitle, selectedChildId, projectSaving])
 
   const handleProjectFieldSave = useCallback(
-    async (field: keyof Project, value: string) => {
-      if (!selectedProject?.id) return
-      await updateDoc(doc(projectsCollection(familyId), selectedProject.id), {
+    async (field: keyof Project, value: string, projectId?: string) => {
+      const targetId = projectId ?? selectedProject?.id
+      if (!targetId) return
+      await updateDoc(doc(projectsCollection(familyId), targetId), {
         [field]: value,
         updatedAt: new Date().toISOString(),
       })
       setProjects((prev) =>
-        prev.map((p) => (p.id === selectedProject.id ? { ...p, [field]: value } : p)),
+        prev.map((p) => (p.id === targetId ? { ...p, [field]: value } : p)),
       )
     },
     [familyId, selectedProject],
   )
 
-  const handleAdvancePhase = useCallback(async () => {
-    if (!selectedProject?.id) return
-    const currentIdx = phaseIndex(selectedProject.phase)
+  const handleAdvancePhase = useCallback(async (projectId?: string) => {
+    const targetId = projectId ?? selectedProject?.id
+    const target = projects.find((p) => p.id === targetId)
+    if (!targetId || !target) return
+    const currentIdx = phaseIndex(target.phase)
     const nextPhase = currentIdx < phases.length - 1
       ? phases[currentIdx + 1]
-      : selectedProject.phase
-    await updateDoc(doc(projectsCollection(familyId), selectedProject.id), {
+      : target.phase
+    await updateDoc(doc(projectsCollection(familyId), targetId), {
       phase: nextPhase,
       updatedAt: new Date().toISOString(),
     })
     setProjects((prev) =>
-      prev.map((p) => (p.id === selectedProject.id ? { ...p, phase: nextPhase } : p)),
+      prev.map((p) => (p.id === targetId ? { ...p, phase: nextPhase } : p)),
     )
-  }, [familyId, selectedProject])
+  }, [familyId, selectedProject, projects])
 
   // ── Render flags ───────────────────────────────────────────
   const isReady = !childrenLoading && !projectsLoading && selectedChildId
@@ -665,7 +670,7 @@ export default function LabModePage() {
       />
       <HelpStrip
         pageKey="dadLab"
-        text="Projects are ongoing. Each week you run a Lab Session inside a project. Photos attach to a session stage."
+        text="A Project is the ongoing thread. A Lab Session is a single run of that project. Photos are evidence captured during the session."
       />
       <Stack spacing={2}>
         <ChildSelector
@@ -676,157 +681,263 @@ export default function LabModePage() {
           isLoading={childrenLoading}
         />
 
-        {isReady && !hasProjects && (
-          /* Empty state — no active projects */
-          <SectionCard title="Dad Lab">
-            <Stack spacing={2} alignItems="flex-start">
+        {/* ═══════════════════════════════════════════════════════
+            Section 1: This Week's Lab Sessions
+            ═══════════════════════════════════════════════════════ */}
+        {isReady && (
+          <SectionCard title={`This Week's Lab Sessions`}>
+            {weekSessionsLoading ? (
+              <Typography color="text.secondary">Loading...</Typography>
+            ) : weekSessions.length === 0 ? (
               <Typography color="text.secondary">
-                No active projects yet. Create a project to get started.
+                No sessions this week yet.{' '}
+                {hasProjects
+                  ? 'Start a session from a project below.'
+                  : 'Create a project to get started.'}
               </Typography>
-              {canEdit && (
-                <Button
-                  variant="contained"
-                  onClick={() => setShowNewProjectDialog(true)}
-                >
-                  New Project
-                </Button>
-              )}
-            </Stack>
+            ) : (
+              <Stack spacing={1}>
+                {weekSessions.map((s) => {
+                  const proj = s.projectId ? projectById[s.projectId] : null
+                  const doneBits = s.stageDone ?? {}
+                  const isCurrentProject = s.projectId === selectedProjectId
+
+                  return (
+                    <Card
+                      key={s.id}
+                      variant="outlined"
+                      sx={{
+                        borderColor: isCurrentProject ? 'primary.main' : undefined,
+                        borderWidth: isCurrentProject ? 2 : 1,
+                      }}
+                    >
+                      <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                        <Stack spacing={0.5}>
+                          <Stack
+                            direction="row"
+                            alignItems="center"
+                            justifyContent="space-between"
+                            flexWrap="wrap"
+                            spacing={1}
+                          >
+                            <Typography variant="subtitle2">
+                              {proj?.title ?? 'Untitled Project'}
+                            </Typography>
+                            <Chip
+                              label={statusLabel[s.status] ?? s.status}
+                              color={statusColor[s.status] ?? 'default'}
+                              size="small"
+                            />
+                          </Stack>
+
+                          {s.dateKey && (
+                            <Typography variant="caption" color="text.secondary">
+                              {formatDateShort(s.dateKey)}
+                            </Typography>
+                          )}
+
+                          {/* Stage completion chips */}
+                          <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                            {LAB_STAGES.map((stage) => (
+                              <Chip
+                                key={stage}
+                                label={stage}
+                                size="small"
+                                variant={doneBits[stage] ? 'filled' : 'outlined'}
+                                color={doneBits[stage] ? 'success' : 'default'}
+                                sx={{ fontSize: '0.7rem', height: 22 }}
+                              />
+                            ))}
+                          </Stack>
+
+                          {/* Actions */}
+                          <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                            {s.status !== LabSessionStatus.Complete && (
+                              <Button
+                                variant="contained"
+                                size="small"
+                                onClick={() => handleContinueSession(s)}
+                              >
+                                Continue
+                              </Button>
+                            )}
+                            {s.status === LabSessionStatus.Complete && (
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => {
+                                  if (s.projectId) setSelectedProjectId(s.projectId)
+                                }}
+                              >
+                                View
+                              </Button>
+                            )}
+                          </Stack>
+                        </Stack>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </Stack>
+            )}
           </SectionCard>
         )}
 
-        {isReady && hasProjects && (
-          <div key={`${selectedChildId}_${weekKey}_${selectedProjectId}`}>
-            {/* ── Project selector + actions ───────────────── */}
-            <SectionCard title="Current Project">
+        {/* ═══════════════════════════════════════════════════════
+            Section 2: Projects
+            ═══════════════════════════════════════════════════════ */}
+        {isReady && (
+          <SectionCard title="Projects">
+            {!hasProjects ? (
+              <Stack spacing={2} alignItems="flex-start">
+                <Typography color="text.secondary">
+                  No active projects yet. Create a project to get started.
+                </Typography>
+                {canEdit && (
+                  <Button
+                    variant="contained"
+                    onClick={() => setShowNewProjectDialog(true)}
+                  >
+                    New Project
+                  </Button>
+                )}
+              </Stack>
+            ) : (
               <Stack spacing={1.5}>
-                <TextField
-                  select
-                  label="Project"
-                  value={selectedProjectId ?? ''}
-                  onChange={(e) => setSelectedProjectId(e.target.value)}
-                  fullWidth
-                  size="small"
-                >
-                  {childProjects.map((p) => (
-                    <MenuItem key={p.id} value={p.id}>
-                      {p.title}
-                    </MenuItem>
-                  ))}
-                </TextField>
+                {childProjects.map((p) => (
+                  <Card
+                    key={p.id}
+                    variant="outlined"
+                    sx={{
+                      borderColor: p.id === selectedProjectId ? 'primary.main' : undefined,
+                      borderWidth: p.id === selectedProjectId ? 2 : 1,
+                    }}
+                  >
+                    <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                      <Stack spacing={1}>
+                        <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+                          <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0 }}>
+                            {p.title}
+                          </Typography>
+                          <Chip
+                            label={p.phase}
+                            color="primary"
+                            size="small"
+                            variant="outlined"
+                          />
+                        </Stack>
 
-                {selectedProject && (
-                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                    <Chip
-                      label={selectedProject.phase}
-                      color="primary"
-                      size="small"
-                    />
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      onClick={() => setShowProjectNotesDialog(true)}
+                        <Stack direction="row" spacing={1} flexWrap="wrap">
+                          {canEdit && (
+                            <Button
+                              variant="contained"
+                              size="small"
+                              onClick={() => handleStartSession(p.id!)}
+                            >
+                              Start Session
+                            </Button>
+                          )}
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => {
+                              setNotesProjectId(p.id!)
+                              setShowProjectNotesDialog(true)
+                            }}
+                          >
+                            Project Notes
+                          </Button>
+                        </Stack>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ))}
+
+                {canEdit && (
+                  <Button
+                    variant="outlined"
+                    onClick={() => setShowNewProjectDialog(true)}
+                    sx={{ alignSelf: 'flex-start' }}
+                  >
+                    New Project
+                  </Button>
+                )}
+              </Stack>
+            )}
+          </SectionCard>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════
+            Section 3: Active Lab Session Detail (stage cards)
+            ═══════════════════════════════════════════════════════ */}
+        {isReady && hasProjects && selectedProject && (
+          <div key={`${selectedChildId}_${weekKey}_${selectedProjectId}`}>
+            {/* Session status bar */}
+            {selectedProject && (
+              <SectionCard title={`${selectedProject.title} — Session`}>
+                {labLoading ? (
+                  <Typography color="text.secondary">Loading...</Typography>
+                ) : labSession ? (
+                  <Stack spacing={1.5}>
+                    <Stack
+                      direction="row"
+                      alignItems="center"
+                      justifyContent="space-between"
+                      flexWrap="wrap"
+                      spacing={1}
                     >
-                      Open Project Notes
-                    </Button>
-                    {canEdit && (
+                      <Typography variant="subtitle2">
+                        Week of {formatWeekShort(weekKey)}
+                      </Typography>
+                      <Stack direction="row" spacing={0.5}>
+                        <Chip
+                          label={statusLabel[labSession.status] ?? labSession.status}
+                          color={statusColor[labSession.status] ?? 'default'}
+                          size="small"
+                        />
+                        <Chip
+                          label={labSession.stage}
+                          variant="outlined"
+                          size="small"
+                        />
+                      </Stack>
+                    </Stack>
+
+                    {labSession.status === LabSessionStatus.InProgress && (
                       <Button
                         variant="outlined"
+                        color="success"
                         size="small"
-                        onClick={() => setShowNewProjectDialog(true)}
+                        onClick={handleMarkComplete}
+                        sx={{ alignSelf: 'flex-start' }}
                       >
-                        New Project
+                        Mark Complete
+                      </Button>
+                    )}
+                  </Stack>
+                ) : (
+                  <Stack spacing={1.5} alignItems="flex-start">
+                    <Typography color="text.secondary">
+                      No session yet this week for {selectedProject.title}.
+                    </Typography>
+                    {canEdit && (
+                      <Button
+                        variant="contained"
+                        size="large"
+                        onClick={() => handleStartSession(selectedProject.id!)}
+                      >
+                        Start Lab Session
                       </Button>
                     )}
                   </Stack>
                 )}
-              </Stack>
-            </SectionCard>
-
-            {/* ── This Week's Session ──────────────────────── */}
-            {selectedProject && (
-              <div style={{ marginTop: 16 }}>
-                <SectionCard title={`This Week's Session`}>
-                  {labLoading ? (
-                    <Typography color="text.secondary">Loading...</Typography>
-                  ) : labSession ? (
-                    <Stack spacing={1.5}>
-                      <Card variant="outlined">
-                        <CardContent>
-                          <Stack spacing={1}>
-                            <Stack
-                              direction="row"
-                              alignItems="center"
-                              justifyContent="space-between"
-                              flexWrap="wrap"
-                              spacing={1}
-                            >
-                              <Typography variant="subtitle1">
-                                {selectedProject.title} — Week of {formatWeekShort(weekKey)}
-                              </Typography>
-                              <Stack direction="row" spacing={0.5}>
-                                <Chip
-                                  label={statusLabel[labSession.status] ?? labSession.status}
-                                  color={statusColor[labSession.status] ?? 'default'}
-                                  size="small"
-                                />
-                                <Chip
-                                  label={labSession.stage}
-                                  variant="outlined"
-                                  size="small"
-                                />
-                              </Stack>
-                            </Stack>
-
-                            {labSession.createdAt && (
-                              <Typography variant="caption" color="text.secondary">
-                                Started {formatDateShort(labSession.createdAt.slice(0, 10))}
-                              </Typography>
-                            )}
-
-                            <Typography variant="body2" color="text.secondary">
-                              {labSession.mission || '(no mission yet)'}
-                            </Typography>
-                          </Stack>
-                        </CardContent>
-                      </Card>
-
-                      <Stack direction="row" spacing={1}>
-                        <Button variant="contained" onClick={handleStartOrContinue}>
-                          Continue Lab
-                        </Button>
-                        {labSession.status === LabSessionStatus.InProgress && (
-                          <Button
-                            variant="outlined"
-                            color="success"
-                            onClick={handleMarkComplete}
-                          >
-                            Complete
-                          </Button>
-                        )}
-                      </Stack>
-                    </Stack>
-                  ) : (
-                    <Stack spacing={1.5} alignItems="flex-start">
-                      <Typography variant="subtitle2">
-                        Week of {formatWeekShort(weekKey)}
-                      </Typography>
-                      <Typography color="text.secondary">
-                        No session yet this week.
-                      </Typography>
-                      <Button variant="contained" size="large" onClick={handleStartOrContinue}>
-                        Start Session for {selectedProject.title} (This Week)
-                      </Button>
-                    </Stack>
-                  )}
-                </SectionCard>
-              </div>
+              </SectionCard>
             )}
 
             {/* ── Lab Session Detail — stage cards ────────── */}
             {labSession && (
               <div ref={labSectionRef} style={{ marginTop: 16 }}>
-                <SectionCard title="Lab Session">
+                <SectionCard title="Lab Stages">
                   <Stack spacing={2}>
                     <TextField
                       label="Mission"
@@ -1188,40 +1299,6 @@ export default function LabModePage() {
                 </SectionCard>
               </div>
             )}
-
-            {/* ── Recent Sessions ──────────────────────────── */}
-            {selectedProject && recentSessions.length > 0 && (
-              <div style={{ marginTop: 16 }}>
-                <SectionCard title="Recent Sessions">
-                  <Stack spacing={1}>
-                    {recentSessions.map((s) => (
-                      <Stack
-                        key={s.id}
-                        direction="row"
-                        spacing={1}
-                        alignItems="center"
-                        justifyContent="space-between"
-                      >
-                        <Typography variant="body2">
-                          Week of {formatWeekShort(s.weekKey)}
-                        </Typography>
-                        <Stack direction="row" spacing={0.5} alignItems="center">
-                          <Chip
-                            label={statusLabel[s.status] ?? s.status}
-                            color={statusColor[s.status] ?? 'default'}
-                            size="small"
-                            variant="outlined"
-                          />
-                          <Typography variant="caption" color="text.secondary">
-                            {sessionCompletion(s)}%
-                          </Typography>
-                        </Stack>
-                      </Stack>
-                    ))}
-                  </Stack>
-                </SectionCard>
-              </div>
-            )}
           </div>
         )}
       </Stack>
@@ -1251,7 +1328,7 @@ export default function LabModePage() {
             onClick={handleCreateProject}
             disabled={!newProjectTitle.trim() || projectSaving}
           >
-            Create
+            {projectSaving ? 'Creating...' : 'Create'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1263,13 +1340,13 @@ export default function LabModePage() {
         maxWidth="md"
         fullWidth
       >
-        {selectedProject && (
+        {notesProject && (
           <>
-            <DialogTitle>{selectedProject.title}</DialogTitle>
+            <DialogTitle>{notesProject.title}</DialogTitle>
             <DialogContent>
               <Stack spacing={3}>
                 <Stepper
-                  activeStep={phaseIndex(selectedProject.phase)}
+                  activeStep={phaseIndex(notesProject.phase)}
                   alternativeLabel
                 >
                   {phases.map((phase) => (
@@ -1283,14 +1360,14 @@ export default function LabModePage() {
                   label="Plan notes"
                   multiline
                   minRows={2}
-                  value={selectedProject.planNotes ?? ''}
+                  value={notesProject.planNotes ?? ''}
                   onChange={(e) => {
                     const val = e.target.value
                     setProjects((prev) =>
-                      prev.map((p) => (p.id === selectedProject.id ? { ...p, planNotes: val } : p)),
+                      prev.map((p) => (p.id === notesProject.id ? { ...p, planNotes: val } : p)),
                     )
                   }}
-                  onBlur={(e) => handleProjectFieldSave('planNotes', e.target.value)}
+                  onBlur={(e) => handleProjectFieldSave('planNotes', e.target.value, notesProject.id)}
                   fullWidth
                   slotProps={{ input: { readOnly: !canEdit } }}
                 />
@@ -1298,14 +1375,14 @@ export default function LabModePage() {
                   label="Build notes"
                   multiline
                   minRows={2}
-                  value={selectedProject.buildNotes ?? ''}
+                  value={notesProject.buildNotes ?? ''}
                   onChange={(e) => {
                     const val = e.target.value
                     setProjects((prev) =>
-                      prev.map((p) => (p.id === selectedProject.id ? { ...p, buildNotes: val } : p)),
+                      prev.map((p) => (p.id === notesProject.id ? { ...p, buildNotes: val } : p)),
                     )
                   }}
-                  onBlur={(e) => handleProjectFieldSave('buildNotes', e.target.value)}
+                  onBlur={(e) => handleProjectFieldSave('buildNotes', e.target.value, notesProject.id)}
                   fullWidth
                   slotProps={{ input: { readOnly: !canEdit } }}
                 />
@@ -1313,14 +1390,14 @@ export default function LabModePage() {
                   label="Test notes"
                   multiline
                   minRows={2}
-                  value={selectedProject.testNotes ?? ''}
+                  value={notesProject.testNotes ?? ''}
                   onChange={(e) => {
                     const val = e.target.value
                     setProjects((prev) =>
-                      prev.map((p) => (p.id === selectedProject.id ? { ...p, testNotes: val } : p)),
+                      prev.map((p) => (p.id === notesProject.id ? { ...p, testNotes: val } : p)),
                     )
                   }}
-                  onBlur={(e) => handleProjectFieldSave('testNotes', e.target.value)}
+                  onBlur={(e) => handleProjectFieldSave('testNotes', e.target.value, notesProject.id)}
                   fullWidth
                   slotProps={{ input: { readOnly: !canEdit } }}
                 />
@@ -1328,14 +1405,14 @@ export default function LabModePage() {
                   label="Improve notes"
                   multiline
                   minRows={2}
-                  value={selectedProject.improveNotes ?? ''}
+                  value={notesProject.improveNotes ?? ''}
                   onChange={(e) => {
                     const val = e.target.value
                     setProjects((prev) =>
-                      prev.map((p) => (p.id === selectedProject.id ? { ...p, improveNotes: val } : p)),
+                      prev.map((p) => (p.id === notesProject.id ? { ...p, improveNotes: val } : p)),
                     )
                   }}
-                  onBlur={(e) => handleProjectFieldSave('improveNotes', e.target.value)}
+                  onBlur={(e) => handleProjectFieldSave('improveNotes', e.target.value, notesProject.id)}
                   fullWidth
                   slotProps={{ input: { readOnly: !canEdit } }}
                 />
@@ -1344,14 +1421,14 @@ export default function LabModePage() {
                   multiline
                   minRows={2}
                   placeholder="What did you change between versions?"
-                  value={selectedProject.whatChanged ?? ''}
+                  value={notesProject.whatChanged ?? ''}
                   onChange={(e) => {
                     const val = e.target.value
                     setProjects((prev) =>
-                      prev.map((p) => (p.id === selectedProject.id ? { ...p, whatChanged: val } : p)),
+                      prev.map((p) => (p.id === notesProject.id ? { ...p, whatChanged: val } : p)),
                     )
                   }}
-                  onBlur={(e) => handleProjectFieldSave('whatChanged', e.target.value)}
+                  onBlur={(e) => handleProjectFieldSave('whatChanged', e.target.value, notesProject.id)}
                   fullWidth
                   slotProps={{ input: { readOnly: !canEdit } }}
                 />
@@ -1360,14 +1437,14 @@ export default function LabModePage() {
                   multiline
                   minRows={2}
                   placeholder="Explain the project to someone else."
-                  value={selectedProject.teachBack ?? ''}
+                  value={notesProject.teachBack ?? ''}
                   onChange={(e) => {
                     const val = e.target.value
                     setProjects((prev) =>
-                      prev.map((p) => (p.id === selectedProject.id ? { ...p, teachBack: val } : p)),
+                      prev.map((p) => (p.id === notesProject.id ? { ...p, teachBack: val } : p)),
                     )
                   }}
-                  onBlur={(e) => handleProjectFieldSave('teachBack', e.target.value)}
+                  onBlur={(e) => handleProjectFieldSave('teachBack', e.target.value, notesProject.id)}
                   fullWidth
                   slotProps={{ input: { readOnly: !canEdit } }}
                 />
@@ -1375,9 +1452,9 @@ export default function LabModePage() {
             </DialogContent>
             <DialogActions>
               <Button onClick={() => setShowProjectNotesDialog(false)}>Close</Button>
-              {canEdit && phaseIndex(selectedProject.phase) < phases.length - 1 && (
-                <Button variant="outlined" onClick={handleAdvancePhase}>
-                  Next Phase: {phases[phaseIndex(selectedProject.phase) + 1]}
+              {canEdit && phaseIndex(notesProject.phase) < phases.length - 1 && (
+                <Button variant="outlined" onClick={() => handleAdvancePhase(notesProject.id)}>
+                  Next Phase: {phases[phaseIndex(notesProject.phase) + 1]}
                 </Button>
               )}
             </DialogActions>

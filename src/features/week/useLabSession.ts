@@ -5,6 +5,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import {
   labSessionDocId,
   labSessionsCollection,
+  projectsCollection,
 } from '../../core/firebase/firestore'
 import type { LabSession } from '../../core/types/domain'
 import { EngineStage, LabSessionStatus } from '../../core/types/enums'
@@ -80,6 +81,7 @@ export function useLabSession(childId: string, weekKey: string, projectId?: stri
       const newSession: Omit<LabSession, 'id'> = {
         childId,
         weekKey,
+        dateKey: now.slice(0, 10),
         projectId,
         status: LabSessionStatus.InProgress,
         stage: EngineStage.Wonder,
@@ -87,6 +89,14 @@ export function useLabSession(childId: string, weekKey: string, projectId?: stri
         updatedAt: now,
       }
       await setDoc(docRef, newSession)
+    }
+
+    // Update lastSessionAt on the project
+    if (projectId) {
+      const projRef = doc(projectsCollection(familyId), projectId)
+      await updateDoc(projRef, { lastSessionAt: now, updatedAt: now }).catch(() => {
+        // Project may not exist yet (race condition) — ignore
+      })
     }
   }, [familyId, childId, weekKey, projectId, labSession])
 

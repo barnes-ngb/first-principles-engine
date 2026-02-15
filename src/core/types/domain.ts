@@ -335,12 +335,16 @@ export interface Project {
   createdAt?: string
   updatedAt?: string
   completed?: boolean
+  /** Timestamp of the most recent lab session for this project. */
+  lastSessionAt?: string
 }
 
 export interface LabSession {
   id?: string
   childId: string
   weekKey: string
+  /** The specific date of this session (YYYY-MM-DD). */
+  dateKey?: string
   /** The project this session belongs to (required for new sessions). */
   projectId?: string
   status: LabSessionStatus
