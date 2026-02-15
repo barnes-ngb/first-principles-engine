@@ -9,7 +9,10 @@ import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import IconButton from '@mui/material/IconButton'
+import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
+import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import Step from '@mui/material/Step'
 import StepLabel from '@mui/material/StepLabel'
@@ -18,8 +21,11 @@ import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
+import ArchiveIcon from '@mui/icons-material/Archive'
 import BrokenImageIcon from '@mui/icons-material/BrokenImage'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
+import UnarchiveIcon from '@mui/icons-material/Unarchive'
 import {
   addDoc,
   doc,
@@ -39,7 +45,7 @@ import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
-import { useFamilyId } from '../../core/auth/useAuth'
+import { useAuth, useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   labSessionDocId,
@@ -172,6 +178,7 @@ export default function LabModePage() {
   const weekKey = weekRange.start
 
   const familyId = useFamilyId()
+  const { user } = useAuth()
   const { canEdit } = useProfile()
   const {
     children,
@@ -192,6 +199,17 @@ export default function LabModePage() {
   const [showProjectNotesDialog, setShowProjectNotesDialog] = useState(false)
   /** Tracks which project the notes dialog is open for. */
   const [notesProjectId, setNotesProjectId] = useState<string | null>(null)
+
+  // ── Delete / archive state ──────────────────────────────────
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [undoProject, setUndoProject] = useState<Project | null>(null)
+  const [showUndoSnackbar, setShowUndoSnackbar] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
+  /** Anchor element for the project card overflow menu. */
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
+  /** Project ID whose overflow menu is open. */
+  const [menuProjectId, setMenuProjectId] = useState<string | null>(null)
 
   // Load projects for the selected child
   useEffect(() => {
@@ -221,8 +239,15 @@ export default function LabModePage() {
     return () => { cancelled = true }
   }, [familyId, selectedChildId])
 
+  /** Active (non-deleted, non-archived, non-completed) projects for the selected child. */
   const childProjects = useMemo(
-    () => projects.filter((p) => p.childId === selectedChildId && !p.completed),
+    () => projects.filter((p) => p.childId === selectedChildId && !p.completed && !p.deletedAt && !p.archivedAt),
+    [projects, selectedChildId],
+  )
+
+  /** Archived projects for the selected child. */
+  const archivedProjects = useMemo(
+    () => projects.filter((p) => p.childId === selectedChildId && !p.deletedAt && !!p.archivedAt),
     [projects, selectedChildId],
   )
 
@@ -260,6 +285,16 @@ export default function LabModePage() {
     }
     return map
   }, [projects])
+
+  /** Whether a project has any sessions (checks weekSessions + lastSessionAt). */
+  const projectHasSessions = useMemo(() => {
+    const sessionProjectIds = new Set(weekSessions.map((s) => s.projectId).filter(Boolean))
+    return (projectId: string): boolean => {
+      if (sessionProjectIds.has(projectId)) return true
+      const proj = projectById[projectId]
+      return Boolean(proj?.lastSessionAt)
+    }
+  }, [weekSessions, projectById])
 
   // ── Lab session hook — scoped to child + week + project ────
   const { labSession, isLoading: labLoading, startOrContinue, updateSession } =
@@ -657,6 +692,101 @@ export default function LabModePage() {
     )
   }, [familyId, selectedProject, projects])
 
+  // ── Delete / archive handlers ──────────────────────────────
+
+  /** Open the delete confirmation dialog for a project. */
+  const handleDeleteRequest = useCallback((projectId: string) => {
+    setDeleteTargetId(projectId)
+    setShowDeleteConfirm(true)
+    setMenuAnchor(null)
+    setMenuProjectId(null)
+  }, [])
+
+  /** Confirm soft-delete: set deletedAt + deletedBy on the project doc. */
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteTargetId) return
+    const now = new Date().toISOString()
+    await updateDoc(doc(projectsCollection(familyId), deleteTargetId), {
+      deletedAt: now,
+      deletedBy: user?.uid ?? null,
+      updatedAt: now,
+    })
+    // Store for undo
+    const deleted = projects.find((p) => p.id === deleteTargetId)
+    if (deleted) {
+      setUndoProject({ ...deleted, deletedAt: now, deletedBy: user?.uid ?? undefined })
+      setShowUndoSnackbar(true)
+    }
+    // Remove from local state (it'll be filtered out)
+    setProjects((prev) =>
+      prev.map((p) => (p.id === deleteTargetId ? { ...p, deletedAt: now, deletedBy: user?.uid ?? undefined } : p)),
+    )
+    if (selectedProjectId === deleteTargetId) setSelectedProjectId(null)
+    setShowDeleteConfirm(false)
+    setDeleteTargetId(null)
+  }, [deleteTargetId, familyId, projects, selectedProjectId, user])
+
+  /** Undo a soft-delete by clearing deletedAt/deletedBy. */
+  const handleUndoDelete = useCallback(async () => {
+    if (!undoProject?.id) return
+    await updateDoc(doc(projectsCollection(familyId), undoProject.id), {
+      deletedAt: null,
+      deletedBy: null,
+      updatedAt: new Date().toISOString(),
+    })
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === undoProject.id
+          ? { ...p, deletedAt: undefined, deletedBy: undefined }
+          : p,
+      ),
+    )
+    setShowUndoSnackbar(false)
+    setUndoProject(null)
+  }, [familyId, undoProject])
+
+  /** Archive a project. */
+  const handleArchive = useCallback(async (projectId: string) => {
+    const now = new Date().toISOString()
+    await updateDoc(doc(projectsCollection(familyId), projectId), {
+      archivedAt: now,
+      updatedAt: now,
+    })
+    setProjects((prev) =>
+      prev.map((p) => (p.id === projectId ? { ...p, archivedAt: now } : p)),
+    )
+    if (selectedProjectId === projectId) setSelectedProjectId(null)
+    setMenuAnchor(null)
+    setMenuProjectId(null)
+  }, [familyId, selectedProjectId])
+
+  /** Unarchive a project. */
+  const handleUnarchive = useCallback(async (projectId: string) => {
+    await updateDoc(doc(projectsCollection(familyId), projectId), {
+      archivedAt: null,
+      updatedAt: new Date().toISOString(),
+    })
+    setProjects((prev) =>
+      prev.map((p) => (p.id === projectId ? { ...p, archivedAt: undefined } : p)),
+    )
+  }, [familyId])
+
+  // ── Smart Start Session (Option A) ───────────────────────
+  const projectsSectionRef = useRef<HTMLDivElement>(null)
+
+  const handleSmartStart = useCallback(() => {
+    if (childProjects.length === 0) {
+      // No projects — prompt to create one
+      setShowNewProjectDialog(true)
+    } else if (childProjects.length === 1) {
+      // Exactly 1 project — start session on it
+      handleStartSession(childProjects[0].id!)
+    } else {
+      // 2+ projects — scroll to Projects section so user can pick
+      projectsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [childProjects, handleStartSession])
+
   // ── Render flags ───────────────────────────────────────────
   const isReady = !childrenLoading && !projectsLoading && selectedChildId
   const hasProjects = childProjects.length > 0
@@ -689,12 +819,19 @@ export default function LabModePage() {
             {weekSessionsLoading ? (
               <Typography color="text.secondary">Loading...</Typography>
             ) : weekSessions.length === 0 ? (
-              <Typography color="text.secondary">
-                No sessions this week yet.{' '}
-                {hasProjects
-                  ? 'Start a session from a project below.'
-                  : 'Create a project to get started.'}
-              </Typography>
+              <Stack spacing={1.5} alignItems="flex-start">
+                <Typography color="text.secondary">
+                  No sessions this week yet.{' '}
+                  {hasProjects
+                    ? 'Start a session from a project below.'
+                    : 'Create a project to get started.'}
+                </Typography>
+                {canEdit && (
+                  <Button variant="contained" size="small" onClick={handleSmartStart}>
+                    Start Lab Session
+                  </Button>
+                )}
+              </Stack>
             ) : (
               <Stack spacing={1}>
                 {weekSessions.map((s) => {
@@ -787,79 +924,187 @@ export default function LabModePage() {
             Section 2: Projects
             ═══════════════════════════════════════════════════════ */}
         {isReady && (
-          <SectionCard title="Projects">
-            {!hasProjects ? (
-              <Stack spacing={2} alignItems="flex-start">
-                <Typography color="text.secondary">
-                  No active projects yet. Create a project to get started.
-                </Typography>
-                <Button
-                  variant="contained"
-                  onClick={() => setShowNewProjectDialog(true)}
-                >
-                  New Project
-                </Button>
-              </Stack>
-            ) : (
-              <Stack spacing={1.5}>
-                {childProjects.map((p) => (
-                  <Card
-                    key={p.id}
-                    variant="outlined"
-                    sx={{
-                      borderColor: p.id === selectedProjectId ? 'primary.main' : undefined,
-                      borderWidth: p.id === selectedProjectId ? 2 : 1,
-                    }}
+          <div ref={projectsSectionRef}>
+            <SectionCard title="Projects">
+              {!hasProjects && !showArchived ? (
+                <Stack spacing={2} alignItems="flex-start">
+                  <Typography color="text.secondary">
+                    No active projects yet. Create a project to get started.
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    onClick={() => setShowNewProjectDialog(true)}
                   >
-                    <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-                      <Stack spacing={1}>
-                        <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
-                          <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0 }}>
-                            {p.title}
-                          </Typography>
-                          <Chip
-                            label={p.phase}
-                            color="primary"
-                            size="small"
-                            variant="outlined"
-                          />
-                        </Stack>
+                    New Project
+                  </Button>
+                </Stack>
+              ) : (
+                <Stack spacing={1.5}>
+                  {/* Active / Archived toggle */}
+                  {archivedProjects.length > 0 && (
+                    <ToggleButtonGroup
+                      value={showArchived ? 'archived' : 'active'}
+                      exclusive
+                      onChange={(_e, val) => { if (val) setShowArchived(val === 'archived') }}
+                      size="small"
+                    >
+                      <ToggleButton value="active">Active ({childProjects.length})</ToggleButton>
+                      <ToggleButton value="archived">Archived ({archivedProjects.length})</ToggleButton>
+                    </ToggleButtonGroup>
+                  )}
 
-                        <Stack direction="row" spacing={1} flexWrap="wrap">
-                          <Button
-                            variant="contained"
-                            size="small"
-                            onClick={() => handleStartSession(p.id!)}
-                          >
-                            Start Session
-                          </Button>
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => {
-                              setNotesProjectId(p.id!)
-                              setShowProjectNotesDialog(true)
-                            }}
-                          >
-                            Project Notes
-                          </Button>
-                        </Stack>
-                      </Stack>
-                    </CardContent>
-                  </Card>
-                ))}
+                  {/* Active projects list */}
+                  {!showArchived && childProjects.map((p) => (
+                      <Card
+                        key={p.id}
+                        variant="outlined"
+                        sx={{
+                          borderColor: p.id === selectedProjectId ? 'primary.main' : undefined,
+                          borderWidth: p.id === selectedProjectId ? 2 : 1,
+                        }}
+                      >
+                        <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                          <Stack spacing={1}>
+                            <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+                              <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0 }}>
+                                {p.title}
+                              </Typography>
+                              <Chip
+                                label={p.phase}
+                                color="primary"
+                                size="small"
+                                variant="outlined"
+                              />
+                              {canEdit && (
+                                <IconButton
+                                  size="small"
+                                  onClick={(e) => {
+                                    setMenuAnchor(e.currentTarget)
+                                    setMenuProjectId(p.id!)
+                                  }}
+                                >
+                                  <MoreVertIcon fontSize="small" />
+                                </IconButton>
+                              )}
+                            </Stack>
 
-                <Button
-                  variant="outlined"
-                  onClick={() => setShowNewProjectDialog(true)}
-                  sx={{ alignSelf: 'flex-start' }}
-                >
-                  New Project
-                </Button>
-              </Stack>
-            )}
-          </SectionCard>
+                            <Stack direction="row" spacing={1} flexWrap="wrap">
+                              <Button
+                                variant="contained"
+                                size="small"
+                                onClick={() => handleStartSession(p.id!)}
+                              >
+                                Start Session
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => {
+                                  setNotesProjectId(p.id!)
+                                  setShowProjectNotesDialog(true)
+                                }}
+                              >
+                                Project Notes
+                              </Button>
+                            </Stack>
+                          </Stack>
+                        </CardContent>
+                      </Card>
+                  ))}
+
+                  {/* Archived projects list */}
+                  {showArchived && archivedProjects.map((p) => (
+                    <Card key={p.id} variant="outlined" sx={{ opacity: 0.75 }}>
+                      <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                        <Stack spacing={1}>
+                          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+                            <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0 }}>
+                              {p.title}
+                            </Typography>
+                            <Chip label={p.phase} size="small" variant="outlined" />
+                            <Chip label="Archived" size="small" color="default" />
+                          </Stack>
+                          <Stack direction="row" spacing={1} flexWrap="wrap">
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => {
+                                setNotesProjectId(p.id!)
+                                setShowProjectNotesDialog(true)
+                              }}
+                            >
+                              Project Notes
+                            </Button>
+                            {canEdit && (
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<UnarchiveIcon />}
+                                onClick={() => handleUnarchive(p.id!)}
+                              >
+                                Unarchive
+                              </Button>
+                            )}
+                          </Stack>
+                        </Stack>
+                      </CardContent>
+                    </Card>
+                  ))}
+
+                  {showArchived && archivedProjects.length === 0 && (
+                    <Typography color="text.secondary">No archived projects.</Typography>
+                  )}
+
+                  {!showArchived && (
+                    <Button
+                      variant="outlined"
+                      onClick={() => setShowNewProjectDialog(true)}
+                      sx={{ alignSelf: 'flex-start' }}
+                    >
+                      New Project
+                    </Button>
+                  )}
+                </Stack>
+              )}
+            </SectionCard>
+          </div>
         )}
+
+        {/* ── Project overflow menu ─────────────────────────── */}
+        <Menu
+          anchorEl={menuAnchor}
+          open={Boolean(menuAnchor)}
+          onClose={() => { setMenuAnchor(null); setMenuProjectId(null) }}
+        >
+          {(() => {
+            const mp = menuProjectId ? projects.find((p) => p.id === menuProjectId) : null
+            const canDeleteMenu = mp && mp.phase === ProjectPhase.Plan && !projectHasSessions(mp.id!)
+            return [
+              <MenuItem
+                key="archive"
+                onClick={() => { if (menuProjectId) handleArchive(menuProjectId) }}
+              >
+                <ArchiveIcon fontSize="small" sx={{ mr: 1 }} />
+                Archive
+              </MenuItem>,
+              canDeleteMenu ? (
+                <MenuItem
+                  key="delete"
+                  onClick={() => { if (menuProjectId) handleDeleteRequest(menuProjectId) }}
+                  sx={{ color: 'error.main' }}
+                >
+                  Delete
+                </MenuItem>
+              ) : (
+                <MenuItem key="delete" disabled>
+                  <Typography variant="body2" color="text.disabled">
+                    {mp && projectHasSessions(mp.id!) ? "Can't delete — sessions exist" : "Can't delete — not in Plan phase"}
+                  </Typography>
+                </MenuItem>
+              ),
+            ]
+          })()}
+        </Menu>
 
         {/* ═══════════════════════════════════════════════════════
             Section 3: Active Lab Session Detail (stage cards)
@@ -1469,6 +1714,42 @@ export default function LabModePage() {
           />
         )}
       </Dialog>
+
+      {/* ── Delete confirmation dialog ──────────────────────── */}
+      <Dialog
+        open={showDeleteConfirm}
+        onClose={() => { setShowDeleteConfirm(false); setDeleteTargetId(null) }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Delete project?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            This removes the project and any notes. This action can be undone for a short time afterward.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setShowDeleteConfirm(false); setDeleteTargetId(null) }}>
+            Cancel
+          </Button>
+          <Button variant="contained" color="error" onClick={handleDeleteConfirm}>
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Undo delete snackbar ───────────────────────────── */}
+      <Snackbar
+        open={showUndoSnackbar}
+        autoHideDuration={10000}
+        onClose={() => { setShowUndoSnackbar(false); setUndoProject(null) }}
+        message={`Deleted "${undoProject?.title ?? 'project'}"`}
+        action={
+          <Button color="inherit" size="small" onClick={handleUndoDelete}>
+            Undo
+          </Button>
+        }
+      />
     </Page>
   )
 }
