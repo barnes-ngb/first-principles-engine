@@ -145,9 +145,18 @@ export const weeklyScoresCollection = (
 
 const labSessionConverter: FirestoreDataConverter<LabSession> = {
   toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
-  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) =>
-    snapshot.data(options) as LabSession,
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as LabSession
+    return {
+      ...data,
+      id: snapshot.id,
+    }
+  },
 }
+
+/** Lab session doc ID: {weekKey}_{childId} */
+export const labSessionDocId = (weekKey: string, childId: string): string =>
+  `${weekKey}_${childId}`
 
 export const labSessionsCollection = (
   familyId: string,

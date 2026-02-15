@@ -14,7 +14,7 @@ import StepLabel from '@mui/material/StepLabel'
 import Stepper from '@mui/material/Stepper'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDocs, updateDoc } from 'firebase/firestore'
+import { addDoc, doc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -23,11 +23,12 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import {
+  labSessionDocId,
   labSessionsCollection,
   projectsCollection,
 } from '../../core/firebase/firestore'
 import type { LabSession, LabStageCapture, Project } from '../../core/types/domain'
-import { EngineStage, ProjectPhase } from '../../core/types/enums'
+import { EngineStage, LabSessionStatus, ProjectPhase } from '../../core/types/enums'
 import type { EngineStage as EngineStageType, ProjectPhase as ProjectPhaseType } from '../../core/types/enums'
 
 const phases: ProjectPhaseType[] = [
@@ -231,24 +232,48 @@ export default function ProjectBoardPage() {
     setLabError(false)
 
     try {
+      const now = new Date().toISOString()
+      const weekKey = now.slice(0, 10)
+      const docId = labSessionDocId(weekKey, selectedChildId)
+      const docRef = doc(labSessionsCollection(familyId), docId)
+
+      // Build stageNotes from the captures
+      const stageNotes: Partial<Record<EngineStageType, string>> = {}
+      for (const capture of labStageCaptures) {
+        if (capture.notes) {
+          stageNotes[capture.stage] = capture.notes
+        }
+      }
+
+      // Determine current stage (last completed + 1, or first)
+      const lastCompleted = [...labStageCaptures].reverse().find((c) => c.completedAt)
+      const lastIdx = lastCompleted ? labStages.indexOf(lastCompleted.stage) : -1
+      const currentStage = lastIdx < labStages.length - 1
+        ? labStages[lastIdx + 1]
+        : labStages[labStages.length - 1]
+
+      const allDone = labStageCaptures.every((c) => c.completedAt)
+
       const session: Omit<LabSession, 'id'> = {
         childId: selectedChildId,
-        date: new Date().toISOString().slice(0, 10),
+        weekKey,
+        status: allDone ? LabSessionStatus.Complete : LabSessionStatus.InProgress,
+        stage: currentStage,
         mission: labMission.trim() || undefined,
         constraints: labConstraints.trim() || undefined,
         roles: labRoles.trim() || undefined,
-        stages: labStageCaptures,
-        story: labStory.trim() || undefined,
-        createdAt: new Date().toISOString(),
+        stageNotes: Object.keys(stageNotes).length > 0 ? stageNotes : undefined,
+        createdAt: now,
+        updatedAt: now,
       }
 
-      await addDoc(labSessionsCollection(familyId), session)
+      await setDoc(docRef, session)
       setLabSaved(true)
     } catch {
       setLabError(true)
     }
     setIsSaving(false)
-  }, [familyId, labConstraints, labMission, labRoles, labStageCaptures, labStory, selectedChildId])
+  }, [familyId, labConstraints, labMission, labRoles, labStageCaptures, selectedChildId])
 
   return (
     <Page>
