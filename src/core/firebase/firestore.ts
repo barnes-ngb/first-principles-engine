@@ -154,9 +154,9 @@ const labSessionConverter: FirestoreDataConverter<LabSession> = {
   },
 }
 
-/** Lab session doc ID: {weekKey}_{childId} */
-export const labSessionDocId = (weekKey: string, childId: string): string =>
-  `${weekKey}_${childId}`
+/** Lab session doc ID: {weekKey}_{childId}_{projectId} (or {weekKey}_{childId} for legacy sessions). */
+export const labSessionDocId = (weekKey: string, childId: string, projectId?: string): string =>
+  projectId ? `${weekKey}_${childId}_${projectId}` : `${weekKey}_${childId}`
 
 export const labSessionsCollection = (
   familyId: string,
