@@ -15,7 +15,7 @@ import { UserProfile } from '../core/types/enums'
 const navItems = [
   { label: 'Dashboard', to: '/dashboard' },
   { label: 'Scoreboard', to: '/scoreboard' },
-  { label: 'Dad Lab', to: '/projects' },
+  { label: 'Dad Lab', to: '/week/lab' },
   { label: 'Ladders', to: '/ladders' },
   { label: 'Today', to: '/today' },
   { label: 'This Week', to: '/week', parentOnly: true },
