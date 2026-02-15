@@ -144,6 +144,13 @@ export const StreamKey = {
 } as const
 export type StreamKey = (typeof StreamKey)[keyof typeof StreamKey]
 
+export const LabSessionStatus = {
+  NotStarted: 'not_started',
+  InProgress: 'in_progress',
+  Complete: 'complete',
+} as const
+export type LabSessionStatus = (typeof LabSessionStatus)[keyof typeof LabSessionStatus]
+
 export const RoutineItemKey = {
   Handwriting: 'handwriting',
   Spelling: 'spelling',
