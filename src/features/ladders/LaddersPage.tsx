@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardActionArea from '@mui/material/CardActionArea'
 import CardContent from '@mui/material/CardContent'
@@ -46,6 +47,24 @@ const RESULT_ICON: Record<string, string> = {
   [SessionSymbol.Miss]: '✖',
 }
 
+/** Group ladders by their `group` field, preserving order. */
+function groupLadders(
+  ladders: LadderCardDefinition[],
+): Array<{ group: string | null; ladders: LadderCardDefinition[] }> {
+  const groups: Array<{ group: string | null; ladders: LadderCardDefinition[] }> = []
+  let currentGroup: string | null | undefined
+  for (const ladder of ladders) {
+    const g = ladder.group ?? null
+    if (groups.length === 0 || g !== currentGroup) {
+      groups.push({ group: g, ladders: [ladder] })
+      currentGroup = g
+    } else {
+      groups[groups.length - 1].ladders.push(ladder)
+    }
+  }
+  return groups
+}
+
 export default function LaddersPage() {
   const familyId = useFamilyId()
   const {
@@ -78,6 +97,12 @@ export default function LaddersPage() {
   const ladderDefinitions = useMemo(
     () => (selectedChild ? getLaddersForChild(selectedChild.name) : undefined),
     [selectedChild],
+  )
+
+  // Group ladders for display
+  const ladderGroups = useMemo(
+    () => ladderDefinitions ? groupLadders(ladderDefinitions) : [],
+    [ladderDefinitions],
   )
 
   // Track which child the progress is loaded for; clear stale data on switch
@@ -192,6 +217,180 @@ export default function LaddersPage() {
   const handleCloseSnackbar = () =>
     setSnackbar((prev) => ({ ...prev, open: false }))
 
+  const renderLadderCard = (ladder: LadderCardDefinition) => {
+    const progress = getProgress(ladder)
+    const currentRung = ladder.rungs.find(
+      (r) => r.rungId === progress.currentRungId,
+    )
+    const rungIndex = ladder.rungs.findIndex(
+      (r) => r.rungId === progress.currentRungId,
+    )
+    const isComplete = rungIndex === ladder.rungs.length - 1 && progress.streakCount >= 3
+    const progressPct = isComplete
+      ? 100
+      : ladder.rungs.length > 0
+        ? (rungIndex / ladder.rungs.length) * 100
+        : 0
+    const isExpanded = expandedKey === ladder.ladderKey
+    const lastEntry = progress.history.length > 0
+      ? progress.history[progress.history.length - 1]
+      : null
+
+    return (
+      <Card
+        key={ladder.ladderKey}
+        variant="outlined"
+        sx={{
+          borderColor: highlightLadder === ladder.ladderKey
+            ? 'primary.main'
+            : undefined,
+          borderWidth: highlightLadder === ladder.ladderKey ? 2 : 1,
+        }}
+      >
+        <CardActionArea
+          onClick={() =>
+            setExpandedKey(isExpanded ? null : ladder.ladderKey)
+          }
+        >
+          <CardContent sx={{ pb: 1.5 }}>
+            <Stack spacing={1}>
+              <Stack
+                direction="row"
+                justifyContent="space-between"
+                alignItems="flex-start"
+              >
+                <Typography variant="subtitle1" fontWeight={600}>
+                  {ladder.title}
+                </Typography>
+                {isComplete ? (
+                  <Chip label="Complete" color="success" size="small" />
+                ) : (
+                  <Chip
+                    label={currentRung
+                      ? `${currentRung.rungId}: ${currentRung.name}`
+                      : progress.currentRungId}
+                    color="primary"
+                    size="small"
+                    variant="outlined"
+                  />
+                )}
+              </Stack>
+
+              <LinearProgress
+                variant="determinate"
+                value={progressPct}
+                sx={{ height: 6, borderRadius: 3 }}
+              />
+
+              <Stack
+                direction="row"
+                spacing={1.5}
+                alignItems="center"
+                flexWrap="wrap"
+              >
+                <Typography variant="caption" color="text.secondary">
+                  Streak: {progress.streakCount}/3
+                </Typography>
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Box
+                    key={i}
+                    sx={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      bgcolor:
+                        i < progress.streakCount
+                          ? 'success.main'
+                          : 'action.disabledBackground',
+                    }}
+                  />
+                ))}
+                {lastEntry && (
+                  <Typography variant="caption" color="text.secondary">
+                    Last: {RESULT_ICON[lastEntry.result] ?? lastEntry.result}
+                  </Typography>
+                )}
+                <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+                  {ladder.metricLabel}
+                </Typography>
+              </Stack>
+            </Stack>
+          </CardContent>
+        </CardActionArea>
+
+        <Collapse in={isExpanded}>
+          <CardContent sx={{ pt: 0 }}>
+            <Stack spacing={1.5}>
+              <Typography variant="body2" color="text.secondary">
+                {ladder.intent}
+              </Typography>
+
+              {currentRung && (
+                <Box
+                  sx={{
+                    bgcolor: 'action.hover',
+                    borderRadius: 1,
+                    p: 1.5,
+                  }}
+                >
+                  <Typography variant="subtitle2">
+                    Evidence: {currentRung.evidenceText}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Supports: {currentRung.supportsText}
+                  </Typography>
+                </Box>
+              )}
+
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                {ladder.rungs.map((rung) => {
+                  const isActive = rung.rungId === progress.currentRungId
+                  const rungIdx = ladder.rungs.indexOf(rung)
+                  const currentIdx = ladder.rungs.findIndex(
+                    (r) => r.rungId === progress.currentRungId,
+                  )
+                  const isAchieved = rungIdx < currentIdx
+                    || (rungIdx === currentIdx && isComplete)
+                  return (
+                    <Chip
+                      key={rung.rungId}
+                      label={`${rung.rungId}: ${rung.name}`}
+                      size="small"
+                      color={
+                        isAchieved
+                          ? 'success'
+                          : isActive
+                            ? 'primary'
+                            : 'default'
+                      }
+                      variant={isActive ? 'filled' : 'outlined'}
+                    />
+                  )
+                })}
+              </Stack>
+
+              <Typography variant="caption" color="text.secondary" fontStyle="italic">
+                {ladder.globalRuleText}
+              </Typography>
+
+              <Button
+                variant="contained"
+                size="small"
+                onClick={(e: React.MouseEvent) => {
+                  e.stopPropagation()
+                  handleOpenLog(ladder)
+                }}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                Log evidence
+              </Button>
+            </Stack>
+          </CardContent>
+        </Collapse>
+      </Card>
+    )
+  }
+
   if (isLoading) {
     return (
       <Page>
@@ -221,190 +420,20 @@ export default function LaddersPage() {
 
       {selectedChildId && ladderDefinitions && (
         <Stack spacing={2}>
-          {ladderDefinitions.map((ladder) => {
-            const progress = getProgress(ladder)
-            const currentRung = ladder.rungs.find(
-              (r) => r.rungId === progress.currentRungId,
-            )
-            const rungIndex = ladder.rungs.findIndex(
-              (r) => r.rungId === progress.currentRungId,
-            )
-            const isComplete = rungIndex === ladder.rungs.length - 1 && progress.streakCount >= 3
-            const progressPct = isComplete
-              ? 100
-              : ladder.rungs.length > 0
-                ? (rungIndex / ladder.rungs.length) * 100
-                : 0
-            const isExpanded = expandedKey === ladder.ladderKey
-            const lastEntry = progress.history.length > 0
-              ? progress.history[progress.history.length - 1]
-              : null
-
-            return (
-              <Card
-                key={ladder.ladderKey}
-                variant="outlined"
-                sx={{
-                  borderColor: highlightLadder === ladder.ladderKey
-                    ? 'primary.main'
-                    : undefined,
-                  borderWidth: highlightLadder === ladder.ladderKey ? 2 : 1,
-                }}
-              >
-                <CardActionArea
-                  onClick={() =>
-                    setExpandedKey(isExpanded ? null : ladder.ladderKey)
-                  }
+          {ladderGroups.map((section, sIdx) => (
+            <Stack key={section.group ?? `ungrouped-${sIdx}`} spacing={2}>
+              {section.group && (
+                <Typography
+                  variant="overline"
+                  color="text.secondary"
+                  sx={{ mt: sIdx > 0 ? 1 : 0 }}
                 >
-                  <CardContent sx={{ pb: 1.5 }}>
-                    <Stack spacing={1}>
-                      <Stack
-                        direction="row"
-                        justifyContent="space-between"
-                        alignItems="flex-start"
-                      >
-                        <Typography variant="subtitle1" fontWeight={600}>
-                          {ladder.title}
-                        </Typography>
-                        {isComplete ? (
-                          <Chip label="Complete" color="success" size="small" />
-                        ) : (
-                          <Chip
-                            label={currentRung
-                              ? `${currentRung.rungId}: ${currentRung.name}`
-                              : progress.currentRungId}
-                            color="primary"
-                            size="small"
-                            variant="outlined"
-                          />
-                        )}
-                      </Stack>
-
-                      <LinearProgress
-                        variant="determinate"
-                        value={progressPct}
-                        sx={{ height: 6, borderRadius: 3 }}
-                      />
-
-                      <Stack
-                        direction="row"
-                        spacing={1.5}
-                        alignItems="center"
-                        flexWrap="wrap"
-                      >
-                        <Typography variant="caption" color="text.secondary">
-                          Streak: {progress.streakCount}/3
-                        </Typography>
-                        {Array.from({ length: 3 }).map((_, i) => (
-                          <Box
-                            key={i}
-                            sx={{
-                              width: 10,
-                              height: 10,
-                              borderRadius: '50%',
-                              bgcolor:
-                                i < progress.streakCount
-                                  ? 'success.main'
-                                  : 'action.disabledBackground',
-                            }}
-                          />
-                        ))}
-                        {lastEntry && (
-                          <Typography variant="caption" color="text.secondary">
-                            Last: {RESULT_ICON[lastEntry.result] ?? lastEntry.result}
-                          </Typography>
-                        )}
-                        <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-                          {ladder.metricLabel}
-                        </Typography>
-                      </Stack>
-                    </Stack>
-                  </CardContent>
-                </CardActionArea>
-
-                <Collapse in={isExpanded}>
-                  <CardContent sx={{ pt: 0 }}>
-                    <Stack spacing={1.5}>
-                      <Typography variant="body2" color="text.secondary">
-                        {ladder.intent}
-                      </Typography>
-
-                      {currentRung && (
-                        <Box
-                          sx={{
-                            bgcolor: 'action.hover',
-                            borderRadius: 1,
-                            p: 1.5,
-                          }}
-                        >
-                          <Typography variant="subtitle2">
-                            Evidence: {currentRung.evidenceText}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            Supports: {currentRung.supportsText}
-                          </Typography>
-                        </Box>
-                      )}
-
-                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                        {ladder.rungs.map((rung) => {
-                          const isActive = rung.rungId === progress.currentRungId
-                          const rungIdx = ladder.rungs.indexOf(rung)
-                          const currentIdx = ladder.rungs.findIndex(
-                            (r) => r.rungId === progress.currentRungId,
-                          )
-                          const isAchieved = rungIdx < currentIdx
-                            || (rungIdx === currentIdx && isComplete)
-                          return (
-                            <Chip
-                              key={rung.rungId}
-                              label={`${rung.rungId}: ${rung.name}`}
-                              size="small"
-                              color={
-                                isAchieved
-                                  ? 'success'
-                                  : isActive
-                                    ? 'primary'
-                                    : 'default'
-                              }
-                              variant={isActive ? 'filled' : 'outlined'}
-                            />
-                          )
-                        })}
-                      </Stack>
-
-                      <Typography variant="caption" color="text.secondary" fontStyle="italic">
-                        {ladder.globalRuleText}
-                      </Typography>
-
-                      <Box
-                        component="button"
-                        onClick={(e: React.MouseEvent) => {
-                          e.stopPropagation()
-                          handleOpenLog(ladder)
-                        }}
-                        sx={{
-                          alignSelf: 'flex-start',
-                          bgcolor: 'primary.main',
-                          color: 'primary.contrastText',
-                          border: 'none',
-                          borderRadius: 1,
-                          px: 2,
-                          py: 1,
-                          cursor: 'pointer',
-                          fontWeight: 600,
-                          fontSize: '0.875rem',
-                          '&:hover': { bgcolor: 'primary.dark' },
-                        }}
-                      >
-                        Log session
-                      </Box>
-                    </Stack>
-                  </CardContent>
-                </Collapse>
-              </Card>
-            )
-          })}
+                  {section.group}
+                </Typography>
+              )}
+              {section.ladders.map(renderLadderCard)}
+            </Stack>
+          ))}
         </Stack>
       )}
 

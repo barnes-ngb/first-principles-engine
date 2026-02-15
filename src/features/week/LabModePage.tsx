@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
@@ -10,7 +11,19 @@ import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, updateDoc } from 'firebase/firestore'
+import BrokenImageIcon from '@mui/icons-material/BrokenImage'
+import {
+  addDoc,
+  doc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore'
+import { getDownloadURL, ref } from 'firebase/storage'
 
 import AudioRecorder from '../../components/AudioRecorder'
 import ChildSelector from '../../components/ChildSelector'
@@ -22,22 +35,34 @@ import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
+  labSessionDocId,
+  ladderProgressCollection,
+  ladderProgressDocId,
 } from '../../core/firebase/firestore'
+import { storage } from '../../core/firebase/storage'
 import {
   generateFilename,
   uploadArtifactFile,
 } from '../../core/firebase/upload'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import type { Artifact, LadderCardDefinition } from '../../core/types/domain'
 import {
   EngineStage,
   EvidenceType,
   LabSessionStatus,
   LearningLocation,
+  SessionSymbol,
   SubjectBucket,
+  SupportLevel,
 } from '../../core/types/enums'
-import { formatWeekShort } from '../../core/utils/dateKey'
+import { formatDateShort, formatWeekShort } from '../../core/utils/dateKey'
 import { parseDateYmd } from '../../lib/format'
 import { getWeekRange } from '../engine/engine.logic'
+import {
+  applySession,
+  createInitialProgress,
+} from '../ladders/ladderProgress'
+import { getLaddersForChild } from '../ladders/laddersCatalog'
 import { LAB_STAGES, labStageIndex } from './labSession.logic'
 import { useLabSession } from './useLabSession'
 
@@ -49,6 +74,8 @@ type ArtifactFormState = {
   location: LearningLocation
   domain: string
   content: string
+  ladderKey: string
+  rungId: string
 }
 
 const defaultFormState = (
@@ -62,6 +89,8 @@ const defaultFormState = (
   location: LearningLocation.Home,
   domain: '',
   content: '',
+  ladderKey: '',
+  rungId: '',
 })
 
 const statusLabel: Record<string, string> = {
@@ -74,6 +103,29 @@ const statusColor: Record<string, 'default' | 'warning' | 'success'> = {
   [LabSessionStatus.NotStarted]: 'default',
   [LabSessionStatus.InProgress]: 'warning',
   [LabSessionStatus.Complete]: 'success',
+}
+
+/** Resolve a photo artifact URL defensively. */
+async function resolvePhotoUrl(artifact: Artifact, familyId: string): Promise<string | null> {
+  if (artifact.uri) return artifact.uri
+  if (artifact.storagePath) {
+    try {
+      return await getDownloadURL(ref(storage, artifact.storagePath))
+    } catch {
+      return null
+    }
+  }
+  // Try default path pattern
+  if (artifact.id) {
+    try {
+      const guessPath = `families/${familyId}/artifacts/${artifact.id}`
+      const dirRef = ref(storage, guessPath)
+      return await getDownloadURL(dirRef)
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 export default function LabModePage() {
@@ -101,6 +153,66 @@ export default function LabModePage() {
 
   // Ref for scrolling to the lab session section
   const labSectionRef = useRef<HTMLDivElement>(null)
+
+  // Ladder definitions for the active child (for artifact → ladder linking)
+  const childLadders: LadderCardDefinition[] = useMemo(
+    () => activeChild ? getLaddersForChild(activeChild.name) ?? [] : [],
+    [activeChild],
+  )
+
+  // Session photo artifacts
+  const [sessionPhotos, setSessionPhotos] = useState<Array<{ url: string | null; id: string }>>([])
+  const [photoCount, setPhotoCount] = useState(0)
+
+  // Load photo artifacts linked to the active lab session
+  const sessionDocId = labSession?.id ?? (selectedChildId && weekKey
+    ? labSessionDocId(weekKey, selectedChildId)
+    : null)
+
+  useEffect(() => {
+    if (!familyId || !selectedChildId || !sessionDocId) {
+      setSessionPhotos([])
+      setPhotoCount(0)
+      return
+    }
+
+    let cancelled = false
+    const load = async () => {
+      try {
+        // Query artifacts linked to this lab session
+        const q = query(
+          artifactsCollection(familyId),
+          where('childId', '==', selectedChildId),
+          where('labSessionId', '==', sessionDocId),
+          where('type', '==', EvidenceType.Photo),
+          orderBy('createdAt', 'desc'),
+          limit(3),
+        )
+        const snap = await getDocs(q)
+        if (cancelled) return
+
+        const photos = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
+        setPhotoCount(snap.size)
+
+        // Resolve URLs defensively
+        const resolved = await Promise.all(
+          photos.map(async (p) => ({
+            id: p.id,
+            url: await resolvePhotoUrl(p, familyId),
+          })),
+        )
+        if (!cancelled) setSessionPhotos(resolved)
+      } catch (err) {
+        console.error('Failed to load session photos', err)
+        if (!cancelled) {
+          setSessionPhotos([])
+          setPhotoCount(0)
+        }
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [familyId, selectedChildId, sessionDocId])
 
   // Artifact capture state — keyed by child+week to reset on switch
   const [selectedStage, setSelectedStage] = useState<EngineStage | null>(null)
@@ -148,11 +260,58 @@ export default function LabModePage() {
           domain: artifactForm.domain,
           subjectBucket: artifactForm.subjectBucket,
           location: artifactForm.location,
+          ...(artifactForm.ladderKey && artifactForm.rungId ? {
+            ladderRef: { ladderId: artifactForm.ladderKey, rungId: artifactForm.rungId },
+          } : {}),
         },
         notes: '',
+        // Link to active lab session if present
+        ...(sessionDocId ? {
+          labSessionId: sessionDocId,
+          labStage: artifactForm.engineStage,
+        } : {}),
       }
     },
-    [artifactForm, selectedChildId],
+    [artifactForm, selectedChildId, sessionDocId],
+  )
+
+  /** After saving an artifact with a ladder selection, also log a ladder session. */
+  const logLadderSessionForArtifact = useCallback(
+    async (artifactId: string) => {
+      if (!artifactForm.ladderKey || !artifactForm.rungId || !selectedChildId || !familyId) return
+      const ladder = childLadders.find((l) => l.ladderKey === artifactForm.ladderKey)
+      if (!ladder) return
+
+      // Load or create progress
+      const progressDocIdStr = ladderProgressDocId(selectedChildId, artifactForm.ladderKey)
+      const progressRef = doc(ladderProgressCollection(familyId), progressDocIdStr)
+      let progress = createInitialProgress(selectedChildId, ladder)
+      try {
+        const snap = await getDocs(query(
+          ladderProgressCollection(familyId),
+          where('childId', '==', selectedChildId),
+        ))
+        for (const d of snap.docs) {
+          const data = d.data()
+          if (data.ladderKey === artifactForm.ladderKey) {
+            progress = data
+            break
+          }
+        }
+      } catch { /* use initial */ }
+
+      // Apply a Pass session at current support level
+      const dateKey = new Date().toISOString().slice(0, 10)
+      const result = applySession(progress, {
+        dateKey,
+        result: SessionSymbol.Pass,
+        supportLevel: progress.lastSupportLevel ?? SupportLevel.None,
+        note: `Artifact: ${artifactId}`,
+      }, ladder)
+
+      await setDoc(progressRef, result.progress)
+    },
+    [artifactForm.ladderKey, artifactForm.rungId, selectedChildId, familyId, childLadders],
   )
 
   const handleSave = useCallback(async () => {
@@ -163,14 +322,16 @@ export default function LabModePage() {
       domain ||
       `${artifactForm.engineStage} Lab Note`
 
-    await addDoc(artifactsCollection(familyId), {
+    const docRef = await addDoc(artifactsCollection(familyId), {
       ...buildBase(title, EvidenceType.Note),
       content: artifactForm.content,
     })
 
+    await logLadderSessionForArtifact(docRef.id)
+
     setSelectedStage(null)
     setArtifactForm((prev) => defaultFormState(EngineStage.Wonder, prev.childId))
-  }, [artifactForm, buildBase, familyId])
+  }, [artifactForm, buildBase, familyId, logLadderSessionForArtifact])
 
   const handlePhotoCapture = useCallback(
     async (file: File) => {
@@ -182,15 +343,24 @@ export default function LabModePage() {
         const docRef = await addDoc(artifactsCollection(familyId), artifact)
         const ext = file.name.split('.').pop() ?? 'jpg'
         const filename = generateFilename(ext)
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+        const { downloadUrl, storagePath } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), {
+          uri: downloadUrl,
+          storagePath,
+        })
+        await logLadderSessionForArtifact(docRef.id)
         setSelectedStage(null)
         setArtifactForm((prev) => defaultFormState(EngineStage.Wonder, prev.childId))
+        // Refresh photo strip
+        if (sessionDocId) {
+          setSessionPhotos((prev) => [{ url: downloadUrl, id: docRef.id }, ...prev.slice(0, 2)])
+          setPhotoCount((prev) => prev + 1)
+        }
       } finally {
         setMediaUploading(false)
       }
     },
-    [artifactForm, buildBase, familyId],
+    [artifactForm, buildBase, familyId, sessionDocId, logLadderSessionForArtifact],
   )
 
   const handleAudioCapture = useCallback(
@@ -202,15 +372,19 @@ export default function LabModePage() {
         const artifact = buildBase(title, EvidenceType.Audio)
         const docRef = await addDoc(artifactsCollection(familyId), artifact)
         const filename = generateFilename('webm')
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, blob, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+        const { downloadUrl, storagePath } = await uploadArtifactFile(familyId, docRef.id, blob, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), {
+          uri: downloadUrl,
+          storagePath,
+        })
+        await logLadderSessionForArtifact(docRef.id)
         setSelectedStage(null)
         setArtifactForm((prev) => defaultFormState(EngineStage.Wonder, prev.childId))
       } finally {
         setMediaUploading(false)
       }
     },
-    [artifactForm, buildBase, familyId],
+    [artifactForm, buildBase, familyId, logLadderSessionForArtifact],
   )
 
   const handleStartOrContinue = useCallback(async () => {
@@ -243,6 +417,20 @@ export default function LabModePage() {
   const handleMissionSave = useCallback(
     async (mission: string) => {
       await updateSession({ mission })
+    },
+    [updateSession],
+  )
+
+  const handleConstraintsSave = useCallback(
+    async (constraints: string) => {
+      await updateSession({ constraints })
+    },
+    [updateSession],
+  )
+
+  const handleRolesSave = useCallback(
+    async (roles: string) => {
+      await updateSession({ roles })
     },
     [updateSession],
   )
@@ -293,37 +481,109 @@ export default function LabModePage() {
                 <Stack spacing={1.5}>
                   <Card variant="outlined">
                     <CardContent>
-                      <Stack
-                        direction="row"
-                        alignItems="center"
-                        justifyContent="space-between"
-                        flexWrap="wrap"
-                        spacing={1}
-                      >
-                        <Typography variant="subtitle1">
-                          Lab Session — Week of {formatWeekShort(weekKey)}
-                        </Typography>
-                        <Stack direction="row" spacing={0.5}>
-                          <Chip
-                            label={statusLabel[labSession.status] ?? labSession.status}
-                            color={statusColor[labSession.status] ?? 'default'}
-                            size="small"
-                          />
-                          <Chip
-                            label={labSession.stage}
-                            variant="outlined"
-                            size="small"
-                          />
+                      <Stack spacing={1}>
+                        <Stack
+                          direction="row"
+                          alignItems="center"
+                          justifyContent="space-between"
+                          flexWrap="wrap"
+                          spacing={1}
+                        >
+                          <Typography variant="subtitle1">
+                            Lab Session — Week of {formatWeekShort(weekKey)}
+                          </Typography>
+                          <Stack direction="row" spacing={0.5}>
+                            <Chip
+                              label={statusLabel[labSession.status] ?? labSession.status}
+                              color={statusColor[labSession.status] ?? 'default'}
+                              size="small"
+                            />
+                            <Chip
+                              label={labSession.stage}
+                              variant="outlined"
+                              size="small"
+                            />
+                          </Stack>
                         </Stack>
+
+                        {/* Created date */}
+                        {labSession.createdAt && (
+                          <Typography variant="caption" color="text.secondary">
+                            Started {formatDateShort(labSession.createdAt.slice(0, 10))}
+                          </Typography>
+                        )}
+
+                        {/* Mission */}
+                        <Typography variant="body2" color="text.secondary">
+                          {labSession.mission || '(no mission yet)'}
+                        </Typography>
+
+                        {/* Photo strip */}
+                        {(sessionPhotos.length > 0 || photoCount > 0) && (
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            {sessionPhotos.map((photo) => (
+                              photo.url ? (
+                                <Box
+                                  key={photo.id}
+                                  component="img"
+                                  src={photo.url}
+                                  alt="Lab photo"
+                                  sx={{
+                                    width: 48,
+                                    height: 48,
+                                    objectFit: 'cover',
+                                    borderRadius: 1,
+                                    border: '1px solid',
+                                    borderColor: 'divider',
+                                  }}
+                                />
+                              ) : (
+                                <Box
+                                  key={photo.id}
+                                  sx={{
+                                    width: 48,
+                                    height: 48,
+                                    borderRadius: 1,
+                                    border: '1px solid',
+                                    borderColor: 'divider',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    bgcolor: 'action.hover',
+                                  }}
+                                >
+                                  <BrokenImageIcon fontSize="small" color="disabled" />
+                                </Box>
+                              )
+                            ))}
+                            {photoCount > 0 && (
+                              <Typography variant="caption" color="text.secondary">
+                                {photoCount} photo{photoCount !== 1 ? 's' : ''}
+                              </Typography>
+                            )}
+                          </Stack>
+                        )}
                       </Stack>
                     </CardContent>
                   </Card>
-                  <Button
-                    variant="contained"
-                    onClick={handleStartOrContinue}
-                  >
-                    Continue Lab
-                  </Button>
+
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      variant="contained"
+                      onClick={handleStartOrContinue}
+                    >
+                      Continue Lab
+                    </Button>
+                    {labSession.status === LabSessionStatus.InProgress && (
+                      <Button
+                        variant="outlined"
+                        color="success"
+                        onClick={handleMarkComplete}
+                      >
+                        Complete
+                      </Button>
+                    )}
+                  </Stack>
                 </Stack>
               ) : (
                 <Stack spacing={1.5} alignItems="flex-start">
@@ -350,6 +610,22 @@ export default function LabModePage() {
                       placeholder="What are we exploring this week?"
                       value={labSession.mission ?? ''}
                       onChange={(e) => handleMissionSave(e.target.value)}
+                      fullWidth
+                      size="small"
+                    />
+                    <TextField
+                      label="Constraints"
+                      placeholder="Any rules or limits for this session?"
+                      value={labSession.constraints ?? ''}
+                      onChange={(e) => handleConstraintsSave(e.target.value)}
+                      fullWidth
+                      size="small"
+                    />
+                    <TextField
+                      label="Roles"
+                      placeholder="Who does what?"
+                      value={labSession.roles ?? ''}
+                      onChange={(e) => handleRolesSave(e.target.value)}
                       fullWidth
                       size="small"
                     />
@@ -391,6 +667,15 @@ export default function LabModePage() {
                                     fullWidth
                                     size="small"
                                   />
+                                )}
+                                {isActive && (
+                                  <Button
+                                    variant="outlined"
+                                    size="small"
+                                    onClick={() => handleStageSelect(stage)}
+                                  >
+                                    Capture {stage} Artifact
+                                  </Button>
                                 )}
                                 {isActive && idx < LAB_STAGES.length - 1 && (
                                   <Button
@@ -483,6 +768,55 @@ export default function LabModePage() {
                       value={artifactForm.domain}
                       onChange={(event) => handleFormChange('domain', event.target.value)}
                     />
+                    {childLadders.length > 0 && (
+                      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                        <TextField
+                          label="Ladder (optional)"
+                          select
+                          fullWidth
+                          size="small"
+                          value={artifactForm.ladderKey}
+                          onChange={(event) => {
+                            const key = event.target.value
+                            handleFormChange('ladderKey', key)
+                            // Default rung to ladder's R0
+                            const ladder = childLadders.find((l) => l.ladderKey === key)
+                            if (ladder && ladder.rungs.length > 0) {
+                              handleFormChange('rungId', ladder.rungs[0].rungId)
+                            } else {
+                              handleFormChange('rungId', '')
+                            }
+                          }}
+                        >
+                          <MenuItem value="">None</MenuItem>
+                          {childLadders.map((l) => (
+                            <MenuItem key={l.ladderKey} value={l.ladderKey}>
+                              {l.title}
+                            </MenuItem>
+                          ))}
+                        </TextField>
+                        {artifactForm.ladderKey && (() => {
+                          const ladder = childLadders.find((l) => l.ladderKey === artifactForm.ladderKey)
+                          if (!ladder) return null
+                          return (
+                            <TextField
+                              label="Rung"
+                              select
+                              fullWidth
+                              size="small"
+                              value={artifactForm.rungId}
+                              onChange={(event) => handleFormChange('rungId', event.target.value)}
+                            >
+                              {ladder.rungs.map((r) => (
+                                <MenuItem key={r.rungId} value={r.rungId}>
+                                  {r.rungId}: {r.name}
+                                </MenuItem>
+                              ))}
+                            </TextField>
+                          )
+                        })()}
+                      </Stack>
+                    )}
                     {artifactForm.evidenceType === EvidenceType.Note && (
                       <>
                         <TextField

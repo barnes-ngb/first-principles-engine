@@ -107,6 +107,7 @@ export const readingInput: LadderCardDefinition = {
 export const laPhonics: LadderCardDefinition = {
   ladderKey: 'la_phonics',
   title: 'LA · Phonics + Blending',
+  group: 'Language Arts Core',
   streamKey: StreamKey.DecodeRead,
   intent: 'Decode words from letters → sounds → blends → multisyllable.',
   workItems: [
@@ -157,6 +158,7 @@ export const laPhonics: LadderCardDefinition = {
 export const laSightWords: LadderCardDefinition = {
   ladderKey: 'la_sightwords',
   title: 'LA · Sight Words (anti-forget)',
+  group: 'Language Arts Core',
   intent: 'Build automatic recognition of high-frequency words. Only add new words when stable.',
   workItems: [
     'First 10 words',
@@ -206,6 +208,7 @@ export const laSightWords: LadderCardDefinition = {
 export const laSpellingPrompts: LadderCardDefinition = {
   ladderKey: 'la_spellingprompts',
   title: 'LA · Spelling + Writing Prompts (output)',
+  group: 'Language Arts Core',
   streamKey: StreamKey.SpellWrite,
   intent: 'Move from sound-spelling to pattern-spelling to prompted writing.',
   workItems: [
@@ -256,6 +259,7 @@ export const laSpellingPrompts: LadderCardDefinition = {
 export const mathDoubles: LadderCardDefinition = {
   ladderKey: 'math_doubles',
   title: 'Math · Addition + Doubles',
+  group: 'Math Core',
   intent: 'Build addition fluency from counting-on → doubles → mental math to 100.',
   workItems: [
     'Count-on strategy',
@@ -305,6 +309,7 @@ export const mathDoubles: LadderCardDefinition = {
 export const mathLongSub: LadderCardDefinition = {
   ladderKey: 'math_longsub',
   title: 'Math · Long-Form Subtraction',
+  group: 'Math Core',
   intent: 'Move from concrete subtraction to multi-digit regrouping.',
   workItems: [
     'Subtract within 10',
@@ -354,6 +359,7 @@ export const mathLongSub: LadderCardDefinition = {
 export const mathWordProblems: LadderCardDefinition = {
   ladderKey: 'math_wordproblems',
   title: 'Math · Word Problems',
+  group: 'Math Core',
   intent: 'Read, model, solve, and eventually create word problems.',
   workItems: [
     'Identify the question',
@@ -403,6 +409,7 @@ export const mathWordProblems: LadderCardDefinition = {
 export const mathTimeCalendar: LadderCardDefinition = {
   ladderKey: 'math_timecalendar',
   title: 'Math · Time + Calendar + Seasons',
+  group: 'Math Core',
   intent: 'Build time-telling, calendar navigation, and season awareness.',
   workItems: [
     'Days of the week in order',
@@ -452,6 +459,7 @@ export const mathTimeCalendar: LadderCardDefinition = {
 export const mathFractions: LadderCardDefinition = {
   ladderKey: 'math_fractions',
   title: 'Math · Fractions (intro)',
+  group: 'Math Core',
   intent: 'Introduce fractions through concrete models → comparisons → number line.',
   workItems: [
     'Equal parts (halves)',
