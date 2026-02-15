@@ -337,6 +337,12 @@ export interface Project {
   completed?: boolean
   /** Timestamp of the most recent lab session for this project. */
   lastSessionAt?: string
+  /** Soft-delete timestamp (ISO string). Filtered out of lists when set. */
+  deletedAt?: string
+  /** UID of the parent who deleted the project. */
+  deletedBy?: string
+  /** Archive timestamp (ISO string). Archived projects are hidden from the active list. */
+  archivedAt?: string
 }
 
 export interface LabSession {
