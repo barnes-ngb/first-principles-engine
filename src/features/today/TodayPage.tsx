@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import AccessTimeIcon from '@mui/icons-material/AccessTime'
 import ChecklistIcon from '@mui/icons-material/Checklist'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -36,12 +37,14 @@ import {
 
 import AudioRecorder from '../../components/AudioRecorder'
 import ChildSelector from '../../components/ChildSelector'
+import ContextBar from '../../components/ContextBar'
+import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
 import type { SaveState } from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
-import { formatDateYmd } from '../../lib/format'
+import { formatDateYmd, parseDateYmd } from '../../lib/format'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import {
@@ -74,7 +77,12 @@ import RoutineSection from './RoutineSection'
 import { calculateXp } from './xp'
 
 export default function TodayPage() {
-  const today = formatDateYmd(new Date())
+  const [searchParams] = useSearchParams()
+  const dateParam = searchParams.get('date')
+  const today = useMemo(() => {
+    if (dateParam && parseDateYmd(dateParam)) return dateParam
+    return formatDateYmd(new Date())
+  }, [dateParam])
   const familyId = useFamilyId()
   const { profile } = useProfile()
   const isKidProfile =
@@ -82,10 +90,12 @@ export default function TodayPage() {
   const {
     children,
     activeChildId: selectedChildId,
+    activeChild,
     setActiveChildId: setSelectedChildId,
     isLoading: isLoadingChildren,
     addChild,
   } = useActiveChild()
+  const artifactSectionRef = useRef<HTMLDivElement>(null)
   const currentDocId = useMemo(
     () => (selectedChildId ? dayLogDocId(today, selectedChildId) : ''),
     [selectedChildId, today],
@@ -111,6 +121,7 @@ export default function TodayPage() {
   const [planType, setPlanType] = useState<'A' | 'B'>('A')
   const [showAllBlocks, setShowAllBlocks] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
   const [artifactForm, setArtifactForm] = useState({
     childId: selectedChildId,
@@ -130,10 +141,7 @@ export default function TodayPage() {
   }, [selectedChildId])
 
   const selectableChildren = children
-  const selectedChild = useMemo(
-    () => children.find((c) => c.id === selectedChildId),
-    [children, selectedChildId],
-  )
+  const selectedChild = activeChild
 
   // Resolve the active template and routine items for the selected child.
   // Priority: child.routineItems (Firestore) → template.routineItems → undefined (all).
@@ -157,8 +165,10 @@ export default function TodayPage() {
         : { ...updated, childId: selectedChildId }
       setSaveState('saving')
       try {
-        await setDoc(dayLogRef, { ...safeLog, updatedAt: new Date().toISOString() })
+        const now = new Date().toISOString()
+        await setDoc(dayLogRef, { ...safeLog, updatedAt: now })
         setSaveState('saved')
+        setLastSavedAt(now)
       } catch (err) {
         console.error('Failed to save day log', err)
         setSaveState('error')
@@ -206,7 +216,9 @@ export default function TodayPage() {
       dayLogRef,
       async (snapshot) => {
         if (snapshot.exists()) {
-          setDayLog(snapshot.data())
+          const data = snapshot.data()
+          setDayLog(data)
+          if (data.updatedAt) setLastSavedAt(data.updatedAt)
           return
         }
 
@@ -581,10 +593,45 @@ export default function TodayPage() {
     [persistDayLogImmediate, activeRoutineItems],
   )
 
+  const scrollToArtifacts = useCallback(() => {
+    artifactSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
+
+  // Compute Daily Log status label
+  const dailyLogStatus = useMemo(() => {
+    if (!dayLog) return null
+    if (lastSavedAt) {
+      try {
+        const d = new Date(lastSavedAt)
+        return `Saved at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      } catch {
+        return 'Saved'
+      }
+    }
+    if (dayLog.updatedAt) {
+      try {
+        const d = new Date(dayLog.updatedAt)
+        return `Saved at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      } catch {
+        return 'Saved'
+      }
+    }
+    return 'Not saved yet'
+  }, [dayLog, lastSavedAt])
+
   if (!dayLog) {
     return (
       <Page>
+        <ContextBar
+          page="today"
+          activeChild={activeChild}
+          dateKey={today}
+        />
         <Typography variant="h4" component="h1">Today</Typography>
+        <HelpStrip
+          pageKey="today"
+          text="This is today's checklist. Saving creates the Daily Log."
+        />
         {isKidProfile ? (
           <Typography variant="subtitle1" color="text.secondary">
             {selectedChild?.name ?? 'Loading...'}
@@ -613,7 +660,17 @@ export default function TodayPage() {
 
   return (
     <Page>
+      <ContextBar
+        page="today"
+        activeChild={activeChild}
+        dateKey={today}
+        onCaptureArtifact={scrollToArtifacts}
+      />
       <Typography variant="h4" component="h1">Today</Typography>
+      <HelpStrip
+        pageKey="today"
+        text="This is today's checklist. Saving creates the Daily Log."
+      />
       {isKidProfile ? (
         <Typography variant="subtitle1" color="text.secondary">
           {selectedChild?.name}
@@ -628,6 +685,26 @@ export default function TodayPage() {
           emptyMessage="Add a child to start logging."
         />
       )}
+
+      {/* Daily Log status line */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          px: 1.5,
+          py: 0.75,
+          borderRadius: 1,
+          bgcolor: lastSavedAt ? 'success.50' : 'action.hover',
+          border: '1px solid',
+          borderColor: lastSavedAt ? 'success.200' : 'divider',
+        }}
+      >
+        <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+          Daily Log: {dailyLogStatus}
+        </Typography>
+        <SaveIndicator state={saveState} />
+      </Box>
 
       <HelperPanel template={activeTemplate} />
 
@@ -863,6 +940,7 @@ export default function TodayPage() {
           )}
         </Stack>
       </SectionCard>
+      <div ref={artifactSectionRef} />
       <SectionCard title="Capture Artifact">
         <Stack spacing={2}>
           <ToggleButtonGroup
