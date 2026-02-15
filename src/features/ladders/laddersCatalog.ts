@@ -1,5 +1,6 @@
 import type { LadderCardDefinition } from '../../core/types/domain'
 import { LINCOLN_LADDERS } from './lincolnLadders'
+import { LONDON_LADDERS } from './londonLadders'
 
 /**
  * Maps a child name (case-insensitive) to their ladder card set.
@@ -9,6 +10,8 @@ export function getLaddersForChild(childName: string): LadderCardDefinition[] | 
   switch (childName.toLowerCase()) {
     case 'lincoln':
       return LINCOLN_LADDERS
+    case 'london':
+      return LONDON_LADDERS
     default:
       return undefined
   }
