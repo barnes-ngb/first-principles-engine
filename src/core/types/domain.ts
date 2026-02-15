@@ -204,10 +204,17 @@ export interface Artifact {
   title: string
   type: EvidenceType
   uri?: string
+  storagePath?: string
   createdAt: string
   content?: string
   tags: ArtifactTags
   notes?: string
+  /** Optional link to a lab session */
+  labSessionId?: string
+  /** Lab stage when this artifact was captured */
+  labStage?: EngineStage
+  /** Optional link to a project */
+  projectId?: string
 }
 
 export interface Ladder {
@@ -421,6 +428,8 @@ export interface LadderCardDefinition {
   metricLabel: string
   globalRuleText: string
   rungs: LadderRungDefinition[]
+  /** Optional group label for grouping sub-ladders under a heading */
+  group?: string
 }
 
 export interface LadderSessionEntry {
