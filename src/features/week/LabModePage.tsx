@@ -288,7 +288,7 @@ export default function LabModePage() {
         {/* Active Labs (This Week) — keyed by child+week for clean remount */}
         {isReady && (
           <div key={`${selectedChildId}_${weekKey}`}>
-            <SectionCard title="Active Labs (This Week)">
+            <SectionCard title="This Week's Lab Sessions">
               {labSession ? (
                 <Stack spacing={1.5}>
                   <Card variant="outlined">
@@ -331,8 +331,7 @@ export default function LabModePage() {
                     Week of {formatWeekShort(weekKey)}
                   </Typography>
                   <Typography color="text.secondary">
-                    Ready to start {activeChild?.name ? `${activeChild.name}'s` : 'a'} lab session for this week.
-                    Tap below to begin with the Wonder stage.
+                    No lab sessions yet. Start one below.
                   </Typography>
                   <Button variant="contained" size="large" onClick={handleStartOrContinue}>
                     Start Lab Session
