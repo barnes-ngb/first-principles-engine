@@ -14,7 +14,7 @@ import {
   artifactsCollection,
   milestoneProgressCollection,
 } from '../../core/firebase/firestore'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Artifact, MilestoneProgress } from '../../core/types/domain'
 import { EngineStage } from '../../core/types/enums'
 import {
@@ -69,7 +69,7 @@ const getStatusColor = (status: ReturnType<typeof computeLoopStatus>) => {
 
 export default function EnginePage() {
   const familyId = useFamilyId()
-  const { children, isLoading: childrenLoading } = useChildren()
+  const { children, isLoading: childrenLoading } = useActiveChild()
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
   const [isLoading, setIsLoading] = useState(true)

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import AccessTimeIcon from '@mui/icons-material/AccessTime'
 import ChecklistIcon from '@mui/icons-material/Checklist'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -27,6 +28,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   query,
   setDoc,
   updateDoc,
@@ -35,13 +37,16 @@ import {
 
 import AudioRecorder from '../../components/AudioRecorder'
 import ChildSelector from '../../components/ChildSelector'
+import ContextBar from '../../components/ContextBar'
+import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
 import type { SaveState } from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
+import { formatDateYmd, parseDateYmd } from '../../lib/format'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import {
   artifactsCollection,
   daysCollection,
@@ -63,24 +68,34 @@ import {
   UserProfile,
 } from '../../core/types/enums'
 import { useDebounce } from '../../lib/useDebounce'
+import { getWeekRange } from '../engine/engine.logic'
 import { blockMeta } from './blockMeta'
+import { getTemplateForChild } from './dailyPlanTemplates'
 import { createDefaultDayLog, dayLogDocId, legacyDayLogDocId } from './daylog.model'
+import HelperPanel from './HelperPanel'
 import RoutineSection from './RoutineSection'
 import { calculateXp } from './xp'
 
 export default function TodayPage() {
-  const today = new Date().toISOString().slice(0, 10)
+  const [searchParams] = useSearchParams()
+  const dateParam = searchParams.get('date')
+  const today = useMemo(() => {
+    if (dateParam && parseDateYmd(dateParam)) return dateParam
+    return formatDateYmd(new Date())
+  }, [dateParam])
   const familyId = useFamilyId()
   const { profile } = useProfile()
   const isKidProfile =
     profile === UserProfile.Lincoln || profile === UserProfile.London
   const {
     children,
-    selectedChildId,
-    setSelectedChildId,
+    activeChildId: selectedChildId,
+    activeChild,
+    setActiveChildId: setSelectedChildId,
     isLoading: isLoadingChildren,
     addChild,
-  } = useChildren()
+  } = useActiveChild()
+  const artifactSectionRef = useRef<HTMLDivElement>(null)
   const currentDocId = useMemo(
     () => (selectedChildId ? dayLogDocId(today, selectedChildId) : ''),
     [selectedChildId, today],
@@ -90,6 +105,12 @@ export default function TodayPage() {
     [familyId, currentDocId],
   )
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
+  // Track which child the current dayLog belongs to; clear stale data on switch
+  const [dayLogChildId, setDayLogChildId] = useState(selectedChildId)
+  if (dayLogChildId !== selectedChildId) {
+    setDayLogChildId(selectedChildId)
+    setDayLog(null)
+  }
   const [ladders, setLadders] = useState<Ladder[]>([])
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
   const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
@@ -100,9 +121,10 @@ export default function TodayPage() {
   const [planType, setPlanType] = useState<'A' | 'B'>('A')
   const [showAllBlocks, setShowAllBlocks] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
   const [artifactForm, setArtifactForm] = useState({
-    childId: '',
+    childId: selectedChildId,
     evidenceType: EvidenceType.Note as EvidenceType,
     engineStage: EngineStage.Wonder,
     subjectBucket: SubjectBucket.Reading,
@@ -113,27 +135,46 @@ export default function TodayPage() {
     rungId: '',
   })
 
+  // Keep artifact form childId in sync with active child
+  useEffect(() => {
+    setArtifactForm((prev) => ({ ...prev, childId: selectedChildId }))
+  }, [selectedChildId])
+
   const selectableChildren = children
-  const selectedChild = useMemo(
-    () => children.find((c) => c.id === selectedChildId),
-    [children, selectedChildId],
+  const selectedChild = activeChild
+
+  // Resolve the active template and routine items for the selected child.
+  // Priority: child.routineItems (Firestore) → template.routineItems → undefined (all).
+  const activeTemplate = useMemo(
+    () => (selectedChild ? getTemplateForChild(selectedChild.name) : undefined),
+    [selectedChild],
+  )
+  const activeRoutineItems = useMemo(
+    () => selectedChild?.routineItems ?? activeTemplate?.routineItems,
+    [selectedChild?.routineItems, activeTemplate?.routineItems],
   )
 
   // --- Persist helpers with save-state tracking ---
 
   const writeDayLog = useCallback(
     async (updated: DayLog) => {
-      if (!dayLogRef) return
+      if (!dayLogRef || !selectedChildId) return
+      // Ensure childId is always correct (defense in depth)
+      const safeLog = updated.childId === selectedChildId
+        ? updated
+        : { ...updated, childId: selectedChildId }
       setSaveState('saving')
       try {
-        await setDoc(dayLogRef, { ...updated, updatedAt: new Date().toISOString() })
+        const now = new Date().toISOString()
+        await setDoc(dayLogRef, { ...safeLog, updatedAt: now })
         setSaveState('saved')
+        setLastSavedAt(now)
       } catch (err) {
         console.error('Failed to save day log', err)
         setSaveState('error')
       }
     },
-    [dayLogRef],
+    [dayLogRef, selectedChildId],
   )
 
   const debouncedWrite = useDebounce(writeDayLog, 800)
@@ -154,108 +195,107 @@ export default function TodayPage() {
     [writeDayLog],
   )
 
+  // Show a brief "Saved" toast when save completes (mobile-friendly feedback)
+  useEffect(() => {
+    if (saveState === 'saved') {
+      setSnackMessage({ text: 'Saved', severity: 'success' })
+    }
+  }, [saveState])
+
   // --- Data loading ---
 
-  // Load DayLog for selected child + date (with legacy doc ID migration)
+  // Load DayLog for selected child + date (real-time, with legacy migration)
   useEffect(() => {
     if (!selectedChildId || !dayLogRef) {
       setDayLog(null)
       return
     }
-    let isMounted = true
+    let migratedOrCreated = false
 
-    const loadDayLog = async () => {
-      try {
-        // Try new format: {date}_{childId}
-        const snapshot = await getDoc(dayLogRef)
-        if (!isMounted) return
-
+    const unsubscribe = onSnapshot(
+      dayLogRef,
+      async (snapshot) => {
         if (snapshot.exists()) {
-          setDayLog(snapshot.data())
+          const data = snapshot.data()
+          setDayLog(data)
+          if (data.updatedAt) setLastSavedAt(data.updatedAt)
           return
         }
 
-        // Backward compat: try legacy format {childId}_{date}
-        const legacyId = legacyDayLogDocId(selectedChildId, today)
-        const legacyRef = doc(daysCollection(familyId), legacyId)
-        const legacySnap = await getDoc(legacyRef)
-        if (!isMounted) return
+        // Doc doesn't exist — try legacy fallback / create default (once)
+        if (migratedOrCreated) return
+        migratedOrCreated = true
 
-        if (legacySnap.exists()) {
-          // Migrate: copy to new doc ID, keep old doc intact
-          const legacyData = legacySnap.data()
-          await setDoc(dayLogRef, { ...legacyData, updatedAt: new Date().toISOString() })
-          if (isMounted) setDayLog(legacyData)
-          return
-        }
-
-        // Also check bare date doc (oldest legacy — no childId in ID)
-        const bareDateRef = doc(daysCollection(familyId), today)
-        const bareDateSnap = await getDoc(bareDateRef)
-        if (!isMounted) return
-
-        if (bareDateSnap.exists()) {
-          const bareData = bareDateSnap.data()
-          // Only adopt if the doc has no childId or matches this child
-          if (!bareData.childId || bareData.childId === selectedChildId) {
-            const migrated = { ...bareData, childId: selectedChildId, updatedAt: new Date().toISOString() }
-            await setDoc(dayLogRef, migrated)
-            if (isMounted) setDayLog(migrated)
+        try {
+          // Backward compat: try legacy format {childId}_{date}
+          const legacyId = legacyDayLogDocId(selectedChildId, today)
+          const legacyRef = doc(daysCollection(familyId), legacyId)
+          const legacySnap = await getDoc(legacyRef)
+          if (legacySnap.exists()) {
+            const legacyData = legacySnap.data()
+            await setDoc(dayLogRef, { ...legacyData, updatedAt: new Date().toISOString() })
+            // onSnapshot will fire again with the migrated doc
             return
           }
-        }
 
-        // No existing doc — create fresh
-        const defaultLog = createDefaultDayLog(
-          selectedChildId,
-          today,
-          selectedChild?.dayBlocks,
-          selectedChild?.routineItems,
-        )
-        await setDoc(dayLogRef, defaultLog)
-        if (isMounted) {
-          setDayLog(defaultLog)
-        }
-      } catch (err) {
-        console.error('Failed to load day log', err)
-        if (isMounted) {
+          // Also check bare date doc (oldest legacy — no childId in ID)
+          const bareDateRef = doc(daysCollection(familyId), today)
+          const bareDateSnap = await getDoc(bareDateRef)
+          if (bareDateSnap.exists()) {
+            const bareData = bareDateSnap.data()
+            if (!bareData.childId || bareData.childId === selectedChildId) {
+              const migrated = { ...bareData, childId: selectedChildId, updatedAt: new Date().toISOString() }
+              await setDoc(dayLogRef, migrated)
+              // onSnapshot will fire again
+              return
+            }
+          }
+
+          // No existing doc — create fresh (use template fallback for blocks/items)
+          const defaultLog = createDefaultDayLog(
+            selectedChildId,
+            today,
+            selectedChild?.dayBlocks ?? activeTemplate?.dayBlocks,
+            activeRoutineItems,
+          )
+          await setDoc(dayLogRef, defaultLog)
+          // onSnapshot will fire again with the new doc
+        } catch (err) {
+          console.error('Failed to load day log', err)
+          migratedOrCreated = false
           setSnackMessage({ text: 'Could not load today\u2019s log.', severity: 'error' })
         }
-      }
-    }
+      },
+      (err) => {
+        console.error('Failed to load day log', err)
+        setSnackMessage({ text: 'Could not load today\u2019s log.', severity: 'error' })
+      },
+    )
 
-    loadDayLog()
+    return unsubscribe
+  }, [dayLogRef, today, selectedChildId, selectedChild, familyId, activeRoutineItems, activeTemplate?.dayBlocks])
 
-    return () => {
-      isMounted = false
-    }
-  }, [dayLogRef, today, selectedChildId, selectedChild, familyId])
+  // Load WeekPlan ID for current week (real-time)
+  const weekRange = useMemo(() => getWeekRange(new Date()), [])
 
   useEffect(() => {
-    let isMounted = true
-
-    const loadWeekPlan = async () => {
-      try {
-        const snapshot = await getDocs(weeksCollection(familyId))
-        if (!isMounted) return
-        const matching = snapshot.docs
-          .map((docSnapshot) => ({
-            id: docSnapshot.id,
-            ...docSnapshot.data(),
-          }))
-          .find((plan) => {
-            const start = plan.startDate as string
-            const end = plan.endDate as string | undefined
-            return start <= today && (!end || today <= end)
-          })
-        setWeekPlanId(matching?.id)
-      } catch (err) {
+    const ref = doc(weeksCollection(familyId), weekRange.start)
+    const unsubscribe = onSnapshot(
+      ref,
+      (snap) => {
+        setWeekPlanId(snap.exists() ? snap.id : undefined)
+      },
+      (err) => {
         console.error('Failed to load week plan', err)
-        if (isMounted) {
-          setSnackMessage({ text: 'Could not load week plan.', severity: 'error' })
-        }
-      }
-    }
+        setSnackMessage({ text: 'Could not load week plan.', severity: 'error' })
+      },
+    )
+    return unsubscribe
+  }, [familyId, weekRange.start])
+
+  // Load ladders and artifacts (one-shot, non-plan data)
+  useEffect(() => {
+    let isMounted = true
 
     const loadLadders = async () => {
       try {
@@ -274,9 +314,28 @@ export default function TodayPage() {
       }
     }
 
+    loadLadders()
+
+    return () => {
+      isMounted = false
+    }
+  }, [familyId])
+
+  // Load artifacts scoped to child + date (reload when child changes)
+  useEffect(() => {
+    if (!selectedChildId) {
+      setTodayArtifacts([])
+      return
+    }
+    let isMounted = true
+
     const loadArtifacts = async () => {
       try {
-        const q = query(artifactsCollection(familyId), where('dayLogId', '==', today))
+        const q = query(
+          artifactsCollection(familyId),
+          where('dayLogId', '==', today),
+          where('childId', '==', selectedChildId),
+        )
         const snapshot = await getDocs(q)
         if (!isMounted) return
         const loadedArtifacts = snapshot.docs
@@ -291,14 +350,12 @@ export default function TodayPage() {
       }
     }
 
-    loadWeekPlan()
-    loadLadders()
     loadArtifacts()
 
     return () => {
       isMounted = false
     }
-  }, [familyId, today])
+  }, [familyId, today, selectedChildId])
 
   const selectedLadder = useMemo(
     () => ladders.find((ladder) => ladder.id === artifactForm.ladderId),
@@ -522,24 +579,59 @@ export default function TodayPage() {
 
   const handleRoutineUpdate = useCallback(
     (updated: DayLog) => {
-      const withXp = { ...updated, xpTotal: calculateXp(updated) }
+      const withXp = { ...updated, xpTotal: calculateXp(updated, activeRoutineItems) }
       persistDayLog(withXp)
     },
-    [persistDayLog],
+    [persistDayLog, activeRoutineItems],
   )
 
   const handleRoutineUpdateImmediate = useCallback(
     (updated: DayLog) => {
-      const withXp = { ...updated, xpTotal: calculateXp(updated) }
+      const withXp = { ...updated, xpTotal: calculateXp(updated, activeRoutineItems) }
       persistDayLogImmediate(withXp)
     },
-    [persistDayLogImmediate],
+    [persistDayLogImmediate, activeRoutineItems],
   )
+
+  const scrollToArtifacts = useCallback(() => {
+    artifactSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
+
+  // Compute Daily Log status label
+  const dailyLogStatus = useMemo(() => {
+    if (!dayLog) return null
+    if (lastSavedAt) {
+      try {
+        const d = new Date(lastSavedAt)
+        return `Saved at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      } catch {
+        return 'Saved'
+      }
+    }
+    if (dayLog.updatedAt) {
+      try {
+        const d = new Date(dayLog.updatedAt)
+        return `Saved at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      } catch {
+        return 'Saved'
+      }
+    }
+    return 'Not saved yet'
+  }, [dayLog, lastSavedAt])
 
   if (!dayLog) {
     return (
       <Page>
+        <ContextBar
+          page="today"
+          activeChild={activeChild}
+          dateKey={today}
+        />
         <Typography variant="h4" component="h1">Today</Typography>
+        <HelpStrip
+          pageKey="today"
+          text="This is today's checklist. Saving creates the Daily Log."
+        />
         {isKidProfile ? (
           <Typography variant="subtitle1" color="text.secondary">
             {selectedChild?.name ?? 'Loading...'}
@@ -568,7 +660,17 @@ export default function TodayPage() {
 
   return (
     <Page>
+      <ContextBar
+        page="today"
+        activeChild={activeChild}
+        dateKey={today}
+        onCaptureArtifact={scrollToArtifacts}
+      />
       <Typography variant="h4" component="h1">Today</Typography>
+      <HelpStrip
+        pageKey="today"
+        text="This is today's checklist. Saving creates the Daily Log."
+      />
       {isKidProfile ? (
         <Typography variant="subtitle1" color="text.secondary">
           {selectedChild?.name}
@@ -584,11 +686,34 @@ export default function TodayPage() {
         />
       )}
 
+      {/* Daily Log status line */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          px: 1.5,
+          py: 0.75,
+          borderRadius: 1,
+          bgcolor: lastSavedAt ? 'success.50' : 'action.hover',
+          border: '1px solid',
+          borderColor: lastSavedAt ? 'success.200' : 'divider',
+        }}
+      >
+        <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+          Daily Log: {dailyLogStatus}
+        </Typography>
+        <SaveIndicator state={saveState} />
+      </Box>
+
+      <HelperPanel template={activeTemplate} />
+
       <RoutineSection
+        key={`${selectedChildId}_${today}`}
         dayLog={dayLog}
         onUpdate={handleRoutineUpdate}
         onUpdateImmediate={handleRoutineUpdateImmediate}
-        routineItems={selectedChild?.routineItems}
+        routineItems={activeRoutineItems}
       />
 
       <SectionCard title={`DayLog (${dayLog.date})`}>
@@ -815,6 +940,7 @@ export default function TodayPage() {
           )}
         </Stack>
       </SectionCard>
+      <div ref={artifactSectionRef} />
       <SectionCard title="Capture Artifact">
         <Stack spacing={2}>
           <ToggleButtonGroup
@@ -1075,7 +1201,7 @@ export default function TodayPage() {
 
       <Snackbar
         open={snackMessage !== null}
-        autoHideDuration={4000}
+        autoHideDuration={snackMessage?.text === 'Saved' ? 1500 : 4000}
         onClose={() => setSnackMessage(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >

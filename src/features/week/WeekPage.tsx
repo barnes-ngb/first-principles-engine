@@ -7,9 +7,11 @@ import ListItem from '@mui/material/ListItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore'
-import { useNavigate } from 'react-router-dom'
+import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
+import ContextBar from '../../components/ContextBar'
+import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import SaveIndicator from '../../components/SaveIndicator'
 import type { SaveState } from '../../components/SaveIndicator'
@@ -19,10 +21,12 @@ import { useProfile } from '../../core/profile/useProfile'
 import {
   weeksCollection,
 } from '../../core/firebase/firestore'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Child, WeekPlan } from '../../core/types/domain'
+import { parseDateYmd } from '../../lib/format'
 import { useDebounce } from '../../lib/useDebounce'
 import { getWeekRange } from '../engine/engine.logic'
+import { navTo } from '../../core/utils/dateKey'
 
 const createDefaultWeekPlan = (
   weekStartDate: string,
@@ -47,16 +51,21 @@ const createDefaultWeekPlan = (
 
 export default function WeekPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const weekParam = searchParams.get('week')
   const familyId = useFamilyId()
   const { canEdit } = useProfile()
-  const weekRange = useMemo(() => getWeekRange(new Date()), [])
+  const weekRange = useMemo(() => {
+    if (weekParam && parseDateYmd(weekParam)) return getWeekRange(parseDateYmd(weekParam)!)
+    return getWeekRange(new Date())
+  }, [weekParam])
   const weekPlanRef = useMemo(
     () => doc(weeksCollection(familyId), weekRange.start),
     [familyId, weekRange.start],
   )
 
   const [weekPlan, setWeekPlan] = useState<WeekPlan | null>(null)
-  const { children } = useChildren()
+  const { children, activeChild } = useActiveChild()
   const [newGoalByChild, setNewGoalByChild] = useState<Record<string, string>>(
     {},
   )
@@ -65,37 +74,38 @@ export default function WeekPage() {
   const [saveState, setSaveState] = useState<SaveState>('idle')
 
   useEffect(() => {
-    let isMounted = true
+    let creatingDefault = false
 
-    const loadWeekPlan = async () => {
-      try {
-        const snapshot = await getDoc(weekPlanRef)
-        if (!isMounted) return
-
+    const unsubscribe = onSnapshot(
+      weekPlanRef,
+      async (snapshot) => {
         if (snapshot.exists()) {
           setWeekPlan(snapshot.data())
           return
         }
 
-        const defaultWeekPlan = createDefaultWeekPlan(
-          weekRange.start,
-          weekRange.end,
-          children,
-        )
-        await setDoc(weekPlanRef, defaultWeekPlan)
-        if (isMounted) {
-          setWeekPlan(defaultWeekPlan)
+        // Document doesn't exist yet — create a default (guard against double-fire)
+        if (creatingDefault) return
+        creatingDefault = true
+        try {
+          const defaultWeekPlan = createDefaultWeekPlan(
+            weekRange.start,
+            weekRange.end,
+            children,
+          )
+          await setDoc(weekPlanRef, defaultWeekPlan)
+          // onSnapshot will fire again with the new doc
+        } catch (err) {
+          console.error('Failed to create default week plan', err)
+          creatingDefault = false
         }
-      } catch (err) {
+      },
+      (err) => {
         console.error('Failed to load week plan', err)
-      }
-    }
+      },
+    )
 
-    loadWeekPlan()
-
-    return () => {
-      isMounted = false
-    }
+    return unsubscribe
   }, [children, weekPlanRef, weekRange.end, weekRange.start])
 
   useEffect(() => {
@@ -274,6 +284,11 @@ export default function WeekPage() {
   if (!weekPlan) {
     return (
       <Page>
+        <ContextBar
+          page="week"
+          activeChild={activeChild}
+          weekStart={weekRange.start}
+        />
         <SectionCard title="Week">
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <CircularProgress size={20} />
@@ -286,6 +301,15 @@ export default function WeekPage() {
 
   return (
     <Page>
+      <ContextBar
+        page="week"
+        activeChild={activeChild}
+        weekStart={weekRange.start}
+      />
+      <HelpStrip
+        pageKey="week"
+        text="This is the plan/targets for the week (not what was done). Completion comes from Daily Logs."
+      />
       <SectionCard title={`Week Plan (${weekPlan.startDate})`}>
         <Stack spacing={2}>
           <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
@@ -507,15 +531,43 @@ export default function WeekPage() {
       )}
 
       {canEdit && (
-        <SectionCard title="Lab Mode">
+        <SectionCard title="Quick Actions">
           <Stack spacing={2}>
-            <Typography color="text.secondary">
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {(() => {
+                const days: string[] = []
+                const start = parseDateYmd(weekRange.start)
+                if (start) {
+                  for (let i = 0; i < 7; i++) {
+                    const d = new Date(start)
+                    d.setDate(start.getDate() + i)
+                    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+                    const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+                    days.push(`${dayNames[d.getDay()]}|${ymd}`)
+                  }
+                }
+                return days.map((entry) => {
+                  const [label, dateKey] = entry.split('|')
+                  return (
+                    <Button
+                      key={dateKey}
+                      size="small"
+                      variant="outlined"
+                      onClick={() => navigate(navTo.today(dateKey))}
+                    >
+                      {label}
+                    </Button>
+                  )
+                })
+              })()}
+            </Stack>
+            <Typography color="text.secondary" variant="body2">
               Ready to jump into quick capture mode for this week?
             </Typography>
             <Button
               variant="contained"
               size="large"
-              onClick={() => navigate('/week/lab')}
+              onClick={() => navigate(navTo.dadLab(weekRange.start))}
             >
               Start Lab Mode
             </Button>

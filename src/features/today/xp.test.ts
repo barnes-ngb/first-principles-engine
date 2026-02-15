@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DayLog } from '../../core/types/domain'
+import { RoutineItemKey } from '../../core/types/enums'
 import { calculateXp, countLoggedCategories } from './xp'
 
 const baseDayLog: DayLog = {
@@ -97,6 +98,116 @@ describe('calculateXp', () => {
     // 1 + 1 + 2 = 4
     expect(calculateXp(log)).toBe(4)
   })
+
+  it('includes readAloud XP when done (unscoped)', () => {
+    const log: DayLog = {
+      ...baseDayLog,
+      reading: {
+        handwriting: { done: false },
+        spelling: { done: false },
+        sightWords: { done: false },
+        minecraft: { done: false },
+        readingEggs: { done: false },
+        readAloud: { done: true, minutes: 10 },
+      },
+    }
+    expect(calculateXp(log)).toBe(1)
+  })
+
+  describe('template-scoped XP', () => {
+    const fullLog: DayLog = {
+      ...baseDayLog,
+      reading: {
+        handwriting: { done: true },
+        spelling: { done: true },
+        sightWords: { done: true },
+        minecraft: { done: true },
+        readingEggs: { done: true },
+        readAloud: { done: true },
+      },
+      math: { done: true },
+      speech: { done: true },
+    }
+
+    it('scopes XP to Lincoln template items only', () => {
+      const lincolnItems = [
+        RoutineItemKey.Handwriting,
+        RoutineItemKey.Spelling,
+        RoutineItemKey.SightWords,
+        RoutineItemKey.MinecraftReading,
+        RoutineItemKey.ReadingEggs,
+        RoutineItemKey.Math,
+        RoutineItemKey.Speech,
+      ]
+      // handwriting(1) + spelling(1) + sightWords(1) + minecraft(2) + readingEggs(1) + math(2) + speech(1) = 9
+      expect(calculateXp(fullLog, lincolnItems)).toBe(9)
+    })
+
+    it('scopes XP to London template items only', () => {
+      const londonItems = [
+        RoutineItemKey.ReadAloud,
+        RoutineItemKey.SightWords,
+        RoutineItemKey.Math,
+        RoutineItemKey.Speech,
+      ]
+      // readAloud(1) + sightWords(1) + math(2) + speech(1) = 5
+      expect(calculateXp(fullLog, londonItems)).toBe(5)
+    })
+
+    it('excludes Lincoln items from London XP', () => {
+      const londonItems = [
+        RoutineItemKey.ReadAloud,
+        RoutineItemKey.SightWords,
+        RoutineItemKey.Math,
+        RoutineItemKey.Speech,
+      ]
+      // Even though handwriting/spelling/minecraft/readingEggs are done,
+      // they should not contribute to London's XP
+      const londonXp = calculateXp(fullLog, londonItems)
+      const unscopedXp = calculateXp(fullLog)
+      expect(londonXp).toBeLessThan(unscopedXp)
+    })
+
+    it('returns 0 when scoped items are all not done', () => {
+      const log: DayLog = {
+        ...baseDayLog,
+        reading: {
+          handwriting: { done: true },
+          spelling: { done: true },
+          sightWords: { done: false },
+          minecraft: { done: false },
+          readingEggs: { done: false },
+          readAloud: { done: false },
+        },
+        math: { done: false },
+      }
+      const londonItems = [
+        RoutineItemKey.ReadAloud,
+        RoutineItemKey.SightWords,
+        RoutineItemKey.Math,
+        RoutineItemKey.Speech,
+      ]
+      // readAloud(false) + sightWords(false) + math(false) + speech(n/a) = 0
+      expect(calculateXp(log, londonItems)).toBe(0)
+    })
+
+    it('unscoped calculation is backward-compatible', () => {
+      // Without routineItems parameter, all items are counted
+      const log: DayLog = {
+        ...baseDayLog,
+        reading: {
+          handwriting: { done: true },
+          spelling: { done: true },
+          sightWords: { done: true },
+          minecraft: { done: true },
+          readingEggs: { done: true },
+        },
+        math: { done: true },
+      }
+      expect(calculateXp(log)).toBe(8)
+      expect(calculateXp(log, undefined)).toBe(8)
+    })
+  })
 })
 
 describe('countLoggedCategories', () => {
@@ -113,6 +224,21 @@ describe('countLoggedCategories', () => {
         sightWords: { done: true },
         minecraft: { done: false },
         readingEggs: { done: false },
+      },
+    }
+    expect(countLoggedCategories(log)).toBe(1)
+  })
+
+  it('counts readAloud as contributing to reading category', () => {
+    const log: DayLog = {
+      ...baseDayLog,
+      reading: {
+        handwriting: { done: false },
+        spelling: { done: false },
+        sightWords: { done: false },
+        minecraft: { done: false },
+        readingEggs: { done: false },
+        readAloud: { done: true },
       },
     }
     expect(countLoggedCategories(log)).toBe(1)

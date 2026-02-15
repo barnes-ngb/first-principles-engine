@@ -111,12 +111,38 @@ export const StreamId = {
 } as const
 export type StreamId = (typeof StreamId)[keyof typeof StreamId]
 
+export const SupportLevel = {
+  None: 'none',
+  Environment: 'environment',
+  Prompts: 'prompts',
+  Tools: 'tools',
+  HandOverHand: 'hand-over-hand',
+} as const
+export type SupportLevel = (typeof SupportLevel)[keyof typeof SupportLevel]
+
+/** Ordered list from least to most support, used for comparison. */
+export const SUPPORT_LEVEL_ORDER: SupportLevel[] = [
+  SupportLevel.None,
+  SupportLevel.Environment,
+  SupportLevel.Prompts,
+  SupportLevel.Tools,
+  SupportLevel.HandOverHand,
+]
+
+export const SessionSymbol = {
+  Pass: '✔',
+  Partial: '△',
+  Miss: '✖',
+} as const
+export type SessionSymbol = (typeof SessionSymbol)[keyof typeof SessionSymbol]
+
 export const RoutineItemKey = {
   Handwriting: 'handwriting',
   Spelling: 'spelling',
   SightWords: 'sightWords',
   MinecraftReading: 'minecraft',
   ReadingEggs: 'readingEggs',
+  ReadAloud: 'readAloud',
   Math: 'math',
   Speech: 'speech',
   // Lincoln Literacy Engine

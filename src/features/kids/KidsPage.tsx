@@ -24,7 +24,7 @@ import {
   laddersCollection,
   milestoneProgressCollection,
 } from '../../core/firebase/firestore'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type {
   Artifact,
   Ladder,
@@ -84,7 +84,7 @@ const isLadderForChild = (ladder: Ladder, childId: string) => {
 export default function KidsPage() {
   const familyId = useFamilyId()
   const { canEdit } = useProfile()
-  const { children, selectedChildId, setSelectedChildId, isLoading: childrenLoading, addChild } = useChildren()
+  const { children, activeChildId: selectedChildId, setActiveChildId: setSelectedChildId, isLoading: childrenLoading, addChild } = useActiveChild()
   const [ladders, setLadders] = useState<Ladder[]>([])
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
   const [artifacts, setArtifacts] = useState<Artifact[]>([])

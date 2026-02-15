@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import Button from '@mui/material/Button'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
@@ -10,6 +11,8 @@ import { addDoc, doc, updateDoc } from 'firebase/firestore'
 
 import AudioRecorder from '../../components/AudioRecorder'
 import ChildSelector from '../../components/ChildSelector'
+import ContextBar from '../../components/ContextBar'
+import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
@@ -21,13 +24,15 @@ import {
   generateFilename,
   uploadArtifactFile,
 } from '../../core/firebase/upload'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import {
   EngineStage,
   EvidenceType,
   LearningLocation,
   SubjectBucket,
 } from '../../core/types/enums'
+import { parseDateYmd } from '../../lib/format'
+import { getWeekRange } from '../engine/engine.logic'
 
 type ArtifactFormState = {
   childId: string
@@ -53,8 +58,14 @@ const defaultFormState = (
 })
 
 export default function LabModePage() {
+  const [searchParams] = useSearchParams()
+  const weekParam = searchParams.get('week')
+  const weekRange = useMemo(() => {
+    if (weekParam && parseDateYmd(weekParam)) return getWeekRange(parseDateYmd(weekParam)!)
+    return getWeekRange(new Date())
+  }, [weekParam])
   const familyId = useFamilyId()
-  const { children, selectedChildId, isLoading: childrenLoading, addChild } = useChildren()
+  const { children, activeChildId: selectedChildId, activeChild, isLoading: childrenLoading, addChild } = useActiveChild()
   const [selectedStage, setSelectedStage] = useState<EngineStage | null>(null)
   const [mediaUploading, setMediaUploading] = useState(false)
   const [artifactForm, setArtifactForm] = useState<ArtifactFormState>(() =>
@@ -191,6 +202,15 @@ export default function LabModePage() {
 
   return (
     <Page>
+      <ContextBar
+        page="dadLab"
+        activeChild={activeChild}
+        weekStart={weekRange.start}
+      />
+      <HelpStrip
+        pageKey="dadLab"
+        text="Weekly experiment + reflection. Uses Daily Logs + Artifacts."
+      />
       <Stack spacing={2}>
         <ChildSelector
           children={children}

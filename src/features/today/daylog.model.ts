@@ -135,6 +135,7 @@ export const createDefaultDayLog = (
     items.has(RoutineItemKey.SightWords) ||
     items.has(RoutineItemKey.MinecraftReading) ||
     items.has(RoutineItemKey.ReadingEggs) ||
+    items.has(RoutineItemKey.ReadAloud) ||
     items.has(RoutineItemKey.PhonemicAwareness) ||
     items.has(RoutineItemKey.PhonicsLesson) ||
     items.has(RoutineItemKey.DecodableReading) ||

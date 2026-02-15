@@ -7,6 +7,8 @@ import { childrenCollection } from '../firebase/firestore'
 import type { Child } from '../types/domain'
 import { UserProfile } from '../types/enums'
 
+const ACTIVE_CHILD_KEY = 'fpe_active_child_id'
+
 /** Canonical child names that correspond to profiles. */
 export const PROFILE_CHILDREN: Array<{ profile: UserProfile; name: string }> = [
   { profile: UserProfile.Lincoln, name: 'Lincoln' },
@@ -36,13 +38,23 @@ export interface UseChildrenResult {
 /**
  * Shared hook for loading children, auto-creating from profiles,
  * and auto-selecting based on the active profile.
+ *
+ * Persists the selected child to localStorage so it survives
+ * page navigation and browser refresh.
  */
 export function useChildren(): UseChildrenResult {
   const familyId = useFamilyId()
   const { profile } = useProfile()
   const [children, setChildren] = useState<Child[]>([])
-  const [selectedChildId, setSelectedChildId] = useState('')
+  const [selectedChildId, setSelectedChildIdState] = useState(
+    () => localStorage.getItem(ACTIVE_CHILD_KEY) ?? '',
+  )
   const [isLoading, setIsLoading] = useState(true)
+
+  const setSelectedChildId = useCallback((id: string) => {
+    localStorage.setItem(ACTIVE_CHILD_KEY, id)
+    setSelectedChildIdState(id)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -77,11 +89,18 @@ export function useChildren(): UseChildrenResult {
 
       setChildren(loaded)
 
-      // Auto-select child matching the active profile
+      // Restore persisted child or auto-select based on profile
+      const persisted = localStorage.getItem(ACTIVE_CHILD_KEY)
       const profileMatch = matchChildToProfile(loaded, profile)
-      setSelectedChildId((cur) => {
+      setSelectedChildIdState((cur) => {
+        // Keep current if still valid
         if (cur && loaded.some((c) => c.id === cur)) return cur
-        return profileMatch ?? loaded[0]?.id ?? ''
+        // Restore persisted if valid
+        if (persisted && loaded.some((c) => c.id === persisted)) return persisted
+        // Fall back to profile match or first child
+        const next = profileMatch ?? loaded[0]?.id ?? ''
+        if (next) localStorage.setItem(ACTIVE_CHILD_KEY, next)
+        return next
       })
 
       setIsLoading(false)
@@ -96,7 +115,7 @@ export function useChildren(): UseChildrenResult {
   const addChild = useCallback((child: Child) => {
     setChildren((prev) => [...prev, child])
     setSelectedChildId(child.id)
-  }, [])
+  }, [setSelectedChildId])
 
   return { children, selectedChildId, setSelectedChildId, isLoading, addChild }
 }

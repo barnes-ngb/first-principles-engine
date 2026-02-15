@@ -2,10 +2,13 @@ import { useCallback, useState } from 'react'
 import type { ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import Box from '@mui/material/Box'
+import Chip from '@mui/material/Chip'
 import Drawer from '@mui/material/Drawer'
 import IconButton from '@mui/material/IconButton'
 import MenuIcon from '@mui/icons-material/Menu'
+import DebugPanel from '../components/DebugPanel'
 import ProfileMenu from '../components/ProfileMenu'
+import { useActiveChild } from '../core/hooks/useActiveChild'
 import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
 
@@ -17,7 +20,7 @@ const navItems = [
   { label: 'Today', to: '/today' },
   { label: 'This Week', to: '/week', parentOnly: true },
   { label: 'Engine', to: '/engine', parentOnly: true },
-  { label: 'Records', to: '/records', parentOnly: true },
+  { label: 'Records', to: '/records', parentOnly: true, end: true },
   { label: 'Evaluations', to: '/records/evaluations', parentOnly: true },
   { label: 'Portfolio', to: '/records/portfolio', parentOnly: true },
 ]
@@ -44,7 +47,11 @@ function NavContent({
             if (!isParent && item.parentOnly) return null
             return (
               <li key={item.to}>
-                <NavLink to={item.to} onClick={onNavigate}>
+                <NavLink
+                  to={item.to}
+                  end={'end' in item ? item.end : undefined}
+                  onClick={onNavigate}
+                >
                   {item.label}
                 </NavLink>
               </li>
@@ -58,6 +65,7 @@ function NavContent({
 
 export function AppShell({ children }: AppShellProps) {
   const { profile } = useProfile()
+  const { activeChild } = useActiveChild()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const location = useLocation()
 
@@ -105,6 +113,14 @@ export function AppShell({ children }: AppShellProps) {
         <Box component="span" sx={{ fontWeight: 600, fontSize: '1rem', flex: 1 }}>
           {currentLabel}
         </Box>
+        {activeChild && (
+          <Chip
+            label={activeChild.name}
+            size="small"
+            variant="outlined"
+            color="primary"
+          />
+        )}
         <ProfileMenu />
       </Box>
 
@@ -126,6 +142,7 @@ export function AppShell({ children }: AppShellProps) {
       </Drawer>
 
       <main className="app-shell__content">{children}</main>
+      <DebugPanel />
     </div>
   )
 }

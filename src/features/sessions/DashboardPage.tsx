@@ -10,7 +10,7 @@ import Chip from '@mui/material/Chip'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { doc, getDoc, getDocs, setDoc } from 'firebase/firestore'
+import { doc, getDoc, getDocs, onSnapshot, setDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -24,7 +24,7 @@ import {
   sessionsCollection,
   weeksCollection,
 } from '../../core/firebase/firestore'
-import { useChildren } from '../../core/hooks/useChildren'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { DayLog, Ladder, MilestoneProgress, Session, WeekPlan } from '../../core/types/domain'
 import { StreamId } from '../../core/types/enums'
 import type { ProgressByRungId } from '../kids/ladder.logic'
@@ -39,7 +39,7 @@ import {
   streamLabel,
 } from './sessions.model'
 import type { TodayBlock } from './weekplan-today'
-import { buildTodayBlocks, createMinimalWeekPlan } from './weekplan-today'
+import { BlockStatus, buildTodayBlocks, createMinimalWeekPlan } from './weekplan-today'
 
 const allStreams = Object.values(StreamId) as StreamId[]
 
@@ -65,9 +65,14 @@ export default function DashboardPage() {
   const today = new Date().toISOString().slice(0, 10)
   const weekRange = useMemo(() => getWeekRange(new Date()), [])
 
-  const { children, selectedChildId, setSelectedChildId, isLoading: childrenLoading, addChild } = useChildren()
+  const { children, activeChildId: selectedChildId, setActiveChildId: setSelectedChildId, isLoading: childrenLoading, addChild } = useActiveChild()
   const [weekPlan, setWeekPlan] = useState<WeekPlan | null | undefined>(undefined) // undefined = loading
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
+  const [dayLogChildId, setDayLogChildId] = useState(selectedChildId)
+  if (dayLogChildId !== selectedChildId) {
+    setDayLogChildId(selectedChildId)
+    setDayLog(null)
+  }
   const [sessions, setSessions] = useState<Session[]>([])
   const [ladders, setLadders] = useState<Ladder[]>([])
   const [milestoneProgress, setMilestoneProgress] = useState<MilestoneProgress[]>([])
@@ -127,68 +132,66 @@ export default function DashboardPage() {
     return () => window.removeEventListener('focus', handleFocus)
   }, [])
 
-  // ─── Load WeekPlan for current week ─────────────────────────────────────────
+  // ─── Load WeekPlan for current week (real-time) ────────────────────────────
 
   useEffect(() => {
-    let cancelled = false
-    const loadWeekPlan = async () => {
-      try {
-        const ref = doc(weeksCollection(familyId), weekRange.start)
-        const snap = await getDoc(ref)
-        if (cancelled) return
-        if (snap.exists()) {
-          setWeekPlan(snap.data())
-        } else {
-          setWeekPlan(null)
-        }
-      } catch (err) {
+    const ref = doc(weeksCollection(familyId), weekRange.start)
+    const unsubscribe = onSnapshot(
+      ref,
+      (snap) => {
+        setWeekPlan(snap.exists() ? snap.data() : null)
+      },
+      (err) => {
         console.error('Failed to load week plan', err)
-        if (!cancelled) {
-          setWeekPlan(null)
-          setSnackMessage({ text: 'Could not load week plan.', severity: 'error' })
-        }
-      }
-    }
-    loadWeekPlan()
-    return () => { cancelled = true }
+        setWeekPlan(null)
+        setSnackMessage({ text: 'Could not load week plan.', severity: 'error' })
+      },
+    )
+    return unsubscribe
   }, [familyId, weekRange.start])
 
-  // ─── Load today's DayLog for selected child ─────────────────────────────────
+  // ─── Load today's DayLog for selected child (real-time) ─────────────────────
 
   useEffect(() => {
-    let cancelled = false
-    const loadDayLog = async () => {
-      if (!selectedChildId) {
-        if (!cancelled) setDayLog(null)
-        return
-      }
-      try {
-        const docId = dayLogDocId(today, selectedChildId)
-        const ref = doc(daysCollection(familyId), docId)
-        const snap = await getDoc(ref)
-        if (cancelled) return
+    if (!selectedChildId) return
+
+    const docId = dayLogDocId(today, selectedChildId)
+    const ref = doc(daysCollection(familyId), docId)
+    let resolvedWithLegacy = false
+
+    const unsubscribe = onSnapshot(
+      ref,
+      async (snap) => {
         if (snap.exists()) {
           setDayLog(snap.data())
           return
         }
-        // Try legacy format
-        const legacyId = legacyDayLogDocId(selectedChildId, today)
-        const legacyRef = doc(daysCollection(familyId), legacyId)
-        const legacySnap = await getDoc(legacyRef)
-        if (cancelled) return
-        if (legacySnap.exists()) {
-          setDayLog(legacySnap.data())
+        // Only attempt legacy fallback once (not on every snapshot)
+        if (resolvedWithLegacy) {
+          setDayLog(null)
           return
         }
+        resolvedWithLegacy = true
+        try {
+          const legacyId = legacyDayLogDocId(selectedChildId, today)
+          const legacyRef = doc(daysCollection(familyId), legacyId)
+          const legacySnap = await getDoc(legacyRef)
+          if (legacySnap.exists()) {
+            setDayLog(legacySnap.data())
+            return
+          }
+        } catch {
+          // ignore legacy fallback errors
+        }
         setDayLog(null)
-      } catch (err) {
+      },
+      (err) => {
         console.error('Failed to load day log', err)
-        if (!cancelled) setDayLog(null)
-      }
-    }
-    loadDayLog()
-    return () => { cancelled = true }
-  }, [familyId, selectedChildId, today, fetchKey])
+        setDayLog(null)
+      },
+    )
+    return unsubscribe
+  }, [familyId, selectedChildId, today])
 
   // ─── Derived data ───────────────────────────────────────────────────────────
 
@@ -376,8 +379,11 @@ export default function DashboardPage() {
                                 </Typography>
                               </Stack>
                             </Stack>
-                            {tb.done && (
-                              <Chip label="Done" color="success" size="small" />
+                            {tb.status === BlockStatus.Logged && (
+                              <Chip label="Logged" color="success" size="small" />
+                            )}
+                            {tb.status === BlockStatus.InProgress && (
+                              <Chip label="In Progress" color="warning" size="small" variant="outlined" />
                             )}
                           </Stack>
                           <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
@@ -392,16 +398,18 @@ export default function DashboardPage() {
                               </Typography>
                             ))}
                           </Box>
-                          {!tb.done && (
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              sx={{ alignSelf: 'flex-start', borderColor: meta.color, color: meta.color }}
-                              onClick={() => handleLogBlock(tb.type)}
-                            >
-                              Log this
-                            </Button>
-                          )}
+                          <Button
+                            variant={tb.status === BlockStatus.Logged ? 'text' : 'outlined'}
+                            size="small"
+                            sx={{ alignSelf: 'flex-start', borderColor: meta.color, color: meta.color }}
+                            onClick={() => handleLogBlock(tb.type)}
+                          >
+                            {tb.status === BlockStatus.Logged
+                              ? 'View Log'
+                              : tb.status === BlockStatus.InProgress
+                                ? 'Continue'
+                                : 'Log'}
+                          </Button>
                         </Stack>
                       </CardContent>
                     </Card>
