@@ -18,6 +18,7 @@ import type {
   HoursEntry,
   LabSession,
   Ladder,
+  LadderProgress,
   MilestoneProgress,
   Project,
   Session,
@@ -159,3 +160,12 @@ export const dadLabCollection = (
   familyId: string,
 ): CollectionReference<DadLabWeek> =>
   collection(db, `families/${familyId}/dadLab`) as CollectionReference<DadLabWeek>
+
+/** Ladder progress per child per ladderKey. Doc ID: {childId}_{ladderKey} */
+export const ladderProgressCollection = (
+  familyId: string,
+): CollectionReference<LadderProgress> =>
+  collection(db, `families/${familyId}/ladderProgress`) as CollectionReference<LadderProgress>
+
+export const ladderProgressDocId = (childId: string, ladderKey: string): string =>
+  `${childId}_${ladderKey}`

@@ -6,8 +6,10 @@ import type {
   ProjectPhase,
   RoutineItemKey,
   SessionResult,
+  SessionSymbol,
   StreamId,
   SubjectBucket,
+  SupportLevel,
   SupportTag,
   TrackType,
 } from './enums'
@@ -396,4 +398,40 @@ export interface DadLabWeek {
   dailyReports: Record<string, DadDailyReport>
   createdAt?: string
   updatedAt?: string
+}
+
+// ── Lincoln's Ladders (card-based) ──────────────────────────────
+
+export interface LadderRungDefinition {
+  rungId: string
+  name: string
+  evidenceText: string
+  supportsText: string
+}
+
+export interface LadderCardDefinition {
+  ladderKey: string
+  title: string
+  intent: string
+  workItems: string[]
+  metricLabel: string
+  globalRuleText: string
+  rungs: LadderRungDefinition[]
+}
+
+export interface LadderSessionEntry {
+  dateKey: string
+  rungId: string
+  supportLevel: SupportLevel
+  result: SessionSymbol
+  note?: string
+}
+
+export interface LadderProgress {
+  childId: string
+  ladderKey: string
+  currentRungId: string
+  streakCount: number
+  lastSupportLevel: SupportLevel
+  history: LadderSessionEntry[]
 }
