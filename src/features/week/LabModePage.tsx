@@ -327,10 +327,14 @@ export default function LabModePage() {
                 </Stack>
               ) : (
                 <Stack spacing={1.5} alignItems="flex-start">
-                  <Typography color="text.secondary">
-                    No lab started for this week yet.
+                  <Typography variant="subtitle2">
+                    Week of {formatWeekShort(weekKey)}
                   </Typography>
-                  <Button variant="contained" onClick={handleStartOrContinue}>
+                  <Typography color="text.secondary">
+                    Ready to start {activeChild?.name ? `${activeChild.name}'s` : 'a'} lab session for this week.
+                    Tap below to begin with the Wonder stage.
+                  </Typography>
+                  <Button variant="contained" size="large" onClick={handleStartOrContinue}>
                     Start Lab Session
                   </Button>
                 </Stack>
