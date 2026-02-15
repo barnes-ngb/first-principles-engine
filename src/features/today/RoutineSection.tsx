@@ -453,7 +453,7 @@ export default function RoutineSection({
             <FormControlLabel
               control={
                 <Checkbox
-                  checked={reading.handwriting.done}
+                  checked={reading.handwriting?.done ?? false}
                   onChange={(e) =>
                     updateReading('handwriting', { done: e.target.checked })
                   }
@@ -468,7 +468,7 @@ export default function RoutineSection({
                 </Stack>
               }
             />
-            {reading.handwriting.done && (
+            {reading.handwriting?.done && (
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Minutes"
@@ -516,7 +516,7 @@ export default function RoutineSection({
             <FormControlLabel
               control={
                 <Checkbox
-                  checked={reading.spelling.done}
+                  checked={reading.spelling?.done ?? false}
                   onChange={(e) =>
                     updateReading('spelling', { done: e.target.checked })
                   }
@@ -531,7 +531,7 @@ export default function RoutineSection({
                 </Stack>
               }
             />
-            {reading.spelling.done && (
+            {reading.spelling?.done && (
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Word(s) practiced"
@@ -562,7 +562,7 @@ export default function RoutineSection({
             <FormControlLabel
               control={
                 <Checkbox
-                  checked={reading.sightWords.done}
+                  checked={reading.sightWords?.done ?? false}
                   onChange={(e) =>
                     updateReading('sightWords', { done: e.target.checked })
                   }
@@ -577,7 +577,7 @@ export default function RoutineSection({
                 </Stack>
               }
             />
-            {reading.sightWords.done && (
+            {reading.sightWords?.done && (
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Count"
@@ -613,7 +613,7 @@ export default function RoutineSection({
             <FormControlLabel
               control={
                 <Checkbox
-                  checked={reading.minecraft.done}
+                  checked={reading.minecraft?.done ?? false}
                   onChange={(e) =>
                     updateReading('minecraft', { done: e.target.checked })
                   }
@@ -628,7 +628,7 @@ export default function RoutineSection({
                 </Stack>
               }
             />
-            {reading.minecraft.done && (
+            {reading.minecraft?.done && (
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Pages"
@@ -676,7 +676,7 @@ export default function RoutineSection({
             <FormControlLabel
               control={
                 <Checkbox
-                  checked={reading.readingEggs.done}
+                  checked={reading.readingEggs?.done ?? false}
                   onChange={(e) =>
                     updateReading('readingEggs', { done: e.target.checked })
                   }
@@ -691,7 +691,7 @@ export default function RoutineSection({
                 </Stack>
               }
             />
-            {reading.readingEggs.done && (
+            {reading.readingEggs?.done && (
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pl: 4 }}>
                 <TextField
                   label="Minutes"
