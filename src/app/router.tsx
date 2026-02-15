@@ -31,11 +31,11 @@ const routes = [
       { path: '/scoreboard', element: <ScoreboardPage /> },
       { path: '/projects', element: <ProjectBoardPage /> },
       { path: '/today', element: <TodayPage /> },
+      { path: '/week/lab', element: <LabModePage /> },
       {
         element: <RequireParent />,
         children: [
           { path: '/week', element: <WeekPage /> },
-          { path: '/week/lab', element: <LabModePage /> },
         ],
       },
       { path: '/engine', element: <EnginePage /> },
