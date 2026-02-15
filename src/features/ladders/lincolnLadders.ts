@@ -1,4 +1,5 @@
 import type { LadderCardDefinition } from '../../core/types/domain'
+import { StreamKey } from '../../core/types/enums'
 
 const GLOBAL_RULE = 'Level up on 3 ✔ in a row with same or less support.'
 
@@ -56,6 +57,7 @@ export const handwriting: LadderCardDefinition = {
 export const readingInput: LadderCardDefinition = {
   ladderKey: 'reading_input',
   title: 'Reading Input (Listen + Discuss)',
+  streamKey: StreamKey.SpeakExplain,
   intent: 'Build comprehension and engagement through read-aloud and discussion.',
   workItems: [
     'Attentive listening (5–15 min read-aloud)',
@@ -105,6 +107,7 @@ export const readingInput: LadderCardDefinition = {
 export const laPhonics: LadderCardDefinition = {
   ladderKey: 'la_phonics',
   title: 'LA · Phonics + Blending',
+  streamKey: StreamKey.DecodeRead,
   intent: 'Decode words from letters → sounds → blends → multisyllable.',
   workItems: [
     'Letter-sound ID (a→/a/)',
@@ -203,6 +206,7 @@ export const laSightWords: LadderCardDefinition = {
 export const laSpellingPrompts: LadderCardDefinition = {
   ladderKey: 'la_spellingprompts',
   title: 'LA · Spelling + Writing Prompts (output)',
+  streamKey: StreamKey.SpellWrite,
   intent: 'Move from sound-spelling to pattern-spelling to prompted writing.',
   workItems: [
     'Sound-spell CVC words',

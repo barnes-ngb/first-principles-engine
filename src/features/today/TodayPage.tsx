@@ -50,7 +50,6 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import {
   artifactsCollection,
   daysCollection,
-  laddersCollection,
   weeksCollection,
 } from '../../core/firebase/firestore'
 import {
@@ -58,7 +57,8 @@ import {
   uploadArtifactFile,
 } from '../../core/firebase/upload'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, DayLog, Ladder } from '../../core/types/domain'
+import type { Artifact, DayLog, LadderCardDefinition } from '../../core/types/domain'
+import { getLaddersForChild } from '../ladders/laddersCatalog'
 import {
   DayBlockType,
   EngineStage,
@@ -111,7 +111,6 @@ export default function TodayPage() {
     setDayLogChildId(selectedChildId)
     setDayLog(null)
   }
-  const [ladders, setLadders] = useState<Ladder[]>([])
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
   const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
   const [linkingArtifactId, setLinkingArtifactId] = useState<string | null>(null)
@@ -142,6 +141,12 @@ export default function TodayPage() {
 
   const selectableChildren = children
   const selectedChild = activeChild
+
+  // Resolve card-based ladders from the catalog for the active child
+  const cardLadders: LadderCardDefinition[] = useMemo(
+    () => (selectedChild ? getLaddersForChild(selectedChild.name) ?? [] : []),
+    [selectedChild],
+  )
 
   // Resolve the active template and routine items for the selected child.
   // Priority: child.routineItems (Firestore) → template.routineItems → undefined (all).
@@ -293,34 +298,6 @@ export default function TodayPage() {
     return unsubscribe
   }, [familyId, weekRange.start])
 
-  // Load ladders and artifacts (one-shot, non-plan data)
-  useEffect(() => {
-    let isMounted = true
-
-    const loadLadders = async () => {
-      try {
-        const snapshot = await getDocs(laddersCollection(familyId))
-        if (!isMounted) return
-        const loadedLadders = snapshot.docs.map((docSnapshot) => ({
-          id: docSnapshot.id,
-          ...(docSnapshot.data() as Ladder),
-        }))
-        setLadders(loadedLadders)
-      } catch (err) {
-        console.error('Failed to load ladders', err)
-        if (isMounted) {
-          setSnackMessage({ text: 'Could not load ladders.', severity: 'error' })
-        }
-      }
-    }
-
-    loadLadders()
-
-    return () => {
-      isMounted = false
-    }
-  }, [familyId])
-
   // Load artifacts scoped to child + date (reload when child changes)
   useEffect(() => {
     if (!selectedChildId) {
@@ -358,13 +335,13 @@ export default function TodayPage() {
   }, [familyId, today, selectedChildId])
 
   const selectedLadder = useMemo(
-    () => ladders.find((ladder) => ladder.id === artifactForm.ladderId),
-    [artifactForm.ladderId, ladders],
+    () => cardLadders.find((l) => l.ladderKey === artifactForm.ladderId),
+    [artifactForm.ladderId, cardLadders],
   )
 
   const linkingLadder = useMemo(
-    () => ladders.find((ladder) => ladder.id === linkingLadderId),
-    [ladders, linkingLadderId],
+    () => cardLadders.find((l) => l.ladderKey === linkingLadderId),
+    [cardLadders, linkingLadderId],
   )
 
   // --- Block field handlers ---
@@ -568,11 +545,11 @@ export default function TodayPage() {
     (artifact: Artifact) => {
       const ladderRef = artifact.tags?.ladderRef
       if (!ladderRef) return 'Unlinked'
-      const ladder = ladders.find((item) => item.id === ladderRef.ladderId)
-      const rung = ladder?.rungs.find((item) => item.id === ladderRef.rungId)
-      return `${ladder?.title ?? 'Ladder'} \u00b7 ${rung?.title ?? 'Rung'}`
+      const ladder = cardLadders.find((item) => item.ladderKey === ladderRef.ladderId)
+      const rung = ladder?.rungs.find((item) => item.rungId === ladderRef.rungId)
+      return `${ladder?.title ?? 'Ladder'} \u00b7 ${rung?.name ?? 'Rung'}`
     },
-    [ladders],
+    [cardLadders],
   )
 
   // --- Loading state ---
@@ -1043,15 +1020,15 @@ export default function TodayPage() {
             }}
           >
             <MenuItem value="">No ladder</MenuItem>
-            {ladders.map((ladder) => (
-              <MenuItem key={ladder.id} value={ladder.id}>
+            {cardLadders.map((ladder) => (
+              <MenuItem key={ladder.ladderKey} value={ladder.ladderKey}>
                 {ladder.title}
               </MenuItem>
             ))}
           </TextField>
           {selectedLadder && selectedLadder.rungs.length > 0 && (
             <TextField
-              label="Rung"
+              label="Rung (optional)"
               select
               value={artifactForm.rungId}
               onChange={(event) =>
@@ -1059,17 +1036,11 @@ export default function TodayPage() {
               }
             >
               <MenuItem value="">Select rung</MenuItem>
-              {selectedLadder.rungs
-                .slice()
-                .sort((a, b) => a.order - b.order)
-                .map((rung) => (
-                  <MenuItem
-                    key={rung.id ?? rung.title}
-                    value={rung.id ?? rung.title}
-                  >
-                    {rung.title}
-                  </MenuItem>
-                ))}
+              {selectedLadder.rungs.map((rung) => (
+                <MenuItem key={rung.rungId} value={rung.rungId}>
+                  {rung.rungId}: {rung.name}
+                </MenuItem>
+              ))}
             </TextField>
           )}
           {artifactForm.evidenceType === EvidenceType.Note && (
@@ -1160,8 +1131,8 @@ export default function TodayPage() {
                           }
                         >
                           <MenuItem value="">Select ladder</MenuItem>
-                          {ladders.map((ladder) => (
-                            <MenuItem key={ladder.id} value={ladder.id}>
+                          {cardLadders.map((ladder) => (
+                            <MenuItem key={ladder.ladderKey} value={ladder.ladderKey}>
                               {ladder.title}
                             </MenuItem>
                           ))}
@@ -1177,17 +1148,11 @@ export default function TodayPage() {
                           }
                         >
                           <MenuItem value="">Select rung</MenuItem>
-                          {linkingLadder?.rungs
-                            .slice()
-                            .sort((a, b) => a.order - b.order)
-                            .map((rung) => (
-                              <MenuItem
-                                key={rung.id ?? rung.title}
-                                value={rung.id ?? rung.title}
-                              >
-                                {rung.title}
-                              </MenuItem>
-                            ))}
+                          {linkingLadder?.rungs.map((rung) => (
+                            <MenuItem key={rung.rungId} value={rung.rungId}>
+                              {rung.rungId}: {rung.name}
+                            </MenuItem>
+                          ))}
                         </TextField>
                       </Stack>
                     )}

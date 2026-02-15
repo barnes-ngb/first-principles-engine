@@ -7,6 +7,7 @@ import type {
   RoutineItemKey,
   SessionResult,
   SessionSymbol,
+  StreamKey,
   StreamId,
   SubjectBucket,
   SupportLevel,
@@ -412,6 +413,7 @@ export interface LadderRungDefinition {
 export interface LadderCardDefinition {
   ladderKey: string
   title: string
+  streamKey?: StreamKey
   intent: string
   workItems: string[]
   metricLabel: string
