@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import Alert from '@mui/material/Alert'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
@@ -14,21 +15,36 @@ import StepLabel from '@mui/material/StepLabel'
 import Stepper from '@mui/material/Stepper'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
+import BrokenImageIcon from '@mui/icons-material/BrokenImage'
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import { addDoc, doc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
+import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import {
+  artifactsCollection,
   labSessionDocId,
   labSessionsCollection,
   projectsCollection,
 } from '../../core/firebase/firestore'
+import {
+  generateFilename,
+  uploadArtifactFile,
+} from '../../core/firebase/upload'
 import type { LabSession, LabStageCapture, Project } from '../../core/types/domain'
-import { EngineStage, LabSessionStatus, ProjectPhase } from '../../core/types/enums'
+import {
+  EngineStage,
+  EvidenceType,
+  LabSessionStatus,
+  LearningLocation,
+  ProjectPhase,
+  SubjectBucket,
+} from '../../core/types/enums'
 import type { EngineStage as EngineStageType, ProjectPhase as ProjectPhaseType } from '../../core/types/enums'
 
 const phases: ProjectPhaseType[] = [
@@ -65,6 +81,8 @@ const stagePrompt: Record<EngineStageType, string> = {
   [EngineStage.Share]: 'Share your result. Who would want to see this?',
 }
 
+type StagePhoto = { id: string; url: string | null }
+
 function emptyStages(): LabStageCapture[] {
   return labStages.map((stage) => ({ stage }))
 }
@@ -95,6 +113,12 @@ export default function ProjectBoardPage() {
   const [labStory, setLabStory] = useState('')
   const [labSaved, setLabSaved] = useState(false)
   const [labError, setLabError] = useState(false)
+
+  // Photo capture state per stage
+  const [photoStageIdx, setPhotoStageIdx] = useState<number | null>(null)
+  const [photoUploading, setPhotoUploading] = useState(false)
+  // Photos captured per stage: { [stageIndex]: StagePhoto[] }
+  const [stagePhotos, setStagePhotos] = useState<Record<number, StagePhoto[]>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -133,8 +157,8 @@ export default function ProjectBoardPage() {
       completed: false,
     }
 
-    const ref = await addDoc(projectsCollection(familyId), project)
-    setProjects((prev) => [...prev, { ...project, id: ref.id }])
+    const docRef = await addDoc(projectsCollection(familyId), project)
+    setProjects((prev) => [...prev, { ...project, id: docRef.id }])
     setNewTitle('')
     setShowNewDialog(false)
     setIsSaving(false)
@@ -204,6 +228,8 @@ export default function ProjectBoardPage() {
     setLabStory('')
     setLabSaved(false)
     setLabError(false)
+    setPhotoStageIdx(null)
+    setStagePhotos({})
   }, [])
 
   const handleLabStageNote = useCallback(
@@ -224,6 +250,70 @@ export default function ProjectBoardPage() {
       )
     },
     [],
+  )
+
+  // Photo capture for a stage
+  const handleStagePhotoCapture = useCallback(
+    async (file: File) => {
+      if (photoStageIdx === null || !selectedChildId) return
+      setPhotoUploading(true)
+      try {
+        const stage = labStages[photoStageIdx]
+        const now = new Date().toISOString()
+        const weekKey = now.slice(0, 10)
+        const sessionId = labSessionDocId(weekKey, selectedChildId)
+        const title = `${stage} Lab Photo`
+
+        const artifact = {
+          title,
+          type: EvidenceType.Photo,
+          createdAt: now,
+          childId: selectedChildId,
+          dayLogId: now.slice(0, 10),
+          tags: {
+            engineStage: stage,
+            domain: '',
+            subjectBucket: SubjectBucket.Science,
+            location: LearningLocation.Home,
+          },
+          notes: '',
+          labSessionId: sessionId,
+          labStage: stage,
+        }
+        const docRef = await addDoc(artifactsCollection(familyId), artifact)
+        const ext = file.name.split('.').pop() ?? 'jpg'
+        const filename = generateFilename(ext)
+        const { downloadUrl, storagePath } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), {
+          uri: downloadUrl,
+          storagePath,
+        })
+
+        // Add artifact id to the stage capture
+        setLabStageCaptures((prev) =>
+          prev.map((s, i) => {
+            if (i !== photoStageIdx) return s
+            return { ...s, artifactIds: [...(s.artifactIds ?? []), docRef.id] }
+          }),
+        )
+
+        // Add to photo display
+        setStagePhotos((prev) => ({
+          ...prev,
+          [photoStageIdx]: [
+            ...(prev[photoStageIdx] ?? []),
+            { id: docRef.id, url: downloadUrl },
+          ],
+        }))
+
+        setPhotoStageIdx(null)
+      } catch (err) {
+        console.error('Failed to upload stage photo', err)
+      } finally {
+        setPhotoUploading(false)
+      }
+    },
+    [photoStageIdx, selectedChildId, familyId],
   )
 
   const handleSaveLabSession = useCallback(async () => {
@@ -450,15 +540,90 @@ export default function ProjectBoardPage() {
                             fullWidth
                             size="small"
                           />
-                          {!capture.completedAt && (
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              onClick={() => handleLabStageComplete(idx)}
-                            >
-                              Mark Done
-                            </Button>
+
+                          {/* Photo thumbnails for this stage */}
+                          {(stagePhotos[idx]?.length ?? 0) > 0 && (
+                            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                              {stagePhotos[idx].map((photo) => (
+                                photo.url ? (
+                                  <Box
+                                    key={photo.id}
+                                    component="img"
+                                    src={photo.url}
+                                    alt={`${capture.stage} photo`}
+                                    sx={{
+                                      width: 56,
+                                      height: 56,
+                                      objectFit: 'cover',
+                                      borderRadius: 1,
+                                      border: '1px solid',
+                                      borderColor: 'divider',
+                                    }}
+                                  />
+                                ) : (
+                                  <Box
+                                    key={photo.id}
+                                    sx={{
+                                      width: 56,
+                                      height: 56,
+                                      borderRadius: 1,
+                                      border: '1px solid',
+                                      borderColor: 'divider',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      bgcolor: 'action.hover',
+                                    }}
+                                  >
+                                    <BrokenImageIcon fontSize="small" color="disabled" />
+                                  </Box>
+                                )
+                              ))}
+                              <Typography variant="caption" color="text.secondary">
+                                {stagePhotos[idx].length} photo{stagePhotos[idx].length !== 1 ? 's' : ''}
+                              </Typography>
+                            </Stack>
                           )}
+
+                          {/* Photo capture inline — appears when this stage's camera is active */}
+                          {photoStageIdx === idx && (
+                            <Box sx={{ mt: 1 }}>
+                              <PhotoCapture
+                                onCapture={handleStagePhotoCapture}
+                                uploading={photoUploading}
+                              />
+                              <Button
+                                variant="text"
+                                size="small"
+                                onClick={() => setPhotoStageIdx(null)}
+                                sx={{ mt: 1 }}
+                              >
+                                Cancel photo
+                              </Button>
+                            </Box>
+                          )}
+
+                          <Stack direction="row" spacing={1}>
+                            {!capture.completedAt && (
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => handleLabStageComplete(idx)}
+                              >
+                                Mark Done
+                              </Button>
+                            )}
+                            {photoStageIdx !== idx && (
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<PhotoCameraIcon />}
+                                onClick={() => setPhotoStageIdx(idx)}
+                              >
+                                Add Photo
+                              </Button>
+                            )}
+                          </Stack>
                         </Stack>
                       </CardContent>
                     </Card>
