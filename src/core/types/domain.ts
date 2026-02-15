@@ -3,6 +3,7 @@ import type {
   EnergyLevel,
   EngineStage,
   EvidenceType,
+  LabSessionStatus,
   ProjectPhase,
   RoutineItemKey,
   SessionResult,
@@ -330,14 +331,15 @@ export interface Project {
 export interface LabSession {
   id?: string
   childId: string
-  projectId?: string
-  date: string
+  weekKey: string
+  status: LabSessionStatus
+  stage: EngineStage
   mission?: string
   constraints?: string
   roles?: string
-  stages: LabStageCapture[]
-  story?: string
+  stageNotes?: Partial<Record<EngineStage, string>>
   createdAt?: string
+  updatedAt?: string
 }
 
 export interface LabStageCapture {
