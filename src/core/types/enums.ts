@@ -136,6 +136,14 @@ export const SessionSymbol = {
 } as const
 export type SessionSymbol = (typeof SessionSymbol)[keyof typeof SessionSymbol]
 
+export const StreamKey = {
+  DecodeRead: 'decode_read',
+  SpellWrite: 'spell_write',
+  SpeakExplain: 'speak_explain',
+  Other: 'other',
+} as const
+export type StreamKey = (typeof StreamKey)[keyof typeof StreamKey]
+
 export const RoutineItemKey = {
   Handwriting: 'handwriting',
   Spelling: 'spelling',
