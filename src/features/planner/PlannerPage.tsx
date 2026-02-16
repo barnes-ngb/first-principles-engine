@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
+import ChatIcon from '@mui/icons-material/Chat'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import DeleteIcon from '@mui/icons-material/Delete'
 import Alert from '@mui/material/Alert'
@@ -87,6 +89,7 @@ function guessSubjectBucket(text: string): SubjectBucket {
 }
 
 export default function PlannerPage() {
+  const navigate = useNavigate()
   const familyId = useFamilyId()
   const {
     children,
@@ -415,10 +418,21 @@ export default function PlannerPage() {
 
   return (
     <Page>
-      <Typography variant="h4" component="h1">Plan My Week</Typography>
-      <Typography color="text.secondary" sx={{ mb: 2 }}>
-        Upload workbook photos, review assignments, and generate a weekly plan.
-      </Typography>
+      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" useFlexGap>
+        <Box>
+          <Typography variant="h4" component="h1">Plan My Week</Typography>
+          <Typography color="text.secondary" sx={{ mb: 2 }}>
+            Upload workbook photos, review assignments, and generate a weekly plan.
+          </Typography>
+        </Box>
+        <Button
+          variant="contained"
+          startIcon={<ChatIcon />}
+          onClick={() => navigate('/planner/chat')}
+        >
+          Planner Chat (Recommended)
+        </Button>
+      </Stack>
 
       <ChildSelector
         children={children}

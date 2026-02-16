@@ -191,6 +191,19 @@ export const SkillLevel = {
 } as const
 export type SkillLevel = (typeof SkillLevel)[keyof typeof SkillLevel]
 
+export const PlannerConversationStatus = {
+  Draft: 'draft',
+  Applied: 'applied',
+} as const
+export type PlannerConversationStatus =
+  (typeof PlannerConversationStatus)[keyof typeof PlannerConversationStatus]
+
+export const ChatMessageRole = {
+  User: 'user',
+  Assistant: 'assistant',
+} as const
+export type ChatMessageRole = (typeof ChatMessageRole)[keyof typeof ChatMessageRole]
+
 export const RoutineItemKey = {
   Handwriting: 'handwriting',
   Spelling: 'spelling',
