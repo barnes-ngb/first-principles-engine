@@ -320,6 +320,20 @@ export interface DailyPlan {
   completedSessionIds?: string[]
 }
 
+/** An append-only entry added each time a session is completed for a project. */
+export interface SessionLogEntry {
+  /** The lab session doc ID. */
+  sessionId: string
+  /** Date the session was completed (YYYY-MM-DD). */
+  dateKey: string
+  /** Short summary of what happened. */
+  summary: string
+  /** Number of artifacts (photos/notes/audio) captured. */
+  artifactCount: number
+  /** "What changed for next time?" response. */
+  whatChanged?: string
+}
+
 export interface Project {
   id?: string
   childId: string
@@ -343,6 +357,8 @@ export interface Project {
   deletedBy?: string
   /** Archive timestamp (ISO string). Archived projects are hidden from the active list. */
   archivedAt?: string
+  /** Append-only log of completed sessions. */
+  sessionLog?: SessionLogEntry[]
 }
 
 export interface LabSession {
@@ -363,6 +379,12 @@ export interface LabSession {
   stageDone?: Partial<Record<EngineStage, boolean>>
   createdAt?: string
   updatedAt?: string
+  /** "What changed for next time?" — captured on finish. */
+  finishWhatChanged?: string
+  /** "Next step (Plan)?" — captured on finish. */
+  finishNextStep?: string
+  /** Short summary captured on finish. */
+  finishSummary?: string
 }
 
 export interface LabStageCapture {
