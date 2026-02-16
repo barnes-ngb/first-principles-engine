@@ -310,6 +310,19 @@ export default function WeekPage() {
         pageKey="week"
         text="This is the plan/targets for the week (not what was done). Completion comes from Daily Logs."
       />
+      {canEdit && (
+        <SectionCard title="Shelly Planner">
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+              Generate a plan from workbook photos and skill snapshots.
+            </Typography>
+            <Button variant="contained" size="small" onClick={() => navigate('/planner')}>
+              Generate from Photos
+            </Button>
+          </Stack>
+        </SectionCard>
+      )}
+
       <SectionCard title={`Week Plan (${weekPlan.startDate})`}>
         <Stack spacing={2}>
           <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
