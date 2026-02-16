@@ -57,8 +57,9 @@ import {
   uploadArtifactFile,
 } from '../../core/firebase/upload'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, DayLog, LadderCardDefinition } from '../../core/types/domain'
+import type { Artifact, ChecklistItem as ChecklistItemType, DayLog, LadderCardDefinition } from '../../core/types/domain'
 import { getLaddersForChild } from '../ladders/laddersCatalog'
+import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
   DayBlockType,
   EngineStage,
@@ -123,6 +124,8 @@ export default function TodayPage() {
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
+  const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
+  const [teachHelperOpen, setTeachHelperOpen] = useState(false)
   const [artifactForm, setArtifactForm] = useState({
     childId: selectedChildId,
     evidenceType: EvidenceType.Note as EvidenceType,
@@ -879,21 +882,34 @@ export default function TodayPage() {
                     {block.checklist && block.checklist.length > 0 ? (
                       <Stack spacing={0.5}>
                         {block.checklist.map((item, itemIndex) => (
-                          <FormControlLabel
-                            key={`${item.label}-${itemIndex}`}
-                            control={
-                              <Checkbox
-                                checked={item.completed}
-                                size="small"
-                                onChange={() =>
-                                  handleChecklistToggle(index, itemIndex)
-                                }
-                              />
-                            }
-                            label={
-                              <Typography variant="body2">{item.label}</Typography>
-                            }
-                          />
+                          <Stack key={`${item.label}-${itemIndex}`} direction="row" spacing={0.5} alignItems="center">
+                            <FormControlLabel
+                              sx={{ flex: 1 }}
+                              control={
+                                <Checkbox
+                                  checked={item.completed}
+                                  size="small"
+                                  onChange={() =>
+                                    handleChecklistToggle(index, itemIndex)
+                                  }
+                                />
+                              }
+                              label={
+                                <Typography variant="body2">{item.label}</Typography>
+                              }
+                            />
+                            <Button
+                              size="small"
+                              variant="text"
+                              onClick={() => {
+                                setTeachHelperItem(item)
+                                setTeachHelperOpen(true)
+                              }}
+                              sx={{ fontSize: '0.7rem', minWidth: 'auto', px: 0.5 }}
+                            >
+                              Help
+                            </Button>
+                          </Stack>
                         ))}
                       </Stack>
                     ) : (
@@ -1172,6 +1188,18 @@ export default function TodayPage() {
           )}
         </Stack>
       </SectionCard>
+
+      {selectedChildId && (
+        <TeachHelperDialog
+          open={teachHelperOpen}
+          onClose={() => { setTeachHelperOpen(false); setTeachHelperItem(null) }}
+          familyId={familyId}
+          childId={selectedChildId}
+          childName={selectedChild?.name ?? ''}
+          item={teachHelperItem}
+          ladders={cardLadders}
+        />
+      )}
 
       <Snackbar
         open={snackMessage !== null}

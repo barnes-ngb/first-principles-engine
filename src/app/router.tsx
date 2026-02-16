@@ -2,9 +2,11 @@ import { Navigate, Outlet, RouterProvider, createBrowserRouter } from 'react-rou
 import { AppShell } from './AppShell'
 import RequireParent from '../components/RequireParent'
 import EnginePage from '../features/engine/EnginePage'
+import SkillSnapshotPage from '../features/evaluation/SkillSnapshotPage'
 import KidsPage from '../features/kids/KidsPage'
 import LaddersPage from '../features/ladders/LaddersPage'
 import NotFoundPage from '../features/NotFoundPage'
+import PlannerPage from '../features/planner/PlannerPage'
 import ProjectBoardPage from '../features/projects/ProjectBoardPage'
 import EvaluationsPage from '../features/records/EvaluationsPage'
 import PortfolioPage from '../features/records/PortfolioPage'
@@ -39,6 +41,8 @@ const routes = [
         ],
       },
       { path: '/engine', element: <EnginePage /> },
+      { path: '/planner', element: <PlannerPage /> },
+      { path: '/evaluation', element: <SkillSnapshotPage /> },
       { path: '/ladders', element: <LaddersPage /> },
       { path: '/kids', element: <KidsPage /> },
       { path: '/records', element: <RecordsPage /> },

@@ -1,13 +1,16 @@
 import type {
+  AssignmentAction,
   DayBlockType,
   EnergyLevel,
   EngineStage,
   EvidenceType,
   LabSessionStatus,
+  PlannerSessionStatus,
   ProjectPhase,
   RoutineItemKey,
   SessionResult,
   SessionSymbol,
+  SkillLevel,
   StreamKey,
   StreamId,
   SubjectBucket,
@@ -180,12 +183,20 @@ export interface DayBlock {
   checklist?: ChecklistItem[]
   sessionIds?: string[]
   artifactIds?: string[]
+  /** Skill tags for engine/ladder alignment */
+  skillTags?: SkillTag[]
+  /** Optional ladder rung reference */
+  ladderRef?: { ladderId: string; rungId: string }
 }
 
 export interface ChecklistItem {
   id?: string
   label: string
   completed: boolean
+  /** Skill tags for engine/ladder alignment */
+  skillTags?: SkillTag[]
+  /** Optional ladder rung reference */
+  ladderRef?: { ladderId: string; rungId: string }
 }
 
 export interface ArtifactTags {
@@ -463,4 +474,126 @@ export interface LadderProgress {
   streakCount: number
   lastSupportLevel: SupportLevel
   history: LadderSessionEntry[]
+}
+
+// ── Skill Tagging ──────────────────────────────────────────────
+
+/** Dot-delimited skill tag: domain.area.skill.level */
+export type SkillTag = string
+
+// ── Lincoln Evaluation — Skill Snapshot ────────────────────────
+
+export interface PrioritySkill {
+  tag: SkillTag
+  label: string
+  level: SkillLevel
+  notes?: string
+}
+
+export interface SupportDefault {
+  label: string
+  description: string
+}
+
+export interface StopRule {
+  label: string
+  trigger: string
+  action: string
+}
+
+export interface EvidenceDefinition {
+  label: string
+  description: string
+}
+
+export interface SkillSnapshot {
+  id?: string
+  childId: string
+  prioritySkills: PrioritySkill[]
+  supports: SupportDefault[]
+  stopRules: StopRule[]
+  evidenceDefinitions: EvidenceDefinition[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+// ── Shelly Planner ─────────────────────────────────────────────
+
+export interface AppBlock {
+  label: string
+  defaultMinutes: number
+  notes?: string
+}
+
+export interface PlannerSession {
+  id?: string
+  childId: string
+  weekKey: string
+  status: PlannerSessionStatus
+  availableHoursPerDay: number
+  appBlocks: AppBlock[]
+  /** Photo artifact IDs uploaded for extraction */
+  photoIds: string[]
+  assignments: AssignmentCandidate[]
+  /** The generated draft weekly plan items */
+  draftPlan: WeeklyPlanItem[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface AssignmentCandidate {
+  id: string
+  subjectBucket: SubjectBucket
+  workbookName: string
+  lessonName: string
+  pageRange?: string
+  estimatedMinutes: number
+  difficultyCues: string[]
+  /** Photo artifact ID this was extracted from */
+  sourcePhotoId?: string
+  /** Action decided by planner/user */
+  action: AssignmentAction
+  /** Skip/modify suggestion, if any */
+  skipSuggestion?: SkipSuggestion
+}
+
+export interface SkipSuggestion {
+  action: 'skip' | 'modify'
+  reason: string
+  replacement: string
+  evidence: string
+}
+
+export interface WeeklyPlanItem {
+  id: string
+  day: string
+  title: string
+  subjectBucket: SubjectBucket
+  estimatedMinutes: number
+  /** Source assignment candidate ID */
+  assignmentId?: string
+  /** Whether this is an app block */
+  isAppBlock?: boolean
+  skillTags: SkillTag[]
+  ladderRef?: { ladderId: string; rungId: string }
+  skipSuggestion?: SkipSuggestion
+  accepted: boolean
+}
+
+// ── Lesson Cards ───────────────────────────────────────────────
+
+export interface LessonCard {
+  id?: string
+  childId: string
+  planItemId?: string
+  title: string
+  durationMinutes: number
+  objective: string
+  materials: string[]
+  steps: string[]
+  supports: string[]
+  evidenceChecks: string[]
+  skillTags: SkillTag[]
+  ladderRef?: { ladderId: string; rungId: string }
+  createdAt?: string
 }
