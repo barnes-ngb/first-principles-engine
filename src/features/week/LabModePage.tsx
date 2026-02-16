@@ -222,13 +222,18 @@ export default function LabModePage() {
   const [weekArtifacts, setWeekArtifacts] = useState<Artifact[]>([])
   const [weekPhotoUrls, setWeekPhotoUrls] = useState<Record<string, string | null>>({})
 
+  // Reset stale artifact data when the load-key changes (render-time reset)
+  const artifactLoadKey = `${familyId}|${selectedChildId}|${weekKey}`
+  const [prevArtifactLoadKey, setPrevArtifactLoadKey] = useState(artifactLoadKey)
+  if (prevArtifactLoadKey !== artifactLoadKey) {
+    setPrevArtifactLoadKey(artifactLoadKey)
+    setWeekArtifacts([])
+    setWeekPhotoUrls({})
+  }
+
   // Load all artifacts for the selected child + week (for photo strip + session counts)
   useEffect(() => {
-    if (!familyId || !selectedChildId || !weekKey) {
-      setWeekArtifacts([])
-      setWeekPhotoUrls({})
-      return
-    }
+    if (!familyId || !selectedChildId || !weekKey) return
     let cancelled = false
     const load = async () => {
       try {

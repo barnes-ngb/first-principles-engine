@@ -82,6 +82,7 @@ export function useDayLog({
         await setDoc(dayLogRef, { ...safeLog, updatedAt: now })
         setSaveState('saved')
         setLastSavedAt(now)
+        setSnackMessage({ text: 'Saved', severity: 'success' })
       } catch (err) {
         console.error('Failed to save day log', err)
         setSaveState('error')
@@ -108,21 +109,11 @@ export function useDayLog({
     [writeDayLog],
   )
 
-  // Show a brief "Saved" toast when save completes (mobile-friendly feedback)
-  useEffect(() => {
-    if (saveState === 'saved') {
-      setSnackMessage({ text: 'Saved', severity: 'success' })
-    }
-  }, [saveState])
-
   // --- Data loading ---
 
   // Load DayLog for selected child + date (real-time, with legacy migration)
   useEffect(() => {
-    if (!selectedChildId || !dayLogRef) {
-      setDayLog(null)
-      return
-    }
+    if (!selectedChildId || !dayLogRef) return
     let migratedOrCreated = false
 
     const unsubscribe = onSnapshot(

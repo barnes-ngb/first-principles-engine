@@ -189,7 +189,7 @@ export default function TodayPage() {
     return () => {
       isMounted = false
     }
-  }, [familyId, today, selectedChildId])
+  }, [familyId, today, selectedChildId, setSnackMessage])
 
   const selectedLadder = useMemo(
     () => cardLadders.find((l) => l.ladderKey === artifactForm.ladderId),
@@ -298,7 +298,7 @@ export default function TodayPage() {
       console.error('Failed to save artifact', err)
       setSnackMessage({ text: 'Failed to save note.', severity: 'error' })
     }
-  }, [artifactForm, buildArtifactBase, familyId, today])
+  }, [artifactForm, buildArtifactBase, familyId, today, setSnackMessage])
 
   const handlePhotoCapture = useCallback(
     async (file: File) => {
@@ -325,7 +325,7 @@ export default function TodayPage() {
         setMediaUploading(false)
       }
     },
-    [artifactForm, buildArtifactBase, familyId, today],
+    [artifactForm, buildArtifactBase, familyId, today, setSnackMessage],
   )
 
   const handleAudioCapture = useCallback(
@@ -352,7 +352,7 @@ export default function TodayPage() {
         setMediaUploading(false)
       }
     },
-    [artifactForm, buildArtifactBase, familyId, today],
+    [artifactForm, buildArtifactBase, familyId, today, setSnackMessage],
   )
 
   const handleStartLinking = useCallback((artifact: Artifact) => {
@@ -395,7 +395,7 @@ export default function TodayPage() {
         setSnackMessage({ text: 'Failed to link artifact.', severity: 'error' })
       }
     },
-    [familyId, linkingArtifactId, linkingLadderId],
+    [familyId, linkingArtifactId, linkingLadderId, setSnackMessage],
   )
 
   const getArtifactLinkLabel = useCallback(
