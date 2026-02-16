@@ -18,7 +18,7 @@ export interface UseLabSessionResult {
   /** Start or continue a lab session (upsert). */
   startOrContinue: () => Promise<void>
   /** Update mutable fields on the lab session. */
-  updateSession: (fields: Partial<Pick<LabSession, 'stage' | 'status' | 'mission' | 'constraints' | 'roles' | 'stageNotes' | 'stageDone'>>) => Promise<void>
+  updateSession: (fields: Partial<Pick<LabSession, 'stage' | 'status' | 'mission' | 'constraints' | 'roles' | 'stageNotes' | 'stageDone' | 'finishWhatChanged' | 'finishNextStep' | 'finishSummary'>>) => Promise<void>
 }
 
 /**
@@ -101,7 +101,7 @@ export function useLabSession(childId: string, weekKey: string, projectId?: stri
   }, [familyId, childId, weekKey, projectId, labSession])
 
   const updateSession = useCallback(
-    async (fields: Partial<Pick<LabSession, 'stage' | 'status' | 'mission' | 'constraints' | 'roles' | 'stageNotes' | 'stageDone'>>) => {
+    async (fields: Partial<Pick<LabSession, 'stage' | 'status' | 'mission' | 'constraints' | 'roles' | 'stageNotes' | 'stageDone' | 'finishWhatChanged' | 'finishNextStep' | 'finishSummary'>>) => {
       if (!childId || !weekKey || !familyId || !projectId) return
 
       const docId = labSessionDocId(weekKey, childId, projectId)
