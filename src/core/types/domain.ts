@@ -2,10 +2,13 @@ import type {
   AssignmentAction,
   ChatMessageRole,
   DayBlockType,
+  DayType,
   EnergyLevel,
   EngineStage,
   EvidenceType,
   LabSessionStatus,
+  MasteryGate,
+  PaceStatus,
   PlannerConversationStatus,
   PlannerSessionStatus,
   ProjectPhase,
@@ -512,6 +515,8 @@ export interface PrioritySkill {
   label: string
   level: SkillLevel
   notes?: string
+  /** Mastery gate level (0-3). Only Level 3 unlocks skip recommendations. */
+  masteryGate?: MasteryGate
 }
 
 export interface SupportDefault {
@@ -682,4 +687,102 @@ export interface LessonCard {
   skillTags: SkillTag[]
   ladderRef?: { ladderId: string; rungId: string }
   createdAt?: string
+}
+
+// ── Workbook Config (Pace Gauge) ──────────────────────────────
+
+export interface WorkbookConfig {
+  id?: string
+  childId: string
+  /** Workbook/curriculum name */
+  name: string
+  subjectBucket: SubjectBucket
+  /** Total number of lessons or pages */
+  totalUnits: number
+  /** Current position (lesson/page number) */
+  currentPosition: number
+  /** Unit label: "lesson", "page", "chapter" */
+  unitLabel: string
+  /** Target finish date (YYYY-MM-DD) */
+  targetFinishDate: string
+  /** Typical school days per week */
+  schoolDaysPerWeek: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface PaceGaugeResult {
+  workbookName: string
+  /** Units required per week to stay on target */
+  requiredPerWeek: number
+  /** Units currently planned per week */
+  plannedPerWeek: number
+  /** Positive = ahead, negative = behind */
+  delta: number
+  status: PaceStatus
+  /** Human-readable suggestion */
+  suggestion: string
+  /** Projected completion date at current pace */
+  projectedFinishDate: string
+  /** Number of buffer days available */
+  bufferDays: number
+}
+
+// ── Light Day Template (Appointment Resilience) ───────────────
+
+export interface LightDayTemplate {
+  /** Items on a light day */
+  items: LightDayItem[]
+  /** Total estimated minutes */
+  totalMinutes: number
+}
+
+export interface LightDayItem {
+  title: string
+  subjectBucket: SubjectBucket
+  estimatedMinutes: number
+  skillTags: SkillTag[]
+  isAppBlock?: boolean
+}
+
+// ── Day Type Config (per day in weekly plan) ──────────────────
+
+export interface DayTypeConfig {
+  day: string
+  dayType: DayType
+  /** Optional note (e.g. "Dr. appointment at 2pm") */
+  note?: string
+}
+
+// ── Start-Anyway Protocol (Motivation) ────────────────────────
+
+export interface StartAnywayScript {
+  /** The trigger situation (e.g. "Refusal/complaining > 60s") */
+  trigger: string
+  /** Two modality choices for the same skill */
+  choices: ModalityChoice[]
+  /** Timer duration in minutes */
+  timerMinutes: number
+  /** Whether to do the first rep together */
+  firstRepTogether: boolean
+  /** Immediate reward description */
+  winReward: string
+  /** Related skill tags */
+  skillTags: SkillTag[]
+}
+
+export interface ModalityChoice {
+  label: string
+  description: string
+}
+
+// ── Skip Advisor Result ───────────────────────────────────────
+
+export interface SkipAdvisorResult {
+  action: 'keep' | 'modify' | 'skip'
+  rationale: string
+  /** The mastery gate level that triggered this recommendation */
+  evidenceLevel?: MasteryGate
+  /** Related skill tag */
+  skillTag?: SkillTag
 }
