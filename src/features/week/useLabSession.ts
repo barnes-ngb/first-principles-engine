@@ -72,6 +72,17 @@ export const defaultFormState = (
   rungId: '',
 })
 
+// ── Project phase ordering (module-level constants) ───────────
+
+const phases: ProjectPhaseType[] = [
+  ProjectPhase.Plan,
+  ProjectPhase.Build,
+  ProjectPhase.Test,
+  ProjectPhase.Improve,
+]
+
+const phaseIndex = (phase: ProjectPhaseType): number => phases.indexOf(phase)
+
 // ── Helpers ────────────────────────────────────────────────────
 
 /** Resolve a photo artifact URL defensively. */
@@ -368,15 +379,6 @@ export function useLabProjects(
 
   // ── CRUD ──────────────────────────────────────────────────────
 
-  const phases: ProjectPhaseType[] = [
-    ProjectPhase.Plan,
-    ProjectPhase.Build,
-    ProjectPhase.Test,
-    ProjectPhase.Improve,
-  ]
-
-  const phaseIndex = (phase: ProjectPhaseType): number => phases.indexOf(phase)
-
   const handleCreateProject = useCallback(async (title: string) => {
     if (!title.trim() || !selectedChildId || projectSaving) return
     setProjectSaving(true)
@@ -594,12 +596,17 @@ export function useSessionArtifacts(
   const [sessionArtifacts, setSessionArtifacts] = useState<Artifact[]>([])
   const [artifactUrls, setArtifactUrls] = useState<Record<string, string | null>>({})
 
+  // Reset stale artifact data when the load-key changes (render-time reset)
+  const sessionArtifactKey = `${familyId}|${selectedChildId}|${sessionDocId ?? ''}`
+  const [prevSessionArtifactKey, setPrevSessionArtifactKey] = useState(sessionArtifactKey)
+  if (prevSessionArtifactKey !== sessionArtifactKey) {
+    setPrevSessionArtifactKey(sessionArtifactKey)
+    setSessionArtifacts([])
+    setArtifactUrls({})
+  }
+
   useEffect(() => {
-    if (!familyId || !selectedChildId || !sessionDocId) {
-      setSessionArtifacts([])
-      setArtifactUrls({})
-      return
-    }
+    if (!familyId || !selectedChildId || !sessionDocId) return
 
     let cancelled = false
     const load = async () => {
