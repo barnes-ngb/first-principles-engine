@@ -14,7 +14,6 @@ import ContextBar from '../../components/ContextBar'
 import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import SaveIndicator from '../../components/SaveIndicator'
-import type { SaveState } from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useProfile } from '../../core/profile/useProfile'
@@ -22,10 +21,11 @@ import {
   weeksCollection,
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useDebounce } from '../../core/hooks/useDebounce'
+import { useSaveState } from '../../core/hooks/useSaveState'
 import type { Child, WeekPlan } from '../../core/types/domain'
-import { parseDateYmd } from '../../lib/format'
-import { useDebounce } from '../../lib/useDebounce'
-import { getWeekRange } from '../engine/engine.logic'
+import { parseDateYmd } from '../../core/utils/format'
+import { getWeekRange } from '../../core/utils/time'
 import { navTo } from '../../core/utils/dateKey'
 
 const createDefaultWeekPlan = (
@@ -71,7 +71,7 @@ export default function WeekPage() {
   )
   const [newMaterial, setNewMaterial] = useState('')
   const [newStep, setNewStep] = useState('')
-  const [saveState, setSaveState] = useState<SaveState>('idle')
+  const { saveState, withSave } = useSaveState()
 
   useEffect(() => {
     let creatingDefault = false
@@ -129,16 +129,9 @@ export default function WeekPage() {
 
   const writeField = useCallback(
     async (field: string, value: unknown) => {
-      setSaveState('saving')
-      try {
-        await updateDoc(weekPlanRef, { [field]: value })
-        setSaveState('saved')
-      } catch (err) {
-        console.error('Failed to save week plan field', err)
-        setSaveState('error')
-      }
+      await withSave(() => updateDoc(weekPlanRef, { [field]: value }))
     },
-    [weekPlanRef],
+    [weekPlanRef, withSave],
   )
 
   const debouncedWriteField = useDebounce(
@@ -157,16 +150,9 @@ export default function WeekPage() {
 
   const writeBuildLab = useCallback(
     async (updatedBuildLab: WeekPlan['buildLab']) => {
-      setSaveState('saving')
-      try {
-        await updateDoc(weekPlanRef, { buildLab: updatedBuildLab })
-        setSaveState('saved')
-      } catch (err) {
-        console.error('Failed to save build lab', err)
-        setSaveState('error')
-      }
+      await withSave(() => updateDoc(weekPlanRef, { buildLab: updatedBuildLab }))
     },
-    [weekPlanRef],
+    [weekPlanRef, withSave],
   )
 
   const debouncedWriteBuildLab = useDebounce(
@@ -246,16 +232,9 @@ export default function WeekPage() {
       )
       setNewGoalByChild((prev) => ({ ...prev, [childId]: '' }))
       setWeekPlan({ ...weekPlan, childGoals: updatedChildGoals })
-      setSaveState('saving')
-      try {
-        await updateDoc(weekPlanRef, { childGoals: updatedChildGoals })
-        setSaveState('saved')
-      } catch (err) {
-        console.error('Failed to save goal', err)
-        setSaveState('error')
-      }
+      await withSave(() => updateDoc(weekPlanRef, { childGoals: updatedChildGoals }))
     },
-    [newGoalByChild, weekPlan, weekPlanRef],
+    [newGoalByChild, weekPlan, weekPlanRef, withSave],
   )
 
   const handleRemoveGoal = useCallback(
@@ -269,16 +248,9 @@ export default function WeekPage() {
         }
       })
       setWeekPlan({ ...weekPlan, childGoals: updatedChildGoals })
-      setSaveState('saving')
-      try {
-        await updateDoc(weekPlanRef, { childGoals: updatedChildGoals })
-        setSaveState('saved')
-      } catch (err) {
-        console.error('Failed to remove goal', err)
-        setSaveState('error')
-      }
+      await withSave(() => updateDoc(weekPlanRef, { childGoals: updatedChildGoals }))
     },
-    [weekPlan, weekPlanRef],
+    [weekPlan, weekPlanRef, withSave],
   )
 
   if (!weekPlan) {

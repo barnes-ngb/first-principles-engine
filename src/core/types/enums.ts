@@ -39,6 +39,19 @@ export const DayBlockType = {
 } as const
 export type DayBlockType = (typeof DayBlockType)[keyof typeof DayBlockType]
 
+/** Human-readable label for each block type. */
+export const DayBlockLabel: Record<DayBlockType, string> = {
+  [DayBlockType.Formation]: 'Formation',
+  [DayBlockType.Reading]: 'Reading',
+  [DayBlockType.Speech]: 'Speech',
+  [DayBlockType.Math]: 'Math',
+  [DayBlockType.Together]: 'Together',
+  [DayBlockType.Movement]: 'Movement',
+  [DayBlockType.Project]: 'Project',
+  [DayBlockType.FieldTrip]: 'Field Trip',
+  [DayBlockType.Other]: 'Other',
+}
+
 export const TrackType = {
   Support: 'Support',
   Stretch: 'Stretch',

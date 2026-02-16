@@ -58,7 +58,75 @@ const items = snapshot.docs.map((doc) => ({
 
 ## Project Structure
 
-- `src/core/types/` — Domain types (`domain.ts`) and enum-like constants (`enums.ts`)
+- `src/app/` — App shell, routing, theme provider
 - `src/components/` — Shared UI components
-- `src/features/` — Feature modules (engine, today, week, etc.)
-- `src/firebase/` — Firebase/Firestore setup and collections
+- `src/core/auth/` — Auth context and hooks
+- `src/core/firebase/` — Firebase/Firestore setup, collections, upload
+- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useDebounce, useSaveState)
+- `src/core/types/` — Domain types (`domain.ts`) and enum-like constants (`enums.ts`)
+- `src/core/utils/` — Date/time utilities, formatting, doc ID parsing
+- `src/features/` — Feature modules (engine, today, week, ladders, sessions, records, etc.)
+
+## North Star
+
+**First Principles Engine** is a phone-fast family learning notebook that:
+- expresses our Charter/Ethos
+- runs daily school (Plan A / Plan B)
+- captures evidence artifacts (notes/photos/audio)
+- visualizes weekly progress (Flywheel)
+- tracks growth (Ladders + Milestones)
+- exports records (MO-friendly: logs + hours + portfolio + eval)
+
+## Project Principles
+
+1. **Frictionless daily use**: "Today" must be usable in under 60 seconds.
+2. **Small artifacts > perfect documentation**: capture evidence quickly.
+3. **Narration counts**: audio evidence is first-class (especially for Lincoln).
+4. **Tags power everything**: engineStage + subjectBucket + location + ladderRef.
+5. **Defaults everywhere**: reduce decision fatigue.
+6. **No heroics**: ship thin slices; keep UI simple; iterate.
+
+## Repo Conventions
+
+### Dates
+Store dates as `YYYY-MM-DD` strings for easy Firestore queries and sorting.
+
+### Tags (required for artifacts)
+- `childId`, `engineStage`, `subjectBucket`, `location`, `domain`
+- Optional: `ladderRef`, `weekId`, `dayId`, `pillar`
+
+### Mobile-first UI
+- Large tap targets, minimal text entry
+- Prefer dropdowns + templates
+- Keep forms short
+
+### Commit style
+Use clear prefixes: `chore:`, `feat:`, `fix:`, `refactor:`, `docs:`, `test:`
+
+Aim for commits that implement one component/flow, can be reverted cleanly, and do not mix scope areas.
+
+## Firestore Collections
+
+All under `families/{familyId}/`:
+
+| Collection | Purpose |
+|---|---|
+| `children` | Child profiles |
+| `weeks` | Weekly plans |
+| `days` | Daily logs |
+| `artifacts` | Evidence artifacts (photos/audio/notes) |
+| `hours` | Manual hours entries |
+| `hoursAdjustments` | Hours adjustments |
+| `evaluations` | Skill evaluations |
+| `ladders` | Skill ladder definitions |
+| `ladderProgress` | Per-child ladder progression |
+| `milestoneProgress` | Milestone achievement tracking |
+| `sessions` | Skill practice sessions |
+| `dailyPlans` | Daily session plans |
+| `projects` | Long-form projects |
+| `weeklyScores` | Weekly score summaries |
+| `labSessions` | Saturday lab sessions |
+| `dadLab` | Dad lab weeks |
+| `skillSnapshots` | Per-child skill snapshots |
+| `plannerSessions` | Planner workflow sessions |
+| `lessonCards` | Lesson card definitions |
