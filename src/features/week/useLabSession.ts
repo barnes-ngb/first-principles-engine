@@ -75,7 +75,7 @@ export const defaultFormState = (
 // ── Helpers ────────────────────────────────────────────────────
 
 /** Resolve a photo artifact URL defensively. */
-async function resolvePhotoUrl(artifact: Artifact, familyId: string): Promise<string | null> {
+export async function resolvePhotoUrl(artifact: Artifact, familyId: string): Promise<string | null> {
   if (artifact.uri) return artifact.uri
   if (artifact.storagePath) {
     try {
@@ -106,7 +106,7 @@ export interface UseLabSessionResult {
   /** Start or continue a lab session (upsert). */
   startOrContinue: () => Promise<void>
   /** Update mutable fields on the lab session. */
-  updateSession: (fields: Partial<Pick<LabSession, 'stage' | 'status' | 'mission' | 'constraints' | 'roles' | 'stageNotes' | 'stageDone'>>) => Promise<void>
+  updateSession: (fields: Partial<Pick<LabSession, 'stage' | 'status' | 'mission' | 'constraints' | 'roles' | 'stageNotes' | 'stageDone' | 'finishWhatChanged' | 'finishNextStep' | 'finishSummary'>>) => Promise<void>
 }
 
 /**
@@ -189,7 +189,7 @@ export function useLabSession(childId: string, weekKey: string, projectId?: stri
   }, [familyId, childId, weekKey, projectId, labSession])
 
   const updateSession = useCallback(
-    async (fields: Partial<Pick<LabSession, 'stage' | 'status' | 'mission' | 'constraints' | 'roles' | 'stageNotes' | 'stageDone'>>) => {
+    async (fields: Partial<Pick<LabSession, 'stage' | 'status' | 'mission' | 'constraints' | 'roles' | 'stageNotes' | 'stageDone' | 'finishWhatChanged' | 'finishNextStep' | 'finishSummary'>>) => {
       if (!childId || !weekKey || !familyId || !projectId) return
 
       const docId = labSessionDocId(weekKey, childId, projectId)
@@ -246,6 +246,14 @@ export interface UseLabProjectsResult {
   setShowUndoSnackbar: (show: boolean) => void
   setUndoProject: (p: Project | null) => void
 
+  // Rename
+  handleRenameOpen: (projectId: string) => void
+  handleRenameConfirm: () => Promise<void>
+  showRenameDialog: boolean
+  setShowRenameDialog: (show: boolean) => void
+  renameTitle: string
+  setRenameTitle: (title: string) => void
+
   // Menu
   menuAnchor: HTMLElement | null
   setMenuAnchor: (el: HTMLElement | null) => void
@@ -275,6 +283,11 @@ export function useLabProjects(
   const [showUndoSnackbar, setShowUndoSnackbar] = useState(false)
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const [menuProjectId, setMenuProjectId] = useState<string | null>(null)
+
+  // Rename state
+  const [showRenameDialog, setShowRenameDialog] = useState(false)
+  const [renameProjectId, setRenameProjectId] = useState<string | null>(null)
+  const [renameTitle, setRenameTitle] = useState('')
 
   // Load projects for the selected child
   useEffect(() => {
@@ -489,6 +502,30 @@ export function useLabProjects(
     )
   }, [familyId])
 
+  // ── Rename ────────────────────────────────────────────────────
+
+  const handleRenameOpen = useCallback((projectId: string) => {
+    const proj = projects.find((p) => p.id === projectId)
+    setRenameProjectId(projectId)
+    setRenameTitle(proj?.title ?? '')
+    setShowRenameDialog(true)
+    setMenuAnchor(null)
+    setMenuProjectId(null)
+  }, [projects])
+
+  const handleRenameConfirm = useCallback(async () => {
+    if (!renameProjectId || !renameTitle.trim()) return
+    await updateDoc(doc(projectsCollection(familyId), renameProjectId), {
+      title: renameTitle.trim(),
+      updatedAt: new Date().toISOString(),
+    })
+    setProjects((prev) =>
+      prev.map((p) => (p.id === renameProjectId ? { ...p, title: renameTitle.trim() } : p)),
+    )
+    setShowRenameDialog(false)
+    setRenameProjectId(null)
+  }, [familyId, renameProjectId, renameTitle])
+
   return {
     projects,
     projectsLoading,
@@ -521,6 +558,13 @@ export function useLabProjects(
     showUndoSnackbar,
     setShowUndoSnackbar,
     setUndoProject,
+
+    handleRenameOpen,
+    handleRenameConfirm,
+    showRenameDialog,
+    setShowRenameDialog,
+    renameTitle,
+    setRenameTitle,
 
     menuAnchor,
     setMenuAnchor,
