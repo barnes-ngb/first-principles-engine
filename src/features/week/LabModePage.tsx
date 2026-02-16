@@ -146,6 +146,7 @@ export default function LabModePage() {
     showUndoSnackbar,
     setShowUndoSnackbar,
     setUndoProject,
+    canDeleteProject,
     handleRenameOpen,
     handleRenameConfirm,
     showRenameDialog,
@@ -280,15 +281,6 @@ export default function LabModePage() {
       }
     }
     return counts
-  }, [weekArtifacts])
-
-  /** Whether a project has any artifacts (checks weekArtifacts). */
-  const projectHasArtifacts = useMemo(() => {
-    const ids = new Set<string>()
-    for (const art of weekArtifacts) {
-      if (art.projectId) ids.add(art.projectId)
-    }
-    return (projectId: string): boolean => ids.has(projectId)
   }, [weekArtifacts])
 
   // ── Child selection ────────────────────────────────────────
@@ -733,9 +725,8 @@ export default function LabModePage() {
         >
           {(() => {
             const mp = menuProjectId ? projects.find((p) => p.id === menuProjectId) : null
+            const eligible = mp ? canDeleteProject(mp.id!) : false
             const hasSessions = mp ? projectHasSessions(mp.id!) : false
-            const hasArtifacts = mp ? projectHasArtifacts(mp.id!) : false
-            const canDeleteMenu = mp && !hasSessions && !hasArtifacts
             return [
               <MenuItem
                 key="rename"
@@ -751,7 +742,7 @@ export default function LabModePage() {
                 <ArchiveIcon fontSize="small" sx={{ mr: 1 }} />
                 Archive
               </MenuItem>,
-              canDeleteMenu ? (
+              eligible ? (
                 <MenuItem
                   key="delete"
                   onClick={() => { if (menuProjectId) handleDeleteRequest(menuProjectId) }}
@@ -763,9 +754,9 @@ export default function LabModePage() {
                 <MenuItem key="delete" disabled>
                   <Typography variant="body2" color="text.disabled">
                     {hasSessions
-                      ? "Can't delete — sessions exist"
-                      : hasArtifacts
-                        ? "Can't delete — evidence exists"
+                      ? "Can't delete \u2014 sessions exist"
+                      : mp?.phase !== 'Plan'
+                        ? "Can't delete \u2014 not in Plan phase"
                         : "Can't delete"}
                   </Typography>
                 </MenuItem>
@@ -1336,7 +1327,7 @@ export default function LabModePage() {
         </DialogTitle>
         <DialogContent>
           <Typography>
-            This cannot be undone. Only available when no sessions or evidence exist.
+            This cannot be undone. Delete is only available for projects in the Plan phase with no sessions.
           </Typography>
         </DialogContent>
         <DialogActions>

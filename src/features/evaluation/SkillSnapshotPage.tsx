@@ -35,6 +35,7 @@ import {
   defaultStopRules,
   defaultSupports,
 } from './lincolnDefaults'
+import QuickCheckPanel from './QuickCheckPanel'
 
 const emptySnapshot = (childId: string): SkillSnapshot => ({
   childId,
@@ -211,6 +212,35 @@ export default function SkillSnapshotPage() {
     [snapshot, persist],
   )
 
+  // --- Quick Check handlers (1-tap level update) ---
+  const handleQuickLevelUpdate = useCallback(
+    (skillIndex: number, newLevel: SkillLevel) => {
+      if (!snapshot) return
+      const updated = snapshot.prioritySkills.map((s, i) =>
+        i === skillIndex ? { ...s, level: newLevel } : s,
+      )
+      void persist({ ...snapshot, prioritySkills: updated })
+    },
+    [snapshot, persist],
+  )
+
+  const handleQuickObservation = useCallback(
+    (skillIndex: number, observation: string) => {
+      if (!snapshot) return
+      const skill = snapshot.prioritySkills[skillIndex]
+      const currentNotes = skill.notes ?? ''
+      const timestamp = new Date().toLocaleDateString()
+      const updatedNotes = currentNotes
+        ? `${currentNotes}\n[${timestamp}] ${observation}`
+        : `[${timestamp}] ${observation}`
+      const updated = snapshot.prioritySkills.map((s, i) =>
+        i === skillIndex ? { ...s, notes: updatedNotes } : s,
+      )
+      void persist({ ...snapshot, prioritySkills: updated })
+    },
+    [snapshot, persist],
+  )
+
   // --- Evidence Definitions CRUD ---
   const handleAddEvidence = useCallback(() => {
     if (!snapshot) return
@@ -276,6 +306,17 @@ export default function SkillSnapshotPage() {
               </Button>
             )}
           </Stack>
+
+          {/* Quick Check Prompts (Evaluation Agent) */}
+          {snapshot.prioritySkills.length > 0 && (
+            <SectionCard title="Quick Checks">
+              <QuickCheckPanel
+                snapshot={snapshot}
+                onUpdateSkillLevel={handleQuickLevelUpdate}
+                onAddObservation={handleQuickObservation}
+              />
+            </SectionCard>
+          )}
 
           {/* Priority Skills */}
           <SectionCard title="Priority Skills (1\u20133 targets)">
