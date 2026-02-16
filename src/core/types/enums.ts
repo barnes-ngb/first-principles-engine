@@ -39,6 +39,19 @@ export const DayBlockType = {
 } as const
 export type DayBlockType = (typeof DayBlockType)[keyof typeof DayBlockType]
 
+/** Human-readable label for each block type. */
+export const DayBlockLabel: Record<DayBlockType, string> = {
+  [DayBlockType.Formation]: 'Formation',
+  [DayBlockType.Reading]: 'Reading',
+  [DayBlockType.Speech]: 'Speech',
+  [DayBlockType.Math]: 'Math',
+  [DayBlockType.Together]: 'Together',
+  [DayBlockType.Movement]: 'Movement',
+  [DayBlockType.Project]: 'Project',
+  [DayBlockType.FieldTrip]: 'Field Trip',
+  [DayBlockType.Other]: 'Other',
+}
+
 export const TrackType = {
   Support: 'Support',
   Stretch: 'Stretch',
@@ -177,6 +190,19 @@ export const SkillLevel = {
   Secure: 'secure',
 } as const
 export type SkillLevel = (typeof SkillLevel)[keyof typeof SkillLevel]
+
+export const PlannerConversationStatus = {
+  Draft: 'draft',
+  Applied: 'applied',
+} as const
+export type PlannerConversationStatus =
+  (typeof PlannerConversationStatus)[keyof typeof PlannerConversationStatus]
+
+export const ChatMessageRole = {
+  User: 'user',
+  Assistant: 'assistant',
+} as const
+export type ChatMessageRole = (typeof ChatMessageRole)[keyof typeof ChatMessageRole]
 
 export const RoutineItemKey = {
   Handwriting: 'handwriting',

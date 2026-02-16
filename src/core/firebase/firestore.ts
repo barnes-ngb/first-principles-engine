@@ -21,6 +21,7 @@ import type {
   LadderProgress,
   LessonCard,
   MilestoneProgress,
+  PlannerConversation,
   PlannerSession,
   Project,
   Session,
@@ -220,3 +221,27 @@ export const lessonCardsCollection = (
   familyId: string,
 ): CollectionReference<LessonCard> =>
   collection(db, `families/${familyId}/lessonCards`) as CollectionReference<LessonCard>
+
+// ── Planner Conversations (Chat Planner) ──────────────────────
+
+const plannerConversationConverter: FirestoreDataConverter<PlannerConversation> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as PlannerConversation
+    return {
+      ...data,
+      id: snapshot.id,
+    }
+  },
+}
+
+export const plannerConversationsCollection = (
+  familyId: string,
+): CollectionReference<PlannerConversation> =>
+  collection(db, `families/${familyId}/plannerConversations`).withConverter(
+    plannerConversationConverter,
+  ) as CollectionReference<PlannerConversation>
+
+/** Planner conversation doc ID: {weekKey}_{childId} */
+export const plannerConversationDocId = (weekKey: string, childId: string): string =>
+  `${weekKey}_${childId}`

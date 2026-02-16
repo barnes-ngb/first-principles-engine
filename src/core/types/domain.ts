@@ -1,10 +1,12 @@
 import type {
   AssignmentAction,
+  ChatMessageRole,
   DayBlockType,
   EnergyLevel,
   EngineStage,
   EvidenceType,
   LabSessionStatus,
+  PlannerConversationStatus,
   PlannerSessionStatus,
   ProjectPhase,
   RoutineItemKey,
@@ -600,6 +602,68 @@ export interface WeeklyPlanItem {
   ladderRef?: { ladderId: string; rungId: string }
   skipSuggestion?: SkipSuggestion
   accepted: boolean
+}
+
+// ── Planner Chat (Conversational Planner) ─────────────────────
+
+export interface ChatMessage {
+  id: string
+  role: ChatMessageRole
+  text?: string
+  artifactIds?: string[]
+  /** Labels attached to uploaded photos */
+  photoLabels?: PhotoLabel[]
+  /** Draft plan snapshot attached to this message */
+  draftPlan?: DraftWeeklyPlan
+  createdAt: string
+}
+
+export interface PhotoLabel {
+  artifactId: string
+  subjectBucket: SubjectBucket
+  lessonOrPages: string
+  estimatedMinutes: number
+}
+
+export interface DraftWeeklyPlan {
+  days: DraftDayPlan[]
+  skipSuggestions: SkipSuggestion[]
+  minimumWin: string
+}
+
+export interface DraftDayPlan {
+  day: string
+  timeBudgetMinutes: number
+  items: DraftPlanItem[]
+}
+
+export interface DraftPlanItem {
+  id: string
+  title: string
+  subjectBucket: SubjectBucket
+  estimatedMinutes: number
+  skillTags: SkillTag[]
+  ladderRef?: { ladderId: string; rungId: string }
+  isAppBlock?: boolean
+  skipSuggestion?: SkipSuggestion
+  accepted: boolean
+  assignmentId?: string
+}
+
+export interface PlannerConversation {
+  id?: string
+  childId: string
+  weekKey: string
+  status: PlannerConversationStatus
+  messages: ChatMessage[]
+  /** Current draft plan (updated with each regeneration) */
+  currentDraft?: DraftWeeklyPlan
+  /** Context for plan generation */
+  availableHoursPerDay: number
+  appBlocks: AppBlock[]
+  assignments: AssignmentCandidate[]
+  createdAt?: string
+  updatedAt?: string
 }
 
 // ── Lesson Cards ───────────────────────────────────────────────

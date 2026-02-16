@@ -10,7 +10,7 @@ import WbSunnyIcon from '@mui/icons-material/WbSunny'
 import type { SxProps, Theme } from '@mui/material/styles'
 import type { ReactElement } from 'react'
 
-import { DayBlockType } from '../../core/types/enums'
+import { DayBlockLabel, DayBlockType } from '../../core/types/enums'
 
 interface BlockMeta {
   icon: ReactElement
@@ -24,46 +24,46 @@ export const blockMeta: Record<DayBlockType, BlockMeta> = {
   [DayBlockType.Formation]: {
     icon: <WbSunnyIcon sx={iconSx} />,
     color: '#f59e0b',
-    label: 'Formation',
+    label: DayBlockLabel[DayBlockType.Formation],
   },
   [DayBlockType.Reading]: {
     icon: <MenuBookIcon sx={iconSx} />,
     color: '#3b82f6',
-    label: 'Reading',
+    label: DayBlockLabel[DayBlockType.Reading],
   },
   [DayBlockType.Speech]: {
     icon: <RecordVoiceOverIcon sx={iconSx} />,
     color: '#8b5cf6',
-    label: 'Speech',
+    label: DayBlockLabel[DayBlockType.Speech],
   },
   [DayBlockType.Math]: {
     icon: <CalculateIcon sx={iconSx} />,
     color: '#10b981',
-    label: 'Math',
+    label: DayBlockLabel[DayBlockType.Math],
   },
   [DayBlockType.Together]: {
     icon: <GroupsIcon sx={iconSx} />,
     color: '#ec4899',
-    label: 'Together',
+    label: DayBlockLabel[DayBlockType.Together],
   },
   [DayBlockType.Movement]: {
     icon: <DirectionsRunIcon sx={iconSx} />,
     color: '#f97316',
-    label: 'Movement',
+    label: DayBlockLabel[DayBlockType.Movement],
   },
   [DayBlockType.Project]: {
     icon: <BuildIcon sx={iconSx} />,
     color: '#14b8a6',
-    label: 'Project',
+    label: DayBlockLabel[DayBlockType.Project],
   },
   [DayBlockType.FieldTrip]: {
     icon: <ExploreIcon sx={iconSx} />,
     color: '#6366f1',
-    label: 'Field Trip',
+    label: DayBlockLabel[DayBlockType.FieldTrip],
   },
   [DayBlockType.Other]: {
     icon: <MoreHorizIcon sx={iconSx} />,
     color: '#6b7280',
-    label: 'Other',
+    label: DayBlockLabel[DayBlockType.Other],
   },
 }

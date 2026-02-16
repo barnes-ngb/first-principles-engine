@@ -1,5 +1,5 @@
 import type { Child, DayLog, WeekPlan } from '../../core/types/domain'
-import { DayBlockType } from '../../core/types/enums'
+import { DayBlockLabel, DayBlockType } from '../../core/types/enums'
 import type { DayBlockType as DayBlockTypeValue } from '../../core/types/enums'
 import { ALL_DAY_BLOCKS } from '../today/daylog.model'
 import { getTemplateForChild } from '../today/dailyPlanTemplates'
@@ -44,19 +44,6 @@ const defaultInstructions: Record<DayBlockTypeValue, string[]> = {
   [DayBlockType.Project]: ['Hands-on project time'],
   [DayBlockType.FieldTrip]: ['Field trip or community outing'],
   [DayBlockType.Other]: ['Flex time'],
-}
-
-/** Human labels for block types (matches blockMeta). */
-const blockTitle: Record<DayBlockTypeValue, string> = {
-  [DayBlockType.Formation]: 'Formation',
-  [DayBlockType.Reading]: 'Reading',
-  [DayBlockType.Speech]: 'Speech',
-  [DayBlockType.Math]: 'Math',
-  [DayBlockType.Together]: 'Together',
-  [DayBlockType.Movement]: 'Movement',
-  [DayBlockType.Project]: 'Project',
-  [DayBlockType.FieldTrip]: 'Field Trip',
-  [DayBlockType.Other]: 'Other',
 }
 
 /**
@@ -200,7 +187,7 @@ export function buildTodayBlocks(
     const status = getBlockStatus(type, dayLog)
     return {
       type,
-      title: blockTitle[type],
+      title: DayBlockLabel[type],
       suggestedMinutes: defaultMinutes[type],
       instructions: deriveInstructions(type, weekPlan, child),
       done: status === BlockStatus.Logged,

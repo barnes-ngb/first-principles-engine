@@ -2,8 +2,8 @@ import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useNavigate } from 'react-router-dom'
-import Page from '../components/Page'
-import SectionCard from '../components/SectionCard'
+import Page from '../../components/Page'
+import SectionCard from '../../components/SectionCard'
 
 export default function NotFoundPage() {
   const navigate = useNavigate()

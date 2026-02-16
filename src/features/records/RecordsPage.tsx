@@ -44,8 +44,8 @@ import type {
   HoursEntry,
 } from '../../core/types/domain'
 import { SubjectBucket } from '../../core/types/enums'
-import { formatDateForInput } from '../../lib/format'
-import { getSchoolYearRange } from '../../lib/time'
+import { formatDateForInput } from '../../core/utils/format'
+import { getSchoolYearRange } from '../../core/utils/time'
 import { parseDateFromDocId } from '../today/daylog.model'
 import {
   buildComplianceZip,

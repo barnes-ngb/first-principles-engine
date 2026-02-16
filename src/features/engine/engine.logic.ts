@@ -1,11 +1,10 @@
 import type { Artifact, MilestoneProgress } from '../../core/types/domain'
 import { EngineStage } from '../../core/types/enums'
-import { formatDateYmd } from '../../lib/format'
+import { formatDateYmd } from '../../core/utils/format'
+import type { WeekRange } from '../../core/utils/time'
 
-export type WeekRange = {
-  start: string
-  end: string
-}
+export type { WeekRange } from '../../core/utils/time'
+export { getWeekRange } from '../../core/utils/time'
 
 export type StageCounts = Partial<Record<EngineStage, number>>
 
@@ -22,21 +21,6 @@ const orderedStages = [
 const minimumStages = [EngineStage.Wonder, EngineStage.Explain, EngineStage.Reflect]
 
 const getCount = (counts: StageCounts, stage: EngineStage) => counts[stage] ?? 0
-
-export const getWeekRange = (date: Date = new Date(), weekStartsOn = 1): WeekRange => {
-  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-  const dayOfWeek = start.getDay()
-  const offset = (dayOfWeek - weekStartsOn + 7) % 7
-  start.setDate(start.getDate() - offset)
-
-  const end = new Date(start)
-  end.setDate(start.getDate() + 6)
-
-  return {
-    start: formatDateYmd(start),
-    end: formatDateYmd(end),
-  }
-}
 
 const getDateKey = (value: string) => {
   const date = new Date(value)
