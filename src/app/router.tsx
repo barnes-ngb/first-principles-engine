@@ -7,6 +7,7 @@ import KidsPage from '../features/kids/KidsPage'
 import LaddersPage from '../features/ladders/LaddersPage'
 import NotFoundPage from '../features/NotFoundPage'
 import PlannerPage from '../features/planner/PlannerPage'
+import PlannerChatPage from '../features/planner-chat/PlannerChatPage'
 import ProjectBoardPage from '../features/projects/ProjectBoardPage'
 import EvaluationsPage from '../features/records/EvaluationsPage'
 import PortfolioPage from '../features/records/PortfolioPage'
@@ -42,6 +43,7 @@ const routes = [
       },
       { path: '/engine', element: <EnginePage /> },
       { path: '/planner', element: <PlannerPage /> },
+      { path: '/planner/chat', element: <PlannerChatPage /> },
       { path: '/evaluation', element: <SkillSnapshotPage /> },
       { path: '/ladders', element: <LaddersPage /> },
       { path: '/kids', element: <KidsPage /> },
