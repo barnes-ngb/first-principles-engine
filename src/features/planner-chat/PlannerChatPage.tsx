@@ -56,9 +56,12 @@ import {
 } from './chatPlanner.logic'
 import type { AdjustmentIntent } from './chatPlanner.logic'
 import { describeAdjustment, parseAdjustmentIntent } from './intentParser'
+import { formatCoverageSummaryText, buildCoverageSummary } from './coverageSummary'
 import ContextDrawer from './ContextDrawer'
 import PlanPreviewCard from './PlanPreviewCard'
+import PlanSummaryPanel from './PlanSummaryPanel'
 import PhotoLabelForm from './PhotoLabelForm'
+import QuickSuggestionButtons from './QuickSuggestionButtons'
 
 function subjectToDayBlockType(subject: SubjectBucket): DayBlockType {
   switch (subject) {
@@ -294,11 +297,25 @@ export default function PlannerChatPage() {
       createdAt: new Date().toISOString(),
     }
 
+    // Check for coverage question first
+    const isCoverageQuestion = /what.*(cover|topic|schedul|plan)|cover.*week|summary/i.test(text)
+
     // Try to parse as adjustment intent
     const intent = parseAdjustmentIntent(text)
     let assistantMsg: ChatMessage
 
-    if (intent && currentDraft) {
+    if (isCoverageQuestion && currentDraft) {
+      // Answer coverage question with summary
+      const prioritySkills = snapshot?.prioritySkills ?? []
+      const entries = buildCoverageSummary(currentDraft, prioritySkills)
+      const summaryText = formatCoverageSummaryText(entries, prioritySkills)
+      assistantMsg = {
+        id: generateItemId(),
+        role: ChatMessageRole.Assistant,
+        text: summaryText,
+        createdAt: new Date().toISOString(),
+      }
+    } else if (intent && currentDraft) {
       // Apply adjustment and regenerate
       const newAdjustments = [...adjustments, intent]
       const assignments = photoLabelsToAssignments(photoLabels)
@@ -341,7 +358,7 @@ export default function PlannerChatPage() {
       assistantMsg = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
-        text: 'I didn\'t catch that adjustment. Try something like:\n- "Make Wed light"\n- "Move math to Tue/Thu"\n- "Reduce writing"\n- "Cap math at 15 min"\n\nOr tap "Apply Plan" when you\'re happy with the draft.',
+        text: 'I didn\'t catch that adjustment. Try something like:\n- "Make Wed light"\n- "Move math to Tue/Thu"\n- "Reduce writing"\n- "Cap math at 15 min"\n- "What\'s covered this week?"\n\nOr tap a quick adjustment below, or "Apply Plan" when you\'re happy.',
         createdAt: new Date().toISOString(),
       }
     }
@@ -485,6 +502,56 @@ export default function PlannerChatPage() {
 
   const minimumWin = buildMinimumWinText(snapshot)
 
+  // Quick suggestion handler - sends the text as if the user typed it
+  const handleQuickSuggestion = useCallback((text: string) => {
+    setInputText(text)
+    // Trigger send immediately
+    const userMsg: ChatMessage = {
+      id: generateItemId(),
+      role: ChatMessageRole.User,
+      text,
+      createdAt: new Date().toISOString(),
+    }
+    const intent = parseAdjustmentIntent(text)
+    let assistantReply: ChatMessage
+
+    if (intent && currentDraft) {
+      const newAdjustments = [...adjustments, intent]
+      const assignments = photoLabelsToAssignments(photoLabels)
+      const draft = generateDraftPlanFromInputs({
+        snapshot,
+        hoursPerDay,
+        appBlocks,
+        assignments,
+        adjustments: newAdjustments,
+      })
+      setCurrentDraft(draft)
+      setAdjustments(newAdjustments)
+      assistantReply = {
+        id: generateItemId(),
+        role: ChatMessageRole.Assistant,
+        text: describeAdjustment(intent) + ' Here\'s the updated plan:',
+        draftPlan: draft,
+        createdAt: new Date().toISOString(),
+      }
+    } else {
+      assistantReply = {
+        id: generateItemId(),
+        role: ChatMessageRole.Assistant,
+        text: 'Could not parse that adjustment.',
+        createdAt: new Date().toISOString(),
+      }
+    }
+
+    const updatedMessages = [...messages, userMsg, assistantReply]
+    setMessages(updatedMessages)
+    setInputText('')
+    void persistConversation({
+      messages: updatedMessages,
+      currentDraft: currentDraft ?? undefined,
+    })
+  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation])
+
   return (
     <Page>
       <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -510,6 +577,14 @@ export default function PlannerChatPage() {
 
       {activeChildId && (
         <>
+          {/* Plan Summary Panel (pinned above chat) */}
+          <PlanSummaryPanel
+            hoursPerDay={hoursPerDay}
+            appBlocks={appBlocks}
+            prioritySkills={snapshot?.prioritySkills ?? []}
+            currentDraft={currentDraft}
+          />
+
           {/* Chat messages */}
           <Box
             sx={{
@@ -631,6 +706,12 @@ export default function PlannerChatPage() {
               <SendIcon />
             </IconButton>
           </Stack>
+
+          {/* Quick suggestion buttons */}
+          <QuickSuggestionButtons
+            onSelect={handleQuickSuggestion}
+            visible={currentDraft !== null && !applied}
+          />
 
           {/* Apply plan button */}
           {currentDraft && !applied && (
