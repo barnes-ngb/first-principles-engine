@@ -7,6 +7,7 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import CloseIcon from '@mui/icons-material/Close'
 
 const DISMISSED_KEY = 'fpe_help_dismissed'
+const DISMISS_COUNT_KEY = 'fpe_help_dismiss_count'
 
 function getDismissed(): Set<string> {
   try {
@@ -20,15 +21,49 @@ function setDismissed(dismissed: Set<string>) {
   localStorage.setItem(DISMISSED_KEY, JSON.stringify([...dismissed]))
 }
 
+function getDismissCount(pageKey: string): number {
+  try {
+    const raw = localStorage.getItem(DISMISS_COUNT_KEY)
+    if (raw) {
+      const counts = JSON.parse(raw) as Record<string, number>
+      return counts[pageKey] ?? 0
+    }
+  } catch { /* ignore */ }
+  return 0
+}
+
+function incrementDismissCount(pageKey: string) {
+  try {
+    const raw = localStorage.getItem(DISMISS_COUNT_KEY)
+    const counts = raw ? JSON.parse(raw) as Record<string, number> : {}
+    counts[pageKey] = (counts[pageKey] ?? 0) + 1
+    localStorage.setItem(DISMISS_COUNT_KEY, JSON.stringify(counts))
+  } catch { /* ignore */ }
+}
+
 interface HelpStripProps {
   /** Unique key for this page's help strip (used for persistent dismiss) */
   pageKey: string
   /** The help text to display */
   text: string
+  /** Max number of times to auto-show before staying hidden. Omit for unlimited. */
+  maxShowCount?: number
+  /** When true, force-show the banner regardless of dismiss state. */
+  forceShow?: boolean
 }
 
-export default function HelpStrip({ pageKey, text }: HelpStripProps) {
-  const [visible, setVisible] = useState(() => !getDismissed().has(pageKey))
+export default function HelpStrip({ pageKey, text, maxShowCount, forceShow }: HelpStripProps) {
+  const [visible, setVisible] = useState(() => {
+    if (forceShow) return true
+    if (getDismissed().has(pageKey)) {
+      // Check if we should still auto-show based on maxShowCount
+      if (maxShowCount != null && getDismissCount(pageKey) < maxShowCount) {
+        return true
+      }
+      return false
+    }
+    return true
+  })
   const [expanded, setExpanded] = useState(visible)
 
   const handleDismiss = useCallback(() => {
@@ -36,6 +71,7 @@ export default function HelpStrip({ pageKey, text }: HelpStripProps) {
     const dismissed = getDismissed()
     dismissed.add(pageKey)
     setDismissed(dismissed)
+    incrementDismissCount(pageKey)
     // After collapse animation, hide completely
     setTimeout(() => setVisible(false), 300)
   }, [pageKey])
