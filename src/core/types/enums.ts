@@ -151,6 +151,33 @@ export const LabSessionStatus = {
 } as const
 export type LabSessionStatus = (typeof LabSessionStatus)[keyof typeof LabSessionStatus]
 
+export const PlannerSessionStatus = {
+  Setup: 'setup',
+  Uploading: 'uploading',
+  Extracting: 'extracting',
+  DraftReview: 'draft_review',
+  Applied: 'applied',
+} as const
+export type PlannerSessionStatus =
+  (typeof PlannerSessionStatus)[keyof typeof PlannerSessionStatus]
+
+export const AssignmentAction = {
+  Keep: 'keep',
+  Modify: 'modify',
+  Skip: 'skip',
+} as const
+export type AssignmentAction =
+  (typeof AssignmentAction)[keyof typeof AssignmentAction]
+
+export const SkillLevel = {
+  Emerging: 'emerging',
+  Developing: 'developing',
+  Supported: 'supported',
+  Practice: 'practice',
+  Secure: 'secure',
+} as const
+export type SkillLevel = (typeof SkillLevel)[keyof typeof SkillLevel]
+
 export const RoutineItemKey = {
   Handwriting: 'handwriting',
   Spelling: 'spelling',

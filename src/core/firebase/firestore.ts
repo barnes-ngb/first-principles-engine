@@ -19,9 +19,12 @@ import type {
   LabSession,
   Ladder,
   LadderProgress,
+  LessonCard,
   MilestoneProgress,
+  PlannerSession,
   Project,
   Session,
+  SkillSnapshot,
   WeekPlan,
   WeeklyScore,
 } from '../types/domain'
@@ -178,3 +181,42 @@ export const ladderProgressCollection = (
 
 export const ladderProgressDocId = (childId: string, ladderKey: string): string =>
   `${childId}_${ladderKey}`
+
+// ── Skill Snapshots (Lincoln Evaluation) ────────────────────────
+
+/** Skill snapshot per child. Doc ID: {childId} */
+export const skillSnapshotsCollection = (
+  familyId: string,
+): CollectionReference<SkillSnapshot> =>
+  collection(db, `families/${familyId}/skillSnapshots`) as CollectionReference<SkillSnapshot>
+
+// ── Planner Sessions (Shelly Planner) ───────────────────────────
+
+const plannerSessionConverter: FirestoreDataConverter<PlannerSession> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as PlannerSession
+    return {
+      ...data,
+      id: snapshot.id,
+    }
+  },
+}
+
+export const plannerSessionsCollection = (
+  familyId: string,
+): CollectionReference<PlannerSession> =>
+  collection(db, `families/${familyId}/plannerSessions`).withConverter(
+    plannerSessionConverter,
+  ) as CollectionReference<PlannerSession>
+
+/** Planner session doc ID: {weekKey}_{childId} */
+export const plannerSessionDocId = (weekKey: string, childId: string): string =>
+  `${weekKey}_${childId}`
+
+// ── Lesson Cards ────────────────────────────────────────────────
+
+export const lessonCardsCollection = (
+  familyId: string,
+): CollectionReference<LessonCard> =>
+  collection(db, `families/${familyId}/lessonCards`) as CollectionReference<LessonCard>
