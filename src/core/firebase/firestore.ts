@@ -28,6 +28,7 @@ import type {
   SkillSnapshot,
   WeekPlan,
   WeeklyScore,
+  WorkbookConfig,
 } from '../types/domain'
 import { app } from './firebase'
 
@@ -245,3 +246,14 @@ export const plannerConversationsCollection = (
 /** Planner conversation doc ID: {weekKey}_{childId} */
 export const plannerConversationDocId = (weekKey: string, childId: string): string =>
   `${weekKey}_${childId}`
+
+// ── Workbook Configs (Pace Gauge) ────────────────────────────
+
+/** Workbook config per child per workbook. Doc ID: {childId}_{workbookName_slug} */
+export const workbookConfigsCollection = (
+  familyId: string,
+): CollectionReference<WorkbookConfig> =>
+  collection(db, `families/${familyId}/workbookConfigs`) as CollectionReference<WorkbookConfig>
+
+export const workbookConfigDocId = (childId: string, workbookName: string): string =>
+  `${childId}_${workbookName.toLowerCase().replace(/\s+/g, '-')}`

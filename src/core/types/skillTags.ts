@@ -50,6 +50,9 @@ export type MathTag = (typeof MathTags)[keyof typeof MathTags]
 export const RegulationTags = {
   Attention: 'regulation.attention',
   Frustration: 'regulation.frustration',
+  StartAnyway: 'regulation.startAnyway',
+  Stamina: 'regulation.stamina',
+  FrustrationTolerance: 'regulation.frustrationTolerance',
 } as const
 export type RegulationTag = (typeof RegulationTags)[keyof typeof RegulationTags]
 
@@ -152,6 +155,24 @@ export const SKILL_TAG_CATALOG: SkillTagDefinition[] = [
     label: 'Frustration Tolerance',
     evidence: 'Uses a coping strategy before quitting',
     commonSupports: ['Visual calm-down steps', 'Offer choice of 2 tasks', 'Reduce difficulty first'],
+  },
+  {
+    tag: RegulationTags.StartAnyway,
+    label: 'Start Anyway',
+    evidence: 'Begins task within 2 minutes of prompt despite reluctance',
+    commonSupports: ['Offer 2 choices (same skill, different modality)', '5-minute timer', 'First rep together', 'Immediate win (1 XP + praise)'],
+  },
+  {
+    tag: RegulationTags.Stamina,
+    label: 'Task Stamina',
+    evidence: 'Sustains effort on a non-preferred task for 10+ minutes',
+    commonSupports: ['Visual timer', 'Break after milestone', 'Reduce task length', 'Pair with preferred activity'],
+  },
+  {
+    tag: RegulationTags.FrustrationTolerance,
+    label: 'Frustration Recovery',
+    evidence: 'Returns to task after frustration without adult escalation',
+    commonSupports: ['Deep breaths visual', 'Choice card', 'Lower difficulty then rebuild', 'Celebrate recovery'],
   },
 ]
 
