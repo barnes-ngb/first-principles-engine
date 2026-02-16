@@ -234,6 +234,8 @@ export interface UseLabProjectsResult {
   setNotesProjectId: (id: string | null) => void
   projectById: Record<string, Project>
   projectHasSessions: (projectId: string) => boolean
+  /** Returns true if the project can be hard-deleted (Plan phase + 0 sessions). */
+  canDeleteProject: (projectId: string) => boolean
   /** Local state setter — used by notes dialog for optimistic updates. */
   setProjects: React.Dispatch<React.SetStateAction<Project[]>>
 
@@ -432,6 +434,16 @@ export function useLabProjects(
     )
   }, [familyId, selectedProject, projects])
 
+  // ── Delete eligibility ───────────────────────────────────────
+  // Delete only if: project is in Plan phase AND has 0 sessions.
+  // Otherwise, the UI should offer Archive instead.
+
+  const canDeleteProject = useCallback((projectId: string): boolean => {
+    const proj = projectById[projectId]
+    if (!proj) return false
+    return proj.phase === ProjectPhase.Plan && !projectHasSessions(projectId)
+  }, [projectById, projectHasSessions])
+
   // ── Delete / archive ──────────────────────────────────────────
 
   const handleDeleteRequest = useCallback((projectId: string) => {
@@ -541,6 +553,7 @@ export function useLabProjects(
     setNotesProjectId,
     projectById,
     projectHasSessions,
+    canDeleteProject,
     setProjects,
 
     handleCreateProject,

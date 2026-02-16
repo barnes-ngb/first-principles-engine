@@ -8,6 +8,7 @@ import type {
   SkipSuggestion,
 } from '../../core/types/domain'
 import { AssignmentAction, SubjectBucket } from '../../core/types/enums'
+import { autoSuggestTags } from '../../core/types/skillTags'
 
 export const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as const
 export type WeekDay = (typeof WEEK_DAYS)[number]
@@ -211,6 +212,9 @@ export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftW
     }
   }
 
+  // Build priority tag list for auto-suggest
+  const prioritySkillTags = snapshot?.prioritySkills.map((s) => s.tag) ?? []
+
   // Distribute remaining assignments
   for (const assignment of activeAssignments) {
     const effectiveMinutes =
@@ -229,13 +233,16 @@ export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftW
       }
     }
 
+    // Auto-suggest skill tags based on subject + priority skills
+    const suggestedTags = autoSuggestTags(assignment.subjectBucket, prioritySkillTags)
+
     const dayPlan = dayMap.get(bestDay)!
     dayPlan.items.push({
       id: generateItemId(),
       title: `${assignment.workbookName} – ${assignment.lessonName}`,
       subjectBucket: assignment.subjectBucket,
       estimatedMinutes: effectiveMinutes,
-      skillTags: [],
+      skillTags: suggestedTags,
       skipSuggestion: assignment.skipSuggestion,
       accepted: true,
       assignmentId: assignment.id,
@@ -279,8 +286,11 @@ function applyLightenDay(days: DraftDayPlan[], intent: LightenDayIntent): void {
   const targetDay = days.find((d) => d.day === intent.day)
   if (!targetDay) return
 
-  // Remove non-app-block, non-priority items or halve their time
-  const nonEssential = targetDay.items.filter((item) => !item.isAppBlock && item.skillTags.length === 0)
+  // Non-essential = not an app block AND not a generated priority-skill item (has assignmentId)
+  // Priority-skill micro-reps (no assignmentId, not app blocks) are protected.
+  const nonEssential = targetDay.items.filter(
+    (item) => !item.isAppBlock && item.assignmentId != null,
+  )
   for (const item of nonEssential) {
     item.estimatedMinutes = Math.ceil(item.estimatedMinutes * 0.5)
   }

@@ -5,9 +5,11 @@ import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
+import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
 import type { DraftWeeklyPlan } from '../../core/types/domain'
+import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { dayTotalMinutes } from './chatPlanner.logic'
 
 interface PlanPreviewCardProps {
@@ -34,8 +36,13 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem }: Pla
             <Alert key={i} severity="warning" sx={{ py: 0 }}>
               <Typography variant="body2">
                 <strong>{s.action === 'skip' ? 'Skip' : 'Modify'}:</strong> {s.reason}
-                {' — '}{s.replacement}
+                {' \u2014 '}{s.replacement}
               </Typography>
+              {s.evidence && (
+                <Typography variant="caption" color="text.secondary">
+                  Why: {s.evidence}
+                </Typography>
+              )}
             </Alert>
           ))}
         </Stack>
@@ -64,59 +71,84 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem }: Pla
                 </Typography>
               ) : (
                 day.items.map((item) => (
-                  <Stack
-                    key={item.id}
-                    direction="row"
-                    spacing={0.5}
-                    alignItems="center"
-                    sx={{
-                      py: 0.25,
-                      opacity: item.accepted ? 1 : 0.4,
-                    }}
-                  >
-                    {onToggleItem ? (
-                      <IconButton
-                        size="small"
-                        onClick={() => onToggleItem(dayIndex, item.id)}
-                        sx={{ p: 0.25 }}
-                      >
-                        {item.accepted ? (
-                          <CheckCircleIcon fontSize="small" color="success" />
-                        ) : (
-                          <RadioButtonUncheckedIcon fontSize="small" />
-                        )}
-                      </IconButton>
-                    ) : (
-                      item.accepted ? (
-                        <CheckCircleIcon fontSize="small" color="success" sx={{ mr: 0.5 }} />
-                      ) : (
-                        <RadioButtonUncheckedIcon fontSize="small" sx={{ mr: 0.5, opacity: 0.4 }} />
-                      )
-                    )}
-                    <Typography
-                      variant="body2"
+                  <Box key={item.id}>
+                    <Stack
+                      direction="row"
+                      spacing={0.5}
+                      alignItems="center"
                       sx={{
-                        flex: 1,
-                        textDecoration: item.accepted ? 'none' : 'line-through',
+                        py: 0.25,
+                        opacity: item.accepted ? 1 : 0.4,
                       }}
                     >
-                      {item.title}
-                    </Typography>
-                    {item.isAppBlock && (
-                      <Chip label="App" size="small" variant="outlined" sx={{ height: 20 }} />
-                    )}
-                    {item.skipSuggestion && (
-                      <Chip
-                        label={item.skipSuggestion.action}
-                        size="small"
-                        color={item.skipSuggestion.action === 'skip' ? 'error' : 'warning'}
-                        sx={{ height: 20 }}
-                      />
-                    )}
-                    <Typography variant="caption" color="text.secondary">
-                      {item.estimatedMinutes}m
-                    </Typography>
-                  </Stack>
+                      {onToggleItem ? (
+                        <IconButton
+                          size="small"
+                          onClick={() => onToggleItem(dayIndex, item.id)}
+                          sx={{ p: 0.25 }}
+                        >
+                          {item.accepted ? (
+                            <CheckCircleIcon fontSize="small" color="success" />
+                          ) : (
+                            <RadioButtonUncheckedIcon fontSize="small" />
+                          )}
+                        </IconButton>
+                      ) : (
+                        item.accepted ? (
+                          <CheckCircleIcon fontSize="small" color="success" sx={{ mr: 0.5 }} />
+                        ) : (
+                          <RadioButtonUncheckedIcon fontSize="small" sx={{ mr: 0.5, opacity: 0.4 }} />
+                        )
+                      )}
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          flex: 1,
+                          textDecoration: item.accepted ? 'none' : 'line-through',
+                        }}
+                      >
+                        {item.title}
+                      </Typography>
+                      {/* Skill tags as small chips */}
+                      {item.skillTags.length > 0 && (
+                        <Stack direction="row" spacing={0.25} flexWrap="wrap" useFlexGap>
+                          {item.skillTags.slice(0, 2).map((tag) => {
+                            const def = SKILL_TAG_MAP[tag]
+                            return (
+                              <Tooltip key={tag} title={def?.evidence ?? tag} arrow>
+                                <Chip
+                                  label={def?.label ?? tag.split('.').pop()}
+                                  size="small"
+                                  color="info"
+                                  variant="outlined"
+                                  sx={{ height: 18, fontSize: '0.65rem' }}
+                                />
+                              </Tooltip>
+                            )
+                          })}
+                        </Stack>
+                      )}
+                      {item.isAppBlock && (
+                        <Chip label="App" size="small" variant="outlined" sx={{ height: 20 }} />
+                      )}
+                      {item.skipSuggestion && (
+                        <Tooltip
+                          title={`${item.skipSuggestion.reason} \u2014 ${item.skipSuggestion.replacement}`}
+                          arrow
+                        >
+                          <Chip
+                            label={item.skipSuggestion.action}
+                            size="small"
+                            color={item.skipSuggestion.action === 'skip' ? 'error' : 'warning'}
+                            sx={{ height: 20 }}
+                          />
+                        </Tooltip>
+                      )}
+                      <Typography variant="caption" color="text.secondary">
+                        {item.estimatedMinutes}m
+                      </Typography>
+                    </Stack>
+                  </Box>
                 ))
               )}
             </Stack>
