@@ -1,73 +1,52 @@
-# React + TypeScript + Vite
+# First Principles Engine
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A phone-fast family learning notebook that runs daily school, captures evidence artifacts (notes/photos/audio), visualizes weekly progress via a flywheel, tracks growth through ladders and milestones, and exports Missouri-compliant records (logs, hours, portfolio, evaluations).
 
-Currently, two official plugins are available:
+## Prerequisites
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Node.js 20+
+- Firebase CLI: `npm install -g firebase-tools`
+- Firebase project authenticated: `firebase login && firebase use <project-id>`
 
-## React Compiler
+## Getting Started
 
-The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+cp .env.example .env   # Fill in Firebase config values from Firebase Console
+npm run dev             # Start dev server
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Scripts
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+| Command | Description |
+|---|---|
+| `npm run dev` | Start Vite dev server |
+| `npm run build` | TypeScript check + Vite production build |
+| `npm test` | Run Vitest test suite |
+| `npm run lint` | Run ESLint |
+| `npx tsc -b` | Type-check only (no emit) |
+| `npm run deploy` | Build + deploy to Firebase (hosting + rules) |
+| `npm run deploy:hosting` | Build + deploy hosting only |
+| `npm run deploy:rules` | Deploy Firestore + Storage rules only |
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Project Structure
+
 ```
+src/
+├── app/           App shell, routing, theme
+├── components/    Shared UI components
+├── core/          Auth, profile, firebase, hooks, types, utils
+├── features/      Feature modules (today, week, engine, ladders, sessions, etc.)
+```
+
+## Documentation
+
+See [`docs/`](./docs/) for detailed design documents covering scope, MVP, engine/ladders design, compliance, media capture, deployment, and testing.
+
+## TypeScript Constraints
+
+- **No enums** — `erasableSyntaxOnly` is enabled; use `as const` objects instead
+- **`import type`** — `verbatimModuleSyntax` requires type-only imports for types
+- **Firestore id-after-spread** — Put `id: doc.id` after `...doc.data()` so document ID wins
+
+See [`CLAUDE.md`](./CLAUDE.md) for full coding conventions.

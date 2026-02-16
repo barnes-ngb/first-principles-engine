@@ -15,11 +15,11 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore'
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SaveIndicator from '../../components/SaveIndicator'
-import type { SaveState } from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useSaveState } from '../../core/hooks/useSaveState'
 import { useProfile } from '../../core/profile/useProfile'
 import type {
   EvidenceDefinition,
@@ -63,7 +63,7 @@ export default function SkillSnapshotPage() {
     setSnapshotChildId(activeChildId)
     setSnapshot(null)
   }
-  const [saveState, setSaveState] = useState<SaveState>('idle')
+  const { saveState, withSave } = useSaveState()
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
 
   const snapshotRef = useMemo(
@@ -105,17 +105,14 @@ export default function SkillSnapshotPage() {
     async (updated: SkillSnapshot) => {
       if (!snapshotRef) return
       setSnapshot(updated)
-      setSaveState('saving')
-      try {
-        await setDoc(snapshotRef, { ...updated, updatedAt: new Date().toISOString() })
-        setSaveState('saved')
-      } catch (err) {
-        console.error('Failed to save snapshot', err)
-        setSaveState('error')
+      const result = await withSave(() =>
+        setDoc(snapshotRef, { ...updated, updatedAt: new Date().toISOString() }),
+      )
+      if (result === undefined) {
         setSnack({ text: 'Failed to save.', severity: 'error' })
       }
     },
-    [snapshotRef],
+    [snapshotRef, withSave],
   )
 
   const handleLoadDefaults = useCallback(() => {

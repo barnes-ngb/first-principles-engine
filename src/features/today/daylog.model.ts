@@ -1,4 +1,4 @@
-import { DayBlockType, RoutineItemKey, SubjectBucket } from '../../core/types/enums'
+import { DayBlockLabel, DayBlockType, RoutineItemKey, SubjectBucket } from '../../core/types/enums'
 import type {
   ChecklistItem,
   DayBlock,
@@ -7,6 +7,8 @@ import type {
   ReadingRoutine,
   SpeechRoutine,
 } from '../../core/types/domain'
+
+export { parseDateFromDocId } from '../../core/utils/docId'
 
 // ─── DayLog document ID helpers ─────────────────────────────────────────────
 
@@ -20,25 +22,6 @@ export const dayLogDocId = (date: string, childId: string): string =>
  */
 export const legacyDayLogDocId = (childId: string, date: string): string =>
   `${childId}_${date}`
-
-/**
- * Extract the `date` portion from a DayLog document ID.
- * Handles both `{date}_{childId}` (new) and `{childId}_{date}` (legacy)
- * formats by checking which segment looks like a YYYY-MM-DD date.
- */
-export const parseDateFromDocId = (docId: string): string => {
-  const datePattern = /^\d{4}-\d{2}-\d{2}$/
-  // New format: date is the prefix (before first `_` that is followed by non-date)
-  // e.g. "2026-02-09_abc123" → date is "2026-02-09"
-  const prefix = docId.slice(0, 10)
-  if (datePattern.test(prefix)) return prefix
-  // Legacy format: date is the suffix after last `_`
-  // e.g. "abc123_2026-02-09" → date is "2026-02-09"
-  const suffix = docId.slice(-10)
-  if (datePattern.test(suffix)) return suffix
-  // Fallback — return the full ID (best effort)
-  return docId
-}
 
 const defaultDayLogChecklistItems: ChecklistItem[] = []
 
@@ -66,19 +49,6 @@ export const ALL_ROUTINE_ITEMS: RoutineItemKey[] = [
   RoutineItemKey.Speech,
 ]
 
-/** Human-readable label for each block type. */
-const blockLabel: Record<DayBlockType, string> = {
-  [DayBlockType.Formation]: 'Formation',
-  [DayBlockType.Reading]: 'Reading',
-  [DayBlockType.Speech]: 'Speech',
-  [DayBlockType.Math]: 'Math',
-  [DayBlockType.Together]: 'Together',
-  [DayBlockType.Movement]: 'Movement',
-  [DayBlockType.Project]: 'Project',
-  [DayBlockType.FieldTrip]: 'Field Trip',
-  [DayBlockType.Other]: 'Other',
-}
-
 /** Map block types to a natural default subject bucket where unambiguous. */
 const defaultSubjectBucket: Partial<Record<DayBlockType, SubjectBucket>> = {
   [DayBlockType.Reading]: SubjectBucket.Reading,
@@ -89,7 +59,7 @@ const defaultSubjectBucket: Partial<Record<DayBlockType, SubjectBucket>> = {
 const buildBlocks = (blockTypes: DayBlockType[]): DayBlock[] =>
   blockTypes.map((type) => ({
     type,
-    title: blockLabel[type],
+    title: DayBlockLabel[type],
     ...(defaultSubjectBucket[type] ? { subjectBucket: defaultSubjectBucket[type] } : {}),
   }))
 

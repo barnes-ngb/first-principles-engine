@@ -4,7 +4,7 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import { useActiveChild } from '../core/hooks/useActiveChild'
 import { dayLogDocId } from '../features/today/daylog.model'
-import { formatDateYmd } from '../lib/format'
+import { formatDateYmd } from '../core/utils/format'
 
 declare const __BUILD_TIMESTAMP__: string
 
