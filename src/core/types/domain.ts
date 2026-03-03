@@ -1,4 +1,5 @@
 import type {
+  AdjustmentDecision,
   AssignmentAction,
   ChatMessageRole,
   DayBlockType,
@@ -13,6 +14,7 @@ import type {
   PlannerSessionStatus,
   PlanType,
   ProjectPhase,
+  ReviewStatus,
   RoutineItemKey,
   SessionResult,
   SessionSymbol,
@@ -791,31 +793,10 @@ export interface ModalityChoice {
 
 // ── Weekly Review (AI Adaptive Loop) ──────────────────────────
 
-export interface PaceAdjustment {
-  subjectBucket: SubjectBucket
-  currentPace: string
-  recommendedPace: string
-  reason: string
-}
-
 export interface PlanModification {
   area: string
   modification: string
   reason: string
-}
-
-export interface WeeklyReview {
-  id?: string
-  childId: string
-  weekKey: string
-  progressSummary: string
-  paceAdjustments: PaceAdjustment[]
-  planModifications: PlanModification[]
-  energyPattern: string
-  celebration: string
-  status: 'draft' | 'reviewed' | 'applied'
-  createdAt?: string
-  reviewedAt?: string
 }
 
 // ── Skip Advisor Result ───────────────────────────────────────
@@ -827,4 +808,42 @@ export interface SkipAdvisorResult {
   evidenceLevel?: MasteryGate
   /** Related skill tag */
   skillTag?: SkillTag
+}
+
+// ── Weekly Review (AI-generated adaptive review) ──────────────
+
+export interface PaceAdjustment {
+  id: string
+  subjectBucket?: SubjectBucket
+  area: string
+  currentPace: string
+  suggestedPace: string
+  rationale: string
+  decision: AdjustmentDecision
+}
+
+export interface WeeklyReview {
+  id?: string
+  childId: string
+  weekKey: string
+  status: ReviewStatus
+  /** Celebration / affirmation highlight */
+  celebration: string
+  /** Narrative summary of the week */
+  summary: string
+  /** Specific wins observed */
+  wins: string[]
+  /** Areas that need attention */
+  growthAreas: string[]
+  /** Pace adjustments with accept/reject per item */
+  paceAdjustments: PaceAdjustment[]
+  /** Structured plan modifications */
+  planModifications?: PlanModification[]
+  /** Recommendations for next week */
+  recommendations: string[]
+  /** Observed energy pattern for the week */
+  energyPattern?: string
+  reviewedAt?: string
+  createdAt?: string
+  updatedAt?: string
 }

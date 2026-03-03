@@ -27,8 +27,8 @@ import type {
   Project,
   Session,
   SkillSnapshot,
-  WeeklyReview,
   WeekPlan,
+  WeeklyReview,
   WeeklyScore,
   WorkbookConfig,
 } from '../types/domain'
@@ -281,12 +281,16 @@ export const workbookConfigsCollection = (
 export const workbookConfigDocId = (childId: string, workbookName: string): string =>
   `${childId}_${workbookName.toLowerCase().replace(/\s+/g, '-')}`
 
-// ── Weekly Reviews (AI Adaptive Loop) ────────────────────────────
+// ── Weekly Reviews (AI-generated adaptive reviews) ──────────────
 
 export const weeklyReviewsCollection = (
   familyId: string,
 ): CollectionReference<WeeklyReview> =>
   collection(db, `families/${familyId}/weeklyReviews`) as CollectionReference<WeeklyReview>
+
+/** Weekly review doc ID: {weekKey}_{childId} */
+export const weeklyReviewDocId = (weekKey: string, childId: string): string =>
+  `${weekKey}_${childId}`
 
 // ── AI Usage ────────────────────────────────────────────────────
 
