@@ -11,6 +11,7 @@ import type {
   PaceStatus,
   PlannerConversationStatus,
   PlannerSessionStatus,
+  PlanType,
   ProjectPhase,
   RoutineItemKey,
   SessionResult,
@@ -331,7 +332,7 @@ export interface DailyPlan {
   childId: string
   date: string
   energy: EnergyLevel
-  planType: 'A' | 'B'
+  planType: PlanType
   sessions: PlannedSession[]
   completedSessionIds?: string[]
 }

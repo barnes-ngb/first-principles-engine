@@ -228,6 +228,18 @@ export const PaceStatus = {
 } as const
 export type PaceStatus = (typeof PaceStatus)[keyof typeof PaceStatus]
 
+export const PlanType = {
+  Normal: 'normal',
+  Mvd: 'mvd',
+} as const
+export type PlanType = (typeof PlanType)[keyof typeof PlanType]
+
+/** Human-readable label for each plan type. */
+export const PlanTypeLabel: Record<PlanType, string> = {
+  [PlanType.Normal]: 'Normal Day',
+  [PlanType.Mvd]: 'Minimum Viable Day',
+}
+
 export const DayType = {
   Normal: 'normal',
   Light: 'light',

@@ -99,6 +99,9 @@ Store dates as `YYYY-MM-DD` strings for easy Firestore queries and sorting.
 - Prefer dropdowns + templates
 - Keep forms short
 
+### Plan type terminology
+Use `'normal'` / `'mvd'` (not the legacy `'A'` / `'B'`) for `DailyPlan.planType`. The `PlanType` const enum in `enums.ts` is the source of truth. Display labels come from `PlanTypeLabel` ("Normal Day" / "Minimum Viable Day"). The Firestore converter in `firestore.ts` normalizes legacy `'A'`→`'normal'` and `'B'`→`'mvd'` on read.
+
 ### Commit style
 Use clear prefixes: `chore:`, `feat:`, `fix:`, `refactor:`, `docs:`, `test:`
 
@@ -185,9 +188,9 @@ functions/
 - **Lincoln (10):** Speech + neurodivergence. ~3rd grade math, ~1st grade reading. Phonics recently clicking. Motivators: Minecraft, Lego, Art. Needs short routines, frequent wins, visual checklists, low-friction starters.
 - **London (6):** Kindergarten. Story-driven, creates own books. Knows most letter sounds. Motivators: Stories, drawing, book-making. Needs attention-rich interactive activities; disengages when unsupervised.
 
-### Energy Modes
-- **Normal Day:** Full routine (formation + reading stations + math stations + together block)
-- **Minimum Viable Day (MVD):** Prayer/Scripture + read aloud + math practice + project/life-skills + one-sentence reflection. This is the floor. Both modes count as real school.
+### Energy Modes (PlanType: `'normal'` | `'mvd'`)
+- **Normal Day (`PlanType.Normal`):** Full routine (formation + reading stations + math stations + together block)
+- **Minimum Viable Day (`PlanType.Mvd`):** Prayer/Scripture + read aloud + math practice + project/life-skills + one-sentence reflection. This is the floor. Both modes count as real school.
 
 ### Scheduling Constraint
 Shelly's direct attention is the primary schedulable resource. Kids need split-block scheduling: Lincoln gets direct support while London does independent work, then swap. Running simultaneously means London's volume wins and Lincoln loses support.
