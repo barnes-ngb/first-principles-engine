@@ -1,12 +1,15 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import type { AssignmentCandidate, SkillSnapshot } from '../../core/types/domain'
+import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, SkillLevel, SubjectBucket } from '../../core/types/enums'
 import {
   AdjustmentType,
   applySnapshotSuggestions,
   buildMinimumWinText,
+  buildPlannerPrompt,
   dayTotalMinutes,
   generateDraftPlanFromInputs,
+  parseAIResponse,
   planTotalMinutes,
   resetIdCounter,
 } from './chatPlanner.logic'
@@ -282,5 +285,259 @@ describe('planTotalMinutes', () => {
     const plan = generateDraftPlanFromInputs({ ...baseInputs, snapshot: null })
     // 1 app block * 15 min * 5 days = 75 minutes
     expect(planTotalMinutes(plan)).toBe(75)
+  })
+})
+
+// ── AI Integration Tests ─────────────────────────────────────
+
+describe('buildPlannerPrompt', () => {
+  it('includes hours per day budget', () => {
+    const prompt = buildPlannerPrompt(baseInputs)
+    expect(prompt).toContain('2.5 hours/day')
+  })
+
+  it('includes app blocks', () => {
+    const prompt = buildPlannerPrompt(baseInputs)
+    expect(prompt).toContain('Reading Eggs')
+    expect(prompt).toContain('15 min/day')
+  })
+
+  it('includes assignments when present', () => {
+    const inputs: PlanGeneratorInputs = {
+      ...baseInputs,
+      assignments: [
+        {
+          id: 'a1', subjectBucket: SubjectBucket.Math, workbookName: 'Math G2', lessonName: 'L5',
+          estimatedMinutes: 15, difficultyCues: [], action: AssignmentAction.Keep,
+        },
+      ],
+    }
+    const prompt = buildPlannerPrompt(inputs)
+    expect(prompt).toContain('Math G2')
+    expect(prompt).toContain('L5')
+  })
+
+  it('includes priority skills from snapshot', () => {
+    const prompt = buildPlannerPrompt(baseInputs)
+    expect(prompt).toContain('CVC blending')
+    expect(prompt).toContain('Regrouping')
+  })
+
+  it('includes stop rules from snapshot', () => {
+    const prompt = buildPlannerPrompt(baseInputs)
+    expect(prompt).toContain('Frustration spikes')
+  })
+
+  it('includes adjustments when present', () => {
+    const inputs: PlanGeneratorInputs = {
+      ...baseInputs,
+      adjustments: [{ type: AdjustmentType.LightenDay, day: 'Wednesday' }],
+    }
+    const prompt = buildPlannerPrompt(inputs)
+    expect(prompt).toContain('lighten_day')
+    expect(prompt).toContain('Wednesday')
+  })
+
+  it('includes JSON schema instruction', () => {
+    const prompt = buildPlannerPrompt(baseInputs)
+    expect(prompt).toContain('Respond ONLY with a JSON object')
+  })
+})
+
+describe('parseAIResponse', () => {
+  const validPlan = {
+    days: [
+      {
+        day: 'Monday',
+        timeBudgetMinutes: 150,
+        items: [
+          {
+            title: 'CVC blending (micro rep)',
+            subjectBucket: 'Reading',
+            estimatedMinutes: 8,
+            skillTags: ['reading.phonics.cvc'],
+            isAppBlock: false,
+            accepted: true,
+          },
+          {
+            title: 'Reading Eggs',
+            subjectBucket: 'Other',
+            estimatedMinutes: 15,
+            skillTags: [],
+            isAppBlock: true,
+            accepted: true,
+          },
+        ],
+      },
+      {
+        day: 'Tuesday',
+        timeBudgetMinutes: 150,
+        items: [
+          {
+            title: 'Math worksheet',
+            subjectBucket: 'Math',
+            estimatedMinutes: 20,
+            skillTags: [],
+            isAppBlock: false,
+            accepted: true,
+          },
+        ],
+      },
+    ],
+    skipSuggestions: [],
+    minimumWin: 'CVC blending: daily micro reps (5-8 min).',
+  }
+
+  const makeResponse = (message: string): ChatResponse => ({
+    message,
+    model: 'claude-sonnet-4-20250514',
+    usage: { inputTokens: 100, outputTokens: 200 },
+  })
+
+  it('parses a valid JSON response into DraftWeeklyPlan', () => {
+    const result = parseAIResponse(makeResponse(JSON.stringify(validPlan)))
+    expect(result).not.toBeNull()
+    expect(result!.days).toHaveLength(2)
+    expect(result!.days[0].day).toBe('Monday')
+    expect(result!.days[0].items).toHaveLength(2)
+    expect(result!.days[0].items[0].title).toBe('CVC blending (micro rep)')
+    expect(result!.days[0].items[0].subjectBucket).toBe(SubjectBucket.Reading)
+    expect(result!.minimumWin).toContain('CVC blending')
+  })
+
+  it('generates unique IDs for each item', () => {
+    const result = parseAIResponse(makeResponse(JSON.stringify(validPlan)))
+    const allIds = result!.days.flatMap((d) => d.items.map((i) => i.id))
+    const uniqueIds = new Set(allIds)
+    expect(uniqueIds.size).toBe(allIds.length)
+  })
+
+  it('strips markdown code fences', () => {
+    const wrapped = '```json\n' + JSON.stringify(validPlan) + '\n```'
+    const result = parseAIResponse(makeResponse(wrapped))
+    expect(result).not.toBeNull()
+    expect(result!.days).toHaveLength(2)
+  })
+
+  it('defaults invalid subjectBucket to Other', () => {
+    const plan = {
+      ...validPlan,
+      days: [
+        {
+          day: 'Monday',
+          timeBudgetMinutes: 150,
+          items: [
+            {
+              title: 'Test item',
+              subjectBucket: 'InvalidSubject',
+              estimatedMinutes: 10,
+              skillTags: [],
+            },
+          ],
+        },
+      ],
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result).not.toBeNull()
+    expect(result!.days[0].items[0].subjectBucket).toBe(SubjectBucket.Other)
+  })
+
+  it('defaults accepted to true when not specified', () => {
+    const plan = {
+      ...validPlan,
+      days: [
+        {
+          day: 'Monday',
+          timeBudgetMinutes: 150,
+          items: [{ title: 'Test', subjectBucket: 'Math', estimatedMinutes: 10 }],
+        },
+      ],
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result!.days[0].items[0].accepted).toBe(true)
+  })
+
+  it('parses skip suggestions when present', () => {
+    const plan = {
+      ...validPlan,
+      skipSuggestions: [
+        {
+          action: 'modify',
+          reason: 'Long task',
+          replacement: 'Do half',
+          evidence: 'Completes modified set',
+        },
+      ],
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result!.skipSuggestions).toHaveLength(1)
+    expect(result!.skipSuggestions[0].reason).toBe('Long task')
+  })
+
+  it('returns null for empty string', () => {
+    expect(parseAIResponse(makeResponse(''))).toBeNull()
+  })
+
+  it('returns null for non-JSON text', () => {
+    expect(parseAIResponse(makeResponse('Here is your plan for the week...'))).toBeNull()
+  })
+
+  it('returns null when days array is missing', () => {
+    expect(parseAIResponse(makeResponse(JSON.stringify({ minimumWin: 'x' })))).toBeNull()
+  })
+
+  it('returns null when days array is empty', () => {
+    expect(parseAIResponse(makeResponse(JSON.stringify({ days: [], minimumWin: 'x' })))).toBeNull()
+  })
+
+  it('returns null when minimumWin is missing', () => {
+    const plan = { days: [{ day: 'Monday', items: [{ title: 'X', estimatedMinutes: 10 }] }] }
+    expect(parseAIResponse(makeResponse(JSON.stringify(plan)))).toBeNull()
+  })
+
+  it('returns null when item title is missing', () => {
+    const plan = {
+      days: [{ day: 'Monday', items: [{ estimatedMinutes: 10, subjectBucket: 'Math' }] }],
+      minimumWin: 'x',
+    }
+    expect(parseAIResponse(makeResponse(JSON.stringify(plan)))).toBeNull()
+  })
+
+  it('returns null when estimatedMinutes is missing', () => {
+    const plan = {
+      days: [{ day: 'Monday', items: [{ title: 'X', subjectBucket: 'Math' }] }],
+      minimumWin: 'x',
+    }
+    expect(parseAIResponse(makeResponse(JSON.stringify(plan)))).toBeNull()
+  })
+
+  it('returns null when estimatedMinutes is negative', () => {
+    const plan = {
+      days: [{ day: 'Monday', items: [{ title: 'X', estimatedMinutes: -5, subjectBucket: 'Math' }] }],
+      minimumWin: 'x',
+    }
+    expect(parseAIResponse(makeResponse(JSON.stringify(plan)))).toBeNull()
+  })
+
+  it('defaults timeBudgetMinutes to 150 when not provided', () => {
+    const plan = {
+      days: [{ day: 'Monday', items: [{ title: 'X', estimatedMinutes: 10, subjectBucket: 'Math' }] }],
+      minimumWin: 'x',
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result!.days[0].timeBudgetMinutes).toBe(150)
+  })
+
+  it('filters out malformed skip suggestions', () => {
+    const plan = {
+      ...validPlan,
+      skipSuggestions: [
+        { action: 'modify', reason: 'valid', replacement: 'ok', evidence: 'yes' },
+        { action: 'modify' }, // missing fields
+        'not an object',
+      ],
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result!.skipSuggestions).toHaveLength(1)
   })
 })

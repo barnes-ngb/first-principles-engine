@@ -247,6 +247,22 @@ export const DayType = {
 } as const
 export type DayType = (typeof DayType)[keyof typeof DayType]
 
+export const ReviewStatus = {
+  Draft: 'draft',
+  Pending: 'pending',
+  Reviewed: 'reviewed',
+  Applied: 'applied',
+} as const
+export type ReviewStatus = (typeof ReviewStatus)[keyof typeof ReviewStatus]
+
+export const AdjustmentDecision = {
+  Pending: 'pending',
+  Accepted: 'accepted',
+  Rejected: 'rejected',
+} as const
+export type AdjustmentDecision =
+  (typeof AdjustmentDecision)[keyof typeof AdjustmentDecision]
+
 export const RoutineItemKey = {
   Handwriting: 'handwriting',
   Spelling: 'spelling',

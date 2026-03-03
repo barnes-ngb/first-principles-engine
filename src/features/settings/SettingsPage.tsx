@@ -4,11 +4,13 @@ import {
   Button,
   Divider,
   FormControl,
+  FormControlLabel,
   InputLabel,
   MenuItem,
   Select,
   Snackbar,
   Stack,
+  Switch,
   Typography,
 } from '@mui/material'
 import type { SelectChangeEvent } from '@mui/material'
@@ -19,7 +21,14 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { useProfile } from '../../core/profile/useProfile'
 import { ThemeMode } from '../../core/types/enums'
 import { seedDemoFamily } from '../../core/data/seed'
+import {
+  AIFeatureFlag,
+  AIFeatureFlagDescription,
+  AIFeatureFlagLabel,
+  useAIFeatureFlags,
+} from '../../core/ai/featureFlags'
 import AccountSection from './AccountSection'
+import AIUsagePanel from './AIUsagePanel'
 
 type SnackbarState = {
   open: boolean
@@ -42,6 +51,7 @@ const themeModeLabels: Record<ThemeMode, string> = {
 export default function SettingsPage() {
   const familyId = useFamilyId()
   const { themeMode, setThemeMode } = useProfile()
+  const { isEnabled, setEnabled } = useAIFeatureFlags()
   const [snackbar, setSnackbar] = useState<SnackbarState>(defaultSnackbarState)
 
   const handleSeedDemoData = async () => {
@@ -102,6 +112,34 @@ export default function SettingsPage() {
 
           <Divider />
 
+          <Stack spacing={2}>
+            <Typography variant="h6">AI Features</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Toggle AI-powered features on or off. When off, the app uses local
+              logic as a fallback.
+            </Typography>
+            {Object.values(AIFeatureFlag).map((flag) => (
+              <FormControlLabel
+                key={flag}
+                control={
+                  <Switch
+                    checked={isEnabled(flag)}
+                    onChange={(_, checked) => setEnabled(flag, checked)}
+                  />
+                }
+                label={AIFeatureFlagLabel[flag]}
+                slotProps={{
+                  typography: { variant: 'body2' },
+                }}
+              />
+            ))}
+            <Typography variant="caption" color="text.secondary">
+              {AIFeatureFlagDescription[AIFeatureFlag.AiPlanning]}
+            </Typography>
+          </Stack>
+
+          <Divider />
+
           <AccountSection />
 
           <Divider />
@@ -117,6 +155,8 @@ export default function SettingsPage() {
 
         </Stack>
       </SectionCard>
+
+      <AIUsagePanel />
 
       <Snackbar
         open={snackbar.open}

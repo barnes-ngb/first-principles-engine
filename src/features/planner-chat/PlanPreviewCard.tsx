@@ -1,3 +1,4 @@
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
 import Alert from '@mui/material/Alert'
@@ -8,7 +9,7 @@ import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
-import type { DraftWeeklyPlan } from '../../core/types/domain'
+import type { DraftPlanItem, DraftWeeklyPlan } from '../../core/types/domain'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { dayTotalMinutes } from './chatPlanner.logic'
 
@@ -16,9 +17,11 @@ interface PlanPreviewCardProps {
   plan: DraftWeeklyPlan
   hoursPerDay: number
   onToggleItem?: (dayIndex: number, itemId: string) => void
+  onGenerateActivity?: (item: DraftPlanItem) => void
+  generatingItemId?: string
 }
 
-export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem }: PlanPreviewCardProps) {
+export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGenerateActivity, generatingItemId }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
 
   return (
@@ -147,6 +150,19 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem }: Pla
                       <Typography variant="caption" color="text.secondary">
                         {item.estimatedMinutes}m
                       </Typography>
+                      {onGenerateActivity && item.accepted && !item.isAppBlock && (
+                        <Tooltip title="Generate activity" arrow>
+                          <IconButton
+                            size="small"
+                            onClick={() => onGenerateActivity(item)}
+                            disabled={generatingItemId === item.id}
+                            sx={{ p: 0.25, ml: 0.25 }}
+                            color="secondary"
+                          >
+                            <AutoAwesomeIcon sx={{ fontSize: 16 }} />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </Stack>
                   </Box>
                 ))

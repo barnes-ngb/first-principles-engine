@@ -19,6 +19,7 @@ import SettingsPage from '../features/settings/SettingsPage'
 import TodayPage from '../features/today/TodayPage'
 import LabModePage from '../features/week/LabModePage'
 import WeekPage from '../features/week/WeekPage'
+import WeeklyReviewPage from '../features/weekly-review/WeeklyReviewPage'
 
 const routes = [
   {
@@ -39,6 +40,7 @@ const routes = [
         element: <RequireParent />,
         children: [
           { path: '/week', element: <WeekPage /> },
+          { path: '/weekly-review', element: <WeeklyReviewPage /> },
         ],
       },
       { path: '/engine', element: <EnginePage /> },

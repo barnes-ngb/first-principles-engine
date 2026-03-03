@@ -1,4 +1,5 @@
 import type {
+  AdjustmentDecision,
   AssignmentAction,
   ChatMessageRole,
   DayBlockType,
@@ -13,6 +14,7 @@ import type {
   PlannerSessionStatus,
   PlanType,
   ProjectPhase,
+  ReviewStatus,
   RoutineItemKey,
   SessionResult,
   SessionSymbol,
@@ -729,6 +731,18 @@ export interface PaceGaugeResult {
   bufferDays: number
 }
 
+// ── AI Usage Tracking ─────────────────────────────────────────
+
+export interface AIUsageEntry {
+  id?: string
+  childId: string
+  taskType: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+  createdAt: string
+}
+
 // ── Light Day Template (Appointment Resilience) ───────────────
 
 export interface LightDayTemplate {
@@ -777,6 +791,14 @@ export interface ModalityChoice {
   description: string
 }
 
+// ── Weekly Review (AI Adaptive Loop) ──────────────────────────
+
+export interface PlanModification {
+  area: string
+  modification: string
+  reason: string
+}
+
 // ── Skip Advisor Result ───────────────────────────────────────
 
 export interface SkipAdvisorResult {
@@ -786,4 +808,42 @@ export interface SkipAdvisorResult {
   evidenceLevel?: MasteryGate
   /** Related skill tag */
   skillTag?: SkillTag
+}
+
+// ── Weekly Review (AI-generated adaptive review) ──────────────
+
+export interface PaceAdjustment {
+  id: string
+  subjectBucket?: SubjectBucket
+  area: string
+  currentPace: string
+  suggestedPace: string
+  rationale: string
+  decision: AdjustmentDecision
+}
+
+export interface WeeklyReview {
+  id?: string
+  childId: string
+  weekKey: string
+  status: ReviewStatus
+  /** Celebration / affirmation highlight */
+  celebration: string
+  /** Narrative summary of the week */
+  summary: string
+  /** Specific wins observed */
+  wins: string[]
+  /** Areas that need attention */
+  growthAreas: string[]
+  /** Pace adjustments with accept/reject per item */
+  paceAdjustments: PaceAdjustment[]
+  /** Structured plan modifications */
+  planModifications?: PlanModification[]
+  /** Recommendations for next week */
+  recommendations: string[]
+  /** Observed energy pattern for the week */
+  energyPattern?: string
+  reviewedAt?: string
+  createdAt?: string
+  updatedAt?: string
 }

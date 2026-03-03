@@ -19,6 +19,21 @@ export default defineConfig({
       openai: fileURLToPath(
         new URL('./functions/src/ai/providers/__stubs__/openai.ts', import.meta.url),
       ),
+      'firebase-admin/firestore': fileURLToPath(
+        new URL('./functions/src/ai/providers/__stubs__/firebase-admin-firestore.ts', import.meta.url),
+      ),
+      'firebase-admin/storage': fileURLToPath(
+        new URL('./functions/src/ai/providers/__stubs__/firebase-admin-storage.ts', import.meta.url),
+      ),
+      'firebase-functions/v2/scheduler': fileURLToPath(
+        new URL('./functions/src/ai/providers/__stubs__/firebase-functions-scheduler.ts', import.meta.url),
+      ),
+      'firebase-functions/v2/https': fileURLToPath(
+        new URL('./functions/src/ai/providers/__stubs__/firebase-functions-https.ts', import.meta.url),
+      ),
+      'firebase-functions/params': fileURLToPath(
+        new URL('./functions/src/ai/providers/__stubs__/firebase-functions-params.ts', import.meta.url),
+      ),
     },
   },
 })
