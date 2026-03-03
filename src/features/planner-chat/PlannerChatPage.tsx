@@ -15,12 +15,13 @@ import { addDoc, doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore'
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import { AIFeatureFlag, useAIFeatureFlags } from '../../core/ai/featureFlags'
-import { useAI, TaskType } from '../../core/ai/useAI'
-import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
+import { useAI, TaskType, useGenerateActivity } from '../../core/ai/useAI'
+import type { ChatMessage as AIChatMessage, GeneratedActivity } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   daysCollection,
+  lessonCardsCollection,
   plannerConversationDocId,
   plannerConversationsCollection,
   skillSnapshotsCollection,
@@ -35,7 +36,9 @@ import type {
   ChecklistItem,
   DayBlock,
   DayLog,
+  DraftPlanItem,
   DraftWeeklyPlan,
+  LessonCard,
   PlannerConversation,
   PhotoLabel,
   SkillSnapshot,
@@ -64,6 +67,7 @@ import type { AdjustmentIntent } from './chatPlanner.logic'
 import { describeAdjustment, parseAdjustmentIntent } from './intentParser'
 import { formatCoverageSummaryText, buildCoverageSummary } from './coverageSummary'
 import ContextDrawer from './ContextDrawer'
+import LessonCardPreview from './LessonCardPreview'
 import PlanPreviewCard from './PlanPreviewCard'
 import PlanSummaryPanel from './PlanSummaryPanel'
 import PhotoLabelForm from './PhotoLabelForm'
@@ -97,6 +101,7 @@ export default function PlannerChatPage() {
   const familyId = useFamilyId()
   const { isEnabled } = useAIFeatureFlags()
   const { chat: aiChat, loading: aiLoading } = useAI()
+  const { generate: generateActivity, loading: generateLoading } = useGenerateActivity()
   const {
     children,
     activeChildId,
@@ -123,6 +128,13 @@ export default function PlannerChatPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [applied, setApplied] = useState(false)
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' } | null>(null)
+
+  // Generate activity state
+  const [generatingItemId, setGeneratingItemId] = useState<string | null>(null)
+  const [generatedActivity, setGeneratedActivity] = useState<GeneratedActivity | null>(null)
+  const [generatedPlanItem, setGeneratedPlanItem] = useState<DraftPlanItem | null>(null)
+  const [lessonCardSaved, setLessonCardSaved] = useState(false)
+  const [lessonCardSaving, setLessonCardSaving] = useState(false)
 
   const conversationDocId = useMemo(
     () => (activeChildId ? plannerConversationDocId(weekRange.start, activeChildId) : ''),
@@ -629,6 +641,81 @@ export default function PlannerChatPage() {
     })
   }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation])
 
+  // Map SubjectBucket to activity type for the generate Cloud Function
+  const subjectToActivityType = useCallback((subject: SubjectBucket): string => {
+    switch (subject) {
+      case SubjectBucket.Reading: return 'reading'
+      case SubjectBucket.LanguageArts: return 'phonics'
+      case SubjectBucket.Math: return 'math'
+      default: return 'other'
+    }
+  }, [])
+
+  // Generate activity for a plan item
+  const handleGenerateActivity = useCallback(async (item: DraftPlanItem) => {
+    if (!activeChildId) return
+    setGeneratingItemId(item.id)
+    setGeneratedActivity(null)
+    setGeneratedPlanItem(null)
+    setLessonCardSaved(false)
+
+    const activityType = subjectToActivityType(item.subjectBucket)
+    const skillTag = item.skillTags[0] ?? `${item.subjectBucket.toLowerCase()}.general`
+
+    const response = await generateActivity({
+      familyId,
+      childId: activeChildId,
+      activityType,
+      skillTag,
+      estimatedMinutes: item.estimatedMinutes,
+    })
+
+    setGeneratingItemId(null)
+
+    if (response) {
+      setGeneratedActivity(response.activity)
+      setGeneratedPlanItem(item)
+    } else {
+      setSnack({ text: 'Failed to generate activity. Try again.', severity: 'error' })
+    }
+  }, [activeChildId, familyId, generateActivity, subjectToActivityType])
+
+  // Save generated activity as a LessonCard in Firestore
+  const handleSaveLessonCard = useCallback(async () => {
+    if (!activeChildId || !generatedActivity || !generatedPlanItem) return
+    setLessonCardSaving(true)
+    try {
+      const lessonCard: Omit<LessonCard, 'id'> = {
+        childId: activeChildId,
+        planItemId: generatedPlanItem.id,
+        title: generatedActivity.title,
+        durationMinutes: generatedPlanItem.estimatedMinutes,
+        objective: generatedActivity.objective,
+        materials: generatedActivity.materials,
+        steps: generatedActivity.steps,
+        supports: [],
+        evidenceChecks: generatedActivity.successCriteria,
+        skillTags: generatedPlanItem.skillTags,
+        ladderRef: generatedPlanItem.ladderRef,
+        createdAt: new Date().toISOString(),
+      }
+      await addDoc(lessonCardsCollection(familyId), lessonCard)
+      setLessonCardSaved(true)
+      setSnack({ text: 'Lesson card saved!', severity: 'success' })
+    } catch (err) {
+      console.error('Failed to save lesson card', err)
+      setSnack({ text: 'Failed to save lesson card.', severity: 'error' })
+    } finally {
+      setLessonCardSaving(false)
+    }
+  }, [activeChildId, familyId, generatedActivity, generatedPlanItem])
+
+  const handleClosePreview = useCallback(() => {
+    setGeneratedActivity(null)
+    setGeneratedPlanItem(null)
+    setLessonCardSaved(false)
+  }, [])
+
   return (
     <Page>
       <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -710,6 +797,8 @@ export default function PlannerChatPage() {
                         plan={msg.draftPlan}
                         hoursPerDay={hoursPerDay}
                         onToggleItem={msg === messages[messages.length - 1] ? handleToggleItem : undefined}
+                        onGenerateActivity={msg === messages[messages.length - 1] && !applied ? handleGenerateActivity : undefined}
+                        generatingItemId={generatingItemId ?? undefined}
                       />
                     </Box>
                   )}
@@ -838,6 +927,41 @@ export default function PlannerChatPage() {
           {snack?.text}
         </Alert>
       </Snackbar>
+
+      {/* Generate activity loading overlay */}
+      {generateLoading && (
+        <Box
+          sx={{
+            position: 'fixed',
+            bottom: 80,
+            right: 24,
+            bgcolor: 'background.paper',
+            borderRadius: 2,
+            boxShadow: 3,
+            px: 2,
+            py: 1,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+          }}
+        >
+          <CircularProgress size={20} />
+          <Typography variant="body2">Generating activity...</Typography>
+        </Box>
+      )}
+
+      {/* Lesson card preview dialog */}
+      {generatedActivity && generatedPlanItem && (
+        <LessonCardPreview
+          open
+          onClose={handleClosePreview}
+          activity={generatedActivity}
+          planItem={generatedPlanItem}
+          saved={lessonCardSaved}
+          saving={lessonCardSaving}
+          onSave={handleSaveLessonCard}
+        />
+      )}
     </Page>
   )
 }

@@ -30,6 +30,30 @@ export interface ChatResponse {
   usage: { inputTokens: number; outputTokens: number }
 }
 
+// ── Generate types (mirrored from functions/src/ai/generate.ts) ──
+
+export interface GenerateRequest {
+  familyId: string
+  childId: string
+  activityType: string
+  skillTag: string
+  estimatedMinutes: number
+}
+
+export interface GeneratedActivity {
+  title: string
+  objective: string
+  materials: string[]
+  steps: string[]
+  successCriteria: string[]
+}
+
+export interface GenerateResponse {
+  activity: GeneratedActivity
+  model: string
+  usage: { inputTokens: number; outputTokens: number }
+}
+
 // ── Image generation types (mirrored from functions/src/ai/imageGen.ts) ──
 
 export interface ImageGenRequest {
@@ -49,6 +73,7 @@ export interface ImageGenResponse {
 
 const functions = getFunctions(app)
 const chatFn = httpsCallable<ChatRequest, ChatResponse>(functions, 'chat')
+const generateFn = httpsCallable<GenerateRequest, GenerateResponse>(functions, 'generateActivity')
 const imageGenFn = httpsCallable<ImageGenRequest, ImageGenResponse>(functions, 'generateImage')
 
 export function useAI() {
@@ -89,4 +114,26 @@ export function useAI() {
   )
 
   return { chat, generateImage, loading, error } as const
+}
+
+export function useGenerateActivity() {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
+
+  const generate = useCallback(async (request: GenerateRequest): Promise<GenerateResponse | null> => {
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await generateFn(request)
+      return result.data
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err))
+      setError(e)
+      return null
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  return { generate, loading, error } as const
 }
