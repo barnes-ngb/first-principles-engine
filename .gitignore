@@ -28,7 +28,7 @@ dist-ssr
 .env
 FIREBASE_SERVICE_ACCOUNT.json
 
-# Cloud Functions
+# Cloud Functions build output
 functions/lib
 functions/node_modules
 functions/.runtimeconfig.json

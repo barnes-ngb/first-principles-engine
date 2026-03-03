@@ -1,41 +1,52 @@
-import * as functions from "firebase-functions";
+import { defineSecret } from "firebase-functions/params";
 
 /**
- * AI provider configuration read from Firebase environment config.
+ * AI provider secrets backed by Google Cloud Secret Manager.
  *
- * Set keys with:
- *   firebase functions:config:set ai.claude_key="sk-ant-..." ai.openai_key="sk-..."
+ * Set secrets with:
+ *   firebase functions:secrets:set CLAUDE_API_KEY
+ *   firebase functions:secrets:set OPENAI_API_KEY
  *
- * For the local emulator, create functions/.runtimeconfig.json:
- *   { "ai": { "claude_key": "test-key", "openai_key": "test-key" } }
+ * For the local emulator, create functions/.secret.local with:
+ *   CLAUDE_API_KEY=sk-ant-...
+ *   OPENAI_API_KEY=sk-...
  *
- * Or export CLAUDE_API_KEY / OPENAI_API_KEY environment variables.
+ * Any Cloud Function that uses these must declare them so the runtime
+ * makes the values available:
+ *
+ *   import { claudeApiKey, openaiApiKey } from "./aiConfig.js";
+ *   export const myFn = onCall({ secrets: [claudeApiKey, openaiApiKey] }, async (req) => {
+ *     const key = claudeApiKey.value();
+ *   });
  */
+
+export const claudeApiKey = defineSecret("CLAUDE_API_KEY");
+export const openaiApiKey = defineSecret("OPENAI_API_KEY");
 
 export interface AiConfig {
   claudeKey: string;
   openaiKey: string;
 }
 
+/**
+ * Read current secret values. Only call from within a function handler
+ * that has declared the secrets via the `secrets` option.
+ */
 export function getAiConfig(): AiConfig {
-  const runtimeConfig = functions.config();
-
-  const claudeKey =
-    runtimeConfig.ai?.claude_key ?? process.env.CLAUDE_API_KEY;
-  const openaiKey =
-    runtimeConfig.ai?.openai_key ?? process.env.OPENAI_API_KEY;
+  const claudeKey = claudeApiKey.value();
+  const openaiKey = openaiApiKey.value();
 
   if (!claudeKey) {
     throw new Error(
-      'Missing AI config: ai.claude_key. Run:\n' +
-        '  firebase functions:config:set ai.claude_key="sk-ant-..."'
+      "Missing secret CLAUDE_API_KEY. Run:\n" +
+        "  firebase functions:secrets:set CLAUDE_API_KEY",
     );
   }
 
   if (!openaiKey) {
     throw new Error(
-      'Missing AI config: ai.openai_key. Run:\n' +
-        '  firebase functions:config:set ai.openai_key="sk-..."'
+      "Missing secret OPENAI_API_KEY. Run:\n" +
+        "  firebase functions:secrets:set OPENAI_API_KEY",
     );
   }
 
