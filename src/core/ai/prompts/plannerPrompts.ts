@@ -21,6 +21,8 @@ import type {
   SupportDefault,
 } from '../../types/domain'
 import type { EnergyLevel } from '../../types/enums'
+import type { EnergyPatternResult } from '../../utils/energyPatterns'
+import { formatEnergyPatternsForPrompt } from '../../utils/energyPatterns'
 
 // ── Charter Preamble ────────────────────────────────────────────
 
@@ -94,6 +96,7 @@ export interface PlannerPromptInputs {
   energyLevel?: EnergyLevel
   paceData?: PaceGaugeResult[]
   recentSessions?: Pick<Session, 'date' | 'streamId' | 'result' | 'notes'>[]
+  energyPatterns?: EnergyPatternResult
 }
 
 // ── Formatting Helpers ──────────────────────────────────────────
@@ -261,11 +264,18 @@ export function buildPlannerSystemPrompt(inputs: PlannerPromptInputs): string {
     buildSkillSnapshotSection(inputs.snapshot),
     '',
     buildSessionContextSection(inputs),
+  ]
+
+  if (inputs.energyPatterns) {
+    sections.push('', formatEnergyPatternsForPrompt(inputs.energyPatterns))
+  }
+
+  sections.push(
     '',
     buildAssignmentsSection(inputs),
     '',
     buildOutputSchemaSection(),
-  ]
+  )
 
   return sections.join('\n')
 }
