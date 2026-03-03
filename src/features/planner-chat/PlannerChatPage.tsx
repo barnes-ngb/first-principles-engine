@@ -48,10 +48,15 @@ import {
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
 import { defaultAppBlocks } from '../planner/planner.logic'
+import { useAI, TaskType } from '../../core/ai/useAI'
+import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import {
   buildMinimumWinText,
+  buildPlannerPrompt,
   generateDraftPlanFromInputs,
   generateItemId,
+  isAIPlannerEnabled,
+  parseAIResponse,
   WEEK_DAYS,
 } from './chatPlanner.logic'
 import type { AdjustmentIntent } from './chatPlanner.logic'
@@ -114,7 +119,9 @@ export default function PlannerChatPage() {
   const [showPhotos, setShowPhotos] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [applied, setApplied] = useState(false)
-  const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
+  const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' } | null>(null)
+  const { chat: aiChat, loading: aiLoading } = useAI()
+  const aiEnabled = isAIPlannerEnabled()
 
   const conversationDocId = useMemo(
     () => (activeChildId ? plannerConversationDocId(weekRange.start, activeChildId) : ''),
@@ -241,8 +248,8 @@ export default function PlannerChatPage() {
     [activeChildId, familyId],
   )
 
-  // Submit photos and generate plan
-  const handleSubmitPhotos = useCallback(() => {
+  // Submit photos and generate plan (AI path with local fallback)
+  const handleSubmitPhotos = useCallback(async () => {
     if (photoLabels.length === 0) return
     const assignments = photoLabelsToAssignments(photoLabels)
 
@@ -255,21 +262,43 @@ export default function PlannerChatPage() {
       createdAt: new Date().toISOString(),
     }
 
-    // Generate draft
-    const draft = generateDraftPlanFromInputs({
-      snapshot,
-      hoursPerDay,
-      appBlocks,
-      assignments,
-      adjustments,
-    })
+    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments }
+    let draft: DraftWeeklyPlan
+    let usedAI = false
+
+    if (aiEnabled && activeChildId) {
+      // AI path: send context to Cloud Function
+      const prompt = buildPlannerPrompt(inputs)
+      const aiMessages: AIChatMessage[] = [{ role: 'user', content: prompt }]
+      const response = await aiChat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.Plan,
+        messages: aiMessages,
+      })
+
+      const aiDraft = response ? parseAIResponse(response) : null
+      if (aiDraft) {
+        draft = aiDraft
+        usedAI = true
+      } else {
+        // Fallback to local logic
+        draft = generateDraftPlanFromInputs(inputs)
+        setSnack({ text: 'AI planning unavailable — used local planner.', severity: 'info' })
+      }
+    } else {
+      // Local path (flag off)
+      draft = generateDraftPlanFromInputs(inputs)
+    }
+
     setCurrentDraft(draft)
 
     // Assistant response with draft
+    const aiLabel = usedAI ? ' (AI-powered)' : ''
     const assistantMsg: ChatMessage = {
       id: generateItemId(),
       role: ChatMessageRole.Assistant,
-      text: `Here's your draft plan based on ${photoLabels.length} workbook page${photoLabels.length > 1 ? 's' : ''}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot.` : ''} You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".`,
+      text: `Here's your draft plan${aiLabel} based on ${photoLabels.length} workbook page${photoLabels.length > 1 ? 's' : ''}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot.` : ''} You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".`,
       draftPlan: draft,
       createdAt: new Date().toISOString(),
     }
@@ -283,10 +312,10 @@ export default function PlannerChatPage() {
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, messages, persistConversation])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, messages, persistConversation, aiEnabled, activeChildId, familyId, aiChat])
 
-  // Handle text message send
-  const handleSend = useCallback(() => {
+  // Handle text message send (AI path for free-form with local fallback)
+  const handleSend = useCallback(async () => {
     const text = inputText.trim()
     if (!text) return
 
@@ -353,8 +382,41 @@ export default function PlannerChatPage() {
         text: 'Looks like you have photos ready. Tap "Generate Plan" to see your draft week plan.',
         createdAt: new Date().toISOString(),
       }
+    } else if (aiEnabled && activeChildId) {
+      // AI path: send free-form message through Cloud Function for plan adjustment
+      const conversationHistory: AIChatMessage[] = messages
+        .filter((m) => m.text)
+        .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.text! }))
+      conversationHistory.push({ role: 'user', content: text })
+
+      const response = await aiChat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.Plan,
+        messages: conversationHistory,
+      })
+
+      const aiDraft = response ? parseAIResponse(response) : null
+      if (aiDraft) {
+        setCurrentDraft(aiDraft)
+        assistantMsg = {
+          id: generateItemId(),
+          role: ChatMessageRole.Assistant,
+          text: 'Here\'s the updated plan based on your request:',
+          draftPlan: aiDraft,
+          createdAt: new Date().toISOString(),
+        }
+      } else {
+        // AI returned non-plan text or failed — show the text response or fallback
+        assistantMsg = {
+          id: generateItemId(),
+          role: ChatMessageRole.Assistant,
+          text: response?.message ?? 'I couldn\'t process that request. Try something like:\n- "Make Wed light"\n- "Move math to Tue/Thu"\n- "Reduce writing"\n- "Cap math at 15 min"',
+          createdAt: new Date().toISOString(),
+        }
+      }
     } else {
-      // Unrecognized intent with existing plan
+      // Unrecognized intent with existing plan (no AI)
       assistantMsg = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
@@ -371,7 +433,7 @@ export default function PlannerChatPage() {
       messages: updatedMessages,
       currentDraft: currentDraft ?? undefined,
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, aiEnabled, activeChildId, familyId, aiChat])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -702,7 +764,7 @@ export default function PlannerChatPage() {
                 }
               }}
             />
-            <IconButton onClick={handleSend} color="primary" disabled={!inputText.trim()}>
+            <IconButton onClick={handleSend} color="primary" disabled={!inputText.trim() || aiLoading}>
               <SendIcon />
             </IconButton>
           </Stack>

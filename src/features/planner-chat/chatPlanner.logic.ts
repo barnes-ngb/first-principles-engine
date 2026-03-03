@@ -7,8 +7,15 @@ import type {
   SkillSnapshot,
   SkipSuggestion,
 } from '../../core/types/domain'
+import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, SubjectBucket } from '../../core/types/enums'
 import { autoSuggestTags } from '../../core/types/skillTags'
+
+// ── Feature Flag ─────────────────────────────────────────────
+
+export function isAIPlannerEnabled(): boolean {
+  return import.meta.env.VITE_AI_PLANNER_ENABLED === 'true'
+}
 
 export const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as const
 export type WeekDay = (typeof WEEK_DAYS)[number]
@@ -370,4 +377,151 @@ function skillTagToSubject(tag: string): SubjectBucket {
   if (lower.startsWith('science')) return SubjectBucket.Science
   if (lower.startsWith('social')) return SubjectBucket.SocialStudies
   return SubjectBucket.Other
+}
+
+// ── AI-Powered Plan Generation ───────────────────────────────
+
+/** Build the user message content that describes assignments and context for the LLM. */
+export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
+  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [] } = inputs
+  const lines: string[] = []
+
+  lines.push(`Generate a weekly school plan (Monday–Friday) with ${hoursPerDay} hours/day budget.`)
+  lines.push('')
+
+  if (appBlocks.length > 0) {
+    lines.push('App blocks (pre-scheduled daily):')
+    for (const block of appBlocks) {
+      lines.push(`- ${block.label}: ${block.defaultMinutes} min/day`)
+    }
+    lines.push('')
+  }
+
+  if (assignments.length > 0) {
+    lines.push('Workbook assignments to distribute:')
+    for (const a of assignments) {
+      lines.push(`- ${a.workbookName} – ${a.lessonName} (${a.subjectBucket}, ${a.estimatedMinutes} min)`)
+    }
+    lines.push('')
+  }
+
+  if (snapshot && snapshot.prioritySkills.length > 0) {
+    lines.push('Priority skills:')
+    for (const skill of snapshot.prioritySkills) {
+      lines.push(`- ${skill.label} (${skill.tag}): ${skill.level}`)
+    }
+    lines.push('')
+  }
+
+  if (snapshot && snapshot.stopRules.length > 0) {
+    lines.push('Stop rules:')
+    for (const rule of snapshot.stopRules) {
+      lines.push(`- ${rule.label}: when "${rule.trigger}" → ${rule.action}`)
+    }
+    lines.push('')
+  }
+
+  if (adjustments.length > 0) {
+    lines.push('Adjustments requested:')
+    for (const adj of adjustments) {
+      lines.push(`- ${JSON.stringify(adj)}`)
+    }
+    lines.push('')
+  }
+
+  lines.push('Respond ONLY with a JSON object matching this schema (no markdown fences, no commentary):')
+  lines.push(JSON.stringify({
+    days: [
+      {
+        day: 'Monday',
+        timeBudgetMinutes: 150,
+        items: [
+          {
+            title: 'string',
+            subjectBucket: 'Reading|Math|LanguageArts|Science|SocialStudies|Other',
+            estimatedMinutes: 15,
+            skillTags: ['optional.skill.tag'],
+            isAppBlock: false,
+            accepted: true,
+          },
+        ],
+      },
+    ],
+    skipSuggestions: [],
+    minimumWin: 'string',
+  }))
+
+  return lines.join('\n')
+}
+
+const VALID_SUBJECT_BUCKETS = new Set<string>(Object.values(SubjectBucket))
+
+/** Parse and validate an AI response into a DraftWeeklyPlan. Returns null if malformed. */
+export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null {
+  try {
+    let text = response.message.trim()
+    // Strip markdown code fences if present
+    if (text.startsWith('```')) {
+      text = text.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')
+    }
+    const parsed = JSON.parse(text) as Record<string, unknown>
+
+    if (!Array.isArray(parsed.days) || parsed.days.length === 0) return null
+    if (typeof parsed.minimumWin !== 'string') return null
+
+    const days: DraftDayPlan[] = []
+    for (const rawDay of parsed.days as Array<Record<string, unknown>>) {
+      if (typeof rawDay.day !== 'string') return null
+      if (!Array.isArray(rawDay.items)) return null
+
+      const items: DraftPlanItem[] = []
+      for (const rawItem of rawDay.items as Array<Record<string, unknown>>) {
+        if (typeof rawItem.title !== 'string') return null
+        if (typeof rawItem.estimatedMinutes !== 'number' || rawItem.estimatedMinutes < 0) return null
+
+        const subjectBucket = VALID_SUBJECT_BUCKETS.has(rawItem.subjectBucket as string)
+          ? (rawItem.subjectBucket as SubjectBucket)
+          : SubjectBucket.Other
+
+        items.push({
+          id: generateItemId(),
+          title: rawItem.title,
+          subjectBucket,
+          estimatedMinutes: rawItem.estimatedMinutes,
+          skillTags: Array.isArray(rawItem.skillTags) ? (rawItem.skillTags as string[]) : [],
+          isAppBlock: rawItem.isAppBlock === true,
+          accepted: rawItem.accepted !== false,
+        })
+      }
+
+      days.push({
+        day: rawDay.day,
+        timeBudgetMinutes: typeof rawDay.timeBudgetMinutes === 'number' ? rawDay.timeBudgetMinutes : 150,
+        items,
+      })
+    }
+
+    const validSkipActions = new Set(['skip', 'modify'])
+    const skipSuggestions: SkipSuggestion[] = Array.isArray(parsed.skipSuggestions)
+      ? (parsed.skipSuggestions as Array<Record<string, unknown>>)
+          .filter(
+            (s) =>
+              typeof s.action === 'string' &&
+              validSkipActions.has(s.action as string) &&
+              typeof s.reason === 'string' &&
+              typeof s.replacement === 'string' &&
+              typeof s.evidence === 'string',
+          )
+          .map((s) => ({
+            action: s.action as 'skip' | 'modify',
+            reason: s.reason as string,
+            replacement: s.replacement as string,
+            evidence: s.evidence as string,
+          }))
+      : []
+
+    return { days, skipSuggestions, minimumWin: parsed.minimumWin as string }
+  } catch {
+    return null
+  }
 }
