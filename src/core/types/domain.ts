@@ -729,6 +729,18 @@ export interface PaceGaugeResult {
   bufferDays: number
 }
 
+// ── AI Usage Tracking ─────────────────────────────────────────
+
+export interface AIUsageEntry {
+  id?: string
+  childId: string
+  taskType: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+  createdAt: string
+}
+
 // ── Light Day Template (Appointment Resilience) ───────────────
 
 export interface LightDayTemplate {

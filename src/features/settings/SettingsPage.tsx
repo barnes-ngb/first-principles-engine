@@ -28,6 +28,7 @@ import {
   useAIFeatureFlags,
 } from '../../core/ai/featureFlags'
 import AccountSection from './AccountSection'
+import AIUsagePanel from './AIUsagePanel'
 
 type SnackbarState = {
   open: boolean
@@ -154,6 +155,8 @@ export default function SettingsPage() {
 
         </Stack>
       </SectionCard>
+
+      <AIUsagePanel />
 
       <Snackbar
         open={snackbar.open}

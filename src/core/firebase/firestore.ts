@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore'
 
 import type {
+  AIUsageEntry,
   Artifact,
   Child,
   DadLabWeek,
@@ -278,3 +279,10 @@ export const workbookConfigsCollection = (
 
 export const workbookConfigDocId = (childId: string, workbookName: string): string =>
   `${childId}_${workbookName.toLowerCase().replace(/\s+/g, '-')}`
+
+// ── AI Usage ────────────────────────────────────────────────────
+
+export const aiUsageCollection = (
+  familyId: string,
+): CollectionReference<AIUsageEntry> =>
+  collection(db, `families/${familyId}/aiUsage`) as CollectionReference<AIUsageEntry>
