@@ -20,6 +20,7 @@ import { useProfile } from '../../core/profile/useProfile'
 import { ThemeMode } from '../../core/types/enums'
 import { seedDemoFamily } from '../../core/data/seed'
 import AccountSection from './AccountSection'
+import AIUsagePanel from './AIUsagePanel'
 
 type SnackbarState = {
   open: boolean
@@ -117,6 +118,8 @@ export default function SettingsPage() {
 
         </Stack>
       </SectionCard>
+
+      <AIUsagePanel />
 
       <Snackbar
         open={snackbar.open}
