@@ -204,6 +204,49 @@ export const ChatMessageRole = {
 } as const
 export type ChatMessageRole = (typeof ChatMessageRole)[keyof typeof ChatMessageRole]
 
+export const MasteryGate = {
+  NotYet: 0,
+  WithHelp: 1,
+  MostlyIndependent: 2,
+  IndependentConsistent: 3,
+} as const
+export type MasteryGate = (typeof MasteryGate)[keyof typeof MasteryGate]
+
+/** Human-readable label for each mastery gate level. */
+export const MasteryGateLabel: Record<MasteryGate, string> = {
+  [MasteryGate.NotYet]: 'Not yet',
+  [MasteryGate.WithHelp]: 'With help',
+  [MasteryGate.MostlyIndependent]: 'Mostly independent',
+  [MasteryGate.IndependentConsistent]: 'Independent + consistent',
+}
+
+export const PaceStatus = {
+  Ahead: 'ahead',
+  OnTrack: 'on_track',
+  Behind: 'behind',
+  Critical: 'critical',
+} as const
+export type PaceStatus = (typeof PaceStatus)[keyof typeof PaceStatus]
+
+export const PlanType = {
+  Normal: 'normal',
+  Mvd: 'mvd',
+} as const
+export type PlanType = (typeof PlanType)[keyof typeof PlanType]
+
+/** Human-readable label for each plan type. */
+export const PlanTypeLabel: Record<PlanType, string> = {
+  [PlanType.Normal]: 'Normal Day',
+  [PlanType.Mvd]: 'Minimum Viable Day',
+}
+
+export const DayType = {
+  Normal: 'normal',
+  Light: 'light',
+  Appointment: 'appointment',
+} as const
+export type DayType = (typeof DayType)[keyof typeof DayType]
+
 export const RoutineItemKey = {
   Handwriting: 'handwriting',
   Spelling: 'spelling',

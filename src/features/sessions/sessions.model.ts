@@ -33,10 +33,10 @@ export const ladderIdForChild = (childId: string, streamId: StreamId): string =>
   `${childId}-${streamLadderSuffix[streamId]}`
 
 /**
- * Plan A: Formation, Read, Math, Together/Project (4 blocks).
- * Plan B: Formation, short Read, short Math (3 blocks, shorter).
+ * Normal Day: Formation, Read, Math, Together/Project (4 blocks).
+ * MVD (Minimum Viable Day): short Read, short Math (2 blocks, shorter).
  */
-export const buildPlanASessions = (
+export const buildNormalDaySessions = (
   childId: string,
   rungsByStream: Record<StreamId, number>,
 ): PlannedSession[] => [
@@ -70,7 +70,7 @@ export const buildPlanASessions = (
   },
 ]
 
-export const buildPlanBSessions = (
+export const buildMvdSessions = (
   childId: string,
   rungsByStream: Record<StreamId, number>,
 ): PlannedSession[] => [

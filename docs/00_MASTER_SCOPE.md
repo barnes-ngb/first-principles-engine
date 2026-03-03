@@ -12,7 +12,7 @@ This repository is the **family learning notebook** for the “First Principles 
 
 ## Product North Star
 A tool that makes the right thing easy:
-- **Daily execution** is frictionless (Plan A / Plan B)
+- **Daily execution** is frictionless (Normal Day / MVD)
 - **Evidence capture** is fast and meaningful
 - **Weekly reflection** is built-in
 - **Progress** is visible (flywheel + ladders)

@@ -28,6 +28,7 @@ import type {
   SkillSnapshot,
   WeekPlan,
   WeeklyScore,
+  WorkbookConfig,
 } from '../types/domain'
 import { app } from './firebase'
 
@@ -134,10 +135,31 @@ export const hoursAdjustmentsCollection = (
 export const sessionsCollection = (familyId: string): CollectionReference<Session> =>
   collection(db, `families/${familyId}/sessions`) as CollectionReference<Session>
 
+/** Normalize legacy planType values: 'A' → 'normal', 'B' → 'mvd'. */
+function normalizePlanType(raw: string): DailyPlan['planType'] {
+  if (raw === 'A' || raw === 'normal') return 'normal'
+  if (raw === 'B' || raw === 'mvd') return 'mvd'
+  return 'normal'
+}
+
+const dailyPlanConverter: FirestoreDataConverter<DailyPlan> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as DailyPlan & { planType: string }
+    return {
+      ...data,
+      id: snapshot.id,
+      planType: normalizePlanType(data.planType),
+    }
+  },
+}
+
 export const dailyPlansCollection = (
   familyId: string,
 ): CollectionReference<DailyPlan> =>
-  collection(db, `families/${familyId}/dailyPlans`) as CollectionReference<DailyPlan>
+  collection(db, `families/${familyId}/dailyPlans`).withConverter(
+    dailyPlanConverter,
+  ) as CollectionReference<DailyPlan>
 
 export const projectsCollection = (familyId: string): CollectionReference<Project> =>
   collection(db, `families/${familyId}/projects`) as CollectionReference<Project>
@@ -245,3 +267,14 @@ export const plannerConversationsCollection = (
 /** Planner conversation doc ID: {weekKey}_{childId} */
 export const plannerConversationDocId = (weekKey: string, childId: string): string =>
   `${weekKey}_${childId}`
+
+// ── Workbook Configs (Pace Gauge) ────────────────────────────
+
+/** Workbook config per child per workbook. Doc ID: {childId}_{workbookName_slug} */
+export const workbookConfigsCollection = (
+  familyId: string,
+): CollectionReference<WorkbookConfig> =>
+  collection(db, `families/${familyId}/workbookConfigs`) as CollectionReference<WorkbookConfig>
+
+export const workbookConfigDocId = (childId: string, workbookName: string): string =>
+  `${childId}_${workbookName.toLowerCase().replace(/\s+/g, '-')}`
