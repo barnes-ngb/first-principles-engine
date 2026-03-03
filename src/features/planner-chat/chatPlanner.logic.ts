@@ -11,12 +11,6 @@ import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, SubjectBucket } from '../../core/types/enums'
 import { autoSuggestTags } from '../../core/types/skillTags'
 
-// ── Feature Flag ─────────────────────────────────────────────
-
-export function isAIPlannerEnabled(): boolean {
-  return import.meta.env.VITE_AI_PLANNER_ENABLED === 'true'
-}
-
 export const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as const
 export type WeekDay = (typeof WEEK_DAYS)[number]
 

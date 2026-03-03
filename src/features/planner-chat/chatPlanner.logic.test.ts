@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach } from 'vitest'
 import type { AssignmentCandidate, SkillSnapshot } from '../../core/types/domain'
 import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, SkillLevel, SubjectBucket } from '../../core/types/enums'
@@ -9,7 +9,6 @@ import {
   buildPlannerPrompt,
   dayTotalMinutes,
   generateDraftPlanFromInputs,
-  isAIPlannerEnabled,
   parseAIResponse,
   planTotalMinutes,
   resetIdCounter,
@@ -290,29 +289,6 @@ describe('planTotalMinutes', () => {
 })
 
 // ── AI Integration Tests ─────────────────────────────────────
-
-describe('isAIPlannerEnabled', () => {
-  const originalEnv = import.meta.env.VITE_AI_PLANNER_ENABLED
-
-  afterEach(() => {
-    import.meta.env.VITE_AI_PLANNER_ENABLED = originalEnv
-  })
-
-  it('returns true when env var is "true"', () => {
-    import.meta.env.VITE_AI_PLANNER_ENABLED = 'true'
-    expect(isAIPlannerEnabled()).toBe(true)
-  })
-
-  it('returns false when env var is not set', () => {
-    import.meta.env.VITE_AI_PLANNER_ENABLED = undefined
-    expect(isAIPlannerEnabled()).toBe(false)
-  })
-
-  it('returns false when env var is "false"', () => {
-    import.meta.env.VITE_AI_PLANNER_ENABLED = 'false'
-    expect(isAIPlannerEnabled()).toBe(false)
-  })
-})
 
 describe('buildPlannerPrompt', () => {
   it('includes hours per day budget', () => {
