@@ -59,6 +59,8 @@ import {
   EngineStage,
   EvidenceType,
   LearningLocation,
+  PlanType,
+  PlanTypeLabel,
   SubjectBucket,
   UserProfile,
 } from '../../core/types/enums'
@@ -96,7 +98,7 @@ export default function TodayPage() {
   const [linkingLadderId, setLinkingLadderId] = useState('')
   const [linkingRungId, setLinkingRungId] = useState('')
   const [mediaUploading, setMediaUploading] = useState(false)
-  const [planType, setPlanType] = useState<'A' | 'B'>('A')
+  const [planType, setPlanType] = useState<PlanType>(PlanType.Normal)
   const [showAllBlocks, setShowAllBlocks] = useState(false)
   const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
   const [teachHelperOpen, setTeachHelperOpen] = useState(false)
@@ -570,8 +572,8 @@ export default function TodayPage() {
               size="small"
               onChange={(_e, value) => { if (value) setPlanType(value) }}
             >
-              <ToggleButton value="A">Plan A</ToggleButton>
-              <ToggleButton value="B">Plan B</ToggleButton>
+              <ToggleButton value={PlanType.Normal}>{PlanTypeLabel[PlanType.Normal]}</ToggleButton>
+              <ToggleButton value={PlanType.Mvd}>{PlanTypeLabel[PlanType.Mvd]}</ToggleButton>
             </ToggleButtonGroup>
             <SaveIndicator state={saveState} />
           </Stack>
@@ -580,12 +582,12 @@ export default function TodayPage() {
           {dayLog.blocks
           .map((block, originalIndex) => ({ block, originalIndex }))
           .filter(({ block }) =>
-            planType === 'B'
+            planType === PlanType.Mvd
               ? block.type === DayBlockType.Reading || block.type === DayBlockType.Math
               : true,
           )
           .filter((_entry, filteredIndex) =>
-            planType === 'A' ? showAllBlocks || filteredIndex < 4 : true,
+            planType === PlanType.Normal ? showAllBlocks || filteredIndex < 4 : true,
           )
           .map(({ block, originalIndex: index }) => {
             const meta = blockMeta[block.type]
@@ -775,7 +777,7 @@ export default function TodayPage() {
               </Accordion>
             )
           })}
-          {planType === 'A' && !showAllBlocks && dayLog.blocks.length > 4 && (
+          {planType === PlanType.Normal && !showAllBlocks && dayLog.blocks.length > 4 && (
             <Button
               size="small"
               onClick={() => setShowAllBlocks(true)}
@@ -784,7 +786,7 @@ export default function TodayPage() {
               Show more ({dayLog.blocks.length - 4} more)
             </Button>
           )}
-          {planType === 'A' && showAllBlocks && dayLog.blocks.length > 4 && (
+          {planType === PlanType.Normal && showAllBlocks && dayLog.blocks.length > 4 && (
             <Button
               size="small"
               onClick={() => setShowAllBlocks(false)}
