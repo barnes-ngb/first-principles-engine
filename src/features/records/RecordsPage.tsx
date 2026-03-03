@@ -47,6 +47,7 @@ import { SubjectBucket } from '../../core/types/enums'
 import { formatDateForInput } from '../../core/utils/format'
 import { getSchoolYearRange } from '../../core/utils/time'
 import { parseDateFromDocId } from '../today/daylog.model'
+import ComplianceDashboard from './ComplianceDashboard'
 import {
   buildComplianceZip,
   computeHoursSummary,
@@ -441,6 +442,15 @@ export default function RecordsPage() {
           )}
         </Stack>
       </SectionCard>
+
+      {/* Compliance Dashboard */}
+      {activeChildId && !isLoading && hasData && (
+        <ComplianceDashboard
+          summary={summary}
+          startDate={startDate}
+          endDate={endDate}
+        />
+      )}
 
       {/* Hours Breakdown by Subject */}
       {activeChildId && !isLoading && hasData && (
