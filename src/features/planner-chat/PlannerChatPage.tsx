@@ -4,6 +4,7 @@ import SendIcon from '@mui/icons-material/Send'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import CircularProgress from '@mui/material/CircularProgress'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
@@ -13,6 +14,8 @@ import { addDoc, doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
+import { AIFeatureFlag, useAIFeatureFlags } from '../../core/ai/featureFlags'
+import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
@@ -89,6 +92,8 @@ function photoLabelsToAssignments(labels: PhotoLabel[]): AssignmentCandidate[] {
 
 export default function PlannerChatPage() {
   const familyId = useFamilyId()
+  const { isEnabled } = useAIFeatureFlags()
+  const { chat: aiChat, loading: aiLoading } = useAI()
   const {
     children,
     activeChildId,
@@ -286,7 +291,7 @@ export default function PlannerChatPage() {
   }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, messages, persistConversation])
 
   // Handle text message send
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const text = inputText.trim()
     if (!text) return
 
@@ -296,6 +301,37 @@ export default function PlannerChatPage() {
       text,
       createdAt: new Date().toISOString(),
     }
+
+    // ── AI-powered path ──────────────────────────────────────────
+    if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
+      const updatedWithUser = [...messages, userMsg]
+      setMessages(updatedWithUser)
+      setInputText('')
+
+      const aiMessages = updatedWithUser.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.text ?? '',
+      }))
+      const response = await aiChat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.Plan,
+        messages: aiMessages,
+      })
+
+      const assistantMsg: ChatMessage = {
+        id: generateItemId(),
+        role: ChatMessageRole.Assistant,
+        text: response?.message ?? 'Sorry, the AI service is unavailable right now. Try again or disable AI planning in Settings.',
+        createdAt: new Date().toISOString(),
+      }
+      const final = [...updatedWithUser, assistantMsg]
+      setMessages(final)
+      void persistConversation({ messages: final, currentDraft: currentDraft ?? undefined })
+      return
+    }
+
+    // ── Local logic path ─────────────────────────────────────────
 
     // Check for coverage question first
     const isCoverageQuestion = /what.*(cover|topic|schedul|plan)|cover.*week|summary/i.test(text)
@@ -371,7 +407,7 @@ export default function PlannerChatPage() {
       messages: updatedMessages,
       currentDraft: currentDraft ?? undefined,
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -702,8 +738,8 @@ export default function PlannerChatPage() {
                 }
               }}
             />
-            <IconButton onClick={handleSend} color="primary" disabled={!inputText.trim()}>
-              <SendIcon />
+            <IconButton onClick={handleSend} color="primary" disabled={!inputText.trim() || aiLoading}>
+              {aiLoading ? <CircularProgress size={24} /> : <SendIcon />}
             </IconButton>
           </Stack>
 
