@@ -1,4 +1,5 @@
 import type {
+  AdjustmentDecision,
   AssignmentAction,
   ChatMessageRole,
   DayBlockType,
@@ -13,6 +14,7 @@ import type {
   PlannerSessionStatus,
   PlanType,
   ProjectPhase,
+  ReviewStatus,
   RoutineItemKey,
   SessionResult,
   SessionSymbol,
@@ -798,4 +800,39 @@ export interface SkipAdvisorResult {
   evidenceLevel?: MasteryGate
   /** Related skill tag */
   skillTag?: SkillTag
+}
+
+// ── Weekly Review (AI-generated adaptive review) ──────────────
+
+export interface PaceAdjustment {
+  id: string
+  area: string
+  currentPace: string
+  suggestedPace: string
+  rationale: string
+  decision: AdjustmentDecision
+}
+
+export interface WeeklyReview {
+  id?: string
+  childId: string
+  weekKey: string
+  status: ReviewStatus
+  /** Celebration / affirmation highlight */
+  celebration: string
+  /** Narrative summary of the week */
+  summary: string
+  /** Specific wins observed */
+  wins: string[]
+  /** Areas that need attention */
+  growthAreas: string[]
+  /** Pace adjustments with accept/reject per item */
+  paceAdjustments: PaceAdjustment[]
+  /** Recommendations for next week */
+  recommendations: string[]
+  /** Whether accepted adjustments have been applied to next week */
+  applied?: boolean
+  reviewedAt?: string
+  createdAt?: string
+  updatedAt?: string
 }

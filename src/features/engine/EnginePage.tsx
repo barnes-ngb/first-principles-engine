@@ -202,12 +202,15 @@ export default function EnginePage() {
           <Typography variant="body2" color="text.secondary">
             Turn workbook photos into a weekly plan with daily checklists.
           </Typography>
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             <Button variant="contained" onClick={() => navigate('/planner')}>
               Plan My Week
             </Button>
             <Button variant="outlined" onClick={() => navigate('/evaluation')}>
               Skill Snapshot
+            </Button>
+            <Button variant="outlined" onClick={() => navigate('/weekly-review')}>
+              Weekly Review
             </Button>
           </Stack>
         </Stack>

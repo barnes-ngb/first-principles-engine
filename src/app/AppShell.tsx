@@ -20,6 +20,7 @@ const navItems = [
   { label: 'Today', to: '/today' },
   { label: 'This Week', to: '/week', parentOnly: true },
   { label: 'Plan My Week', to: '/planner', parentOnly: true },
+  { label: 'Weekly Review', to: '/weekly-review', parentOnly: true },
   { label: 'Engine', to: '/engine', parentOnly: true },
   { label: 'Skill Snapshot', to: '/evaluation', parentOnly: true },
   { label: 'Records', to: '/records', parentOnly: true, end: true },
