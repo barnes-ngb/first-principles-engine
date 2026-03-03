@@ -789,6 +789,35 @@ export interface ModalityChoice {
   description: string
 }
 
+// ── Weekly Review (AI Adaptive Loop) ──────────────────────────
+
+export interface PaceAdjustment {
+  subjectBucket: SubjectBucket
+  currentPace: string
+  recommendedPace: string
+  reason: string
+}
+
+export interface PlanModification {
+  area: string
+  modification: string
+  reason: string
+}
+
+export interface WeeklyReview {
+  id?: string
+  childId: string
+  weekKey: string
+  progressSummary: string
+  paceAdjustments: PaceAdjustment[]
+  planModifications: PlanModification[]
+  energyPattern: string
+  celebration: string
+  status: 'draft' | 'reviewed' | 'applied'
+  createdAt?: string
+  reviewedAt?: string
+}
+
 // ── Skip Advisor Result ───────────────────────────────────────
 
 export interface SkipAdvisorResult {
