@@ -12,8 +12,6 @@
     "noFallthroughCasesInSwitch": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
-    "declaration": true,
-    "declarationMap": true,
     "sourceMap": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
