@@ -32,3 +32,6 @@ FIREBASE_SERVICE_ACCOUNT.json
 functions/lib
 functions/node_modules
 functions/.runtimeconfig.json
+
+# TypeScript build info
+*.tsbuildinfo
