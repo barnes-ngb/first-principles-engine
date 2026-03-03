@@ -2,9 +2,12 @@ import { Navigate, Outlet, RouterProvider, createBrowserRouter } from 'react-rou
 import { AppShell } from './AppShell'
 import RequireParent from '../components/RequireParent'
 import EnginePage from '../features/engine/EnginePage'
+import SkillSnapshotPage from '../features/evaluation/SkillSnapshotPage'
 import KidsPage from '../features/kids/KidsPage'
 import LaddersPage from '../features/ladders/LaddersPage'
-import NotFoundPage from '../features/NotFoundPage'
+import NotFoundPage from '../features/not-found/NotFoundPage'
+import PlannerPage from '../features/planner/PlannerPage'
+import PlannerChatPage from '../features/planner-chat/PlannerChatPage'
 import ProjectBoardPage from '../features/projects/ProjectBoardPage'
 import EvaluationsPage from '../features/records/EvaluationsPage'
 import PortfolioPage from '../features/records/PortfolioPage'
@@ -31,14 +34,17 @@ const routes = [
       { path: '/scoreboard', element: <ScoreboardPage /> },
       { path: '/projects', element: <ProjectBoardPage /> },
       { path: '/today', element: <TodayPage /> },
+      { path: '/week/lab', element: <LabModePage /> },
       {
         element: <RequireParent />,
         children: [
           { path: '/week', element: <WeekPage /> },
-          { path: '/week/lab', element: <LabModePage /> },
         ],
       },
       { path: '/engine', element: <EnginePage /> },
+      { path: '/planner', element: <PlannerPage /> },
+      { path: '/planner/chat', element: <PlannerChatPage /> },
+      { path: '/evaluation', element: <SkillSnapshotPage /> },
       { path: '/ladders', element: <LaddersPage /> },
       { path: '/kids', element: <KidsPage /> },
       { path: '/records', element: <RecordsPage /> },

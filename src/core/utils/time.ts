@@ -1,5 +1,25 @@
 import { formatDateYmd } from './format'
 
+export type WeekRange = {
+  start: string
+  end: string
+}
+
+export const getWeekRange = (date: Date = new Date(), weekStartsOn = 1): WeekRange => {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const dayOfWeek = start.getDay()
+  const offset = (dayOfWeek - weekStartsOn + 7) % 7
+  start.setDate(start.getDate() - offset)
+
+  const end = new Date(start)
+  end.setDate(start.getDate() + 6)
+
+  return {
+    start: formatDateYmd(start),
+    end: formatDateYmd(end),
+  }
+}
+
 type SchoolYearRange = {
   start: string
   end: string

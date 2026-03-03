@@ -21,7 +21,7 @@ import {
   SubjectBucket,
   TrackType,
 } from '../types/enums'
-import { formatDateYmd } from '../../lib/format'
+import { formatDateYmd } from '../utils/format'
 
 const getWeekStart = (date: Date) => {
   const start = new Date(date)

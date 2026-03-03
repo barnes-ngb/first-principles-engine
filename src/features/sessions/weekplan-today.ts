@@ -1,5 +1,5 @@
 import type { Child, DayLog, WeekPlan } from '../../core/types/domain'
-import { DayBlockType } from '../../core/types/enums'
+import { DayBlockLabel, DayBlockType } from '../../core/types/enums'
 import type { DayBlockType as DayBlockTypeValue } from '../../core/types/enums'
 import { ALL_DAY_BLOCKS } from '../today/daylog.model'
 import { getTemplateForChild } from '../today/dailyPlanTemplates'
@@ -46,19 +46,6 @@ const defaultInstructions: Record<DayBlockTypeValue, string[]> = {
   [DayBlockType.Other]: ['Flex time'],
 }
 
-/** Human labels for block types (matches blockMeta). */
-const blockTitle: Record<DayBlockTypeValue, string> = {
-  [DayBlockType.Formation]: 'Formation',
-  [DayBlockType.Reading]: 'Reading',
-  [DayBlockType.Speech]: 'Speech',
-  [DayBlockType.Math]: 'Math',
-  [DayBlockType.Together]: 'Together',
-  [DayBlockType.Movement]: 'Movement',
-  [DayBlockType.Project]: 'Project',
-  [DayBlockType.FieldTrip]: 'Field Trip',
-  [DayBlockType.Other]: 'Other',
-}
-
 /**
  * Derive instructions for a block type from the WeekPlan.
  * Falls back to child-specific template instructions, then generic defaults.
@@ -101,9 +88,14 @@ function deriveInstructions(
       return items.length > 0 ? items.slice(0, 2) : fallback()
     }
     default: {
-      // For Reading, Math, Speech, etc. — child goals > template > generic
+      // For Reading, Math, Speech, etc. — template instructions (the child's
+      // actual routine) take priority over WeekPlan childGoals so Dashboard
+      // bullets always match the real routine.
+      if (templateInstructions && templateInstructions.length > 0) {
+        return templateInstructions
+      }
       if (childGoals.length > 0) {
-        return childGoals.slice(0, 2)
+        return childGoals.slice(0, 3)
       }
       return fallback()
     }
@@ -195,7 +187,7 @@ export function buildTodayBlocks(
     const status = getBlockStatus(type, dayLog)
     return {
       type,
-      title: blockTitle[type],
+      title: DayBlockLabel[type],
       suggestedMinutes: defaultMinutes[type],
       instructions: deriveInstructions(type, weekPlan, child),
       done: status === BlockStatus.Logged,

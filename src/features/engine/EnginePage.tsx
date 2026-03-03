@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Alert from '@mui/material/Alert'
+import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Divider from '@mui/material/Divider'
 import Snackbar from '@mui/material/Snackbar'
@@ -68,6 +70,7 @@ const getStatusColor = (status: ReturnType<typeof computeLoopStatus>) => {
 }
 
 export default function EnginePage() {
+  const navigate = useNavigate()
   const familyId = useFamilyId()
   const { children, isLoading: childrenLoading } = useActiveChild()
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
@@ -191,6 +194,22 @@ export default function EnginePage() {
               Week starts on {weekStartLabel}.
             </Typography>
           ) : null}
+        </Stack>
+      </SectionCard>
+
+      <SectionCard title="Shelly Planner">
+        <Stack spacing={1.5}>
+          <Typography variant="body2" color="text.secondary">
+            Turn workbook photos into a weekly plan with daily checklists.
+          </Typography>
+          <Stack direction="row" spacing={1}>
+            <Button variant="contained" onClick={() => navigate('/planner')}>
+              Plan My Week
+            </Button>
+            <Button variant="outlined" onClick={() => navigate('/evaluation')}>
+              Skill Snapshot
+            </Button>
+          </Stack>
         </Stack>
       </SectionCard>
 

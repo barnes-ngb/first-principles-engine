@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import AccessTimeIcon from '@mui/icons-material/AccessTime'
 import ChecklistIcon from '@mui/icons-material/Checklist'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -25,56 +26,59 @@ import Typography from '@mui/material/Typography'
 import {
   addDoc,
   doc,
-  getDoc,
   getDocs,
-  onSnapshot,
   query,
-  setDoc,
   updateDoc,
   where,
 } from 'firebase/firestore'
 
 import AudioRecorder from '../../components/AudioRecorder'
 import ChildSelector from '../../components/ChildSelector'
+import ContextBar from '../../components/ContextBar'
+import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
-import type { SaveState } from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
-import { formatDateYmd } from '../../lib/format'
+import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import {
   artifactsCollection,
-  daysCollection,
-  laddersCollection,
-  weeksCollection,
 } from '../../core/firebase/firestore'
 import {
   generateFilename,
   uploadArtifactFile,
 } from '../../core/firebase/upload'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, DayLog, Ladder } from '../../core/types/domain'
+import type { Artifact, ChecklistItem as ChecklistItemType, DayLog, LadderCardDefinition } from '../../core/types/domain'
+import { getLaddersForChild } from '../ladders/laddersCatalog'
+import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
   DayBlockType,
   EngineStage,
   EvidenceType,
   LearningLocation,
+  PlanType,
+  PlanTypeLabel,
   SubjectBucket,
   UserProfile,
 } from '../../core/types/enums'
-import { useDebounce } from '../../lib/useDebounce'
-import { getWeekRange } from '../engine/engine.logic'
 import { blockMeta } from './blockMeta'
 import { getTemplateForChild } from './dailyPlanTemplates'
-import { createDefaultDayLog, dayLogDocId, legacyDayLogDocId } from './daylog.model'
 import HelperPanel from './HelperPanel'
+import LadderQuickLog from './LadderQuickLog'
 import RoutineSection from './RoutineSection'
+import { useDayLog } from './useDayLog'
 import { calculateXp } from './xp'
 
 export default function TodayPage() {
-  const today = formatDateYmd(new Date())
+  const [searchParams] = useSearchParams()
+  const dateParam = searchParams.get('date')
+  const today = useMemo(() => {
+    if (dateParam && parseDateYmd(dateParam)) return dateParam
+    return formatDateYmd(new Date())
+  }, [dateParam])
   const familyId = useFamilyId()
   const { profile } = useProfile()
   const isKidProfile =
@@ -82,36 +86,22 @@ export default function TodayPage() {
   const {
     children,
     activeChildId: selectedChildId,
+    activeChild,
     setActiveChildId: setSelectedChildId,
     isLoading: isLoadingChildren,
     addChild,
   } = useActiveChild()
-  const currentDocId = useMemo(
-    () => (selectedChildId ? dayLogDocId(today, selectedChildId) : ''),
-    [selectedChildId, today],
-  )
-  const dayLogRef = useMemo(
-    () => (currentDocId ? doc(daysCollection(familyId), currentDocId) : null),
-    [familyId, currentDocId],
-  )
-  const [dayLog, setDayLog] = useState<DayLog | null>(null)
-  // Track which child the current dayLog belongs to; clear stale data on switch
-  const [dayLogChildId, setDayLogChildId] = useState(selectedChildId)
-  if (dayLogChildId !== selectedChildId) {
-    setDayLogChildId(selectedChildId)
-    setDayLog(null)
-  }
-  const [ladders, setLadders] = useState<Ladder[]>([])
+  const artifactSectionRef = useRef<HTMLDivElement>(null)
+
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
-  const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
   const [linkingArtifactId, setLinkingArtifactId] = useState<string | null>(null)
   const [linkingLadderId, setLinkingLadderId] = useState('')
   const [linkingRungId, setLinkingRungId] = useState('')
   const [mediaUploading, setMediaUploading] = useState(false)
-  const [planType, setPlanType] = useState<'A' | 'B'>('A')
+  const [planType, setPlanType] = useState<PlanType>(PlanType.Normal)
   const [showAllBlocks, setShowAllBlocks] = useState(false)
-  const [saveState, setSaveState] = useState<SaveState>('idle')
-  const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
+  const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
+  const [teachHelperOpen, setTeachHelperOpen] = useState(false)
   const [artifactForm, setArtifactForm] = useState({
     childId: selectedChildId,
     evidenceType: EvidenceType.Note as EvidenceType,
@@ -130,173 +120,42 @@ export default function TodayPage() {
   }, [selectedChildId])
 
   const selectableChildren = children
-  const selectedChild = useMemo(
-    () => children.find((c) => c.id === selectedChildId),
-    [children, selectedChildId],
+  const selectedChild = activeChild
+
+  // Resolve card-based ladders from the catalog for the active child
+  const cardLadders: LadderCardDefinition[] = useMemo(
+    () => (selectedChild ? getLaddersForChild(selectedChild.name) ?? [] : []),
+    [selectedChild],
   )
 
-  // --- Persist helpers with save-state tracking ---
-
-  const writeDayLog = useCallback(
-    async (updated: DayLog) => {
-      if (!dayLogRef || !selectedChildId) return
-      // Ensure childId is always correct (defense in depth)
-      const safeLog = updated.childId === selectedChildId
-        ? updated
-        : { ...updated, childId: selectedChildId }
-      setSaveState('saving')
-      try {
-        await setDoc(dayLogRef, { ...safeLog, updatedAt: new Date().toISOString() })
-        setSaveState('saved')
-      } catch (err) {
-        console.error('Failed to save day log', err)
-        setSaveState('error')
-      }
-    },
-    [dayLogRef, selectedChildId],
+  // Resolve the active template and routine items for the selected child.
+  // Priority: child.routineItems (Firestore) → template.routineItems → undefined (all).
+  const activeTemplate = useMemo(
+    () => (selectedChild ? getTemplateForChild(selectedChild.name) : undefined),
+    [selectedChild],
+  )
+  const activeRoutineItems = useMemo(
+    () => selectedChild?.routineItems ?? activeTemplate?.routineItems,
+    [selectedChild?.routineItems, activeTemplate?.routineItems],
   )
 
-  const debouncedWrite = useDebounce(writeDayLog, 800)
-
-  const persistDayLog = useCallback(
-    (updated: DayLog) => {
-      setDayLog(updated)
-      debouncedWrite(updated)
-    },
-    [debouncedWrite],
-  )
-
-  const persistDayLogImmediate = useCallback(
-    (updated: DayLog) => {
-      setDayLog(updated)
-      void writeDayLog(updated)
-    },
-    [writeDayLog],
-  )
-
-  // Show a brief "Saved" toast when save completes (mobile-friendly feedback)
-  useEffect(() => {
-    if (saveState === 'saved') {
-      setSnackMessage({ text: 'Saved', severity: 'success' })
-    }
-  }, [saveState])
-
-  // --- Data loading ---
-
-  // Load DayLog for selected child + date (real-time, with legacy migration)
-  useEffect(() => {
-    if (!selectedChildId || !dayLogRef) {
-      setDayLog(null)
-      return
-    }
-    let migratedOrCreated = false
-
-    const unsubscribe = onSnapshot(
-      dayLogRef,
-      async (snapshot) => {
-        if (snapshot.exists()) {
-          setDayLog(snapshot.data())
-          return
-        }
-
-        // Doc doesn't exist — try legacy fallback / create default (once)
-        if (migratedOrCreated) return
-        migratedOrCreated = true
-
-        try {
-          // Backward compat: try legacy format {childId}_{date}
-          const legacyId = legacyDayLogDocId(selectedChildId, today)
-          const legacyRef = doc(daysCollection(familyId), legacyId)
-          const legacySnap = await getDoc(legacyRef)
-          if (legacySnap.exists()) {
-            const legacyData = legacySnap.data()
-            await setDoc(dayLogRef, { ...legacyData, updatedAt: new Date().toISOString() })
-            // onSnapshot will fire again with the migrated doc
-            return
-          }
-
-          // Also check bare date doc (oldest legacy — no childId in ID)
-          const bareDateRef = doc(daysCollection(familyId), today)
-          const bareDateSnap = await getDoc(bareDateRef)
-          if (bareDateSnap.exists()) {
-            const bareData = bareDateSnap.data()
-            if (!bareData.childId || bareData.childId === selectedChildId) {
-              const migrated = { ...bareData, childId: selectedChildId, updatedAt: new Date().toISOString() }
-              await setDoc(dayLogRef, migrated)
-              // onSnapshot will fire again
-              return
-            }
-          }
-
-          // No existing doc — create fresh
-          const defaultLog = createDefaultDayLog(
-            selectedChildId,
-            today,
-            selectedChild?.dayBlocks,
-            selectedChild?.routineItems,
-          )
-          await setDoc(dayLogRef, defaultLog)
-          // onSnapshot will fire again with the new doc
-        } catch (err) {
-          console.error('Failed to load day log', err)
-          migratedOrCreated = false
-          setSnackMessage({ text: 'Could not load today\u2019s log.', severity: 'error' })
-        }
-      },
-      (err) => {
-        console.error('Failed to load day log', err)
-        setSnackMessage({ text: 'Could not load today\u2019s log.', severity: 'error' })
-      },
-    )
-
-    return unsubscribe
-  }, [dayLogRef, today, selectedChildId, selectedChild, familyId])
-
-  // Load WeekPlan ID for current week (real-time)
-  const weekRange = useMemo(() => getWeekRange(new Date()), [])
-
-  useEffect(() => {
-    const ref = doc(weeksCollection(familyId), weekRange.start)
-    const unsubscribe = onSnapshot(
-      ref,
-      (snap) => {
-        setWeekPlanId(snap.exists() ? snap.id : undefined)
-      },
-      (err) => {
-        console.error('Failed to load week plan', err)
-        setSnackMessage({ text: 'Could not load week plan.', severity: 'error' })
-      },
-    )
-    return unsubscribe
-  }, [familyId, weekRange.start])
-
-  // Load ladders and artifacts (one-shot, non-plan data)
-  useEffect(() => {
-    let isMounted = true
-
-    const loadLadders = async () => {
-      try {
-        const snapshot = await getDocs(laddersCollection(familyId))
-        if (!isMounted) return
-        const loadedLadders = snapshot.docs.map((docSnapshot) => ({
-          id: docSnapshot.id,
-          ...(docSnapshot.data() as Ladder),
-        }))
-        setLadders(loadedLadders)
-      } catch (err) {
-        console.error('Failed to load ladders', err)
-        if (isMounted) {
-          setSnackMessage({ text: 'Could not load ladders.', severity: 'error' })
-        }
-      }
-    }
-
-    loadLadders()
-
-    return () => {
-      isMounted = false
-    }
-  }, [familyId])
+  const {
+    dayLog,
+    saveState,
+    lastSavedAt,
+    weekPlanId,
+    snackMessage,
+    setSnackMessage,
+    persistDayLog,
+    persistDayLogImmediate,
+  } = useDayLog({
+    familyId,
+    selectedChildId,
+    today,
+    selectedChild,
+    activeTemplate,
+    activeRoutineItems,
+  })
 
   // Load artifacts scoped to child + date (reload when child changes)
   useEffect(() => {
@@ -332,16 +191,16 @@ export default function TodayPage() {
     return () => {
       isMounted = false
     }
-  }, [familyId, today, selectedChildId])
+  }, [familyId, today, selectedChildId, setSnackMessage])
 
   const selectedLadder = useMemo(
-    () => ladders.find((ladder) => ladder.id === artifactForm.ladderId),
-    [artifactForm.ladderId, ladders],
+    () => cardLadders.find((l) => l.ladderKey === artifactForm.ladderId),
+    [artifactForm.ladderId, cardLadders],
   )
 
   const linkingLadder = useMemo(
-    () => ladders.find((ladder) => ladder.id === linkingLadderId),
-    [ladders, linkingLadderId],
+    () => cardLadders.find((l) => l.ladderKey === linkingLadderId),
+    [cardLadders, linkingLadderId],
   )
 
   // --- Block field handlers ---
@@ -441,7 +300,7 @@ export default function TodayPage() {
       console.error('Failed to save artifact', err)
       setSnackMessage({ text: 'Failed to save note.', severity: 'error' })
     }
-  }, [artifactForm, buildArtifactBase, familyId, today])
+  }, [artifactForm, buildArtifactBase, familyId, today, setSnackMessage])
 
   const handlePhotoCapture = useCallback(
     async (file: File) => {
@@ -468,7 +327,7 @@ export default function TodayPage() {
         setMediaUploading(false)
       }
     },
-    [artifactForm, buildArtifactBase, familyId, today],
+    [artifactForm, buildArtifactBase, familyId, today, setSnackMessage],
   )
 
   const handleAudioCapture = useCallback(
@@ -495,7 +354,7 @@ export default function TodayPage() {
         setMediaUploading(false)
       }
     },
-    [artifactForm, buildArtifactBase, familyId, today],
+    [artifactForm, buildArtifactBase, familyId, today, setSnackMessage],
   )
 
   const handleStartLinking = useCallback((artifact: Artifact) => {
@@ -538,42 +397,77 @@ export default function TodayPage() {
         setSnackMessage({ text: 'Failed to link artifact.', severity: 'error' })
       }
     },
-    [familyId, linkingArtifactId, linkingLadderId],
+    [familyId, linkingArtifactId, linkingLadderId, setSnackMessage],
   )
 
   const getArtifactLinkLabel = useCallback(
     (artifact: Artifact) => {
       const ladderRef = artifact.tags?.ladderRef
       if (!ladderRef) return 'Unlinked'
-      const ladder = ladders.find((item) => item.id === ladderRef.ladderId)
-      const rung = ladder?.rungs.find((item) => item.id === ladderRef.rungId)
-      return `${ladder?.title ?? 'Ladder'} \u00b7 ${rung?.title ?? 'Rung'}`
+      const ladder = cardLadders.find((item) => item.ladderKey === ladderRef.ladderId)
+      const rung = ladder?.rungs.find((item) => item.rungId === ladderRef.rungId)
+      return `${ladder?.title ?? 'Ladder'} \u00b7 ${rung?.name ?? 'Rung'}`
     },
-    [ladders],
+    [cardLadders],
   )
 
   // --- Loading state ---
 
   const handleRoutineUpdate = useCallback(
     (updated: DayLog) => {
-      const withXp = { ...updated, xpTotal: calculateXp(updated) }
+      const withXp = { ...updated, xpTotal: calculateXp(updated, activeRoutineItems) }
       persistDayLog(withXp)
     },
-    [persistDayLog],
+    [persistDayLog, activeRoutineItems],
   )
 
   const handleRoutineUpdateImmediate = useCallback(
     (updated: DayLog) => {
-      const withXp = { ...updated, xpTotal: calculateXp(updated) }
+      const withXp = { ...updated, xpTotal: calculateXp(updated, activeRoutineItems) }
       persistDayLogImmediate(withXp)
     },
-    [persistDayLogImmediate],
+    [persistDayLogImmediate, activeRoutineItems],
   )
+
+  const scrollToArtifacts = useCallback(() => {
+    artifactSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
+
+  // Compute Daily Log status label
+  const dailyLogStatus = useMemo(() => {
+    if (!dayLog) return null
+    if (lastSavedAt) {
+      try {
+        const d = new Date(lastSavedAt)
+        return `Saved at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      } catch {
+        return 'Saved'
+      }
+    }
+    if (dayLog.updatedAt) {
+      try {
+        const d = new Date(dayLog.updatedAt)
+        return `Saved at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      } catch {
+        return 'Saved'
+      }
+    }
+    return 'Not saved yet'
+  }, [dayLog, lastSavedAt])
 
   if (!dayLog) {
     return (
       <Page>
+        <ContextBar
+          page="today"
+          activeChild={activeChild}
+          dateKey={today}
+        />
         <Typography variant="h4" component="h1">Today</Typography>
+        <HelpStrip
+          pageKey="today"
+          text="This is today's checklist. Saving creates the Daily Log."
+        />
         {isKidProfile ? (
           <Typography variant="subtitle1" color="text.secondary">
             {selectedChild?.name ?? 'Loading...'}
@@ -602,7 +496,17 @@ export default function TodayPage() {
 
   return (
     <Page>
+      <ContextBar
+        page="today"
+        activeChild={activeChild}
+        dateKey={today}
+        onCaptureArtifact={scrollToArtifacts}
+      />
       <Typography variant="h4" component="h1">Today</Typography>
+      <HelpStrip
+        pageKey="today"
+        text="This is today's checklist. Saving creates the Daily Log."
+      />
       {isKidProfile ? (
         <Typography variant="subtitle1" color="text.secondary">
           {selectedChild?.name}
@@ -618,15 +522,43 @@ export default function TodayPage() {
         />
       )}
 
-      <HelperPanel template={selectedChild ? getTemplateForChild(selectedChild.name) : undefined} />
+      {/* Daily Log status line */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          px: 1.5,
+          py: 0.75,
+          borderRadius: 1,
+          bgcolor: lastSavedAt ? 'success.50' : 'action.hover',
+          border: '1px solid',
+          borderColor: lastSavedAt ? 'success.200' : 'divider',
+        }}
+      >
+        <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+          Daily Log: {dailyLogStatus}
+        </Typography>
+        <SaveIndicator state={saveState} />
+      </Box>
+
+      <HelperPanel template={activeTemplate} />
 
       <RoutineSection
         key={`${selectedChildId}_${today}`}
         dayLog={dayLog}
         onUpdate={handleRoutineUpdate}
         onUpdateImmediate={handleRoutineUpdateImmediate}
-        routineItems={selectedChild?.routineItems}
+        routineItems={activeRoutineItems}
       />
+
+      {cardLadders.length > 0 && selectedChildId && (
+        <LadderQuickLog
+          familyId={familyId}
+          childId={selectedChildId}
+          ladders={cardLadders}
+        />
+      )}
 
       <SectionCard title={`DayLog (${dayLog.date})`}>
         <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
@@ -640,8 +572,8 @@ export default function TodayPage() {
               size="small"
               onChange={(_e, value) => { if (value) setPlanType(value) }}
             >
-              <ToggleButton value="A">Plan A</ToggleButton>
-              <ToggleButton value="B">Plan B</ToggleButton>
+              <ToggleButton value={PlanType.Normal}>{PlanTypeLabel[PlanType.Normal]}</ToggleButton>
+              <ToggleButton value={PlanType.Mvd}>{PlanTypeLabel[PlanType.Mvd]}</ToggleButton>
             </ToggleButtonGroup>
             <SaveIndicator state={saveState} />
           </Stack>
@@ -650,12 +582,12 @@ export default function TodayPage() {
           {dayLog.blocks
           .map((block, originalIndex) => ({ block, originalIndex }))
           .filter(({ block }) =>
-            planType === 'B'
+            planType === PlanType.Mvd
               ? block.type === DayBlockType.Reading || block.type === DayBlockType.Math
               : true,
           )
           .filter((_entry, filteredIndex) =>
-            planType === 'A' ? showAllBlocks || filteredIndex < 4 : true,
+            planType === PlanType.Normal ? showAllBlocks || filteredIndex < 4 : true,
           )
           .map(({ block, originalIndex: index }) => {
             const meta = blockMeta[block.type]
@@ -805,21 +737,34 @@ export default function TodayPage() {
                     {block.checklist && block.checklist.length > 0 ? (
                       <Stack spacing={0.5}>
                         {block.checklist.map((item, itemIndex) => (
-                          <FormControlLabel
-                            key={`${item.label}-${itemIndex}`}
-                            control={
-                              <Checkbox
-                                checked={item.completed}
-                                size="small"
-                                onChange={() =>
-                                  handleChecklistToggle(index, itemIndex)
-                                }
-                              />
-                            }
-                            label={
-                              <Typography variant="body2">{item.label}</Typography>
-                            }
-                          />
+                          <Stack key={`${item.label}-${itemIndex}`} direction="row" spacing={0.5} alignItems="center">
+                            <FormControlLabel
+                              sx={{ flex: 1 }}
+                              control={
+                                <Checkbox
+                                  checked={item.completed}
+                                  size="small"
+                                  onChange={() =>
+                                    handleChecklistToggle(index, itemIndex)
+                                  }
+                                />
+                              }
+                              label={
+                                <Typography variant="body2">{item.label}</Typography>
+                              }
+                            />
+                            <Button
+                              size="small"
+                              variant="text"
+                              onClick={() => {
+                                setTeachHelperItem(item)
+                                setTeachHelperOpen(true)
+                              }}
+                              sx={{ fontSize: '0.7rem', minWidth: 'auto', px: 0.5 }}
+                            >
+                              Help
+                            </Button>
+                          </Stack>
                         ))}
                       </Stack>
                     ) : (
@@ -832,7 +777,7 @@ export default function TodayPage() {
               </Accordion>
             )
           })}
-          {planType === 'A' && !showAllBlocks && dayLog.blocks.length > 4 && (
+          {planType === PlanType.Normal && !showAllBlocks && dayLog.blocks.length > 4 && (
             <Button
               size="small"
               onClick={() => setShowAllBlocks(true)}
@@ -841,7 +786,7 @@ export default function TodayPage() {
               Show more ({dayLog.blocks.length - 4} more)
             </Button>
           )}
-          {planType === 'A' && showAllBlocks && dayLog.blocks.length > 4 && (
+          {planType === PlanType.Normal && showAllBlocks && dayLog.blocks.length > 4 && (
             <Button
               size="small"
               onClick={() => setShowAllBlocks(false)}
@@ -852,6 +797,7 @@ export default function TodayPage() {
           )}
         </Stack>
       </SectionCard>
+      <div ref={artifactSectionRef} />
       <SectionCard title="Capture Artifact">
         <Stack spacing={2}>
           <ToggleButtonGroup
@@ -954,15 +900,15 @@ export default function TodayPage() {
             }}
           >
             <MenuItem value="">No ladder</MenuItem>
-            {ladders.map((ladder) => (
-              <MenuItem key={ladder.id} value={ladder.id}>
+            {cardLadders.map((ladder) => (
+              <MenuItem key={ladder.ladderKey} value={ladder.ladderKey}>
                 {ladder.title}
               </MenuItem>
             ))}
           </TextField>
           {selectedLadder && selectedLadder.rungs.length > 0 && (
             <TextField
-              label="Rung"
+              label="Rung (optional)"
               select
               value={artifactForm.rungId}
               onChange={(event) =>
@@ -970,17 +916,11 @@ export default function TodayPage() {
               }
             >
               <MenuItem value="">Select rung</MenuItem>
-              {selectedLadder.rungs
-                .slice()
-                .sort((a, b) => a.order - b.order)
-                .map((rung) => (
-                  <MenuItem
-                    key={rung.id ?? rung.title}
-                    value={rung.id ?? rung.title}
-                  >
-                    {rung.title}
-                  </MenuItem>
-                ))}
+              {selectedLadder.rungs.map((rung) => (
+                <MenuItem key={rung.rungId} value={rung.rungId}>
+                  {rung.rungId}: {rung.name}
+                </MenuItem>
+              ))}
             </TextField>
           )}
           {artifactForm.evidenceType === EvidenceType.Note && (
@@ -1071,8 +1011,8 @@ export default function TodayPage() {
                           }
                         >
                           <MenuItem value="">Select ladder</MenuItem>
-                          {ladders.map((ladder) => (
-                            <MenuItem key={ladder.id} value={ladder.id}>
+                          {cardLadders.map((ladder) => (
+                            <MenuItem key={ladder.ladderKey} value={ladder.ladderKey}>
                               {ladder.title}
                             </MenuItem>
                           ))}
@@ -1088,17 +1028,11 @@ export default function TodayPage() {
                           }
                         >
                           <MenuItem value="">Select rung</MenuItem>
-                          {linkingLadder?.rungs
-                            .slice()
-                            .sort((a, b) => a.order - b.order)
-                            .map((rung) => (
-                              <MenuItem
-                                key={rung.id ?? rung.title}
-                                value={rung.id ?? rung.title}
-                              >
-                                {rung.title}
-                              </MenuItem>
-                            ))}
+                          {linkingLadder?.rungs.map((rung) => (
+                            <MenuItem key={rung.rungId} value={rung.rungId}>
+                              {rung.rungId}: {rung.name}
+                            </MenuItem>
+                          ))}
                         </TextField>
                       </Stack>
                     )}
@@ -1109,6 +1043,18 @@ export default function TodayPage() {
           )}
         </Stack>
       </SectionCard>
+
+      {selectedChildId && (
+        <TeachHelperDialog
+          open={teachHelperOpen}
+          onClose={() => { setTeachHelperOpen(false); setTeachHelperItem(null) }}
+          familyId={familyId}
+          childId={selectedChildId}
+          childName={selectedChild?.name ?? ''}
+          item={teachHelperItem}
+          ladders={cardLadders}
+        />
+      )}
 
       <Snackbar
         open={snackMessage !== null}

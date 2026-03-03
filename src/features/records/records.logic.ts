@@ -8,28 +8,10 @@ import type {
   HoursEntry,
 } from '../../core/types/domain'
 import { LearningLocation, SubjectBucket } from '../../core/types/enums'
-import { formatDateForCsv } from '../../lib/format'
+import { formatDateForCsv, toCsvValue } from '../../core/utils/format'
+import { deriveChildIdFromDocId } from '../../core/utils/docId'
 
-// ─── Child ID Derivation ────────────────────────────────────────────────────
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-
-/**
- * Derive a childId from a Firestore document ID that encodes both date and
- * childId separated by `_`.  Handles both `${date}_${childId}` and
- * `${childId}_${date}` formats.
- */
-export function deriveChildIdFromDocId(docId: string): string | undefined {
-  const idx = docId.indexOf('_')
-  if (idx === -1) return undefined
-
-  const first = docId.slice(0, idx)
-  const rest = docId.slice(idx + 1)
-
-  if (DATE_RE.test(first) && rest.length > 0) return rest
-  if (DATE_RE.test(rest) && first.length > 0) return first
-  return undefined
-}
+export { deriveChildIdFromDocId }
 
 // ─── Hours Summary ───────────────────────────────────────────────────────────
 
@@ -153,12 +135,6 @@ export const computeHoursSummary = (
 }
 
 // ─── CSV Generation ──────────────────────────────────────────────────────────
-
-const toCsvValue = (value: string | number | null | undefined): string => {
-  const str = `${value ?? ''}`
-  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`
-  return str
-}
 
 const csvRow = (values: (string | number | null | undefined)[]): string =>
   values.map(toCsvValue).join(',')

@@ -39,6 +39,19 @@ export const DayBlockType = {
 } as const
 export type DayBlockType = (typeof DayBlockType)[keyof typeof DayBlockType]
 
+/** Human-readable label for each block type. */
+export const DayBlockLabel: Record<DayBlockType, string> = {
+  [DayBlockType.Formation]: 'Formation',
+  [DayBlockType.Reading]: 'Reading',
+  [DayBlockType.Speech]: 'Speech',
+  [DayBlockType.Math]: 'Math',
+  [DayBlockType.Together]: 'Together',
+  [DayBlockType.Movement]: 'Movement',
+  [DayBlockType.Project]: 'Project',
+  [DayBlockType.FieldTrip]: 'Field Trip',
+  [DayBlockType.Other]: 'Other',
+}
+
 export const TrackType = {
   Support: 'Support',
   Stretch: 'Stretch',
@@ -111,12 +124,136 @@ export const StreamId = {
 } as const
 export type StreamId = (typeof StreamId)[keyof typeof StreamId]
 
+export const SupportLevel = {
+  None: 'none',
+  Environment: 'environment',
+  Prompts: 'prompts',
+  Tools: 'tools',
+  HandOverHand: 'hand-over-hand',
+} as const
+export type SupportLevel = (typeof SupportLevel)[keyof typeof SupportLevel]
+
+/** Ordered list from least to most support, used for comparison. */
+export const SUPPORT_LEVEL_ORDER: SupportLevel[] = [
+  SupportLevel.None,
+  SupportLevel.Environment,
+  SupportLevel.Prompts,
+  SupportLevel.Tools,
+  SupportLevel.HandOverHand,
+]
+
+export const SessionSymbol = {
+  Pass: '✔',
+  Partial: '△',
+  Miss: '✖',
+} as const
+export type SessionSymbol = (typeof SessionSymbol)[keyof typeof SessionSymbol]
+
+export const StreamKey = {
+  DecodeRead: 'decode_read',
+  SpellWrite: 'spell_write',
+  SpeakExplain: 'speak_explain',
+  Other: 'other',
+} as const
+export type StreamKey = (typeof StreamKey)[keyof typeof StreamKey]
+
+export const LabSessionStatus = {
+  NotStarted: 'not_started',
+  InProgress: 'in_progress',
+  Complete: 'complete',
+} as const
+export type LabSessionStatus = (typeof LabSessionStatus)[keyof typeof LabSessionStatus]
+
+export const PlannerSessionStatus = {
+  Setup: 'setup',
+  Uploading: 'uploading',
+  Extracting: 'extracting',
+  DraftReview: 'draft_review',
+  Applied: 'applied',
+} as const
+export type PlannerSessionStatus =
+  (typeof PlannerSessionStatus)[keyof typeof PlannerSessionStatus]
+
+export const AssignmentAction = {
+  Keep: 'keep',
+  Modify: 'modify',
+  Skip: 'skip',
+} as const
+export type AssignmentAction =
+  (typeof AssignmentAction)[keyof typeof AssignmentAction]
+
+export const SkillLevel = {
+  Emerging: 'emerging',
+  Developing: 'developing',
+  Supported: 'supported',
+  Practice: 'practice',
+  Secure: 'secure',
+} as const
+export type SkillLevel = (typeof SkillLevel)[keyof typeof SkillLevel]
+
+export const PlannerConversationStatus = {
+  Draft: 'draft',
+  Applied: 'applied',
+} as const
+export type PlannerConversationStatus =
+  (typeof PlannerConversationStatus)[keyof typeof PlannerConversationStatus]
+
+export const ChatMessageRole = {
+  User: 'user',
+  Assistant: 'assistant',
+} as const
+export type ChatMessageRole = (typeof ChatMessageRole)[keyof typeof ChatMessageRole]
+
+export const MasteryGate = {
+  NotYet: 0,
+  WithHelp: 1,
+  MostlyIndependent: 2,
+  IndependentConsistent: 3,
+} as const
+export type MasteryGate = (typeof MasteryGate)[keyof typeof MasteryGate]
+
+/** Human-readable label for each mastery gate level. */
+export const MasteryGateLabel: Record<MasteryGate, string> = {
+  [MasteryGate.NotYet]: 'Not yet',
+  [MasteryGate.WithHelp]: 'With help',
+  [MasteryGate.MostlyIndependent]: 'Mostly independent',
+  [MasteryGate.IndependentConsistent]: 'Independent + consistent',
+}
+
+export const PaceStatus = {
+  Ahead: 'ahead',
+  OnTrack: 'on_track',
+  Behind: 'behind',
+  Critical: 'critical',
+} as const
+export type PaceStatus = (typeof PaceStatus)[keyof typeof PaceStatus]
+
+export const PlanType = {
+  Normal: 'normal',
+  Mvd: 'mvd',
+} as const
+export type PlanType = (typeof PlanType)[keyof typeof PlanType]
+
+/** Human-readable label for each plan type. */
+export const PlanTypeLabel: Record<PlanType, string> = {
+  [PlanType.Normal]: 'Normal Day',
+  [PlanType.Mvd]: 'Minimum Viable Day',
+}
+
+export const DayType = {
+  Normal: 'normal',
+  Light: 'light',
+  Appointment: 'appointment',
+} as const
+export type DayType = (typeof DayType)[keyof typeof DayType]
+
 export const RoutineItemKey = {
   Handwriting: 'handwriting',
   Spelling: 'spelling',
   SightWords: 'sightWords',
   MinecraftReading: 'minecraft',
   ReadingEggs: 'readingEggs',
+  ReadAloud: 'readAloud',
   Math: 'math',
   Speech: 'speech',
   // Lincoln Literacy Engine
