@@ -134,8 +134,7 @@ export default function WeeklyReviewPage() {
     const docId = weeklyReviewDocId(weekKey, activeChildId)
     const updated: WeeklyReview = {
       ...review,
-      applied: true,
-      status: ReviewStatus.Reviewed,
+      status: ReviewStatus.Applied,
       reviewedAt: review.reviewedAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
@@ -194,7 +193,7 @@ export default function WeeklyReviewPage() {
               color={review.status === ReviewStatus.Reviewed ? 'success' : 'warning'}
               variant="outlined"
             />
-            {review.applied && (
+            {review.status === ReviewStatus.Applied && (
               <Chip label="Adjustments Applied" color="info" variant="outlined" />
             )}
           </Stack>
@@ -304,7 +303,7 @@ export default function WeeklyReviewPage() {
                 {isSaving ? 'Saving...' : 'Mark as Reviewed'}
               </Button>
             )}
-            {review.paceAdjustments.length > 0 && !review.applied && (
+            {review.paceAdjustments.length > 0 && review.status !== ReviewStatus.Applied && (
               <Button
                 variant="contained"
                 onClick={handleApplyAdjustments}
@@ -316,7 +315,7 @@ export default function WeeklyReviewPage() {
                   : `Apply ${acceptedCount} Adjustment${acceptedCount !== 1 ? 's' : ''}`}
               </Button>
             )}
-            {review.applied && (
+            {review.status === ReviewStatus.Applied && (
               <Alert severity="success" sx={{ flex: 1 }}>
                 Accepted adjustments have been applied. Changes will be visible in your next
                 planner session.

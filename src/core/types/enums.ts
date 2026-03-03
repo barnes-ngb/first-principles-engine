@@ -248,8 +248,10 @@ export const DayType = {
 export type DayType = (typeof DayType)[keyof typeof DayType]
 
 export const ReviewStatus = {
+  Draft: 'draft',
   Pending: 'pending',
   Reviewed: 'reviewed',
+  Applied: 'applied',
 } as const
 export type ReviewStatus = (typeof ReviewStatus)[keyof typeof ReviewStatus]
 
