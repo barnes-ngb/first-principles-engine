@@ -10,6 +10,7 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { useAuth } from '../../core/auth/useAuth'
+import { getAuthErrorMessage } from '../../core/auth/firebaseAuthErrors'
 
 export default function AccountSection() {
   const { user, upgradeToEmail, signIn, signOut } = useAuth()
@@ -18,13 +19,18 @@ export default function AccountSection() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const isAnonymous = user?.isAnonymous ?? true
 
+  const passwordTooShort = password.length > 0 && password.length < 6
+  const canSubmit = email.length > 0 && password.length >= 6 && !submitting
+
   const handleUpgrade = async () => {
     setError(null)
     setSuccess(null)
+    setSubmitting(true)
     try {
       await upgradeToEmail(email, password)
       setSuccess('Account upgraded! Your data is preserved.')
@@ -32,13 +38,27 @@ export default function AccountSection() {
       setEmail('')
       setPassword('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upgrade failed.')
+      const message = getAuthErrorMessage(err)
+      // If the email is already in use, hint to switch to sign-in mode.
+      if (
+        err &&
+        typeof err === 'object' &&
+        'code' in err &&
+        (err as { code: string }).code === 'auth/email-already-in-use'
+      ) {
+        setError(message)
+      } else {
+        setError(message)
+      }
+    } finally {
+      setSubmitting(false)
     }
   }
 
   const handleSignIn = async () => {
     setError(null)
     setSuccess(null)
+    setSubmitting(true)
     try {
       await signIn(email, password)
       setSuccess('Signed in.')
@@ -46,9 +66,13 @@ export default function AccountSection() {
       setEmail('')
       setPassword('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed.')
+      setError(getAuthErrorMessage(err))
+    } finally {
+      setSubmitting(false)
     }
   }
+
+  const handleSubmit = mode === 'upgrade' ? handleUpgrade : handleSignIn
 
   const handleSignOutClick = () => {
     if (isAnonymous) {
@@ -102,11 +126,20 @@ export default function AccountSection() {
       )}
 
       {(mode === 'upgrade' || mode === 'signin') && (
-        <Stack spacing={2} sx={{ maxWidth: 360 }}>
+        <Stack
+          component="form"
+          spacing={2}
+          sx={{ maxWidth: 360 }}
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (canSubmit) handleSubmit()
+          }}
+        >
           <TextField
             label="Email"
             type="email"
             size="small"
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
@@ -114,17 +147,24 @@ export default function AccountSection() {
             label="Password"
             type="password"
             size="small"
+            autoComplete={mode === 'upgrade' ? 'new-password' : 'current-password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            error={passwordTooShort}
+            helperText={passwordTooShort ? 'Password must be at least 6 characters' : undefined}
           />
           <Stack direction="row" spacing={1}>
             <Button
               variant="contained"
               size="small"
-              onClick={mode === 'upgrade' ? handleUpgrade : handleSignIn}
-              disabled={!email || !password}
+              type="submit"
+              disabled={!canSubmit}
             >
-              {mode === 'upgrade' ? 'Create Account' : 'Sign In'}
+              {submitting
+                ? 'Please wait…'
+                : mode === 'upgrade'
+                  ? 'Create Account'
+                  : 'Sign In'}
             </Button>
             <Button
               variant="text"
@@ -137,6 +177,38 @@ export default function AccountSection() {
               Cancel
             </Button>
           </Stack>
+          {mode === 'upgrade' && (
+            <Typography variant="caption" color="text.secondary">
+              Already have an account?{' '}
+              <Button
+                variant="text"
+                size="small"
+                sx={{ textTransform: 'none', p: 0, minWidth: 'auto' }}
+                onClick={() => {
+                  setMode('signin')
+                  setError(null)
+                }}
+              >
+                Sign in instead
+              </Button>
+            </Typography>
+          )}
+          {mode === 'signin' && (
+            <Typography variant="caption" color="text.secondary">
+              Need an account?{' '}
+              <Button
+                variant="text"
+                size="small"
+                sx={{ textTransform: 'none', p: 0, minWidth: 'auto' }}
+                onClick={() => {
+                  setMode('upgrade')
+                  setError(null)
+                }}
+              >
+                Create one
+              </Button>
+            </Typography>
+          )}
         </Stack>
       )}
 
