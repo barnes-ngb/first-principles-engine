@@ -35,6 +35,7 @@ import {
 } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useDebounce } from '../../core/hooks/useDebounce'
 import type {
   AppBlock,
   AssignmentCandidate,
@@ -48,6 +49,7 @@ import type {
   PlannerConversation,
   PhotoLabel,
   SkillSnapshot,
+  WeekPlan,
 } from '../../core/types/domain'
 import {
   AssignmentAction,
@@ -135,6 +137,9 @@ export default function PlannerChatPage() {
   const [applied, setApplied] = useState(false)
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' } | null>(null)
 
+  // Week plan state (theme/virtue/scripture/heartQuestion)
+  const [weekPlan, setWeekPlan] = useState<WeekPlan | null>(null)
+
   // Confirmation dialog state
   const [confirmNewPlan, setConfirmNewPlan] = useState(false)
   const [confirmClearPlan, setConfirmClearPlan] = useState(false)
@@ -178,6 +183,51 @@ export default function PlannerChatPage() {
     })
     return unsubscribe
   }, [familyId, activeChildId])
+
+  // Load week plan (theme/virtue/scripture/heartQuestion)
+  const weekPlanRef = useMemo(
+    () => doc(weeksCollection(familyId), weekRange.start),
+    [familyId, weekRange.start],
+  )
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(weekPlanRef, async (snap) => {
+      if (snap.exists()) {
+        setWeekPlan(snap.data() as WeekPlan)
+      } else {
+        const defaultPlan: WeekPlan = {
+          startDate: weekRange.start,
+          endDate: weekRange.end,
+          theme: '',
+          virtue: '',
+          scriptureRef: '',
+          heartQuestion: '',
+          tracks: [],
+          flywheelPlan: '',
+          buildLab: { title: '', materials: [], steps: [] },
+          childGoals: children.map((c) => ({ childId: c.id, goals: [] })),
+        }
+        await setDoc(weekPlanRef, defaultPlan)
+      }
+    })
+    return unsubscribe
+  }, [weekPlanRef, weekRange.start, weekRange.end, children])
+
+  const debouncedWriteWeekField = useDebounce(
+    (field: string, value: string) => {
+      void updateDoc(weekPlanRef, { [field]: value })
+    },
+    800,
+  )
+
+  const updateWeekField = useCallback(
+    (field: keyof WeekPlan, value: string) => {
+      if (!weekPlan) return
+      setWeekPlan({ ...weekPlan, [field]: value })
+      debouncedWriteWeekField(field, value)
+    },
+    [weekPlan, debouncedWriteWeekField],
+  )
 
   // Add welcome message on first load when child is selected
   useEffect(() => {
@@ -927,6 +977,51 @@ export default function PlannerChatPage() {
             prioritySkills={snapshot?.prioritySkills ?? []}
             currentDraft={currentDraft}
           />
+
+          {/* Week theme / virtue / scripture */}
+          {weekPlan && (
+            <Box
+              sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 2,
+                p: 2,
+                bgcolor: 'background.paper',
+              }}
+            >
+              <Typography variant="subtitle2" gutterBottom>
+                Week Focus
+              </Typography>
+              <Stack spacing={1.5}>
+                <TextField
+                  label="Theme"
+                  size="small"
+                  value={weekPlan.theme}
+                  onChange={(e) => updateWeekField('theme', e.target.value)}
+                />
+                <TextField
+                  label="Virtue"
+                  size="small"
+                  value={weekPlan.virtue}
+                  onChange={(e) => updateWeekField('virtue', e.target.value)}
+                />
+                <TextField
+                  label="Scripture reference"
+                  size="small"
+                  value={weekPlan.scriptureRef}
+                  onChange={(e) => updateWeekField('scriptureRef', e.target.value)}
+                />
+                <TextField
+                  label="Heart question"
+                  size="small"
+                  multiline
+                  minRows={2}
+                  value={weekPlan.heartQuestion}
+                  onChange={(e) => updateWeekField('heartQuestion', e.target.value)}
+                />
+              </Stack>
+            </Box>
+          )}
 
           {/* Chat messages */}
           <Box
