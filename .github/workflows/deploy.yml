@@ -1,4 +1,4 @@
-name: Deploy to Firebase Hosting
+name: Deploy to Firebase
 
 on:
   push:
@@ -11,6 +11,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - uses: actions/setup-node@v4
         with:
@@ -43,3 +45,25 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           channelId: live
           projectId: barneshome-3dfbb
+
+      # ── Cloud Functions (only when functions/ changes) ──────────
+      - name: Check for functions changes
+        id: functions-changed
+        run: |
+          if git diff --quiet HEAD~1 HEAD -- functions/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install functions dependencies
+        if: steps.functions-changed.outputs.changed == 'true'
+        run: cd functions && npm ci
+
+      - name: Deploy Cloud Functions
+        if: steps.functions-changed.outputs.changed == 'true'
+        uses: w9jds/firebase-action@master
+        with:
+          args: deploy --only functions --project barneshome-3dfbb
+        env:
+          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
