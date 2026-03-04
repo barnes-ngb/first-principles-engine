@@ -41,6 +41,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user || !user.isAnonymous) {
       throw new Error('Only anonymous accounts can be upgraded.')
     }
+    // Reload the user to ensure the token is fresh before linking.
+    await user.reload()
     const credential = EmailAuthProvider.credential(email, password)
     const result = await linkWithCredential(user, credential)
     setUser(result.user)
