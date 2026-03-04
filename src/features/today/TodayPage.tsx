@@ -234,7 +234,22 @@ export default function TodayPage() {
             ? { ...item, completed: !item.completed }
             : item,
         )
-        return { ...block, checklist: updatedChecklist }
+        const allCompleted = updatedChecklist.every((item) => item.completed)
+        // Auto-populate actualMinutes from plannedMinutes when all items are
+        // checked, but only if the user hasn't manually set a different value.
+        let { actualMinutes } = block
+        if (allCompleted && block.plannedMinutes != null) {
+          if (actualMinutes == null || actualMinutes === 0) {
+            actualMinutes = block.plannedMinutes
+          }
+        } else if (!allCompleted) {
+          // Clear auto-populated value when unchecking — only if it still
+          // matches plannedMinutes (meaning the user didn't manually edit it).
+          if (actualMinutes != null && actualMinutes === block.plannedMinutes) {
+            actualMinutes = undefined
+          }
+        }
+        return { ...block, checklist: updatedChecklist, actualMinutes }
       })
       persistDayLogImmediate({ ...dayLog, blocks: updatedBlocks })
     },

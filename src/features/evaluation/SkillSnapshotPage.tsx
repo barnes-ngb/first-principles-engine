@@ -28,7 +28,7 @@ import type {
   StopRule,
   SupportDefault,
 } from '../../core/types/domain'
-import { SkillLevel, UserProfile } from '../../core/types/enums'
+import { MasteryGate, SkillLevel, UserProfile } from '../../core/types/enums'
 import {
   defaultEvidenceDefinitions,
   defaultPrioritySkills,
@@ -106,9 +106,9 @@ export default function SkillSnapshotPage() {
     async (updated: SkillSnapshot) => {
       if (!snapshotRef) return
       setSnapshot(updated)
-      // Strip undefined values — Firestore rejects them
-      const cleaned = JSON.parse(JSON.stringify({ ...updated, updatedAt: new Date().toISOString() }))
-      const result = await withSave(() => setDoc(snapshotRef, cleaned))
+      const result = await withSave(() =>
+        setDoc(snapshotRef, { ...updated, updatedAt: new Date().toISOString() }),
+      )
       if (result === undefined) {
         setSnack({ text: 'Failed to save.', severity: 'error' })
       }
@@ -135,6 +135,7 @@ export default function SkillSnapshotPage() {
       label: '',
       level: SkillLevel.Emerging,
       notes: '',
+      masteryGate: MasteryGate.NotYet,
     }
     void persist({ ...snapshot, prioritySkills: [...snapshot.prioritySkills, newSkill] })
   }, [snapshot, persist])
