@@ -60,6 +60,7 @@ import {
   PlannerConversationStatus,
   SubjectBucket,
 } from '../../core/types/enums'
+import { formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
 import { defaultAppBlocks } from '../planner/planner.logic'
@@ -74,6 +75,7 @@ import {
 import type { AdjustmentIntent } from './chatPlanner.logic'
 import { describeAdjustment, parseAdjustmentIntent } from './intentParser'
 import { formatCoverageSummaryText, buildCoverageSummary } from './coverageSummary'
+import { clonePlanWithAdvancedLessons } from './repeatWeek.logic'
 import ContextDrawer from './ContextDrawer'
 import LessonCardPreview from './LessonCardPreview'
 import PlanPreviewCard from './PlanPreviewCard'
@@ -906,6 +908,50 @@ export default function PlannerChatPage() {
     }
   }, [conversationDocId, familyId, activeChildId, weekRange.start, hoursPerDay, appBlocks])
 
+  // Repeat Last Week handler: clone previous week's plan with advanced lesson numbers
+  const handleRepeatLastWeek = useCallback(async () => {
+    if (!activeChildId) return
+    try {
+      // Compute previous week start by subtracting 7 days
+      const startDate = new Date(weekRange.start + 'T00:00:00')
+      startDate.setDate(startDate.getDate() - 7)
+      const previousWeekStart = formatDateYmd(startDate)
+
+      const prevDocId = plannerConversationDocId(previousWeekStart, activeChildId)
+      const prevRef = doc(plannerConversationsCollection(familyId), prevDocId)
+      const prevSnap = await getDoc(prevRef)
+
+      if (!prevSnap.exists() || !prevSnap.data().currentDraft) {
+        setSnack({ text: 'No plan found for last week. Try planning with AI instead.', severity: 'info' })
+        return
+      }
+
+      const previousDraft = prevSnap.data().currentDraft!
+      const clonedDraft = clonePlanWithAdvancedLessons(previousDraft)
+
+      setCurrentDraft(clonedDraft)
+
+      const assistantMsg: ChatMessage = {
+        id: generateItemId(),
+        role: ChatMessageRole.Assistant,
+        text: "Here's last week's plan carried forward with workbook lessons advanced. Review and adjust, then Apply.",
+        draftPlan: clonedDraft,
+        createdAt: new Date().toISOString(),
+      }
+
+      const updatedMessages = [...messages, assistantMsg]
+      setMessages(updatedMessages)
+
+      void persistConversation({
+        messages: updatedMessages,
+        currentDraft: clonedDraft,
+      })
+    } catch (err) {
+      console.error('Failed to repeat last week', err)
+      setSnack({ text: 'Failed to load last week\'s plan.', severity: 'error' })
+    }
+  }, [activeChildId, weekRange.start, familyId, messages, persistConversation])
+
   // Redo Plan handler: clears applied plan from Today/Week AND resets conversation
   const handleRedoPlan = useCallback(async () => {
     setConfirmNewPlan(false)
@@ -1033,6 +1079,23 @@ export default function PlannerChatPage() {
                 />
               </Stack>
             </Box>
+          )}
+
+          {/* Quick Start buttons — shown when no conversation yet (only welcome message) */}
+          {messages.length <= 1 && !currentDraft && !applied && (
+            <Stack spacing={1.5} sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" color="text.secondary">
+                Quick Start
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap">
+                <Button variant="outlined" size="small" onClick={handleRepeatLastWeek}>
+                  Repeat Last Week
+                </Button>
+                <Button variant="outlined" size="small" onClick={() => setInputText('Help me plan this week')}>
+                  Plan with AI
+                </Button>
+              </Stack>
+            </Stack>
           )}
 
           {/* Chat messages */}
