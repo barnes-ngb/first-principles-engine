@@ -729,7 +729,7 @@ export default function PlannerChatPage() {
     setLessonCardSaved(false)
 
     const activityType = subjectToActivityType(item.subjectBucket)
-    const skillTag = item.skillTags[0] ?? `${item.subjectBucket.toLowerCase()}.general`
+    const skillTag = item.skillTags[0] || `${item.subjectBucket.toLowerCase()}.general`
 
     const response = await generateActivity({
       familyId,

@@ -482,7 +482,7 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
           title: rawItem.title,
           subjectBucket,
           estimatedMinutes: rawItem.estimatedMinutes,
-          skillTags: Array.isArray(rawItem.skillTags) ? (rawItem.skillTags as string[]) : [],
+          skillTags: Array.isArray(rawItem.skillTags) ? (rawItem.skillTags as string[]).filter(Boolean) : [],
           isAppBlock: rawItem.isAppBlock === true,
           accepted: rawItem.accepted !== false,
         })
