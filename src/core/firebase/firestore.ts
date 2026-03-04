@@ -163,6 +163,10 @@ export const dailyPlansCollection = (
     dailyPlanConverter,
   ) as CollectionReference<DailyPlan>
 
+/** Daily plan doc ID: {date}_{childId} */
+export const dailyPlanDocId = (date: string, childId: string): string =>
+  `${date}_${childId}`
+
 export const projectsCollection = (familyId: string): CollectionReference<Project> =>
   collection(db, `families/${familyId}/projects`) as CollectionReference<Project>
 
