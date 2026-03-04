@@ -419,6 +419,28 @@ describe('parseAIResponse', () => {
     expect(result!.days).toHaveLength(2)
   })
 
+  it('extracts JSON when AI adds preamble text before the object', () => {
+    const preamble = "Here's your weekly plan:\n" + JSON.stringify(validPlan)
+    const result = parseAIResponse(makeResponse(preamble))
+    expect(result).not.toBeNull()
+    expect(result!.days).toHaveLength(2)
+    expect(result!.days[0].day).toBe('Monday')
+  })
+
+  it('extracts JSON when AI adds trailing text after the object', () => {
+    const trailing = JSON.stringify(validPlan) + '\n\nLet me know if you want adjustments!'
+    const result = parseAIResponse(makeResponse(trailing))
+    expect(result).not.toBeNull()
+    expect(result!.days).toHaveLength(2)
+  })
+
+  it('extracts JSON wrapped in markdown fences with preamble', () => {
+    const mixed = "Here's the plan:\n```json\n" + JSON.stringify(validPlan) + '\n```\nAdjust as needed.'
+    const result = parseAIResponse(makeResponse(mixed))
+    expect(result).not.toBeNull()
+    expect(result!.days).toHaveLength(2)
+  })
+
   it('defaults invalid subjectBucket to Other', () => {
     const plan = {
       ...validPlan,
