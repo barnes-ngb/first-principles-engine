@@ -598,27 +598,41 @@ export default function TodayPage() {
       {dayLog.checklist && dayLog.checklist.length > 0 && (
         <SectionCard title="Today's Plan">
           <Stack spacing={1}>
-            {dayLog.checklist.map((item, index) => (
-              <FormControlLabel
-                key={index}
-                control={
-                  <Checkbox
-                    checked={item.completed}
-                    onChange={() => {
-                      const updated = {
-                        ...dayLog,
-                        checklist: dayLog.checklist!.map((ci, i) =>
-                          i === index ? { ...ci, completed: !ci.completed } : ci
-                        ),
-                      }
-                      persistDayLogImmediate(updated)
-                    }}
-                  />
-                }
-                label={item.label}
-                sx={item.completed ? { textDecoration: 'line-through', opacity: 0.6 } : {}}
-              />
-            ))}
+            {dayLog.checklist.map((item, index) => {
+              const isMvd = planType === PlanType.Mvd
+              const isDimmed = isMvd && item.mvdEssential !== true
+              return (
+                <FormControlLabel
+                  key={index}
+                  control={
+                    <Checkbox
+                      checked={item.completed}
+                      onChange={() => {
+                        const updated = {
+                          ...dayLog,
+                          checklist: dayLog.checklist!.map((ci, i) =>
+                            i === index ? { ...ci, completed: !ci.completed } : ci
+                          ),
+                        }
+                        persistDayLogImmediate(updated)
+                      }}
+                    />
+                  }
+                  label={
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <span>{item.label}</span>
+                      {isDimmed && (
+                        <Chip label="stretch goal" size="small" variant="outlined" sx={{ fontSize: '0.7rem' }} />
+                      )}
+                    </Stack>
+                  }
+                  sx={{
+                    ...(item.completed ? { textDecoration: 'line-through', opacity: 0.6 } : {}),
+                    ...(isDimmed && !item.completed ? { opacity: 0.5 } : {}),
+                  }}
+                />
+              )
+            })}
           </Stack>
         </SectionCard>
       )}

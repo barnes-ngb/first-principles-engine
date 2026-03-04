@@ -205,6 +205,8 @@ export interface ChecklistItem {
   skillTags?: SkillTag[]
   /** Optional ladder rung reference */
   ladderRef?: { ladderId: string; rungId: string }
+  /** When true, this item is part of the Minimum Viable Day (MVD) set. */
+  mvdEssential?: boolean
 }
 
 export interface ArtifactTags {
@@ -656,6 +658,8 @@ export interface DraftPlanItem {
   skipSuggestion?: SkipSuggestion
   accepted: boolean
   assignmentId?: string
+  /** When true, this item is part of the Minimum Viable Day (MVD) set. */
+  mvdEssential?: boolean
 }
 
 export interface PlannerConversation {

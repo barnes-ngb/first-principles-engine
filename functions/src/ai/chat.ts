@@ -410,6 +410,15 @@ export function buildSystemPrompt(
 const PLAN_OUTPUT_INSTRUCTIONS = `OUTPUT FORMAT INSTRUCTIONS:
 When the user asks you to generate, create, or build a plan (or says "generate the plan", "make a plan", "plan the week", etc.), respond ONLY with valid JSON matching this exact schema — no markdown fences, no preamble, no explanation:
 
+PLAN CONTENT RULES:
+- Every day MUST start with a Formation block: prayer, scripture reading, and/or gratitude. 5-10 minutes. SubjectBucket: "Other".
+- Include Speech practice if the child has speech targets (check child context). 5 minutes. SubjectBucket: "LanguageArts".
+- Include ALL app blocks the user specified (Reading Eggs, Math app, etc.) as daily items with "isAppBlock": true.
+- Reading should include BOTH structured phonics/workbook AND read-aloud time as separate items.
+- Mark the 3-4 most essential items with "mvdEssential": true — these are the Minimum Viable Day items.
+- Total daily minutes should not exceed the hours budget.
+- Vary activities slightly across days (different read-aloud chapters, different phonics focuses) to avoid monotony.
+
 {
   "days": [
     {
@@ -422,7 +431,8 @@ When the user asks you to generate, create, or build a plan (or says "generate t
           "estimatedMinutes": 15,
           "skillTags": ["optional.dot.delimited.tag"],
           "isAppBlock": false,
-          "accepted": true
+          "accepted": true,
+          "mvdEssential": false
         }
       ]
     }
@@ -438,6 +448,7 @@ Rules:
 - Include app blocks (like Reading Eggs, Math app) as items with "isAppBlock": true.
 - Every item must have "accepted": true.
 - "estimatedMinutes" must be a positive number.
+- "mvdEssential" must be a boolean. Mark the 3-4 core items per day as true (Formation, core math, core reading, speech if applicable).
 - "skipSuggestions" is an array of { "action": "skip"|"modify", "reason": "string", "replacement": "string", "evidence": "string" }.
 
 When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.`;
