@@ -10,14 +10,18 @@ import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { doc, onSnapshot, setDoc } from 'firebase/firestore'
+import { deleteDoc, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SaveIndicator from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { skillSnapshotsCollection } from '../../core/firebase/firestore'
+import {
+  skillSnapshotsCollection,
+  workbookConfigDocId,
+  workbookConfigsCollection,
+} from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useSaveState } from '../../core/hooks/useSaveState'
 import { useProfile } from '../../core/profile/useProfile'
@@ -27,8 +31,9 @@ import type {
   SkillSnapshot,
   StopRule,
   SupportDefault,
+  WorkbookConfig,
 } from '../../core/types/domain'
-import { MasteryGate, SkillLevel, UserProfile } from '../../core/types/enums'
+import { MasteryGate, SkillLevel, SubjectBucket, UserProfile } from '../../core/types/enums'
 import {
   defaultEvidenceDefinitions,
   defaultPrioritySkills,
@@ -36,6 +41,30 @@ import {
   defaultSupports,
 } from './lincolnDefaults'
 import QuickCheckPanel from './QuickCheckPanel'
+
+function computePaceText(wb: WorkbookConfig): { text: string; color: string } | null {
+  if (!wb.totalUnits || !wb.targetFinishDate || !wb.currentPosition) return null
+  const remaining = wb.totalUnits - wb.currentPosition
+  if (remaining <= 0) return { text: 'Complete!', color: 'success.main' }
+
+  const today = new Date()
+  const target = new Date(wb.targetFinishDate + 'T00:00:00')
+  const msPerDay = 86_400_000
+  const totalDays = Math.max(1, Math.ceil((target.getTime() - today.getTime()) / msPerDay))
+  const totalWeeks = totalDays / 7
+  const schoolDays = Math.max(1, Math.round(totalWeeks * (wb.schoolDaysPerWeek || 5)))
+  const perDay = remaining / schoolDays
+
+  const unit = wb.unitLabel || 'lesson'
+  const targetMonth = target.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  const text = `${unit.charAt(0).toUpperCase() + unit.slice(1)} ${wb.currentPosition} of ${wb.totalUnits} — ${perDay.toFixed(1)} ${unit}s/school day to finish by ${targetMonth}`
+
+  let color = 'success.main'
+  if (perDay > 2.5) color = 'error.main'
+  else if (perDay > 1.5) color = 'warning.main'
+
+  return { text, color }
+}
 
 const emptySnapshot = (childId: string): SkillSnapshot => ({
   childId,
@@ -241,6 +270,76 @@ export default function SkillSnapshotPage() {
       void persist({ ...snapshot, prioritySkills: updated })
     },
     [snapshot, persist],
+  )
+
+  // --- Workbook Configs (separate Firestore docs) ---
+  const [workbooks, setWorkbooks] = useState<WorkbookConfig[]>([])
+
+  useEffect(() => {
+    if (!activeChildId) return
+    const q = query(workbookConfigsCollection(familyId), where('childId', '==', activeChildId))
+    const unsubscribe = onSnapshot(
+      q,
+      (snap) => {
+        const items = snap.docs.map((d) => ({ ...(d.data() as WorkbookConfig), id: d.id }))
+        setWorkbooks(items)
+      },
+      (err) => {
+        console.error('Failed to load workbook configs', err)
+        setSnack({ text: 'Could not load workbooks.', severity: 'error' })
+      },
+    )
+    return unsubscribe
+  }, [familyId, activeChildId])
+
+  const handleAddWorkbook = useCallback(() => {
+    if (!activeChildId) return
+    const name = ''
+    const newConfig: WorkbookConfig = {
+      childId: activeChildId,
+      name,
+      subjectBucket: SubjectBucket.Other,
+      totalUnits: 0,
+      currentPosition: 0,
+      unitLabel: 'lesson',
+      targetFinishDate: '',
+      schoolDaysPerWeek: 5,
+    }
+    setWorkbooks((prev) => [...prev, newConfig])
+  }, [activeChildId])
+
+  const handleSaveWorkbook = useCallback(
+    async (index: number, updated: WorkbookConfig) => {
+      if (!updated.name.trim()) return
+      const docId = workbookConfigDocId(updated.childId, updated.name)
+      const ref = doc(workbookConfigsCollection(familyId), docId)
+      setWorkbooks((prev) => prev.map((w, i) => (i === index ? { ...updated, id: docId } : w)))
+      const result = await withSave(() =>
+        setDoc(ref, { ...updated, id: docId, updatedAt: new Date().toISOString() }),
+      )
+      if (result === undefined) {
+        setSnack({ text: 'Failed to save workbook.', severity: 'error' })
+      }
+    },
+    [familyId, withSave],
+  )
+
+  const handleDeleteWorkbook = useCallback(
+    async (index: number) => {
+      const wb = workbooks[index]
+      if (!wb) return
+      if (wb.id) {
+        const ref = doc(workbookConfigsCollection(familyId), wb.id)
+        setWorkbooks((prev) => prev.filter((_, i) => i !== index))
+        const result = await withSave(() => deleteDoc(ref))
+        if (result === undefined) {
+          setSnack({ text: 'Failed to delete workbook.', severity: 'error' })
+        }
+      } else {
+        setWorkbooks((prev) => prev.filter((_, i) => i !== index))
+      }
+    },
+    [familyId, workbooks, withSave],
   )
 
   // --- Evidence Definitions CRUD ---
@@ -494,6 +593,131 @@ export default function SkillSnapshotPage() {
               )}
               <Button startIcon={<AddIcon />} size="small" onClick={handleAddEvidence}>
                 Add Evidence Definition
+              </Button>
+            </Stack>
+          </SectionCard>
+
+          {/* Workbooks (Pace Tracking) */}
+          <SectionCard title="Workbooks">
+            <Stack spacing={2}>
+              {workbooks.length === 0 ? (
+                <Typography color="text.secondary">No workbooks configured.</Typography>
+              ) : (
+                workbooks.map((wb, index) => {
+                  const pace = computePaceText(wb)
+                  return (
+                    <Stack
+                      key={wb.id ?? index}
+                      spacing={1}
+                      sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}
+                    >
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <TextField
+                          label="Workbook Name"
+                          size="small"
+                          fullWidth
+                          value={wb.name}
+                          onChange={(e) => {
+                            const updated = { ...wb, name: e.target.value }
+                            setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                          }}
+                          onBlur={() => void handleSaveWorkbook(index, wb)}
+                        />
+                        <TextField
+                          label="Subject"
+                          select
+                          size="small"
+                          sx={{ minWidth: 140 }}
+                          value={wb.subjectBucket}
+                          onChange={(e) => {
+                            const updated = { ...wb, subjectBucket: e.target.value as SubjectBucket }
+                            setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                            void handleSaveWorkbook(index, updated)
+                          }}
+                        >
+                          {Object.values(SubjectBucket).map((val) => (
+                            <MenuItem key={val} value={val}>{val}</MenuItem>
+                          ))}
+                        </TextField>
+                        <IconButton size="small" onClick={() => void handleDeleteWorkbook(index)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                      <Stack direction="row" spacing={1}>
+                        <TextField
+                          label="Total Units"
+                          size="small"
+                          type="number"
+                          sx={{ flex: 1 }}
+                          value={wb.totalUnits || ''}
+                          onChange={(e) => {
+                            const updated = { ...wb, totalUnits: Number(e.target.value) || 0 }
+                            setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                            void handleSaveWorkbook(index, updated)
+                          }}
+                        />
+                        <TextField
+                          label="Current Position"
+                          size="small"
+                          type="number"
+                          sx={{ flex: 1 }}
+                          value={wb.currentPosition || ''}
+                          onChange={(e) => {
+                            const updated = { ...wb, currentPosition: Number(e.target.value) || 0 }
+                            setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                            void handleSaveWorkbook(index, updated)
+                          }}
+                        />
+                        <TextField
+                          label="Unit Label"
+                          size="small"
+                          sx={{ flex: 1 }}
+                          value={wb.unitLabel}
+                          onChange={(e) => {
+                            const updated = { ...wb, unitLabel: e.target.value }
+                            setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                          }}
+                          onBlur={() => void handleSaveWorkbook(index, wb)}
+                        />
+                      </Stack>
+                      <Stack direction="row" spacing={1}>
+                        <TextField
+                          label="Target Finish Date"
+                          size="small"
+                          type="date"
+                          sx={{ flex: 1 }}
+                          slotProps={{ inputLabel: { shrink: true } }}
+                          value={wb.targetFinishDate}
+                          onChange={(e) => {
+                            const updated = { ...wb, targetFinishDate: e.target.value }
+                            setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                            void handleSaveWorkbook(index, updated)
+                          }}
+                        />
+                        <TextField
+                          label="School Days/Week"
+                          size="small"
+                          type="number"
+                          sx={{ flex: 1 }}
+                          value={wb.schoolDaysPerWeek}
+                          onChange={(e) => {
+                            const updated = { ...wb, schoolDaysPerWeek: Number(e.target.value) || 5 }
+                            setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                            void handleSaveWorkbook(index, updated)
+                          }}
+                        />
+                      </Stack>
+                      {pace && (
+                        <Typography variant="body2" sx={{ color: pace.color, fontWeight: 500 }}>
+                          {pace.text}
+                        </Typography>
+                      )}
+                    </Stack>
+                  )
+                })
+              )}
+              <Button startIcon={<AddIcon />} size="small" onClick={handleAddWorkbook}>
+                Add Workbook
               </Button>
             </Stack>
           </SectionCard>

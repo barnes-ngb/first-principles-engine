@@ -4,6 +4,9 @@ export const SubjectBucket = {
   Math: 'Math',
   Science: 'Science',
   SocialStudies: 'SocialStudies',
+  Music: 'Music',
+  Art: 'Art',
+  PE: 'PE',
   Other: 'Other',
 } as const
 export type SubjectBucket = (typeof SubjectBucket)[keyof typeof SubjectBucket]
