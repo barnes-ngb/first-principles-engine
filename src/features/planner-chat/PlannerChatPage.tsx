@@ -16,7 +16,7 @@ import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore'
+import { addDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -32,6 +32,7 @@ import {
   plannerConversationsCollection,
   skillSnapshotsCollection,
   weeksCollection,
+  workbookConfigsCollection,
 } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -48,8 +49,10 @@ import type {
   LessonCard,
   PlannerConversation,
   PhotoLabel,
+  PhotoContentExtraction,
   SkillSnapshot,
   WeekPlan,
+  WorkbookConfig,
 } from '../../core/types/domain'
 import {
   AssignmentAction,
@@ -102,16 +105,54 @@ function subjectToDayBlockType(subject: SubjectBucket): DayBlockType {
 }
 
 function photoLabelsToAssignments(labels: PhotoLabel[]): AssignmentCandidate[] {
-  return labels.map((label) => ({
-    id: generateItemId(),
-    subjectBucket: label.subjectBucket,
-    workbookName: label.subjectBucket,
-    lessonName: label.lessonOrPages || 'Workbook page',
-    estimatedMinutes: label.estimatedMinutes,
-    difficultyCues: [],
-    sourcePhotoId: label.artifactId,
-    action: AssignmentAction.Keep,
-  }))
+  return labels.map((label) => {
+    const extracted = label.extractedContent
+    const workbookName = extracted?.workbookMatch?.workbookName ?? label.subjectBucket
+    const lessonName = extracted
+      ? `${extracted.lessonNumber ? `${extracted.workbookMatch?.unitLabel ?? 'lesson'} ${extracted.lessonNumber}` : label.lessonOrPages || 'Workbook page'}${extracted.topic && extracted.topic !== workbookName ? ` (${extracted.topic})` : ''}`
+      : label.lessonOrPages || 'Workbook page'
+
+    return {
+      id: generateItemId(),
+      subjectBucket: label.subjectBucket,
+      workbookName,
+      lessonName,
+      estimatedMinutes: extracted?.estimatedMinutes || label.estimatedMinutes,
+      difficultyCues: extracted?.difficulty ? [extracted.difficulty] : [],
+      sourcePhotoId: label.artifactId,
+      action: AssignmentAction.Keep,
+    }
+  })
+}
+
+/** Build a text description of photo context for inclusion in AI plan prompts. */
+function buildPhotoContextSection(labels: PhotoLabel[]): string {
+  const labelsWithContent = labels.filter((l) => l.extractedContent || l.lessonOrPages)
+  if (labelsWithContent.length === 0) return ''
+
+  const lines = ['Photos uploaded this session:']
+  for (const label of labelsWithContent) {
+    const ex = label.extractedContent
+    if (ex?.workbookMatch) {
+      const parts = [
+        ex.workbookMatch.workbookName,
+        ex.lessonNumber ? `${ex.workbookMatch.unitLabel} ${ex.lessonNumber} of ${ex.workbookMatch.totalUnits}` : null,
+        ex.topic && ex.topic !== ex.workbookMatch.workbookName ? ex.topic : null,
+        `~${ex.estimatedMinutes || label.estimatedMinutes} min`,
+      ].filter(Boolean)
+      lines.push(`- ${parts.join(', ')}`)
+      if (ex.difficulty) {
+        lines.push(`  Difficulty note: ${ex.difficulty}`)
+      }
+      if (ex.modifications) {
+        lines.push(`  Suggested modification: ${ex.modifications}`)
+      }
+    } else {
+      lines.push(`- ${label.subjectBucket}: ${label.lessonOrPages || 'workbook page'} (~${label.estimatedMinutes} min)`)
+    }
+  }
+  lines.push('Please incorporate these specific materials into the plan.')
+  return lines.join('\n')
 }
 
 export default function PlannerChatPage() {
@@ -159,6 +200,9 @@ export default function PlannerChatPage() {
   const [lessonCardSaved, setLessonCardSaved] = useState(false)
   const [lessonCardSaving, setLessonCardSaving] = useState(false)
 
+  // Workbook configs for active child (for photo label matching)
+  const [workbookConfigs, setWorkbookConfigs] = useState<WorkbookConfig[]>([])
+
   const conversationDocId = useMemo(
     () => (activeChildId ? plannerConversationDocId(weekRange.start, activeChildId) : ''),
     [weekRange.start, activeChildId],
@@ -190,6 +234,20 @@ export default function PlannerChatPage() {
       }
     })
     return unsubscribe
+  }, [familyId, activeChildId])
+
+  // Load workbook configs for active child
+  useEffect(() => {
+    if (!activeChildId) {
+      setWorkbookConfigs([])
+      return
+    }
+    const col = workbookConfigsCollection(familyId)
+    const q = query(col, where('childId', '==', activeChildId))
+    void getDocs(q).then((snap) => {
+      const configs = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
+      setWorkbookConfigs(configs)
+    })
   }, [familyId, activeChildId])
 
   // Load week plan (theme/virtue/scripture/heartQuestion)
@@ -329,9 +387,91 @@ export default function PlannerChatPage() {
     [activeChildId, familyId],
   )
 
+  // Extract photo content using AI (MVP: uses label + workbook config, not image analysis)
+  const extractPhotoContent = useCallback(async (
+    userLabel: string,
+    subject: SubjectBucket,
+  ): Promise<PhotoContentExtraction | null> => {
+    if (!activeChildId) return null
+
+    // Find matching workbook config for richer context
+    const matchingConfig = workbookConfigs.find((c) => c.subjectBucket === subject)
+    const configContext = matchingConfig
+      ? `\nKnown workbook: "${matchingConfig.name}" (${matchingConfig.subjectBucket}), currently at ${matchingConfig.unitLabel} ${matchingConfig.currentPosition} of ${matchingConfig.totalUnits}, target finish: ${matchingConfig.targetFinishDate}.`
+      : ''
+
+    try {
+      const response = await aiChat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.Generate,
+        messages: [{
+          role: 'user',
+          content: `I'm uploading a photo of homeschool materials labeled "${userLabel}" (subject: ${subject}).${configContext}
+
+Please extract:
+1. Subject (math, reading, phonics, science, etc.)
+2. Specific lesson/chapter number if visible
+3. Topic or skill covered
+4. Estimated time to complete
+5. Difficulty observations (too many problems? needs modification?)
+6. Any specific instructions visible on the page
+
+Return as JSON:
+{
+  "subject": "...",
+  "lessonNumber": "...",
+  "topic": "...",
+  "estimatedMinutes": 0,
+  "difficulty": "...",
+  "modifications": "...",
+  "rawDescription": "..."
+}`,
+        }],
+      })
+
+      if (!response?.message) return null
+
+      // Try to parse the JSON from the response
+      const jsonMatch = response.message.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) return null
+
+      const parsed = JSON.parse(jsonMatch[0]) as PhotoContentExtraction
+
+      // Attach workbook match if found
+      if (matchingConfig) {
+        parsed.workbookMatch = {
+          workbookName: matchingConfig.name,
+          totalUnits: matchingConfig.totalUnits,
+          currentPosition: matchingConfig.currentPosition,
+          unitLabel: matchingConfig.unitLabel,
+        }
+      }
+
+      return parsed
+    } catch (err) {
+      console.error('Photo content extraction failed', err)
+      return null
+    }
+  }, [aiChat, familyId, activeChildId, workbookConfigs])
+
   // Submit photos and generate plan (AI path with local fallback)
   const handleSubmitPhotos = useCallback(async () => {
     if (photoLabels.length === 0) return
+
+    // Attempt AI-based content extraction for labels without existing extracted content
+    if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
+      const enriched = await Promise.all(
+        photoLabels.map(async (label) => {
+          if (label.extractedContent || !label.lessonOrPages.trim()) return label
+          const extracted = await extractPhotoContent(label.lessonOrPages, label.subjectBucket)
+          if (extracted) return { ...label, extractedContent: extracted }
+          return label
+        }),
+      )
+      setPhotoLabels(enriched)
+    }
+
     const assignments = photoLabelsToAssignments(photoLabels)
 
     // Add user message with photo labels
@@ -350,7 +490,9 @@ export default function PlannerChatPage() {
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       // AI path: send context to Cloud Function
       const prompt = buildPlannerPrompt(inputs)
-      const aiMessages: AIChatMessage[] = [{ role: 'user', content: prompt }]
+      const photoContext = buildPhotoContextSection(photoLabels)
+      const fullPrompt = photoContext ? `${prompt}\n\n${photoContext}` : prompt
+      const aiMessages: AIChatMessage[] = [{ role: 'user', content: fullPrompt }]
       const response = await aiChat({
         familyId,
         childId: activeChildId,
@@ -393,7 +535,7 @@ export default function PlannerChatPage() {
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -415,12 +557,14 @@ export default function PlannerChatPage() {
 
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       const prompt = buildPlannerPrompt(inputs)
+      const photoContext = buildPhotoContextSection(photoLabels)
+      const fullPrompt = photoContext ? `${prompt}\n\n${photoContext}` : prompt
       const aiMessages: AIChatMessage[] = [
         ...messages.map((m) => ({
           role: m.role as 'user' | 'assistant',
           content: m.text ?? '',
         })),
-        { role: 'user' as const, content: prompt },
+        { role: 'user' as const, content: fullPrompt },
       ]
       const response = await aiChat({
         familyId,
@@ -1176,6 +1320,7 @@ export default function PlannerChatPage() {
                 onLabelsChange={setPhotoLabels}
                 onPhotoCapture={handlePhotoCapture}
                 uploading={uploading}
+                workbookConfigs={workbookConfigs}
               />
               {photoLabels.length > 0 && (
                 <Button
