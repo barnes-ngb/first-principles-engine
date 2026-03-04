@@ -6,17 +6,21 @@ import type { ReactNode } from 'react'
 
 interface SectionCardProps {
   title: string
+  action?: ReactNode
   children: ReactNode
 }
 
-export default function SectionCard({ title, children }: SectionCardProps) {
+export default function SectionCard({ title, action, children }: SectionCardProps) {
   return (
     <Card elevation={2}>
       <CardContent>
         <Stack spacing={2}>
-          <Typography component="h2" variant="h6">
-            {title}
-          </Typography>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Typography component="h2" variant="h6">
+              {title}
+            </Typography>
+            {action}
+          </Stack>
           {children}
         </Stack>
       </CardContent>
