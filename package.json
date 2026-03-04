@@ -10,10 +10,10 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:watch": "vitest --watch",
-    "deploy": "npm run build && firebase deploy",
+    "deploy": "npm run build && firebase deploy --except extensions",
     "deploy:hosting": "npm run build && firebase deploy --only hosting",
     "deploy:rules": "firebase deploy --only firestore:rules,storage",
-    "deploy:functions": "npm --prefix functions run lint && npm --prefix functions run build && firebase deploy --only functions"
+    "deploy:functions": "npm --prefix functions run lint && npm --prefix functions run build && firebase deploy --only functions --except extensions"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
