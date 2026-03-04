@@ -56,6 +56,8 @@ import { getLaddersForChild } from '../ladders/laddersCatalog'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
   DayBlockType,
+  EnergyLevel,
+  EnergyLevelLabel,
   EngineStage,
   EvidenceType,
   LearningLocation,
@@ -70,6 +72,7 @@ import { autoFillBlockMinutes } from './daylog.model'
 import HelperPanel from './HelperPanel'
 import LadderQuickLog from './LadderQuickLog'
 import RoutineSection from './RoutineSection'
+import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
 import { calculateXp } from './xp'
 
@@ -99,6 +102,7 @@ export default function TodayPage() {
   const [linkingLadderId, setLinkingLadderId] = useState('')
   const [linkingRungId, setLinkingRungId] = useState('')
   const [mediaUploading, setMediaUploading] = useState(false)
+  const [energy, setEnergy] = useState<EnergyLevel>(EnergyLevel.Normal)
   const [planType, setPlanType] = useState<PlanType>(PlanType.Normal)
   const [showAllBlocks, setShowAllBlocks] = useState(false)
   const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
@@ -157,6 +161,35 @@ export default function TodayPage() {
     activeTemplate,
     activeRoutineItems,
   })
+
+  // Load/persist daily plan (energy + planType) to Firestore
+  const { dailyPlan, saveDailyPlan } = useDailyPlan({
+    familyId,
+    childId: selectedChildId,
+    date: today,
+  })
+
+  // Restore energy + planType from saved dailyPlan on load
+  useEffect(() => {
+    if (dailyPlan) {
+      setEnergy(dailyPlan.energy)
+      setPlanType(dailyPlan.planType)
+    }
+  }, [dailyPlan])
+
+  /** Map energy level to plan type: normal → Normal Day, low/overwhelmed → MVD. */
+  const energyToPlanType = (level: EnergyLevel): PlanType =>
+    level === EnergyLevel.Normal ? PlanType.Normal : PlanType.Mvd
+
+  const handleEnergyChange = useCallback(
+    (newEnergy: EnergyLevel) => {
+      setEnergy(newEnergy)
+      const newPlanType = energyToPlanType(newEnergy)
+      setPlanType(newPlanType)
+      void saveDailyPlan(newEnergy, newPlanType)
+    },
+    [saveDailyPlan],
+  )
 
   // Load artifacts scoped to child + date (reload when child changes)
   useEffect(() => {
@@ -562,6 +595,34 @@ export default function TodayPage() {
 
       <HelperPanel template={activeTemplate} />
 
+      {dayLog.checklist && dayLog.checklist.length > 0 && (
+        <SectionCard title="Today's Plan">
+          <Stack spacing={1}>
+            {dayLog.checklist.map((item, index) => (
+              <FormControlLabel
+                key={index}
+                control={
+                  <Checkbox
+                    checked={item.completed}
+                    onChange={() => {
+                      const updated = {
+                        ...dayLog,
+                        checklist: dayLog.checklist!.map((ci, i) =>
+                          i === index ? { ...ci, completed: !ci.completed } : ci
+                        ),
+                      }
+                      persistDayLogImmediate(updated)
+                    }}
+                  />
+                }
+                label={item.label}
+                sx={item.completed ? { textDecoration: 'line-through', opacity: 0.6 } : {}}
+              />
+            ))}
+          </Stack>
+        </SectionCard>
+      )}
+
       <RoutineSection
         key={`${selectedChildId}_${today}`}
         dayLog={dayLog}
@@ -585,14 +646,23 @@ export default function TodayPage() {
           </Typography>
           <Stack direction="row" spacing={1} alignItems="center">
             <ToggleButtonGroup
-              value={planType}
+              value={energy}
               exclusive
               size="small"
-              onChange={(_e, value) => { if (value) setPlanType(value) }}
+              onChange={(_e, value) => { if (value) handleEnergyChange(value as EnergyLevel) }}
             >
-              <ToggleButton value={PlanType.Normal}>{PlanTypeLabel[PlanType.Normal]}</ToggleButton>
-              <ToggleButton value={PlanType.Mvd}>{PlanTypeLabel[PlanType.Mvd]}</ToggleButton>
+              {Object.values(EnergyLevel).map((level) => (
+                <ToggleButton key={level} value={level}>
+                  {EnergyLevelLabel[level]}
+                </ToggleButton>
+              ))}
             </ToggleButtonGroup>
+            <Chip
+              size="small"
+              label={PlanTypeLabel[planType]}
+              color={planType === PlanType.Normal ? 'success' : 'warning'}
+              variant="outlined"
+            />
             <SaveIndicator state={saveState} />
           </Stack>
         </Stack>

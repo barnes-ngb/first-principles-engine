@@ -107,7 +107,7 @@ export default function PlannerChatPage() {
   const familyId = useFamilyId()
   const { isEnabled } = useAIFeatureFlags()
   const { chat: aiChat, loading: aiLoading } = useAI()
-  const { generate: generateActivity, loading: generateLoading, error: generateError } = useGenerateActivity()
+  const { generate: generateActivity, loading: generateLoading } = useGenerateActivity()
   const {
     children,
     activeChildId,
@@ -423,10 +423,26 @@ export default function PlannerChatPage() {
       setMessages(updatedWithUser)
       setInputText('')
 
-      const aiMessages: AIChatMessage[] = updatedWithUser.map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.text ?? '',
-      }))
+      // When a draft already exists, include it + JSON schema so the AI returns structured JSON
+      let adjustmentContent: string | null = null
+      if (currentDraft) {
+        adjustmentContent = [
+          'Current plan:',
+          JSON.stringify(currentDraft, null, 2),
+          `User adjustment: "${text}"`,
+          `Apply the adjustment and return the COMPLETE updated plan as valid JSON with this schema:`,
+          `{ "days": [{ "day": "Monday", "timeBudgetMinutes": 150, "items": [{ "title": "string", "subjectBucket": "Reading|Math|LanguageArts|Science|SocialStudies|Other", "estimatedMinutes": 15, "skillTags": [], "isAppBlock": false, "accepted": true }] }], "skipSuggestions": [], "minimumWin": "string" }`,
+          `Respect hours budget of ${hoursPerDay} hours/day. No markdown, no preamble — only valid JSON.`,
+        ].join('\n')
+      }
+
+      const aiMessages: AIChatMessage[] = [
+        ...updatedWithUser.slice(0, -1).map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.text ?? '',
+        })),
+        { role: 'user' as const, content: adjustmentContent ?? text },
+      ]
       const response = await aiChat({
         familyId,
         childId: activeChildId,
@@ -746,24 +762,24 @@ export default function PlannerChatPage() {
     const activityType = subjectToActivityType(item.subjectBucket)
     const skillTag = item.skillTags[0] || `${item.subjectBucket.toLowerCase()}.general`
 
-    const response = await generateActivity({
-      familyId,
-      childId: activeChildId,
-      activityType,
-      skillTag,
-      estimatedMinutes: item.estimatedMinutes,
-    })
+    try {
+      const response = await generateActivity({
+        familyId,
+        childId: activeChildId,
+        activityType,
+        skillTag,
+        estimatedMinutes: item.estimatedMinutes,
+      })
 
-    setGeneratingItemId(null)
-
-    if (response) {
       setGeneratedActivity(response.activity)
       setGeneratedPlanItem(item)
-    } else {
-      const errMsg = generateError?.message ?? 'Failed to generate activity.'
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Failed to generate activity.'
       setSnack({ text: `${errMsg} Try again.`, severity: 'error' })
+    } finally {
+      setGeneratingItemId(null)
     }
-  }, [activeChildId, familyId, generateActivity, generateError, subjectToActivityType])
+  }, [activeChildId, familyId, generateActivity, subjectToActivityType])
 
   // Save generated activity as a LessonCard in Firestore
   const handleSaveLessonCard = useCallback(async () => {

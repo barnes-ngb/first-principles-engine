@@ -120,7 +120,7 @@ export function useGenerateActivity() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
-  const generate = useCallback(async (request: GenerateRequest): Promise<GenerateResponse | null> => {
+  const generate = useCallback(async (request: GenerateRequest): Promise<GenerateResponse> => {
     setLoading(true)
     setError(null)
     try {
@@ -129,7 +129,7 @@ export function useGenerateActivity() {
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err))
       setError(e)
-      return null
+      throw e
     } finally {
       setLoading(false)
     }

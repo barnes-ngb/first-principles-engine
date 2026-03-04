@@ -4,6 +4,9 @@ export const SubjectBucket = {
   Math: 'Math',
   Science: 'Science',
   SocialStudies: 'SocialStudies',
+  Music: 'Music',
+  Art: 'Art',
+  PE: 'PE',
   Other: 'Other',
 } as const
 export type SubjectBucket = (typeof SubjectBucket)[keyof typeof SubjectBucket]
@@ -95,6 +98,13 @@ export const EnergyLevel = {
   Overwhelmed: 'overwhelmed',
 } as const
 export type EnergyLevel = (typeof EnergyLevel)[keyof typeof EnergyLevel]
+
+/** Human-readable label for each energy level. */
+export const EnergyLevelLabel: Record<EnergyLevel, string> = {
+  [EnergyLevel.Normal]: 'Normal',
+  [EnergyLevel.Low]: 'Low',
+  [EnergyLevel.Overwhelmed]: 'Overwhelmed',
+}
 
 export const SupportTag = {
   Prompts: 'Prompts',
