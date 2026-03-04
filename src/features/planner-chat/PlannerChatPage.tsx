@@ -439,6 +439,7 @@ export default function PlannerChatPage() {
       let assistantMsg: ChatMessage
       if (aiDraft) {
         setCurrentDraft(aiDraft)
+        if (applied) setApplied(false)
         assistantMsg = {
           id: generateItemId(),
           role: ChatMessageRole.Assistant,
@@ -458,7 +459,8 @@ export default function PlannerChatPage() {
 
       const final = [...updatedWithUser, assistantMsg]
       setMessages(final)
-      void persistConversation({ messages: final, currentDraft: currentDraft ?? undefined })
+      const persistStatus = aiDraft && applied ? { status: PlannerConversationStatus.Draft } : {}
+      void persistConversation({ messages: final, currentDraft: aiDraft ?? currentDraft ?? undefined, ...persistStatus })
       return
     }
 
@@ -496,6 +498,7 @@ export default function PlannerChatPage() {
 
       setCurrentDraft(draft)
       setAdjustments(newAdjustments)
+      if (applied) setApplied(false)
 
       assistantMsg = {
         id: generateItemId(),
@@ -537,8 +540,9 @@ export default function PlannerChatPage() {
     void persistConversation({
       messages: updatedMessages,
       currentDraft: currentDraft ?? undefined,
+      ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -694,6 +698,7 @@ export default function PlannerChatPage() {
       })
       setCurrentDraft(draft)
       setAdjustments(newAdjustments)
+      if (applied) setApplied(false)
       assistantReply = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
@@ -716,8 +721,9 @@ export default function PlannerChatPage() {
     void persistConversation({
       messages: updatedMessages,
       currentDraft: currentDraft ?? undefined,
+      ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
     })
-  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation])
+  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied])
 
   // Map SubjectBucket to activity type for the generate Cloud Function
   const subjectToActivityType = useCallback((subject: SubjectBucket): string => {
