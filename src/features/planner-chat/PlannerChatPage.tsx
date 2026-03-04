@@ -423,10 +423,26 @@ export default function PlannerChatPage() {
       setMessages(updatedWithUser)
       setInputText('')
 
-      const aiMessages: AIChatMessage[] = updatedWithUser.map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.text ?? '',
-      }))
+      // When a draft already exists, include it + JSON schema so the AI returns structured JSON
+      let adjustmentContent: string | null = null
+      if (currentDraft) {
+        adjustmentContent = [
+          'Current plan:',
+          JSON.stringify(currentDraft, null, 2),
+          `User adjustment: "${text}"`,
+          `Apply the adjustment and return the COMPLETE updated plan as valid JSON with this schema:`,
+          `{ "days": [{ "day": "Monday", "timeBudgetMinutes": 150, "items": [{ "title": "string", "subjectBucket": "Reading|Math|LanguageArts|Science|SocialStudies|Other", "estimatedMinutes": 15, "skillTags": [], "isAppBlock": false, "accepted": true }] }], "skipSuggestions": [], "minimumWin": "string" }`,
+          `Respect hours budget of ${hoursPerDay} hours/day. No markdown, no preamble — only valid JSON.`,
+        ].join('\n')
+      }
+
+      const aiMessages: AIChatMessage[] = [
+        ...updatedWithUser.slice(0, -1).map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.text ?? '',
+        })),
+        { role: 'user' as const, content: adjustmentContent ?? text },
+      ]
       const response = await aiChat({
         familyId,
         childId: activeChildId,
