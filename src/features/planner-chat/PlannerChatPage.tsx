@@ -766,7 +766,7 @@ export default function PlannerChatPage() {
         supports: [],
         evidenceChecks: generatedActivity.successCriteria,
         skillTags: generatedPlanItem.skillTags,
-        ladderRef: generatedPlanItem.ladderRef,
+        ...(generatedPlanItem.ladderRef ? { ladderRef: generatedPlanItem.ladderRef } : {}),
         createdAt: new Date().toISOString(),
       }
       await addDoc(lessonCardsCollection(familyId), lessonCard)
