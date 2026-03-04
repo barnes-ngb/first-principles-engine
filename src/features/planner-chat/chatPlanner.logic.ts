@@ -450,15 +450,29 @@ export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
 
 const VALID_SUBJECT_BUCKETS = new Set<string>(Object.values(SubjectBucket))
 
+/** Extract a JSON object string from text that may contain preamble or surrounding prose. */
+function extractJsonObject(text: string): string | null {
+  const trimmed = text.trim()
+  if (!trimmed) return null
+
+  // Strip markdown code fences anywhere in the text
+  const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+  if (fenceMatch) return fenceMatch[1].trim()
+
+  // Find the outermost { ... } in the text
+  const firstBrace = trimmed.indexOf('{')
+  if (firstBrace === -1) return null
+  const lastBrace = trimmed.lastIndexOf('}')
+  if (lastBrace <= firstBrace) return null
+  return trimmed.slice(firstBrace, lastBrace + 1)
+}
+
 /** Parse and validate an AI response into a DraftWeeklyPlan. Returns null if malformed. */
 export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null {
   try {
-    let text = response.message.trim()
-    // Strip markdown code fences if present
-    if (text.startsWith('```')) {
-      text = text.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')
-    }
-    const parsed = JSON.parse(text) as Record<string, unknown>
+    const jsonText = extractJsonObject(response.message)
+    if (!jsonText) return null
+    const parsed = JSON.parse(jsonText) as Record<string, unknown>
 
     if (!Array.isArray(parsed.days) || parsed.days.length === 0) return null
     if (typeof parsed.minimumWin !== 'string') return null
