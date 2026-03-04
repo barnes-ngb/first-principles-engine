@@ -1,4 +1,3 @@
-import OpenAI from "openai";
 import type { ImageOptions, ImageResponse } from "../aiService.js";
 
 /** OpenAI-specific image generation provider. */
@@ -11,10 +10,11 @@ export interface OpenAiProvider {
 
 /** Create an OpenAI provider for image generation (DALL-E). */
 export function createOpenAiProvider(apiKey: string): OpenAiProvider {
-  const client = new OpenAI({ apiKey });
-
   return {
     async generateImage(prompt, options) {
+      const { default: OpenAI } = await import("openai");
+      const client = new OpenAI({ apiKey });
+
       const response = await client.images.generate({
         model: options?.model ?? "dall-e-3",
         prompt,
