@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
@@ -406,6 +405,7 @@ export const generateActivity = onCall(
 
     // ── Call Claude (Haiku for routine generation) ──────────────
     const model = "claude-haiku-4-5-20251001";
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
     const client = new Anthropic({ apiKey: claudeApiKey.value() });
 
     const completion = await client.messages.create({
