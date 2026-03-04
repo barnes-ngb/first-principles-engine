@@ -132,7 +132,7 @@ export default function LessonCardPreview({
                 {activity.successCriteria.map((c, i) => (
                   <ListItem key={i} sx={{ pl: 0 }}>
                     <ListItemText
-                      primary={`\u2022 ${decodeUnicodeEscapes(c)}`}
+                      primary={`• ${decodeUnicodeEscapes(c)}`}
                       primaryTypographyProps={{ variant: 'body2' }}
                     />
                   </ListItem>
