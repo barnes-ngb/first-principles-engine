@@ -233,8 +233,14 @@ function currentWeekKey(): string {
 }
 
 function parseActivityJson(raw: string): GeneratedActivity {
-  // Strip markdown fences if present
-  const cleaned = raw
+  // Strip markdown fences — handle leading text, nested fences, etc.
+  let cleaned = raw.trim();
+  const fenceMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)```/i);
+  if (fenceMatch) {
+    cleaned = fenceMatch[1].trim();
+  }
+  // Also try stripping simple start/end fences
+  cleaned = cleaned
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/i, "")
     .trim();
@@ -405,34 +411,50 @@ export const generateActivity = onCall(
 
     // ── Call Claude (Haiku for routine generation) ──────────────
     const model = "claude-haiku-4-5-20251001";
-    const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const client = new Anthropic({ apiKey: claudeApiKey.value() });
 
-    const completion = await client.messages.create({
-      model,
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-    });
+    let responseText: string;
+    let usage: { inputTokens: number; outputTokens: number };
 
-    const responseText =
-      completion.content[0].type === "text"
-        ? completion.content[0].text
-        : "";
+    try {
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const client = new Anthropic({ apiKey: claudeApiKey.value() });
 
-    const usage = {
-      inputTokens: completion.usage.input_tokens,
-      outputTokens: completion.usage.output_tokens,
-    };
+      const completion = await client.messages.create({
+        model,
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userMessage }],
+      });
+
+      const textBlock = completion.content.find((c) => c.type === "text");
+      responseText = textBlock?.text ?? "";
+
+      usage = {
+        inputTokens: completion.usage.input_tokens,
+        outputTokens: completion.usage.output_tokens,
+      };
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Unknown AI provider error";
+      console.error("generateActivity: Claude API call failed:", msg);
+      throw new HttpsError("internal", `AI provider error: ${msg}`);
+    }
 
     // ── Parse structured response ──────────────────────────────
     let activity: GeneratedActivity;
     try {
       activity = parseActivityJson(responseText);
-    } catch {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "parse error";
+      console.error(
+        "generateActivity: Failed to parse AI response:",
+        msg,
+        "Raw response:",
+        responseText.slice(0, 500),
+      );
       throw new HttpsError(
         "internal",
-        "Failed to parse AI response as structured activity.",
+        `Failed to parse AI response: ${msg}`,
       );
     }
 
