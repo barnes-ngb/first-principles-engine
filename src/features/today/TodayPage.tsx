@@ -66,6 +66,7 @@ import {
 } from '../../core/types/enums'
 import { blockMeta } from './blockMeta'
 import { getTemplateForChild } from './dailyPlanTemplates'
+import { autoFillBlockMinutes } from './daylog.model'
 import HelperPanel from './HelperPanel'
 import LadderQuickLog from './LadderQuickLog'
 import RoutineSection from './RoutineSection'
@@ -430,7 +431,8 @@ export default function TodayPage() {
 
   const handleRoutineUpdate = useCallback(
     (updated: DayLog) => {
-      const withXp = { ...updated, xpTotal: calculateXp(updated, activeRoutineItems) }
+      const withMinutes = autoFillBlockMinutes(updated, activeRoutineItems)
+      const withXp = { ...withMinutes, xpTotal: calculateXp(withMinutes, activeRoutineItems) }
       persistDayLog(withXp)
     },
     [persistDayLog, activeRoutineItems],
@@ -438,7 +440,8 @@ export default function TodayPage() {
 
   const handleRoutineUpdateImmediate = useCallback(
     (updated: DayLog) => {
-      const withXp = { ...updated, xpTotal: calculateXp(updated, activeRoutineItems) }
+      const withMinutes = autoFillBlockMinutes(updated, activeRoutineItems)
+      const withXp = { ...withMinutes, xpTotal: calculateXp(withMinutes, activeRoutineItems) }
       persistDayLogImmediate(withXp)
     },
     [persistDayLogImmediate, activeRoutineItems],
@@ -783,9 +786,27 @@ export default function TodayPage() {
                         ))}
                       </Stack>
                     ) : (
-                      <Typography variant="body2" color="text.secondary">
-                        No checklist items yet.
-                      </Typography>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={block.actualMinutes != null && block.actualMinutes > 0}
+                            size="small"
+                            onChange={(_e, checked) => {
+                              const planned = block.plannedMinutes ?? 0
+                              handleBlockFieldChange(
+                                index,
+                                'actualMinutes',
+                                checked ? (planned > 0 ? planned : undefined) : undefined,
+                              )
+                            }}
+                          />
+                        }
+                        label={
+                          <Typography variant="body2" color="text.secondary">
+                            Mark complete ({block.plannedMinutes ?? 0}m)
+                          </Typography>
+                        }
+                      />
                     )}
                   </Stack>
                 </AccordionDetails>
