@@ -96,6 +96,13 @@ export const EnergyLevel = {
 } as const
 export type EnergyLevel = (typeof EnergyLevel)[keyof typeof EnergyLevel]
 
+/** Human-readable label for each energy level. */
+export const EnergyLevelLabel: Record<EnergyLevel, string> = {
+  [EnergyLevel.Normal]: 'Normal',
+  [EnergyLevel.Low]: 'Low',
+  [EnergyLevel.Overwhelmed]: 'Overwhelmed',
+}
+
 export const SupportTag = {
   Prompts: 'Prompts',
   FingerTracking: 'FingerTracking',
