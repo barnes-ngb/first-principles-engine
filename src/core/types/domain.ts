@@ -201,6 +201,10 @@ export interface ChecklistItem {
   id?: string
   label: string
   completed: boolean
+  /** Planned duration in minutes for this item. */
+  plannedMinutes?: number
+  /** Subject bucket for color-coding. */
+  subjectBucket?: SubjectBucket
   /** Skill tags for engine/ladder alignment */
   skillTags?: SkillTag[]
   /** Optional ladder rung reference */
