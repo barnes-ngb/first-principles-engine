@@ -209,11 +209,24 @@ export const ladderProgressDocId = (childId: string, ladderKey: string): string 
 
 // ── Skill Snapshots (Lincoln Evaluation) ────────────────────────
 
+const skillSnapshotConverter: FirestoreDataConverter<SkillSnapshot> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as SkillSnapshot
+    return {
+      ...data,
+      id: snapshot.id,
+    }
+  },
+}
+
 /** Skill snapshot per child. Doc ID: {childId} */
 export const skillSnapshotsCollection = (
   familyId: string,
 ): CollectionReference<SkillSnapshot> =>
-  collection(db, `families/${familyId}/skillSnapshots`) as CollectionReference<SkillSnapshot>
+  collection(db, `families/${familyId}/skillSnapshots`).withConverter(
+    skillSnapshotConverter,
+  ) as CollectionReference<SkillSnapshot>
 
 // ── Planner Sessions (Shelly Planner) ───────────────────────────
 
