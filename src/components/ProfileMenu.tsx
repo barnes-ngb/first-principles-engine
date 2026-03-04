@@ -10,6 +10,8 @@ import MenuItem from '@mui/material/MenuItem'
 import SettingsIcon from '@mui/icons-material/Settings'
 import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
+import MinecraftAvatar from '../features/minecraft/MinecraftAvatar'
+import { ARMOR_TIERS } from '../features/minecraft/armorTiers'
 
 const profileMeta: Record<
   UserProfile,
@@ -63,17 +65,21 @@ export default function ProfileMenu() {
           '&:hover': { bgcolor: 'action.hover' },
         }}
       >
-        <Avatar
-          sx={{
-            width: 32,
-            height: 32,
-            bgcolor: current.color,
-            fontSize: '0.875rem',
-            fontWeight: 700,
-          }}
-        >
-          {current.initial}
-        </Avatar>
+        {profile === UserProfile.Lincoln ? (
+          <MinecraftAvatar tier={ARMOR_TIERS[3]} scale={2} />
+        ) : (
+          <Avatar
+            sx={{
+              width: 32,
+              height: 32,
+              bgcolor: current.color,
+              fontSize: '0.875rem',
+              fontWeight: 700,
+            }}
+          >
+            {current.initial}
+          </Avatar>
+        )}
         <Box
           component="span"
           sx={{
@@ -107,17 +113,21 @@ export default function ProfileMenu() {
               onClick={() => handleSwitch(p)}
             >
               <ListItemIcon>
-                <Avatar
-                  sx={{
-                    width: 28,
-                    height: 28,
-                    bgcolor: meta.color,
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
-                  }}
-                >
-                  {meta.initial}
-                </Avatar>
+                {p === UserProfile.Lincoln ? (
+                  <MinecraftAvatar tier={ARMOR_TIERS[3]} scale={2} />
+                ) : (
+                  <Avatar
+                    sx={{
+                      width: 28,
+                      height: 28,
+                      bgcolor: meta.color,
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {meta.initial}
+                  </Avatar>
+                )}
               </ListItemIcon>
               <ListItemText>{meta.label}</ListItemText>
             </MenuItem>
