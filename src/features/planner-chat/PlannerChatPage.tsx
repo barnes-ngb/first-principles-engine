@@ -6,12 +6,17 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore'
+import { addDoc, doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -129,6 +134,9 @@ export default function PlannerChatPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [applied, setApplied] = useState(false)
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' } | null>(null)
+
+  // Confirmation dialog state
+  const [confirmDialog, setConfirmDialog] = useState<'startNew' | 'clearApplied' | null>(null)
 
   // Generate activity state
   const [generatingItemId, setGeneratingItemId] = useState<string | null>(null)
@@ -430,6 +438,7 @@ export default function PlannerChatPage() {
       let assistantMsg: ChatMessage
       if (aiDraft) {
         setCurrentDraft(aiDraft)
+        if (applied) setApplied(false)
         assistantMsg = {
           id: generateItemId(),
           role: ChatMessageRole.Assistant,
@@ -449,7 +458,8 @@ export default function PlannerChatPage() {
 
       const final = [...updatedWithUser, assistantMsg]
       setMessages(final)
-      void persistConversation({ messages: final, currentDraft: currentDraft ?? undefined })
+      const persistStatus = aiDraft && applied ? { status: PlannerConversationStatus.Draft } : {}
+      void persistConversation({ messages: final, currentDraft: aiDraft ?? currentDraft ?? undefined, ...persistStatus })
       return
     }
 
@@ -487,6 +497,7 @@ export default function PlannerChatPage() {
 
       setCurrentDraft(draft)
       setAdjustments(newAdjustments)
+      if (applied) setApplied(false)
 
       assistantMsg = {
         id: generateItemId(),
@@ -528,8 +539,9 @@ export default function PlannerChatPage() {
     void persistConversation({
       messages: updatedMessages,
       currentDraft: currentDraft ?? undefined,
+      ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -685,6 +697,7 @@ export default function PlannerChatPage() {
       })
       setCurrentDraft(draft)
       setAdjustments(newAdjustments)
+      if (applied) setApplied(false)
       assistantReply = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
@@ -707,8 +720,9 @@ export default function PlannerChatPage() {
     void persistConversation({
       messages: updatedMessages,
       currentDraft: currentDraft ?? undefined,
+      ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
     })
-  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation])
+  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied])
 
   // Map SubjectBucket to activity type for the generate Cloud Function
   const subjectToActivityType = useCallback((subject: SubjectBucket): string => {
@@ -785,6 +799,89 @@ export default function PlannerChatPage() {
     setGeneratedPlanItem(null)
     setLessonCardSaved(false)
   }, [])
+
+  // Start New Plan — reset conversation state, keep applied day logs
+  const handleStartNewPlan = useCallback(async () => {
+    setConfirmDialog(null)
+    setMessages([])
+    setCurrentDraft(null)
+    setApplied(false)
+    setPhotoLabels([])
+    setAdjustments([])
+
+    await persistConversation({
+      status: PlannerConversationStatus.Draft,
+      messages: [],
+      currentDraft: undefined,
+    })
+
+    setSnack({ text: 'Conversation reset. Start a new plan!', severity: 'info' })
+  }, [persistConversation])
+
+  // Clear Applied Plan — delete day log entries created by this plan, then reset
+  const handleClearAppliedPlan = useCallback(async () => {
+    setConfirmDialog(null)
+    if (!activeChildId || !currentDraft) {
+      // No draft to clear — just reset conversation
+      await handleStartNewPlan()
+      return
+    }
+
+    try {
+      // Remove blocks and checklist from day logs created by this plan
+      for (const dayPlan of currentDraft.days) {
+        const dayIndex = WEEK_DAYS.indexOf(dayPlan.day as typeof WEEK_DAYS[number])
+        if (dayIndex < 0) continue
+
+        const startDate = new Date(weekRange.start + 'T00:00:00')
+        const targetDate = new Date(startDate)
+        targetDate.setDate(startDate.getDate() + dayIndex + 1)
+        const dateKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`
+
+        const docId = dayLogDocId(dateKey, activeChildId)
+        const dayLogRef = doc(daysCollection(familyId), docId)
+        const dayLogSnap = await getDoc(dayLogRef)
+
+        if (dayLogSnap.exists()) {
+          await updateDoc(dayLogRef, {
+            blocks: [],
+            checklist: [],
+            updatedAt: new Date().toISOString(),
+          })
+        }
+      }
+
+      // Remove childGoals from the week doc
+      const weekRef = doc(weeksCollection(familyId), weekRange.start)
+      const weekSnap = await getDoc(weekRef)
+      if (weekSnap.exists()) {
+        const existing = weekSnap.data()
+        const existingGoals = existing.childGoals ?? []
+        const filteredGoals = existingGoals.filter(
+          (g: { childId: string }) => g.childId !== activeChildId,
+        )
+        await setDoc(weekRef, { ...existing, childGoals: filteredGoals })
+      }
+
+      // Reset conversation state
+      setMessages([])
+      setCurrentDraft(null)
+      setApplied(false)
+      setPhotoLabels([])
+      setAdjustments([])
+
+      await persistConversation({
+        status: PlannerConversationStatus.Draft,
+        messages: [],
+        currentDraft: undefined,
+      })
+
+      setSnack({ text: 'Applied plan cleared. Day logs and goals removed.', severity: 'success' })
+    } catch (err) {
+      console.error('Failed to clear applied plan', err)
+      setSnack({ text: 'Failed to clear applied plan.', severity: 'error' })
+    }
+  }, [activeChildId, currentDraft, familyId, weekRange.start, persistConversation, handleStartNewPlan])
 
   return (
     <Page>
@@ -979,10 +1076,28 @@ export default function PlannerChatPage() {
           )}
 
           {applied && (
-            <Alert severity="success">
-              Plan applied. Check This Week and Today pages for your generated
-              checklists and day blocks.
-            </Alert>
+            <>
+              <Alert severity="success">
+                Plan applied. Check This Week and Today pages for your generated
+                checklists and day blocks.
+              </Alert>
+              <Stack direction="row" spacing={2}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={() => setConfirmDialog('startNew')}
+                >
+                  Start New Plan
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  onClick={() => setConfirmDialog('clearApplied')}
+                >
+                  Clear Applied Plan
+                </Button>
+              </Stack>
+            </>
           )}
         </>
       )}
@@ -1035,6 +1150,35 @@ export default function PlannerChatPage() {
           <Typography variant="body2">Generating activity...</Typography>
         </Box>
       )}
+
+      {/* Confirmation dialogs */}
+      <Dialog open={confirmDialog === 'startNew'} onClose={() => setConfirmDialog(null)}>
+        <DialogTitle>Start New Plan</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This will clear the current conversation and let you create a new plan.
+            Applied day blocks will remain on the Today page. Continue?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDialog(null)}>Cancel</Button>
+          <Button onClick={handleStartNewPlan} variant="contained">Continue</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={confirmDialog === 'clearApplied'} onClose={() => setConfirmDialog(null)}>
+        <DialogTitle>Clear Applied Plan</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This will remove the generated checklists and day blocks from This Week
+            and Today. Continue?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDialog(null)}>Cancel</Button>
+          <Button onClick={handleClearAppliedPlan} variant="contained" color="warning">Continue</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Lesson card preview dialog */}
       {generatedActivity && generatedPlanItem && (
