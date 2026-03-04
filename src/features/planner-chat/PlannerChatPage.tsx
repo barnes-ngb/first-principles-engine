@@ -16,7 +16,7 @@ import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore'
+import { addDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -32,6 +32,7 @@ import {
   plannerConversationsCollection,
   skillSnapshotsCollection,
   weeksCollection,
+  workbookConfigsCollection,
 } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -48,8 +49,10 @@ import type {
   LessonCard,
   PlannerConversation,
   PhotoLabel,
+  PhotoContentExtraction,
   SkillSnapshot,
   WeekPlan,
+  WorkbookConfig,
 } from '../../core/types/domain'
 import {
   AssignmentAction,
@@ -60,6 +63,7 @@ import {
   PlannerConversationStatus,
   SubjectBucket,
 } from '../../core/types/enums'
+import { formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
 import { defaultAppBlocks } from '../planner/planner.logic'
@@ -74,12 +78,20 @@ import {
 import type { AdjustmentIntent } from './chatPlanner.logic'
 import { describeAdjustment, parseAdjustmentIntent } from './intentParser'
 import { formatCoverageSummaryText, buildCoverageSummary } from './coverageSummary'
+import { clonePlanWithAdvancedLessons } from './repeatWeek.logic'
 import ContextDrawer from './ContextDrawer'
 import LessonCardPreview from './LessonCardPreview'
 import PlanPreviewCard from './PlanPreviewCard'
 import PlanSummaryPanel from './PlanSummaryPanel'
 import PhotoLabelForm from './PhotoLabelForm'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
+
+/** Decode any literal \\uXXXX escape sequences that survived double-serialization. */
+function decodeUnicodeEscapes(text: string): string {
+  return text.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
+    String.fromCharCode(parseInt(hex, 16))
+  )
+}
 
 function subjectToDayBlockType(subject: SubjectBucket): DayBlockType {
   switch (subject) {
@@ -93,16 +105,54 @@ function subjectToDayBlockType(subject: SubjectBucket): DayBlockType {
 }
 
 function photoLabelsToAssignments(labels: PhotoLabel[]): AssignmentCandidate[] {
-  return labels.map((label) => ({
-    id: generateItemId(),
-    subjectBucket: label.subjectBucket,
-    workbookName: label.subjectBucket,
-    lessonName: label.lessonOrPages || 'Workbook page',
-    estimatedMinutes: label.estimatedMinutes,
-    difficultyCues: [],
-    sourcePhotoId: label.artifactId,
-    action: AssignmentAction.Keep,
-  }))
+  return labels.map((label) => {
+    const extracted = label.extractedContent
+    const workbookName = extracted?.workbookMatch?.workbookName ?? label.subjectBucket
+    const lessonName = extracted
+      ? `${extracted.lessonNumber ? `${extracted.workbookMatch?.unitLabel ?? 'lesson'} ${extracted.lessonNumber}` : label.lessonOrPages || 'Workbook page'}${extracted.topic && extracted.topic !== workbookName ? ` (${extracted.topic})` : ''}`
+      : label.lessonOrPages || 'Workbook page'
+
+    return {
+      id: generateItemId(),
+      subjectBucket: label.subjectBucket,
+      workbookName,
+      lessonName,
+      estimatedMinutes: extracted?.estimatedMinutes || label.estimatedMinutes,
+      difficultyCues: extracted?.difficulty ? [extracted.difficulty] : [],
+      sourcePhotoId: label.artifactId,
+      action: AssignmentAction.Keep,
+    }
+  })
+}
+
+/** Build a text description of photo context for inclusion in AI plan prompts. */
+function buildPhotoContextSection(labels: PhotoLabel[]): string {
+  const labelsWithContent = labels.filter((l) => l.extractedContent || l.lessonOrPages)
+  if (labelsWithContent.length === 0) return ''
+
+  const lines = ['Photos uploaded this session:']
+  for (const label of labelsWithContent) {
+    const ex = label.extractedContent
+    if (ex?.workbookMatch) {
+      const parts = [
+        ex.workbookMatch.workbookName,
+        ex.lessonNumber ? `${ex.workbookMatch.unitLabel} ${ex.lessonNumber} of ${ex.workbookMatch.totalUnits}` : null,
+        ex.topic && ex.topic !== ex.workbookMatch.workbookName ? ex.topic : null,
+        `~${ex.estimatedMinutes || label.estimatedMinutes} min`,
+      ].filter(Boolean)
+      lines.push(`- ${parts.join(', ')}`)
+      if (ex.difficulty) {
+        lines.push(`  Difficulty note: ${ex.difficulty}`)
+      }
+      if (ex.modifications) {
+        lines.push(`  Suggested modification: ${ex.modifications}`)
+      }
+    } else {
+      lines.push(`- ${label.subjectBucket}: ${label.lessonOrPages || 'workbook page'} (~${label.estimatedMinutes} min)`)
+    }
+  }
+  lines.push('Please incorporate these specific materials into the plan.')
+  return lines.join('\n')
 }
 
 export default function PlannerChatPage() {
@@ -142,7 +192,6 @@ export default function PlannerChatPage() {
 
   // Confirmation dialog state
   const [confirmNewPlan, setConfirmNewPlan] = useState(false)
-  const [confirmClearPlan, setConfirmClearPlan] = useState(false)
 
   // Generate activity state
   const [generatingItemId, setGeneratingItemId] = useState<string | null>(null)
@@ -150,6 +199,9 @@ export default function PlannerChatPage() {
   const [generatedPlanItem, setGeneratedPlanItem] = useState<DraftPlanItem | null>(null)
   const [lessonCardSaved, setLessonCardSaved] = useState(false)
   const [lessonCardSaving, setLessonCardSaving] = useState(false)
+
+  // Workbook configs for active child (for photo label matching)
+  const [workbookConfigs, setWorkbookConfigs] = useState<WorkbookConfig[]>([])
 
   const conversationDocId = useMemo(
     () => (activeChildId ? plannerConversationDocId(weekRange.start, activeChildId) : ''),
@@ -182,6 +234,20 @@ export default function PlannerChatPage() {
       }
     })
     return unsubscribe
+  }, [familyId, activeChildId])
+
+  // Load workbook configs for active child
+  useEffect(() => {
+    if (!activeChildId) {
+      setWorkbookConfigs([])
+      return
+    }
+    const col = workbookConfigsCollection(familyId)
+    const q = query(col, where('childId', '==', activeChildId))
+    void getDocs(q).then((snap) => {
+      const configs = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
+      setWorkbookConfigs(configs)
+    })
   }, [familyId, activeChildId])
 
   // Load week plan (theme/virtue/scripture/heartQuestion)
@@ -321,9 +387,91 @@ export default function PlannerChatPage() {
     [activeChildId, familyId],
   )
 
+  // Extract photo content using AI (MVP: uses label + workbook config, not image analysis)
+  const extractPhotoContent = useCallback(async (
+    userLabel: string,
+    subject: SubjectBucket,
+  ): Promise<PhotoContentExtraction | null> => {
+    if (!activeChildId) return null
+
+    // Find matching workbook config for richer context
+    const matchingConfig = workbookConfigs.find((c) => c.subjectBucket === subject)
+    const configContext = matchingConfig
+      ? `\nKnown workbook: "${matchingConfig.name}" (${matchingConfig.subjectBucket}), currently at ${matchingConfig.unitLabel} ${matchingConfig.currentPosition} of ${matchingConfig.totalUnits}, target finish: ${matchingConfig.targetFinishDate}.`
+      : ''
+
+    try {
+      const response = await aiChat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.Generate,
+        messages: [{
+          role: 'user',
+          content: `I'm uploading a photo of homeschool materials labeled "${userLabel}" (subject: ${subject}).${configContext}
+
+Please extract:
+1. Subject (math, reading, phonics, science, etc.)
+2. Specific lesson/chapter number if visible
+3. Topic or skill covered
+4. Estimated time to complete
+5. Difficulty observations (too many problems? needs modification?)
+6. Any specific instructions visible on the page
+
+Return as JSON:
+{
+  "subject": "...",
+  "lessonNumber": "...",
+  "topic": "...",
+  "estimatedMinutes": 0,
+  "difficulty": "...",
+  "modifications": "...",
+  "rawDescription": "..."
+}`,
+        }],
+      })
+
+      if (!response?.message) return null
+
+      // Try to parse the JSON from the response
+      const jsonMatch = response.message.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) return null
+
+      const parsed = JSON.parse(jsonMatch[0]) as PhotoContentExtraction
+
+      // Attach workbook match if found
+      if (matchingConfig) {
+        parsed.workbookMatch = {
+          workbookName: matchingConfig.name,
+          totalUnits: matchingConfig.totalUnits,
+          currentPosition: matchingConfig.currentPosition,
+          unitLabel: matchingConfig.unitLabel,
+        }
+      }
+
+      return parsed
+    } catch (err) {
+      console.error('Photo content extraction failed', err)
+      return null
+    }
+  }, [aiChat, familyId, activeChildId, workbookConfigs])
+
   // Submit photos and generate plan (AI path with local fallback)
   const handleSubmitPhotos = useCallback(async () => {
     if (photoLabels.length === 0) return
+
+    // Attempt AI-based content extraction for labels without existing extracted content
+    if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
+      const enriched = await Promise.all(
+        photoLabels.map(async (label) => {
+          if (label.extractedContent || !label.lessonOrPages.trim()) return label
+          const extracted = await extractPhotoContent(label.lessonOrPages, label.subjectBucket)
+          if (extracted) return { ...label, extractedContent: extracted }
+          return label
+        }),
+      )
+      setPhotoLabels(enriched)
+    }
+
     const assignments = photoLabelsToAssignments(photoLabels)
 
     // Add user message with photo labels
@@ -342,7 +490,9 @@ export default function PlannerChatPage() {
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       // AI path: send context to Cloud Function
       const prompt = buildPlannerPrompt(inputs)
-      const aiMessages: AIChatMessage[] = [{ role: 'user', content: prompt }]
+      const photoContext = buildPhotoContextSection(photoLabels)
+      const fullPrompt = photoContext ? `${prompt}\n\n${photoContext}` : prompt
+      const aiMessages: AIChatMessage[] = [{ role: 'user', content: fullPrompt }]
       const response = await aiChat({
         familyId,
         childId: activeChildId,
@@ -385,7 +535,7 @@ export default function PlannerChatPage() {
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -407,12 +557,14 @@ export default function PlannerChatPage() {
 
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       const prompt = buildPlannerPrompt(inputs)
+      const photoContext = buildPhotoContextSection(photoLabels)
+      const fullPrompt = photoContext ? `${prompt}\n\n${photoContext}` : prompt
       const aiMessages: AIChatMessage[] = [
         ...messages.map((m) => ({
           role: m.role as 'user' | 'assistant',
           content: m.text ?? '',
         })),
-        { role: 'user' as const, content: prompt },
+        { role: 'user' as const, content: fullPrompt },
       ]
       const response = await aiChat({
         familyId,
@@ -679,6 +831,7 @@ export default function PlannerChatPage() {
           completed: false,
           skillTags: item.skillTags,
           ladderRef: item.ladderRef,
+          source: 'planner' as const,
         }))
 
         const blocks: DayBlock[] = dayItems
@@ -690,14 +843,22 @@ export default function PlannerChatPage() {
             plannedMinutes: item.estimatedMinutes,
             skillTags: item.skillTags,
             ladderRef: item.ladderRef,
+            source: 'planner' as const,
           }))
 
         if (dayLogSnap.exists()) {
           const existing = dayLogSnap.data()
+          // Replace planner-generated items, keep manually-added ones
+          const existingChecklist = (existing.checklist ?? []).filter(
+            (item: ChecklistItem) => item.source !== 'planner'
+          )
+          const existingBlocks = (existing.blocks ?? []).filter(
+            (block: DayBlock) => block.source !== 'planner'
+          )
           await setDoc(dayLogRef, {
             ...existing,
-            checklist: [...(existing.checklist ?? []), ...checklist],
-            blocks: [...(existing.blocks ?? []), ...blocks],
+            checklist: [...existingChecklist, ...checklist],
+            blocks: [...existingBlocks, ...blocks],
             updatedAt: new Date().toISOString(),
           })
         } else {
@@ -891,24 +1052,56 @@ export default function PlannerChatPage() {
     }
   }, [conversationDocId, familyId, activeChildId, weekRange.start, hoursPerDay, appBlocks])
 
-  // Start New Plan handler
-  const handleStartNewPlan = useCallback(async () => {
-    setConfirmNewPlan(false)
+  // Repeat Last Week handler: clone previous week's plan with advanced lesson numbers
+  const handleRepeatLastWeek = useCallback(async () => {
+    if (!activeChildId) return
     try {
-      await resetConversationState()
-      setSnack({ text: 'Conversation reset. Start a new plan!', severity: 'success' })
-    } catch (err) {
-      console.error('Failed to reset conversation', err)
-      setSnack({ text: 'Failed to reset conversation.', severity: 'error' })
-    }
-  }, [resetConversationState])
+      // Compute previous week start by subtracting 7 days
+      const startDate = new Date(weekRange.start + 'T00:00:00')
+      startDate.setDate(startDate.getDate() - 7)
+      const previousWeekStart = formatDateYmd(startDate)
 
-  // Clear Applied Plan handler
-  const handleClearAppliedPlan = useCallback(async () => {
-    setConfirmClearPlan(false)
+      const prevDocId = plannerConversationDocId(previousWeekStart, activeChildId)
+      const prevRef = doc(plannerConversationsCollection(familyId), prevDocId)
+      const prevSnap = await getDoc(prevRef)
+
+      if (!prevSnap.exists() || !prevSnap.data().currentDraft) {
+        setSnack({ text: 'No plan found for last week. Try planning with AI instead.', severity: 'info' })
+        return
+      }
+
+      const previousDraft = prevSnap.data().currentDraft!
+      const clonedDraft = clonePlanWithAdvancedLessons(previousDraft)
+
+      setCurrentDraft(clonedDraft)
+
+      const assistantMsg: ChatMessage = {
+        id: generateItemId(),
+        role: ChatMessageRole.Assistant,
+        text: "Here's last week's plan carried forward with workbook lessons advanced. Review and adjust, then Apply.",
+        draftPlan: clonedDraft,
+        createdAt: new Date().toISOString(),
+      }
+
+      const updatedMessages = [...messages, assistantMsg]
+      setMessages(updatedMessages)
+
+      void persistConversation({
+        messages: updatedMessages,
+        currentDraft: clonedDraft,
+      })
+    } catch (err) {
+      console.error('Failed to repeat last week', err)
+      setSnack({ text: 'Failed to load last week\'s plan.', severity: 'error' })
+    }
+  }, [activeChildId, weekRange.start, familyId, messages, persistConversation])
+
+  // Redo Plan handler: clears applied plan from Today/Week AND resets conversation
+  const handleRedoPlan = useCallback(async () => {
+    setConfirmNewPlan(false)
     if (!activeChildId || !currentDraft) return
     try {
-      // Remove blocks and checklist from each day's DayLog
+      // Remove planner-generated blocks and checklist from each day's DayLog
       for (const dayPlan of currentDraft.days) {
         const dayIndex = WEEK_DAYS.indexOf(dayPlan.day as typeof WEEK_DAYS[number])
         if (dayIndex < 0) continue
@@ -922,7 +1115,15 @@ export default function PlannerChatPage() {
         const dayLogRef = doc(daysCollection(familyId), docId)
         const dayLogSnap = await getDoc(dayLogRef)
         if (dayLogSnap.exists()) {
-          await updateDoc(dayLogRef, { blocks: [], checklist: [] })
+          const existing = dayLogSnap.data()
+          // Keep manually-added items, remove planner-generated ones
+          const manualChecklist = (existing.checklist ?? []).filter(
+            (item: ChecklistItem) => item.source !== 'planner'
+          )
+          const manualBlocks = (existing.blocks ?? []).filter(
+            (block: DayBlock) => block.source !== 'planner'
+          )
+          await updateDoc(dayLogRef, { checklist: manualChecklist, blocks: manualBlocks })
         }
       }
 
@@ -937,11 +1138,12 @@ export default function PlannerChatPage() {
         await setDoc(weekRef, { ...existing, childGoals: updatedGoals })
       }
 
+      // Reset conversation state to start fresh
       await resetConversationState()
-      setSnack({ text: 'Applied plan cleared from Week and Today.', severity: 'success' })
+      setSnack({ text: 'Plan cleared and conversation reset. Start fresh!', severity: 'success' })
     } catch (err) {
-      console.error('Failed to clear applied plan', err)
-      setSnack({ text: 'Failed to clear applied plan.', severity: 'error' })
+      console.error('Failed to redo plan', err)
+      setSnack({ text: 'Failed to redo plan.', severity: 'error' })
     }
   }, [activeChildId, currentDraft, familyId, weekRange.start, resetConversationState])
 
@@ -1023,6 +1225,23 @@ export default function PlannerChatPage() {
             </Box>
           )}
 
+          {/* Quick Start buttons — shown when no conversation yet (only welcome message) */}
+          {messages.length <= 1 && !currentDraft && !applied && (
+            <Stack spacing={1.5} sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" color="text.secondary">
+                Quick Start
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap">
+                <Button variant="outlined" size="small" onClick={handleRepeatLastWeek}>
+                  Repeat Last Week
+                </Button>
+                <Button variant="outlined" size="small" onClick={() => setInputText('Help me plan this week')}>
+                  Plan with AI
+                </Button>
+              </Stack>
+            </Stack>
+          )}
+
           {/* Chat messages */}
           <Box
             sx={{
@@ -1053,7 +1272,7 @@ export default function PlannerChatPage() {
                 >
                   {msg.text && (
                     <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
-                      {msg.text}
+                      {decodeUnicodeEscapes(msg.text)}
                     </Typography>
                   )}
                   {msg.photoLabels && msg.photoLabels.length > 0 && (
@@ -1101,6 +1320,7 @@ export default function PlannerChatPage() {
                 onLabelsChange={setPhotoLabels}
                 onPhotoCapture={handlePhotoCapture}
                 uploading={uploading}
+                workbookConfigs={workbookConfigs}
               />
               {photoLabels.length > 0 && (
                 <Button
@@ -1188,46 +1408,25 @@ export default function PlannerChatPage() {
                 Plan applied. Check This Week and Today pages for your generated
                 checklists and day blocks.
               </Alert>
-              <Stack direction="row" spacing={2}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={() => setConfirmNewPlan(true)}
-                >
-                  Start New Plan
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="warning"
-                  onClick={() => setConfirmClearPlan(true)}
-                >
-                  Clear Applied Plan
-                </Button>
-              </Stack>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={() => setConfirmNewPlan(true)}
+                fullWidth
+              >
+                Redo Plan
+              </Button>
 
               <Dialog open={confirmNewPlan} onClose={() => setConfirmNewPlan(false)}>
-                <DialogTitle>Start New Plan?</DialogTitle>
+                <DialogTitle>Redo Plan?</DialogTitle>
                 <DialogContent>
                   <DialogContentText>
-                    Start a fresh plan for this week? Your applied checklist items on the Today page will remain.
+                    This will clear your current plan from Today and let you start fresh. Continue?
                   </DialogContentText>
                 </DialogContent>
                 <DialogActions>
                   <Button onClick={() => setConfirmNewPlan(false)}>Cancel</Button>
-                  <Button onClick={handleStartNewPlan} variant="contained">Start New Plan</Button>
-                </DialogActions>
-              </Dialog>
-
-              <Dialog open={confirmClearPlan} onClose={() => setConfirmClearPlan(false)}>
-                <DialogTitle>Clear Applied Plan?</DialogTitle>
-                <DialogContent>
-                  <DialogContentText>
-                    Remove generated blocks and checklists from This Week and Today? This cannot be undone.
-                  </DialogContentText>
-                </DialogContent>
-                <DialogActions>
-                  <Button onClick={() => setConfirmClearPlan(false)}>Cancel</Button>
-                  <Button onClick={handleClearAppliedPlan} variant="contained" color="warning">Clear Plan</Button>
+                  <Button onClick={handleRedoPlan} variant="contained">Redo Plan</Button>
                 </DialogActions>
               </Dialog>
             </>

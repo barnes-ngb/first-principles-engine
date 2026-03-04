@@ -17,6 +17,8 @@ import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
+import MinecraftAvatar from '../minecraft/MinecraftAvatar'
+import MinecraftXpBar from '../minecraft/MinecraftXpBar'
 import {
   daysCollection,
   ladderProgressCollection,
@@ -196,6 +198,9 @@ export default function ScoreboardPage() {
     [dayLogs, selectedChildId, weekStart, weekEnd],
   )
 
+  // Detect Lincoln for Minecraft-themed UI
+  const isLincoln = selectedChild?.name?.toLowerCase() === 'lincoln'
+
   const todayXp = todayLog ? calculateXp(todayLog) : 0
   const weeklyXp = weekDayLogs.reduce((sum, d) => sum + calculateXp(d), 0)
 
@@ -336,47 +341,137 @@ export default function ScoreboardPage() {
 
       {!childrenLoading && !isLoading && selectedChildId && (
         <>
-          {/* XP Summary */}
-          <SectionCard title="XP Score">
-            <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-              <Card variant="outlined" sx={{ flex: 1, minWidth: 100 }}>
-                <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
-                  <Typography variant="h4" color="primary.main" fontWeight={700}>
-                    {todayXp}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Today XP
-                  </Typography>
-                </CardContent>
-              </Card>
-              <Card variant="outlined" sx={{ flex: 1, minWidth: 100 }}>
-                <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
-                  <Typography variant="h4" color="secondary.main" fontWeight={700}>
-                    {weeklyXp}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    This Week
-                  </Typography>
-                </CardContent>
-              </Card>
-              <Card variant="outlined" sx={{ flex: 1, minWidth: 100 }}>
-                <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
-                  <Stack direction="row" alignItems="center" justifyContent="center" spacing={0.5}>
-                    <LocalFireDepartmentIcon
-                      color={streak > 0 ? 'error' : 'disabled'}
-                      fontSize="small"
-                    />
-                    <Typography variant="h4" fontWeight={700}>
-                      {streak}
-                    </Typography>
+          {/* XP Summary — Minecraft-enhanced for Lincoln */}
+          {isLincoln ? (
+            <SectionCard title="XP Score">
+              <Stack direction="row" spacing={2} alignItems="center">
+                {/* Pixel avatar with armor based on total XP */}
+                <Box sx={{ flexShrink: 0 }}>
+                  <MinecraftAvatar xp={weeklyXp * 10} scale={4} showTitle showTier />
+                </Box>
+
+                {/* Stats + XP bar */}
+                <Stack spacing={1.5} sx={{ flex: 1, minWidth: 0 }}>
+                  <MinecraftXpBar totalXp={weeklyXp * 10} todayXp={todayXp} />
+
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Card variant="outlined" sx={{ flex: 1, minWidth: 80 }}>
+                      <CardContent sx={{ textAlign: 'center', py: 1, px: 1 }}>
+                        <Typography
+                          sx={{
+                            fontFamily: '"Press Start 2P", monospace',
+                            fontSize: '1rem',
+                            color: 'primary.main',
+                          }}
+                        >
+                          {todayXp}
+                        </Typography>
+                        <Typography
+                          sx={{
+                            fontFamily: '"Press Start 2P", monospace',
+                            fontSize: '0.35rem',
+                            color: 'text.secondary',
+                          }}
+                        >
+                          TODAY
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                    <Card variant="outlined" sx={{ flex: 1, minWidth: 80 }}>
+                      <CardContent sx={{ textAlign: 'center', py: 1, px: 1 }}>
+                        <Typography
+                          sx={{
+                            fontFamily: '"Press Start 2P", monospace',
+                            fontSize: '1rem',
+                            color: 'secondary.main',
+                          }}
+                        >
+                          {weeklyXp}
+                        </Typography>
+                        <Typography
+                          sx={{
+                            fontFamily: '"Press Start 2P", monospace',
+                            fontSize: '0.35rem',
+                            color: 'text.secondary',
+                          }}
+                        >
+                          WEEK
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                    <Card variant="outlined" sx={{ flex: 1, minWidth: 80 }}>
+                      <CardContent sx={{ textAlign: 'center', py: 1, px: 1 }}>
+                        <Stack direction="row" alignItems="center" justifyContent="center" spacing={0.5}>
+                          <LocalFireDepartmentIcon
+                            color={streak > 0 ? 'error' : 'disabled'}
+                            sx={{ fontSize: '0.9rem' }}
+                          />
+                          <Typography
+                            sx={{
+                              fontFamily: '"Press Start 2P", monospace',
+                              fontSize: '1rem',
+                            }}
+                          >
+                            {streak}
+                          </Typography>
+                        </Stack>
+                        <Typography
+                          sx={{
+                            fontFamily: '"Press Start 2P", monospace',
+                            fontSize: '0.35rem',
+                            color: 'text.secondary',
+                          }}
+                        >
+                          STREAK
+                        </Typography>
+                      </CardContent>
+                    </Card>
                   </Stack>
-                  <Typography variant="caption" color="text.secondary">
-                    Day Streak
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Stack>
-          </SectionCard>
+                </Stack>
+              </Stack>
+            </SectionCard>
+          ) : (
+            <SectionCard title="XP Score">
+              <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+                <Card variant="outlined" sx={{ flex: 1, minWidth: 100 }}>
+                  <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
+                    <Typography variant="h4" color="primary.main" fontWeight={700}>
+                      {todayXp}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Today XP
+                    </Typography>
+                  </CardContent>
+                </Card>
+                <Card variant="outlined" sx={{ flex: 1, minWidth: 100 }}>
+                  <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
+                    <Typography variant="h4" color="secondary.main" fontWeight={700}>
+                      {weeklyXp}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      This Week
+                    </Typography>
+                  </CardContent>
+                </Card>
+                <Card variant="outlined" sx={{ flex: 1, minWidth: 100 }}>
+                  <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
+                    <Stack direction="row" alignItems="center" justifyContent="center" spacing={0.5}>
+                      <LocalFireDepartmentIcon
+                        color={streak > 0 ? 'error' : 'disabled'}
+                        fontSize="small"
+                      />
+                      <Typography variant="h4" fontWeight={700}>
+                        {streak}
+                      </Typography>
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary">
+                      Day Streak
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Stack>
+            </SectionCard>
+          )}
 
           <SectionCard title="Stream Progress">
             <Stack spacing={1.5}>

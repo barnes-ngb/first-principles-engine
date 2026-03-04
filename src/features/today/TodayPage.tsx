@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import AccessTimeIcon from '@mui/icons-material/AccessTime'
+import AddIcon from '@mui/icons-material/Add'
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
+import CheckIcon from '@mui/icons-material/Check'
 import ChecklistIcon from '@mui/icons-material/Checklist'
+import DeleteIcon from '@mui/icons-material/Delete'
+import EditIcon from '@mui/icons-material/Edit'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import SchoolIcon from '@mui/icons-material/School'
 import Accordion from '@mui/material/Accordion'
@@ -130,6 +136,11 @@ export default function TodayPage() {
   const [showAllBlocks, setShowAllBlocks] = useState(false)
   const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
   const [teachHelperOpen, setTeachHelperOpen] = useState(false)
+  const [editingPlan, setEditingPlan] = useState(false)
+  const [addingItem, setAddingItem] = useState(false)
+  const [newItemTitle, setNewItemTitle] = useState('')
+  const [newItemMinutes, setNewItemMinutes] = useState(15)
+  const [newItemSubject, setNewItemSubject] = useState<SubjectBucket>(SubjectBucket.Other)
   const [artifactForm, setArtifactForm] = useState({
     childId: selectedChildId,
     evidenceType: EvidenceType.Note as EvidenceType,
@@ -650,15 +661,88 @@ export default function TodayPage() {
 
       {/* --- Today's Plan checklist (PRIMARY) --- */}
       {(() => {
-        const checklist = dayLog.checklist ?? []
-        const hasPlanItems = checklist.length > 0
+        const rawChecklist = dayLog.checklist ?? []
+        const hasPlanItems = rawChecklist.length > 0
         const isMvd = planType === PlanType.Mvd
+        // When no items are marked mvdEssential, default first 3 as essential
+        const essentialCount = rawChecklist.filter(i => i.mvdEssential).length
+        const checklist = essentialCount > 0
+          ? rawChecklist
+          : rawChecklist.map((item, i) => ({ ...item, mvdEssential: i < 3 }))
         const completedCount = checklist.filter((item) => item.completed).length
         const totalPlannedMinutes = checklist.reduce((sum, item) => sum + (item.plannedMinutes ?? 0), 0)
         const budgetMinutes = isMvd ? 90 : 150 // MVD ~1.5h, Normal ~2.5h
 
+        const handleReorder = (fromIndex: number, direction: 'up' | 'down') => {
+          const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1
+          if (toIndex < 0 || toIndex >= rawChecklist.length) return
+          const updated = [...rawChecklist]
+          const temp = updated[fromIndex]
+          updated[fromIndex] = updated[toIndex]
+          updated[toIndex] = temp
+          persistDayLogImmediate({ ...dayLog, checklist: updated })
+        }
+
+        const handleDeleteItem = (index: number) => {
+          const item = rawChecklist[index]
+          const updatedChecklist = rawChecklist.filter((_, i) => i !== index)
+          // If planner-sourced, also remove matching block
+          let updatedBlocks = dayLog.blocks
+          if (item.source === 'planner') {
+            updatedBlocks = dayLog.blocks.filter((block) => {
+              const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
+              return !matchesLabel
+            })
+          }
+          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist, blocks: updatedBlocks })
+        }
+
+        const handleEditLabel = (index: number, newLabel: string) => {
+          const updatedChecklist = rawChecklist.map((ci, i) =>
+            i === index ? { ...ci, label: newLabel } : ci
+          )
+          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+        }
+
+        const handleEditMinutes = (index: number, minutes: number) => {
+          const item = rawChecklist[index]
+          const updatedChecklist = rawChecklist.map((ci, i) =>
+            i === index ? { ...ci, plannedMinutes: minutes } : ci
+          )
+          // Also update the corresponding block's plannedMinutes
+          const updatedBlocks = dayLog.blocks.map((block) => {
+            const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
+            if (matchesLabel) return { ...block, plannedMinutes: minutes }
+            return block
+          })
+          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist, blocks: updatedBlocks })
+        }
+
+        const handleAddItem = () => {
+          if (!newItemTitle.trim()) return
+          const newItem: ChecklistItemType = {
+            label: newItemTitle.trim(),
+            completed: false,
+            plannedMinutes: newItemMinutes,
+            subjectBucket: newItemSubject,
+            source: 'manual',
+          }
+          const updatedChecklist = [...rawChecklist, newItem]
+          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+          setNewItemTitle('')
+          setNewItemMinutes(15)
+          setNewItemSubject(SubjectBucket.Other)
+          setAddingItem(false)
+        }
+
         return (
-          <SectionCard title="Today's Plan">
+          <SectionCard title="Today's Plan" action={
+            hasPlanItems ? (
+              <IconButton size="small" onClick={() => { setEditingPlan(!editingPlan); setAddingItem(false) }}>
+                {editingPlan ? <CheckIcon /> : <EditIcon />}
+              </IconButton>
+            ) : undefined
+          }>
             {hasPlanItems ? (
               <Stack spacing={1.5}>
                 {/* Summary bar */}
@@ -686,6 +770,57 @@ export default function TodayPage() {
                   const chipColor = item.subjectBucket
                     ? subjectBucketColor[item.subjectBucket] ?? '#6b7280'
                     : undefined
+
+                  if (editingPlan) {
+                    return (
+                      <Stack key={index} direction="row" spacing={0.5} alignItems="center">
+                        {/* Reorder buttons */}
+                        <Stack>
+                          <IconButton
+                            size="small"
+                            disabled={index === 0}
+                            onClick={() => handleReorder(index, 'up')}
+                            sx={{ p: 0.25 }}
+                          >
+                            <ArrowUpwardIcon sx={{ fontSize: 16 }} />
+                          </IconButton>
+                          <IconButton
+                            size="small"
+                            disabled={index === checklist.length - 1}
+                            onClick={() => handleReorder(index, 'down')}
+                            sx={{ p: 0.25 }}
+                          >
+                            <ArrowDownwardIcon sx={{ fontSize: 16 }} />
+                          </IconButton>
+                        </Stack>
+                        {/* Editable title */}
+                        <TextField
+                          size="small"
+                          variant="standard"
+                          value={item.label}
+                          onChange={(e) => handleEditLabel(index, e.target.value)}
+                          sx={{ flex: 1 }}
+                          inputProps={{ style: { fontSize: '0.875rem' } }}
+                        />
+                        {/* Editable minutes */}
+                        <TextField
+                          size="small"
+                          variant="standard"
+                          type="number"
+                          value={item.plannedMinutes ?? 0}
+                          onChange={(e) => handleEditMinutes(index, Math.max(0, parseInt(e.target.value) || 0))}
+                          sx={{ width: 48 }}
+                          inputProps={{ min: 0, style: { fontSize: '0.875rem', textAlign: 'right' } }}
+                        />
+                        <Typography variant="caption" color="text.secondary">m</Typography>
+                        {/* Delete button */}
+                        <IconButton size="small" onClick={() => handleDeleteItem(index)} color="error">
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    )
+                  }
+
                   return (
                     <Stack
                       key={index}
@@ -757,6 +892,60 @@ export default function TodayPage() {
                     </Stack>
                   )
                 })}
+
+                {/* Add Item (edit mode only) */}
+                {editingPlan && !addingItem && (
+                  <Button
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={() => setAddingItem(true)}
+                    sx={{ alignSelf: 'flex-start' }}
+                  >
+                    Add Item
+                  </Button>
+                )}
+                {editingPlan && addingItem && (
+                  <Stack spacing={1} sx={{ p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                    <TextField
+                      size="small"
+                      label="Title"
+                      value={newItemTitle}
+                      onChange={(e) => setNewItemTitle(e.target.value)}
+                      autoFocus
+                    />
+                    <Stack direction="row" spacing={1}>
+                      <TextField
+                        size="small"
+                        label="Minutes"
+                        type="number"
+                        value={newItemMinutes}
+                        onChange={(e) => setNewItemMinutes(Math.max(0, parseInt(e.target.value) || 0))}
+                        sx={{ width: 100 }}
+                        inputProps={{ min: 0 }}
+                      />
+                      <TextField
+                        size="small"
+                        label="Subject"
+                        select
+                        value={newItemSubject}
+                        onChange={(e) => setNewItemSubject(e.target.value as SubjectBucket)}
+                        sx={{ flex: 1 }}
+                      >
+                        {Object.values(SubjectBucket).map((sb) => (
+                          <MenuItem key={sb} value={sb}>{sb}</MenuItem>
+                        ))}
+                      </TextField>
+                    </Stack>
+                    <Stack direction="row" spacing={1}>
+                      <Button size="small" variant="contained" onClick={handleAddItem} disabled={!newItemTitle.trim()}>
+                        Add
+                      </Button>
+                      <Button size="small" onClick={() => setAddingItem(false)}>
+                        Cancel
+                      </Button>
+                    </Stack>
+                  </Stack>
+                )}
               </Stack>
             ) : (
               <Stack spacing={1} sx={{ py: 1 }}>
