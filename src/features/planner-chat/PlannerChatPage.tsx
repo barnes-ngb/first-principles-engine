@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import SendIcon from '@mui/icons-material/Send'
 import Alert from '@mui/material/Alert'
@@ -312,6 +313,74 @@ export default function PlannerChatPage() {
       id: generateItemId(),
       role: ChatMessageRole.Assistant,
       text: `Here's your draft plan${aiLabel} based on ${photoLabels.length} workbook page${photoLabels.length > 1 ? 's' : ''}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot.` : ''} You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".`,
+      draftPlan: draft,
+      createdAt: new Date().toISOString(),
+    }
+
+    const updatedMessages = [...messages, userMsg, assistantMsg]
+    setMessages(updatedMessages)
+    setShowPhotos(false)
+
+    void persistConversation({
+      messages: updatedMessages,
+      currentDraft: draft,
+      assignments,
+    })
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat])
+
+  // Generate Plan button handler (AI path with local fallback)
+  const handleGeneratePlan = useCallback(async () => {
+    const assignments = photoLabelsToAssignments(photoLabels)
+
+    const userMsg: ChatMessage = {
+      id: generateItemId(),
+      role: ChatMessageRole.User,
+      text: photoLabels.length > 0
+        ? `Generate a plan with ${photoLabels.length} assignment${photoLabels.length > 1 ? 's' : ''}.`
+        : 'Generate a plan for this week.',
+      photoLabels: photoLabels.length > 0 ? photoLabels : undefined,
+      createdAt: new Date().toISOString(),
+    }
+
+    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments }
+    let draft: DraftWeeklyPlan
+    let usedAI = false
+
+    if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
+      const prompt = buildPlannerPrompt(inputs)
+      const aiMessages: AIChatMessage[] = [
+        ...messages.map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.text ?? '',
+        })),
+        { role: 'user' as const, content: prompt },
+      ]
+      const response = await aiChat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.Plan,
+        messages: aiMessages,
+      })
+
+      const aiDraft = response ? parseAIResponse(response) : null
+      if (aiDraft) {
+        draft = aiDraft
+        usedAI = true
+      } else {
+        draft = generateDraftPlanFromInputs(inputs)
+        setSnack({ text: 'AI planning unavailable — used local planner.', severity: 'info' })
+      }
+    } else {
+      draft = generateDraftPlanFromInputs(inputs)
+    }
+
+    setCurrentDraft(draft)
+
+    const aiLabel = usedAI ? ' (AI-powered)' : ''
+    const assistantMsg: ChatMessage = {
+      id: generateItemId(),
+      role: ChatMessageRole.Assistant,
+      text: `Here's your draft plan${aiLabel}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot. ` : ''}You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".`,
       draftPlan: draft,
       createdAt: new Date().toISOString(),
     }
@@ -872,6 +941,22 @@ export default function PlannerChatPage() {
               {aiLoading ? <CircularProgress size={24} /> : <SendIcon />}
             </IconButton>
           </Stack>
+
+          {/* Generate Plan button — visible after chat exchange or photo labels, before a draft exists */}
+          {!currentDraft && !applied && (messages.length >= 2 || photoLabels.length > 0) && (
+            <Button
+              variant="contained"
+              color="primary"
+              size="large"
+              onClick={handleGeneratePlan}
+              disabled={aiLoading}
+              startIcon={aiLoading ? <CircularProgress size={20} color="inherit" /> : <AutoAwesomeIcon />}
+              fullWidth
+              sx={{ py: 1.5, fontWeight: 'bold', fontSize: '1rem' }}
+            >
+              {aiLoading ? 'Generating Plan...' : 'Generate Plan'}
+            </Button>
+          )}
 
           {/* Quick suggestion buttons */}
           <QuickSuggestionButtons
