@@ -53,6 +53,7 @@ jobs:
       #   - Cloud Build Editor (roles/cloudbuild.builds.editor)
       #   - Storage Admin (roles/storage.admin)
       #   - Artifact Registry Admin (roles/artifactregistry.admin) — for 2nd gen functions
+      #   - Service Usage Consumer (roles/serviceusage.serviceUsageConsumer) — API enablement checks
       - name: Check for functions changes
         id: functions-changed
         run: |
