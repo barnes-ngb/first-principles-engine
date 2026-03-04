@@ -73,7 +73,7 @@ interface ChildContext {
   stopRules?: Array<{ label: string; trigger: string; action: string }>;
 }
 
-function buildSystemPrompt(child: ChildContext): string {
+function buildSystemPrompt(child: ChildContext, taskType: TaskType): string {
   const lines = [CHARTER_PREAMBLE, "", `Current child: ${child.name}`];
 
   if (child.grade) {
@@ -101,8 +101,46 @@ function buildSystemPrompt(child: ChildContext): string {
     }
   }
 
+  if (taskType === TaskType.Plan) {
+    lines.push("", PLAN_OUTPUT_INSTRUCTIONS);
+  }
+
   return lines.join("\n");
 }
+
+// ── Plan output format instructions ─────────────────────────────
+
+const PLAN_OUTPUT_INSTRUCTIONS = `When the user asks you to generate or create a plan, respond ONLY with valid JSON matching this schema:
+${JSON.stringify({
+  days: [
+    {
+      day: "string (Monday-Friday)",
+      timeBudgetMinutes: "number",
+      items: [
+        {
+          title: "string",
+          subjectBucket: "Reading|Math|LanguageArts|Science|SocialStudies|Other",
+          estimatedMinutes: "number",
+          skillTags: ["string"],
+          accepted: true,
+        },
+      ],
+    },
+  ],
+  skipSuggestions: [
+    {
+      action: "string",
+      reason: "string",
+      replacement: "string",
+      evidence: "string",
+    },
+  ],
+  minimumWin: "string",
+})}
+
+Valid subjectBucket values: Reading, Math, LanguageArts, Science, SocialStudies, Other.
+
+No markdown fences, no preamble. When the user is just chatting or asking questions, respond normally in plain text.`;
 
 // ── Callable Cloud Function ─────────────────────────────────────
 
@@ -175,13 +213,16 @@ export const chat = onCall(
       : undefined;
 
     // ── Assemble system prompt ─────────────────────────────────
-    const systemPrompt = buildSystemPrompt({
-      name: childData.name,
-      grade: childData.grade,
-      prioritySkills: snapshotData?.prioritySkills,
-      supports: snapshotData?.supports,
-      stopRules: snapshotData?.stopRules,
-    });
+    const systemPrompt = buildSystemPrompt(
+      {
+        name: childData.name,
+        grade: childData.grade,
+        prioritySkills: snapshotData?.prioritySkills,
+        supports: snapshotData?.supports,
+        stopRules: snapshotData?.stopRules,
+      },
+      taskType,
+    );
 
     // ── Call Claude ─────────────────────────────────────────────
     const model = modelForTask(taskType);
@@ -190,7 +231,7 @@ export const chat = onCall(
 
     const completion = await client.messages.create({
       model,
-      max_tokens: 1024,
+      max_tokens: taskType === TaskType.Plan ? 4096 : 1024,
       system: systemPrompt,
       messages: messages.map((m) => ({
         role: m.role,
