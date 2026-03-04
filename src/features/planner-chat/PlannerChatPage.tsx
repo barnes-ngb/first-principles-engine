@@ -5,16 +5,21 @@ import SendIcon from '@mui/icons-material/Send'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Checkbox from '@mui/material/Checkbox'
+import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogContentText from '@mui/material/DialogContentText'
 import DialogTitle from '@mui/material/DialogTitle'
+import FormControlLabel from '@mui/material/FormControlLabel'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
+import ToggleButton from '@mui/material/ToggleButton'
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import { addDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
@@ -203,6 +208,14 @@ export default function PlannerChatPage() {
   // Workbook configs for active child (for photo label matching)
   const [workbookConfigs, setWorkbookConfigs] = useState<WorkbookConfig[]>([])
 
+  // Setup wizard state
+  const [conversationLoaded, setConversationLoaded] = useState(false)
+  const [setupComplete, setSetupComplete] = useState(false)
+  const [weekEnergy, setWeekEnergy] = useState<'full' | 'lighter' | 'mvd'>('full')
+  const [readAloud, setReadAloud] = useState('')
+  const [weekNotes, setWeekNotes] = useState('')
+  const [selectedWorkbookIds, setSelectedWorkbookIds] = useState<Set<string>>(new Set())
+
   const conversationDocId = useMemo(
     () => (activeChildId ? plannerConversationDocId(weekRange.start, activeChildId) : ''),
     [weekRange.start, activeChildId],
@@ -219,6 +232,10 @@ export default function PlannerChatPage() {
         setHoursPerDay(data.availableHoursPerDay)
         if (data.currentDraft) setCurrentDraft(data.currentDraft)
         if (data.status === PlannerConversationStatus.Applied) setApplied(true)
+        if (data.messages.length > 0) {
+          setConversationLoaded(true)
+          setSetupComplete(true)
+        }
       }
     })
     return unsubscribe
@@ -249,6 +266,13 @@ export default function PlannerChatPage() {
       setWorkbookConfigs(configs)
     })
   }, [familyId, activeChildId])
+
+  // Initialize selected workbooks when configs load
+  useEffect(() => {
+    if (workbookConfigs.length > 0) {
+      setSelectedWorkbookIds(new Set(workbookConfigs.map((c) => c.id ?? '')))
+    }
+  }, [workbookConfigs])
 
   // Load week plan (theme/virtue/scripture/heartQuestion)
   const weekPlanRef = useMemo(
@@ -295,9 +319,9 @@ export default function PlannerChatPage() {
     [weekPlan, debouncedWriteWeekField],
   )
 
-  // Add welcome message on first load when child is selected
+  // Add welcome message on first load when child is selected (only after setup wizard is complete)
   useEffect(() => {
-    if (!activeChildId || messages.length > 0) return
+    if (!activeChildId || messages.length > 0 || !setupComplete) return
     const minimumWin = buildMinimumWinText(snapshot)
     const welcomeParts = [
       `Planning week of ${weekRange.start} for ${activeChild?.name ?? 'your child'}.`,
@@ -317,7 +341,7 @@ export default function PlannerChatPage() {
       createdAt: new Date().toISOString(),
     }
     setMessages([welcomeMsg])
-  }, [activeChildId, snapshot, weekRange.start, activeChild?.name, messages.length])
+  }, [activeChildId, snapshot, weekRange.start, activeChild?.name, messages.length, setupComplete])
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -608,8 +632,8 @@ Return as JSON:
   }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat])
 
   // Handle text message send (AI path for free-form with local fallback)
-  const handleSend = useCallback(async () => {
-    const text = inputText.trim()
+  const handleSend = useCallback(async (overrideText?: string) => {
+    const text = (overrideText ?? inputText).trim()
     if (!text) return
 
     const userMsg: ChatMessage = {
@@ -761,6 +785,52 @@ Return as JSON:
       ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
     })
   }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied])
+
+  // Toggle workbook selection in setup wizard
+  const handleWorkbookToggle = useCallback((wbId: string, checked: boolean) => {
+    setSelectedWorkbookIds((prev) => {
+      const next = new Set(prev)
+      if (checked) {
+        next.add(wbId)
+      } else {
+        next.delete(wbId)
+      }
+      return next
+    })
+  }, [])
+
+  // Setup wizard completion handler
+  const handleSetupComplete = useCallback(() => {
+    const energyLabel =
+      weekEnergy === 'full'
+        ? 'normal energy'
+        : weekEnergy === 'lighter'
+          ? 'lighter week, reduce load'
+          : 'MVD week, minimum items only'
+
+    const selectedConfigs = workbookConfigs.filter((wb) => selectedWorkbookIds.has(wb.id ?? ''))
+    const workbookLines = selectedConfigs
+      .map((wb) => `- ${wb.name}: ${wb.unitLabel} ${wb.currentPosition + 1} (${wb.subjectBucket})`)
+      .join('\n')
+
+    const contextMessage = `Plan ${activeChild?.name ?? 'my child'}'s week.
+
+Energy: ${energyLabel}
+Hours/day: ${hoursPerDay}
+
+Workbooks:
+${workbookLines || '(none configured)'}
+${readAloud ? `Read-aloud: ${readAloud}` : ''}
+${weekNotes ? `Notes: ${weekNotes}` : ''}
+
+Generate a plan for Monday through Friday.`.trim()
+
+    setSetupComplete(true)
+    setInputText(contextMessage)
+    setTimeout(() => {
+      void handleSend(contextMessage)
+    }, 100)
+  }, [weekEnergy, hoursPerDay, workbookConfigs, selectedWorkbookIds, readAloud, weekNotes, activeChild, handleSend])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -1039,6 +1109,11 @@ Return as JSON:
     setApplied(false)
     setPhotoLabels([])
     setAdjustments([])
+    setSetupComplete(false)
+    setConversationLoaded(false)
+    setWeekEnergy('full')
+    setReadAloud('')
+    setWeekNotes('')
 
     if (conversationDocId) {
       const ref = doc(plannerConversationsCollection(familyId), conversationDocId)
@@ -1229,8 +1304,97 @@ Return as JSON:
             </Box>
           )}
 
+          {/* Setup wizard — shown when no conversation exists for this week */}
+          {messages.length === 0 && !setupComplete && !conversationLoaded && (
+            <Stack spacing={3} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+              <Typography variant="h6">Plan {activeChild?.name ?? 'your child'}&apos;s Week</Typography>
+
+              {/* Step 1: Energy */}
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  How&apos;s your week looking?
+                </Typography>
+                <ToggleButtonGroup
+                  value={weekEnergy}
+                  exclusive
+                  onChange={(_, v) => { if (v) setWeekEnergy(v) }}
+                  size="small"
+                >
+                  <ToggleButton value="full">Full Week</ToggleButton>
+                  <ToggleButton value="lighter">Lighter Week</ToggleButton>
+                  <ToggleButton value="mvd">Tough Week (MVD)</ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
+
+              {/* Step 2: Workbooks (pre-filled from workbookConfigs) */}
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  This week&apos;s workbooks
+                </Typography>
+                {workbookConfigs.length > 0 ? (
+                  workbookConfigs.map((wb) => (
+                    <FormControlLabel
+                      key={wb.id ?? wb.name}
+                      control={
+                        <Checkbox
+                          checked={selectedWorkbookIds.has(wb.id ?? '')}
+                          onChange={(e) => handleWorkbookToggle(wb.id ?? '', e.target.checked)}
+                        />
+                      }
+                      label={`${wb.name} — next: ${wb.unitLabel} ${wb.currentPosition + 1}`}
+                    />
+                  ))
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    No workbooks configured yet. You can still generate a plan.
+                  </Typography>
+                )}
+                <TextField
+                  size="small"
+                  placeholder="Read-aloud book + chapter (e.g., Charlotte's Web Ch 5)"
+                  value={readAloud}
+                  onChange={(e) => setReadAloud(e.target.value)}
+                  fullWidth
+                  sx={{ mt: 1 }}
+                />
+              </Box>
+
+              {/* Step 3: Special notes */}
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  Anything special this week?
+                </Typography>
+                <TextField
+                  size="small"
+                  placeholder="Field trip Tuesday, appointment Thursday, etc."
+                  value={weekNotes}
+                  onChange={(e) => setWeekNotes(e.target.value)}
+                  fullWidth
+                  multiline
+                  rows={2}
+                />
+              </Box>
+
+              {/* Generate button */}
+              <Button
+                variant="contained"
+                size="large"
+                onClick={handleSetupComplete}
+                fullWidth
+                startIcon={<AutoAwesomeIcon />}
+              >
+                Generate Plan
+              </Button>
+
+              {/* Repeat last week shortcut */}
+              <Button variant="outlined" size="small" onClick={handleRepeatLastWeek}>
+                Or repeat last week&apos;s plan
+              </Button>
+            </Stack>
+          )}
+
           {/* Quick Start buttons — shown when no conversation yet (only welcome message) */}
-          {messages.length <= 1 && !currentDraft && !applied && (
+          {setupComplete && messages.length <= 1 && !currentDraft && !applied && (
             <Stack spacing={1.5} sx={{ mb: 2 }}>
               <Typography variant="subtitle2" color="text.secondary">
                 Quick Start
@@ -1366,7 +1530,7 @@ Return as JSON:
                 }
               }}
             />
-            <IconButton onClick={handleSend} color="primary" disabled={!inputText.trim() || aiLoading}>
+            <IconButton onClick={() => handleSend()} color="primary" disabled={!inputText.trim() || aiLoading}>
               {aiLoading ? <CircularProgress size={24} /> : <SendIcon />}
             </IconButton>
           </Stack>
@@ -1392,6 +1556,16 @@ Return as JSON:
             onSelect={handleQuickSuggestion}
             visible={currentDraft !== null && !applied}
           />
+
+          {/* Suggestion chips for quick adjustments */}
+          {currentDraft && !applied && (
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+              <Chip label="Make Wednesday lighter" onClick={() => setInputText('Make Wednesday lighter')} clickable size="small" />
+              <Chip label="Add more reading time" onClick={() => setInputText('Add more reading time')} clickable size="small" />
+              <Chip label="Swap Thursday and Friday" onClick={() => setInputText('Swap Thursday and Friday')} clickable size="small" />
+              <Chip label="Remove speech this week" onClick={() => setInputText('Remove speech this week')} clickable size="small" />
+            </Stack>
+          )}
 
           {/* Apply plan button */}
           {currentDraft && !applied && (
