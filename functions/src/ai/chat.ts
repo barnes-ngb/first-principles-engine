@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
@@ -186,6 +185,7 @@ export const chat = onCall(
 
     // ── Call Claude ─────────────────────────────────────────────
     const model = modelForTask(taskType);
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
     const client = new Anthropic({ apiKey: claudeApiKey.value() });
 
     const completion = await client.messages.create({

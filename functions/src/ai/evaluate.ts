@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { getFirestore } from "firebase-admin/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { claudeApiKey } from "./aiConfig.js";
@@ -337,6 +336,7 @@ export async function generateReviewForChild(
   ctx: WeekContext,
   apiKey: string,
 ): Promise<WeeklyReview> {
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey });
   const model = "claude-sonnet-4-20250514";
 

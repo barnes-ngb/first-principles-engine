@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { ChatMessage, ChatOptions, ChatResponse } from "../aiService.js";
 
 /** Map task-based model aliases to Anthropic model IDs. */
@@ -14,10 +13,11 @@ export interface ClaudeProvider {
 
 /** Create a Claude chat provider backed by the Anthropic SDK. */
 export function createClaudeProvider(apiKey: string): ClaudeProvider {
-  const client = new Anthropic({ apiKey });
-
   return {
     async chat(messages, options) {
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const client = new Anthropic({ apiKey });
+
       const systemMessages = messages.filter((m) => m.role === "system");
       const conversationMessages = messages.filter((m) => m.role !== "system");
 
