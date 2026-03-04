@@ -107,7 +107,7 @@ export default function PlannerChatPage() {
   const familyId = useFamilyId()
   const { isEnabled } = useAIFeatureFlags()
   const { chat: aiChat, loading: aiLoading } = useAI()
-  const { generate: generateActivity, loading: generateLoading, error: generateError } = useGenerateActivity()
+  const { generate: generateActivity, loading: generateLoading } = useGenerateActivity()
   const {
     children,
     activeChildId,
@@ -746,24 +746,24 @@ export default function PlannerChatPage() {
     const activityType = subjectToActivityType(item.subjectBucket)
     const skillTag = item.skillTags[0] || `${item.subjectBucket.toLowerCase()}.general`
 
-    const response = await generateActivity({
-      familyId,
-      childId: activeChildId,
-      activityType,
-      skillTag,
-      estimatedMinutes: item.estimatedMinutes,
-    })
+    try {
+      const response = await generateActivity({
+        familyId,
+        childId: activeChildId,
+        activityType,
+        skillTag,
+        estimatedMinutes: item.estimatedMinutes,
+      })
 
-    setGeneratingItemId(null)
-
-    if (response) {
       setGeneratedActivity(response.activity)
       setGeneratedPlanItem(item)
-    } else {
-      const errMsg = generateError?.message ?? 'Failed to generate activity.'
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Failed to generate activity.'
       setSnack({ text: `${errMsg} Try again.`, severity: 'error' })
+    } finally {
+      setGeneratingItemId(null)
     }
-  }, [activeChildId, familyId, generateActivity, generateError, subjectToActivityType])
+  }, [activeChildId, familyId, generateActivity, subjectToActivityType])
 
   // Save generated activity as a LessonCard in Firestore
   const handleSaveLessonCard = useCallback(async () => {
