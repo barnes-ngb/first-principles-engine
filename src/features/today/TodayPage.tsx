@@ -562,6 +562,34 @@ export default function TodayPage() {
 
       <HelperPanel template={activeTemplate} />
 
+      {dayLog.checklist && dayLog.checklist.length > 0 && (
+        <SectionCard title="Today's Plan">
+          <Stack spacing={1}>
+            {dayLog.checklist.map((item, index) => (
+              <FormControlLabel
+                key={index}
+                control={
+                  <Checkbox
+                    checked={item.completed}
+                    onChange={() => {
+                      const updated = {
+                        ...dayLog,
+                        checklist: dayLog.checklist!.map((ci, i) =>
+                          i === index ? { ...ci, completed: !ci.completed } : ci
+                        ),
+                      }
+                      persistDayLogImmediate(updated)
+                    }}
+                  />
+                }
+                label={item.label}
+                sx={item.completed ? { textDecoration: 'line-through', opacity: 0.6 } : {}}
+              />
+            ))}
+          </Stack>
+        </SectionCard>
+      )}
+
       <RoutineSection
         key={`${selectedChildId}_${today}`}
         dayLog={dayLog}
