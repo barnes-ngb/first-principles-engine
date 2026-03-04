@@ -68,7 +68,7 @@ import {
   PlannerConversationStatus,
   SubjectBucket,
 } from '../../core/types/enums'
-import { formatDateYmd } from '../../core/utils/format'
+import { fixUnicodeEscapes, formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
 import { defaultAppBlocks } from '../planner/planner.logic'
@@ -91,12 +91,6 @@ import PlanSummaryPanel from './PlanSummaryPanel'
 import PhotoLabelForm from './PhotoLabelForm'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
 
-/** Decode any literal \\uXXXX escape sequences that survived double-serialization. */
-function decodeUnicodeEscapes(text: string): string {
-  return text.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
-    String.fromCharCode(parseInt(hex, 16))
-  )
-}
 
 function subjectToDayBlockType(subject: SubjectBucket): DayBlockType {
   switch (subject) {
@@ -1440,7 +1434,7 @@ Generate a plan for Monday through Friday.`.trim()
                 >
                   {msg.text && (
                     <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
-                      {decodeUnicodeEscapes(msg.text)}
+                      {fixUnicodeEscapes(msg.text)}
                     </Typography>
                   )}
                   {msg.photoLabels && msg.photoLabels.length > 0 && (

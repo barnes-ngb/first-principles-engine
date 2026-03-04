@@ -18,13 +18,7 @@ import Typography from '@mui/material/Typography'
 import type { GeneratedActivity } from '../../core/ai/useAI'
 import type { DraftPlanItem } from '../../core/types/domain'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
-
-/** Decode any literal \\uXXXX escape sequences that survived double-serialization. */
-function decodeUnicodeEscapes(text: string): string {
-  return text.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
-    String.fromCharCode(parseInt(hex, 16))
-  )
-}
+import { fixUnicodeEscapes } from '../../core/utils/format'
 
 interface LessonCardPreviewProps {
   open: boolean
@@ -48,7 +42,7 @@ export default function LessonCardPreview({
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle sx={{ pr: 6 }}>
-        <Typography variant="h6" component="span">{decodeUnicodeEscapes(activity.title)}</Typography>
+        <Typography variant="h6" component="span">{fixUnicodeEscapes(activity.title)}</Typography>
         <IconButton
           onClick={onClose}
           sx={{ position: 'absolute', right: 8, top: 8 }}
@@ -63,7 +57,7 @@ export default function LessonCardPreview({
             <Typography variant="subtitle2" color="text.secondary" gutterBottom>
               Objective
             </Typography>
-            <Typography variant="body2">{decodeUnicodeEscapes(activity.objective)}</Typography>
+            <Typography variant="body2">{fixUnicodeEscapes(activity.objective)}</Typography>
           </Box>
 
           {/* Skill tags */}
@@ -99,7 +93,7 @@ export default function LessonCardPreview({
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                 {activity.materials.map((m, i) => (
-                  <Chip key={i} label={decodeUnicodeEscapes(m)} size="small" variant="outlined" />
+                  <Chip key={i} label={fixUnicodeEscapes(m)} size="small" variant="outlined" />
                 ))}
               </Stack>
             </Box>
@@ -114,7 +108,7 @@ export default function LessonCardPreview({
               {activity.steps.map((step, i) => (
                 <ListItem key={i} sx={{ pl: 0 }}>
                   <ListItemText
-                    primary={`${i + 1}. ${decodeUnicodeEscapes(step)}`}
+                    primary={`${i + 1}. ${fixUnicodeEscapes(step)}`}
                     primaryTypographyProps={{ variant: 'body2' }}
                   />
                 </ListItem>
@@ -132,7 +126,7 @@ export default function LessonCardPreview({
                 {activity.successCriteria.map((c, i) => (
                   <ListItem key={i} sx={{ pl: 0 }}>
                     <ListItemText
-                      primary={`• ${decodeUnicodeEscapes(c)}`}
+                      primary={`• ${fixUnicodeEscapes(c)}`}
                       primaryTypographyProps={{ variant: 'body2' }}
                     />
                   </ListItem>
