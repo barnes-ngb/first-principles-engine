@@ -13,19 +13,19 @@ import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
 
 const navItems = [
-  { label: 'Dashboard', to: '/dashboard' },
-  { label: 'Scoreboard', to: '/scoreboard' },
-  { label: 'Dad Lab', to: '/week/lab' },
-  { label: 'Ladders', to: '/ladders' },
   { label: 'Today', to: '/today' },
-  { label: 'This Week', to: '/week', parentOnly: true },
-  { label: 'Plan My Week', to: '/planner', parentOnly: true },
+  { label: 'Plan My Week', to: '/planner/chat', parentOnly: true },
   { label: 'Weekly Review', to: '/weekly-review', parentOnly: true },
-  { label: 'Engine', to: '/engine', parentOnly: true },
-  { label: 'Skill Snapshot', to: '/evaluation', parentOnly: true },
-  { label: 'Records', to: '/records', parentOnly: true, end: true },
-  { label: 'Evaluations', to: '/records/evaluations', parentOnly: true },
-  { label: 'Portfolio', to: '/records/portfolio', parentOnly: true },
+  { label: 'Progress', to: '/progress', parentOnly: true },
+  { label: 'Records', to: '/records', parentOnly: true },
+  { label: 'Dad Lab', to: '/week/lab' },
+  { label: 'Settings', to: '/settings', parentOnly: true },
+]
+
+const kidNavItems = [
+  { label: 'Today', to: '/today' },
+  { label: 'Progress', to: '/progress' },
+  { label: 'Dad Lab', to: '/week/lab' },
 ]
 
 type AppShellProps = {
@@ -39,6 +39,7 @@ function NavContent({
   isParent: boolean
   onNavigate?: () => void
 }) {
+  const items = isParent ? navItems : kidNavItems
   return (
     <>
       <div className="app-shell__profile-row">
@@ -46,20 +47,16 @@ function NavContent({
       </div>
       <nav>
         <ul>
-          {navItems.map((item) => {
-            if (!isParent && item.parentOnly) return null
-            return (
-              <li key={item.to}>
-                <NavLink
-                  to={item.to}
-                  end={'end' in item ? item.end : undefined}
-                  onClick={onNavigate}
-                >
-                  {item.label}
-                </NavLink>
-              </li>
-            )
-          })}
+          {items.map((item) => (
+            <li key={item.to}>
+              <NavLink
+                to={item.to}
+                onClick={onNavigate}
+              >
+                {item.label}
+              </NavLink>
+            </li>
+          ))}
         </ul>
       </nav>
     </>
@@ -77,10 +74,11 @@ export function AppShell({ children }: AppShellProps) {
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
 
   // Find the current page label for the mobile header
+  const allNavItems = [...navItems, ...kidNavItems]
   const currentLabel =
-    navItems.find((item) => location.pathname === item.to)?.label ??
-    navItems.find((item) => location.pathname.startsWith(item.to) && item.to !== '/')?.label ??
-    'Planner'
+    allNavItems.find((item) => location.pathname === item.to)?.label ??
+    allNavItems.find((item) => location.pathname.startsWith(item.to) && item.to !== '/')?.label ??
+    'Home'
 
   return (
     <div className="app-shell">
