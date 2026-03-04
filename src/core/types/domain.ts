@@ -195,6 +195,8 @@ export interface DayBlock {
   skillTags?: SkillTag[]
   /** Optional ladder rung reference */
   ladderRef?: { ladderId: string; rungId: string }
+  /** Source of this block: 'planner' for AI/planner-generated, 'manual' for user-added. */
+  source?: 'planner' | 'manual'
 }
 
 export interface ChecklistItem {
@@ -211,6 +213,8 @@ export interface ChecklistItem {
   ladderRef?: { ladderId: string; rungId: string }
   /** When true, this item is part of the Minimum Viable Day (MVD) set. */
   mvdEssential?: boolean
+  /** Source of this item: 'planner' for AI/planner-generated, 'manual' for user-added. */
+  source?: 'planner' | 'manual'
 }
 
 export interface ArtifactTags {

@@ -81,6 +81,13 @@ import PlanSummaryPanel from './PlanSummaryPanel'
 import PhotoLabelForm from './PhotoLabelForm'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
 
+/** Decode any literal \\uXXXX escape sequences that survived double-serialization. */
+function decodeUnicodeEscapes(text: string): string {
+  return text.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
+    String.fromCharCode(parseInt(hex, 16))
+  )
+}
+
 function subjectToDayBlockType(subject: SubjectBucket): DayBlockType {
   switch (subject) {
     case SubjectBucket.Reading: return DayBlockType.Reading
@@ -142,7 +149,6 @@ export default function PlannerChatPage() {
 
   // Confirmation dialog state
   const [confirmNewPlan, setConfirmNewPlan] = useState(false)
-  const [confirmClearPlan, setConfirmClearPlan] = useState(false)
 
   // Generate activity state
   const [generatingItemId, setGeneratingItemId] = useState<string | null>(null)
@@ -679,6 +685,7 @@ export default function PlannerChatPage() {
           completed: false,
           skillTags: item.skillTags,
           ladderRef: item.ladderRef,
+          source: 'planner' as const,
         }))
 
         const blocks: DayBlock[] = dayItems
@@ -690,14 +697,22 @@ export default function PlannerChatPage() {
             plannedMinutes: item.estimatedMinutes,
             skillTags: item.skillTags,
             ladderRef: item.ladderRef,
+            source: 'planner' as const,
           }))
 
         if (dayLogSnap.exists()) {
           const existing = dayLogSnap.data()
+          // Replace planner-generated items, keep manually-added ones
+          const existingChecklist = (existing.checklist ?? []).filter(
+            (item: ChecklistItem) => item.source !== 'planner'
+          )
+          const existingBlocks = (existing.blocks ?? []).filter(
+            (block: DayBlock) => block.source !== 'planner'
+          )
           await setDoc(dayLogRef, {
             ...existing,
-            checklist: [...(existing.checklist ?? []), ...checklist],
-            blocks: [...(existing.blocks ?? []), ...blocks],
+            checklist: [...existingChecklist, ...checklist],
+            blocks: [...existingBlocks, ...blocks],
             updatedAt: new Date().toISOString(),
           })
         } else {
@@ -891,24 +906,12 @@ export default function PlannerChatPage() {
     }
   }, [conversationDocId, familyId, activeChildId, weekRange.start, hoursPerDay, appBlocks])
 
-  // Start New Plan handler
-  const handleStartNewPlan = useCallback(async () => {
+  // Redo Plan handler: clears applied plan from Today/Week AND resets conversation
+  const handleRedoPlan = useCallback(async () => {
     setConfirmNewPlan(false)
-    try {
-      await resetConversationState()
-      setSnack({ text: 'Conversation reset. Start a new plan!', severity: 'success' })
-    } catch (err) {
-      console.error('Failed to reset conversation', err)
-      setSnack({ text: 'Failed to reset conversation.', severity: 'error' })
-    }
-  }, [resetConversationState])
-
-  // Clear Applied Plan handler
-  const handleClearAppliedPlan = useCallback(async () => {
-    setConfirmClearPlan(false)
     if (!activeChildId || !currentDraft) return
     try {
-      // Remove blocks and checklist from each day's DayLog
+      // Remove planner-generated blocks and checklist from each day's DayLog
       for (const dayPlan of currentDraft.days) {
         const dayIndex = WEEK_DAYS.indexOf(dayPlan.day as typeof WEEK_DAYS[number])
         if (dayIndex < 0) continue
@@ -922,7 +925,15 @@ export default function PlannerChatPage() {
         const dayLogRef = doc(daysCollection(familyId), docId)
         const dayLogSnap = await getDoc(dayLogRef)
         if (dayLogSnap.exists()) {
-          await updateDoc(dayLogRef, { blocks: [], checklist: [] })
+          const existing = dayLogSnap.data()
+          // Keep manually-added items, remove planner-generated ones
+          const manualChecklist = (existing.checklist ?? []).filter(
+            (item: ChecklistItem) => item.source !== 'planner'
+          )
+          const manualBlocks = (existing.blocks ?? []).filter(
+            (block: DayBlock) => block.source !== 'planner'
+          )
+          await updateDoc(dayLogRef, { checklist: manualChecklist, blocks: manualBlocks })
         }
       }
 
@@ -937,11 +948,12 @@ export default function PlannerChatPage() {
         await setDoc(weekRef, { ...existing, childGoals: updatedGoals })
       }
 
+      // Reset conversation state to start fresh
       await resetConversationState()
-      setSnack({ text: 'Applied plan cleared from Week and Today.', severity: 'success' })
+      setSnack({ text: 'Plan cleared and conversation reset. Start fresh!', severity: 'success' })
     } catch (err) {
-      console.error('Failed to clear applied plan', err)
-      setSnack({ text: 'Failed to clear applied plan.', severity: 'error' })
+      console.error('Failed to redo plan', err)
+      setSnack({ text: 'Failed to redo plan.', severity: 'error' })
     }
   }, [activeChildId, currentDraft, familyId, weekRange.start, resetConversationState])
 
@@ -1053,7 +1065,7 @@ export default function PlannerChatPage() {
                 >
                   {msg.text && (
                     <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
-                      {msg.text}
+                      {decodeUnicodeEscapes(msg.text)}
                     </Typography>
                   )}
                   {msg.photoLabels && msg.photoLabels.length > 0 && (
@@ -1188,46 +1200,25 @@ export default function PlannerChatPage() {
                 Plan applied. Check This Week and Today pages for your generated
                 checklists and day blocks.
               </Alert>
-              <Stack direction="row" spacing={2}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={() => setConfirmNewPlan(true)}
-                >
-                  Start New Plan
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="warning"
-                  onClick={() => setConfirmClearPlan(true)}
-                >
-                  Clear Applied Plan
-                </Button>
-              </Stack>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={() => setConfirmNewPlan(true)}
+                fullWidth
+              >
+                Redo Plan
+              </Button>
 
               <Dialog open={confirmNewPlan} onClose={() => setConfirmNewPlan(false)}>
-                <DialogTitle>Start New Plan?</DialogTitle>
+                <DialogTitle>Redo Plan?</DialogTitle>
                 <DialogContent>
                   <DialogContentText>
-                    Start a fresh plan for this week? Your applied checklist items on the Today page will remain.
+                    This will clear your current plan from Today and let you start fresh. Continue?
                   </DialogContentText>
                 </DialogContent>
                 <DialogActions>
                   <Button onClick={() => setConfirmNewPlan(false)}>Cancel</Button>
-                  <Button onClick={handleStartNewPlan} variant="contained">Start New Plan</Button>
-                </DialogActions>
-              </Dialog>
-
-              <Dialog open={confirmClearPlan} onClose={() => setConfirmClearPlan(false)}>
-                <DialogTitle>Clear Applied Plan?</DialogTitle>
-                <DialogContent>
-                  <DialogContentText>
-                    Remove generated blocks and checklists from This Week and Today? This cannot be undone.
-                  </DialogContentText>
-                </DialogContent>
-                <DialogActions>
-                  <Button onClick={() => setConfirmClearPlan(false)}>Cancel</Button>
-                  <Button onClick={handleClearAppliedPlan} variant="contained" color="warning">Clear Plan</Button>
+                  <Button onClick={handleRedoPlan} variant="contained">Redo Plan</Button>
                 </DialogActions>
               </Dialog>
             </>

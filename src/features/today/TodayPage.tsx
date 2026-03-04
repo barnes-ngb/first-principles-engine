@@ -650,9 +650,14 @@ export default function TodayPage() {
 
       {/* --- Today's Plan checklist (PRIMARY) --- */}
       {(() => {
-        const checklist = dayLog.checklist ?? []
-        const hasPlanItems = checklist.length > 0
+        const rawChecklist = dayLog.checklist ?? []
+        const hasPlanItems = rawChecklist.length > 0
         const isMvd = planType === PlanType.Mvd
+        // When no items are marked mvdEssential, default first 3 as essential
+        const essentialCount = rawChecklist.filter(i => i.mvdEssential).length
+        const checklist = essentialCount > 0
+          ? rawChecklist
+          : rawChecklist.map((item, i) => ({ ...item, mvdEssential: i < 3 }))
         const completedCount = checklist.filter((item) => item.completed).length
         const totalPlannedMinutes = checklist.reduce((sum, item) => sum + (item.plannedMinutes ?? 0), 0)
         const budgetMinutes = isMvd ? 90 : 150 // MVD ~1.5h, Normal ~2.5h
