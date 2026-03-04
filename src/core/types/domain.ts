@@ -641,6 +641,25 @@ export interface PhotoLabel {
   subjectBucket: SubjectBucket
   lessonOrPages: string
   estimatedMinutes: number
+  /** Extracted content details from AI or workbook config matching */
+  extractedContent?: PhotoContentExtraction
+}
+
+export interface PhotoContentExtraction {
+  subject: string
+  lessonNumber: string
+  topic: string
+  estimatedMinutes: number
+  difficulty: string
+  modifications: string
+  rawDescription: string
+  /** Workbook config match, if found */
+  workbookMatch?: {
+    workbookName: string
+    totalUnits: number
+    currentPosition: number
+    unitLabel: string
+  }
 }
 
 export interface DraftWeeklyPlan {
