@@ -6,12 +6,17 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore'
+import { addDoc, doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -129,6 +134,10 @@ export default function PlannerChatPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [applied, setApplied] = useState(false)
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' } | null>(null)
+
+  // Confirmation dialog state
+  const [confirmNewPlan, setConfirmNewPlan] = useState(false)
+  const [confirmClearPlan, setConfirmClearPlan] = useState(false)
 
   // Generate activity state
   const [generatingItemId, setGeneratingItemId] = useState<string | null>(null)
@@ -588,7 +597,7 @@ export default function PlannerChatPage() {
 
         const startDate = new Date(weekRange.start + 'T00:00:00')
         const targetDate = new Date(startDate)
-        targetDate.setDate(startDate.getDate() + dayIndex + 1)
+        targetDate.setDate(startDate.getDate() + dayIndex)
         const dateKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`
 
         const docId = dayLogDocId(dateKey, activeChildId)
@@ -786,6 +795,84 @@ export default function PlannerChatPage() {
     setLessonCardSaved(false)
   }, [])
 
+  // Reset conversation state (shared by both Start New Plan and Clear Applied Plan)
+  const resetConversationState = useCallback(async () => {
+    setMessages([])
+    setCurrentDraft(null)
+    setApplied(false)
+    setPhotoLabels([])
+    setAdjustments([])
+
+    if (conversationDocId) {
+      const ref = doc(plannerConversationsCollection(familyId), conversationDocId)
+      await setDoc(ref, {
+        childId: activeChildId,
+        weekKey: weekRange.start,
+        status: PlannerConversationStatus.Draft,
+        messages: [],
+        availableHoursPerDay: hoursPerDay,
+        appBlocks,
+        assignments: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+    }
+  }, [conversationDocId, familyId, activeChildId, weekRange.start, hoursPerDay, appBlocks])
+
+  // Start New Plan handler
+  const handleStartNewPlan = useCallback(async () => {
+    setConfirmNewPlan(false)
+    try {
+      await resetConversationState()
+      setSnack({ text: 'Conversation reset. Start a new plan!', severity: 'success' })
+    } catch (err) {
+      console.error('Failed to reset conversation', err)
+      setSnack({ text: 'Failed to reset conversation.', severity: 'error' })
+    }
+  }, [resetConversationState])
+
+  // Clear Applied Plan handler
+  const handleClearAppliedPlan = useCallback(async () => {
+    setConfirmClearPlan(false)
+    if (!activeChildId || !currentDraft) return
+    try {
+      // Remove blocks and checklist from each day's DayLog
+      for (const dayPlan of currentDraft.days) {
+        const dayIndex = WEEK_DAYS.indexOf(dayPlan.day as typeof WEEK_DAYS[number])
+        if (dayIndex < 0) continue
+
+        const startDate = new Date(weekRange.start + 'T00:00:00')
+        const targetDate = new Date(startDate)
+        targetDate.setDate(startDate.getDate() + dayIndex)
+        const dateKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`
+
+        const docId = dayLogDocId(dateKey, activeChildId)
+        const dayLogRef = doc(daysCollection(familyId), docId)
+        const dayLogSnap = await getDoc(dayLogRef)
+        if (dayLogSnap.exists()) {
+          await updateDoc(dayLogRef, { blocks: [], checklist: [] })
+        }
+      }
+
+      // Remove childGoals from week doc
+      const weekRef = doc(weeksCollection(familyId), weekRange.start)
+      const weekSnap = await getDoc(weekRef)
+      if (weekSnap.exists()) {
+        const existing = weekSnap.data()
+        const updatedGoals = (existing.childGoals ?? []).filter(
+          (g: { childId: string }) => g.childId !== activeChildId,
+        )
+        await setDoc(weekRef, { ...existing, childGoals: updatedGoals })
+      }
+
+      await resetConversationState()
+      setSnack({ text: 'Applied plan cleared from Week and Today.', severity: 'success' })
+    } catch (err) {
+      console.error('Failed to clear applied plan', err)
+      setSnack({ text: 'Failed to clear applied plan.', severity: 'error' })
+    }
+  }, [activeChildId, currentDraft, familyId, weekRange.start, resetConversationState])
+
   return (
     <Page>
       <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -979,10 +1066,54 @@ export default function PlannerChatPage() {
           )}
 
           {applied && (
-            <Alert severity="success">
-              Plan applied. Check This Week and Today pages for your generated
-              checklists and day blocks.
-            </Alert>
+            <>
+              <Alert severity="success">
+                Plan applied. Check This Week and Today pages for your generated
+                checklists and day blocks.
+              </Alert>
+              <Stack direction="row" spacing={2}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={() => setConfirmNewPlan(true)}
+                >
+                  Start New Plan
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  onClick={() => setConfirmClearPlan(true)}
+                >
+                  Clear Applied Plan
+                </Button>
+              </Stack>
+
+              <Dialog open={confirmNewPlan} onClose={() => setConfirmNewPlan(false)}>
+                <DialogTitle>Start New Plan?</DialogTitle>
+                <DialogContent>
+                  <DialogContentText>
+                    Start a fresh plan for this week? Your applied checklist items on the Today page will remain.
+                  </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                  <Button onClick={() => setConfirmNewPlan(false)}>Cancel</Button>
+                  <Button onClick={handleStartNewPlan} variant="contained">Start New Plan</Button>
+                </DialogActions>
+              </Dialog>
+
+              <Dialog open={confirmClearPlan} onClose={() => setConfirmClearPlan(false)}>
+                <DialogTitle>Clear Applied Plan?</DialogTitle>
+                <DialogContent>
+                  <DialogContentText>
+                    Remove generated blocks and checklists from This Week and Today? This cannot be undone.
+                  </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                  <Button onClick={() => setConfirmClearPlan(false)}>Cancel</Button>
+                  <Button onClick={handleClearAppliedPlan} variant="contained" color="warning">Clear Plan</Button>
+                </DialogActions>
+              </Dialog>
+            </>
           )}
         </>
       )}
