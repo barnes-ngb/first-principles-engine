@@ -1,3 +1,4 @@
+import type { Firestore } from "firebase-admin/firestore";
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
@@ -51,6 +52,238 @@ function modelForTask(taskType: TaskType): string {
   }
 }
 
+// ── Enriched context types ──────────────────────────────────────
+
+interface SessionSummary {
+  streamId: string;
+  hits: number;
+  nears: number;
+  misses: number;
+}
+
+interface WorkbookPace {
+  name: string;
+  unitLabel: string;
+  currentPosition: number;
+  totalUnits: number;
+  unitsPerDayNeeded: number;
+  targetFinishDate: string;
+  status: "ahead" | "on-track" | "behind";
+}
+
+interface WeekContext {
+  theme: string;
+  virtue: string;
+  scriptureRef: string;
+  heartQuestion?: string;
+}
+
+interface EnrichedContext {
+  sessions: SessionSummary[];
+  workbookPaces: WorkbookPace[];
+  week: WeekContext | null;
+  hoursTotalMinutes: number;
+  hoursTarget: number;
+}
+
+// ── Date helpers ────────────────────────────────────────────────
+
+/** Returns YYYY-MM-DD string for a Date. */
+function toDateString(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/** Returns the Monday of the ISO week containing the given date. */
+export function getWeekMonday(d: Date): Date {
+  const date = new Date(d);
+  const day = date.getDay(); // 0=Sun, 1=Mon, …, 6=Sat
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + diff);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+/** Returns school year start (Aug 1) for the given date. */
+function schoolYearStart(d: Date): string {
+  const year = d.getMonth() >= 7 ? d.getFullYear() : d.getFullYear() - 1;
+  return `${year}-08-01`;
+}
+
+// ── Enriched context loaders ────────────────────────────────────
+
+/** Load recent sessions (last 14 days) and summarize by stream. */
+export async function loadRecentSessions(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<SessionSummary[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 14);
+  const cutoffStr = toDateString(cutoff);
+
+  const snap = await db
+    .collection(`families/${familyId}/sessions`)
+    .where("childId", "==", childId)
+    .where("date", ">=", cutoffStr)
+    .get();
+
+  const byStream = new Map<
+    string,
+    { hits: number; nears: number; misses: number }
+  >();
+
+  for (const doc of snap.docs) {
+    const data = doc.data() as {
+      streamId: string;
+      result: string;
+    };
+    if (!byStream.has(data.streamId)) {
+      byStream.set(data.streamId, { hits: 0, nears: 0, misses: 0 });
+    }
+    const counts = byStream.get(data.streamId)!;
+    if (data.result === "hit") counts.hits++;
+    else if (data.result === "near") counts.nears++;
+    else if (data.result === "miss") counts.misses++;
+  }
+
+  return [...byStream.entries()].map(([streamId, counts]) => ({
+    streamId,
+    ...counts,
+  }));
+}
+
+/** Load workbook configs and calculate pace for each. */
+export async function loadWorkbookPaces(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<WorkbookPace[]> {
+  const snap = await db
+    .collection(`families/${familyId}/workbookConfigs`)
+    .where("childId", "==", childId)
+    .get();
+
+  const today = new Date();
+  const paces: WorkbookPace[] = [];
+
+  for (const doc of snap.docs) {
+    const data = doc.data() as {
+      name: string;
+      unitLabel: string;
+      currentPosition: number;
+      totalUnits: number;
+      targetFinishDate: string;
+      schoolDaysPerWeek: number;
+    };
+
+    const remaining = data.totalUnits - data.currentPosition;
+    const targetDate = new Date(data.targetFinishDate + "T00:00:00");
+    const msPerDay = 86_400_000;
+    const calendarDaysLeft = Math.max(
+      1,
+      Math.ceil((targetDate.getTime() - today.getTime()) / msPerDay),
+    );
+    // Approximate school days: (calendarDays / 7) * schoolDaysPerWeek
+    const schoolDaysLeft = Math.max(
+      1,
+      Math.round((calendarDaysLeft / 7) * (data.schoolDaysPerWeek || 5)),
+    );
+    const unitsPerDay = remaining / schoolDaysLeft;
+
+    let status: WorkbookPace["status"];
+    if (unitsPerDay <= 0.8) status = "ahead";
+    else if (unitsPerDay <= 1.2) status = "on-track";
+    else status = "behind";
+
+    paces.push({
+      name: data.name,
+      unitLabel: data.unitLabel || "lesson",
+      currentPosition: data.currentPosition,
+      totalUnits: data.totalUnits,
+      unitsPerDayNeeded: Math.round(unitsPerDay * 10) / 10,
+      targetFinishDate: data.targetFinishDate,
+      status,
+    });
+  }
+
+  return paces;
+}
+
+/** Load current week's plan (theme, virtue, scripture). */
+export async function loadWeekContext(
+  db: Firestore,
+  familyId: string,
+): Promise<WeekContext | null> {
+  const monday = getWeekMonday(new Date());
+  const weekId = toDateString(monday);
+
+  const snap = await db.doc(`families/${familyId}/weeks/${weekId}`).get();
+
+  if (!snap.exists) return null;
+
+  const data = snap.data() as {
+    theme?: string;
+    virtue?: string;
+    scriptureRef?: string;
+    heartQuestion?: string;
+  };
+
+  if (!data.theme && !data.virtue && !data.scriptureRef) return null;
+
+  return {
+    theme: data.theme || "",
+    virtue: data.virtue || "",
+    scriptureRef: data.scriptureRef || "",
+    heartQuestion: data.heartQuestion,
+  };
+}
+
+/** Load hours logged since school year start and sum total minutes. */
+export async function loadHoursSummary(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<{ totalMinutes: number }> {
+  const startDate = schoolYearStart(new Date());
+
+  const snap = await db
+    .collection(`families/${familyId}/hours`)
+    .where("childId", "==", childId)
+    .where("date", ">=", startDate)
+    .get();
+
+  let totalMinutes = 0;
+  for (const doc of snap.docs) {
+    const data = doc.data() as { minutes?: number; hours?: number };
+    totalMinutes += data.minutes || 0;
+    if (data.hours) totalMinutes += data.hours * 60;
+  }
+
+  return { totalMinutes };
+}
+
+/** Load all enriched context in parallel. Only called for plan/evaluate. */
+export async function loadEnrichedContext(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<EnrichedContext> {
+  const [sessions, workbookPaces, week, hours] = await Promise.all([
+    loadRecentSessions(db, familyId, childId),
+    loadWorkbookPaces(db, familyId, childId),
+    loadWeekContext(db, familyId),
+    loadHoursSummary(db, familyId, childId),
+  ]);
+
+  return {
+    sessions,
+    workbookPaces,
+    week,
+    hoursTotalMinutes: hours.totalMinutes,
+    hoursTarget: 1000, // MO target hours
+  };
+}
+
 // ── System prompt assembly ──────────────────────────────────────
 
 const CHARTER_PREAMBLE = `You are an AI assistant for the First Principles Engine, a family homeschool learning platform.
@@ -73,34 +306,98 @@ interface ChildContext {
   stopRules?: Array<{ label: string; trigger: string; action: string }>;
 }
 
-function buildSystemPrompt(child: ChildContext, taskType: TaskType): string {
-  const lines = [CHARTER_PREAMBLE, "", `Current child: ${child.name}`];
+export function buildSystemPrompt(
+  child: ChildContext,
+  taskType: TaskType,
+  enriched?: EnrichedContext,
+): string {
+  const lines = [CHARTER_PREAMBLE];
 
+  // ── CHILD PROFILE ─────────────────────────────────────────────
+  lines.push("", "CHILD PROFILE:");
+  lines.push(`Name: ${child.name}`);
   if (child.grade) {
     lines.push(`Grade: ${child.grade}`);
   }
 
   if (child.prioritySkills?.length) {
-    lines.push("", "Priority skills:");
+    lines.push("Priority skills:");
     for (const s of child.prioritySkills) {
       lines.push(`- ${s.label} (${s.tag}): ${s.level}`);
     }
   }
 
   if (child.supports?.length) {
-    lines.push("", "Available supports:");
+    lines.push("Available supports:");
     for (const s of child.supports) {
       lines.push(`- ${s.label}: ${s.description}`);
     }
   }
 
   if (child.stopRules?.length) {
-    lines.push("", "Stop rules:");
+    lines.push("Stop rules:");
     for (const r of child.stopRules) {
       lines.push(`- ${r.label}: when "${r.trigger}" → ${r.action}`);
     }
   }
 
+  // ── Enriched context (only present for plan/evaluate) ─────────
+  if (enriched) {
+    // RECENT PERFORMANCE
+    lines.push("", "RECENT PERFORMANCE (last 14 days):");
+    if (enriched.sessions.length === 0) {
+      lines.push("No recent session data available.");
+    } else {
+      for (const s of enriched.sessions) {
+        lines.push(
+          `- ${s.streamId}: ${s.hits} hits, ${s.nears} nears, ${s.misses} misses`,
+        );
+      }
+    }
+
+    // WORKBOOK PACE
+    lines.push("", "WORKBOOK PACE:");
+    if (enriched.workbookPaces.length === 0) {
+      lines.push("No workbook data available.");
+    } else {
+      for (const w of enriched.workbookPaces) {
+        lines.push(
+          `- ${w.name} — ${w.unitLabel} ${w.currentPosition} of ${w.totalUnits}, ${w.unitsPerDayNeeded} ${w.unitLabel}s/day needed to finish by ${w.targetFinishDate}. Status: ${w.status}`,
+        );
+      }
+    }
+
+    // THIS WEEK
+    lines.push("", "THIS WEEK:");
+    if (enriched.week) {
+      if (enriched.week.theme) {
+        lines.push(`Theme: ${enriched.week.theme}`);
+      }
+      if (enriched.week.virtue) {
+        lines.push(`Virtue: ${enriched.week.virtue}`);
+      }
+      if (enriched.week.scriptureRef) {
+        lines.push(`Scripture: ${enriched.week.scriptureRef}`);
+      }
+      if (enriched.week.heartQuestion) {
+        lines.push(`Heart question: ${enriched.week.heartQuestion}`);
+      }
+    } else {
+      lines.push("No weekly plan set yet.");
+    }
+
+    // HOURS PROGRESS
+    lines.push("", "HOURS PROGRESS:");
+    const totalHours = Math.round(enriched.hoursTotalMinutes / 60);
+    const pct = Math.round(
+      (enriched.hoursTotalMinutes / (enriched.hoursTarget * 60)) * 100,
+    );
+    lines.push(
+      `Hours logged this year: ${totalHours} hours of ${enriched.hoursTarget} target (${pct}% complete)`,
+    );
+  }
+
+  // ── Plan output format (always last) ──────────────────────────
   if (taskType === TaskType.Plan) {
     lines.push("", PLAN_OUTPUT_INSTRUCTIONS);
   }
@@ -215,6 +512,13 @@ export const chat = onCall(
         })
       : undefined;
 
+    // ── Load enriched context for plan/evaluate only ────────────
+    const needsEnrichedContext =
+      taskType === TaskType.Plan || taskType === TaskType.Evaluate;
+    const enriched = needsEnrichedContext
+      ? await loadEnrichedContext(db, familyId, childId)
+      : undefined;
+
     // ── Assemble system prompt ─────────────────────────────────
     const systemPrompt = buildSystemPrompt(
       {
@@ -225,6 +529,7 @@ export const chat = onCall(
         stopRules: snapshotData?.stopRules,
       },
       taskType,
+      enriched,
     );
 
     // ── Call Claude ─────────────────────────────────────────────
