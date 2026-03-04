@@ -47,6 +47,12 @@ jobs:
           projectId: barneshome-3dfbb
 
       # ── Cloud Functions (only when functions/ changes) ──────────
+      # Required IAM roles on the service account for functions deploy:
+      #   - Cloud Functions Admin (roles/cloudfunctions.admin)
+      #   - Service Account User (roles/iam.serviceAccountUser)
+      #   - Cloud Build Editor (roles/cloudbuild.builds.editor)
+      #   - Storage Admin (roles/storage.admin)
+      #   - Artifact Registry Admin (roles/artifactregistry.admin) — for 2nd gen functions
       - name: Check for functions changes
         id: functions-changed
         run: |
@@ -60,10 +66,14 @@ jobs:
         if: steps.functions-changed.outputs.changed == 'true'
         run: cd functions && npm ci
 
+      - name: Build functions
+        if: steps.functions-changed.outputs.changed == 'true'
+        run: cd functions && npm run build
+
       - name: Deploy Cloud Functions
         if: steps.functions-changed.outputs.changed == 'true'
-        uses: w9jds/firebase-action@master
+        uses: w9jds/firebase-action@v15.8.0
         with:
           args: deploy --only functions --project barneshome-3dfbb
         env:
-          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
