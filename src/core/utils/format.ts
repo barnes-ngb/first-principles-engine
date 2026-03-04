@@ -42,6 +42,15 @@ export const formatDateForCsv = (value: Date | string) => formatDateForInput(val
 
 export const parseDateInput = (value: string) => parseDateYmd(value)
 
+/**
+ * Fix double-escaped Unicode sequences (e.g. literal "\u2022" → "•").
+ * This can happen when AI-generated text is JSON.stringify'd an extra time.
+ */
+export const fixUnicodeEscapes = (text: string): string =>
+  text.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
+    String.fromCharCode(parseInt(hex, 16)),
+  )
+
 export const toCsvValue = (value: string | number | null | undefined) => {
   const stringValue = `${value ?? ''}`
   if (/[",\n]/.test(stringValue)) {

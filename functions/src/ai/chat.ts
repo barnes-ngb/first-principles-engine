@@ -418,6 +418,8 @@ PLAN CONTENT RULES:
 - Mark the 3-4 most essential items with "mvdEssential": true — these are the Minimum Viable Day items.
 - Total daily minutes should not exceed the hours budget.
 - Vary activities slightly across days (different read-aloud chapters, different phonics focuses) to avoid monotony.
+- Every item must have a "category" field: "must-do" for core academic work (math, phonics, formation/prayer — usually 3-4 items), or "choose" for activities the child picks from after must-do items (Reading Eggs, Minecraft reading, read-aloud, art — include 3-4 options, child picks 2).
+- Items with category "must-do" should have mvdEssential: true. On MVD days, only must-do items are required.
 
 {
   "days": [
@@ -432,7 +434,8 @@ PLAN CONTENT RULES:
           "skillTags": ["optional.dot.delimited.tag"],
           "isAppBlock": false,
           "accepted": true,
-          "mvdEssential": false
+          "mvdEssential": false,
+          "category": "must-do"
         }
       ]
     }
@@ -449,6 +452,7 @@ Rules:
 - Every item must have "accepted": true.
 - "estimatedMinutes" must be a positive number.
 - "mvdEssential" must be a boolean. Mark the 3-4 core items per day as true (Formation, core math, core reading, speech if applicable).
+- "category" must be either "must-do" or "choose". Core academics are "must-do", elective/fun activities are "choose".
 - "skipSuggestions" is an array of { "action": "skip"|"modify", "reason": "string", "replacement": "string", "evidence": "string" }.
 
 When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.`;

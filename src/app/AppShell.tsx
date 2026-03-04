@@ -24,7 +24,7 @@ const navItems = [
 
 const kidNavItems = [
   { label: 'Today', to: '/today' },
-  { label: 'Progress', to: '/progress' },
+  { label: 'My Stuff', to: '/records/portfolio' },
   { label: 'Dad Lab', to: '/week/lab' },
 ]
 

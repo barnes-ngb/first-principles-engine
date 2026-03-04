@@ -832,6 +832,10 @@ Return as JSON:
           skillTags: item.skillTags,
           ladderRef: item.ladderRef,
           source: 'planner' as const,
+          mvdEssential: item.mvdEssential ?? item.category === 'must-do',
+          category: item.category ?? 'must-do',
+          estimatedMinutes: item.estimatedMinutes,
+          subjectBucket: item.subjectBucket,
         }))
 
         const blocks: DayBlock[] = dayItems

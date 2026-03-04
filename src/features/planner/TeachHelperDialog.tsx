@@ -15,6 +15,7 @@ import { doc, getDoc } from 'firebase/firestore'
 
 import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import type { ChecklistItem, LadderCardDefinition, SkillSnapshot } from '../../core/types/domain'
+import { fixUnicodeEscapes } from '../../core/utils/format'
 
 interface TeachHelperDialogProps {
   open: boolean
@@ -103,7 +104,7 @@ export default function TeachHelperDialog({
                 </Typography>
                 {ladderInfo.rung && (
                   <Typography variant="body2" color="text.secondary">
-                    Evidence: {ladderInfo.rung.evidenceText}
+                    Evidence: {fixUnicodeEscapes(ladderInfo.rung.evidenceText)}
                   </Typography>
                 )}
               </Box>
@@ -132,7 +133,7 @@ export default function TeachHelperDialog({
               </Typography>
               <Typography variant="body2">
                 <strong>4. Check (1 min):</strong> Ask {childName} to explain what they did.
-                {ladderInfo?.rung && ` Look for: ${ladderInfo.rung.evidenceText}`}
+                {ladderInfo?.rung && ` Look for: ${fixUnicodeEscapes(ladderInfo.rung.evidenceText)}`}
               </Typography>
             </Stack>
           </Box>
@@ -148,7 +149,7 @@ export default function TeachHelperDialog({
                 <Stack spacing={0.5}>
                   {supports.map((s, i) => (
                     <Typography key={i} variant="body2">
-                      \u2022 <strong>{s.label}:</strong> {s.description}
+                      \u2022 <strong>{fixUnicodeEscapes(s.label)}:</strong> {fixUnicodeEscapes(s.description)}
                     </Typography>
                   ))}
                 </Stack>
@@ -168,10 +169,10 @@ export default function TeachHelperDialog({
                   {stopRules.map((rule, i) => (
                     <Alert key={i} severity="info" variant="outlined" sx={{ py: 0 }}>
                       <Typography variant="body2">
-                        <strong>If:</strong> {rule.trigger}
+                        <strong>If:</strong> {fixUnicodeEscapes(rule.trigger)}
                       </Typography>
                       <Typography variant="body2">
-                        <strong>Then:</strong> {rule.action}
+                        <strong>Then:</strong> {fixUnicodeEscapes(rule.action)}
                       </Typography>
                     </Alert>
                   ))}

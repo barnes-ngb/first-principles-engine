@@ -1,4 +1,5 @@
 import { getFirestore } from "firebase-admin/firestore";
+import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { claudeApiKey } from "./aiConfig.js";
 
@@ -391,6 +392,32 @@ export async function generateReviewForChild(
 
   return reviewData;
 }
+
+// ── On-demand callable (Generate Now) ───────────────────────────
+
+export const generateWeeklyReviewNow = onCall(
+  { secrets: [claudeApiKey] },
+  async (request) => {
+    const { familyId, childId, weekKey } = request.data as {
+      familyId?: string;
+      childId?: string;
+      weekKey?: string;
+    };
+
+    if (!familyId || !childId || !weekKey) {
+      throw new HttpsError(
+        "invalid-argument",
+        "familyId, childId, and weekKey are required.",
+      );
+    }
+
+    const apiKey = claudeApiKey.value();
+    const ctx = await assembleWeekContext(familyId, childId, weekKey);
+    await generateReviewForChild(familyId, ctx, apiKey);
+
+    return { success: true };
+  },
+);
 
 // ── Scheduled Cloud Function ────────────────────────────────────
 

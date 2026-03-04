@@ -5,27 +5,38 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
 import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents'
+import EventNoteIcon from '@mui/icons-material/EventNote'
 import ThumbDownIcon from '@mui/icons-material/ThumbDown'
 import ThumbUpIcon from '@mui/icons-material/ThumbUp'
 import { doc, onSnapshot, setDoc } from 'firebase/firestore'
+import { getFunctions, httpsCallable } from 'firebase/functions'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { app } from '../../core/firebase/firebase'
 import { weeklyReviewsCollection, weeklyReviewDocId } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { PaceAdjustment, WeeklyReview } from '../../core/types/domain'
 import { AdjustmentDecision, ReviewStatus } from '../../core/types/enums'
 import { getWeekRange } from '../../core/utils/time'
+
+const functions = getFunctions(app)
+const generateReviewFn = httpsCallable<
+  { familyId: string; childId: string; weekKey: string },
+  { success: boolean }
+>(functions, 'generateWeeklyReviewNow')
 
 export default function WeeklyReviewPage() {
   const familyId = useFamilyId()
@@ -175,12 +186,13 @@ export default function WeeklyReviewPage() {
       />
 
       {!childrenLoading && !isLoading && activeChildId && !review && (
-        <SectionCard title="No Review Yet">
-          <Typography color="text.secondary">
-            No AI-generated review is available for {activeChild?.name ?? 'this child'} this week.
-            Reviews are generated automatically at the end of each week.
-          </Typography>
-        </SectionCard>
+        <EmptyReviewState
+          childName={activeChild?.name ?? 'this child'}
+          familyId={familyId}
+          childId={activeChildId}
+          weekKey={weekKey}
+          onSnack={setSnack}
+        />
       )}
 
       {!childrenLoading && !isLoading && review && (
@@ -347,6 +359,54 @@ export default function WeeklyReviewPage() {
         </Alert>
       </Snackbar>
     </Page>
+  )
+}
+
+// ── Empty Review State ──────────────────────────────────────────
+
+interface EmptyReviewStateProps {
+  childName: string
+  familyId: string
+  childId: string
+  weekKey: string
+  onSnack: (snack: { text: string; severity: 'success' | 'error' }) => void
+}
+
+function EmptyReviewState({ childName, familyId, childId, weekKey, onSnack }: EmptyReviewStateProps) {
+  const [generating, setGenerating] = useState(false)
+
+  const handleGenerateNow = async () => {
+    setGenerating(true)
+    try {
+      await generateReviewFn({ familyId, childId, weekKey })
+      onSnack({ text: `Review generated for ${childName}!`, severity: 'success' })
+    } catch (err) {
+      console.error('Failed to generate review on demand', err)
+      onSnack({ text: 'Failed to generate review. Try again.', severity: 'error' })
+    }
+    setGenerating(false)
+  }
+
+  return (
+    <SectionCard title="No Review Yet">
+      <Stack spacing={2} alignItems="center" sx={{ py: 2, textAlign: 'center' }}>
+        <EventNoteIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
+        <Typography color="text.secondary">
+          Your weekly review for {childName} will be generated Sunday evening at 7 PM.
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          For the best review, log your daily activities on the Today page throughout the week.
+        </Typography>
+        <Button
+          variant="outlined"
+          startIcon={generating ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
+          onClick={handleGenerateNow}
+          disabled={generating}
+        >
+          {generating ? 'Generating\u2026' : 'Generate Now'}
+        </Button>
+      </Stack>
+    </SectionCard>
   )
 }
 
