@@ -110,37 +110,40 @@ function buildSystemPrompt(child: ChildContext, taskType: TaskType): string {
 
 // ── Plan output format instructions ─────────────────────────────
 
-const PLAN_OUTPUT_INSTRUCTIONS = `When the user asks you to generate or create a plan, respond ONLY with valid JSON matching this schema:
-${JSON.stringify({
-  days: [
+const PLAN_OUTPUT_INSTRUCTIONS = `OUTPUT FORMAT INSTRUCTIONS:
+When the user asks you to generate, create, or build a plan (or says "generate the plan", "make a plan", "plan the week", etc.), respond ONLY with valid JSON matching this exact schema — no markdown fences, no preamble, no explanation:
+
+{
+  "days": [
     {
-      day: "string (Monday-Friday)",
-      timeBudgetMinutes: "number",
-      items: [
+      "day": "Monday",
+      "timeBudgetMinutes": 150,
+      "items": [
         {
-          title: "string",
-          subjectBucket: "Reading|Math|LanguageArts|Science|SocialStudies|Other",
-          estimatedMinutes: "number",
-          skillTags: ["string"],
-          accepted: true,
-        },
-      ],
-    },
+          "title": "Activity name",
+          "subjectBucket": "Reading",
+          "estimatedMinutes": 15,
+          "skillTags": ["optional.dot.delimited.tag"],
+          "isAppBlock": false,
+          "accepted": true
+        }
+      ]
+    }
   ],
-  skipSuggestions: [
-    {
-      action: "string",
-      reason: "string",
-      replacement: "string",
-      evidence: "string",
-    },
-  ],
-  minimumWin: "string",
-})}
+  "skipSuggestions": [],
+  "minimumWin": "One sentence describing the minimum viable accomplishment for the week."
+}
 
-Valid subjectBucket values: Reading, Math, LanguageArts, Science, SocialStudies, Other.
+Rules:
+- Days must be Monday through Friday (5 days).
+- Respect the hours-per-day budget the user specifies.
+- Valid subjectBucket values: Reading, LanguageArts, Math, Science, SocialStudies, Other.
+- Include app blocks (like Reading Eggs, Math app) as items with "isAppBlock": true.
+- Every item must have "accepted": true.
+- "estimatedMinutes" must be a positive number.
+- "skipSuggestions" is an array of { "action": "skip"|"modify", "reason": "string", "replacement": "string", "evidence": "string" }.
 
-No markdown fences, no preamble. When the user is just chatting or asking questions, respond normally in plain text.`;
+When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.`;
 
 // ── Callable Cloud Function ─────────────────────────────────────
 
