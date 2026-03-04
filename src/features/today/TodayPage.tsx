@@ -75,10 +75,12 @@ import {
   SubjectBucket,
   UserProfile,
 } from '../../core/types/enums'
+import { getWeekRange } from '../../core/utils/time'
 import { blockMeta } from './blockMeta'
 import { getTemplateForChild } from './dailyPlanTemplates'
 import { autoFillBlockMinutes } from './daylog.model'
 import HelperPanel from './HelperPanel'
+import KidTodayView from './KidTodayView'
 import LadderQuickLog from './LadderQuickLog'
 import RoutineSection from './RoutineSection'
 import { useDailyPlan } from './useDailyPlan'
@@ -567,6 +569,22 @@ export default function TodayPage() {
     }
     return 'Not saved yet'
   }, [dayLog, lastSavedAt])
+
+  // Kid profile early return — render dedicated kid view
+  if (isKidProfile && dayLog && activeChild) {
+    const weekRange = getWeekRange(parseDateYmd(today) ?? new Date())
+    return (
+      <KidTodayView
+        dayLog={dayLog}
+        child={activeChild}
+        persistDayLogImmediate={persistDayLogImmediate}
+        familyId={familyId}
+        today={today}
+        weekStart={weekRange.start}
+        isMvd={planType === PlanType.Mvd}
+      />
+    )
+  }
 
   if (!dayLog) {
     return (

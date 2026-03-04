@@ -215,6 +215,10 @@ export interface ChecklistItem {
   mvdEssential?: boolean
   /** Source of this item: 'planner' for AI/planner-generated, 'manual' for user-added. */
   source?: 'planner' | 'manual'
+  /** Category for kid-facing view: must-do, choose, or routine. */
+  category?: 'must-do' | 'choose' | 'routine'
+  /** Estimated duration in minutes (kid-facing display). */
+  estimatedMinutes?: number
 }
 
 export interface ArtifactTags {
@@ -687,6 +691,8 @@ export interface DraftPlanItem {
   assignmentId?: string
   /** When true, this item is part of the Minimum Viable Day (MVD) set. */
   mvdEssential?: boolean
+  /** Category for kid-facing view: must-do or choose. */
+  category?: 'must-do' | 'choose'
 }
 
 export interface PlannerConversation {
