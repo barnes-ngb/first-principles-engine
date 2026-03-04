@@ -97,12 +97,40 @@ const subjectBucketColor: Record<string, string> = {
   Other: '#6b7280',
 }
 
+/** Infer a subject bucket from the item label when subjectBucket is not set. */
+function inferSubjectBucket(label: string): string | undefined {
+  const lower = label.toLowerCase()
+  if (/\bread|reading eggs|phonics|book\b/.test(lower)) return 'Reading'
+  if (/\bmath|addition|subtraction|multiply|division|arithmetic\b/.test(lower)) return 'Math'
+  if (/\blanguage|grammar|writing|spelling|handwriting\b/.test(lower)) return 'LanguageArts'
+  if (/\bscience|experiment|nature|biology\b/.test(lower)) return 'Science'
+  if (/\bhistory|social studies|geography\b/.test(lower)) return 'History'
+  if (/\bart|draw|paint|craft\b/.test(lower)) return 'Art'
+  if (/\bmusic|piano|sing\b/.test(lower)) return 'Music'
+  if (/\bpe|exercise|movement|run\b/.test(lower)) return 'PE'
+  return undefined
+}
+
+/** Get color for a checklist item, using subjectBucket or inferring from label. */
+function getItemColor(item: ChecklistItemType): string | undefined {
+  const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
+  return bucket ? (subjectBucketColor[bucket] ?? '#6b7280') : undefined
+}
+
 function formatMinutes(mins: number): string {
   const h = Math.floor(mins / 60)
   const m = mins % 60
   if (h === 0) return `${m}m`
   if (m === 0) return `${h}h`
   return `${h}h ${m}m`
+}
+
+function formatTime12h(date: Date): string {
+  const h = date.getHours()
+  const m = date.getMinutes()
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 || 12
+  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`
 }
 
 export default function TodayPage() {
@@ -671,7 +699,6 @@ export default function TodayPage() {
           : rawChecklist.map((item, i) => ({ ...item, mvdEssential: i < 3 }))
         const completedCount = checklist.filter((item) => item.completed).length
         const totalPlannedMinutes = checklist.reduce((sum, item) => sum + (item.plannedMinutes ?? 0), 0)
-        const budgetMinutes = isMvd ? 90 : 150 // MVD ~1.5h, Normal ~2.5h
 
         const handleReorder = (fromIndex: number, direction: 'up' | 'down') => {
           const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1
@@ -745,31 +772,26 @@ export default function TodayPage() {
           }>
             {hasPlanItems ? (
               <Stack spacing={1.5}>
-                {/* Summary bar */}
-                <Stack direction="row" spacing={2} alignItems="center" sx={{ px: 0.5 }}>
-                  <Chip
-                    icon={<ChecklistIcon />}
-                    label={`${completedCount} of ${checklist.length} done`}
-                    size="small"
-                    color={completedCount === checklist.length ? 'success' : 'default'}
-                    variant="outlined"
-                  />
-                  {totalPlannedMinutes > 0 && (
-                    <Chip
-                      icon={<AccessTimeIcon />}
-                      label={`${formatMinutes(totalPlannedMinutes)} of ${formatMinutes(budgetMinutes)} planned`}
-                      size="small"
-                      variant="outlined"
-                    />
-                  )}
-                </Stack>
+                {/* Summary line */}
+                <Typography variant="body2" color="text.secondary" sx={{ px: 0.5 }}>
+                  {formatMinutes(totalPlannedMinutes)} planned{' \u00B7 '}
+                  {completedCount} of {checklist.length} done
+                  {(() => {
+                    const remainingMinutes = checklist
+                      .filter((ci) => !ci.completed)
+                      .reduce((sum, ci) => sum + (ci.plannedMinutes ?? 0), 0)
+                    if (remainingMinutes > 0 && completedCount < checklist.length) {
+                      const est = new Date(Date.now() + remainingMinutes * 60_000)
+                      return ` \u00B7 Est. finish: ${formatTime12h(est)}`
+                    }
+                    return ''
+                  })()}
+                </Typography>
 
                 {/* Checklist items */}
                 {checklist.map((item, index) => {
                   const isDimmed = isMvd && item.mvdEssential !== true
-                  const chipColor = item.subjectBucket
-                    ? subjectBucketColor[item.subjectBucket] ?? '#6b7280'
-                    : undefined
+                  const dotColor = getItemColor(item)
 
                   if (editingPlan) {
                     return (
@@ -832,6 +854,17 @@ export default function TodayPage() {
                         ...(isDimmed && !item.completed ? { opacity: 0.5 } : {}),
                       }}
                     >
+                      {dotColor && (
+                        <Box
+                          sx={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: '50%',
+                            bgcolor: dotColor,
+                            flexShrink: 0,
+                          }}
+                        />
+                      )}
                       <Checkbox
                         checked={item.completed}
                         onChange={() => {
@@ -860,18 +893,6 @@ export default function TodayPage() {
                         <Typography variant="caption" color="text.secondary">
                           {item.plannedMinutes}m
                         </Typography>
-                      )}
-                      {chipColor && item.subjectBucket && (
-                        <Chip
-                          label={item.subjectBucket}
-                          size="small"
-                          sx={{
-                            bgcolor: `${chipColor}18`,
-                            color: chipColor,
-                            fontSize: '0.7rem',
-                            height: 22,
-                          }}
-                        />
                       )}
                       {isDimmed && !item.completed && (
                         <Chip label="(stretch)" size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
