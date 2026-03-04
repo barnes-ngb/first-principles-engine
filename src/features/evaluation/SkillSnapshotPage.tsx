@@ -106,9 +106,9 @@ export default function SkillSnapshotPage() {
     async (updated: SkillSnapshot) => {
       if (!snapshotRef) return
       setSnapshot(updated)
-      const result = await withSave(() =>
-        setDoc(snapshotRef, { ...updated, updatedAt: new Date().toISOString() }),
-      )
+      // Strip undefined values — Firestore rejects them
+      const cleaned = JSON.parse(JSON.stringify({ ...updated, updatedAt: new Date().toISOString() }))
+      const result = await withSave(() => setDoc(snapshotRef, cleaned))
       if (result === undefined) {
         setSnack({ text: 'Failed to save.', severity: 'error' })
       }
@@ -134,6 +134,7 @@ export default function SkillSnapshotPage() {
       tag: '',
       label: '',
       level: SkillLevel.Emerging,
+      notes: '',
     }
     void persist({ ...snapshot, prioritySkills: [...snapshot.prioritySkills, newSkill] })
   }, [snapshot, persist])
