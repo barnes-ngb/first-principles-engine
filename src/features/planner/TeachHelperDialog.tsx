@@ -69,6 +69,23 @@ export default function TeachHelperDialog({
     }
 
     setLoadingCard(true)
+
+    // Strategy 0: direct lookup by lessonCardId (auto-generated on plan apply)
+    if (item.lessonCardId) {
+      const ref = doc(lessonCardsCollection(familyId), item.lessonCardId)
+      getDoc(ref)
+        .then((snap) => {
+          if (snap.exists()) {
+            setLessonCard({ ...(snap.data() as LessonCard), id: snap.id })
+          } else {
+            setLessonCard(null)
+          }
+        })
+        .finally(() => setLoadingCard(false))
+      return
+    }
+
+    // Fallback: query-based matching
     const q = query(
       lessonCardsCollection(familyId),
       where('childId', '==', childId),

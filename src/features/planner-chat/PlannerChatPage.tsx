@@ -844,11 +844,85 @@ Generate a plan for Monday through Friday.`.trim()
     setCurrentDraft(updated)
   }, [currentDraft])
 
+  // Map SubjectBucket to activity type for the generate Cloud Function
+  const subjectToActivityType = useCallback((subject: SubjectBucket): string => {
+    switch (subject) {
+      case SubjectBucket.Reading: return 'reading'
+      case SubjectBucket.LanguageArts: return 'phonics'
+      case SubjectBucket.Math: return 'math'
+      default: return 'other'
+    }
+  }, [])
+
   // Apply plan to WeekPlan + DayLogs
   const handleApplyPlan = useCallback(async () => {
     if (!activeChildId || !currentDraft) return
     try {
-      // Write WeekPlan update
+      // Step 1: Auto-generate lesson cards for non-app-block must-do items
+      const itemsNeedingCards = currentDraft.days
+        .flatMap((d) => d.items)
+        .filter((item) => item.accepted && !item.isAppBlock && item.category === 'must-do')
+        // Deduplicate by title (same activity across days only needs one card)
+        .filter((item, i, arr) => arr.findIndex((x) => x.title === item.title) === i)
+
+      const lessonCardMap = new Map<string, string>() // title → lessonCardDocId
+
+      if (itemsNeedingCards.length > 0) {
+        setSnack({ text: `Preparing lesson cards... (0 of ${itemsNeedingCards.length})`, severity: 'info' })
+        let completedCount = 0
+
+        const batchSize = 3
+        for (let i = 0; i < itemsNeedingCards.length; i += batchSize) {
+          const batch = itemsNeedingCards.slice(i, i + batchSize)
+          await Promise.allSettled(
+            batch.map(async (item) => {
+              try {
+                const activityType = subjectToActivityType(item.subjectBucket)
+                const skillTag = item.skillTags[0] || `${item.subjectBucket.toLowerCase()}.general`
+                const response = await generateActivity({
+                  familyId,
+                  childId: activeChildId,
+                  activityType,
+                  skillTag,
+                  estimatedMinutes: item.estimatedMinutes,
+                })
+
+                if (response?.activity) {
+                  const card: Omit<LessonCard, 'id'> = {
+                    childId: activeChildId,
+                    planItemId: item.id,
+                    title: response.activity.title,
+                    durationMinutes: item.estimatedMinutes,
+                    objective: response.activity.objective,
+                    materials: response.activity.materials,
+                    steps: response.activity.steps,
+                    supports: [],
+                    evidenceChecks: response.activity.successCriteria,
+                    skillTags: item.skillTags,
+                    ...(item.ladderRef ? { ladderRef: item.ladderRef } : {}),
+                    createdAt: new Date().toISOString(),
+                  }
+                  const docRef = await addDoc(lessonCardsCollection(familyId), card)
+                  lessonCardMap.set(item.title, docRef.id)
+                }
+              } catch (err) {
+                console.warn(`Failed to generate lesson card for ${item.title}`, err)
+                // Non-fatal — continue without card
+              } finally {
+                completedCount++
+                setSnack({
+                  text: `Preparing lesson cards... (${completedCount} of ${itemsNeedingCards.length})`,
+                  severity: 'info',
+                })
+              }
+            }),
+          )
+        }
+      }
+
+      setSnack({ text: 'Applying plan...', severity: 'info' })
+
+      // Step 2: Write WeekPlan update
       const weekRef = doc(weeksCollection(familyId), weekRange.start)
       const weekSnap = await getDoc(weekRef)
       if (weekSnap.exists()) {
@@ -900,6 +974,7 @@ Generate a plan for Monday through Friday.`.trim()
           category: item.category ?? 'must-do',
           estimatedMinutes: item.estimatedMinutes,
           subjectBucket: item.subjectBucket,
+          ...(lessonCardMap.get(item.title) ? { lessonCardId: lessonCardMap.get(item.title) } : {}),
         }))
 
         const blocks: DayBlock[] = dayItems
@@ -964,7 +1039,7 @@ Generate a plan for Monday through Friday.`.trim()
       console.error('Failed to apply plan', err)
       setSnack({ text: 'Failed to apply plan.', severity: 'error' })
     }
-  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation])
+  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType])
 
   const minimumWin = buildMinimumWinText(snapshot)
 
@@ -1019,16 +1094,6 @@ Generate a plan for Monday through Friday.`.trim()
       ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
     })
   }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied])
-
-  // Map SubjectBucket to activity type for the generate Cloud Function
-  const subjectToActivityType = useCallback((subject: SubjectBucket): string => {
-    switch (subject) {
-      case SubjectBucket.Reading: return 'reading'
-      case SubjectBucket.LanguageArts: return 'phonics'
-      case SubjectBucket.Math: return 'math'
-      default: return 'other'
-    }
-  }, [])
 
   // Generate activity for a plan item
   const handleGenerateActivity = useCallback(async (item: DraftPlanItem) => {
