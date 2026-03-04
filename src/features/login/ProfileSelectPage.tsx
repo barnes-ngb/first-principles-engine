@@ -4,6 +4,8 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { UserProfile } from '../../core/types/enums'
 import { useProfile } from '../../core/profile/useProfile'
+import MinecraftAvatar from '../minecraft/MinecraftAvatar'
+import { ARMOR_TIERS } from '../minecraft/armorTiers'
 
 const profiles = [
   {
@@ -162,42 +164,44 @@ export default function ProfileSelectPage() {
               )}
 
               {/* Avatar */}
-              <Box
-                sx={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: p.avatarRadius,
-                  backgroundColor: isMinecraft
-                    ? '#8B6914'
-                    : isMario
+              {isMinecraft ? (
+                <Box sx={{ mt: 1 }}>
+                  <MinecraftAvatar
+                    tier={ARMOR_TIERS[3]}
+                    scale={4}
+                    showTitle
+                  />
+                </Box>
+              ) : (
+                <Box
+                  sx={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: p.avatarRadius,
+                    backgroundColor: isMario
                       ? p.color
                       : `${p.color}20`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: isMinecraft ? '1.2rem' : '1.5rem',
-                  fontWeight: 700,
-                  fontFamily: isMinecraft
-                    ? '"Press Start 2P", monospace'
-                    : isMario
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '1.5rem',
+                    fontWeight: 700,
+                    fontFamily: isMario
                       ? '"Luckiest Guy", sans-serif'
                       : 'inherit',
-                  color: isMinecraft || isMario ? '#fff' : p.color,
-                  border: isMinecraft
-                    ? '3px solid rgba(0,0,0,0.3)'
-                    : isMario
+                    color: isMario ? '#fff' : p.color,
+                    border: isMario
                       ? '3px solid #fff'
                       : 'none',
-                  boxShadow: isMinecraft
-                    ? '3px 3px 0px rgba(0,0,0,0.2)'
-                    : isMario
+                    boxShadow: isMario
                       ? '0 3px 0 rgba(0,0,0,0.2)'
                       : 'none',
-                  mt: 1,
-                }}
-              >
-                {p.label[0]}
-              </Box>
+                    mt: 1,
+                  }}
+                >
+                  {p.label[0]}
+                </Box>
+              )}
 
               {/* Name */}
               <Typography

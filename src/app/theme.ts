@@ -12,11 +12,14 @@ const familyPalette = {
   background: { default: '#f5f5f7', paper: '#ffffff' },
 }
 
-/* Minecraft palette — grass green, dirt brown, stone gray */
+/* Minecraft palette — grass green, dirt brown, stone gray, creeper dark */
 const lincolnPalette = {
   primary: { main: '#5A8C32' },
   secondary: { main: '#8B6914' },
-  background: { default: '#d7e5c0', paper: '#f0ead6' },
+  background: { default: '#c6d9a8', paper: '#ede4cf' },
+  success: { main: '#7EFC20' },   // XP green (matches in-game XP bar)
+  info: { main: '#5DECF5' },      // Diamond cyan
+  warning: { main: '#FCDB5B' },   // Gold yellow
 }
 
 /* Super Mario palette — Mario red, coin gold, sky blue */
@@ -56,10 +59,11 @@ const bodyFonts: Record<ThemeMode, string> = {
 /* Background patterns — subtle CSS-based repeating patterns */
 const backgroundPatterns: Record<ThemeMode, string> = {
   family: 'none',
-  // Minecraft dirt/grass block grid
+  // Minecraft dirt/grass block grid with grass-top accent
   lincoln: [
-    'linear-gradient(rgba(90,140,50,0.12) 1px, transparent 1px),',
-    'linear-gradient(90deg, rgba(90,140,50,0.12) 1px, transparent 1px)',
+    'linear-gradient(rgba(90,140,50,0.15) 1px, transparent 1px),',
+    'linear-gradient(90deg, rgba(90,140,50,0.15) 1px, transparent 1px),',
+    'linear-gradient(180deg, rgba(90,140,50,0.06) 0%, transparent 50%)',
   ].join('\n'),
   // Mario sky with subtle cloud puffs
   london: [
@@ -83,7 +87,7 @@ const backgroundPatterns: Record<ThemeMode, string> = {
 
 const backgroundSizes: Record<ThemeMode, string | undefined> = {
   family: undefined,
-  lincoln: '32px 32px',   // 32×32 block grid like Minecraft
+  lincoln: '32px 32px, 32px 32px, 100% 100%',   // block grid + grass gradient
   london: '200px 120px',
 }
 
@@ -232,12 +236,14 @@ export function buildTheme(mode: ThemeMode) {
       MuiAppBar: {
         styleOverrides: {
           root: {
-            // Minecraft: dark oak toolbar
+            // Minecraft: dark oak plank toolbar with crafting-table texture
             ...(mode === 'lincoln'
               ? {
                   borderRadius: 0,
-                  borderBottom: '3px solid rgba(0,0,0,0.3)',
-                  boxShadow: '0 3px 0 rgba(0,0,0,0.15)',
+                  borderBottom: '4px solid rgba(0,0,0,0.35)',
+                  boxShadow: '0 4px 0 rgba(0,0,0,0.15), inset 0 -1px 0 rgba(139,105,20,0.3)',
+                  backgroundImage: 'linear-gradient(90deg, rgba(139,105,20,0.08) 1px, transparent 1px)',
+                  backgroundSize: '32px 32px',
                 }
               : {}),
             // Mario: pipe green accent bar
@@ -276,6 +282,64 @@ export function buildTheme(mode: ThemeMode) {
             // Minecraft: square avatars like player heads
             ...(mode === 'lincoln'
               ? { borderRadius: 0, border: '2px solid rgba(0,0,0,0.3)' }
+              : {}),
+          },
+        },
+      },
+      MuiLinearProgress: {
+        styleOverrides: {
+          root: {
+            // Minecraft: pixel XP bar style
+            ...(mode === 'lincoln'
+              ? {
+                  height: 10,
+                  borderRadius: 0,
+                  border: '2px solid rgba(0,0,0,0.3)',
+                  backgroundColor: '#1A1A1A',
+                }
+              : {}),
+          },
+          bar: {
+            ...(mode === 'lincoln'
+              ? {
+                  borderRadius: 0,
+                  background: 'linear-gradient(180deg, #7EFC20 0%, #5BC010 50%, #3A8008 100%)',
+                }
+              : {}),
+          },
+        },
+      },
+      MuiTab: {
+        styleOverrides: {
+          root: {
+            // Minecraft: inventory slot tabs
+            ...(mode === 'lincoln'
+              ? {
+                  fontFamily: '"Press Start 2P", monospace',
+                  fontSize: '0.55rem',
+                  borderRadius: 0,
+                  minHeight: 40,
+                  textTransform: 'none' as const,
+                  '&.Mui-selected': {
+                    backgroundColor: 'rgba(90,140,50,0.15)',
+                    borderBottom: '3px solid #5A8C32',
+                  },
+                }
+              : {}),
+          },
+        },
+      },
+      MuiAlert: {
+        styleOverrides: {
+          root: {
+            // Minecraft: notification toast style
+            ...(mode === 'lincoln'
+              ? {
+                  borderRadius: 0,
+                  border: '2px solid rgba(0,0,0,0.2)',
+                  fontFamily: '"Space Mono", monospace',
+                  boxShadow: '3px 3px 0px rgba(0,0,0,0.15)',
+                }
               : {}),
           },
         },
