@@ -73,8 +73,9 @@ jobs:
 
       - name: Deploy Cloud Functions
         if: steps.functions-changed.outputs.changed == 'true'
-        uses: w9jds/firebase-action@v15.8.0
-        with:
-          args: deploy --only functions --project barneshome-3dfbb
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /tmp/gcp_key.json
+          npx firebase-tools@latest deploy --only functions --project barneshome-3dfbb --non-interactive --force
+          rm -f /tmp/gcp_key.json
         env:
-          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp_key.json
