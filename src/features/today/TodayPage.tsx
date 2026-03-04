@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import AccessTimeIcon from '@mui/icons-material/AccessTime'
 import ChecklistIcon from '@mui/icons-material/Checklist'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import SchoolIcon from '@mui/icons-material/School'
 import Accordion from '@mui/material/Accordion'
 import AccordionDetails from '@mui/material/AccordionDetails'
 import AccordionSummary from '@mui/material/AccordionSummary'
@@ -14,6 +15,7 @@ import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import FormControlLabel from '@mui/material/FormControlLabel'
+import IconButton from '@mui/material/IconButton'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
 import MenuItem from '@mui/material/MenuItem'
@@ -22,6 +24,7 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
+import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import {
   addDoc,
@@ -75,6 +78,26 @@ import RoutineSection from './RoutineSection'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
 import { calculateXp } from './xp'
+
+const subjectBucketColor: Record<string, string> = {
+  Reading: '#3b82f6',
+  LanguageArts: '#8b5cf6',
+  Math: '#10b981',
+  Science: '#06b6d4',
+  History: '#f59e0b',
+  Art: '#ec4899',
+  Music: '#a855f7',
+  PE: '#f97316',
+  Other: '#6b7280',
+}
+
+function formatMinutes(mins: number): string {
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  if (h === 0) return `${m}m`
+  if (m === 0) return `${h}h`
+  return `${h}h ${m}m`
+}
 
 export default function TodayPage() {
   const [searchParams] = useSearchParams()
@@ -595,68 +618,11 @@ export default function TodayPage() {
 
       <HelperPanel template={activeTemplate} />
 
-      {dayLog.checklist && dayLog.checklist.length > 0 && (
-        <SectionCard title="Today's Plan">
-          <Stack spacing={1}>
-            {dayLog.checklist.map((item, index) => {
-              const isMvd = planType === PlanType.Mvd
-              const isDimmed = isMvd && item.mvdEssential !== true
-              return (
-                <FormControlLabel
-                  key={index}
-                  control={
-                    <Checkbox
-                      checked={item.completed}
-                      onChange={() => {
-                        const updated = {
-                          ...dayLog,
-                          checklist: dayLog.checklist!.map((ci, i) =>
-                            i === index ? { ...ci, completed: !ci.completed } : ci
-                          ),
-                        }
-                        persistDayLogImmediate(updated)
-                      }}
-                    />
-                  }
-                  label={
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <span>{item.label}</span>
-                      {isDimmed && (
-                        <Chip label="stretch goal" size="small" variant="outlined" sx={{ fontSize: '0.7rem' }} />
-                      )}
-                    </Stack>
-                  }
-                  sx={{
-                    ...(item.completed ? { textDecoration: 'line-through', opacity: 0.6 } : {}),
-                    ...(isDimmed && !item.completed ? { opacity: 0.5 } : {}),
-                  }}
-                />
-              )
-            })}
-          </Stack>
-        </SectionCard>
-      )}
-
-      <RoutineSection
-        key={`${selectedChildId}_${today}`}
-        dayLog={dayLog}
-        onUpdate={handleRoutineUpdate}
-        onUpdateImmediate={handleRoutineUpdateImmediate}
-        routineItems={activeRoutineItems}
-      />
-
-      {cardLadders.length > 0 && selectedChildId && (
-        <LadderQuickLog
-          familyId={familyId}
-          childId={selectedChildId}
-          ladders={cardLadders}
-        />
-      )}
-
+      {/* --- Energy selector --- */}
       <SectionCard title={`DayLog (${dayLog.date})`}>
         <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
           <Typography color="text.secondary" variant="body2">
-            Capture today&apos;s highlights and reflections.
+            How&apos;s your energy today?
           </Typography>
           <Stack direction="row" spacing={1} alignItems="center">
             <ToggleButtonGroup
@@ -680,245 +646,136 @@ export default function TodayPage() {
             <SaveIndicator state={saveState} />
           </Stack>
         </Stack>
-        <Stack spacing={1}>
-          {dayLog.blocks
-          .map((block, originalIndex) => ({ block, originalIndex }))
-          .filter(({ block }) =>
-            planType === PlanType.Mvd
-              ? block.type === DayBlockType.Reading || block.type === DayBlockType.Math
-              : true,
-          )
-          .filter((_entry, filteredIndex) =>
-            planType === PlanType.Normal ? showAllBlocks || filteredIndex < 4 : true,
-          )
-          .map(({ block, originalIndex: index }) => {
-            const meta = blockMeta[block.type]
-            const checklistDone = block.checklist?.filter((i) => i.completed).length ?? 0
-            const checklistTotal = block.checklist?.length ?? 0
-            const hasTime = block.actualMinutes != null || block.plannedMinutes != null
-            return (
-              <Accordion
-                key={`${block.type}-${index}`}
-                disableGutters
-                sx={{
-                  '&::before': { display: 'none' },
-                  borderLeft: `4px solid ${meta.color}`,
-                  borderRadius: 1,
-                }}
-              >
-                <AccordionSummary
-                  expandIcon={<ExpandMoreIcon />}
-                  sx={{ px: 2, py: 0.5 }}
-                >
-                  <Stack direction="row" spacing={1.5} alignItems="center" sx={{ width: '100%' }}>
-                    <Avatar
+      </SectionCard>
+
+      {/* --- Today's Plan checklist (PRIMARY) --- */}
+      {(() => {
+        const checklist = dayLog.checklist ?? []
+        const hasPlanItems = checklist.length > 0
+        const isMvd = planType === PlanType.Mvd
+        const completedCount = checklist.filter((item) => item.completed).length
+        const totalPlannedMinutes = checklist.reduce((sum, item) => sum + (item.plannedMinutes ?? 0), 0)
+        const budgetMinutes = isMvd ? 90 : 150 // MVD ~1.5h, Normal ~2.5h
+
+        return (
+          <SectionCard title="Today's Plan">
+            {hasPlanItems ? (
+              <Stack spacing={1.5}>
+                {/* Summary bar */}
+                <Stack direction="row" spacing={2} alignItems="center" sx={{ px: 0.5 }}>
+                  <Chip
+                    icon={<ChecklistIcon />}
+                    label={`${completedCount} of ${checklist.length} done`}
+                    size="small"
+                    color={completedCount === checklist.length ? 'success' : 'default'}
+                    variant="outlined"
+                  />
+                  {totalPlannedMinutes > 0 && (
+                    <Chip
+                      icon={<AccessTimeIcon />}
+                      label={`${formatMinutes(totalPlannedMinutes)} of ${formatMinutes(budgetMinutes)} planned`}
+                      size="small"
+                      variant="outlined"
+                    />
+                  )}
+                </Stack>
+
+                {/* Checklist items */}
+                {checklist.map((item, index) => {
+                  const isDimmed = isMvd && item.mvdEssential !== true
+                  const chipColor = item.subjectBucket
+                    ? subjectBucketColor[item.subjectBucket] ?? '#6b7280'
+                    : undefined
+                  return (
+                    <Stack
+                      key={index}
+                      direction="row"
+                      spacing={0.5}
+                      alignItems="center"
                       sx={{
-                        bgcolor: `${meta.color}20`,
-                        color: meta.color,
-                        width: 40,
-                        height: 40,
+                        ...(item.completed ? { textDecoration: 'line-through', opacity: 0.6 } : {}),
+                        ...(isDimmed && !item.completed ? { opacity: 0.5 } : {}),
                       }}
                     >
-                      {meta.icon}
-                    </Avatar>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1 }}>
-                      {meta.label}
-                    </Typography>
-                    {hasTime && (
-                      <Chip
-                        icon={<AccessTimeIcon />}
-                        size="small"
-                        label={
-                          block.actualMinutes != null
-                            ? `${block.actualMinutes}m`
-                            : `${block.plannedMinutes ?? 0}m planned`
-                        }
-                        variant="outlined"
-                        sx={{ borderColor: meta.color, color: meta.color }}
-                      />
-                    )}
-                    {checklistTotal > 0 && (
-                      <Chip
-                        icon={<ChecklistIcon />}
-                        size="small"
-                        label={`${checklistDone}/${checklistTotal}`}
-                        variant="outlined"
-                        color={checklistDone === checklistTotal ? 'success' : 'default'}
-                      />
-                    )}
-                  </Stack>
-                </AccordionSummary>
-                <AccordionDetails sx={{ px: 2, pb: 2 }}>
-                  <Stack spacing={2}>
-                    <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                      <TextField
-                        label="Subject bucket"
-                        select
-                        fullWidth
-                        size="small"
-                        value={block.subjectBucket ?? ''}
-                        onChange={(event) =>
-                          handleBlockFieldChange(
-                            index,
-                            'subjectBucket',
-                            event.target.value || undefined,
+                      <Checkbox
+                        checked={item.completed}
+                        onChange={() => {
+                          const newCompleted = !item.completed
+                          const updatedChecklist = dayLog.checklist!.map((ci, i) =>
+                            i === index ? { ...ci, completed: newCompleted } : ci
                           )
-                        }
-                      >
-                        <MenuItem value="">Unassigned</MenuItem>
-                        {Object.values(SubjectBucket).map((bucket) => (
-                          <MenuItem key={bucket} value={bucket}>
-                            {bucket}
-                          </MenuItem>
-                        ))}
-                      </TextField>
-                      <TextField
-                        label="Location"
-                        select
-                        fullWidth
-                        size="small"
-                        value={block.location ?? ''}
-                        onChange={(event) =>
-                          handleBlockFieldChange(
-                            index,
-                            'location',
-                            event.target.value || undefined,
-                          )
-                        }
-                      >
-                        <MenuItem value="">Unassigned</MenuItem>
-                        {Object.values(LearningLocation).map((location) => (
-                          <MenuItem key={location} value={location}>
-                            {location}
-                          </MenuItem>
-                        ))}
-                      </TextField>
-                    </Stack>
-                    <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                      <TextField
-                        label="Planned minutes"
-                        type="number"
-                        size="small"
-                        value={block.plannedMinutes ?? ''}
-                        onChange={(event) =>
-                          handleBlockFieldChange(
-                            index,
-                            'plannedMinutes',
-                            event.target.value === ''
-                              ? undefined
-                              : Number(event.target.value),
-                          )
-                        }
-                      />
-                      <TextField
-                        label="Actual minutes"
-                        type="number"
-                        size="small"
-                        value={block.actualMinutes ?? ''}
-                        onChange={(event) =>
-                          handleBlockFieldChange(
-                            index,
-                            'actualMinutes',
-                            event.target.value === ''
-                              ? undefined
-                              : Number(event.target.value),
-                          )
-                        }
-                      />
-                    </Stack>
-                    <TextField
-                      label="Quick note"
-                      multiline
-                      minRows={2}
-                      size="small"
-                      value={block.notes ?? ''}
-                      onChange={(event) =>
-                        handleBlockFieldChange(index, 'notes', event.target.value)
-                      }
-                    />
-                    {block.checklist && block.checklist.length > 0 ? (
-                      <Stack spacing={0.5}>
-                        {block.checklist.map((item, itemIndex) => (
-                          <Stack key={`${item.label}-${itemIndex}`} direction="row" spacing={0.5} alignItems="center">
-                            <FormControlLabel
-                              sx={{ flex: 1 }}
-                              control={
-                                <Checkbox
-                                  checked={item.completed}
-                                  size="small"
-                                  onChange={() =>
-                                    handleChecklistToggle(index, itemIndex)
-                                  }
-                                />
+                          // Auto-set actualMinutes on corresponding block when checking
+                          let updatedBlocks = dayLog.blocks
+                          if (newCompleted && item.plannedMinutes) {
+                            updatedBlocks = dayLog.blocks.map((block) => {
+                              const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
+                              if (matchesLabel && (block.actualMinutes == null || block.actualMinutes === 0)) {
+                                return { ...block, actualMinutes: item.plannedMinutes }
                               }
-                              label={
-                                <Typography variant="body2">{item.label}</Typography>
-                              }
-                            />
-                            <Button
-                              size="small"
-                              variant="text"
-                              onClick={() => {
-                                setTeachHelperItem(item)
-                                setTeachHelperOpen(true)
-                              }}
-                              sx={{ fontSize: '0.7rem', minWidth: 'auto', px: 0.5 }}
-                            >
-                              Help
-                            </Button>
-                          </Stack>
-                        ))}
-                      </Stack>
-                    ) : (
-                      <FormControlLabel
-                        control={
-                          <Checkbox
-                            checked={block.actualMinutes != null && block.actualMinutes > 0}
+                              return block
+                            })
+                          }
+                          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist, blocks: updatedBlocks })
+                        }}
+                      />
+                      <Typography variant="body2" sx={{ flex: 1 }}>
+                        {item.label}
+                      </Typography>
+                      {item.plannedMinutes != null && item.plannedMinutes > 0 && (
+                        <Typography variant="caption" color="text.secondary">
+                          {item.plannedMinutes}m
+                        </Typography>
+                      )}
+                      {chipColor && item.subjectBucket && (
+                        <Chip
+                          label={item.subjectBucket}
+                          size="small"
+                          sx={{
+                            bgcolor: `${chipColor}18`,
+                            color: chipColor,
+                            fontSize: '0.7rem',
+                            height: 22,
+                          }}
+                        />
+                      )}
+                      {isDimmed && !item.completed && (
+                        <Chip label="(stretch)" size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
+                      )}
+                      {!item.completed && (
+                        <Tooltip title="Help me teach this">
+                          <IconButton
                             size="small"
-                            onChange={(_e, checked) => {
-                              const planned = block.plannedMinutes ?? 0
-                              handleBlockFieldChange(
-                                index,
-                                'actualMinutes',
-                                checked ? (planned > 0 ? planned : undefined) : undefined,
-                              )
+                            onClick={() => {
+                              setTeachHelperItem(item)
+                              setTeachHelperOpen(true)
                             }}
-                          />
-                        }
-                        label={
-                          <Typography variant="body2" color="text.secondary">
-                            Mark complete ({block.plannedMinutes ?? 0}m)
-                          </Typography>
-                        }
-                      />
-                    )}
-                  </Stack>
-                </AccordionDetails>
-              </Accordion>
-            )
-          })}
-          {planType === PlanType.Normal && !showAllBlocks && dayLog.blocks.length > 4 && (
-            <Button
-              size="small"
-              onClick={() => setShowAllBlocks(true)}
-              sx={{ alignSelf: 'flex-start' }}
-            >
-              Show more ({dayLog.blocks.length - 4} more)
-            </Button>
-          )}
-          {planType === PlanType.Normal && showAllBlocks && dayLog.blocks.length > 4 && (
-            <Button
-              size="small"
-              onClick={() => setShowAllBlocks(false)}
-              sx={{ alignSelf: 'flex-start' }}
-            >
-              Show less
-            </Button>
-          )}
-        </Stack>
-      </SectionCard>
+                          >
+                            <SchoolIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    </Stack>
+                  )
+                })}
+              </Stack>
+            ) : (
+              <Stack spacing={1} sx={{ py: 1 }}>
+                <Typography color="text.secondary">
+                  No plan for today yet.{' '}
+                  <RouterLink to="/planner" style={{ color: 'inherit' }}>
+                    Go to Plan My Week
+                  </RouterLink>{' '}
+                  to create one, or use the routine below.
+                </Typography>
+              </Stack>
+            )}
+          </SectionCard>
+        )
+      })()}
+
+      {/* --- Quick Capture --- */}
       <div ref={artifactSectionRef} />
-      <SectionCard title="Capture Artifact">
+      <SectionCard title="Quick Capture">
         <Stack spacing={2}>
           <ToggleButtonGroup
             value={artifactForm.evidenceType}
@@ -1163,6 +1020,274 @@ export default function TodayPage() {
           )}
         </Stack>
       </SectionCard>
+
+      {/* --- Detailed Tracking (collapsed legacy sections) --- */}
+      <Accordion defaultExpanded={(dayLog.checklist?.length ?? 0) === 0}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle1" color="text.secondary">
+            Detailed Tracking (Routine, Ladders, Blocks)
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2}>
+            <RoutineSection
+              key={`${selectedChildId}_${today}`}
+              dayLog={dayLog}
+              onUpdate={handleRoutineUpdate}
+              onUpdateImmediate={handleRoutineUpdateImmediate}
+              routineItems={activeRoutineItems}
+            />
+
+            {cardLadders.length > 0 && selectedChildId && (
+              <LadderQuickLog
+                familyId={familyId}
+                childId={selectedChildId}
+                ladders={cardLadders}
+              />
+            )}
+
+            {/* DayLog Blocks */}
+            <SectionCard title="Day Blocks">
+              <Stack spacing={1}>
+                {dayLog.blocks
+                .map((block, originalIndex) => ({ block, originalIndex }))
+                .filter(({ block }) =>
+                  planType === PlanType.Mvd
+                    ? block.type === DayBlockType.Reading || block.type === DayBlockType.Math
+                    : true,
+                )
+                .filter((_entry, filteredIndex) =>
+                  planType === PlanType.Normal ? showAllBlocks || filteredIndex < 4 : true,
+                )
+                .map(({ block, originalIndex: index }) => {
+                  const meta = blockMeta[block.type]
+                  const checklistDone = block.checklist?.filter((i) => i.completed).length ?? 0
+                  const checklistTotal = block.checklist?.length ?? 0
+                  const hasTime = block.actualMinutes != null || block.plannedMinutes != null
+                  return (
+                    <Accordion
+                      key={`${block.type}-${index}`}
+                      disableGutters
+                      sx={{
+                        '&::before': { display: 'none' },
+                        borderLeft: `4px solid ${meta.color}`,
+                        borderRadius: 1,
+                      }}
+                    >
+                      <AccordionSummary
+                        expandIcon={<ExpandMoreIcon />}
+                        sx={{ px: 2, py: 0.5 }}
+                      >
+                        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ width: '100%' }}>
+                          <Avatar
+                            sx={{
+                              bgcolor: `${meta.color}20`,
+                              color: meta.color,
+                              width: 40,
+                              height: 40,
+                            }}
+                          >
+                            {meta.icon}
+                          </Avatar>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1 }}>
+                            {meta.label}
+                          </Typography>
+                          {hasTime && (
+                            <Chip
+                              icon={<AccessTimeIcon />}
+                              size="small"
+                              label={
+                                block.actualMinutes != null
+                                  ? `${block.actualMinutes}m`
+                                  : `${block.plannedMinutes ?? 0}m planned`
+                              }
+                              variant="outlined"
+                              sx={{ borderColor: meta.color, color: meta.color }}
+                            />
+                          )}
+                          {checklistTotal > 0 && (
+                            <Chip
+                              icon={<ChecklistIcon />}
+                              size="small"
+                              label={`${checklistDone}/${checklistTotal}`}
+                              variant="outlined"
+                              color={checklistDone === checklistTotal ? 'success' : 'default'}
+                            />
+                          )}
+                        </Stack>
+                      </AccordionSummary>
+                      <AccordionDetails sx={{ px: 2, pb: 2 }}>
+                        <Stack spacing={2}>
+                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                            <TextField
+                              label="Subject bucket"
+                              select
+                              fullWidth
+                              size="small"
+                              value={block.subjectBucket ?? ''}
+                              onChange={(event) =>
+                                handleBlockFieldChange(
+                                  index,
+                                  'subjectBucket',
+                                  event.target.value || undefined,
+                                )
+                              }
+                            >
+                              <MenuItem value="">Unassigned</MenuItem>
+                              {Object.values(SubjectBucket).map((bucket) => (
+                                <MenuItem key={bucket} value={bucket}>
+                                  {bucket}
+                                </MenuItem>
+                              ))}
+                            </TextField>
+                            <TextField
+                              label="Location"
+                              select
+                              fullWidth
+                              size="small"
+                              value={block.location ?? ''}
+                              onChange={(event) =>
+                                handleBlockFieldChange(
+                                  index,
+                                  'location',
+                                  event.target.value || undefined,
+                                )
+                              }
+                            >
+                              <MenuItem value="">Unassigned</MenuItem>
+                              {Object.values(LearningLocation).map((location) => (
+                                <MenuItem key={location} value={location}>
+                                  {location}
+                                </MenuItem>
+                              ))}
+                            </TextField>
+                          </Stack>
+                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                            <TextField
+                              label="Planned minutes"
+                              type="number"
+                              size="small"
+                              value={block.plannedMinutes ?? ''}
+                              onChange={(event) =>
+                                handleBlockFieldChange(
+                                  index,
+                                  'plannedMinutes',
+                                  event.target.value === ''
+                                    ? undefined
+                                    : Number(event.target.value),
+                                )
+                              }
+                            />
+                            <TextField
+                              label="Actual minutes"
+                              type="number"
+                              size="small"
+                              value={block.actualMinutes ?? ''}
+                              onChange={(event) =>
+                                handleBlockFieldChange(
+                                  index,
+                                  'actualMinutes',
+                                  event.target.value === ''
+                                    ? undefined
+                                    : Number(event.target.value),
+                                )
+                              }
+                            />
+                          </Stack>
+                          <TextField
+                            label="Quick note"
+                            multiline
+                            minRows={2}
+                            size="small"
+                            value={block.notes ?? ''}
+                            onChange={(event) =>
+                              handleBlockFieldChange(index, 'notes', event.target.value)
+                            }
+                          />
+                          {block.checklist && block.checklist.length > 0 ? (
+                            <Stack spacing={0.5}>
+                              {block.checklist.map((item, itemIndex) => (
+                                <Stack key={`${item.label}-${itemIndex}`} direction="row" spacing={0.5} alignItems="center">
+                                  <FormControlLabel
+                                    sx={{ flex: 1 }}
+                                    control={
+                                      <Checkbox
+                                        checked={item.completed}
+                                        size="small"
+                                        onChange={() =>
+                                          handleChecklistToggle(index, itemIndex)
+                                        }
+                                      />
+                                    }
+                                    label={
+                                      <Typography variant="body2">{item.label}</Typography>
+                                    }
+                                  />
+                                  <Button
+                                    size="small"
+                                    variant="text"
+                                    onClick={() => {
+                                      setTeachHelperItem(item)
+                                      setTeachHelperOpen(true)
+                                    }}
+                                    sx={{ fontSize: '0.7rem', minWidth: 'auto', px: 0.5 }}
+                                  >
+                                    Help
+                                  </Button>
+                                </Stack>
+                              ))}
+                            </Stack>
+                          ) : (
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={block.actualMinutes != null && block.actualMinutes > 0}
+                                  size="small"
+                                  onChange={(_e, checked) => {
+                                    const planned = block.plannedMinutes ?? 0
+                                    handleBlockFieldChange(
+                                      index,
+                                      'actualMinutes',
+                                      checked ? (planned > 0 ? planned : undefined) : undefined,
+                                    )
+                                  }}
+                                />
+                              }
+                              label={
+                                <Typography variant="body2" color="text.secondary">
+                                  Mark complete ({block.plannedMinutes ?? 0}m)
+                                </Typography>
+                              }
+                            />
+                          )}
+                        </Stack>
+                      </AccordionDetails>
+                    </Accordion>
+                  )
+                })}
+                {planType === PlanType.Normal && !showAllBlocks && dayLog.blocks.length > 4 && (
+                  <Button
+                    size="small"
+                    onClick={() => setShowAllBlocks(true)}
+                    sx={{ alignSelf: 'flex-start' }}
+                  >
+                    Show more ({dayLog.blocks.length - 4} more)
+                  </Button>
+                )}
+                {planType === PlanType.Normal && showAllBlocks && dayLog.blocks.length > 4 && (
+                  <Button
+                    size="small"
+                    onClick={() => setShowAllBlocks(false)}
+                    sx={{ alignSelf: 'flex-start' }}
+                  >
+                    Show less
+                  </Button>
+                )}
+              </Stack>
+            </SectionCard>
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
 
       {selectedChildId && (
         <TeachHelperDialog
