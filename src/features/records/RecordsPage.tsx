@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { type SyntheticEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import Alert from '@mui/material/Alert'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Container from '@mui/material/Container'
 import Divider from '@mui/material/Divider'
 import FormControl from '@mui/material/FormControl'
 import InputLabel from '@mui/material/InputLabel'
@@ -8,11 +10,13 @@ import MenuItem from '@mui/material/MenuItem'
 import Select from '@mui/material/Select'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
+import Tab from '@mui/material/Tab'
 import Table from '@mui/material/Table'
 import TableBody from '@mui/material/TableBody'
 import TableCell from '@mui/material/TableCell'
 import TableHead from '@mui/material/TableHead'
 import TableRow from '@mui/material/TableRow'
+import Tabs from '@mui/material/Tabs'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import {
@@ -48,6 +52,8 @@ import { formatDateForInput } from '../../core/utils/format'
 import { getSchoolYearRange } from '../../core/utils/time'
 import { parseDateFromDocId } from '../today/daylog.model'
 import ComplianceDashboard from './ComplianceDashboard'
+import EvaluationsPage from './EvaluationsPage'
+import PortfolioPage from './PortfolioPage'
 import {
   buildComplianceZip,
   computeHoursSummary,
@@ -75,6 +81,31 @@ function downloadFile(content: string, filename: string, mimeType: string) {
 const subjectBucketOptions = Object.values(SubjectBucket)
 
 export default function RecordsPage() {
+  const [activeTab, setActiveTab] = useState(0)
+
+  const handleTabChange = (_: SyntheticEvent, newValue: number) => {
+    setActiveTab(newValue)
+  }
+
+  return (
+    <>
+      <Container maxWidth="lg" sx={{ pt: { xs: 2, md: 3 } }}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+          <Tabs value={activeTab} onChange={handleTabChange}>
+            <Tab label="Hours & Compliance" />
+            <Tab label="Evaluations" />
+            <Tab label="Portfolio" />
+          </Tabs>
+        </Box>
+      </Container>
+      {activeTab === 0 && <HoursComplianceTab />}
+      {activeTab === 1 && <EvaluationsPage />}
+      {activeTab === 2 && <PortfolioPage />}
+    </>
+  )
+}
+
+function HoursComplianceTab() {
   const familyId = useFamilyId()
   const { start, end } = useMemo(() => getSchoolYearRange(), [])
   const [startDate, setStartDate] = useState(start)

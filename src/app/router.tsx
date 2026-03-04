@@ -6,14 +6,13 @@ import SkillSnapshotPage from '../features/evaluation/SkillSnapshotPage'
 import KidsPage from '../features/kids/KidsPage'
 import LaddersPage from '../features/ladders/LaddersPage'
 import NotFoundPage from '../features/not-found/NotFoundPage'
-import PlannerPage from '../features/planner/PlannerPage'
 import PlannerChatPage from '../features/planner-chat/PlannerChatPage'
+import ProgressPage from '../features/progress/ProgressPage'
 import ProjectBoardPage from '../features/projects/ProjectBoardPage'
 import EvaluationsPage from '../features/records/EvaluationsPage'
 import PortfolioPage from '../features/records/PortfolioPage'
 import RecordsPage from '../features/records/RecordsPage'
 import ScoreboardPage from '../features/scoreboard/ScoreboardPage'
-import DashboardPage from '../features/sessions/DashboardPage'
 import SessionRunnerPage from '../features/sessions/SessionRunnerPage'
 import SettingsPage from '../features/settings/SettingsPage'
 import TodayPage from '../features/today/TodayPage'
@@ -29,13 +28,15 @@ const routes = [
       </AppShell>
     ),
     children: [
-      { index: true, element: <Navigate to="/dashboard" replace /> },
-      { path: '/dashboard', element: <DashboardPage /> },
+      { index: true, element: <Navigate to="/today" replace /> },
+      { path: '/dashboard', element: <Navigate to="/today" replace /> },
+      { path: '/planner', element: <Navigate to="/planner/chat" replace /> },
+      { path: '/today', element: <TodayPage /> },
       { path: '/sessions/run', element: <SessionRunnerPage /> },
       { path: '/scoreboard', element: <ScoreboardPage /> },
       { path: '/projects', element: <ProjectBoardPage /> },
-      { path: '/today', element: <TodayPage /> },
       { path: '/week/lab', element: <LabModePage /> },
+      { path: '/progress', element: <ProgressPage /> },
       {
         element: <RequireParent />,
         children: [
@@ -44,7 +45,6 @@ const routes = [
         ],
       },
       { path: '/engine', element: <EnginePage /> },
-      { path: '/planner', element: <PlannerPage /> },
       { path: '/planner/chat', element: <PlannerChatPage /> },
       { path: '/evaluation', element: <SkillSnapshotPage /> },
       { path: '/ladders', element: <LaddersPage /> },

@@ -201,10 +201,16 @@ export interface ChecklistItem {
   id?: string
   label: string
   completed: boolean
+  /** Planned duration in minutes for this item. */
+  plannedMinutes?: number
+  /** Subject bucket for color-coding. */
+  subjectBucket?: SubjectBucket
   /** Skill tags for engine/ladder alignment */
   skillTags?: SkillTag[]
   /** Optional ladder rung reference */
   ladderRef?: { ladderId: string; rungId: string }
+  /** When true, this item is part of the Minimum Viable Day (MVD) set. */
+  mvdEssential?: boolean
 }
 
 export interface ArtifactTags {
@@ -656,6 +662,8 @@ export interface DraftPlanItem {
   skipSuggestion?: SkipSuggestion
   accepted: boolean
   assignmentId?: string
+  /** When true, this item is part of the Minimum Viable Day (MVD) set. */
+  mvdEssential?: boolean
 }
 
 export interface PlannerConversation {
