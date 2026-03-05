@@ -716,7 +716,13 @@ export default function TodayPage() {
           ? rawChecklist
           : rawChecklist.map((item, i) => ({ ...item, mvdEssential: i < 3 }))
         const completedCount = checklist.filter((item) => item.completed).length
-        const totalPlannedMinutes = checklist.reduce((sum, item) => sum + (item.plannedMinutes ?? 0), 0)
+        const parseMinutesFromLabel = (label: string): number => {
+          const match = label.match(/\((\d+)m\)/)
+          return match ? parseInt(match[1]) : 0
+        }
+        const totalPlannedMinutes = checklist.reduce((sum, item) => {
+          return sum + (item.plannedMinutes ?? item.estimatedMinutes ?? parseMinutesFromLabel(item.label))
+        }, 0)
 
         const handleReorder = (fromIndex: number, direction: 'up' | 'down') => {
           const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1
@@ -797,7 +803,7 @@ export default function TodayPage() {
                   {(() => {
                     const remainingMinutes = checklist
                       .filter((ci) => !ci.completed)
-                      .reduce((sum, ci) => sum + (ci.plannedMinutes ?? 0), 0)
+                      .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
                     if (remainingMinutes > 0 && completedCount < checklist.length) {
                       const est = new Date(Date.now() + remainingMinutes * 60_000)
                       return ` \u00B7 Est. finish: ${formatTime12h(est)}`
