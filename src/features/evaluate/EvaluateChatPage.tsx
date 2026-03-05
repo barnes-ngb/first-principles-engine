@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import AssessmentIcon from '@mui/icons-material/Assessment'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
@@ -9,13 +10,18 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore'
+import { doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -125,6 +131,7 @@ function findingStatusIcon(status: EvaluationFinding['status']) {
 
 export default function EvaluateChatPage() {
   const familyId = useFamilyId()
+  const navigate = useNavigate()
   const { activeChildId, activeChild, children, setActiveChildId } = useActiveChild()
   const { chat, loading: aiLoading, error: aiError } = useAI()
 
@@ -136,8 +143,10 @@ export default function EvaluateChatPage() {
   const [nextEvalDate, setNextEvalDate] = useState<string | undefined>()
   const [sessionDocId, setSessionDocId] = useState<string | null>(null)
   const [sessionStatus, setSessionStatus] = useState<'in-progress' | 'complete'>('in-progress')
+  const [previousSessions, setPreviousSessions] = useState<EvaluationSession[]>([])
   const [inputText, setInputText] = useState('')
   const [initializing, setInitializing] = useState(true)
+  const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll on new messages
@@ -155,29 +164,31 @@ export default function EvaluateChatPage() {
     async function loadSession() {
       setInitializing(true)
       try {
-        // Check for existing in-progress session for this child + domain
-        const q = query(
+        // Load all sessions for this child + domain
+        const allQ = query(
           evaluationSessionsCollection(familyId),
           where('childId', '==', activeChildId),
           where('domain', '==', domain),
-          where('status', '==', 'in-progress'),
+          orderBy('evaluatedAt', 'desc'),
         )
-        const snap = await getDocs(q)
+        const allSnap = await getDocs(allQ)
 
         if (cancelled) return
 
-        if (!snap.empty) {
-          // Resume existing session
-          const existing = snap.docs[0]
-          const data = existing.data()
-          setSessionDocId(existing.id)
-          setMessages(data.messages || [])
-          setFindings(data.findings || [])
-          setRecommendations(data.recommendations || [])
-          setSessionStatus(data.status)
-          if (data.status === 'complete') {
-            setCompleteSummary('Evaluation complete.')
-          }
+        const allSessions = allSnap.docs.map((d) => ({ ...d.data(), id: d.id }))
+        setPreviousSessions(allSessions.filter((s) => s.status === 'complete'))
+
+        // Check for an in-progress session to resume
+        const inProgress = allSessions.find((s) => s.status === 'in-progress')
+
+        if (inProgress) {
+          setSessionDocId(inProgress.id!)
+          setMessages(inProgress.messages || [])
+          setFindings(inProgress.findings || [])
+          setRecommendations(inProgress.recommendations || [])
+          setSessionStatus(inProgress.status)
+          setCompleteSummary(inProgress.summary || null)
+          setNextEvalDate(inProgress.nextEvalDate)
         } else {
           // Fresh session
           setSessionDocId(null)
@@ -218,6 +229,7 @@ export default function EvaluateChatPage() {
         messages: msgs,
         findings: fndgs,
         recommendations: complete?.recommendations || recommendations,
+        summary: complete?.summary || completeSummary || undefined,
         evaluatedAt: new Date().toISOString(),
         nextEvalDate: complete?.nextEvalDate || nextEvalDate,
       }
@@ -237,7 +249,7 @@ export default function EvaluateChatPage() {
         console.error('Failed to persist evaluation session', err)
       }
     },
-    [activeChildId, domain, familyId, sessionDocId, recommendations, nextEvalDate],
+    [activeChildId, domain, familyId, sessionDocId, recommendations, completeSummary, nextEvalDate],
   )
 
   // ── Start evaluation (first AI message) ─────────────────────
@@ -411,6 +423,19 @@ export default function EvaluateChatPage() {
     }
   }, [activeChildId, familyId, findings])
 
+  // ── Clear & Restart ───────────────────────────────────────
+
+  const handleClear = useCallback(() => {
+    setMessages([])
+    setFindings([])
+    setRecommendations([])
+    setCompleteSummary(null)
+    setNextEvalDate(undefined)
+    setSessionDocId(null)
+    setSessionStatus('in-progress')
+    setClearDialogOpen(false)
+  }, [])
+
   // ── Handle Enter key ────────────────────────────────────────
 
   const handleKeyDown = useCallback(
@@ -452,10 +477,34 @@ export default function EvaluateChatPage() {
           scrollButtons="auto"
         >
           {DOMAIN_TABS.map((tab) => (
-            <Tab key={tab.value} value={tab.value} label={tab.label} />
+            <Tab
+              key={tab.value}
+              value={tab.value}
+              label={tab.value === EvaluationDomain.Reading ? tab.label : `${tab.label} (coming soon)`}
+              disabled={tab.value !== EvaluationDomain.Reading}
+            />
           ))}
         </Tabs>
       </Box>
+
+      {/* Previous evaluations */}
+      {previousSessions.length > 0 && (
+        <Box sx={{ mb: 1 }}>
+          <Typography variant="subtitle2" color="text.secondary">
+            Previous evaluations:
+          </Typography>
+          <Stack direction="row" flexWrap="wrap" gap={0.5} sx={{ mt: 0.5 }}>
+            {previousSessions.map((session) => (
+              <Chip
+                key={session.id}
+                label={`${session.domain} — ${new Date(session.evaluatedAt).toLocaleDateString()}`}
+                variant="outlined"
+                size="small"
+              />
+            ))}
+          </Stack>
+        </Box>
+      )}
 
       {!isDomainReady ? (
         <Alert severity="info">
@@ -658,17 +707,57 @@ export default function EvaluateChatPage() {
                 </Typography>
               )}
 
-              <Button
-                variant="contained"
-                sx={{ mt: 2 }}
-                onClick={handleSaveAndApply}
-              >
-                Save & Apply to Skill Snapshot
-              </Button>
+              <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+                <Button variant="contained" onClick={handleSaveAndApply}>
+                  Apply to Skill Snapshot
+                </Button>
+                <Button variant="outlined" onClick={() => navigate('/planner/chat')}>
+                  Plan Week
+                </Button>
+              </Stack>
             </Box>
           )}
+
+          {/* Action buttons */}
+          <Stack direction="row" spacing={1}>
+            {hasMessages && (
+              <Button
+                variant="outlined"
+                color="warning"
+                size="small"
+                onClick={() => setClearDialogOpen(true)}
+              >
+                Clear & Restart
+              </Button>
+            )}
+            {!completeSummary && hasMessages && (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => void persistSession(messages, findings)}
+              >
+                Save Progress
+              </Button>
+            )}
+          </Stack>
         </Stack>
       )}
+
+      {/* Clear confirmation dialog */}
+      <Dialog open={clearDialogOpen} onClose={() => setClearDialogOpen(false)}>
+        <DialogTitle>Clear & Restart?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This will clear all messages and findings from the current session. A new session will start fresh. Previous completed evaluations are not affected.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setClearDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleClear} color="warning" variant="contained">
+            Clear & Restart
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Page>
   )
 }
