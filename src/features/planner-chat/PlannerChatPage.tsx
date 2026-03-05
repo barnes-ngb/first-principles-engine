@@ -858,10 +858,12 @@ Generate a plan for Monday through Friday.`.trim()
   const handleApplyPlan = useCallback(async () => {
     if (!activeChildId || !currentDraft) return
     try {
-      // Step 1: Auto-generate lesson cards for non-app-block must-do items
+      // Step 1: Auto-generate lesson cards for non-app-block accepted items
+      // Note: category is optional and often unset, so we include items that are
+      // either explicitly 'must-do', have no category set, or are mvdEssential.
       const itemsNeedingCards = currentDraft.days
         .flatMap((d) => d.items)
-        .filter((item) => item.accepted && !item.isAppBlock && item.category === 'must-do')
+        .filter((item) => item.accepted && !item.isAppBlock && item.category !== 'choose')
         // Deduplicate by title (same activity across days only needs one card)
         .filter((item, i, arr) => arr.findIndex((x) => x.title === item.title) === i)
 
@@ -877,6 +879,7 @@ Generate a plan for Monday through Friday.`.trim()
           await Promise.allSettled(
             batch.map(async (item) => {
               try {
+                console.log(`[LessonCards] Generating card for: "${item.title}" (${item.subjectBucket})`)
                 const activityType = subjectToActivityType(item.subjectBucket)
                 const skillTag = item.skillTags[0] || `${item.subjectBucket.toLowerCase()}.general`
                 const response = await generateActivity({
@@ -888,6 +891,7 @@ Generate a plan for Monday through Friday.`.trim()
                 })
 
                 if (response?.activity) {
+                  console.log(`[LessonCards] Generated card for: "${item.title}"`, response.activity.title)
                   const card: Omit<LessonCard, 'id'> = {
                     childId: activeChildId,
                     planItemId: item.id,
@@ -906,7 +910,7 @@ Generate a plan for Monday through Friday.`.trim()
                   lessonCardMap.set(item.title, docRef.id)
                 }
               } catch (err) {
-                console.warn(`Failed to generate lesson card for ${item.title}`, err)
+                console.error(`[LessonCards] FAILED to generate card for "${item.title}":`, err)
                 // Non-fatal — continue without card
               } finally {
                 completedCount++
@@ -918,6 +922,7 @@ Generate a plan for Monday through Friday.`.trim()
             }),
           )
         }
+        console.log(`[LessonCards] Generated ${lessonCardMap.size} of ${itemsNeedingCards.length} cards`, Object.fromEntries(lessonCardMap))
       }
 
       setSnack({ text: 'Applying plan...', severity: 'info' })

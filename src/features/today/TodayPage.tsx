@@ -916,7 +916,7 @@ export default function TodayPage() {
                         <Chip label="(stretch)" size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
                       )}
                       {!item.completed && (
-                        <Tooltip title="Help me teach this">
+                        <Tooltip title={item.lessonCardId ? 'View lesson plan' : 'Help me teach this'}>
                           <IconButton
                             size="small"
                             onClick={() => {
@@ -924,7 +924,11 @@ export default function TodayPage() {
                               setTeachHelperOpen(true)
                             }}
                           >
-                            <SchoolIcon fontSize="small" />
+                            <SchoolIcon
+                              fontSize="small"
+                              color={item.lessonCardId ? 'primary' : 'action'}
+                              sx={item.lessonCardId ? undefined : { opacity: 0.5 }}
+                            />
                           </IconButton>
                         </Tooltip>
                       )}
@@ -1454,13 +1458,14 @@ export default function TodayPage() {
                                   <Button
                                     size="small"
                                     variant="text"
+                                    color={item.lessonCardId ? 'primary' : 'inherit'}
                                     onClick={() => {
                                       setTeachHelperItem(item)
                                       setTeachHelperOpen(true)
                                     }}
-                                    sx={{ fontSize: '0.7rem', minWidth: 'auto', px: 0.5 }}
+                                    sx={{ fontSize: '0.7rem', minWidth: 'auto', px: 0.5, opacity: item.lessonCardId ? 1 : 0.6 }}
                                   >
-                                    Help
+                                    {item.lessonCardId ? 'Lesson' : 'Help'}
                                   </Button>
                                 </Stack>
                               ))}
