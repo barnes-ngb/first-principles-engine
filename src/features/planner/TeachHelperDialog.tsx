@@ -47,8 +47,19 @@ export default function TeachHelperDialog({
 }: TeachHelperDialogProps) {
   const [snapshot, setSnapshot] = useState<SkillSnapshot | null>(null)
   const [lessonCard, setLessonCard] = useState<LessonCard | null>(null)
-  const [loadingCard, setLoadingCard] = useState(false)
+  const [loadedForKey, setLoadedForKey] = useState<string | null>(null)
   const { generate, loading: generating } = useGenerateActivity()
+
+  // Derive a stable key for the current lesson card request
+  const lessonCardKey = open && childId && item
+    ? `${childId}:${item.id ?? ''}:${item.lessonCardId ?? ''}`
+    : null
+
+  // Derive loading state: we need to load when we have a key but haven't loaded for it yet
+  const loadingCard = lessonCardKey !== null && loadedForKey !== lessonCardKey
+
+  // Derive effective lesson card — null when dialog is closed or still loading
+  const activeLessonCard = lessonCardKey !== null && !loadingCard ? lessonCard : null
 
   // Load skill snapshot
   useEffect(() => {
@@ -63,26 +74,24 @@ export default function TeachHelperDialog({
 
   // Load matching lesson card
   useEffect(() => {
-    if (!open || !childId || !item) {
-      setLessonCard(null)
-      return
-    }
+    if (!lessonCardKey || !childId || !item) return
 
-    setLoadingCard(true)
+    let cancelled = false
 
     // Strategy 0: direct lookup by lessonCardId (auto-generated on plan apply)
     if (item.lessonCardId) {
       const ref = doc(lessonCardsCollection(familyId), item.lessonCardId)
       getDoc(ref)
         .then((snap) => {
+          if (cancelled) return
           if (snap.exists()) {
             setLessonCard({ ...(snap.data() as LessonCard), id: snap.id })
           } else {
             setLessonCard(null)
           }
+          setLoadedForKey(lessonCardKey)
         })
-        .finally(() => setLoadingCard(false))
-      return
+      return () => { cancelled = true }
     }
 
     // Fallback: query-based matching
@@ -92,6 +101,7 @@ export default function TeachHelperDialog({
     )
     getDocs(q)
       .then((snap) => {
+        if (cancelled) return
         const cards = snap.docs.map((d) => ({
           ...(d.data() as LessonCard),
           id: d.id,
@@ -105,9 +115,11 @@ export default function TeachHelperDialog({
             return keyword.length > 2 && item.label.toLowerCase().includes(keyword)
           })
         setLessonCard(match ?? null)
+        setLoadedForKey(lessonCardKey)
       })
-      .finally(() => setLoadingCard(false))
-  }, [open, familyId, childId, item])
+
+    return () => { cancelled = true }
+  }, [lessonCardKey, familyId, childId, item])
 
   const ladderInfo = useMemo(() => {
     if (!item?.ladderRef) return null
@@ -209,21 +221,21 @@ export default function TeachHelperDialog({
             <Typography variant="body2" color="text.secondary">
               Loading lesson card…
             </Typography>
-          ) : lessonCard ? (
+          ) : activeLessonCard ? (
             /* ── SPECIFIC lesson card from planning ── */
             <>
               <Box>
-                <Typography variant="h6">{fixUnicodeEscapes(lessonCard.title)}</Typography>
+                <Typography variant="h6">{fixUnicodeEscapes(activeLessonCard.title)}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {fixUnicodeEscapes(lessonCard.objective)}
+                  {fixUnicodeEscapes(activeLessonCard.objective)}
                 </Typography>
               </Box>
 
-              {lessonCard.materials.length > 0 && (
+              {activeLessonCard.materials.length > 0 && (
                 <Box>
                   <Typography variant="subtitle2">Materials</Typography>
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                    {lessonCard.materials.map((m, i) => (
+                    {activeLessonCard.materials.map((m, i) => (
                       <Chip key={i} label={fixUnicodeEscapes(m)} size="small" variant="outlined" />
                     ))}
                   </Stack>
@@ -233,7 +245,7 @@ export default function TeachHelperDialog({
               <Box>
                 <Typography variant="subtitle2" color="primary">Steps</Typography>
                 <Stack spacing={1}>
-                  {lessonCard.steps.map((step, i) => (
+                  {activeLessonCard.steps.map((step, i) => (
                     <Typography key={i} variant="body2">
                       {i + 1}. {fixUnicodeEscapes(step)}
                     </Typography>
@@ -241,11 +253,11 @@ export default function TeachHelperDialog({
                 </Stack>
               </Box>
 
-              {lessonCard.evidenceChecks.length > 0 && (
+              {activeLessonCard.evidenceChecks.length > 0 && (
                 <Box>
                   <Typography variant="subtitle2">Success Criteria</Typography>
                   <Stack spacing={0.5}>
-                    {lessonCard.evidenceChecks.map((check, i) => (
+                    {activeLessonCard.evidenceChecks.map((check, i) => (
                       <Typography key={i} variant="body2">• {fixUnicodeEscapes(check)}</Typography>
                     ))}
                   </Stack>

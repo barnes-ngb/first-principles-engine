@@ -95,7 +95,7 @@ export default function KidTodayView({
   const [showCapture, setShowCapture] = useState<'photo' | 'note' | null>(null)
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
 
-  const checklist = dayLog.checklist ?? []
+  const checklist = useMemo(() => dayLog.checklist ?? [], [dayLog.checklist])
   const { mustDo, choose } = useMemo(() => categorizeItems(checklist), [checklist])
 
   const mustDoDone = mustDo.length > 0 && mustDo.every((item) => item.completed)
