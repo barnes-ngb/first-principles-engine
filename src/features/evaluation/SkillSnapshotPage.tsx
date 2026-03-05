@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
+import AssessmentIcon from '@mui/icons-material/Assessment'
 import DeleteIcon from '@mui/icons-material/Delete'
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
@@ -75,6 +77,7 @@ const emptySnapshot = (childId: string): SkillSnapshot => ({
 })
 
 export default function SkillSnapshotPage() {
+  const navigate = useNavigate()
   const familyId = useFamilyId()
   const { profile } = useProfile()
   const isParent = profile === UserProfile.Parents
@@ -373,10 +376,21 @@ export default function SkillSnapshotPage() {
 
   return (
     <Page>
-      <Typography variant="h4" component="h1">Lincoln Evaluation</Typography>
-      <Typography color="text.secondary" sx={{ mb: 1 }}>
-        Maintain a living Skill Snapshot used by the planner and teach helper.
-      </Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between">
+        <div>
+          <Typography variant="h4" component="h1">Lincoln Evaluation</Typography>
+          <Typography color="text.secondary">
+            Maintain a living Skill Snapshot used by the planner and teach helper.
+          </Typography>
+        </div>
+        <Button
+          variant="contained"
+          startIcon={<AssessmentIcon />}
+          onClick={() => navigate('/evaluate')}
+        >
+          Evaluate {activeChild?.name || 'Child'}'s Skills
+        </Button>
+      </Stack>
 
       {isParent ? (
         <ChildSelector

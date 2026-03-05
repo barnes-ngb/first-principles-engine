@@ -273,6 +273,14 @@ export const AdjustmentDecision = {
 export type AdjustmentDecision =
   (typeof AdjustmentDecision)[keyof typeof AdjustmentDecision]
 
+export const EvaluationDomain = {
+  Reading: 'reading',
+  Math: 'math',
+  Speech: 'speech',
+  Writing: 'writing',
+} as const
+export type EvaluationDomain = (typeof EvaluationDomain)[keyof typeof EvaluationDomain]
+
 export const RoutineItemKey = {
   Handwriting: 'handwriting',
   Spelling: 'spelling',

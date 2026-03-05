@@ -30,6 +30,8 @@ interface ChatRequest {
   childId: string;
   taskType: TaskType;
   messages: ChatMessage[];
+  /** Evaluation domain (only used when taskType === 'evaluate') */
+  domain?: string;
 }
 
 interface ChatResponse {
@@ -310,6 +312,7 @@ export function buildSystemPrompt(
   child: ChildContext,
   taskType: TaskType,
   enriched?: EnrichedContext,
+  domain?: string,
 ): string {
   const lines = [CHARTER_PREAMBLE];
 
@@ -402,6 +405,11 @@ export function buildSystemPrompt(
     lines.push("", PLAN_OUTPUT_INSTRUCTIONS);
   }
 
+  // ── Evaluation diagnostic prompt ──────────────────────────────
+  if (taskType === TaskType.Evaluate) {
+    lines.push("", buildEvaluationPrompt(domain || "reading"));
+  }
+
   return lines.join("\n");
 }
 
@@ -457,6 +465,91 @@ Rules:
 
 When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.`;
 
+// ── Evaluation diagnostic prompt ─────────────────────────────
+
+function buildEvaluationPrompt(domain: string): string {
+  const reading = `ROLE: You are a diagnostic reading specialist guiding a homeschool parent through a structured assessment of their child's reading skills.
+
+APPROACH:
+- Walk the parent through ONE step at a time. Never give multiple steps at once.
+- After each step, wait for the parent's response before proceeding.
+- Adapt: if the child clearly knows something, skip ahead. If they struggle, go deeper into that area.
+- Be specific: "he can blend -at words but not -ig words" not "he's developing blending skills."
+- Be encouraging about the child: every skill map has a frontier, that's normal and good.
+- Keep each step to 2-3 minutes of actual testing with the child.
+
+DIAGNOSTIC SEQUENCE FOR READING:
+
+Level 0: Phonemic Awareness
+- Can the child hear rhymes? (Do cat and hat rhyme?)
+- Can they identify first sounds? (What sound starts "mat"?)
+- Can they segment words into sounds? (What sounds are in "sit"? /s/ /i/ /t/)
+- Can they blend sounds into words? (What word is /s/ /i/ /t/?)
+If ALL solid → move to Level 1. If gaps → this is the frontier.
+
+Level 1: Letter-Sound Knowledge
+- Test consonant sounds (show letters, ask for sounds) in groups of 6
+- Test short vowels: a, e, i, o, u
+- Note any reversals (b/d, p/q) or unknowns
+If all known → Level 2. If gaps → fill these first.
+
+Level 2: CVC Blending (test by word family)
+- -at words: cat, hat, sat, mat, bat
+- -an words: can, man, ran, fan, pan
+- -it words: sit, hit, bit, fit, lit
+- -ig words: big, dig, pig, wig, fig
+- -ot words: hot, dot, got, lot, not
+- -ug words: bug, mug, rug, hug, jug
+- -en words: ten, hen, pen, den, men
+- -op words: hop, mop, top, pop, cop
+Test 3-4 families. If solid → move on. If some fail → those are the frontier.
+
+Level 3: Digraphs (sh, ch, th, wh)
+Level 4: Consonant Blends (bl, cr, st, tr, fl, gr, nd, nk)
+Level 5: Long Vowels & Silent-E (CVCe pattern)
+Level 6: Vowel Teams (ea, ai, oa, ee, oo)
+
+INSTRUCTIONS FOR EACH STEP:
+1. Tell the parent exactly what to show/ask the child
+2. Use specific words — don't say "test some CVC words," say "ask him to read: cat, hat, sat"
+3. Wait for the parent to report results
+4. Record findings in a <finding> block
+5. Decide whether to go deeper, skip ahead, or move to next level
+
+AFTER EACH PARENT RESPONSE, include a <finding> block:
+<finding>
+{
+  "skill": "phonics.cvc.short-a",
+  "status": "mastered",
+  "evidence": "Read 5/5 -at words correctly",
+  "notes": "Quick and confident"
+}
+</finding>
+
+WHEN DONE (you've identified the frontier), output a <complete> block:
+<complete>
+{
+  "summary": "Summary of the child's reading frontier...",
+  "recommendations": [
+    {
+      "priority": 1,
+      "skill": "phonics.cvc.short-o",
+      "action": "Practice -ot and -og word families daily.",
+      "duration": "2 weeks",
+      "frequency": "Daily, 8-10 minutes",
+      "materials": ["CVC word cards"]
+    }
+  ],
+  "nextEvalDate": "YYYY-MM-DD"
+}
+</complete>
+
+Do NOT output the <complete> block until you are confident you've mapped the child's frontier. Ask at least 3-4 probing steps.`;
+
+  if (domain === "reading") return reading;
+  return `Evaluate the child's ${domain} skills using a structured diagnostic approach. Walk the parent through ONE step at a time. After each parent response, include a <finding> block with JSON containing skill, status (mastered/emerging/not-yet/not-tested), evidence, and notes. When done, output a <complete> block with summary, recommendations array, and nextEvalDate.`;
+}
+
 // ── Callable Cloud Function ─────────────────────────────────────
 
 export const chat = onCall(
@@ -467,7 +560,7 @@ export const chat = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
-    const { familyId, childId, taskType, messages } =
+    const { familyId, childId, taskType, messages, domain } =
       request.data as ChatRequest;
 
     // ── Input validation ───────────────────────────────────────
@@ -545,6 +638,7 @@ export const chat = onCall(
       },
       taskType,
       enriched,
+      domain,
     );
 
     // ── Call Claude ─────────────────────────────────────────────
@@ -554,7 +648,7 @@ export const chat = onCall(
 
     const completion = await client.messages.create({
       model,
-      max_tokens: taskType === TaskType.Plan ? 4096 : 1024,
+      max_tokens: taskType === TaskType.Plan || taskType === TaskType.Evaluate ? 4096 : 1024,
       system: systemPrompt,
       messages: messages.map((m) => ({
         role: m.role,

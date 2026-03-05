@@ -6,6 +6,7 @@ import type {
   DayType,
   EnergyLevel,
   EngineStage,
+  EvaluationDomain,
   EvidenceType,
   LabSessionStatus,
   MasteryGate,
@@ -885,4 +886,35 @@ export interface WeeklyReview {
   reviewedAt?: string
   createdAt?: string
   updatedAt?: string
+}
+
+// ── Evaluation Sessions (Diagnostic Assessment Chat) ────────
+
+export interface EvaluationSession {
+  id?: string
+  childId: string
+  domain: EvaluationDomain
+  status: 'in-progress' | 'complete'
+  messages: ChatMessage[]
+  findings: EvaluationFinding[]
+  recommendations: EvaluationRecommendation[]
+  evaluatedAt: string
+  nextEvalDate?: string
+}
+
+export interface EvaluationFinding {
+  skill: string
+  status: 'mastered' | 'emerging' | 'not-yet' | 'not-tested'
+  evidence: string
+  notes?: string
+  testedAt: string
+}
+
+export interface EvaluationRecommendation {
+  priority: number
+  skill: string
+  action: string
+  duration: string
+  materials?: string[]
+  frequency: string
 }
