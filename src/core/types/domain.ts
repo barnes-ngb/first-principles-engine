@@ -219,6 +219,8 @@ export interface ChecklistItem {
   category?: 'must-do' | 'choose' | 'routine'
   /** Estimated duration in minutes (kid-facing display). */
   estimatedMinutes?: number
+  /** Linked lesson card document ID (auto-generated on plan apply). */
+  lessonCardId?: string
 }
 
 export interface ArtifactTags {

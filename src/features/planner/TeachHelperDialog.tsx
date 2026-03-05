@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CloseIcon from '@mui/icons-material/Close'
 import SchoolIcon from '@mui/icons-material/School'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
@@ -11,10 +13,11 @@ import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { doc, getDoc } from 'firebase/firestore'
+import { addDoc, doc, getDoc, getDocs, query, where } from 'firebase/firestore'
 
-import { skillSnapshotsCollection } from '../../core/firebase/firestore'
-import type { ChecklistItem, LadderCardDefinition, SkillSnapshot } from '../../core/types/domain'
+import { useGenerateActivity } from '../../core/ai/useAI'
+import { lessonCardsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
+import type { ChecklistItem, LadderCardDefinition, LessonCard, SkillSnapshot } from '../../core/types/domain'
 import { fixUnicodeEscapes } from '../../core/utils/format'
 
 interface TeachHelperDialogProps {
@@ -30,6 +33,8 @@ interface TeachHelperDialogProps {
 /**
  * "Help me teach this" dialog — provides a micro-lesson script
  * based on the plan item, skill snapshot, and ladder rung.
+ * When a saved lesson card exists for this item, shows it instead
+ * of the generic template.
  */
 export default function TeachHelperDialog({
   open,
@@ -41,7 +46,22 @@ export default function TeachHelperDialog({
   ladders,
 }: TeachHelperDialogProps) {
   const [snapshot, setSnapshot] = useState<SkillSnapshot | null>(null)
+  const [lessonCard, setLessonCard] = useState<LessonCard | null>(null)
+  const [loadedForKey, setLoadedForKey] = useState<string | null>(null)
+  const { generate, loading: generating } = useGenerateActivity()
 
+  // Derive a stable key for the current lesson card request
+  const lessonCardKey = open && childId && item
+    ? `${childId}:${item.id ?? ''}:${item.lessonCardId ?? ''}`
+    : null
+
+  // Derive loading state: we need to load when we have a key but haven't loaded for it yet
+  const loadingCard = lessonCardKey !== null && loadedForKey !== lessonCardKey
+
+  // Derive effective lesson card — null when dialog is closed or still loading
+  const activeLessonCard = lessonCardKey !== null && !loadingCard ? lessonCard : null
+
+  // Load skill snapshot
   useEffect(() => {
     if (!open || !childId) return
     const ref = doc(skillSnapshotsCollection(familyId), childId)
@@ -52,12 +72,95 @@ export default function TeachHelperDialog({
     })
   }, [open, familyId, childId])
 
+  // Load matching lesson card
+  useEffect(() => {
+    if (!lessonCardKey || !childId || !item) return
+
+    let cancelled = false
+
+    // Strategy 0: direct lookup by lessonCardId (auto-generated on plan apply)
+    if (item.lessonCardId) {
+      const ref = doc(lessonCardsCollection(familyId), item.lessonCardId)
+      getDoc(ref)
+        .then((snap) => {
+          if (cancelled) return
+          if (snap.exists()) {
+            setLessonCard({ ...(snap.data() as LessonCard), id: snap.id })
+          } else {
+            setLessonCard(null)
+          }
+          setLoadedForKey(lessonCardKey)
+        })
+      return () => { cancelled = true }
+    }
+
+    // Fallback: query-based matching
+    const q = query(
+      lessonCardsCollection(familyId),
+      where('childId', '==', childId),
+    )
+    getDocs(q)
+      .then((snap) => {
+        if (cancelled) return
+        const cards = snap.docs.map((d) => ({
+          ...(d.data() as LessonCard),
+          id: d.id,
+        }))
+        // Strategy 1: exact planItemId match
+        const match =
+          cards.find((c) => c.planItemId && item.id && c.planItemId === item.id) ||
+          // Strategy 2: title keyword match as fallback
+          cards.find((c) => {
+            const keyword = c.title.toLowerCase().split(' ')[0]
+            return keyword.length > 2 && item.label.toLowerCase().includes(keyword)
+          })
+        setLessonCard(match ?? null)
+        setLoadedForKey(lessonCardKey)
+      })
+
+    return () => { cancelled = true }
+  }, [lessonCardKey, familyId, childId, item])
+
   const ladderInfo = useMemo(() => {
     if (!item?.ladderRef) return null
     const ladder = ladders.find((l) => l.ladderKey === item.ladderRef!.ladderId)
     const rung = ladder?.rungs.find((r) => r.rungId === item.ladderRef!.rungId)
     return { ladder, rung }
   }, [item, ladders])
+
+  const handleGenerateForItem = useCallback(async () => {
+    if (!item || !childId) return
+
+    try {
+      const result = await generate({
+        familyId,
+        childId,
+        activityType: item.subjectBucket ?? 'general',
+        skillTag: item.skillTags?.[0] ?? 'general',
+        estimatedMinutes: item.estimatedMinutes ?? item.plannedMinutes ?? 10,
+      })
+
+      const card: Omit<LessonCard, 'id'> = {
+        childId,
+        planItemId: item.id,
+        title: result.activity.title,
+        durationMinutes: item.estimatedMinutes ?? item.plannedMinutes ?? 10,
+        objective: result.activity.objective,
+        materials: result.activity.materials,
+        steps: result.activity.steps,
+        supports: [],
+        evidenceChecks: result.activity.successCriteria,
+        skillTags: (item.skillTags ?? []),
+        ladderRef: item.ladderRef,
+        createdAt: new Date().toISOString(),
+      }
+
+      const docRef = await addDoc(lessonCardsCollection(familyId), card)
+      setLessonCard({ ...card, id: docRef.id })
+    } catch {
+      // Error is surfaced by the useGenerateActivity hook
+    }
+  }, [item, childId, familyId, generate])
 
   const supports = snapshot?.supports ?? []
   const stopRules = snapshot?.stopRules ?? []
@@ -100,7 +203,7 @@ export default function TeachHelperDialog({
                   Ladder
                 </Typography>
                 <Typography>
-                  {ladderInfo.ladder.title} \u2014 {ladderInfo.rung?.name ?? 'Unknown rung'}
+                  {ladderInfo.ladder.title} — {ladderInfo.rung?.name ?? 'Unknown rung'}
                 </Typography>
                 {ladderInfo.rung && (
                   <Typography variant="body2" color="text.secondary">
@@ -113,30 +216,93 @@ export default function TeachHelperDialog({
 
           <Divider />
 
-          {/* Micro-lesson script */}
-          <Box>
-            <Typography variant="subtitle2" color="primary" gutterBottom>
-              Micro-Lesson (5\u201310 min)
+          {/* Lesson content: saved card or generic template */}
+          {loadingCard ? (
+            <Typography variant="body2" color="text.secondary">
+              Loading lesson card…
             </Typography>
-            <Stack spacing={1}>
-              <Typography variant="body2">
-                <strong>1. Warm up (1 min):</strong> Start with something {childName} already
-                knows. Pick 2 easy examples to build confidence.
-              </Typography>
-              <Typography variant="body2">
-                <strong>2. Teach (2\u20133 min):</strong> Introduce the concept from the plan item.
-                Model it once, then do one together.
-              </Typography>
-              <Typography variant="body2">
-                <strong>3. Practice (3\u20135 min):</strong> Let {childName} try 3\u20135 examples.
-                Watch for frustration cues.
-              </Typography>
-              <Typography variant="body2">
-                <strong>4. Check (1 min):</strong> Ask {childName} to explain what they did.
-                {ladderInfo?.rung && ` Look for: ${fixUnicodeEscapes(ladderInfo.rung.evidenceText)}`}
-              </Typography>
-            </Stack>
-          </Box>
+          ) : activeLessonCard ? (
+            /* ── SPECIFIC lesson card from planning ── */
+            <>
+              <Box>
+                <Typography variant="h6">{fixUnicodeEscapes(activeLessonCard.title)}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {fixUnicodeEscapes(activeLessonCard.objective)}
+                </Typography>
+              </Box>
+
+              {activeLessonCard.materials.length > 0 && (
+                <Box>
+                  <Typography variant="subtitle2">Materials</Typography>
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                    {activeLessonCard.materials.map((m, i) => (
+                      <Chip key={i} label={fixUnicodeEscapes(m)} size="small" variant="outlined" />
+                    ))}
+                  </Stack>
+                </Box>
+              )}
+
+              <Box>
+                <Typography variant="subtitle2" color="primary">Steps</Typography>
+                <Stack spacing={1}>
+                  {activeLessonCard.steps.map((step, i) => (
+                    <Typography key={i} variant="body2">
+                      {i + 1}. {fixUnicodeEscapes(step)}
+                    </Typography>
+                  ))}
+                </Stack>
+              </Box>
+
+              {activeLessonCard.evidenceChecks.length > 0 && (
+                <Box>
+                  <Typography variant="subtitle2">Success Criteria</Typography>
+                  <Stack spacing={0.5}>
+                    {activeLessonCard.evidenceChecks.map((check, i) => (
+                      <Typography key={i} variant="body2">• {fixUnicodeEscapes(check)}</Typography>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
+            </>
+          ) : (
+            /* ── GENERIC fallback template ── */
+            <>
+              <Box>
+                <Typography variant="subtitle2" color="primary" gutterBottom>
+                  Micro-Lesson (5–10 min)
+                </Typography>
+                <Stack spacing={1}>
+                  <Typography variant="body2">
+                    <strong>1. Warm up (1 min):</strong> Start with something {childName} already
+                    knows. Pick 2 easy examples to build confidence.
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>2. Teach (2–3 min):</strong> Introduce the concept from the plan item.
+                    Model it once, then do one together.
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>3. Practice (3–5 min):</strong> Let {childName} try 3–5 examples.
+                    Watch for frustration cues.
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>4. Check (1 min):</strong> Ask {childName} to explain what they did.
+                    {ladderInfo?.rung && ` Look for: ${fixUnicodeEscapes(ladderInfo.rung.evidenceText)}`}
+                  </Typography>
+                </Stack>
+              </Box>
+
+              {/* Generate button */}
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<AutoAwesomeIcon />}
+                onClick={handleGenerateForItem}
+                disabled={generating}
+              >
+                {generating ? 'Generating…' : 'Generate Specific Lesson'}
+              </Button>
+            </>
+          )}
 
           {/* Supports */}
           {supports.length > 0 && (
@@ -149,7 +315,7 @@ export default function TeachHelperDialog({
                 <Stack spacing={0.5}>
                   {supports.map((s, i) => (
                     <Typography key={i} variant="body2">
-                      \u2022 <strong>{fixUnicodeEscapes(s.label)}:</strong> {fixUnicodeEscapes(s.description)}
+                      • <strong>{fixUnicodeEscapes(s.label)}:</strong> {fixUnicodeEscapes(s.description)}
                     </Typography>
                   ))}
                 </Stack>
@@ -189,16 +355,16 @@ export default function TeachHelperDialog({
             </Typography>
             <Stack spacing={0.5}>
               <Typography variant="body2">
-                \u2022 <strong>If stuck:</strong> &quot;Let&apos;s look at this together. What do you see first?&quot;
+                • <strong>If stuck:</strong> &quot;Let&apos;s look at this together. What do you see first?&quot;
               </Typography>
               <Typography variant="body2">
-                \u2022 <strong>If frustrated:</strong> &quot;It&apos;s okay to find this hard. Let&apos;s try an easier one and come back.&quot;
+                • <strong>If frustrated:</strong> &quot;It&apos;s okay to find this hard. Let&apos;s try an easier one and come back.&quot;
               </Typography>
               <Typography variant="body2">
-                \u2022 <strong>If rushing:</strong> &quot;Slow down \u2014 show me how you got that answer.&quot;
+                • <strong>If rushing:</strong> &quot;Slow down — show me how you got that answer.&quot;
               </Typography>
               <Typography variant="body2">
-                \u2022 <strong>If correct:</strong> &quot;You did it! Can you explain how?&quot;
+                • <strong>If correct:</strong> &quot;You did it! Can you explain how?&quot;
               </Typography>
             </Stack>
           </Box>
