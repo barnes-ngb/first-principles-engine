@@ -22,6 +22,8 @@ export interface ChatRequest {
   childId: string
   taskType: TaskType
   messages: ChatMessage[]
+  /** Evaluation domain (only used when taskType === 'evaluate') */
+  domain?: string
 }
 
 export interface ChatResponse {

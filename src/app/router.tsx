@@ -2,6 +2,7 @@ import { Navigate, Outlet, RouterProvider, createBrowserRouter } from 'react-rou
 import { AppShell } from './AppShell'
 import RequireParent from '../components/RequireParent'
 import EnginePage from '../features/engine/EnginePage'
+import EvaluateChatPage from '../features/evaluate/EvaluateChatPage'
 import SkillSnapshotPage from '../features/evaluation/SkillSnapshotPage'
 import KidsPage from '../features/kids/KidsPage'
 import LaddersPage from '../features/ladders/LaddersPage'
@@ -48,6 +49,7 @@ const routes = [
       { path: '/engine', element: <EnginePage /> },
       { path: '/planner/chat', element: <PlannerChatPage /> },
       { path: '/planner/legacy', element: <PlannerPage /> },
+      { path: '/evaluate', element: <EvaluateChatPage /> },
       { path: '/evaluation', element: <SkillSnapshotPage /> },
       { path: '/ladders', element: <LaddersPage /> },
       { path: '/kids', element: <KidsPage /> },
