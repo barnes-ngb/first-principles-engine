@@ -13,7 +13,7 @@
     "deploy": "npm run build && firebase deploy --except extensions",
     "deploy:hosting": "npm run build && firebase deploy --only hosting",
     "deploy:rules": "firebase deploy --only firestore:rules,storage",
-    "deploy:functions": "npm --prefix functions run lint && npm --prefix functions run build && firebase deploy --only functions --except extensions"
+    "deploy:functions": "npm --prefix functions run lint && npm --prefix functions run build && firebase deploy --only functions"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
