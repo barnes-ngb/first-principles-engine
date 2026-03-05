@@ -15,6 +15,7 @@ import type {
   DailyPlan,
   DayLog,
   Evaluation,
+  EvaluationSession,
   HoursAdjustment,
   HoursEntry,
   LabSession,
@@ -315,3 +316,10 @@ export const aiUsageCollection = (
   familyId: string,
 ): CollectionReference<AIUsageEntry> =>
   collection(db, `families/${familyId}/aiUsage`) as CollectionReference<AIUsageEntry>
+
+// ── Evaluation Sessions (Diagnostic Assessment Chat) ──────────
+
+export const evaluationSessionsCollection = (
+  familyId: string,
+): CollectionReference<EvaluationSession> =>
+  collection(db, `families/${familyId}/evaluationSessions`) as CollectionReference<EvaluationSession>
