@@ -319,7 +319,17 @@ export const aiUsageCollection = (
 
 // ── Evaluation Sessions (Diagnostic Assessment Chat) ──────────
 
+const evaluationSessionConverter: FirestoreDataConverter<EvaluationSession> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as EvaluationSession
+    return { ...data, id: snapshot.id }
+  },
+}
+
 export const evaluationSessionsCollection = (
   familyId: string,
 ): CollectionReference<EvaluationSession> =>
-  collection(db, `families/${familyId}/evaluationSessions`) as CollectionReference<EvaluationSession>
+  collection(db, `families/${familyId}/evaluationSessions`).withConverter(
+    evaluationSessionConverter,
+  ) as CollectionReference<EvaluationSession>

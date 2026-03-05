@@ -898,6 +898,7 @@ export interface EvaluationSession {
   messages: ChatMessage[]
   findings: EvaluationFinding[]
   recommendations: EvaluationRecommendation[]
+  summary?: string
   evaluatedAt: string
   nextEvalDate?: string
 }
