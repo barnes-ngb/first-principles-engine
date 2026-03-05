@@ -213,6 +213,7 @@ export default function TodayPage() {
     saveState,
     lastSavedAt,
     weekPlanId,
+    weekFocus,
     snackMessage,
     setSnackMessage,
     persistDayLog,
@@ -582,6 +583,7 @@ export default function TodayPage() {
         today={today}
         weekStart={weekRange.start}
         isMvd={planType === PlanType.Mvd}
+        weekFocus={weekFocus}
       />
     )
   }
@@ -704,6 +706,37 @@ export default function TodayPage() {
           </Stack>
         </Stack>
       </SectionCard>
+
+      {/* --- Week Focus --- */}
+      {weekFocus && (weekFocus.theme || weekFocus.scriptureRef) && (
+        <Box sx={{
+          p: 2, borderRadius: 2,
+          bgcolor: 'primary.50',
+          border: '1px solid',
+          borderColor: 'primary.100',
+        }}>
+          {weekFocus.theme && (
+            <Typography variant="subtitle2" color="primary.main">
+              Theme: {weekFocus.theme}
+            </Typography>
+          )}
+          {weekFocus.virtue && (
+            <Typography variant="body2" color="text.secondary">
+              Virtue: {weekFocus.virtue}
+            </Typography>
+          )}
+          {weekFocus.scriptureRef && (
+            <Typography variant="body2" sx={{ fontStyle: 'italic', mt: 0.5 }}>
+              📖 {weekFocus.scriptureRef}
+            </Typography>
+          )}
+          {weekFocus.heartQuestion && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              ❤️ {weekFocus.heartQuestion}
+            </Typography>
+          )}
+        </Box>
+      )}
 
       {/* --- Today's Plan checklist (PRIMARY) --- */}
       {(() => {

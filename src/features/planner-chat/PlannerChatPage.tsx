@@ -998,10 +998,10 @@ Generate a plan for Monday through Friday.`.trim()
           const existing = dayLogSnap.data()
           // Replace planner-generated items, keep manually-added ones
           const existingChecklist = (existing.checklist ?? []).filter(
-            (item: ChecklistItem) => item.source !== 'planner'
+            (item: ChecklistItem) => item.source === 'manual'
           )
           const existingBlocks = (existing.blocks ?? []).filter(
-            (block: DayBlock) => block.source !== 'planner'
+            (block: DayBlock) => block.source === 'manual'
           )
           await setDoc(dayLogRef, {
             ...existing,
@@ -1261,10 +1261,10 @@ Generate a plan for Monday through Friday.`.trim()
           const existing = dayLogSnap.data()
           // Keep manually-added items, remove planner-generated ones
           const manualChecklist = (existing.checklist ?? []).filter(
-            (item: ChecklistItem) => item.source !== 'planner'
+            (item: ChecklistItem) => item.source === 'manual'
           )
           const manualBlocks = (existing.blocks ?? []).filter(
-            (block: DayBlock) => block.source !== 'planner'
+            (block: DayBlock) => block.source === 'manual'
           )
           await updateDoc(dayLogRef, { checklist: manualChecklist, blocks: manualBlocks })
         }
