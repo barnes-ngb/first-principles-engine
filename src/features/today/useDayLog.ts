@@ -25,6 +25,12 @@ interface UseDayLogResult {
   saveState: SaveState
   lastSavedAt: string | null
   weekPlanId: string | undefined
+  weekFocus: {
+    theme?: string
+    virtue?: string
+    scriptureRef?: string
+    heartQuestion?: string
+  } | null
   snackMessage: { text: string; severity: 'success' | 'error' } | null
   setSnackMessage: React.Dispatch<
     React.SetStateAction<{ text: string; severity: 'success' | 'error' } | null>
@@ -50,6 +56,12 @@ export function useDayLog({
   }
 
   const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
+  const [weekFocus, setWeekFocus] = useState<{
+    theme?: string
+    virtue?: string
+    scriptureRef?: string
+    heartQuestion?: string
+  } | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const [snackMessage, setSnackMessage] = useState<{
@@ -208,7 +220,19 @@ export function useDayLog({
     const unsubscribe = onSnapshot(
       ref,
       (snap) => {
-        setWeekPlanId(snap.exists() ? snap.id : undefined)
+        if (snap.exists()) {
+          setWeekPlanId(snap.id)
+          const data = snap.data()
+          setWeekFocus({
+            theme: data.theme || undefined,
+            virtue: data.virtue || undefined,
+            scriptureRef: data.scriptureRef || undefined,
+            heartQuestion: data.heartQuestion || undefined,
+          })
+        } else {
+          setWeekPlanId(undefined)
+          setWeekFocus(null)
+        }
       },
       (err) => {
         console.error('Failed to load week plan', err)
@@ -227,6 +251,7 @@ export function useDayLog({
     saveState,
     lastSavedAt,
     weekPlanId,
+    weekFocus,
     snackMessage,
     setSnackMessage,
     persistDayLog,

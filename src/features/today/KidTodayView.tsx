@@ -24,6 +24,12 @@ interface KidTodayViewProps {
   today: string
   weekStart: string
   isMvd?: boolean
+  weekFocus?: {
+    theme?: string
+    virtue?: string
+    scriptureRef?: string
+    heartQuestion?: string
+  } | null
 }
 
 const CELEBRATIONS = [
@@ -90,6 +96,7 @@ export default function KidTodayView({
   today,
   weekStart,
   isMvd,
+  weekFocus,
 }: KidTodayViewProps) {
   const [selectedChoices, setSelectedChoices] = useState<Set<number>>(new Set())
   const [showCapture, setShowCapture] = useState<'photo' | 'note' | null>(null)
@@ -200,6 +207,15 @@ export default function KidTodayView({
       <Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
         {greeting}
       </Typography>
+
+      {/* Morning verse */}
+      {weekFocus?.scriptureRef && (
+        <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: 'grey.50', mb: 2 }}>
+          <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+            📖 {weekFocus.scriptureRef}
+          </Typography>
+        </Box>
+      )}
 
       {/* MVD warm message */}
       {isMvd && (
