@@ -213,6 +213,7 @@ export default function TodayPage() {
     saveState,
     lastSavedAt,
     weekPlanId,
+    weekFocus,
     snackMessage,
     setSnackMessage,
     persistDayLog,
@@ -582,6 +583,7 @@ export default function TodayPage() {
         today={today}
         weekStart={weekRange.start}
         isMvd={planType === PlanType.Mvd}
+        weekFocus={weekFocus}
       />
     )
   }
@@ -705,6 +707,37 @@ export default function TodayPage() {
         </Stack>
       </SectionCard>
 
+      {/* --- Week Focus --- */}
+      {weekFocus && (weekFocus.theme || weekFocus.scriptureRef) && (
+        <Box sx={{
+          p: 2, borderRadius: 2,
+          bgcolor: 'primary.50',
+          border: '1px solid',
+          borderColor: 'primary.100',
+        }}>
+          {weekFocus.theme && (
+            <Typography variant="subtitle2" color="primary.main">
+              Theme: {weekFocus.theme}
+            </Typography>
+          )}
+          {weekFocus.virtue && (
+            <Typography variant="body2" color="text.secondary">
+              Virtue: {weekFocus.virtue}
+            </Typography>
+          )}
+          {weekFocus.scriptureRef && (
+            <Typography variant="body2" sx={{ fontStyle: 'italic', mt: 0.5 }}>
+              📖 {weekFocus.scriptureRef}
+            </Typography>
+          )}
+          {weekFocus.heartQuestion && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              ❤️ {weekFocus.heartQuestion}
+            </Typography>
+          )}
+        </Box>
+      )}
+
       {/* --- Today's Plan checklist (PRIMARY) --- */}
       {(() => {
         const rawChecklist = dayLog.checklist ?? []
@@ -716,7 +749,13 @@ export default function TodayPage() {
           ? rawChecklist
           : rawChecklist.map((item, i) => ({ ...item, mvdEssential: i < 3 }))
         const completedCount = checklist.filter((item) => item.completed).length
-        const totalPlannedMinutes = checklist.reduce((sum, item) => sum + (item.plannedMinutes ?? 0), 0)
+        const parseMinutesFromLabel = (label: string): number => {
+          const match = label.match(/\((\d+)m\)/)
+          return match ? parseInt(match[1]) : 0
+        }
+        const totalPlannedMinutes = checklist.reduce((sum, item) => {
+          return sum + (item.plannedMinutes ?? item.estimatedMinutes ?? parseMinutesFromLabel(item.label))
+        }, 0)
 
         const handleReorder = (fromIndex: number, direction: 'up' | 'down') => {
           const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1
@@ -797,7 +836,7 @@ export default function TodayPage() {
                   {(() => {
                     const remainingMinutes = checklist
                       .filter((ci) => !ci.completed)
-                      .reduce((sum, ci) => sum + (ci.plannedMinutes ?? 0), 0)
+                      .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
                     if (remainingMinutes > 0 && completedCount < checklist.length) {
                       const est = new Date(Date.now() + remainingMinutes * 60_000)
                       return ` \u00B7 Est. finish: ${formatTime12h(est)}`

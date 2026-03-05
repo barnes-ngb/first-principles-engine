@@ -48,7 +48,8 @@ export default function TeachHelperDialog({
   const [snapshot, setSnapshot] = useState<SkillSnapshot | null>(null)
   const [lessonCard, setLessonCard] = useState<LessonCard | null>(null)
   const [loadedForKey, setLoadedForKey] = useState<string | null>(null)
-  const { generate, loading: generating } = useGenerateActivity()
+  const { generate, loading: generating, error: generateError } = useGenerateActivity()
+  const [localError, setLocalError] = useState<string | null>(null)
 
   // Derive a stable key for the current lesson card request
   const lessonCardKey = open && childId && item
@@ -130,37 +131,67 @@ export default function TeachHelperDialog({
 
   const handleGenerateForItem = useCallback(async () => {
     if (!item || !childId) return
+    setLocalError(null)
 
     try {
+      const minutesFromLabel = (label: string): number => {
+        const match = label.match(/\((\d+)m\)/)
+        return match ? parseInt(match[1]) : 10
+      }
+      const minutes = item.estimatedMinutes ?? item.plannedMinutes ?? minutesFromLabel(item.label)
+
+      console.log('TeachHelper: generating for', item.label, {
+        familyId, childId,
+        activityType: item.subjectBucket ?? 'general',
+        skillTag: item.skillTags?.[0] ?? 'general',
+        estimatedMinutes: minutes,
+      })
+
       const result = await generate({
         familyId,
         childId,
         activityType: item.subjectBucket ?? 'general',
         skillTag: item.skillTags?.[0] ?? 'general',
-        estimatedMinutes: item.estimatedMinutes ?? item.plannedMinutes ?? 10,
+        estimatedMinutes: minutes,
       })
+
+      console.log('TeachHelper: generate result', result)
+
+      if (!result?.activity) {
+        setLocalError('AI returned empty response')
+        return
+      }
 
       const card: Omit<LessonCard, 'id'> = {
         childId,
         planItemId: item.id,
         title: result.activity.title,
-        durationMinutes: item.estimatedMinutes ?? item.plannedMinutes ?? 10,
+        durationMinutes: minutes,
         objective: result.activity.objective,
-        materials: result.activity.materials,
-        steps: result.activity.steps,
+        materials: result.activity.materials ?? [],
+        steps: result.activity.steps ?? [],
         supports: [],
-        evidenceChecks: result.activity.successCriteria,
-        skillTags: (item.skillTags ?? []),
+        evidenceChecks: result.activity.successCriteria ?? [],
+        skillTags: item.skillTags ?? [],
         ladderRef: item.ladderRef,
         createdAt: new Date().toISOString(),
       }
 
-      const docRef = await addDoc(lessonCardsCollection(familyId), card)
+      console.log('TeachHelper: saving lesson card', card)
+
+      // Strip undefined values before saving (Firestore rejects them)
+      const cleanCard = JSON.parse(JSON.stringify(card))
+      const docRef = await addDoc(lessonCardsCollection(familyId), cleanCard)
+
+      console.log('TeachHelper: saved as', docRef.id)
       setLessonCard({ ...card, id: docRef.id })
-    } catch {
-      // Error is surfaced by the useGenerateActivity hook
+      setLoadedForKey(lessonCardKey)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('TeachHelper: generate failed:', msg, err)
+      setLocalError(msg)
     }
-  }, [item, childId, familyId, generate])
+  }, [item, childId, familyId, generate, lessonCardKey])
 
   const supports = snapshot?.supports ?? []
   const stopRules = snapshot?.stopRules ?? []
@@ -301,6 +332,12 @@ export default function TeachHelperDialog({
               >
                 {generating ? 'Generating…' : 'Generate Specific Lesson'}
               </Button>
+
+              {(generateError || localError) && (
+                <Alert severity="error" sx={{ mt: 1 }}>
+                  {localError || generateError?.message || 'Failed to generate lesson card'}
+                </Alert>
+              )}
             </>
           )}
 
