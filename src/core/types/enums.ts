@@ -302,3 +302,11 @@ export const RoutineItemKey = {
   NarrationOrSoundReps: 'narrationOrSoundReps',
 } as const
 export type RoutineItemKey = (typeof RoutineItemKey)[keyof typeof RoutineItemKey]
+
+export const DadLabType = {
+  Science: 'science',
+  Engineering: 'engineering',
+  Adventure: 'adventure',
+  Heart: 'heart',
+} as const
+export type DadLabType = (typeof DadLabType)[keyof typeof DadLabType]
