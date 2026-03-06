@@ -2,6 +2,7 @@ import type {
   AdjustmentDecision,
   AssignmentAction,
   ChatMessageRole,
+  DadLabType,
   DayBlockType,
   DayType,
   EnergyLevel,
@@ -482,6 +483,37 @@ export interface DadLabWeek {
   dailyReports: Record<string, DadDailyReport>
   createdAt?: string
   updatedAt?: string
+}
+
+// ── Dad Lab Reports ─────────────────────────────────────────────
+
+export interface ChildLabReport {
+  prediction?: string
+  explanation?: string
+  observation?: string
+  creation?: string
+  artifacts: string[]
+  notes?: string
+}
+
+export interface DadLabReport {
+  id?: string
+  date: string
+  weekKey: string
+  title: string
+  labType: DadLabType
+  question: string
+  description: string
+  childReports: Record<string, ChildLabReport>
+  subjectTags: SubjectBucket[]
+  skillTags?: string[]
+  virtueTag?: string
+  dadReflection?: string
+  bestMoment?: string
+  nextTime?: string
+  totalMinutes?: number
+  createdAt: string
+  updatedAt: string
 }
 
 // ── Lincoln's Ladders (card-based) ──────────────────────────────

@@ -11,6 +11,7 @@ import type {
   AIUsageEntry,
   Artifact,
   Child,
+  DadLabReport,
   DadLabWeek,
   DailyPlan,
   DayLog,
@@ -202,6 +203,21 @@ export const dadLabCollection = (
   familyId: string,
 ): CollectionReference<DadLabWeek> =>
   collection(db, `families/${familyId}/dadLab`) as CollectionReference<DadLabWeek>
+
+const dadLabReportConverter: FirestoreDataConverter<DadLabReport> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as DadLabReport
+    return { ...data, id: snapshot.id }
+  },
+}
+
+export const dadLabReportsCollection = (
+  familyId: string,
+): CollectionReference<DadLabReport> =>
+  collection(db, `families/${familyId}/dadLabReports`).withConverter(
+    dadLabReportConverter,
+  ) as CollectionReference<DadLabReport>
 
 /** Ladder progress per child per ladderKey. Doc ID: {childId}_{ladderKey} */
 export const ladderProgressCollection = (

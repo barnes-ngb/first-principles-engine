@@ -18,14 +18,14 @@ const navItems = [
   { label: 'Weekly Review', to: '/weekly-review', parentOnly: true },
   { label: 'Progress', to: '/progress', parentOnly: true },
   { label: 'Records', to: '/records', parentOnly: true },
-  { label: 'Dad Lab', to: '/week/lab' },
+  { label: 'Dad Lab', to: '/dad-lab' },
   { label: 'Settings', to: '/settings', parentOnly: true },
 ]
 
 const kidNavItems = [
   { label: 'Today', to: '/today' },
   { label: 'My Stuff', to: '/records/portfolio' },
-  { label: 'Dad Lab', to: '/week/lab' },
+  { label: 'Dad Lab', to: '/dad-lab' },
 ]
 
 type AppShellProps = {

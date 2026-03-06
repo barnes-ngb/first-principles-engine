@@ -17,6 +17,7 @@ import ScoreboardPage from '../features/scoreboard/ScoreboardPage'
 import SessionRunnerPage from '../features/sessions/SessionRunnerPage'
 import SettingsPage from '../features/settings/SettingsPage'
 import TodayPage from '../features/today/TodayPage'
+import DadLabPage from '../features/dad-lab/DadLabPage'
 import LabModePage from '../features/week/LabModePage'
 import WeekPage from '../features/week/WeekPage'
 import WeeklyReviewPage from '../features/weekly-review/WeeklyReviewPage'
@@ -36,6 +37,7 @@ const routes = [
       { path: '/sessions/run', element: <SessionRunnerPage /> },
       { path: '/scoreboard', element: <ScoreboardPage /> },
       { path: '/projects', element: <ProjectBoardPage /> },
+      { path: '/dad-lab', element: <DadLabPage /> },
       { path: '/week/lab', element: <LabModePage /> },
       { path: '/progress', element: <ProgressPage /> },
       {
