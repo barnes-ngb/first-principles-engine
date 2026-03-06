@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
+import { sanitizeAndParseJson } from "./sanitizeJson.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -233,19 +234,7 @@ function currentWeekKey(): string {
 }
 
 function parseActivityJson(raw: string): GeneratedActivity {
-  // Strip markdown fences — handle leading text, nested fences, etc.
-  let cleaned = raw.trim();
-  const fenceMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)```/i);
-  if (fenceMatch) {
-    cleaned = fenceMatch[1].trim();
-  }
-  // Also try stripping simple start/end fences
-  cleaned = cleaned
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/i, "")
-    .trim();
-
-  const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+  const parsed = sanitizeAndParseJson<Record<string, unknown>>(raw);
 
   // Validate required fields
   if (typeof parsed.title !== "string" || !parsed.title) {
