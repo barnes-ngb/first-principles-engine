@@ -1,18 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
-import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
+import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import CameraAltIcon from '@mui/icons-material/CameraAlt'
-import MicIcon from '@mui/icons-material/Mic'
-import { getDocs, orderBy, query } from 'firebase/firestore'
+import { getDocs, orderBy, query, where } from 'firebase/firestore'
 
 import Page from '../../components/Page'
+import PhotoCapture from '../../components/PhotoCapture'
+import AudioRecorder from '../../components/AudioRecorder'
 import SectionCard from '../../components/SectionCard'
-import { dadLabReportsCollection } from '../../core/firebase/firestore'
+import { artifactsCollection, dadLabReportsCollection } from '../../core/firebase/firestore'
+import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import type { DadLabReport } from '../../core/types/domain'
+import { DadLabStatus, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type { DadLabType } from '../../core/types/enums'
+import { addDoc, updateDoc, doc } from 'firebase/firestore'
 
 const LAB_TYPE_ICONS: Record<DadLabType, string> = {
   science: '\u{1F9EA}',
@@ -27,27 +30,156 @@ interface KidLabViewProps {
 }
 
 export default function KidLabView({ familyId, childName }: KidLabViewProps) {
-  const [currentLab, setCurrentLab] = useState<DadLabReport | null>(null)
+  const [activeLab, setActiveLab] = useState<DadLabReport | null>(null)
   const [pastLabs, setPastLabs] = useState<DadLabReport[]>([])
   const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    const load = async () => {
-      const q = query(dadLabReportsCollection(familyId), orderBy('date', 'desc'))
-      const snap = await getDocs(q)
-      const labs = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
-
-      const today = new Date().toISOString().split('T')[0]
-      const todayLab = labs.find((l) => l.date === today)
-      setCurrentLab(todayLab ?? labs[0] ?? null)
-      setPastLabs(labs.slice(0, 5))
-      setLoading(false)
-    }
-    void load()
-  }, [familyId])
+  const [prediction, setPrediction] = useState('')
+  const [explanation, setExplanation] = useState('')
+  const [uploading, setUploading] = useState(false)
 
   const isLincoln = childName === 'Lincoln'
   const childKey = childName.toLowerCase()
+
+  useEffect(() => {
+    const load = async () => {
+      // Load active labs first
+      const activeQ = query(
+        dadLabReportsCollection(familyId),
+        where('status', '==', DadLabStatus.Active),
+      )
+      const activeSnap = await getDocs(activeQ)
+      const activeLabs = activeSnap.docs.map((d) => ({ ...d.data(), id: d.id }))
+      setActiveLab(activeLabs[0] ?? null)
+
+      // Load past completed labs
+      const completedQ = query(
+        dadLabReportsCollection(familyId),
+        where('status', '==', DadLabStatus.Complete),
+        orderBy('date', 'desc'),
+      )
+      const completedSnap = await getDocs(completedQ)
+      setPastLabs(completedSnap.docs.map((d) => ({ ...d.data(), id: d.id })).slice(0, 5))
+
+      // Initialize child's prediction/explanation from active lab
+      if (activeLabs[0]) {
+        const cr = activeLabs[0].childReports[childKey]
+        if (cr?.prediction) setPrediction(cr.prediction)
+        if (cr?.explanation) setExplanation(cr.explanation)
+      }
+
+      setLoading(false)
+    }
+    void load()
+  }, [familyId, childKey])
+
+  const handleSaveField = useCallback(
+    async (field: string, value: string) => {
+      if (!activeLab?.id) return
+      const ref = doc(dadLabReportsCollection(familyId), activeLab.id)
+      const cr = activeLab.childReports[childKey] ?? { artifacts: [] }
+      await updateDoc(ref, {
+        [`childReports.${childKey}.${field}`]: value,
+        updatedAt: new Date().toISOString(),
+      })
+      setActiveLab({
+        ...activeLab,
+        childReports: {
+          ...activeLab.childReports,
+          [childKey]: { ...cr, [field]: value },
+        },
+      })
+    },
+    [familyId, activeLab, childKey],
+  )
+
+  const handlePhotoCapture = useCallback(
+    async (file: File) => {
+      if (!activeLab?.id) return
+      setUploading(true)
+      try {
+        const ext = file.name.split('.').pop() ?? 'jpg'
+        const artifact = {
+          childId: childKey,
+          title: `Dad Lab photo - ${activeLab.title}`,
+          type: EvidenceType.Photo,
+          createdAt: new Date().toISOString(),
+          tags: {
+            engineStage: 'Build' as const,
+            domain: 'dad-lab',
+            subjectBucket: SubjectBucket.Science,
+            location: 'Home',
+          },
+        }
+        const docRef = await addDoc(artifactsCollection(familyId), artifact as never)
+        const filename = generateFilename(ext)
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+
+        // Add artifact ID to child report
+        const cr = activeLab.childReports[childKey] ?? { artifacts: [] }
+        const updatedArtifacts = [...(cr.artifacts ?? []), docRef.id]
+        const labRef = doc(dadLabReportsCollection(familyId), activeLab.id!)
+        await updateDoc(labRef, {
+          [`childReports.${childKey}.artifacts`]: updatedArtifacts,
+          updatedAt: new Date().toISOString(),
+        })
+        setActiveLab({
+          ...activeLab,
+          childReports: {
+            ...activeLab.childReports,
+            [childKey]: { ...cr, artifacts: updatedArtifacts },
+          },
+        })
+      } finally {
+        setUploading(false)
+      }
+    },
+    [familyId, activeLab, childKey],
+  )
+
+  const handleAudioCapture = useCallback(
+    async (blob: Blob) => {
+      if (!activeLab?.id) return
+      setUploading(true)
+      try {
+        const artifact = {
+          childId: childKey,
+          title: `Dad Lab recording - ${activeLab.title}`,
+          type: EvidenceType.Audio,
+          createdAt: new Date().toISOString(),
+          tags: {
+            engineStage: 'Build' as const,
+            domain: 'dad-lab',
+            subjectBucket: SubjectBucket.Science,
+            location: 'Home',
+          },
+        }
+        const docRef = await addDoc(artifactsCollection(familyId), artifact as never)
+        const filename = generateFilename('webm')
+        const file = new File([blob], filename, { type: 'audio/webm' })
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+
+        const cr = activeLab.childReports[childKey] ?? { artifacts: [] }
+        const updatedArtifacts = [...(cr.artifacts ?? []), docRef.id]
+        const labRef = doc(dadLabReportsCollection(familyId), activeLab.id!)
+        await updateDoc(labRef, {
+          [`childReports.${childKey}.artifacts`]: updatedArtifacts,
+          updatedAt: new Date().toISOString(),
+        })
+        setActiveLab({
+          ...activeLab,
+          childReports: {
+            ...activeLab.childReports,
+            [childKey]: { ...cr, artifacts: updatedArtifacts },
+          },
+        })
+      } finally {
+        setUploading(false)
+      }
+    },
+    [familyId, activeLab, childKey],
+  )
 
   if (loading) {
     return (
@@ -63,7 +195,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
         Dad Lab
       </Typography>
 
-      {currentLab ? (
+      {activeLab ? (
         <Box sx={{ mt: 2 }}>
           <Box
             sx={{
@@ -74,12 +206,12 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
               mb: 2,
             }}
           >
-            <Typography variant="h6">{currentLab.title}</Typography>
+            <Typography variant="h6">{activeLab.title}</Typography>
             <Typography variant="body2" sx={{ opacity: 0.9, fontStyle: 'italic' }}>
-              &ldquo;{currentLab.question}&rdquo;
+              &ldquo;{activeLab.question}&rdquo;
             </Typography>
             <Chip
-              label={currentLab.labType}
+              label={activeLab.labType}
               size="small"
               sx={{ mt: 1, bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
             />
@@ -88,45 +220,53 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
           <SectionCard title={`${childName}'s Job`}>
             {isLincoln ? (
               <Stack spacing={1.5}>
-                {currentLab.childReports[childKey]?.prediction && (
+                {activeLab.lincolnRole && (
                   <Box>
                     <Typography variant="subtitle2" color="primary">
-                      My Prediction
+                      Your Role
                     </Typography>
-                    <Typography variant="body2">
-                      {currentLab.childReports[childKey].prediction}
-                    </Typography>
+                    <Typography variant="body2">{activeLab.lincolnRole}</Typography>
                   </Box>
                 )}
                 <Box>
                   <Typography variant="subtitle2" color="primary">
-                    What I Need To Do
+                    My Prediction
                   </Typography>
-                  <Typography variant="body2">
-                    {currentLab.description || 'Dad will tell you what to do today!'}
-                  </Typography>
+                  <TextField
+                    placeholder="What do you think will happen?"
+                    value={prediction}
+                    onChange={(e) => setPrediction(e.target.value)}
+                    onBlur={() => handleSaveField('prediction', prediction)}
+                    fullWidth
+                    multiline
+                    minRows={2}
+                    size="small"
+                  />
                 </Box>
-                {currentLab.childReports[childKey]?.explanation && (
-                  <Box>
-                    <Typography variant="subtitle2" color="primary">
-                      Teach London
-                    </Typography>
-                    <Typography variant="body2">
-                      After the lab, explain what happened to London in your own words.
-                    </Typography>
-                  </Box>
-                )}
+                <Box>
+                  <Typography variant="subtitle2" color="primary">
+                    Teach London
+                  </Typography>
+                  <TextField
+                    placeholder="Explain what happened to London in your own words"
+                    value={explanation}
+                    onChange={(e) => setExplanation(e.target.value)}
+                    onBlur={() => handleSaveField('explanation', explanation)}
+                    fullWidth
+                    multiline
+                    minRows={2}
+                    size="small"
+                  />
+                </Box>
               </Stack>
             ) : (
               <Stack spacing={1.5}>
-                {currentLab.childReports[childKey]?.observation && (
+                {activeLab.londonRole && (
                   <Box>
                     <Typography variant="subtitle2" color="primary">
-                      What I Noticed
+                      Your Role
                     </Typography>
-                    <Typography variant="body2">
-                      {currentLab.childReports[childKey].observation}
-                    </Typography>
+                    <Typography variant="body2">{activeLab.londonRole}</Typography>
                   </Box>
                 )}
                 <Box>
@@ -140,13 +280,16 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
           </SectionCard>
 
           <SectionCard title="Capture My Work">
-            <Stack direction="row" spacing={1}>
-              <Button variant="outlined" startIcon={<CameraAltIcon />}>
-                Take Photo
-              </Button>
-              <Button variant="outlined" startIcon={<MicIcon />}>
-                Record
-              </Button>
+            <Stack spacing={1}>
+              <PhotoCapture
+                onCapture={handlePhotoCapture}
+                uploading={uploading}
+                multiple
+              />
+              <AudioRecorder
+                onCapture={handleAudioCapture}
+                uploading={uploading}
+              />
             </Stack>
           </SectionCard>
         </Box>

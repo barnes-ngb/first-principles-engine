@@ -2,6 +2,7 @@ import type {
   AdjustmentDecision,
   AssignmentAction,
   ChatMessageRole,
+  DadLabStatus,
   DadLabType,
   DayBlockType,
   DayType,
@@ -472,6 +473,14 @@ export interface DadLabReport {
   labType: DadLabType
   question: string
   description: string
+  /** Lifecycle status: planned → active → complete */
+  status: DadLabStatus
+  /** Materials list (set during planning) */
+  materials?: string[]
+  /** Lincoln's role description (set during planning) */
+  lincolnRole?: string
+  /** London's role description (set during planning) */
+  londonRole?: string
   childReports: Record<string, ChildLabReport>
   subjectTags: SubjectBucket[]
   skillTags?: string[]

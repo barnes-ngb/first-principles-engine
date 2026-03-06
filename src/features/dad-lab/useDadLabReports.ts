@@ -7,6 +7,7 @@ import {
   orderBy,
   query,
   setDoc,
+  updateDoc,
   where,
 } from 'firebase/firestore'
 
@@ -14,6 +15,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { dadLabReportsCollection, hoursCollection } from '../../core/firebase/firestore'
 import { useChildren } from '../../core/hooks/useChildren'
 import type { DadLabReport } from '../../core/types/domain'
+import type { DadLabStatus } from '../../core/types/enums'
 
 export function useDadLabReports() {
   const familyId = useFamilyId()
@@ -91,14 +93,34 @@ export function useDadLabReports() {
         await setDoc(ref, { ...report, updatedAt: now })
       }
 
-      // Sync compliance hours
-      await syncComplianceHours(reportId, report)
+      // Only sync compliance hours for completed labs
+      if (report.status === 'complete') {
+        await syncComplianceHours(reportId, report)
+      }
 
       // Reload list
       await load()
       return reportId
     },
     [familyId, syncComplianceHours, load],
+  )
+
+  const updateStatus = useCallback(
+    async (reportId: string, status: DadLabStatus) => {
+      const ref = doc(dadLabReportsCollection(familyId), reportId)
+      await updateDoc(ref, { status, updatedAt: new Date().toISOString() })
+
+      // If completing, sync compliance hours
+      if (status === 'complete') {
+        const report = reports.find((r) => r.id === reportId)
+        if (report) {
+          await syncComplianceHours(reportId, { ...report, status })
+        }
+      }
+
+      await load()
+    },
+    [familyId, reports, syncComplianceHours, load],
   )
 
   const deleteReport = useCallback(
@@ -120,5 +142,5 @@ export function useDadLabReports() {
     [familyId, load],
   )
 
-  return { reports, loading, saveReport, deleteReport } as const
+  return { reports, loading, saveReport, updateStatus, deleteReport } as const
 }
