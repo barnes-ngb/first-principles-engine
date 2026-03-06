@@ -12,7 +12,6 @@ import type {
   Artifact,
   Child,
   DadLabReport,
-  DadLabWeek,
   DailyPlan,
   DayLog,
   Evaluation,
@@ -198,11 +197,6 @@ export const labSessionsCollection = (
   collection(db, `families/${familyId}/labSessions`).withConverter(
     labSessionConverter,
   ) as CollectionReference<LabSession>
-
-export const dadLabCollection = (
-  familyId: string,
-): CollectionReference<DadLabWeek> =>
-  collection(db, `families/${familyId}/dadLab`) as CollectionReference<DadLabWeek>
 
 const dadLabReportConverter: FirestoreDataConverter<DadLabReport> = {
   toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
