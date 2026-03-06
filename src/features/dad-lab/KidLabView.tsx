@@ -31,6 +31,7 @@ interface KidLabViewProps {
 
 export default function KidLabView({ familyId, childName }: KidLabViewProps) {
   const [activeLab, setActiveLab] = useState<DadLabReport | null>(null)
+  const [plannedLabs, setPlannedLabs] = useState<DadLabReport[]>([])
   const [pastLabs, setPastLabs] = useState<DadLabReport[]>([])
   const [loading, setLoading] = useState(true)
   const [prediction, setPrediction] = useState('')
@@ -50,6 +51,15 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
       const activeSnap = await getDocs(activeQ)
       const activeLabs = activeSnap.docs.map((d) => ({ ...d.data(), id: d.id }))
       setActiveLab(activeLabs[0] ?? null)
+
+      // Load planned labs
+      const plannedQ = query(
+        dadLabReportsCollection(familyId),
+        where('status', '==', DadLabStatus.Planned),
+        orderBy('date', 'asc'),
+      )
+      const plannedSnap = await getDocs(plannedQ)
+      setPlannedLabs(plannedSnap.docs.map((d) => ({ ...d.data(), id: d.id })))
 
       // Load past completed labs
       const completedQ = query(
@@ -296,11 +306,37 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
       ) : (
         <Box sx={{ textAlign: 'center', py: 4, mt: 2 }}>
           <Typography variant="h6" color="text.secondary">
-            No lab today
+            No lab running right now
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Ask Dad when the next lab is!
+            Ask Dad when the next lab starts!
           </Typography>
+
+          {plannedLabs.length > 0 && (
+            <Box sx={{ mt: 3, textAlign: 'left' }}>
+              <Typography variant="subtitle2" color="text.secondary">
+                Coming up:
+              </Typography>
+              {plannedLabs.map((lab) => (
+                <Box
+                  key={lab.id}
+                  sx={{ p: 1.5, mt: 1, borderRadius: 1, bgcolor: 'action.hover' }}
+                >
+                  <Typography variant="body2" fontWeight={600}>
+                    {LAB_TYPE_ICONS[lab.labType]} {lab.title}
+                  </Typography>
+                  {lab.question && (
+                    <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+                      &ldquo;{lab.question}&rdquo;
+                    </Typography>
+                  )}
+                  <Typography variant="caption" color="text.secondary">
+                    {new Date(lab.date + 'T00:00:00').toLocaleDateString()}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+          )}
         </Box>
       )}
 
