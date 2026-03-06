@@ -46,7 +46,7 @@ function modelForTask(taskType: TaskType): string {
   switch (taskType) {
     case TaskType.Plan:
     case TaskType.Evaluate:
-      return "claude-sonnet-4-5-20250929";
+      return "claude-sonnet-4-20250514";
     case TaskType.Generate:
     case TaskType.Chat:
     default:
