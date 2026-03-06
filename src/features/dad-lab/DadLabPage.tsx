@@ -20,8 +20,9 @@ import { useChildren } from '../../core/hooks/useChildren'
 import { useProfile } from '../../core/profile/useProfile'
 import type { DadLabReport } from '../../core/types/domain'
 import type { DadLabType } from '../../core/types/enums'
-import { DadLabStatus, UserProfile } from '../../core/types/enums'
-import { formatDateShort } from '../../core/utils/dateKey'
+import { DadLabStatus, SubjectBucket, UserProfile } from '../../core/types/enums'
+import { formatDateShort, weekKeyFromDate } from '../../core/utils/dateKey'
+import { formatDateYmd } from '../../core/utils/format'
 import KidLabView from './KidLabView'
 import LabReportForm from './LabReportForm'
 import LabSuggestions from './LabSuggestions'
@@ -61,6 +62,15 @@ interface Prefill {
   materials?: string[]
   lincolnRole?: string
   londonRole?: string
+  duration?: number
+}
+
+function getNextSaturday(): Date {
+  const d = new Date()
+  const day = d.getDay()
+  const diff = (6 - day + 7) % 7 || 7
+  d.setDate(d.getDate() + (day === 6 ? 0 : diff))
+  return d
 }
 
 export default function DadLabPage() {
@@ -116,12 +126,37 @@ export default function DadLabPage() {
     [saveReport],
   )
 
-  const handleSuggestionSelect = useCallback((data: Prefill) => {
-    setSuggestionsOpen(false)
-    setPrefill(data)
-    setEditingReport(undefined)
-    setView('form')
-  }, [])
+  const handleSuggestionSelect = useCallback(
+    async (data: Prefill) => {
+      setSuggestionsOpen(false)
+      const nextSat = getNextSaturday()
+      const dateStr = formatDateYmd(nextSat)
+
+      const planned: DadLabReport = {
+        date: dateStr,
+        weekKey: weekKeyFromDate(nextSat),
+        title: data.title ?? 'Untitled Lab',
+        labType: data.labType ?? 'science',
+        question: data.question ?? '',
+        description: data.description ?? '',
+        status: DadLabStatus.Planned,
+        materials: data.materials,
+        lincolnRole: data.lincolnRole,
+        londonRole: data.londonRole,
+        childReports: {},
+        subjectTags: [
+          data.labType === 'science' || data.labType === 'engineering'
+            ? SubjectBucket.Science
+            : SubjectBucket.Other,
+        ],
+        totalMinutes: data.duration ?? 60,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      await saveReport(planned)
+    },
+    [saveReport],
+  )
 
   const handleStartLab = useCallback(
     async (reportId: string) => {
