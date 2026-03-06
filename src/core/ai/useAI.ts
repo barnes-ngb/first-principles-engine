@@ -89,8 +89,12 @@ export function useAI() {
       const result = await chatFn(request)
       return result.data
     } catch (err) {
-      const e = err instanceof Error ? err : new Error(String(err))
-      setError(e)
+      // Firebase callable functions wrap errors in FirebaseError with a `code` and `message`
+      // Extract the server message when available for a better user experience
+      const fireErr = err as { code?: string; message?: string; details?: string }
+      const message =
+        fireErr.details || fireErr.message || (err instanceof Error ? err.message : String(err))
+      setError(new Error(message))
       return null
     } finally {
       setLoading(false)
