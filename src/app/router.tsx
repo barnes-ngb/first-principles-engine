@@ -3,7 +3,6 @@ import { AppShell } from './AppShell'
 import RequireParent from '../components/RequireParent'
 import EnginePage from '../features/engine/EnginePage'
 import EvaluateChatPage from '../features/evaluate/EvaluateChatPage'
-import SkillSnapshotPage from '../features/evaluation/SkillSnapshotPage'
 import KidsPage from '../features/kids/KidsPage'
 import LaddersPage from '../features/ladders/LaddersPage'
 import NotFoundPage from '../features/not-found/NotFoundPage'
@@ -50,7 +49,7 @@ const routes = [
       { path: '/planner/chat', element: <PlannerChatPage /> },
       { path: '/planner/legacy', element: <PlannerPage /> },
       { path: '/evaluate', element: <EvaluateChatPage /> },
-      { path: '/evaluation', element: <SkillSnapshotPage /> },
+      { path: '/evaluation', element: <Navigate to="/progress" replace /> },
       { path: '/ladders', element: <LaddersPage /> },
       { path: '/kids', element: <KidsPage /> },
       { path: '/records', element: <RecordsPage /> },

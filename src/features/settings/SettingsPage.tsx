@@ -1,5 +1,4 @@
 import { type SyntheticEvent, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   Alert,
   Button,
@@ -50,7 +49,6 @@ const themeModeLabels: Record<ThemeMode, string> = {
 }
 
 export default function SettingsPage() {
-  const navigate = useNavigate()
   const familyId = useFamilyId()
   const { themeMode, setThemeMode } = useProfile()
   const { isEnabled, setEnabled } = useAIFeatureFlags()
@@ -138,20 +136,6 @@ export default function SettingsPage() {
             <Typography variant="caption" color="text.secondary">
               {AIFeatureFlagDescription[AIFeatureFlag.AiPlanning]}
             </Typography>
-          </Stack>
-
-          <Divider />
-
-          <Stack spacing={1}>
-            <Typography variant="h6">Tools</Typography>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => navigate('/evaluation')}
-              sx={{ alignSelf: 'flex-start' }}
-            >
-              Skill Snapshot
-            </Button>
           </Stack>
 
           <Divider />
