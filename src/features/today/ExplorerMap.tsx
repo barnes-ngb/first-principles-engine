@@ -30,7 +30,7 @@ const MC_TRAIL_SETS = [
   ['🏜️', '🌵', '🏛️', '💀', '👑'], // Desert temple
 ]
 
-const GARDEN_SET = ['🌱', '🌿', '🌸', '🌺', '🌻']
+const DINO_SET = ['🥚', '🦕', '🦖', '🐲', '🌋']
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
 
@@ -58,7 +58,7 @@ export default function ExplorerMap({
   const isLincoln = childName?.toLowerCase() === 'lincoln'
 
   const trailSet = useMemo(() => {
-    if (isLondon) return GARDEN_SET
+    if (isLondon) return DINO_SET
     const weekNum = Math.floor(
       new Date(weekStart + 'T00:00:00').getTime() / (7 * 24 * 60 * 60 * 1000),
     )
@@ -115,18 +115,18 @@ export default function ExplorerMap({
 
   const summaryText = allExplored
     ? isLondon
-      ? 'Full garden bloomed this week! 🎉'
+      ? 'All dinos hatched this week! 🎉'
       : isLincoln
         ? 'Full map explored! Legendary week!'
         : 'Full week explored! What an adventure! 🎉'
     : isLondon
-      ? `${exploredCount} flower${exploredCount !== 1 ? 's' : ''} bloomed! ${remainingCount} to grow...`
+      ? `${exploredCount} dino${exploredCount !== 1 ? 's' : ''} hatched! ${remainingCount} to discover...`
       : isLincoln
         ? `${exploredCount} biome${exploredCount !== 1 ? 's' : ''} explored! ${remainingCount} to discover...`
         : `${exploredCount} day${exploredCount !== 1 ? 's' : ''} explored! ${remainingCount} to discover...`
 
   const title = isLondon
-    ? '🌸 This Week\'s Garden'
+    ? '🦕 Dino Discovery'
     : isLincoln
       ? '🗺️ World Map'
       : '🗺️ This Week\'s Journey'

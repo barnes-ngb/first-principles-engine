@@ -11,21 +11,35 @@ interface PhotoCaptureProps {
   onCapture: (file: File) => void
   /** If true, show a spinner to indicate upload in progress. */
   uploading?: boolean
+  /** If true, allow selecting multiple files at once. */
+  multiple?: boolean
 }
 
-export default function PhotoCapture({ onCapture, uploading }: PhotoCaptureProps) {
+export default function PhotoCapture({ onCapture, uploading, multiple }: PhotoCaptureProps) {
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [file, setFile] = useState<File | null>(null)
 
   const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = event.target.files?.[0]
-    if (!selected) return
+    const files = event.target.files
+    if (!files || files.length === 0) return
+
+    if (multiple && files.length > 1) {
+      // Multiple mode: send all files directly without preview
+      for (let i = 0; i < files.length; i++) {
+        onCapture(files[i])
+      }
+      if (uploadInputRef.current) uploadInputRef.current.value = ''
+      return
+    }
+
+    // Single file: show preview
+    const selected = files[0]
     setFile(selected)
     const objectUrl = URL.createObjectURL(selected)
     setPreview(objectUrl)
-  }, [])
+  }, [multiple, onCapture])
 
   const handleConfirm = useCallback(() => {
     if (!file) return
@@ -60,6 +74,7 @@ export default function PhotoCapture({ onCapture, uploading }: PhotoCaptureProps
         ref={uploadInputRef}
         type="file"
         accept="image/*"
+        multiple={multiple}
         onChange={handleFileChange}
         style={{ display: 'none' }}
       />

@@ -91,41 +91,54 @@ function LabSuggestionsContent({ onClose, onSelect }: Omit<LabSuggestionsProps, 
   const [error, setError] = useState<string | null>(null)
 
   const fetchSuggestions = useCallback(async () => {
-    if (!children.length) return
+    if (!children.length) {
+      setError('No children found. Add a child first.')
+      return
+    }
     setSuggestions([])
     setRawText('')
     setError(null)
 
-    const response = await chat({
-      familyId,
-      childId: children[0]?.id ?? '',
-      taskType: TaskType.Chat,
-      messages: [
-        {
-          role: 'user',
-          content: `Suggest 3 Dad Lab activities for this Saturday. Consider:
-- Lincoln (10, neurodivergent, loves Minecraft/Lego/Art), London (6, story-driven, loves drawing)
+    try {
+      const response = await chat({
+        familyId,
+        childId: children[0]?.id ?? '',
+        taskType: TaskType.Chat,
+        messages: [
+          {
+            role: 'user',
+            content: `Suggest 3 Dad Lab activities for this Saturday. Consider:
+- Lincoln (10, neurodivergent, loves Minecraft/Lego/Art), London (6, story-driven, loves drawing and making books)
+- Both boys
 - Lab types: science, engineering, adventure, or heart/character
 - Keep to 45-90 minutes, household materials preferred
 - Include what each kid does at their level
 - Include a driving question
 
-For each suggestion provide:
+For each suggestion provide exactly this format:
 Title: [name]
 Type: [science/engineering/adventure/heart]
 Question: [the driving question]
 Description: [brief overview and materials needed]
 Lincoln's role: [what he does]
-London's role: [what she does]`,
-        },
-      ],
-    })
+London's role: [what he does]`,
+          },
+        ],
+      })
 
-    if (response?.message) {
-      setRawText(response.message)
-      setSuggestions(parseSuggestions(response.message))
-    } else {
-      setError('No suggestions received. Try again later.')
+      console.log('Lab suggestions response:', response)
+
+      if (response?.message) {
+        setRawText(response.message)
+        const parsed = parseSuggestions(response.message)
+        console.log('Parsed suggestions:', parsed)
+        setSuggestions(parsed)
+      } else {
+        setError('No response from AI. Check that AI features are enabled in Settings.')
+      }
+    } catch (err) {
+      console.error('Lab suggestions failed:', err)
+      setError(`Failed to get suggestions: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
   }, [familyId, children, chat])
 
@@ -158,9 +171,12 @@ London's role: [what she does]`,
         )}
 
         {error && (
-          <Typography color="error" sx={{ py: 2 }}>
-            {error}
-          </Typography>
+          <Stack spacing={1} sx={{ py: 2 }}>
+            <Typography color="error">{error}</Typography>
+            <Button variant="outlined" size="small" onClick={fetchSuggestions}>
+              Try Again
+            </Button>
+          </Stack>
         )}
 
         {!aiLoading && suggestions.length > 0 && (
