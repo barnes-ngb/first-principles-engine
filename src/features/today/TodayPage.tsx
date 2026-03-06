@@ -1307,6 +1307,7 @@ export default function TodayPage() {
               onUpdate={handleRoutineUpdate}
               onUpdateImmediate={handleRoutineUpdateImmediate}
               routineItems={activeRoutineItems}
+              childName={selectedChild?.name}
             />
 
             {cardLadders.length > 0 && selectedChildId && (

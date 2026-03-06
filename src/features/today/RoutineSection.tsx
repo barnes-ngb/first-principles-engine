@@ -23,6 +23,8 @@ interface RoutineSectionProps {
   onUpdateImmediate: (updated: DayLog) => void
   /** Which routine items to show, in priority order. Defaults to all. */
   routineItems?: RoutineItemKey[]
+  /** Child name — used for themed UI (e.g. Minecraft for Lincoln) */
+  childName?: string
 }
 
 export default function RoutineSection({
@@ -30,6 +32,7 @@ export default function RoutineSection({
   onUpdate,
   onUpdateImmediate,
   routineItems,
+  childName,
 }: RoutineSectionProps) {
   const items = useMemo(
     () => new Set(routineItems ?? ALL_ROUTINE_ITEMS),
@@ -69,6 +72,7 @@ export default function RoutineSection({
   // Use "Literacy" heading when new engine items are present
   const literacyHeading = hasNewLiteracy ? 'Literacy' : 'Reading & Literacy'
 
+  const isLincoln = childName?.toLowerCase() === 'lincoln'
   const xp = calculateXp(dayLog, routineItems)
 
   const updateReading = useCallback(
@@ -167,11 +171,20 @@ export default function RoutineSection({
         }}
       >
         <Stack direction="row" alignItems="center" justifyContent="space-between">
-          <Typography variant="h6">Daily Routine</Typography>
+          <Typography variant="h6">{isLincoln ? '⛏️ Daily Crafting' : 'Daily Routine'}</Typography>
           <Chip
             label={`${xp} XP`}
             color={xp > 0 ? 'success' : 'default'}
             variant={xp > 0 ? 'filled' : 'outlined'}
+            sx={isLincoln ? {
+              fontFamily: '"Press Start 2P", monospace',
+              fontSize: '0.5rem',
+              bgcolor: xp > 0 ? '#1A1A1A' : undefined,
+              color: xp > 0 ? '#7EFC20' : undefined,
+              border: xp > 0 ? '2px solid #3A3A3A' : undefined,
+              borderRadius: 0,
+              '& .MuiChip-label': { px: 1.5 },
+            } : {}}
           />
         </Stack>
       </Box>
