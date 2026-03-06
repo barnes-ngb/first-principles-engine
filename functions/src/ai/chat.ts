@@ -673,9 +673,15 @@ export const chat = onCall(
     // ── Load enriched context for plan/evaluate only ────────────
     const needsEnrichedContext =
       taskType === TaskType.Plan || taskType === TaskType.Evaluate;
-    const enriched = needsEnrichedContext
-      ? await loadEnrichedContext(db, familyId, childId)
-      : undefined;
+    let enriched: EnrichedContext | undefined;
+    if (needsEnrichedContext) {
+      try {
+        enriched = await loadEnrichedContext(db, familyId, childId);
+      } catch (err) {
+        console.warn("Failed to load enriched context, proceeding without it:", err);
+        // Continue without enriched context rather than failing the whole request
+      }
+    }
 
     // ── Load recent evaluation for plan context ──────────────
     let recentEvalContext = "";
@@ -742,36 +748,84 @@ export const chat = onCall(
 
     // ── Call Claude ─────────────────────────────────────────────
     const model = modelForTask(taskType);
-    const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const client = new Anthropic({ apiKey: claudeApiKey.value() });
 
-    const completion = await client.messages.create({
-      model,
-      max_tokens: taskType === TaskType.Plan || taskType === TaskType.Evaluate ? 4096 : 1024,
-      system: systemPrompt,
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
-    });
+    let responseText: string;
+    let usage: { inputTokens: number; outputTokens: number };
 
-    const responseText =
-      completion.content[0].type === "text" ? completion.content[0].text : "";
+    try {
+      const apiKey = claudeApiKey.value();
+      if (!apiKey) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Missing CLAUDE_API_KEY secret. Run: firebase functions:secrets:set CLAUDE_API_KEY",
+        );
+      }
 
-    const usage = {
-      inputTokens: completion.usage.input_tokens,
-      outputTokens: completion.usage.output_tokens,
-    };
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const client = new Anthropic({ apiKey });
+
+      const completion = await client.messages.create({
+        model,
+        max_tokens:
+          taskType === TaskType.Plan || taskType === TaskType.Evaluate
+            ? 4096
+            : 1024,
+        system: systemPrompt,
+        messages: messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+      });
+
+      const firstBlock = completion.content[0];
+      responseText =
+        firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
+
+      if (!responseText) {
+        console.warn("Claude returned empty response", {
+          model,
+          taskType,
+          stopReason: completion.stop_reason,
+        });
+      }
+
+      usage = {
+        inputTokens: completion.usage.input_tokens,
+        outputTokens: completion.usage.output_tokens,
+      };
+    } catch (err) {
+      // Re-throw HttpsError as-is (e.g. our own failed-precondition above)
+      if (err instanceof HttpsError) throw err;
+
+      const errMsg =
+        err instanceof Error ? err.message : "Unknown AI provider error";
+      console.error("Claude API call failed:", {
+        model,
+        taskType,
+        childId,
+        error: errMsg,
+      });
+
+      throw new HttpsError(
+        "unavailable",
+        `AI service error: ${errMsg}`,
+      );
+    }
 
     // ── Log usage to Firestore ─────────────────────────────────
-    await db.collection(`families/${familyId}/aiUsage`).add({
-      childId,
-      taskType,
-      model,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      createdAt: new Date().toISOString(),
-    });
+    try {
+      await db.collection(`families/${familyId}/aiUsage`).add({
+        childId,
+        taskType,
+        model,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (logErr) {
+      // Don't fail the request if usage logging fails
+      console.warn("Failed to log AI usage:", logErr);
+    }
 
     return { message: responseText, model, usage };
   },
