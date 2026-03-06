@@ -453,38 +453,6 @@ export interface ScoreMetric {
   result: SessionResult | 'na'
 }
 
-export interface WeeklyExperiment {
-  id?: string
-  childId: string
-  weekKey: string
-  hypothesis: string
-  intervention: string
-  measurement: string
-  startDate?: string
-  endDate?: string
-  result?: string
-  createdAt?: string
-  updatedAt?: string
-}
-
-export interface DadDailyReport {
-  win: string
-  hardThing: string
-  whatHeTried: string
-  energy: 'high' | 'medium' | 'low'
-  adjustmentForTomorrow: string
-}
-
-export interface DadLabWeek {
-  id?: string
-  childId: string
-  weekKey: string
-  experiment?: WeeklyExperiment
-  dailyReports: Record<string, DadDailyReport>
-  createdAt?: string
-  updatedAt?: string
-}
-
 // ── Dad Lab Reports ─────────────────────────────────────────────
 
 export interface ChildLabReport {

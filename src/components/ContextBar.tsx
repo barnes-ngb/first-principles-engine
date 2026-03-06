@@ -11,14 +11,14 @@ import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import type { Child } from '../core/types/domain'
 import { formatDateShort, formatWeekShort, navTo, weekRangeFromDateKey } from '../core/utils/dateKey'
 
-export type ContextBarPage = 'today' | 'week' | 'dadLab' | 'artifacts'
+export type ContextBarPage = 'today' | 'week' | 'artifacts'
 
 interface ContextBarProps {
   page: ContextBarPage
   activeChild?: Child
   /** YYYY-MM-DD for Today pages */
   dateKey?: string
-  /** YYYY-MM-DD week start for Week/DadLab */
+  /** YYYY-MM-DD week start for Week pages */
   weekStart?: string
   /** Callback when "Capture Artifact" is tapped (optional, shown only when provided) */
   onCaptureArtifact?: () => void
@@ -71,7 +71,7 @@ export default function ContextBar({
           icon={<CalendarTodayIcon />}
         />
       )}
-      {(page === 'week' || page === 'dadLab') && resolvedWeekStart && (
+      {page === 'week' && resolvedWeekStart && (
         <Chip
           label={formatWeekShort(resolvedWeekStart)}
           size="small"
@@ -106,8 +106,8 @@ export default function ContextBar({
         <Tooltip title="Dad Lab">
           <IconButton
             size="small"
-            color={page === 'dadLab' ? 'primary' : 'default'}
-            onClick={() => navigate(navTo.dadLab(resolvedWeekStart))}
+            color="default"
+            onClick={() => navigate(navTo.dadLab())}
           >
             <ScienceIcon fontSize="small" />
           </IconButton>
