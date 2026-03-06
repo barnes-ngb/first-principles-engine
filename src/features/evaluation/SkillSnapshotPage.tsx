@@ -138,9 +138,10 @@ export default function SkillSnapshotPage() {
     async (updated: SkillSnapshot) => {
       if (!snapshotRef) return
       setSnapshot(updated)
-      const result = await withSave(() =>
-        setDoc(snapshotRef, { ...updated, updatedAt: new Date().toISOString() }),
-      )
+      const result = await withSave(async () => {
+        await setDoc(snapshotRef, { ...updated, updatedAt: new Date().toISOString() })
+        return true
+      })
       if (result === undefined) {
         setSnack({ text: 'Failed to save.', severity: 'error' })
       }
@@ -317,9 +318,10 @@ export default function SkillSnapshotPage() {
       const docId = workbookConfigDocId(updated.childId, updated.name)
       const ref = doc(workbookConfigsCollection(familyId), docId)
       setWorkbooks((prev) => prev.map((w, i) => (i === index ? { ...updated, id: docId } : w)))
-      const result = await withSave(() =>
-        setDoc(ref, { ...updated, id: docId, updatedAt: new Date().toISOString() }),
-      )
+      const result = await withSave(async () => {
+        await setDoc(ref, { ...updated, id: docId, updatedAt: new Date().toISOString() })
+        return true
+      })
       if (result === undefined) {
         setSnack({ text: 'Failed to save workbook.', severity: 'error' })
       }
@@ -334,7 +336,10 @@ export default function SkillSnapshotPage() {
       if (wb.id) {
         const ref = doc(workbookConfigsCollection(familyId), wb.id)
         setWorkbooks((prev) => prev.filter((_, i) => i !== index))
-        const result = await withSave(() => deleteDoc(ref))
+        const result = await withSave(async () => {
+          await deleteDoc(ref)
+          return true
+        })
         if (result === undefined) {
           setSnack({ text: 'Failed to delete workbook.', severity: 'error' })
         }
