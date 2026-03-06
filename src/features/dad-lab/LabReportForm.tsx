@@ -12,6 +12,8 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import SaveIcon from '@mui/icons-material/Save'
 
+import Dialog from '@mui/material/Dialog'
+import DialogContent from '@mui/material/DialogContent'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -50,8 +52,8 @@ const LINCOLN_FIELDS = [
 ] as const
 
 const LONDON_FIELDS = [
-  { key: 'observation', label: 'Observation', placeholder: 'What did she notice or say?' },
-  { key: 'creation', label: 'Creation', placeholder: 'What did she draw/build/make?' },
+  { key: 'observation', label: 'Observation', placeholder: 'What did he notice or say?' },
+  { key: 'creation', label: 'Creation', placeholder: 'What did he draw/build/make?' },
   { key: 'notes', label: 'Notes', placeholder: 'Your observations about London' },
 ] as const
 
@@ -128,6 +130,7 @@ export default function LabReportForm({
   // Photo upload state
   const [uploadingChildId, setUploadingChildId] = useState<string | null>(null)
   const [artifactUrls, setArtifactUrls] = useState<Record<string, string>>({})
+  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null)
 
   // Initialize date from prefill
   useEffect(() => {
@@ -388,7 +391,7 @@ export default function LabReportForm({
 
               {/* Artifact thumbnails */}
               {cr.artifacts.length > 0 && (
-                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                   {cr.artifacts.map((artifactId) => {
                     const url = artifactUrls[artifactId]
                     if (!url) return null
@@ -398,6 +401,7 @@ export default function LabReportForm({
                         component="img"
                         src={url}
                         alt="Lab photo"
+                        onClick={() => setPreviewPhoto(url)}
                         sx={{
                           width: 80,
                           height: 80,
@@ -405,6 +409,7 @@ export default function LabReportForm({
                           borderRadius: 1,
                           border: '1px solid',
                           borderColor: 'divider',
+                          cursor: 'pointer',
                         }}
                       />
                     )
@@ -418,6 +423,7 @@ export default function LabReportForm({
                   <PhotoCapture
                     onCapture={(file) => handlePhotoCapture(child.id, file)}
                     uploading={isUploading}
+                    multiple
                   />
                   <AudioRecorder
                     onCapture={(blob) => handleAudioCapture(child.id, blob)}
@@ -557,6 +563,17 @@ export default function LabReportForm({
           Back
         </Button>
       )}
+
+      {/* Photo preview dialog */}
+      <Dialog open={!!previewPhoto} onClose={() => setPreviewPhoto(null)} maxWidth="md">
+        <DialogContent sx={{ p: 0 }}>
+          <Box
+            component="img"
+            src={previewPhoto ?? undefined}
+            sx={{ width: '100%', display: 'block' }}
+          />
+        </DialogContent>
+      </Dialog>
     </Stack>
   )
 }
