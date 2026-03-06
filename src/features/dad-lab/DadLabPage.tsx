@@ -12,10 +12,14 @@ import AddIcon from '@mui/icons-material/Add'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 
+import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
+import { useProfile } from '../../core/profile/useProfile'
 import type { DadLabReport } from '../../core/types/domain'
 import type { DadLabType } from '../../core/types/enums'
+import { UserProfile } from '../../core/types/enums'
 import { formatDateShort } from '../../core/utils/dateKey'
+import KidLabView from './KidLabView'
 import LabReportForm from './LabReportForm'
 import LabSuggestions from './LabSuggestions'
 import { useDadLabReports } from './useDadLabReports'
@@ -42,6 +46,10 @@ interface Prefill {
 }
 
 export default function DadLabPage() {
+  const { profile } = useProfile()
+  const familyId = useFamilyId()
+  const isKid = profile === UserProfile.Lincoln || profile === UserProfile.London
+
   const { reports, loading, saveReport } = useDadLabReports()
   const { children } = useChildren()
   const [view, setView] = useState<'history' | 'form'>('history')
@@ -102,6 +110,15 @@ export default function DadLabPage() {
     )
     return { count: thisYear.length, totalHours: Math.round(totalMinutes / 60), byType }
   }, [reports])
+
+  if (isKid) {
+    return (
+      <KidLabView
+        familyId={familyId}
+        childName={profile === UserProfile.Lincoln ? 'Lincoln' : 'London'}
+      />
+    )
+  }
 
   if (view === 'form') {
     return (

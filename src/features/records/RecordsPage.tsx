@@ -52,7 +52,7 @@ import { formatDateForInput } from '../../core/utils/format'
 import { getSchoolYearRange } from '../../core/utils/time'
 import { parseDateFromDocId } from '../today/daylog.model'
 import ComplianceDashboard from './ComplianceDashboard'
-import EvaluationsPage from './EvaluationsPage'
+import EvaluationHistoryTab from './EvaluationHistoryTab'
 import PortfolioPage from './PortfolioPage'
 import {
   buildComplianceZip,
@@ -99,7 +99,7 @@ export default function RecordsPage() {
         </Box>
       </Container>
       {activeTab === 0 && <HoursComplianceTab />}
-      {activeTab === 1 && <EvaluationsPage />}
+      {activeTab === 1 && <EvaluationHistoryTab />}
       {activeTab === 2 && <PortfolioPage />}
     </>
   )
