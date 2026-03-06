@@ -13,8 +13,10 @@ import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { artifactsCollection } from '../../core/firebase/firestore'
 import type { Artifact, ChecklistItem, Child, DayLog } from '../../core/types/domain'
+import MinecraftAvatar from '../minecraft/MinecraftAvatar'
 import ExplorerMap from './ExplorerMap'
 import KidCaptureForm from './KidCaptureForm'
+import { calculateXp } from './xp'
 
 interface KidTodayViewProps {
   dayLog: DayLog
@@ -40,8 +42,21 @@ const CELEBRATIONS = [
   'Done! You tackled hard things today! 🏆',
 ]
 
-function getGreeting(name: string): string {
+const MC_CELEBRATIONS = [
+  'Achievement Unlocked! All quests complete!',
+  'You mined through every challenge today!',
+  'Full diamond day! All tasks crafted!',
+  'Legendary! You cleared the whole board!',
+  'Respawn tomorrow for more adventures!',
+]
+
+function getGreeting(name: string, isLincoln: boolean): string {
   const hour = new Date().getHours()
+  if (isLincoln) {
+    if (hour < 12) return `Rise and mine, ${name}!`
+    if (hour < 17) return `Keep crafting, ${name}!`
+    return `Strong day at the workbench, ${name}!`
+  }
   if (hour < 12) return `Good morning, ${name}!`
   if (hour < 17) return `Good afternoon, ${name}!`
   return `Nice work today, ${name}!`
@@ -53,13 +68,14 @@ function getTimeLabel(minutes?: number): string {
 }
 
 /** Get a celebration message consistent within a day. */
-function getCelebration(today: string): string {
+function getCelebration(today: string, isLincoln: boolean): string {
   const d = new Date(today + 'T00:00:00')
   const start = new Date(d.getFullYear(), 0, 0)
   const dayOfYear = Math.floor(
     (d.getTime() - start.getTime()) / 86400000,
   )
-  return CELEBRATIONS[Math.abs(dayOfYear) % CELEBRATIONS.length]
+  const pool = isLincoln ? MC_CELEBRATIONS : CELEBRATIONS
+  return pool[Math.abs(dayOfYear) % pool.length]
 }
 
 /**
@@ -120,8 +136,11 @@ export default function KidTodayView({
     mustDoDone &&
     (isMvd || choose.length === 0 || selectedChoiceItems.every((item) => item.completed))
 
-  const greeting = useMemo(() => getGreeting(child.name), [child.name])
-  const celebrationMessage = useMemo(() => getCelebration(today), [today])
+  const isLincoln = child.name.toLowerCase() === 'lincoln'
+  const todayXp = useMemo(() => calculateXp(dayLog), [dayLog])
+
+  const greeting = useMemo(() => getGreeting(child.name, isLincoln), [child.name, isLincoln])
+  const celebrationMessage = useMemo(() => getCelebration(today, isLincoln), [today, isLincoln])
 
   // Load artifacts for today
   const loadArtifacts = useCallback(() => {
@@ -204,9 +223,31 @@ export default function KidTodayView({
   return (
     <Page>
       {/* Greeting */}
-      <Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
-        {greeting}
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={2}>
+        {isLincoln && (
+          <Box sx={{ flexShrink: 0 }}>
+            <MinecraftAvatar xp={todayXp * 10} scale={3} />
+          </Box>
+        )}
+        <Box>
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
+            {greeting}
+          </Typography>
+          {isLincoln && todayXp > 0 && (
+            <Typography
+              sx={{
+                fontFamily: '"Press Start 2P", monospace',
+                fontSize: '0.55rem',
+                color: '#7EFC20',
+                textShadow: '1px 1px 0 rgba(0,0,0,0.3)',
+                mt: 0.5,
+              }}
+            >
+              +{todayXp} XP today
+            </Typography>
+          )}
+        </Box>
+      </Stack>
 
       {/* Morning verse */}
       {weekFocus?.scriptureRef && (
@@ -225,7 +266,7 @@ export default function KidTodayView({
       )}
 
       {/* ── MUST DO ── */}
-      <SectionCard title="Must Do">
+      <SectionCard title={isLincoln ? '⛏️ Daily Quests' : 'Must Do'}>
         <Stack spacing={1}>
           {mustDo.map((item) => {
             const absIndex = checklist.indexOf(item)
@@ -282,7 +323,9 @@ export default function KidTodayView({
             textAlign="center"
             sx={{ mt: 1, fontWeight: 500 }}
           >
-            {mustDoRemaining} to go, then you choose!
+            {isLincoln
+              ? `${mustDoRemaining} quest${mustDoRemaining !== 1 ? 's' : ''} to go, then you craft!`
+              : `${mustDoRemaining} to go, then you choose!`}
           </Typography>
         )}
         {mustDoDone && !isMvd && choose.length > 0 && (
@@ -291,14 +334,14 @@ export default function KidTodayView({
             textAlign="center"
             sx={{ mt: 1, fontWeight: 600, color: 'success.main' }}
           >
-            Great job! Now pick your adventures!
+            {isLincoln ? 'Quests complete! Craft your adventure!' : 'Great job! Now pick your adventures!'}
           </Typography>
         )}
       </SectionCard>
 
       {/* ── CHOOSE SECTION ── */}
       {!isMvd && choose.length > 0 && (
-        <SectionCard title={`Choose ${maxChoices}`}>
+        <SectionCard title={isLincoln ? `🔨 Craft ${maxChoices}` : `Choose ${maxChoices}`}>
           {!mustDoDone && (
             <Stack
               direction="row"
@@ -313,7 +356,9 @@ export default function KidTodayView({
             >
               <LockIcon sx={{ color: 'text.disabled', fontSize: 20 }} />
               <Typography variant="body2" color="text.secondary">
-                Complete your must-do items to unlock choices!
+                {isLincoln
+                  ? 'Complete your quests to unlock crafting!'
+                  : 'Complete your must-do items to unlock choices!'}
               </Typography>
             </Stack>
           )}
@@ -430,20 +475,56 @@ export default function KidTodayView({
         <Box
           sx={{
             textAlign: 'center',
-            py: 4,
+            py: isLincoln ? 3 : 4,
             px: 2,
-            bgcolor: 'success.50',
-            borderRadius: 3,
-            border: '2px solid',
-            borderColor: 'success.200',
+            bgcolor: isLincoln ? 'rgba(0,0,0,0.85)' : 'success.50',
+            borderRadius: isLincoln ? 0 : 3,
+            border: isLincoln ? '3px solid #FCDB5B' : '2px solid',
+            borderColor: isLincoln ? '#FCDB5B' : 'success.200',
             my: 2,
           }}
         >
-          <Typography variant="h4" sx={{ mb: 1 }}>
+          {isLincoln && (
+            <Typography
+              sx={{
+                fontFamily: '"Press Start 2P", monospace',
+                fontSize: '0.6rem',
+                color: '#FCDB5B',
+                mb: 1,
+                letterSpacing: 1,
+              }}
+            >
+              Achievement Get!
+            </Typography>
+          )}
+          <Typography
+            variant="h4"
+            sx={{
+              mb: 1,
+              ...(isLincoln
+                ? {
+                    fontFamily: '"Press Start 2P", monospace',
+                    fontSize: '0.7rem',
+                    color: '#FFFFFF',
+                    lineHeight: 1.6,
+                  }
+                : {}),
+            }}
+          >
             {celebrationMessage}
           </Typography>
-          <Typography variant="body1" color="text.secondary">
-            {child.name}&apos;s journey continues tomorrow!
+          <Typography
+            variant="body1"
+            sx={{
+              color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.secondary',
+              ...(isLincoln
+                ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.45rem' }
+                : {}),
+            }}
+          >
+            {isLincoln
+              ? 'Respawn tomorrow for more XP!'
+              : `${child.name}'s journey continues tomorrow!`}
           </Typography>
         </Box>
       )}
@@ -455,15 +536,27 @@ export default function KidTodayView({
             textAlign: 'center',
             py: 3,
             px: 2,
-            bgcolor: 'success.50',
-            borderRadius: 3,
-            border: '2px solid',
-            borderColor: 'success.200',
+            bgcolor: isLincoln ? 'rgba(0,0,0,0.85)' : 'success.50',
+            borderRadius: isLincoln ? 0 : 3,
+            border: isLincoln ? '3px solid #5A8C32' : '2px solid',
+            borderColor: isLincoln ? '#5A8C32' : 'success.200',
             my: 2,
           }}
         >
-          <Typography variant="h5" sx={{ mb: 1 }}>
-            Done! Rest well today. 🌟
+          <Typography
+            variant="h5"
+            sx={{
+              mb: 1,
+              ...(isLincoln
+                ? {
+                    fontFamily: '"Press Start 2P", monospace',
+                    fontSize: '0.65rem',
+                    color: '#7EFC20',
+                  }
+                : {}),
+            }}
+          >
+            {isLincoln ? 'Base camp secured! Rest well.' : 'Done! Rest well today. 🌟'}
           </Typography>
         </Box>
       )}
@@ -478,7 +571,7 @@ export default function KidTodayView({
       />
 
       {/* ── MY STUFF ── */}
-      <SectionCard title="📸 My Stuff">
+      <SectionCard title={isLincoln ? '🧰 Inventory' : '📸 My Stuff'}>
         {/* Quick capture buttons */}
         <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
           <Button
@@ -519,7 +612,9 @@ export default function KidTodayView({
         {/* Artifacts list */}
         {artifacts.length === 0 ? (
           <Typography color="text.secondary" variant="body2">
-            Nothing captured yet today. Take a photo of your work!
+            {isLincoln
+              ? 'Nothing in your inventory yet. Capture your builds!'
+              : 'Nothing captured yet today. Take a photo of your work!'}
           </Typography>
         ) : (
           <Stack spacing={1}>

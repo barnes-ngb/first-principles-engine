@@ -23,6 +23,13 @@ const TRAIL_SETS = [
   ['🏰', '🐉', '⚔️', '🗝️', '👑'], // Castle quest
 ]
 
+const MC_TRAIL_SETS = [
+  ['⛏️', '🪨', '🔥', '💎', '🏆'], // Mining expedition
+  ['🌲', '🐺', '🗡️', '🛡️', '🏠'], // Forest survival
+  ['🌊', '🐙', '🧭', '🗺️', '⚓'], // Ocean monument
+  ['🏜️', '🌵', '🏛️', '💀', '👑'], // Desert temple
+]
+
 const GARDEN_SET = ['🌱', '🌿', '🌸', '🌺', '🌻']
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
@@ -47,15 +54,17 @@ export default function ExplorerMap({
 
   const weekDates = useMemo(() => getWeekDates(weekStart), [weekStart])
 
-  const useGardenTheme = childName?.toLowerCase() === 'london'
+  const isLondon = childName?.toLowerCase() === 'london'
+  const isLincoln = childName?.toLowerCase() === 'lincoln'
 
   const trailSet = useMemo(() => {
-    if (useGardenTheme) return GARDEN_SET
+    if (isLondon) return GARDEN_SET
     const weekNum = Math.floor(
       new Date(weekStart + 'T00:00:00').getTime() / (7 * 24 * 60 * 60 * 1000),
     )
-    return TRAIL_SETS[weekNum % TRAIL_SETS.length]
-  }, [weekStart, useGardenTheme])
+    const sets = isLincoln ? MC_TRAIL_SETS : TRAIL_SETS
+    return sets[weekNum % sets.length]
+  }, [weekStart, isLondon, isLincoln])
 
   // Load day completion data
   useEffect(() => {
@@ -105,14 +114,22 @@ export default function ExplorerMap({
   const allExplored = exploredCount === 5
 
   const summaryText = allExplored
-    ? useGardenTheme
+    ? isLondon
       ? 'Full garden bloomed this week! 🎉'
-      : 'Full week explored! What an adventure! 🎉'
-    : useGardenTheme
+      : isLincoln
+        ? 'Full map explored! Legendary week!'
+        : 'Full week explored! What an adventure! 🎉'
+    : isLondon
       ? `${exploredCount} flower${exploredCount !== 1 ? 's' : ''} bloomed! ${remainingCount} to grow...`
-      : `${exploredCount} day${exploredCount !== 1 ? 's' : ''} explored! ${remainingCount} to discover...`
+      : isLincoln
+        ? `${exploredCount} biome${exploredCount !== 1 ? 's' : ''} explored! ${remainingCount} to discover...`
+        : `${exploredCount} day${exploredCount !== 1 ? 's' : ''} explored! ${remainingCount} to discover...`
 
-  const title = useGardenTheme ? '🌸 This Week\'s Garden' : '🗺️ This Week\'s Journey'
+  const title = isLondon
+    ? '🌸 This Week\'s Garden'
+    : isLincoln
+      ? '🗺️ World Map'
+      : '🗺️ This Week\'s Journey'
 
   return (
     <SectionCard title={title}>
@@ -205,7 +222,7 @@ export default function ExplorerMap({
           textAlign="center"
           sx={{ color: 'warning.main', fontWeight: 600 }}
         >
-          🔥 Streak: {streak} days
+          {isLincoln ? `⛏️ Mining streak: ${streak} days` : `🔥 Streak: ${streak} days`}
         </Typography>
       )}
     </SectionCard>
