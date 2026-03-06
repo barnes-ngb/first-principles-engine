@@ -308,6 +308,17 @@ export const generatePortfolioMarkdown = (
     })
 
     lines.push('')
+
+    // Include image references for photo artifacts
+    const photos = sorted.filter((art) => ((art.type as string) === 'Photo' || (art.type as string) === 'photo') && art.uri)
+    if (photos.length > 0) {
+      lines.push('### Photos')
+      lines.push('')
+      for (const art of photos) {
+        lines.push(`![${art.title}](${art.uri})`)
+        lines.push('')
+      }
+    }
   }
 
   return lines.join('\n')
