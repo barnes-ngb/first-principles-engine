@@ -29,35 +29,14 @@ export function useDadLabReports() {
   }, [familyId])
 
   useEffect(() => {
-    load()
-  }, [load])
-
-  const saveReport = useCallback(
-    async (report: DadLabReport): Promise<string> => {
-      const now = new Date().toISOString()
-      const isNew = !report.id
-      let reportId: string
-
-      if (isNew) {
-        const data = { ...report, createdAt: now, updatedAt: now }
-        delete (data as { id?: string }).id
-        const ref = await addDoc(dadLabReportsCollection(familyId), data)
-        reportId = ref.id
-      } else {
-        reportId = report.id!
-        const ref = doc(dadLabReportsCollection(familyId), reportId)
-        await setDoc(ref, { ...report, updatedAt: now })
-      }
-
-      // Sync compliance hours
-      await syncComplianceHours(reportId, report)
-
-      // Reload list
-      await load()
-      return reportId
-    },
-    [familyId, children, load],
-  )
+    const fetchReports = async () => {
+      const q = query(dadLabReportsCollection(familyId), orderBy('date', 'desc'))
+      const snap = await getDocs(q)
+      setReports(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
+      setLoading(false)
+    }
+    fetchReports()
+  }, [familyId])
 
   const syncComplianceHours = useCallback(
     async (reportId: string, report: DadLabReport) => {
@@ -93,6 +72,33 @@ export function useDadLabReports() {
       }
     },
     [familyId, children],
+  )
+
+  const saveReport = useCallback(
+    async (report: DadLabReport): Promise<string> => {
+      const now = new Date().toISOString()
+      const isNew = !report.id
+      let reportId: string
+
+      if (isNew) {
+        const data = { ...report, createdAt: now, updatedAt: now }
+        delete (data as { id?: string }).id
+        const ref = await addDoc(dadLabReportsCollection(familyId), data)
+        reportId = ref.id
+      } else {
+        reportId = report.id!
+        const ref = doc(dadLabReportsCollection(familyId), reportId)
+        await setDoc(ref, { ...report, updatedAt: now })
+      }
+
+      // Sync compliance hours
+      await syncComplianceHours(reportId, report)
+
+      // Reload list
+      await load()
+      return reportId
+    },
+    [familyId, syncComplianceHours, load],
   )
 
   const deleteReport = useCallback(

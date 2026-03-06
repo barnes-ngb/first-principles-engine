@@ -51,7 +51,7 @@ function parseSuggestions(text: string): ParsedSuggestion[] {
   // Try to parse structured suggestions from AI response
   // Look for numbered items with title, type, question patterns
   const suggestions: ParsedSuggestion[] = []
-  const blocks = text.split(/(?=\d+[\.\)]\s)/).filter((b) => b.trim())
+  const blocks = text.split(/(?=\d+[.)]\s)/).filter((b) => b.trim())
 
   for (const block of blocks) {
     const titleMatch = block.match(/(?:title|name)[:\s]*["']?([^"'\n]+)["']?/i)
@@ -82,7 +82,7 @@ function parseSuggestions(text: string): ParsedSuggestion[] {
   return suggestions
 }
 
-export default function LabSuggestions({ open, onClose, onSelect }: LabSuggestionsProps) {
+function LabSuggestionsContent({ onClose, onSelect }: Omit<LabSuggestionsProps, 'open'>) {
   const familyId = useFamilyId()
   const { children } = useChildren()
   const { chat, loading: aiLoading } = useAI()
@@ -91,7 +91,7 @@ export default function LabSuggestions({ open, onClose, onSelect }: LabSuggestio
   const [error, setError] = useState<string | null>(null)
 
   const fetchSuggestions = useCallback(async () => {
-    if (!open || !children.length) return
+    if (!children.length) return
     setSuggestions([])
     setRawText('')
     setError(null)
@@ -127,11 +127,12 @@ London's role: [what she does]`,
     } else {
       setError('No suggestions received. Try again later.')
     }
-  }, [open, familyId, children, chat])
+  }, [familyId, children, chat])
 
   useEffect(() => {
-    if (open) fetchSuggestions()
-  }, [open, fetchSuggestions])
+    fetchSuggestions()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleSelect = useCallback(
     (suggestion: ParsedSuggestion) => {
@@ -146,7 +147,7 @@ London's role: [what she does]`,
   )
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <>
       <DialogTitle>Lab Suggestions</DialogTitle>
       <DialogContent>
         {aiLoading && (
@@ -205,6 +206,14 @@ London's role: [what she does]`,
           <Button onClick={onClose}>Close</Button>
         </Stack>
       </DialogContent>
+    </>
+  )
+}
+
+export default function LabSuggestions({ open, onClose, onSelect }: LabSuggestionsProps) {
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      {open && <LabSuggestionsContent onClose={onClose} onSelect={onSelect} />}
     </Dialog>
   )
 }
