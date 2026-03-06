@@ -11,6 +11,7 @@ import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import SaveIcon from '@mui/icons-material/Save'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 
 import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
@@ -21,7 +22,7 @@ import { artifactsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useSaveState } from '../../core/hooks/useSaveState'
 import type { Child, ChildLabReport, DadLabReport } from '../../core/types/domain'
-import { DadLabType, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { DadLabStatus, DadLabType, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
 import { addDoc, updateDoc, doc } from 'firebase/firestore'
 
@@ -64,6 +65,9 @@ interface Prefill {
   question?: string
   labType?: DadLabType
   description?: string
+  materials?: string[]
+  lincolnRole?: string
+  londonRole?: string
 }
 
 interface LabReportFormProps {
@@ -99,10 +103,14 @@ export default function LabReportForm({
 }: LabReportFormProps) {
   const familyId = useFamilyId()
   const { saveState, withSave } = useSaveState()
-  const isViewMode = !!report
+
+  // Determine if this is an active lab being completed
+  const isCompleting = report?.status === DadLabStatus.Active
+  const isViewingComplete = report?.status === DadLabStatus.Complete
+  const isEditing = !!report && !isCompleting
 
   // Form state
-  const [date, setDate] = useState(report?.date ?? prefill?.title ? todayKey() : todayKey())
+  const [date, setDate] = useState(report?.date ?? todayKey())
   const [title, setTitle] = useState(report?.title ?? prefill?.title ?? '')
   const [labType, setLabType] = useState<DadLabType>(
     report?.labType ?? prefill?.labType ?? DadLabType.Science,
@@ -111,6 +119,15 @@ export default function LabReportForm({
   const [question, setQuestion] = useState(report?.question ?? prefill?.question ?? '')
   const [description, setDescription] = useState(
     report?.description ?? prefill?.description ?? '',
+  )
+  const [materials, setMaterials] = useState(
+    (report?.materials ?? prefill?.materials ?? []).join(', '),
+  )
+  const [lincolnRole, setLincolnRole] = useState(
+    report?.lincolnRole ?? prefill?.lincolnRole ?? '',
+  )
+  const [londonRole, setLondonRole] = useState(
+    report?.londonRole ?? prefill?.londonRole ?? '',
   )
   const [childReports, setChildReports] = useState<Record<string, ChildLabReport>>(() => {
     if (report?.childReports) return report.childReports
@@ -132,13 +149,16 @@ export default function LabReportForm({
   const [artifactUrls, setArtifactUrls] = useState<Record<string, string>>({})
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null)
 
-  // Initialize date from prefill
+  // Initialize from prefill
   useEffect(() => {
     if (prefill && !report) {
       if (prefill.title) setTitle(prefill.title)
       if (prefill.question) setQuestion(prefill.question)
       if (prefill.labType) setLabType(prefill.labType)
       if (prefill.description) setDescription(prefill.description)
+      if (prefill.materials) setMaterials(prefill.materials.join(', '))
+      if (prefill.lincolnRole) setLincolnRole(prefill.lincolnRole)
+      if (prefill.londonRole) setLondonRole(prefill.londonRole)
     }
   }, [prefill, report])
 
@@ -248,6 +268,21 @@ export default function LabReportForm({
 
   const handleSave = useCallback(async () => {
     const dateObj = new Date(date + 'T00:00:00')
+    const parsedMaterials = materials
+      .split(',')
+      .map((m) => m.trim())
+      .filter(Boolean)
+
+    // Determine status: completing an active lab → complete; editing existing → keep status; new → planned
+    let status: DadLabReport['status']
+    if (isCompleting) {
+      status = DadLabStatus.Complete
+    } else if (report?.status) {
+      status = report.status
+    } else {
+      status = DadLabStatus.Planned
+    }
+
     const reportData: DadLabReport = {
       ...(report?.id ? { id: report.id } : {}),
       date,
@@ -256,6 +291,10 @@ export default function LabReportForm({
       labType,
       question: question.trim(),
       description: description.trim(),
+      status,
+      materials: parsedMaterials.length > 0 ? parsedMaterials : undefined,
+      lincolnRole: lincolnRole.trim() || undefined,
+      londonRole: londonRole.trim() || undefined,
       childReports,
       subjectTags: subjectTags as DadLabReport['subjectTags'],
       skillTags: skillTags.length > 0 ? skillTags : undefined,
@@ -269,17 +308,23 @@ export default function LabReportForm({
     }
     await withSave(() => onSave(reportData))
   }, [
-    date, title, labType, question, description, childReports,
-    subjectTags, skillTags, virtueTag, dadReflection, bestMoment, nextTime,
-    totalMinutes, report, onSave, withSave,
+    date, title, labType, question, description, childReports, materials,
+    lincolnRole, londonRole, subjectTags, skillTags, virtueTag, dadReflection,
+    bestMoment, nextTime, totalMinutes, report, isCompleting, onSave, withSave,
   ])
+
+  const disabled = isViewingComplete
 
   // ── Render ──
 
   return (
     <Stack spacing={3}>
       <Typography variant="h6" sx={{ fontWeight: 700 }}>
-        {report ? report.title : 'New Lab Report'}
+        {isCompleting
+          ? 'Complete Lab'
+          : report
+            ? report.title
+            : 'Plan a Lab'}
       </Typography>
 
       {/* Date + Title + Type + Duration */}
@@ -288,7 +333,7 @@ export default function LabReportForm({
         type="date"
         value={date}
         onChange={(e) => setDate(e.target.value)}
-        disabled={isViewMode}
+        disabled={disabled || isCompleting}
         fullWidth
         slotProps={{ inputLabel: { shrink: true } }}
       />
@@ -298,7 +343,7 @@ export default function LabReportForm({
         placeholder="Volcano Lab, Birdhouse Build..."
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        disabled={isViewMode}
+        disabled={disabled || isCompleting}
         fullWidth
       />
 
@@ -310,7 +355,7 @@ export default function LabReportForm({
           value={labType}
           exclusive
           onChange={(_, val) => val && setLabType(val)}
-          disabled={isViewMode}
+          disabled={disabled || isCompleting}
           sx={{ flexWrap: 'wrap' }}
         >
           {LAB_TYPES.map((t) => (
@@ -326,7 +371,7 @@ export default function LabReportForm({
         type="number"
         value={totalMinutes}
         onChange={(e) => setTotalMinutes(Number(e.target.value))}
-        disabled={isViewMode}
+        disabled={disabled}
         sx={{ maxWidth: 200 }}
       />
 
@@ -336,105 +381,150 @@ export default function LabReportForm({
           The Question
         </Typography>
         <TextField
-          placeholder="What question did we explore today?"
+          placeholder="What question will we explore?"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          disabled={isViewMode}
+          disabled={disabled || isCompleting}
           fullWidth
           multiline
           minRows={2}
         />
       </Box>
 
-      {/* What Happened */}
+      {/* Description / What Happened */}
       <Box>
         <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600 }}>
-          What Happened
+          {isCompleting ? 'What Happened' : 'Description'}
         </Typography>
         <TextField
-          placeholder="Describe what you did..."
+          placeholder={isCompleting ? 'Describe what happened...' : 'Describe what you plan to do...'}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          disabled={isViewMode}
+          disabled={disabled}
           fullWidth
           multiline
           minRows={3}
         />
       </Box>
 
-      {/* Per-Child Sections */}
-      {children.map((child) => {
-        const cr = childReports[child.id] ?? emptyChildReport()
-        const fields = getChildFields(child.name)
-        const isUploading = uploadingChildId === child.id
+      {/* Materials (planning fields) */}
+      <Box>
+        <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600 }}>
+          Materials Needed
+        </Typography>
+        <TextField
+          placeholder="Baking soda, vinegar, food coloring..."
+          value={materials}
+          onChange={(e) => setMaterials(e.target.value)}
+          disabled={disabled || isCompleting}
+          fullWidth
+          helperText="Comma-separated list"
+        />
+      </Box>
 
-        return (
-          <Box key={child.id} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
-              {child.name}
-            </Typography>
+      {/* Role assignments (planning fields) */}
+      <Box>
+        <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600 }}>
+          Roles
+        </Typography>
+        <Stack spacing={2}>
+          <TextField
+            label="Lincoln's role"
+            placeholder="Makes prediction, runs the experiment, explains to London"
+            value={lincolnRole}
+            onChange={(e) => setLincolnRole(e.target.value)}
+            disabled={disabled || isCompleting}
+            fullWidth
+            multiline
+            minRows={2}
+          />
+          <TextField
+            label="London's role"
+            placeholder="Watches, draws what he sees, helps pour"
+            value={londonRole}
+            onChange={(e) => setLondonRole(e.target.value)}
+            disabled={disabled || isCompleting}
+            fullWidth
+            multiline
+            minRows={2}
+          />
+        </Stack>
+      </Box>
 
-            <Stack spacing={2}>
-              {fields.map((field) => (
-                <TextField
-                  key={field.key}
-                  label={field.label}
-                  placeholder={field.placeholder}
-                  value={(cr as unknown as Record<string, unknown>)[field.key] ?? ''}
-                  onChange={(e) => updateChildField(child.id, field.key, e.target.value)}
-                  disabled={isViewMode}
-                  fullWidth
-                  multiline
-                  minRows={2}
-                />
-              ))}
+      {/* Per-Child Sections (shown for active/completing or complete labs) */}
+      {(isCompleting || isViewingComplete || (isEditing && report?.status !== DadLabStatus.Planned)) &&
+        children.map((child) => {
+          const cr = childReports[child.id] ?? emptyChildReport()
+          const fields = getChildFields(child.name)
+          const isUploading = uploadingChildId === child.id
 
-              {/* Artifact thumbnails */}
-              {cr.artifacts.length > 0 && (
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  {cr.artifacts.map((artifactId) => {
-                    const url = artifactUrls[artifactId]
-                    if (!url) return null
-                    return (
-                      <Box
-                        key={artifactId}
-                        component="img"
-                        src={url}
-                        alt="Lab photo"
-                        onClick={() => setPreviewPhoto(url)}
-                        sx={{
-                          width: 80,
-                          height: 80,
-                          objectFit: 'cover',
-                          borderRadius: 1,
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          cursor: 'pointer',
-                        }}
-                      />
-                    )
-                  })}
-                </Stack>
-              )}
+          return (
+            <Box key={child.id} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
+                {child.name}
+              </Typography>
 
-              {/* Capture buttons */}
-              {!isViewMode && (
-                <Stack spacing={1}>
-                  <PhotoCapture
-                    onCapture={(file) => handlePhotoCapture(child.id, file)}
-                    uploading={isUploading}
-                    multiple
+              <Stack spacing={2}>
+                {fields.map((field) => (
+                  <TextField
+                    key={field.key}
+                    label={field.label}
+                    placeholder={field.placeholder}
+                    value={(cr as unknown as Record<string, unknown>)[field.key] ?? ''}
+                    onChange={(e) => updateChildField(child.id, field.key, e.target.value)}
+                    disabled={disabled}
+                    fullWidth
+                    multiline
+                    minRows={2}
                   />
-                  <AudioRecorder
-                    onCapture={(blob) => handleAudioCapture(child.id, blob)}
-                    uploading={isUploading}
-                  />
-                </Stack>
-              )}
-            </Stack>
-          </Box>
-        )
-      })}
+                ))}
+
+                {/* Artifact thumbnails */}
+                {cr.artifacts.length > 0 && (
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    {cr.artifacts.map((artifactId) => {
+                      const url = artifactUrls[artifactId]
+                      if (!url) return null
+                      return (
+                        <Box
+                          key={artifactId}
+                          component="img"
+                          src={url}
+                          alt="Lab photo"
+                          onClick={() => setPreviewPhoto(url)}
+                          sx={{
+                            width: 80,
+                            height: 80,
+                            objectFit: 'cover',
+                            borderRadius: 1,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            cursor: 'pointer',
+                          }}
+                        />
+                      )
+                    })}
+                  </Stack>
+                )}
+
+                {/* Capture buttons */}
+                {!disabled && (
+                  <Stack spacing={1}>
+                    <PhotoCapture
+                      onCapture={(file) => handlePhotoCapture(child.id, file)}
+                      uploading={isUploading}
+                      multiple
+                    />
+                    <AudioRecorder
+                      onCapture={(blob) => handleAudioCapture(child.id, blob)}
+                      uploading={isUploading}
+                    />
+                  </Stack>
+                )}
+              </Stack>
+            </Box>
+          )
+        })}
 
       {/* Tags */}
       <Box>
@@ -449,7 +539,7 @@ export default function LabReportForm({
                 <Checkbox
                   checked={subjectTags.includes(opt.value)}
                   onChange={() => toggleSubject(opt.value)}
-                  disabled={isViewMode}
+                  disabled={disabled}
                   size="small"
                 />
               }
@@ -470,12 +560,12 @@ export default function LabReportForm({
             <Chip
               key={tag}
               label={tag}
-              onDelete={isViewMode ? undefined : () => removeSkillTag(tag)}
+              onDelete={disabled ? undefined : () => removeSkillTag(tag)}
               size="small"
             />
           ))}
         </Stack>
-        {!isViewMode && (
+        {!disabled && (
           <TextField
             placeholder="Type a skill tag and press Enter"
             size="small"
@@ -502,63 +592,78 @@ export default function LabReportForm({
           placeholder="What virtue or character trait?"
           value={virtueTag}
           onChange={(e) => setVirtueTag(e.target.value)}
-          disabled={isViewMode}
+          disabled={disabled}
           fullWidth
         />
       )}
 
-      {/* Reflection */}
-      <Box>
-        <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600 }}>
-          Reflection
-        </Typography>
-        <Stack spacing={2}>
-          <TextField
-            label="Best moment"
-            placeholder="The highlight of the lab"
-            value={bestMoment}
-            onChange={(e) => setBestMoment(e.target.value)}
-            disabled={isViewMode}
-            fullWidth
-            multiline
-            minRows={2}
-          />
-          <TextField
-            label="Next time"
-            placeholder="What to do differently"
-            value={nextTime}
-            onChange={(e) => setNextTime(e.target.value)}
-            disabled={isViewMode}
-            fullWidth
-          />
-          <TextField
-            label="Dad's thoughts"
-            placeholder="How did it go?"
-            value={dadReflection}
-            onChange={(e) => setDadReflection(e.target.value)}
-            disabled={isViewMode}
-            fullWidth
-            multiline
-            minRows={2}
-          />
-        </Stack>
-      </Box>
+      {/* Reflection (shown when completing or viewing complete) */}
+      {(isCompleting || isViewingComplete) && (
+        <Box>
+          <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600 }}>
+            Reflection
+          </Typography>
+          <Stack spacing={2}>
+            <TextField
+              label="Best moment"
+              placeholder="The highlight of the lab"
+              value={bestMoment}
+              onChange={(e) => setBestMoment(e.target.value)}
+              disabled={disabled}
+              fullWidth
+              multiline
+              minRows={2}
+            />
+            <TextField
+              label="Next time"
+              placeholder="What to do differently"
+              value={nextTime}
+              onChange={(e) => setNextTime(e.target.value)}
+              disabled={disabled}
+              fullWidth
+            />
+            <TextField
+              label="Dad's thoughts"
+              placeholder="How did it go?"
+              value={dadReflection}
+              onChange={(e) => setDadReflection(e.target.value)}
+              disabled={disabled}
+              fullWidth
+              multiline
+              minRows={2}
+            />
+          </Stack>
+        </Box>
+      )}
 
-      {/* Save */}
-      {!isViewMode && (
+      {/* Save / Complete button */}
+      {!disabled && (
         <Button
           variant="contained"
           size="large"
-          startIcon={saveState === 'saving' ? <CircularProgress size={18} /> : <SaveIcon />}
+          startIcon={
+            saveState === 'saving' ? (
+              <CircularProgress size={18} />
+            ) : isCompleting ? (
+              <CheckCircleIcon />
+            ) : (
+              <SaveIcon />
+            )
+          }
           onClick={handleSave}
           disabled={saveState === 'saving' || !title.trim()}
+          color={isCompleting ? 'success' : 'primary'}
           sx={{ height: 56 }}
         >
-          {saveState === 'saving' ? 'Saving...' : 'Save Lab Report'}
+          {saveState === 'saving'
+            ? 'Saving...'
+            : isCompleting
+              ? 'Complete Lab'
+              : 'Save Lab'}
         </Button>
       )}
 
-      {isViewMode && (
+      {disabled && (
         <Button variant="outlined" onClick={onCancel}>
           Back
         </Button>

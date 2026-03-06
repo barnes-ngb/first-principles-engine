@@ -20,6 +20,9 @@ interface Prefill {
   question: string
   labType: DadLabType
   description: string
+  materials?: string[]
+  lincolnRole?: string
+  londonRole?: string
 }
 
 interface LabSuggestionsProps {
@@ -33,6 +36,9 @@ interface ParsedSuggestion {
   type: string
   question: string
   description: string
+  materials?: string[]
+  lincolnRole?: string
+  londonRole?: string
 }
 
 const LAB_TYPE_MAP: Record<string, DadLabType> = {
@@ -60,11 +66,19 @@ function parseSuggestions(text: string): ParsedSuggestion[] {
     const descMatch = block.match(/(?:description|brief|overview)[:\s]*["']?([^"'\n]+)["']?/i)
 
     if (titleMatch) {
+      const materialsMatch = block.match(/(?:materials?)[:\s]*["']?([^"'\n]+)["']?/i)
+      const lincolnMatch = block.match(/(?:lincoln'?s?\s*role)[:\s]*["']?([^"'\n]+)["']?/i)
+      const londonMatch = block.match(/(?:london'?s?\s*role)[:\s]*["']?([^"'\n]+)["']?/i)
       suggestions.push({
         title: titleMatch[1].trim(),
         type: typeMatch?.[1]?.trim() ?? 'science',
         question: questionMatch?.[1]?.trim() ?? '',
         description: descMatch?.[1]?.trim() ?? '',
+        materials: materialsMatch
+          ? materialsMatch[1].split(',').map((m) => m.trim()).filter(Boolean)
+          : undefined,
+        lincolnRole: lincolnMatch?.[1]?.trim(),
+        londonRole: londonMatch?.[1]?.trim(),
       })
     }
   }
@@ -154,6 +168,9 @@ London's role: [what he does]`,
         question: suggestion.question,
         labType: parseLabType(suggestion.type),
         description: suggestion.description,
+        materials: suggestion.materials,
+        lincolnRole: suggestion.lincolnRole,
+        londonRole: suggestion.londonRole,
       })
     },
     [onSelect],
