@@ -54,9 +54,6 @@ export const navTo = {
     if (weekStart) return `/week?week=${weekStart}`
     return '/week'
   },
-  dadLab: (weekStart?: string): string => {
-    if (weekStart) return `/week/lab?week=${weekStart}`
-    return '/week/lab'
-  },
+  dadLab: (): string => '/dad-lab',
   artifacts: (): string => '/records',
 }

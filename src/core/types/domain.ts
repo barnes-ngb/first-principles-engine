@@ -2,6 +2,7 @@ import type {
   AdjustmentDecision,
   AssignmentAction,
   ChatMessageRole,
+  DadLabType,
   DayBlockType,
   DayType,
   EnergyLevel,
@@ -452,36 +453,35 @@ export interface ScoreMetric {
   result: SessionResult | 'na'
 }
 
-export interface WeeklyExperiment {
-  id?: string
-  childId: string
-  weekKey: string
-  hypothesis: string
-  intervention: string
-  measurement: string
-  startDate?: string
-  endDate?: string
-  result?: string
-  createdAt?: string
-  updatedAt?: string
+// ── Dad Lab Reports ─────────────────────────────────────────────
+
+export interface ChildLabReport {
+  prediction?: string
+  explanation?: string
+  observation?: string
+  creation?: string
+  artifacts: string[]
+  notes?: string
 }
 
-export interface DadDailyReport {
-  win: string
-  hardThing: string
-  whatHeTried: string
-  energy: 'high' | 'medium' | 'low'
-  adjustmentForTomorrow: string
-}
-
-export interface DadLabWeek {
+export interface DadLabReport {
   id?: string
-  childId: string
+  date: string
   weekKey: string
-  experiment?: WeeklyExperiment
-  dailyReports: Record<string, DadDailyReport>
-  createdAt?: string
-  updatedAt?: string
+  title: string
+  labType: DadLabType
+  question: string
+  description: string
+  childReports: Record<string, ChildLabReport>
+  subjectTags: SubjectBucket[]
+  skillTags?: string[]
+  virtueTag?: string
+  dadReflection?: string
+  bestMoment?: string
+  nextTime?: string
+  totalMinutes?: number
+  createdAt: string
+  updatedAt: string
 }
 
 // ── Lincoln's Ladders (card-based) ──────────────────────────────

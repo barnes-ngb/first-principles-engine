@@ -552,7 +552,7 @@ export default function WeekPage() {
             <Button
               variant="contained"
               size="large"
-              onClick={() => navigate(navTo.dadLab(weekRange.start))}
+              onClick={() => navigate(navTo.dadLab())}
             >
               Start Lab Mode
             </Button>
