@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AssessmentIcon from '@mui/icons-material/Assessment'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import DownloadIcon from '@mui/icons-material/Download'
 import ErrorIcon from '@mui/icons-material/Error'
 import SendIcon from '@mui/icons-material/Send'
 import WarningIcon from '@mui/icons-material/Warning'
@@ -498,6 +499,68 @@ export default function EvaluateChatPage() {
     setSnackText(null)
   }, [])
 
+  // ── Download Report ─────────────────────────────────────────
+
+  const handleDownloadReport = useCallback(() => {
+    if (!activeChild || !completeSummary) return
+
+    const date = new Date().toLocaleDateString()
+    let md = `# ${activeChild.name} — Reading Evaluation\n`
+    md += `**Date:** ${date}\n\n`
+    md += `## Summary\n${completeSummary}\n\n`
+
+    if (completeData?.frontier) {
+      md += `## Learning Frontier\n${completeData.frontier}\n\n`
+    }
+
+    // Findings
+    md += `## Skill Map\n`
+    for (const f of findings) {
+      const icon = f.status === 'mastered' ? '\u2705' : f.status === 'emerging' ? '\u26A0\uFE0F' : '\u274C'
+      md += `${icon} **${formatSkillLabel(f.skill)}:** ${f.evidence}`
+      if (f.notes) md += ` \u2014 ${f.notes}`
+      md += `\n`
+    }
+    md += `\n`
+
+    // Recommendations
+    if (recommendations.length > 0) {
+      md += `## What to Work On\n`
+      for (const rec of recommendations) {
+        md += `### ${rec.priority}. ${formatSkillLabel(rec.skill)}\n`
+        md += `${rec.action}\n`
+        md += `- Frequency: ${rec.frequency}\n`
+        md += `- Duration: ${rec.duration}\n`
+        if (rec.materials?.length) md += `- Materials: ${rec.materials.join(', ')}\n`
+        md += `\n`
+      }
+    }
+
+    // What to skip
+    if (completeData?.skipList && completeData.skipList.length > 0) {
+      md += `## What to Skip\n`
+      for (const item of completeData.skipList) {
+        md += `- **${item.skill}:** ${item.reason}\n`
+      }
+      md += `\n`
+    }
+
+    // Next eval
+    if (completeData?.nextEvalDate) {
+      md += `## Next Evaluation\n`
+      md += `Suggested: ${new Date(completeData.nextEvalDate).toLocaleDateString()}\n`
+    }
+
+    // Trigger download
+    const blob = new Blob([md], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${activeChild.name}-reading-eval-${new Date().toISOString().split('T')[0]}.md`
+    link.click()
+    URL.revokeObjectURL(url)
+  }, [activeChild, completeSummary, findings, recommendations, completeData])
+
   // ── Handle Enter key ────────────────────────────────────────
 
   const handleKeyDown = useCallback(
@@ -747,6 +810,63 @@ export default function EvaluateChatPage() {
                 </Alert>
               )}
 
+              {/* Learning Roadmap */}
+              {recommendations.length > 0 && (
+                <Box sx={{ my: 2 }}>
+                  <Typography variant="subtitle2" gutterBottom>Learning Roadmap</Typography>
+                  <Stack spacing={0}>
+                    {recommendations.map((rec, i) => {
+                      const isFirst = i === 0
+                      const isLast = i === recommendations.length - 1
+                      return (
+                        <Stack key={i} direction="row" spacing={1.5} alignItems="flex-start">
+                          {/* Timeline */}
+                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 24, flexShrink: 0 }}>
+                            <Box sx={{
+                              width: 16, height: 16, borderRadius: '50%',
+                              bgcolor: isFirst ? 'primary.main' : 'grey.300',
+                              border: '2px solid',
+                              borderColor: isFirst ? 'primary.main' : 'grey.400',
+                            }} />
+                            {!isLast && (
+                              <Box sx={{ width: 2, height: 48, bgcolor: 'grey.300' }} />
+                            )}
+                          </Box>
+                          {/* Content */}
+                          <Box sx={{ pb: isLast ? 0 : 2 }}>
+                            <Typography variant="body2" sx={{ fontWeight: isFirst ? 700 : 400 }}>
+                              {isFirst ? '\u2192 NOW: ' : ''}{formatSkillLabel(rec.skill)}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {rec.duration} \u00B7 {rec.frequency}
+                            </Typography>
+                          </Box>
+                        </Stack>
+                      )
+                    })}
+                    {/* Future milestone */}
+                    <Stack direction="row" spacing={1.5} alignItems="flex-start">
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 24 }}>
+                        <Box sx={{
+                          width: 16, height: 16, borderRadius: '50%',
+                          bgcolor: 'success.main', border: '2px solid', borderColor: 'success.main',
+                        }} />
+                      </Box>
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 700, color: 'success.main' }}>
+                          Re-evaluate & advance
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {completeData?.nextEvalDate
+                            ? new Date(completeData.nextEvalDate).toLocaleDateString()
+                            : '4-6 weeks from now'}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  </Stack>
+                </Box>
+              )}
+
               {/* Recommendations */}
               {recommendations.length > 0 && (
                 <>
@@ -794,6 +914,14 @@ export default function EvaluateChatPage() {
                 <Button variant="contained" onClick={handleSaveAndApply}>
                   Apply to Skill Snapshot
                 </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<DownloadIcon />}
+                  onClick={handleDownloadReport}
+                >
+                  Download Report
+                </Button>
                 <Button variant="outlined" onClick={() => navigate('/progress')}>
                   View Skill Snapshot
                 </Button>
@@ -821,15 +949,6 @@ export default function EvaluateChatPage() {
                 onClick={() => setClearDialogOpen(true)}
               >
                 Clear & Restart
-              </Button>
-            )}
-            {!completeSummary && hasMessages && (
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => void persistSession(messages, findings)}
-              >
-                Save Progress
               </Button>
             )}
           </Stack>
