@@ -2,6 +2,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { claudeApiKey } from "./aiConfig.js";
+import { sanitizeAndParseJson } from "./sanitizeJson.js";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -305,9 +306,7 @@ interface ReviewPayload {
 }
 
 export function parseReviewResponse(text: string): ReviewPayload {
-  // Strip markdown code fences if present
-  const cleaned = text.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
-  const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+  const parsed = sanitizeAndParseJson<Record<string, unknown>>(text);
 
   return {
     progressSummary: String(parsed.progressSummary ?? ""),
