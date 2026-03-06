@@ -310,3 +310,10 @@ export const DadLabType = {
   Heart: 'heart',
 } as const
 export type DadLabType = (typeof DadLabType)[keyof typeof DadLabType]
+
+export const DadLabStatus = {
+  Planned: 'planned',
+  Active: 'active',
+  Complete: 'complete',
+} as const
+export type DadLabStatus = (typeof DadLabStatus)[keyof typeof DadLabStatus]

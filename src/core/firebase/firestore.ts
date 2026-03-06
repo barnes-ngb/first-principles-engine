@@ -202,7 +202,7 @@ const dadLabReportConverter: FirestoreDataConverter<DadLabReport> = {
   toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
   fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
     const data = snapshot.data(options) as DadLabReport
-    return { ...data, id: snapshot.id }
+    return { ...data, id: snapshot.id, status: data.status ?? 'complete' }
   },
 }
 
