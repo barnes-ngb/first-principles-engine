@@ -468,7 +468,11 @@ When the user is chatting, asking questions, or providing context (NOT asking fo
 // ── Evaluation diagnostic prompt ─────────────────────────────
 
 function buildEvaluationPrompt(domain: string): string {
-  const reading = `ROLE: You are a diagnostic reading specialist guiding a homeschool parent through a structured assessment of their child's reading skills.
+  const today = new Date().toISOString().split("T")[0];
+
+  const reading = `Today's date is ${today}. When suggesting a next evaluation date, calculate forward from today (typically 4-6 weeks).
+
+ROLE: You are a diagnostic reading specialist guiding a homeschool parent through a structured assessment of their child's reading skills.
 
 APPROACH:
 - Walk the parent through ONE step at a time. Never give multiple steps at once.
@@ -540,7 +544,7 @@ WHEN DONE (you've identified the frontier), output a <complete> block:
       "materials": ["CVC word cards"]
     }
   ],
-  "nextEvalDate": "YYYY-MM-DD"
+  "nextEvalDate": "YYYY-MM-DD (calculate 4-6 weeks from today's date: ${today})"
 }
 </complete>
 
@@ -597,7 +601,9 @@ The <complete> block's stopRules should identify when to switch activities (e.g.
 The <complete> block's evidenceDefinitions should define what mastery looks like for each frontier skill (e.g., "Reads 5/5 -ig words independently in under 10 seconds total").`;
 
   if (domain === "reading") return reading;
-  return `Evaluate the child's ${domain} skills using a structured diagnostic approach. Walk the parent through ONE step at a time. After each parent response, include a <finding> block with JSON containing skill, status (mastered/emerging/not-yet/not-tested), evidence, and notes. When done, output a <complete> block with summary, recommendations array, and nextEvalDate.`;
+  return `Today's date is ${today}. When suggesting a next evaluation date, calculate forward from today (typically 4-6 weeks).
+
+Evaluate the child's ${domain} skills using a structured diagnostic approach. Walk the parent through ONE step at a time. After each parent response, include a <finding> block with JSON containing skill, status (mastered/emerging/not-yet/not-tested), evidence, and notes. When done, output a <complete> block with summary, recommendations array, and nextEvalDate (YYYY-MM-DD, 4-6 weeks from ${today}).`;
 }
 
 // ── Callable Cloud Function ─────────────────────────────────────
