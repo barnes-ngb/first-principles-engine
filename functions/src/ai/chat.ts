@@ -46,7 +46,7 @@ function modelForTask(taskType: TaskType): string {
   switch (taskType) {
     case TaskType.Plan:
     case TaskType.Evaluate:
-      return "claude-sonnet-4-20250514";
+      return "claude-sonnet-4-5-20250929";
     case TaskType.Generate:
     case TaskType.Chat:
     default:
@@ -544,7 +544,57 @@ WHEN DONE (you've identified the frontier), output a <complete> block:
 }
 </complete>
 
-Do NOT output the <complete> block until you are confident you've mapped the child's frontier. Ask at least 3-4 probing steps.`;
+Do NOT output the <complete> block until you are confident you've mapped the child's frontier. Ask at least 3-4 probing steps.
+
+═══════════════════════════════════════════════════════
+CRITICAL OUTPUT RULES — FOLLOW THESE EXACTLY:
+═══════════════════════════════════════════════════════
+
+After EVERY parent response about what the child did, you MUST include a <finding> block. No exceptions.
+Format:
+<finding>
+{"skill": "phonics.letter-sounds.consonants", "status": "mastered", "evidence": "Got 6/6 correct", "notes": "Quick, no hesitation"}
+</finding>
+
+You may include multiple <finding> blocks in one response if you learned about multiple skills.
+
+When you have identified the child's frontier (after at least 3-4 exchanges), end with a <complete> block.
+The <complete> block must include ALL of these fields:
+<complete>
+{
+  "summary": "2-3 sentence summary of what the child can and cannot do",
+  "frontier": "One sentence: the specific next learning edge",
+  "recommendations": [
+    {
+      "priority": 1,
+      "skill": "specific.skill.tag",
+      "action": "Exactly what to practice and how",
+      "duration": "2-3 weeks",
+      "frequency": "Daily, 10 minutes",
+      "materials": ["specific material 1", "specific material 2"]
+    }
+  ],
+  "skipList": [
+    {"skill": "Name of skill to stop drilling", "reason": "Why — already mastered or not ready yet"}
+  ],
+  "supports": [
+    {"label": "Support name", "description": "How to apply this support"}
+  ],
+  "stopRules": [
+    {"label": "Rule name", "trigger": "When this happens", "action": "Do this instead"}
+  ],
+  "evidenceDefinitions": [
+    {"label": "Evidence name", "description": "What mastery looks like for this skill"}
+  ],
+  "nextEvalDate": "YYYY-MM-DD"
+}
+</complete>
+
+The <finding> and <complete> blocks must contain VALID JSON. Double-check your JSON before outputting.
+Do NOT skip the <finding> blocks even if the response is conversational. The parent won't see them — they're extracted by the app.
+The <complete> block's supports should be specific to this child based on what you observed (e.g., "Short reading sessions: 5-8 min max before a break" or "Immediate success loops: start with 2 easy words before a stretch word").
+The <complete> block's stopRules should identify when to switch activities (e.g., "If Lincoln misses 3 words in a row, stop and go back to the previous word family" or "If frustration appears, switch to a familiar word game").
+The <complete> block's evidenceDefinitions should define what mastery looks like for each frontier skill (e.g., "Reads 5/5 -ig words independently in under 10 seconds total").`;
 
   if (domain === "reading") return reading;
   return `Evaluate the child's ${domain} skills using a structured diagnostic approach. Walk the parent through ONE step at a time. After each parent response, include a <finding> block with JSON containing skill, status (mastered/emerging/not-yet/not-tested), evidence, and notes. When done, output a <complete> block with summary, recommendations array, and nextEvalDate.`;
@@ -627,6 +677,55 @@ export const chat = onCall(
       ? await loadEnrichedContext(db, familyId, childId)
       : undefined;
 
+    // ── Load recent evaluation for plan context ──────────────
+    let recentEvalContext = "";
+    if (taskType === TaskType.Plan) {
+      try {
+        const evalQuery = await db
+          .collection(`families/${familyId}/evaluationSessions`)
+          .where("childId", "==", childId)
+          .where("status", "==", "complete")
+          .orderBy("evaluatedAt", "desc")
+          .limit(1)
+          .get();
+
+        if (!evalQuery.empty) {
+          const evalData = evalQuery.docs[0].data() as {
+            domain?: string;
+            evaluatedAt?: string;
+            summary?: string;
+            recommendations?: Array<{
+              priority: number;
+              skill: string;
+              action: string;
+              frequency: string;
+              duration: string;
+            }>;
+          };
+
+          if (evalData.summary) {
+            const evalLines: string[] = [];
+            evalLines.push("", "RECENT EVALUATION:");
+            evalLines.push(`Domain: ${evalData.domain || "unknown"}`);
+            evalLines.push(`Date: ${evalData.evaluatedAt || "unknown"}`);
+            evalLines.push(`Summary: ${evalData.summary}`);
+            if (evalData.recommendations?.length) {
+              evalLines.push("Recommendations:");
+              for (const rec of evalData.recommendations) {
+                evalLines.push(
+                  `- Priority ${rec.priority}: ${rec.skill} — ${rec.action} (${rec.frequency}, ${rec.duration})`,
+                );
+              }
+            }
+            recentEvalContext = evalLines.join("\n");
+          }
+        }
+      } catch (err) {
+        // If the query fails (e.g., missing composite index), log but don't block
+        console.warn("Failed to load recent evaluation for plan context:", err);
+      }
+    }
+
     // ── Assemble system prompt ─────────────────────────────────
     const systemPrompt = buildSystemPrompt(
       {
@@ -639,7 +738,7 @@ export const chat = onCall(
       taskType,
       enriched,
       domain,
-    );
+    ) + recentEvalContext;
 
     // ── Call Claude ─────────────────────────────────────────────
     const model = modelForTask(taskType);

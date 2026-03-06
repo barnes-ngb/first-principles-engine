@@ -40,7 +40,7 @@ import type {
   EvaluationSession,
   SkillSnapshot,
 } from '../../core/types/domain'
-import { ChatMessageRole, EvaluationDomain } from '../../core/types/enums'
+import { ChatMessageRole, EvaluationDomain, MasteryGate, SkillLevel } from '../../core/types/enums'
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -71,7 +71,12 @@ function extractFindings(text: string): EvaluationFinding[] {
 
 interface CompleteBlock {
   summary: string
+  frontier?: string
   recommendations: EvaluationRecommendation[]
+  skipList?: Array<{ skill: string; reason: string }>
+  supports?: Array<{ label: string; description: string }>
+  stopRules?: Array<{ label: string; trigger: string; action: string }>
+  evidenceDefinitions?: Array<{ label: string; description: string }>
   nextEvalDate?: string
 }
 
@@ -83,6 +88,7 @@ function extractComplete(text: string): CompleteBlock | null {
     const parsed = JSON.parse(match[1])
     return {
       summary: parsed.summary || '',
+      frontier: parsed.frontier,
       recommendations: (parsed.recommendations || []).map(
         (r: EvaluationRecommendation, i: number) => ({
           priority: r.priority ?? i + 1,
@@ -93,6 +99,10 @@ function extractComplete(text: string): CompleteBlock | null {
           frequency: r.frequency || '',
         }),
       ),
+      skipList: parsed.skipList,
+      supports: parsed.supports,
+      stopRules: parsed.stopRules,
+      evidenceDefinitions: parsed.evidenceDefinitions,
       nextEvalDate: parsed.nextEvalDate,
     }
   } catch {
@@ -105,6 +115,17 @@ function stripTags(text: string): string {
     .replace(/<finding>[\s\S]*?<\/finding>/g, '')
     .replace(/<complete>[\s\S]*?<\/complete>/g, '')
     .trim()
+}
+
+/** Convert skill tags like "phonics.cvc.short-o" to readable labels like "Phonics > CVC > Short o" */
+function formatSkillLabel(tag: string): string {
+  return tag
+    .split('.')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' \u2192 ')
+    .replace(/-/g, ' ')
+    .replace(/cvc/i, 'CVC')
+    .replace(/cvce/i, 'CVCe')
 }
 
 const DOMAIN_TABS: { value: EvaluationDomain; label: string }[] = [
@@ -140,7 +161,9 @@ export default function EvaluateChatPage() {
   const [findings, setFindings] = useState<EvaluationFinding[]>([])
   const [recommendations, setRecommendations] = useState<EvaluationRecommendation[]>([])
   const [completeSummary, setCompleteSummary] = useState<string | null>(null)
+  const [completeData, setCompleteData] = useState<CompleteBlock | null>(null)
   const [nextEvalDate, setNextEvalDate] = useState<string | undefined>()
+  const [snackText, setSnackText] = useState<string | null>(null)
   const [sessionDocId, setSessionDocId] = useState<string | null>(null)
   const [sessionStatus, setSessionStatus] = useState<'in-progress' | 'complete'>('in-progress')
   const [previousSessions, setPreviousSessions] = useState<EvaluationSession[]>([])
@@ -299,6 +322,7 @@ export default function EvaluateChatPage() {
     setFindings(allFindings)
 
     if (complete) {
+      setCompleteData(complete)
       setRecommendations(complete.recommendations)
       setCompleteSummary(complete.summary)
       setNextEvalDate(complete.nextEvalDate)
@@ -359,6 +383,7 @@ export default function EvaluateChatPage() {
     setFindings(allFindings)
 
     if (complete) {
+      setCompleteData(complete)
       setRecommendations(complete.recommendations)
       setCompleteSummary(complete.summary)
       setNextEvalDate(complete.nextEvalDate)
@@ -380,48 +405,83 @@ export default function EvaluateChatPage() {
         ? snapshotSnap.data()
         : {}
 
-      // Merge findings into prioritySkills
-      const existingSkills = existing.prioritySkills || []
-      const updatedSkills = [...existingSkills]
+      // Build priority skills from findings (frontier skills — emerging/not-yet)
+      const newPrioritySkills: SkillSnapshot['prioritySkills'] = findings
+        .filter((f) => f.status === 'emerging' || f.status === 'not-yet')
+        .map((f) => ({
+          tag: f.skill,
+          label: formatSkillLabel(f.skill),
+          level: f.status === 'emerging' ? SkillLevel.Emerging : SkillLevel.Emerging,
+          masteryGate: MasteryGate.NotYet,
+          notes: `${f.evidence}${f.notes ? ' \u2014 ' + f.notes : ''} (Evaluated ${new Date().toLocaleDateString()})`,
+        }))
 
-      for (const finding of findings) {
-        if (finding.status === 'not-tested') continue
-        const existingIdx = updatedSkills.findIndex((s) => s.tag === finding.skill)
-        const level =
-          finding.status === 'mastered'
-            ? 'secure'
-            : finding.status === 'emerging'
-              ? 'developing'
-              : 'emerging'
-
-        if (existingIdx >= 0) {
-          updatedSkills[existingIdx] = {
-            ...updatedSkills[existingIdx],
-            level,
-            label: updatedSkills[existingIdx].label || finding.skill,
-          }
-        } else {
-          updatedSkills.push({
-            tag: finding.skill,
-            label: finding.skill,
-            level,
+      // Add recommendations as priority skills if not already covered
+      for (const rec of recommendations) {
+        if (!newPrioritySkills.some((s) => s.tag === rec.skill)) {
+          newPrioritySkills.push({
+            tag: rec.skill,
+            label: formatSkillLabel(rec.skill),
+            level: SkillLevel.Emerging,
+            masteryGate: MasteryGate.NotYet,
+            notes: `${rec.action} (${rec.frequency}, ${rec.duration})`,
           })
         }
       }
 
-      await setDoc(snapshotRef, {
-        ...existing,
+      // Also update mastered findings in existing skills
+      for (const finding of findings) {
+        if (finding.status === 'mastered') {
+          const existingIdx = newPrioritySkills.findIndex((s) => s.tag === finding.skill)
+          if (existingIdx < 0) {
+            newPrioritySkills.push({
+              tag: finding.skill,
+              label: formatSkillLabel(finding.skill),
+              level: SkillLevel.Secure,
+              masteryGate: MasteryGate.IndependentConsistent,
+              notes: `${finding.evidence}${finding.notes ? ' \u2014 ' + finding.notes : ''} (Evaluated ${new Date().toLocaleDateString()})`,
+            })
+          }
+        }
+      }
+
+      // Build supports, stop rules, evidence definitions from <complete> data
+      const newSupports = completeData?.supports?.map((s) => ({
+        label: s.label,
+        description: s.description,
+      })) || []
+
+      const newStopRules = completeData?.stopRules?.map((r) => ({
+        label: r.label,
+        trigger: r.trigger,
+        action: r.action,
+      })) || []
+
+      const newEvidenceDefs = completeData?.evidenceDefinitions?.map((e) => ({
+        label: e.label,
+        description: e.description,
+      })) || []
+
+      // Merge with existing (keep existing items not covered by evaluation)
+      const existingSkills = (existing.prioritySkills || []).filter(
+        (s) => !newPrioritySkills.some((n) => n.tag === s.tag),
+      )
+
+      const updated: Omit<SkillSnapshot, 'id'> = {
         childId: activeChildId,
-        prioritySkills: updatedSkills,
-        supports: existing.supports || [],
-        stopRules: existing.stopRules || [],
-        evidenceDefinitions: existing.evidenceDefinitions || [],
+        prioritySkills: [...existingSkills, ...newPrioritySkills],
+        supports: newSupports.length > 0 ? newSupports : existing.supports || [],
+        stopRules: newStopRules.length > 0 ? newStopRules : existing.stopRules || [],
+        evidenceDefinitions: newEvidenceDefs.length > 0 ? newEvidenceDefs : existing.evidenceDefinitions || [],
         updatedAt: new Date().toISOString(),
-      } satisfies Omit<SkillSnapshot, 'id'>)
+      }
+
+      await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)))
+      setSnackText('Skill snapshot updated! Priority skills, supports, stop rules, and evidence all set.')
     } catch (err) {
       console.error('Failed to apply findings to skill snapshot', err)
     }
-  }, [activeChildId, familyId, findings])
+  }, [activeChildId, familyId, findings, recommendations, completeData])
 
   // ── Clear & Restart ───────────────────────────────────────
 
@@ -430,10 +490,12 @@ export default function EvaluateChatPage() {
     setFindings([])
     setRecommendations([])
     setCompleteSummary(null)
+    setCompleteData(null)
     setNextEvalDate(undefined)
     setSessionDocId(null)
     setSessionStatus('in-progress')
     setClearDialogOpen(false)
+    setSnackText(null)
   }, [])
 
   // ── Handle Enter key ────────────────────────────────────────
@@ -630,12 +692,16 @@ export default function EvaluateChatPage() {
               </Typography>
               <Stack spacing={0.5}>
                 {findings.map((f, i) => (
-                  <Stack key={i} direction="row" spacing={1} alignItems="center">
+                  <Stack key={i} direction="row" spacing={1} alignItems="flex-start" sx={{ py: 0.5 }}>
                     {findingStatusIcon(f.status)}
-                    <Typography variant="body2">
-                      <strong>{f.skill}:</strong> {f.evidence}
-                      {f.notes ? ` — ${f.notes}` : ''}
-                    </Typography>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2">
+                        <strong>{formatSkillLabel(f.skill)}:</strong> {f.evidence}
+                      </Typography>
+                      {f.notes && (
+                        <Typography variant="caption" color="text.secondary">{f.notes}</Typography>
+                      )}
+                    </Box>
                     <Chip
                       label={f.status}
                       size="small"
@@ -666,55 +732,82 @@ export default function EvaluateChatPage() {
               }}
             >
               <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                Assessment Complete
+                Evaluation Complete
               </Typography>
-              <Typography variant="body2" sx={{ mb: 2 }}>
+              <Typography variant="body2" sx={{ mb: 1 }}>
                 {completeSummary}
               </Typography>
 
+              {/* Frontier callout */}
+              {completeData?.frontier && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  <Typography variant="body2">
+                    <strong>Learning frontier:</strong> {completeData.frontier}
+                  </Typography>
+                </Alert>
+              )}
+
+              {/* Recommendations */}
               {recommendations.length > 0 && (
                 <>
                   <Typography variant="subtitle2" gutterBottom>
-                    Recommendations
+                    What to Work On:
                   </Typography>
-                  <Stack spacing={1}>
-                    {recommendations.map((r, i) => (
-                      <Box
-                        key={i}
-                        sx={{
-                          pl: 2,
-                          borderLeft: '3px solid',
-                          borderColor: 'primary.main',
-                        }}
-                      >
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {r.priority}. {r.skill}
-                        </Typography>
-                        <Typography variant="body2">{r.action}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {r.frequency} · {r.duration}
-                          {r.materials?.length ? ` · Materials: ${r.materials.join(', ')}` : ''}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
+                  {recommendations.map((rec, i) => (
+                    <Box key={i} sx={{ mb: 1.5, pl: 1.5, borderLeft: '3px solid', borderColor: 'primary.main' }}>
+                      <Typography variant="body2"><strong>{rec.priority}. {formatSkillLabel(rec.skill)}</strong></Typography>
+                      <Typography variant="body2">{rec.action}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {rec.frequency} · {rec.duration}
+                        {rec.materials?.length ? ` · Materials: ${rec.materials.join(', ')}` : ''}
+                      </Typography>
+                    </Box>
+                  ))}
                 </>
               )}
 
-              {nextEvalDate && (
-                <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
-                  Next evaluation: {nextEvalDate}
-                </Typography>
+              {/* What to skip */}
+              {completeData?.skipList && completeData.skipList.length > 0 && (
+                <>
+                  <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>
+                    What to Skip:
+                  </Typography>
+                  {completeData.skipList.map((item, i) => (
+                    <Box key={i} sx={{ mb: 0.5, pl: 1.5, borderLeft: '3px solid', borderColor: 'warning.main' }}>
+                      <Typography variant="body2">
+                        <strong>{item.skill}:</strong> {item.reason}
+                      </Typography>
+                    </Box>
+                  ))}
+                </>
               )}
 
-              <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+              {/* Snack feedback */}
+              {snackText && (
+                <Alert severity="success" sx={{ mt: 2 }} onClose={() => setSnackText(null)}>
+                  {snackText}
+                </Alert>
+              )}
+
+              {/* Action buttons */}
+              <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
                 <Button variant="contained" onClick={handleSaveAndApply}>
                   Apply to Skill Snapshot
                 </Button>
+                <Button variant="outlined" onClick={() => navigate('/progress')}>
+                  View Skill Snapshot
+                </Button>
                 <Button variant="outlined" onClick={() => navigate('/planner/chat')}>
-                  Plan Week
+                  Plan Week from Evaluation
                 </Button>
               </Stack>
+
+              {/* Next eval reminder */}
+              {completeData?.nextEvalDate && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  Next evaluation suggested: {new Date(completeData.nextEvalDate).toLocaleDateString()}
+                </Typography>
+              )}
             </Box>
           )}
 
