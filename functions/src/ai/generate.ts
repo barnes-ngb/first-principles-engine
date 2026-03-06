@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
+import { sanitizeAndParseJson } from "./sanitizeJson.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -202,14 +203,65 @@ function buildGenerateSystemPrompt(ctx: PromptContext): string {
         "- Keep the reading passage short and engaging.",
       );
       break;
-    default:
-      lines.push(
-        "- Design a structured, hands-on activity appropriate for the child's level.",
-        "- Keep instructions clear and sequential.",
-        "- Include success criteria that can be observed or demonstrated.",
-        "- Prefer oral demonstration or physical evidence over written work.",
-      );
+    default: {
+      // Determine a reasonable approach based on the activity type string
+      const lowerType = ctx.activityType.toLowerCase();
+      if (
+        lowerType.includes("formation") ||
+        lowerType.includes("prayer") ||
+        lowerType.includes("scripture")
+      ) {
+        lines.push(
+          "- Create a short formation/devotional activity.",
+          "- Include a brief prayer or scripture reading appropriate for a child.",
+          "- Keep it warm, simple, and focused on gratitude or character.",
+          "- 5-10 minutes maximum.",
+        );
+      } else if (
+        lowerType.includes("art") ||
+        lowerType.includes("draw") ||
+        lowerType.includes("creative")
+      ) {
+        lines.push(
+          "- Design a creative/art activity connected to current learning.",
+          "- Include specific materials needed.",
+          "- Keep instructions open-ended but with a starting point.",
+          "- Emphasize process over product.",
+        );
+      } else if (lowerType.includes("read") && lowerType.includes("aloud")) {
+        lines.push(
+          "- Plan a read-aloud session with comprehension support.",
+          "- Include 2-3 before-reading predictions or vocabulary words.",
+          "- Include 2-3 during/after narration prompts.",
+          "- The parent reads, the child listens and discusses.",
+        );
+      } else if (lowerType.includes("speech")) {
+        lines.push(
+          "- Design a speech practice activity appropriate for the child's targets.",
+          "- Focus on clear articulation in context (words, then sentences).",
+          "- Keep it conversational and low-pressure.",
+          "- Include specific words or sounds to practice.",
+        );
+      } else if (
+        lowerType.includes("science") ||
+        lowerType.includes("explore")
+      ) {
+        lines.push(
+          "- Design a hands-on science or exploration activity.",
+          "- Include observation and narration components.",
+          "- Use household materials when possible.",
+          "- Encourage questions and predictions.",
+        );
+      } else {
+        lines.push(
+          "- Design a structured, hands-on activity appropriate for the child's level.",
+          "- Keep instructions clear and sequential.",
+          "- Include success criteria that can be observed or demonstrated.",
+          "- Prefer oral demonstration or physical evidence over written work.",
+        );
+      }
       break;
+    }
   }
 
   return lines.join("\n");
@@ -232,20 +284,42 @@ function currentWeekKey(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function parseActivityJson(raw: string): GeneratedActivity {
-  // Strip markdown fences — handle leading text, nested fences, etc.
-  let cleaned = raw.trim();
-  const fenceMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)```/i);
-  if (fenceMatch) {
-    cleaned = fenceMatch[1].trim();
-  }
-  // Also try stripping simple start/end fences
-  cleaned = cleaned
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/i, "")
-    .trim();
+function coerceActivity(parsed: Record<string, unknown>): GeneratedActivity {
+  return {
+    title: String(parsed.title || "Activity"),
+    objective: String(parsed.objective || ""),
+    materials: Array.isArray(parsed.materials)
+      ? (parsed.materials as string[])
+      : [],
+    steps: Array.isArray(parsed.steps)
+      ? (parsed.steps as string[])
+      : [String(parsed.steps || "Complete the activity")],
+    successCriteria: Array.isArray(parsed.successCriteria)
+      ? (parsed.successCriteria as string[])
+      : [],
+  };
+}
 
-  const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+function parseActivityJson(raw: string): GeneratedActivity {
+  let parsed: Record<string, unknown>;
+
+  try {
+    parsed = sanitizeAndParseJson<Record<string, unknown>>(raw);
+  } catch (parseErr) {
+    // Fallback: try to find a JSON object in the raw text
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+        return coerceActivity(parsed);
+      } catch {
+        // Fall through to error
+      }
+    }
+    throw new Error(
+      `Failed to parse activity JSON: ${(parseErr as Error).message}`,
+    );
+  }
 
   // Validate required fields
   if (typeof parsed.title !== "string" || !parsed.title) {

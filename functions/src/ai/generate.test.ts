@@ -177,8 +177,19 @@ describe("buildGenerateSystemPrompt", () => {
     expect(prompt).toContain("narration");
   });
 
-  it("includes generic guidance for unknown activity types", () => {
+  it("includes science-specific guidance for science activity types", () => {
     const prompt = buildGenerateSystemPrompt(minimalCtx);
+    expect(prompt).toContain("hands-on science");
+    expect(prompt).toContain("observation");
+  });
+
+  it("includes generic guidance for truly unknown activity types", () => {
+    const unknownCtx: PromptContext = {
+      ...minimalCtx,
+      activityType: "custom-xyz",
+      skillTag: "misc.unknown",
+    };
+    const prompt = buildGenerateSystemPrompt(unknownCtx);
     expect(prompt).toContain("hands-on activity");
     expect(prompt).toContain("success criteria");
   });
