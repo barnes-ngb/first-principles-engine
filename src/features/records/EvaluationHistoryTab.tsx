@@ -16,11 +16,12 @@ export default function EvaluationHistoryTab() {
   const { activeChildId, activeChild } = useActiveChild()
   const [sessions, setSessions] = useState<EvaluationSession[]>([])
   const [selectedSession, setSelectedSession] = useState<EvaluationSession | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loadedKey, setLoadedKey] = useState<string | null>(null)
+  const currentKey = activeChildId ? `${familyId}:${activeChildId}` : null
+  const loading = !!currentKey && loadedKey !== currentKey
 
   useEffect(() => {
     if (!activeChildId) return
-    setLoading(true)
     const q = query(
       evaluationSessionsCollection(familyId),
       where('childId', '==', activeChildId),
@@ -32,7 +33,7 @@ export default function EvaluationHistoryTab() {
           .map((d) => ({ ...d.data(), id: d.id }))
           .sort((a, b) => b.evaluatedAt.localeCompare(a.evaluatedAt)),
       )
-      setLoading(false)
+      setLoadedKey(`${familyId}:${activeChildId}`)
     })
   }, [familyId, activeChildId])
 
