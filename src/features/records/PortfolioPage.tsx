@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
+import Dialog from '@mui/material/Dialog'
+import DialogContent from '@mui/material/DialogContent'
 import Divider from '@mui/material/Divider'
 import FormControl from '@mui/material/FormControl'
 import InputLabel from '@mui/material/InputLabel'
@@ -22,6 +25,7 @@ import {
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Artifact } from '../../core/types/domain'
+import { EvidenceType } from '../../core/types/enums'
 import {
   generatePortfolioMarkdown,
   getMonthLabel,
@@ -41,6 +45,7 @@ export default function PortfolioPage() {
   const [allArtifacts, setAllArtifacts] = useState<Artifact[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [showAutoSuggest, setShowAutoSuggest] = useState(false)
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
 
   // Filter artifacts by active child
@@ -210,19 +215,22 @@ export default function PortfolioPage() {
               {scored.map(({ artifact, score }) => {
                 const isSelected = artifact.id != null && selectedIds.has(artifact.id)
                 const child = children.find((c) => c.id === artifact.childId)
+                const artType = artifact.type as string
+                const isPhoto = artType === EvidenceType.Photo || artType === 'photo'
+                const isAudio = artType === EvidenceType.Audio || artType === 'audio'
 
                 return (
                   <Stack
                     key={artifact.id}
                     direction="row"
-                    spacing={1}
-                    alignItems="center"
+                    spacing={1.5}
+                    alignItems="flex-start"
                     sx={{
-                      p: 1,
+                      p: 1.5,
                       borderRadius: 1,
-                      bgcolor: isSelected
-                        ? 'action.selected'
-                        : 'transparent',
+                      bgcolor: isSelected ? 'action.selected' : 'transparent',
+                      border: isSelected ? '2px solid' : '1px solid',
+                      borderColor: isSelected ? 'primary.main' : 'divider',
                     }}
                   >
                     <Checkbox
@@ -230,6 +238,29 @@ export default function PortfolioPage() {
                       onChange={() => toggleArtifact(artifact.id ?? '')}
                       size="small"
                     />
+
+                    {isPhoto && artifact.uri && (
+                      <Box
+                        component="img"
+                        src={artifact.uri}
+                        sx={{
+                          width: 64,
+                          height: 64,
+                          borderRadius: 1,
+                          objectFit: 'cover',
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                        }}
+                        onClick={() => setPreviewImage(artifact.uri!)}
+                      />
+                    )}
+
+                    {isAudio && artifact.uri && (
+                      <Box sx={{ flexShrink: 0 }}>
+                        <audio controls src={artifact.uri} style={{ height: 32, width: 200 }} />
+                      </Box>
+                    )}
+
                     <Stack spacing={0.5} flex={1}>
                       <Stack
                         direction="row"
@@ -273,6 +304,9 @@ export default function PortfolioPage() {
                           {artifact.content}
                         </Typography>
                       )}
+                      <Typography variant="caption" color="text.secondary">
+                        {artifact.createdAt ? new Date(artifact.createdAt).toLocaleDateString() : ''}
+                      </Typography>
                     </Stack>
                     {showAutoSuggest && (
                       <Chip
@@ -299,6 +333,14 @@ export default function PortfolioPage() {
           </>}
         </Stack>
       </SectionCard>
+
+      <Dialog open={!!previewImage} onClose={() => setPreviewImage(null)} maxWidth="md">
+        <DialogContent sx={{ p: 0 }}>
+          {previewImage && (
+            <Box component="img" src={previewImage} sx={{ width: '100%', display: 'block' }} />
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Snackbar
         open={snackMessage !== null}
