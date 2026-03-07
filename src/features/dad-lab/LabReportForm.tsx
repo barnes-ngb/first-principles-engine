@@ -92,6 +92,30 @@ function getChildFields(childName: string) {
   return [...LINCOLN_FIELDS.filter((f) => f.key !== 'notes'), ...LONDON_FIELDS]
 }
 
+/** Find the child report regardless of whether the key is Firestore ID or lowercase name */
+function getChildReport(
+  childReports: Record<string, ChildLabReport>,
+  child: Child,
+): ChildLabReport {
+  if (childReports[child.id]) return childReports[child.id]
+  const nameKey = child.name.toLowerCase()
+  if (childReports[nameKey]) return childReports[nameKey]
+  if (childReports[child.name]) return childReports[child.name]
+  return emptyChildReport()
+}
+
+/** Return whichever key actually has data for this child */
+function getChildReportKey(
+  childReports: Record<string, ChildLabReport>,
+  child: Child,
+): string {
+  if (childReports[child.id]) return child.id
+  const nameKey = child.name.toLowerCase()
+  if (childReports[nameKey]) return nameKey
+  if (childReports[child.name]) return child.name
+  return nameKey
+}
+
 // ── Component ──────────────────────────────────────────────────
 
 export default function LabReportForm({
@@ -133,9 +157,10 @@ export default function LabReportForm({
   )
   const [childReports, setChildReports] = useState<Record<string, ChildLabReport>>(() => {
     if (report?.childReports) return report.childReports
+    // Use lowercase name as key (matches KidLabView convention)
     const initial: Record<string, ChildLabReport> = {}
     for (const child of children) {
-      initial[child.id] = emptyChildReport()
+      initial[child.name.toLowerCase()] = emptyChildReport()
     }
     return initial
   })
@@ -167,12 +192,16 @@ export default function LabReportForm({
 
   const updateChildField = useCallback(
     (childId: string, field: string, value: string) => {
-      setChildReports((prev) => ({
-        ...prev,
-        [childId]: { ...prev[childId] ?? emptyChildReport(), [field]: value },
-      }))
+      setChildReports((prev) => {
+        const child = children.find(c => c.id === childId)
+        const key = child ? getChildReportKey(prev, child) : childId
+        return {
+          ...prev,
+          [key]: { ...(prev[key] ?? emptyChildReport()), [field]: value },
+        }
+      })
     },
-    [],
+    [children],
   )
 
   // ── Photo capture ──
@@ -200,15 +229,17 @@ export default function LabReportForm({
         await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
 
         setChildReports((prev) => {
-          const cr = prev[childId] ?? emptyChildReport()
-          return { ...prev, [childId]: { ...cr, artifacts: [...cr.artifacts, docRef.id] } }
+          const child = children.find(c => c.id === childId)
+          const key = child ? getChildReportKey(prev, child) : childId
+          const cr = prev[key] ?? emptyChildReport()
+          return { ...prev, [key]: { ...cr, artifacts: [...cr.artifacts, docRef.id] } }
         })
         setArtifactRefreshKey(prev => prev + 1)
       } finally {
         setUploadingChildId(null)
       }
     },
-    [familyId, title],
+    [familyId, title, children],
   )
 
   // ── Audio capture ──
@@ -236,15 +267,17 @@ export default function LabReportForm({
         await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
 
         setChildReports((prev) => {
-          const cr = prev[childId] ?? emptyChildReport()
-          return { ...prev, [childId]: { ...cr, artifacts: [...cr.artifacts, docRef.id] } }
+          const child = children.find(c => c.id === childId)
+          const key = child ? getChildReportKey(prev, child) : childId
+          const cr = prev[key] ?? emptyChildReport()
+          return { ...prev, [key]: { ...cr, artifacts: [...cr.artifacts, docRef.id] } }
         })
         setArtifactRefreshKey(prev => prev + 1)
       } finally {
         setUploadingChildId(null)
       }
     },
-    [familyId, title],
+    [familyId, title, children],
   )
 
   // ── Subject tag toggle ──
@@ -284,6 +317,23 @@ export default function LabReportForm({
       status = DadLabStatus.Planned
     }
 
+    // Normalize childReports keys to lowercase names before saving
+    const normalizedChildReports: Record<string, ChildLabReport> = {}
+    for (const [key, value] of Object.entries(childReports)) {
+      const child = children.find(c => c.id === key)
+      const normalizedKey = child ? child.name.toLowerCase() : key
+      const existing = normalizedChildReports[normalizedKey]
+      if (existing) {
+        normalizedChildReports[normalizedKey] = {
+          ...existing,
+          ...value,
+          artifacts: [...new Set([...existing.artifacts, ...value.artifacts])],
+        }
+      } else {
+        normalizedChildReports[normalizedKey] = value
+      }
+    }
+
     const reportData: DadLabReport = {
       ...(report?.id ? { id: report.id } : {}),
       date,
@@ -296,7 +346,7 @@ export default function LabReportForm({
       materials: parsedMaterials.length > 0 ? parsedMaterials : undefined,
       lincolnRole: lincolnRole.trim() || undefined,
       londonRole: londonRole.trim() || undefined,
-      childReports,
+      childReports: normalizedChildReports,
       subjectTags: subjectTags as DadLabReport['subjectTags'],
       skillTags: skillTags.length > 0 ? skillTags : undefined,
       virtueTag: virtueTag.trim() || undefined,
@@ -309,7 +359,7 @@ export default function LabReportForm({
     }
     await withSave(() => onSave(reportData))
   }, [
-    date, title, labType, question, description, childReports, materials,
+    date, title, labType, question, description, childReports, children, materials,
     lincolnRole, londonRole, subjectTags, skillTags, virtueTag, dadReflection,
     bestMoment, nextTime, totalMinutes, report, isCompleting, isEditingActive, onSave, withSave,
   ])
@@ -461,7 +511,7 @@ export default function LabReportForm({
             Kid Contributions
           </Typography>
           {children.map((child) => {
-            const cr = childReports[child.id]
+            const cr = getChildReport(childReports, child)
             const hasPrediction = !!cr?.prediction
             const hasExplanation = !!cr?.explanation
             const hasObservation = !!cr?.observation
@@ -520,8 +570,9 @@ export default function LabReportForm({
       {/* Per-Child Sections (shown for active/completing or complete labs) */}
       {(isCompleting || isEditingActive || isViewingComplete || (isEditing && report?.status !== DadLabStatus.Planned)) &&
         children.map((child) => {
-          const cr = childReports[child.id] ?? emptyChildReport()
+          const cr = getChildReport(childReports, child)
           const fields = getChildFields(child.name)
+          const reportKey = getChildReportKey(childReports, child)
           const isUploading = uploadingChildId === child.id
 
           return (
