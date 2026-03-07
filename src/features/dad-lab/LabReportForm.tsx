@@ -13,8 +13,7 @@ import Typography from '@mui/material/Typography'
 import SaveIcon from '@mui/icons-material/Save'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 
-import Dialog from '@mui/material/Dialog'
-import DialogContent from '@mui/material/DialogContent'
+import ArtifactGallery from '../../components/ArtifactGallery'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -149,8 +148,7 @@ export default function LabReportForm({
 
   // Photo upload state
   const [uploadingChildId, setUploadingChildId] = useState<string | null>(null)
-  const [artifactUrls, setArtifactUrls] = useState<Record<string, string>>({})
-  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null)
+  const [artifactRefreshKey, setArtifactRefreshKey] = useState(0)
 
   // Initialize from prefill
   useEffect(() => {
@@ -205,7 +203,7 @@ export default function LabReportForm({
           const cr = prev[childId] ?? emptyChildReport()
           return { ...prev, [childId]: { ...cr, artifacts: [...cr.artifacts, docRef.id] } }
         })
-        setArtifactUrls((prev) => ({ ...prev, [docRef.id]: downloadUrl }))
+        setArtifactRefreshKey(prev => prev + 1)
       } finally {
         setUploadingChildId(null)
       }
@@ -241,7 +239,7 @@ export default function LabReportForm({
           const cr = prev[childId] ?? emptyChildReport()
           return { ...prev, [childId]: { ...cr, artifacts: [...cr.artifacts, docRef.id] } }
         })
-        setArtifactUrls((prev) => ({ ...prev, [docRef.id]: downloadUrl }))
+        setArtifactRefreshKey(prev => prev + 1)
       } finally {
         setUploadingChildId(null)
       }
@@ -504,9 +502,14 @@ export default function LabReportForm({
                   </Box>
                 )}
                 {hasArtifacts && (
-                  <Typography variant="caption" color="text.secondary">
-                    {cr!.artifacts.length} artifact{cr!.artifacts.length !== 1 ? 's' : ''} captured
-                  </Typography>
+                  <Box sx={{ mt: 0.5 }}>
+                    <ArtifactGallery
+                      familyId={familyId}
+                      artifactIds={cr!.artifacts}
+                      label={`${cr!.artifacts.length} artifact${cr!.artifacts.length !== 1 ? 's' : ''} captured`}
+                      thumbnailSize={56}
+                    />
+                  </Box>
                 )}
               </Box>
             )
@@ -542,32 +545,14 @@ export default function LabReportForm({
                   />
                 ))}
 
-                {/* Artifact thumbnails */}
+                {/* Artifact gallery — loads from Firestore */}
                 {cr.artifacts.length > 0 && (
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    {cr.artifacts.map((artifactId) => {
-                      const url = artifactUrls[artifactId]
-                      if (!url) return null
-                      return (
-                        <Box
-                          key={artifactId}
-                          component="img"
-                          src={url}
-                          alt="Lab photo"
-                          onClick={() => setPreviewPhoto(url)}
-                          sx={{
-                            width: 80,
-                            height: 80,
-                            objectFit: 'cover',
-                            borderRadius: 1,
-                            border: '1px solid',
-                            borderColor: 'divider',
-                            cursor: 'pointer',
-                          }}
-                        />
-                      )
-                    })}
-                  </Stack>
+                  <ArtifactGallery
+                    key={`${child.id}-${artifactRefreshKey}`}
+                    familyId={familyId}
+                    artifactIds={cr.artifacts}
+                    label={`${cr.artifacts.length} artifact${cr.artifacts.length !== 1 ? 's' : ''} captured`}
+                  />
                 )}
 
                 {/* Capture buttons */}
@@ -734,16 +719,6 @@ export default function LabReportForm({
         </Button>
       )}
 
-      {/* Photo preview dialog */}
-      <Dialog open={!!previewPhoto} onClose={() => setPreviewPhoto(null)} maxWidth="md">
-        <DialogContent sx={{ p: 0 }}>
-          <Box
-            component="img"
-            src={previewPhoto ?? undefined}
-            sx={{ width: '100%', display: 'block' }}
-          />
-        </DialogContent>
-      </Dialog>
     </Stack>
   )
 }

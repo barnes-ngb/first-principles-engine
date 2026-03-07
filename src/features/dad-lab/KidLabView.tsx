@@ -6,6 +6,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { getDocs, orderBy, query, where } from 'firebase/firestore'
 
+import ArtifactGallery from '../../components/ArtifactGallery'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import AudioRecorder from '../../components/AudioRecorder'
@@ -37,6 +38,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
   const [prediction, setPrediction] = useState('')
   const [explanation, setExplanation] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [artifactRefreshKey, setArtifactRefreshKey] = useState(0)
 
   const isLincoln = childName === 'Lincoln'
   const childKey = childName.toLowerCase()
@@ -140,6 +142,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
             [childKey]: { ...cr, artifacts: updatedArtifacts },
           },
         })
+        setArtifactRefreshKey(prev => prev + 1)
       } finally {
         setUploading(false)
       }
@@ -184,6 +187,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
             [childKey]: { ...cr, artifacts: updatedArtifacts },
           },
         })
+        setArtifactRefreshKey(prev => prev + 1)
       } finally {
         setUploading(false)
       }
@@ -290,7 +294,16 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
           </SectionCard>
 
           <SectionCard title="Capture My Work">
-            <Stack spacing={1}>
+            <Stack spacing={2}>
+              {/* Show already-captured artifacts */}
+              <ArtifactGallery
+                key={artifactRefreshKey}
+                familyId={familyId}
+                artifactIds={activeLab.childReports?.[childKey]?.artifacts ?? []}
+                label={`${(activeLab.childReports?.[childKey]?.artifacts ?? []).length} item${(activeLab.childReports?.[childKey]?.artifacts ?? []).length !== 1 ? 's' : ''} captured`}
+              />
+
+              {/* Capture buttons */}
               <PhotoCapture
                 onCapture={handlePhotoCapture}
                 uploading={uploading}
