@@ -4,6 +4,7 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -12,15 +13,18 @@ import DialogTitle from '@mui/material/DialogTitle'
 import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
+import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
+import LightbulbIcon from '@mui/icons-material/Lightbulb'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 
+import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
 import { useProfile } from '../../core/profile/useProfile'
@@ -60,6 +64,17 @@ const STATUS_LABELS: Record<DadLabStatus, string> = {
   complete: 'Complete',
 }
 
+const LAB_TYPE_MAP: Record<string, DadLabType> = {
+  science: 'science',
+  engineering: 'engineering',
+  adventure: 'adventure',
+  heart: 'heart',
+}
+
+function parseLabType(raw: string): DadLabType {
+  return LAB_TYPE_MAP[raw.toLowerCase().trim()] ?? 'science'
+}
+
 interface Prefill {
   title?: string
   question?: string
@@ -86,12 +101,17 @@ export default function DadLabPage() {
 
   const { reports, loading, saveReport, updateStatus, deleteReport } = useDadLabReports()
   const { children } = useChildren()
+  const { chat } = useAI()
   const [view, setView] = useState<'list' | 'form'>('list')
   const [editingReport, setEditingReport] = useState<DadLabReport | undefined>()
   const [prefill, setPrefill] = useState<Prefill | undefined>()
   const [completing, setCompleting] = useState(false)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<DadLabReport | undefined>()
+  const [ideaOpen, setIdeaOpen] = useState(false)
+  const [ideaText, setIdeaText] = useState('')
+  const [ideaLoading, setIdeaLoading] = useState(false)
+  const [ideaResult, setIdeaResult] = useState<Prefill | null>(null)
 
   // Split reports by status
   const { planned, active, completed } = useMemo(() => {
@@ -203,6 +223,84 @@ export default function DadLabPage() {
     setDeleteTarget(undefined)
   }, [])
 
+  const handleRefineIdea = useCallback(async () => {
+    if (!ideaText.trim()) return
+    setIdeaLoading(true)
+    setIdeaResult(null)
+
+    try {
+      const response = await chat({
+        familyId,
+        childId: children[0]?.id ?? '',
+        taskType: TaskType.Chat,
+        messages: [{
+          role: 'user',
+          content: `I have an idea for a Dad Lab activity. Structure it into a complete lab plan.
+
+My idea: "${ideaText}"
+
+Context:
+- Lincoln (10, neurodivergent, loves Minecraft/building/art)
+- London (6, loves drawing and stories)
+- Both boys
+- Saturday morning lab, 45-90 minutes
+
+Respond in EXACTLY this format (no other text):
+Title: [a catchy name for the lab]
+Type: [science/engineering/adventure/heart]
+Question: [a driving question that frames the exploration]
+Description: [2-3 sentences about what we'll do and learn]
+Materials: [comma-separated list of what we need]
+Lincoln's role: [specific tasks — he leads, measures, explains]
+London's role: [specific tasks — he observes, draws, helps]
+Duration: [estimated minutes]`,
+        }],
+      })
+
+      if (response?.message) {
+        const get = (key: string): string => {
+          const match = response.message!.match(new RegExp(`${key}:\\s*(.+)`, 'i'))
+          return match?.[1]?.trim() ?? ''
+        }
+
+        setIdeaResult({
+          title: get('Title') || ideaText.slice(0, 40),
+          labType: parseLabType(get('Type')),
+          question: get('Question'),
+          description: get('Description'),
+          materials: get('Materials').split(',').map(s => s.trim()).filter(Boolean),
+          lincolnRole: get("Lincoln's role") || get('Lincoln'),
+          londonRole: get("London's role") || get('London'),
+        })
+      } else {
+        // Fallback: create a basic structure from the idea text
+        setIdeaResult({
+          title: ideaText.slice(0, 50),
+          labType: 'science' as DadLabType,
+          question: '',
+          description: ideaText,
+          materials: [],
+          lincolnRole: '',
+          londonRole: '',
+        })
+      }
+    } catch (err) {
+      console.error('Refine idea failed:', err)
+      // Still let Nathan plan manually
+      setIdeaResult({
+        title: ideaText.slice(0, 50),
+        labType: 'science' as DadLabType,
+        question: '',
+        description: ideaText,
+        materials: [],
+        lincolnRole: '',
+        londonRole: '',
+      })
+    } finally {
+      setIdeaLoading(false)
+    }
+  }, [ideaText, chat, familyId, children])
+
   // Stats (completed labs only)
   const stats = useMemo(() => {
     const currentYear = new Date().getFullYear()
@@ -251,7 +349,7 @@ export default function DadLabPage() {
         Dad Lab
       </Typography>
 
-      <Stack direction="row" spacing={1} sx={{ mb: 3 }}>
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 3 }}>
         <Button variant="contained" startIcon={<AddIcon />} onClick={handleNew}>
           Plan a Lab
         </Button>
@@ -261,6 +359,13 @@ export default function DadLabPage() {
           onClick={() => setSuggestionsOpen(true)}
         >
           Suggest a Lab
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<LightbulbIcon />}
+          onClick={() => setIdeaOpen(true)}
+        >
+          I Have an Idea
         </Button>
       </Stack>
 
@@ -349,6 +454,136 @@ export default function DadLabPage() {
         onClose={() => setSuggestionsOpen(false)}
         onSelect={handleSuggestionSelect}
       />
+
+      <Dialog
+        open={ideaOpen}
+        onClose={() => { setIdeaOpen(false); setIdeaResult(null); setIdeaText('') }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Build a Lab from Your Idea</DialogTitle>
+        <DialogContent>
+          {!ideaResult ? (
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                Describe your idea — rough is fine. The AI will structure it into a full lab plan
+                with roles, materials, and a driving question.
+              </Typography>
+              <TextField
+                fullWidth
+                multiline
+                minRows={3}
+                maxRows={6}
+                placeholder="e.g., I want to do something with magnets and see what's magnetic around the house... or: we have cardboard boxes, let's build something... or: Lincoln is interested in volcanoes lately"
+                value={ideaText}
+                onChange={e => setIdeaText(e.target.value)}
+                disabled={ideaLoading}
+                autoFocus
+              />
+              <Button
+                variant="contained"
+                onClick={handleRefineIdea}
+                disabled={!ideaText.trim() || ideaLoading}
+                startIcon={ideaLoading ? <CircularProgress size={18} /> : <AutoAwesomeIcon />}
+                fullWidth
+              >
+                {ideaLoading ? 'Building lab plan...' : 'Build This Into a Lab'}
+              </Button>
+            </Stack>
+          ) : (
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                Here&apos;s your idea structured as a lab. Edit anything, then plan it.
+              </Typography>
+
+              <TextField
+                label="Title"
+                fullWidth
+                size="small"
+                value={ideaResult.title}
+                onChange={e => setIdeaResult({ ...ideaResult, title: e.target.value })}
+              />
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                {(['science', 'engineering', 'adventure', 'heart'] as DadLabType[]).map(t => (
+                  <Chip
+                    key={t}
+                    label={`${LAB_TYPE_ICONS[t]} ${t}`}
+                    onClick={() => setIdeaResult({ ...ideaResult, labType: t })}
+                    color={ideaResult.labType === t ? 'primary' : 'default'}
+                    variant={ideaResult.labType === t ? 'filled' : 'outlined'}
+                  />
+                ))}
+              </Stack>
+              <TextField
+                label="Driving Question"
+                fullWidth
+                size="small"
+                value={ideaResult.question}
+                onChange={e => setIdeaResult({ ...ideaResult, question: e.target.value })}
+              />
+              <TextField
+                label="Description"
+                fullWidth
+                size="small"
+                multiline
+                minRows={2}
+                value={ideaResult.description}
+                onChange={e => setIdeaResult({ ...ideaResult, description: e.target.value })}
+              />
+              <TextField
+                label="Materials Needed"
+                fullWidth
+                size="small"
+                value={ideaResult.materials?.join(', ') ?? ''}
+                onChange={e => setIdeaResult({
+                  ...ideaResult,
+                  materials: e.target.value.split(',').map(s => s.trim()).filter(Boolean),
+                })}
+                helperText="Comma-separated"
+              />
+              <TextField
+                label="Lincoln's Role"
+                fullWidth
+                size="small"
+                multiline
+                minRows={1}
+                value={ideaResult.lincolnRole ?? ''}
+                onChange={e => setIdeaResult({ ...ideaResult, lincolnRole: e.target.value })}
+              />
+              <TextField
+                label="London's Role"
+                fullWidth
+                size="small"
+                multiline
+                minRows={1}
+                value={ideaResult.londonRole ?? ''}
+                onChange={e => setIdeaResult({ ...ideaResult, londonRole: e.target.value })}
+              />
+
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained"
+                  onClick={() => {
+                    handleSuggestionSelect(ideaResult)
+                    setIdeaOpen(false)
+                    setIdeaResult(null)
+                    setIdeaText('')
+                  }}
+                  fullWidth
+                >
+                  Plan This Lab
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={() => { setIdeaResult(null) }}
+                >
+                  Back
+                </Button>
+              </Stack>
+            </Stack>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!deleteTarget} onClose={handleDeleteCancel}>
         <DialogTitle>Delete Lab?</DialogTitle>
