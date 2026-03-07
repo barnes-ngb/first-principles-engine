@@ -361,7 +361,7 @@ export default function LabReportForm({
   }, [
     date, title, labType, question, description, childReports, children, materials,
     lincolnRole, londonRole, subjectTags, skillTags, virtueTag, dadReflection,
-    bestMoment, nextTime, totalMinutes, report, isCompleting, isEditingActive, onSave, withSave,
+    bestMoment, nextTime, totalMinutes, report, isCompleting, onSave, withSave,
   ])
 
   const disabled = isViewingComplete
@@ -572,7 +572,6 @@ export default function LabReportForm({
         children.map((child) => {
           const cr = getChildReport(childReports, child)
           const fields = getChildFields(child.name)
-          const reportKey = getChildReportKey(childReports, child)
           const isUploading = uploadingChildId === child.id
 
           return (
