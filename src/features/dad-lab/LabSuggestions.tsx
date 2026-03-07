@@ -136,7 +136,7 @@ function parseDuration(raw: string): number | undefined {
 
 function LabSuggestionsContent({ onClose, onSelect }: Omit<LabSuggestionsProps, 'open'>) {
   const familyId = useFamilyId()
-  const { children } = useChildren()
+  const { children, isLoading: childrenLoading } = useChildren()
   const { chat, loading: aiLoading } = useAI()
   const [suggestions, setSuggestions] = useState<ParsedSuggestion[]>([])
   const [rawText, setRawText] = useState('')
@@ -202,9 +202,11 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
   }, [familyId, children, chat])
 
   useEffect(() => {
-    fetchSuggestions()
+    if (!childrenLoading) {
+      fetchSuggestions()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [childrenLoading])
 
   const handleSelect = useCallback(
     (suggestion: ParsedSuggestion) => {
@@ -228,7 +230,7 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
     <>
       <DialogTitle>Lab Suggestions</DialogTitle>
       <DialogContent>
-        {aiLoading && (
+        {(aiLoading || childrenLoading) && (
           <Stack alignItems="center" spacing={2} sx={{ py: 4 }}>
             <CircularProgress />
             <Typography color="text.secondary">Thinking up lab ideas...</Typography>
@@ -244,7 +246,7 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
           </Stack>
         )}
 
-        {!aiLoading && suggestions.length > 0 && (
+        {!aiLoading && !childrenLoading && suggestions.length > 0 && (
           <Stack spacing={1.5} sx={{ pb: 1 }}>
             {suggestions.map((s, i) => (
               <Card key={i} variant="outlined">
@@ -311,7 +313,7 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
         )}
 
         {/* Show raw text if parsing yielded only fallback */}
-        {!aiLoading && rawText && suggestions.length === 1 && suggestions[0].title === 'AI Suggested Lab' && (
+        {!aiLoading && !childrenLoading && rawText && suggestions.length === 1 && suggestions[0].title === 'AI Suggested Lab' && (
           <Typography
             variant="body2"
             sx={{ whiteSpace: 'pre-wrap', mt: 1, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}
