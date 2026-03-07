@@ -24,6 +24,7 @@ import LightbulbIcon from '@mui/icons-material/Lightbulb'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 
+import ArtifactGallery from '../../components/ArtifactGallery'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
@@ -402,6 +403,7 @@ Duration: [estimated minutes]`,
               <ActiveLabCard
                 key={report.id}
                 report={report}
+                familyId={familyId}
                 onEdit={handleEdit}
                 onComplete={handleCompleteLab}
                 onDelete={handleDeleteRequest}
@@ -420,7 +422,7 @@ Duration: [estimated minutes]`,
           </Typography>
           <Stack spacing={1.5} sx={{ mb: 3 }}>
             {completed.map((report) => (
-              <ReportCard key={report.id} report={report} onView={handleEdit} />
+              <ReportCard key={report.id} report={report} familyId={familyId} onView={handleEdit} />
             ))}
           </Stack>
 
@@ -682,11 +684,13 @@ function PlannedLabCard({
 
 function ActiveLabCard({
   report,
+  familyId,
   onEdit,
   onComplete,
   onDelete,
 }: {
   report: DadLabReport
+  familyId: string
   onEdit: (report: DadLabReport) => void
   onComplete: (report: DadLabReport) => void
   onDelete: (report: DadLabReport) => void
@@ -767,8 +771,46 @@ function ActiveLabCard({
                     />
                   )}
                 </Stack>
+                {/* Lincoln's actual photos + audio */}
+                {(lincolnReport?.artifacts?.length ?? 0) > 0 && (
+                  <Box sx={{ mt: 1 }}>
+                    <ArtifactGallery
+                      familyId={familyId}
+                      artifactIds={lincolnReport!.artifacts}
+                      thumbnailSize={56}
+                    />
+                  </Box>
+                )}
               </Box>
             )}
+
+            {/* London's contributions */}
+            {(() => {
+              const londonReport = report.childReports?.london
+              return (londonReport?.artifacts?.length ?? 0) > 0 ? (
+                <Box
+                  sx={{
+                    mt: 1,
+                    p: 1,
+                    bgcolor: 'info.50',
+                    borderRadius: 1,
+                    border: '1px solid',
+                    borderColor: 'info.200',
+                  }}
+                >
+                  <Typography variant="caption" color="info.main" sx={{ fontWeight: 600 }}>
+                    London contributed:
+                  </Typography>
+                  <Box sx={{ mt: 0.5 }}>
+                    <ArtifactGallery
+                      familyId={familyId}
+                      artifactIds={londonReport!.artifacts}
+                      thumbnailSize={56}
+                    />
+                  </Box>
+                </Box>
+              ) : null
+            })()}
 
             <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
               <Typography variant="caption" color="text.secondary">
@@ -803,9 +845,11 @@ function ActiveLabCard({
 
 function ReportCard({
   report,
+  familyId,
   onView,
 }: {
   report: DadLabReport
+  familyId: string
   onView: (report: DadLabReport) => void
 }) {
   const artifactCount = Object.values(report.childReports).reduce(
@@ -852,6 +896,20 @@ function ReportCard({
                 &ldquo;{report.question}&rdquo;
               </Typography>
             )}
+            {/* Show up to 4 thumbnails in list view */}
+            {(() => {
+              const allArtifactIds = Object.values(report.childReports)
+                .flatMap(cr => cr.artifacts ?? [])
+              return allArtifactIds.length > 0 ? (
+                <Box sx={{ mt: 0.5 }}>
+                  <ArtifactGallery
+                    familyId={familyId}
+                    artifactIds={allArtifactIds.slice(0, 4)}
+                    thumbnailSize={48}
+                  />
+                </Box>
+              ) : null
+            })()}
           </Box>
           <Button
             variant="outlined"
