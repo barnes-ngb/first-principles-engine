@@ -4,6 +4,11 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
@@ -86,6 +91,7 @@ export default function DadLabPage() {
   const [prefill, setPrefill] = useState<Prefill | undefined>()
   const [completing, setCompleting] = useState(false)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<DadLabReport | undefined>()
 
   // Split reports by status
   const { planned, active, completed } = useMemo(() => {
@@ -180,12 +186,22 @@ export default function DadLabPage() {
     [],
   )
 
-  const handleDelete = useCallback(
-    async (reportId: string) => {
-      await deleteReport(reportId)
+  const handleDeleteRequest = useCallback(
+    (report: DadLabReport) => {
+      setDeleteTarget(report)
     },
-    [deleteReport],
+    [],
   )
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteTarget?.id) return
+    await deleteReport(deleteTarget.id)
+    setDeleteTarget(undefined)
+  }, [deleteTarget, deleteReport])
+
+  const handleDeleteCancel = useCallback(() => {
+    setDeleteTarget(undefined)
+  }, [])
 
   // Stats (completed labs only)
   const stats = useMemo(() => {
@@ -263,7 +279,7 @@ export default function DadLabPage() {
                 report={report}
                 onEdit={handleEdit}
                 onStart={handleStartLab}
-                onDelete={handleDelete}
+                onDelete={handleDeleteRequest}
               />
             ))}
           </Stack>
@@ -283,6 +299,7 @@ export default function DadLabPage() {
                 report={report}
                 onEdit={handleEdit}
                 onComplete={handleCompleteLab}
+                onDelete={handleDeleteRequest}
               />
             ))}
           </Stack>
@@ -332,6 +349,21 @@ export default function DadLabPage() {
         onClose={() => setSuggestionsOpen(false)}
         onSelect={handleSuggestionSelect}
       />
+
+      <Dialog open={!!deleteTarget} onClose={handleDeleteCancel}>
+        <DialogTitle>Delete Lab?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to delete &ldquo;{deleteTarget?.title}&rdquo;? This cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDeleteCancel}>Cancel</Button>
+          <Button onClick={handleDeleteConfirm} color="error" variant="contained">
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }
@@ -347,7 +379,7 @@ function PlannedLabCard({
   report: DadLabReport
   onEdit: (report: DadLabReport) => void
   onStart: (id: string) => void
-  onDelete: (id: string) => void
+  onDelete: (report: DadLabReport) => void
 }) {
   return (
     <Card variant="outlined" sx={{ borderLeft: '4px solid', borderLeftColor: 'warning.main' }}>
@@ -399,7 +431,7 @@ function PlannedLabCard({
             <IconButton
               size="small"
               color="error"
-              onClick={() => onDelete(report.id!)}
+              onClick={() => onDelete(report)}
               title="Delete"
             >
               <DeleteIcon fontSize="small" />
@@ -417,10 +449,12 @@ function ActiveLabCard({
   report,
   onEdit,
   onComplete,
+  onDelete,
 }: {
   report: DadLabReport
   onEdit: (report: DadLabReport) => void
   onComplete: (report: DadLabReport) => void
+  onDelete: (report: DadLabReport) => void
 }) {
   const artifactCount = Object.values(report.childReports).reduce(
     (acc, cr) => acc + (cr.artifacts?.length ?? 0),
@@ -513,13 +547,16 @@ function ActiveLabCard({
             </Stack>
           </Box>
 
-          <Stack spacing={0.5}>
+          <Stack spacing={0.5} alignItems="flex-end">
             <Button variant="outlined" size="small" startIcon={<EditIcon />} onClick={() => onEdit(report)}>
               Edit
             </Button>
             <Button variant="contained" size="small" onClick={() => onComplete(report)}>
               Complete
             </Button>
+            <IconButton size="small" color="error" onClick={() => onDelete(report)} title="Delete">
+              <DeleteIcon fontSize="small" />
+            </IconButton>
           </Stack>
         </Stack>
       </CardContent>
