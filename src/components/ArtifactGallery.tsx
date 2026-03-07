@@ -30,16 +30,12 @@ export default function ArtifactGallery({
   thumbnailSize = 80,
 }: ArtifactGalleryProps) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(artifactIds.length > 0)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!artifactIds.length) {
-      setArtifacts([])
-      return
-    }
+    if (!artifactIds.length) return
     let cancelled = false
-    setLoading(true)
 
     const loadArtifacts = async () => {
       const loaded: Artifact[] = []
