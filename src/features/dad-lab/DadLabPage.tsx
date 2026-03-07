@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
-import CardActionArea from '@mui/material/CardActionArea'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
 import Divider from '@mui/material/Divider'
@@ -13,7 +12,9 @@ import AddIcon from '@mui/icons-material/Add'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import DeleteIcon from '@mui/icons-material/Delete'
+import EditIcon from '@mui/icons-material/Edit'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import VisibilityIcon from '@mui/icons-material/Visibility'
 
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
@@ -83,6 +84,7 @@ export default function DadLabPage() {
   const [view, setView] = useState<'list' | 'form'>('list')
   const [editingReport, setEditingReport] = useState<DadLabReport | undefined>()
   const [prefill, setPrefill] = useState<Prefill | undefined>()
+  const [completing, setCompleting] = useState(false)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
 
   // Split reports by status
@@ -107,12 +109,14 @@ export default function DadLabPage() {
   const handleEdit = useCallback((report: DadLabReport) => {
     setEditingReport(report)
     setPrefill(undefined)
+    setCompleting(false)
     setView('form')
   }, [])
 
   const handleCancel = useCallback(() => {
     setEditingReport(undefined)
     setPrefill(undefined)
+    setCompleting(false)
     setView('list')
   }, [])
 
@@ -167,9 +171,10 @@ export default function DadLabPage() {
 
   const handleCompleteLab = useCallback(
     (report: DadLabReport) => {
-      // Open form to fill in reflection before completing
+      // Open form with reflection fields to complete the lab
       setEditingReport(report)
       setPrefill(undefined)
+      setCompleting(true)
       setView('form')
     },
     [],
@@ -216,6 +221,7 @@ export default function DadLabPage() {
           report={editingReport}
           prefill={prefill}
           children={children}
+          completing={completing}
           onSave={handleSave}
           onCancel={handleCancel}
         />
@@ -275,6 +281,7 @@ export default function DadLabPage() {
               <ActiveLabCard
                 key={report.id}
                 report={report}
+                onEdit={handleEdit}
                 onComplete={handleCompleteLab}
               />
             ))}
@@ -291,7 +298,7 @@ export default function DadLabPage() {
           </Typography>
           <Stack spacing={1.5} sx={{ mb: 3 }}>
             {completed.map((report) => (
-              <ReportCard key={report.id} report={report} onEdit={handleEdit} />
+              <ReportCard key={report.id} report={report} onView={handleEdit} />
             ))}
           </Stack>
 
@@ -408,14 +415,24 @@ function PlannedLabCard({
 
 function ActiveLabCard({
   report,
+  onEdit,
   onComplete,
 }: {
   report: DadLabReport
+  onEdit: (report: DadLabReport) => void
   onComplete: (report: DadLabReport) => void
 }) {
   const artifactCount = Object.values(report.childReports).reduce(
     (acc, cr) => acc + (cr.artifacts?.length ?? 0),
     0,
+  )
+
+  // Check what Lincoln has contributed
+  const lincolnReport = report.childReports?.lincoln
+  const hasLincolnInput = !!(
+    lincolnReport?.prediction ||
+    lincolnReport?.explanation ||
+    (lincolnReport?.artifacts?.length ?? 0) > 0
   )
 
   return (
@@ -449,24 +466,61 @@ function ActiveLabCard({
                 &ldquo;{report.question}&rdquo;
               </Typography>
             )}
+
+            {/* Lincoln's contributions summary */}
+            {hasLincolnInput && (
+              <Box
+                sx={{
+                  mt: 1,
+                  p: 1,
+                  bgcolor: 'success.50',
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'success.200',
+                }}
+              >
+                <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
+                  Lincoln contributed:
+                </Typography>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                  {lincolnReport?.prediction && (
+                    <Chip label="Prediction" size="small" color="success" variant="outlined" />
+                  )}
+                  {lincolnReport?.explanation && (
+                    <Chip label="Explanation" size="small" color="success" variant="outlined" />
+                  )}
+                  {(lincolnReport?.artifacts?.length ?? 0) > 0 && (
+                    <Chip
+                      label={`${lincolnReport!.artifacts.length} photo${lincolnReport!.artifacts.length !== 1 ? 's' : ''}`}
+                      size="small"
+                      color="success"
+                      variant="outlined"
+                    />
+                  )}
+                </Stack>
+              </Box>
+            )}
+
             <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
               <Typography variant="caption" color="text.secondary">
                 {LAB_TYPE_LABELS[report.labType]}
               </Typography>
               {artifactCount > 0 && (
                 <Typography variant="caption" color="text.secondary">
-                  &middot; {artifactCount} photo{artifactCount !== 1 ? 's' : ''}
+                  &middot; {artifactCount} artifact{artifactCount !== 1 ? 's' : ''}
                 </Typography>
               )}
             </Stack>
           </Box>
-          <Button
-            variant="contained"
-            size="small"
-            onClick={() => onComplete(report)}
-          >
-            Complete
-          </Button>
+
+          <Stack spacing={0.5}>
+            <Button variant="outlined" size="small" startIcon={<EditIcon />} onClick={() => onEdit(report)}>
+              Edit
+            </Button>
+            <Button variant="contained" size="small" onClick={() => onComplete(report)}>
+              Complete
+            </Button>
+          </Stack>
         </Stack>
       </CardContent>
     </Card>
@@ -477,10 +531,10 @@ function ActiveLabCard({
 
 function ReportCard({
   report,
-  onEdit,
+  onView,
 }: {
   report: DadLabReport
-  onEdit: (report: DadLabReport) => void
+  onView: (report: DadLabReport) => void
 }) {
   const artifactCount = Object.values(report.childReports).reduce(
     (acc, cr) => acc + (cr.artifacts?.length ?? 0),
@@ -489,48 +543,54 @@ function ReportCard({
 
   return (
     <Card variant="outlined">
-      <CardActionArea onClick={() => onEdit(report)}>
-        <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Typography sx={{ fontSize: '1.3rem' }}>
-              {LAB_TYPE_ICONS[report.labType] ?? ''}
+      <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Typography sx={{ fontSize: '1.3rem' }}>
+            {LAB_TYPE_ICONS[report.labType] ?? ''}
+          </Typography>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600 }} noWrap>
+              {report.title}
             </Typography>
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 600 }} noWrap>
-                {report.title}
+            <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Typography variant="caption" color="text.secondary">
+                {LAB_TYPE_LABELS[report.labType]}
               </Typography>
-              <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+              {report.totalMinutes && (
                 <Typography variant="caption" color="text.secondary">
-                  {LAB_TYPE_LABELS[report.labType]}
-                </Typography>
-                {report.totalMinutes && (
-                  <Typography variant="caption" color="text.secondary">
-                    &middot; {report.totalMinutes} min
-                  </Typography>
-                )}
-                {artifactCount > 0 && (
-                  <Typography variant="caption" color="text.secondary">
-                    &middot; {artifactCount} photo{artifactCount !== 1 ? 's' : ''}
-                  </Typography>
-                )}
-                <Typography variant="caption" color="text.secondary">
-                  &middot; {formatDateShort(report.date)}
-                </Typography>
-              </Stack>
-              {report.question && (
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mt: 0.5, fontStyle: 'italic' }}
-                  noWrap
-                >
-                  &ldquo;{report.question}&rdquo;
+                  &middot; {report.totalMinutes} min
                 </Typography>
               )}
-            </Box>
-          </Stack>
-        </CardContent>
-      </CardActionArea>
+              {artifactCount > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  &middot; {artifactCount} photo{artifactCount !== 1 ? 's' : ''}
+                </Typography>
+              )}
+              <Typography variant="caption" color="text.secondary">
+                &middot; {formatDateShort(report.date)}
+              </Typography>
+            </Stack>
+            {report.question && (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ mt: 0.5, fontStyle: 'italic' }}
+                noWrap
+              >
+                &ldquo;{report.question}&rdquo;
+              </Typography>
+            )}
+          </Box>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<VisibilityIcon />}
+            onClick={() => onView(report)}
+          >
+            View
+          </Button>
+        </Stack>
+      </CardContent>
     </Card>
   )
 }
