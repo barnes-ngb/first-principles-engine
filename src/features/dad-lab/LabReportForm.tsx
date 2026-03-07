@@ -74,6 +74,7 @@ interface LabReportFormProps {
   report?: DadLabReport
   prefill?: Prefill
   children: Child[]
+  completing?: boolean
   onSave: (report: DadLabReport) => Promise<void>
   onCancel: () => void
 }
@@ -98,16 +99,18 @@ export default function LabReportForm({
   report,
   prefill,
   children,
+  completing = false,
   onSave,
   onCancel,
 }: LabReportFormProps) {
   const familyId = useFamilyId()
   const { saveState, withSave } = useSaveState()
 
-  // Determine if this is an active lab being completed
-  const isCompleting = report?.status === DadLabStatus.Active
+  // Determine form mode based on completing prop and report status
+  const isCompleting = completing && report?.status === DadLabStatus.Active
+  const isEditingActive = !completing && report?.status === DadLabStatus.Active
   const isViewingComplete = report?.status === DadLabStatus.Complete
-  const isEditing = !!report && !isCompleting
+  const isEditing = !!report && !isCompleting && !isEditingActive
 
   // Form state
   const [date, setDate] = useState(report?.date ?? todayKey())
@@ -273,7 +276,7 @@ export default function LabReportForm({
       .map((m) => m.trim())
       .filter(Boolean)
 
-    // Determine status: completing an active lab → complete; editing existing → keep status; new → planned
+    // Determine status: completing → complete; editing active → stay active; editing existing → keep status; new → planned
     let status: DadLabReport['status']
     if (isCompleting) {
       status = DadLabStatus.Complete
@@ -310,7 +313,7 @@ export default function LabReportForm({
   }, [
     date, title, labType, question, description, childReports, materials,
     lincolnRole, londonRole, subjectTags, skillTags, virtueTag, dadReflection,
-    bestMoment, nextTime, totalMinutes, report, isCompleting, onSave, withSave,
+    bestMoment, nextTime, totalMinutes, report, isCompleting, isEditingActive, onSave, withSave,
   ])
 
   const disabled = isViewingComplete
@@ -322,9 +325,11 @@ export default function LabReportForm({
       <Typography variant="h6" sx={{ fontWeight: 700 }}>
         {isCompleting
           ? 'Complete Lab'
-          : report
-            ? report.title
-            : 'Plan a Lab'}
+          : isEditingActive
+            ? `Edit: ${report.title}`
+            : report
+              ? report.title
+              : 'Plan a Lab'}
       </Typography>
 
       {/* Date + Title + Type + Duration */}
@@ -333,7 +338,7 @@ export default function LabReportForm({
         type="date"
         value={date}
         onChange={(e) => setDate(e.target.value)}
-        disabled={disabled || isCompleting}
+        disabled={disabled}
         fullWidth
         slotProps={{ inputLabel: { shrink: true } }}
       />
@@ -343,7 +348,7 @@ export default function LabReportForm({
         placeholder="Volcano Lab, Birdhouse Build..."
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        disabled={disabled || isCompleting}
+        disabled={disabled}
         fullWidth
       />
 
@@ -355,7 +360,7 @@ export default function LabReportForm({
           value={labType}
           exclusive
           onChange={(_, val) => val && setLabType(val)}
-          disabled={disabled || isCompleting}
+          disabled={disabled}
           sx={{ flexWrap: 'wrap' }}
         >
           {LAB_TYPES.map((t) => (
@@ -384,7 +389,7 @@ export default function LabReportForm({
           placeholder="What question will we explore?"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          disabled={disabled || isCompleting}
+          disabled={disabled}
           fullWidth
           multiline
           minRows={2}
@@ -416,7 +421,7 @@ export default function LabReportForm({
           placeholder="Baking soda, vinegar, food coloring..."
           value={materials}
           onChange={(e) => setMaterials(e.target.value)}
-          disabled={disabled || isCompleting}
+          disabled={disabled}
           fullWidth
           helperText="Comma-separated list"
         />
@@ -433,7 +438,7 @@ export default function LabReportForm({
             placeholder="Makes prediction, runs the experiment, explains to London"
             value={lincolnRole}
             onChange={(e) => setLincolnRole(e.target.value)}
-            disabled={disabled || isCompleting}
+            disabled={disabled}
             fullWidth
             multiline
             minRows={2}
@@ -443,7 +448,7 @@ export default function LabReportForm({
             placeholder="Watches, draws what he sees, helps pour"
             value={londonRole}
             onChange={(e) => setLondonRole(e.target.value)}
-            disabled={disabled || isCompleting}
+            disabled={disabled}
             fullWidth
             multiline
             minRows={2}
@@ -451,8 +456,8 @@ export default function LabReportForm({
         </Stack>
       </Box>
 
-      {/* Child contributions summary (shown when completing an active lab) */}
-      {isCompleting && (
+      {/* Child contributions summary (shown when editing or completing an active lab) */}
+      {(isCompleting || isEditingActive) && (
         <Box>
           <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
             Kid Contributions
@@ -510,7 +515,7 @@ export default function LabReportForm({
       )}
 
       {/* Per-Child Sections (shown for active/completing or complete labs) */}
-      {(isCompleting || isViewingComplete || (isEditing && report?.status !== DadLabStatus.Planned)) &&
+      {(isCompleting || isEditingActive || isViewingComplete || (isEditing && report?.status !== DadLabStatus.Planned)) &&
         children.map((child) => {
           const cr = childReports[child.id] ?? emptyChildReport()
           const fields = getChildFields(child.name)
@@ -717,7 +722,9 @@ export default function LabReportForm({
             ? 'Saving...'
             : isCompleting
               ? 'Complete Lab'
-              : 'Save Lab'}
+              : isEditingActive
+                ? 'Save Changes'
+                : 'Save Lab'}
         </Button>
       )}
 

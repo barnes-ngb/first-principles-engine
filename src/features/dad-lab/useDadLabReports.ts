@@ -4,6 +4,7 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
   setDoc,
@@ -30,14 +31,14 @@ export function useDadLabReports() {
     setLoading(false)
   }, [familyId])
 
+  // Use real-time listener so Nathan sees Lincoln's contributions immediately
   useEffect(() => {
-    const fetchReports = async () => {
-      const q = query(dadLabReportsCollection(familyId), orderBy('date', 'desc'))
-      const snap = await getDocs(q)
+    const q = query(dadLabReportsCollection(familyId), orderBy('date', 'desc'))
+    const unsubscribe = onSnapshot(q, (snap) => {
       setReports(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
       setLoading(false)
-    }
-    fetchReports()
+    })
+    return unsubscribe
   }, [familyId])
 
   const syncComplianceHours = useCallback(
