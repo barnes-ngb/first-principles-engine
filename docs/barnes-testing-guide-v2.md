@@ -1,377 +1,380 @@
-# First Principles Engine — Testing Guide v2
+# First Principles Engine — Testing Guide (v2)
 
-**Updated: March 5, 2026**
-**Previous version: March 3, 2026**
-
----
-
-## 1. PREREQUISITES
-
-Before testing, ensure the following are in place:
-
-### AI Feature Flag
-1. Open **Settings** (gear icon)
-2. Toggle **"AI-Powered Planning"** to ON
-   - This enables AI-generated plans via Cloud Functions
-   - Without it, the planner uses local logic fallback (still functional, but not the AI path)
-   - Stored in localStorage (`fpe_ai_flag_`) — persists across sessions and syncs across tabs
-
-### Child Profiles
-- At least one child profile must exist: **Lincoln (10)** is the primary test profile
-- Lincoln should have a **skill snapshot** populated (used by AI for context-aware planning)
-- Optionally add **London (6)** to test multi-child flows and kid-themed views
-
-### Workbook Configs (Recommended)
-- Open Settings → Workbook Configuration
-- Add at least 2-3 workbooks (e.g., "Saxon Math Lesson 45", "Explode the Code Book 3")
-- Fields: name, subjectBucket, currentPosition, totalUnits, unitLabel
-- Workbooks are used during plan setup and photo content extraction
-- Position auto-advances when plans are applied (lesson number increment logic)
-
-### Demo Data (Optional)
-- Settings page has a **Seed Demo Data** function for quick test setup
-- Populates sample children, weeks, and assignments
+> Last updated: 2026-03-07
 
 ---
 
-## 2. WEEKLY PLANNING FLOW (Core Test)
+## Table of Contents
 
-This is the most complex flow and the primary feature to verify.
-
-### Step 1: Open Plan My Week
-- Navigate to **Plan My Week** from the main nav
-- **Verify:** Setup wizard appears (if no conversation exists for this week)
-- If a plan already exists, you'll see the conversation view instead
-
-### Step 2: Guided Setup Wizard
-- Fill out:
-  - **Week energy level:** Full / Lighter / MVD
-  - **Hours per day** target
-  - **Workbook selections** (pulls from your workbook configs)
-  - **Read-aloud** selection
-  - **Notes** (free-form context for the AI)
-- **Verify:** All dropdowns populate correctly; workbook list matches your configs
-
-### Step 3: Generate Plan
-- Click Generate after completing setup
-- **Verify (AI path):** Loading indicator appears → structured plan preview returns
-- **Verify (Local fallback):** If AI flag is off, local logic generates a plan instantly
-- Plan items should include: title, estimatedMinutes, category (must-do / choose), skillTags
-
-### Step 4: Review Preview
-- Inspect the generated plan across all days
-- **Verify:** Each day has reasonable items distributed across subjects
-- **Verify:** Items have correct categories (must-do for core, choose for electives)
-- **Try an adjustment:** Type a free-form command like "make Wednesday light" or "move math to Tue/Thu"
-  - Adjustment intents are parsed by `parseAdjustmentIntent()` and plan regenerates locally
-- **Try a coverage question:** Ask "what does the week cover?" → should get a formatted summary
-
-### Step 5: Apply Plan
-- Click **Apply** to commit the plan
-- **Verify:** Progress indicator shows lesson card generation (batches of 3)
-- **Verify:** Console shows `[LessonCards] Generating card for...` and `[LessonCards] Generated X of Y cards`
-- **Verify:** After apply completes:
-  - Conversation is locked (no further adjustments)
-  - `applied` state is true
-  - DayLog checklist items created for each day
-  - DayBlock items created for non-app-block items
-  - Week plan updated with childGoals
-  - Lesson cards written to Firestore `lessonCards` collection
-
-### Step 6: Check Today
-- Navigate to **Today**
-- **Verify:** Checklist items appear for today's date
-- **Verify:** Items show label + planned minutes
-- **Verify:** Color dots correspond to subject buckets
-- **Verify:** Week focus (theme/virtue/scripture) displays if set during planning
-
-### Step 7: Check This Week
-- Navigate to **This Week** view
-- **Verify:** All days show their planned items
-- **Verify:** Items match what was generated in the planner
-
-### Redo Plan (Important!)
-- If items look wrong (stale duplicates, 0m planned), use **Redo Plan**:
-  1. Go back to Plan My Week
-  2. Click **Redo Plan** → confirmation dialog appears
-  3. Confirm → clears planner-generated checklist items (preserves manually-added items)
-  4. Clears week focus fields
-  5. Resets conversation to Draft status
-  6. Re-run the setup wizard and generate a fresh plan
-
-### Repeat Last Week
-- Alternative to fresh planning: **Repeat Last Week** button
-- Clones previous plan with auto-advanced lesson numbers
-- Regex patterns detect: "Lesson", "Ch", "Chapter", "Unit", "Page" followed by a number
-- **Verify:** Lesson numbers increment correctly (e.g., "Saxon Math Lesson 45" → "Saxon Math Lesson 46")
+1. [Prerequisites](#1-prerequisites)
+2. [Weekly Planning Flow](#2-weekly-planning-flow)
+3. [Daily Execution Flow](#3-daily-execution-flow)
+4. [Evaluation Flow](#4-evaluation-flow)
+5. [Dad Lab Flow](#5-dad-lab-flow)
+6. [Records & Compliance](#6-records--compliance)
+7. [Quick Smoke Test (5 min)](#7-quick-smoke-test-5-min)
+8. [Common Issues & Troubleshooting](#8-common-issues--troubleshooting)
 
 ---
 
-## 3. DAILY EXECUTION FLOW
+## 1. Prerequisites
 
-### Opening Today
-1. Navigate to **Today**
-2. **Verify:** Checklist loads for current date
-3. **Verify:** Energy level selector shows current mode
-4. **Verify:** Morning greeting appears (time-appropriate: morning/afternoon/evening)
+### Environment Setup
 
-### Checklist Interaction
-- Tap checkbox to mark items complete
-- **Verify:** Completion persists (reload page → still checked)
-- **Verify:** When all items for a block are checked, `actualMinutes` auto-populates on the corresponding block
-- **Verify:** Subject inference works — items with labels like "phonics" or "math" get correct subjectBucket
+- **Node.js**: 18+ (check: `node -v`)
+- **npm**: 9+ (check: `npm -v`)
+- **Firebase CLI**: installed globally (`npm i -g firebase-tools`)
+- **Firebase project**: configured and authenticated (`firebase login`)
 
-### Teach Helper
-1. Tap the **school icon** (📚) next to an incomplete item
-2. **Verify:** TeachHelperDialog opens
-3. **Verify:** Shows skill snapshot + matching lesson card (if generated during Apply)
-4. **Verify:** Displays ladder rung, supports, stop rules, common mistakes
-5. If no lesson card exists, a **micro-lesson template** (5-min structure) is shown
-6. **"Generate Specific Lesson" button:** Creates a lesson card on demand (see Lesson Card section)
+### Local Development
 
-### Artifact Capture
-- Quick Capture section at bottom of Today view
-- Toggle between **Note / Photo / Audio**
-- **Verify:** Photo triggers PhotoCapture component
-- **Verify:** Audio triggers AudioRecorder
-- **Verify:** All artifacts tagged with: childId, engineStage, subjectBucket, domain, location
-- **Verify:** Artifacts appear scoped to current dayLog + child
+```bash
+# Install dependencies
+npm install
+cd functions && npm install && cd ..
 
-### MVD Mode Toggle
-- Change energy level dropdown: `full` → normal day, `low/overwhelmed` → MVD
-- **Verify:** Non-mvdEssential items are dimmed/de-emphasized in MVD mode
-- **Verify:** First 3 items default as mvdEssential if no category was explicitly set
-- **Verify:** Plan type changes persist via `saveDailyPlan()`
+# Start dev server
+npm run dev
 
-### Inline Editing (New since v1)
-1. Tap **Edit** button on Today view
-2. **Verify:** Edit mode activates — shows text fields for label + minutes
-3. **Verify:** Reorder arrows appear (move items up/down)
-4. **Verify:** Delete button removes items
-5. **Verify:** "Add Item" button reveals form with title, minutes, and subject dropdowns
-6. **Verify:** Changes persist immediately via `persistDayLogImmediate()`
-7. Exit edit mode → items reflect changes
+# Start Firebase emulators (separate terminal)
+cd functions && npm run serve
+```
 
----
+### Running Tests
 
-## 4. LESSON CARD FLOW
+```bash
+# All unit tests
+npm test
 
-### Auto-Generation During Apply
-- Triggered automatically when you Apply a plan
-- Only generates for items that are: accepted, not app-blocks, not in 'choose' category
-- Deduplicates by title (same activity across multiple days = one card)
-- Batch processing in groups of 3 (watch console)
-- **Console pattern:** `[LessonCards] Generating card for "Saxon Math Lesson 46"...`
-- **Console pattern:** `[LessonCards] Generated 5 of 8 cards`
-- Non-fatal: if generation fails for one card, the rest continue
+# Type-check only
+npx tsc -b
 
-### Manual Generation via Teach Helper
-1. Open Teach Helper for any item
-2. Click **"Generate Specific Lesson"**
-3. **Verify:** Loading state appears
-4. **Verify:** Card generates with: title, objective, materials[], steps[], successCriteria[]
-5. **Verify:** Card saved to Firestore with planItemId linkage
+# Lint
+npm run lint
 
-### Verification in Firestore
-- Check `families/{familyId}/lessonCards` collection
-- Each card should have: childId, planItemId, title, durationMinutes, objective, materials[], steps[], evidenceChecks[], skillTags[], ladderRef (optional), createdAt
-- **Lookup chain:** TeachHelper finds cards by: (1) lessonCardId on plan item → (2) query by planItemId → (3) fallback title keyword match
+# Full build (tsc + vite)
+npm run build
+```
 
-### Known Fix: Unicode Escapes
-- AI-generated content may contain Unicode escape sequences
-- `fixUnicodeEscapes()` utility handles this in both TeachHelper and LessonCard display
-- **Verify:** No raw `\u00XX` sequences appear in rendered card text
+### Required State
+
+Before testing flows, ensure:
+
+1. **Logged in** — Anonymous auth auto-creates on first visit; upgrade to email for persistence
+2. **Family created** — At least one family with `familyId` matching auth UID
+3. **Children added** — Lincoln and London profiles in `families/{familyId}/children`
+4. **At least one ladder** — Reading or Math ladder in `families/{familyId}/ladders`
+
+### Accounts & Profiles
+
+| Profile | Role | What They See |
+|---------|------|---------------|
+| Parent (Shelly/Nathan) | Full access | All routes, all admin features |
+| Lincoln | Kid | Today, My Stuff, Dad Lab |
+| London | Kid | Today, My Stuff, Dad Lab |
+
+Profile selection happens at `/login` (ProfileSelectPage) before accessing the app.
 
 ---
 
-## 5. KID VIEW TESTING
+## 2. Weekly Planning Flow
 
-### Switching to Kid View
-1. Select **Lincoln** from the child profile selector
-2. **Verify:** KidTodayView loads (different layout from parent view)
-3. Lincoln gets **Press Start 2P** font (Minecraft-style theme)
-4. London gets **Fredoka/Luckiest Guy** fonts (playful theme)
+**Route:** `/planner/chat` (parent-only)
 
-### Must-Do / Choose-Your-Adventure Flow
-1. **Verify:** Must-Do section shows required items with checkboxes
-2. Complete all Must-Do items
-3. **Verify:** "Great job! Now pick your adventures!" message appears
-4. **Verify:** Choose-Your-Adventure section unlocks
-5. Select up to 2 adventure items (configurable `maxChoices`)
-6. **Verify:** Selected choices show checkboxes; unselected use radio-style selectors
-7. Complete selected adventures
-8. **Verify:** Celebration message appears (random, deterministic per day-of-year)
+**Purpose:** AI-powered conversational weekly plan creation.
 
-### Categorization Logic
-- Items categorized by `category` field: 'must-do' vs 'choose'
-- **Fallback:** If no categories set, first 3 items are must-do
-- MVD-essential items always appear in must-do
+### Step-by-step
 
-### Explorer Map (Week Visualization)
-- Visual trail with themed emoji sets
-- **Themes rotate weekly:** Forest / Space / Island / Castle (based on weekNum % 4)
-- London gets special garden theme: 🌱🌿🌸🌺🌻
-- **Verify:** Completed days show as "explored" on the trail
-- **Verify:** Streak count displays (consecutive explored days backward from today)
-- **Verify:** Progress text: "X days explored! Y to discover..."
+1. **Navigate** to Plan My Week from sidebar (or `/planner/chat`)
+2. **Verify** profile selection gate — must be logged in as parent
+3. **Select child** — choose Lincoln or London from the child selector
+4. **Start conversation** — the chat interface loads with a greeting
+5. **Provide context** — tell the AI about the week:
+   - Energy level expectations
+   - Any schedule constraints ("we have a dentist appointment Tuesday")
+   - Focus areas ("Lincoln needs extra phonics this week")
+   - App blocks to include ("Reading Eggs 15 min daily")
+6. **Request plan generation** — say "generate the plan" or "make a plan"
+7. **Verify JSON response** — AI should return a `DraftWeeklyPlan` JSON:
+   - [ ] 5 days (Monday-Friday)
+   - [ ] Each day has a `timeBudgetMinutes`
+   - [ ] Formation block first each day
+   - [ ] 3-4 items marked `mvdEssential: true`
+   - [ ] Items have `category`: `"must-do"` or `"choose"`
+   - [ ] App blocks have `isAppBlock: true`
+   - [ ] Valid `subjectBucket` values
+   - [ ] `minimumWin` sentence present
+8. **Review plan preview** — plan should render in the UI preview panel
+9. **Accept/modify** — user can accept items, remove them, or ask for changes
+10. **Save plan** — confirm it writes to `families/{familyId}/weeks/{weekKey}`
 
-### My Stuff (Artifacts)
-- Shows today's artifacts (Photo / Note)
-- **Add Photo / Add Note** buttons trigger KidCaptureForm
-- **Verify:** Artifacts display title + timestamp
-- **Verify:** Photos show thumbnail image
+### What to Watch For
 
-### Week Focus Display
-- If week focus was set during planning:
-  - Theme, virtue, scriptureRef, heartQuestion display in kid view
-  - Scripture shown in italic box
-- **Verify:** No verse displayed if Week Focus fields weren't set (known behavior, not a bug)
+- Plan respects hours budget (doesn't exceed daily limit)
+- MVD items are the core 3-4 (formation, math, reading, speech if applicable)
+- Skip suggestions populated if AI sees redundancy
+- Recent evaluation context is injected (check that recommendations appear)
+- Enriched context loads: workbook pace, recent sessions, hours progress
 
 ---
 
-## 6. WEEKLY REVIEW
+## 3. Daily Execution Flow
 
-### How to Test
-- **Scheduled:** Automatically triggers Sunday at 7 PM via Firebase Cloud Scheduler
-- **Manual trigger:** Navigate to Weekly Review → click **"Generate Now"** (appears in empty state)
-- Calls `generateReviewFn()` Cloud Function with familyId, childId, weekKey
+**Route:** `/today`
 
-### Data Requirements for Meaningful Review
-- At least 3-4 days of completed checklist items for the week
-- Some artifacts captured
-- Skill snapshot populated for the child
-- Hours logged (via block completion or manual entry)
+**Purpose:** Daily log, routine tracking, artifact capture.
 
-### Review Structure
-- **Status flow:** PendingReview → Reviewed → Applied
-- Review contains:
-  - **Celebration:** warm affirmation of the week
-  - **Summary:** week overview
-  - **Wins[]:** specific achievements
-  - **Growth Areas[]:** areas to develop
-  - **Pace Adjustments[]:** per-adjustment cards with accept/reject
-  - **Recommendations[]:** next week guidance
+### Step-by-step
 
-### Pace Adjustment Cards
-1. Each shows: area, currentPace → suggestedPace, rationale
-2. **Verify:** Thumb up/down buttons toggle accept/reject per adjustment
-3. Click **Apply** → accepted adjustments persist for next plan generation
-4. **Verify:** Review status changes to "Applied"
+1. **Navigate** to Today (default route, `/today`)
+2. **Verify date** — shows today's date, correct day of week
+3. **Select child** — switch between Lincoln and London
+4. **Choose plan type:**
+   - [ ] Normal Day — full routine loads
+   - [ ] MVD (Minimum Viable Day) — only `must-do` items show
+5. **Set energy level** — normal / low / overwhelmed
+6. **Work through sessions:**
+   - [ ] Tap a session to start it
+   - [ ] Log result: hit / near / miss
+   - [ ] Session timer tracks duration
+   - [ ] Session saves to `families/{familyId}/sessions`
+7. **Capture artifacts:**
+   - [ ] Photo — camera or gallery upload
+   - [ ] Audio — record narration
+   - [ ] Note — quick text entry
+   - [ ] Verify tags: childId, engineStage, subjectBucket, location
+   - [ ] Artifact saves to `families/{familyId}/artifacts`
+8. **Log hours:**
+   - [ ] Hours auto-calculated from sessions
+   - [ ] Manual hours entry available
+   - [ ] Subject bucket attribution
+   - [ ] Saves to `families/{familyId}/hours`
+9. **End of day:**
+   - [ ] All sessions marked complete or skipped
+   - [ ] Daily plan saved to `families/{familyId}/dailyPlans`
+   - [ ] Hours total visible
 
-### Real-time Updates
-- Review page uses `onSnapshot()` for real-time updates
-- **Verify:** Child selector switches between children correctly
-- **Verify:** Loading state resets when switching children
+### What to Watch For
 
----
-
-## 7. RECORDS & COMPLIANCE
-
-### Hours Accumulation
-- Hours accumulate from two sources:
-  1. **Automatic:** DayLog blocks with `actualMinutes` (set when checklist items completed)
-  2. **Manual:** HoursEntry records (takes precedence when entries exist)
-- Hours adjustments via HoursAdjustment records
-
-### Subject Tracking
-- `computeHoursSummary()` aggregates by subject (bySubject[]) and by date (byDate{})
-- Core subjects: Reading, LanguageArts, Math, Science, SocialStudies
-- Non-core tracked separately
-- Home vs other locations tracked per entry
-
-### Compliance Dashboard
-- **MO requirements:** 1000 total hours, 600 core hours
-- **Per-subject target:** ~120 hours each (600 ÷ 5 core subjects)
-- **Status indicators:**
-  | Color | Overall | Per-Subject |
-  |-------|---------|-------------|
-  | 🟢 Green | ≥90% of expected | ≥85% of target |
-  | 🟡 Yellow | 75-90% of expected | 60-85% of target |
-  | 🔴 Red | <75% of expected | <60% of target |
-- **Verify:** Progress bars reflect actual logged hours
-- **Verify:** School year progress percentage is based on elapsed time
-
-### Portfolio Export
-- Exports artifacts (photos/notes/audio) with metadata
-- CSV export of day logs with dates, subjects, durations
-- Hours summary by subject + date
-- Evaluation records with skill progression
+- MVD mode hides non-essential items (only `must-do` / `mvdEssential` items)
+- Energy level persists if page is refreshed
+- Audio recording works on mobile (test on phone)
+- Large tap targets — usable with one thumb
+- Session results update the scoreboard in real-time
 
 ---
 
-## 8. COMMON ISSUES & TROUBLESHOOTING
+## 4. Evaluation Flow
 
-| Issue | Symptom | Fix |
-|-------|---------|-----|
-| **"0m planned" on Today items** | Checklist items show 0 minutes | Go to Plan My Week → Redo Plan → re-generate and re-apply. This was a lesson generation handler bug (fixed in `9b2acc7`) — if you see it, redo clears stale data. |
-| **Stale duplicate items** | Same items appear multiple times on Today | Redo Plan — clears planner-sourced items and regenerates fresh. Redo only removes `source === 'planner'` items, preserving manual additions. |
-| **Generate Specific Lesson fails** | Teach Helper "Generate" button shows error or nothing happens | Check browser console for error details. Verify AI feature flag is ON. Check Firebase function logs for 500 errors. Ensure child has skill snapshot. |
-| **No verse on Today** | Scripture/verse area is blank | Set Week Focus fields (theme, virtue, scriptureRef) during the planning wizard. If already planned, Redo and re-plan with focus fields filled. |
-| **500 error on chat** | Plan generation fails with server error | Check Firebase Cloud Function logs (`firebase functions:log`). Common causes: missing API key, token limit exceeded, malformed prompt. Local fallback should still work with AI flag OFF. |
-| **Unicode artifacts in lesson cards** | Raw `\u00XX` sequences in card text | Should be auto-fixed by `fixUnicodeEscapes()`. If visible, check that the fix is applied in both TeachHelper and LessonCardPreview. |
-| **Lesson cards not generated during Apply** | Console shows no `[LessonCards]` messages | Verify items are: accepted, not app-blocks, and not 'choose' category. This was a category filter bug (fixed in `61773e7`). |
-| **Items not categorized in Kid View** | All items show as must-do, no adventures | Ensure plan items have `category` field set. Fallback: first 3 items become must-do if no categories exist. |
-| **Week focus not showing on Today** | Theme/virtue missing after planning | Fixed in `a7b4344`. Week focus now propagates from Week → Today views via route params and props. Redo plan if stale. |
-| **Photo scan not matching workbook** | Photo content extraction misses workbook | Verify workbook configs exist in Settings. AI extraction looks for matching workbook name + calculates lesson number. |
+**Route:** `/evaluate`
 
----
+**Purpose:** AI-guided diagnostic skill assessment (reading, math, etc.)
 
-## 9. QUICK SMOKE TEST (5 Minutes)
+### Step-by-step
 
-A minimal test to verify the app is functioning end-to-end:
+1. **Navigate** to Evaluate from sidebar (or `/evaluate`)
+2. **Select child** — choose Lincoln or London
+3. **Select domain** — reading (primary), math, or other
+4. **Start evaluation chat:**
+   - [ ] AI introduces itself as a diagnostic specialist
+   - [ ] First prompt: specific instruction to parent ("Ask him to read: cat, hat, sat")
+5. **Report results to AI:**
+   - [ ] Type what the child did ("He got cat and hat but not sat")
+   - [ ] AI should respond with a `<finding>` block in the response
+6. **Verify finding extraction:**
+   - [ ] `<finding>` JSON parsed by the app
+   - [ ] Skill tag, status, evidence, notes captured
+   - [ ] Finding appears in the UI findings panel
+7. **Continue 3-4 exchanges:**
+   - [ ] AI adapts — skips mastered areas, digs deeper on struggles
+   - [ ] Each response includes at least one `<finding>` block
+   - [ ] AI progresses through diagnostic levels appropriately
+8. **Complete evaluation:**
+   - [ ] AI outputs a `<complete>` block
+   - [ ] Verify all fields: summary, frontier, recommendations, skipList, supports, stopRules, evidenceDefinitions, nextEvalDate
+   - [ ] `nextEvalDate` is 4-6 weeks from today
+9. **Save evaluation:**
+   - [ ] Evaluation session saved to `families/{familyId}/evaluationSessions`
+   - [ ] Skill snapshot updated at `families/{familyId}/skillSnapshots/{childId}`
+   - [ ] Supports and stop rules from `<complete>` block stored
 
-### 1. Plan Generation (1 min)
-- [ ] Open **Plan My Week**
-- [ ] Does the setup wizard appear? (If returning, does the conversation load?)
-- [ ] Fill in energy level + at least one workbook
-- [ ] Click Generate → does a structured preview appear within ~10 seconds?
+### What to Watch For
 
-### 2. Apply Plan (1 min)
-- [ ] Click **Apply**
-- [ ] Watch console for `[LessonCards]` messages
-- [ ] Does the apply complete without errors?
-
-### 3. Today View (1 min)
-- [ ] Navigate to **Today**
-- [ ] Do checklist items appear for today?
-- [ ] Are minutes displayed (not "0m")?
-- [ ] Is the week focus/verse visible (if set)?
-
-### 4. Teach Helper (1 min)
-- [ ] Tap the school icon on any incomplete item
-- [ ] Does the TeachHelperDialog open?
-- [ ] Does it show lesson content or a micro-lesson template?
-
-### 5. Completion & Persistence (1 min)
-- [ ] Check off one item → does it save?
-- [ ] Reload the page → is it still checked?
-- [ ] Switch to Kid View → does KidTodayView load with Must-Do items?
-
-### Smoke Test: PASS / FAIL
-
-If any step fails, check the troubleshooting table in Section 8 above.
+- AI never gives multiple diagnostic steps at once (one step at a time)
+- AI uses specific words/examples, not vague instructions
+- Finding blocks contain valid JSON
+- Complete block `supports` are specific to observed behavior (not generic)
+- Complete block `stopRules` are actionable ("If Lincoln misses 3 in a row, stop")
+- `nextEvalDate` is correctly calculated from today's date
 
 ---
 
-## Appendix: Key File Paths for Debugging
+## 5. Dad Lab Flow
 
-| Area | File |
-|------|------|
-| Planner Chat (main) | `src/features/planner-chat/PlannerChatPage.tsx` |
-| Plan Generation Logic | `src/features/planner-chat/chatPlanner.logic.ts` |
-| Repeat Last Week | `src/features/planner-chat/repeatWeek.logic.ts` |
-| Adjustment Parsing | `src/features/planner-chat/intentParser.ts` |
-| Today (Parent) | `src/features/today/TodayPage.tsx` |
-| Today (Kid) | `src/features/today/KidTodayView.tsx` |
-| Day Log Hook | `src/features/today/useDayLog.ts` |
-| Explorer Map | `src/features/today/ExplorerMap.tsx` |
-| Teach Helper | `src/features/planner/TeachHelperDialog.tsx` |
-| Lesson Card Preview | `src/features/planner-chat/LessonCardPreview.tsx` |
-| Weekly Review | `src/features/weekly-review/WeeklyReviewPage.tsx` |
-| Records / Compliance | `src/features/records/ComplianceDashboard.tsx` |
-| Hours Computation | `src/features/records/records.logic.ts` |
-| AI Feature Flags | `src/core/ai/featureFlags.ts` |
-| Settings | `src/features/settings/SettingsPage.tsx` |
-| Cloud Functions (chat) | `functions/src/ai/chat.ts` |
-| Cloud Functions (generate) | `functions/src/ai/generate.ts` |
-| Cloud Functions (evaluate) | `functions/src/ai/evaluate.ts` |
+**Route:** `/dad-lab`
+
+**Purpose:** Saturday lab sessions — Nathan leads hands-on project-based learning.
+
+### Step-by-step
+
+1. **Navigate** to Dad Lab from sidebar (or `/dad-lab`)
+2. **Create a new lab plan:**
+   - [ ] Select a topic or project theme
+   - [ ] Set estimated duration
+   - [ ] Add materials list
+   - [ ] Optionally generate AI suggestions for activities
+   - [ ] Plan saves to `families/{familyId}/dadLab`
+3. **Start the lab session:**
+   - [ ] Tap "Start Lab" to begin
+   - [ ] Timer starts tracking session duration
+   - [ ] Session state: `planned` → `active`
+4. **Lincoln contributes:**
+   - [ ] Switch to Lincoln's profile (or Lincoln's device)
+   - [ ] Lincoln sees the kid lab view
+   - [ ] Lincoln can capture artifacts (photos, audio narration, notes)
+   - [ ] Artifacts tagged with `engineStage`, `domain: dadlab`
+   - [ ] Lincoln's contributions appear in the lab session
+5. **London contributes:**
+   - [ ] Same flow as Lincoln
+   - [ ] Age-appropriate interface
+6. **Complete the lab:**
+   - [ ] End the session
+   - [ ] Session state: `active` → `complete`
+   - [ ] Review captured artifacts
+   - [ ] Lab report summary generated
+   - [ ] Hours logged to `families/{familyId}/hours`
+   - [ ] Session saved to `families/{familyId}/labSessions`
+
+### What to Watch For
+
+- Kid profile view is simplified — large buttons, minimal text
+- Audio recording works for Lincoln's narration
+- Artifacts properly tagged with dad lab metadata
+- Hours from lab session count toward yearly total
+- Lab report captures both children's contributions
+
+---
+
+## 6. Records & Compliance
+
+**Route:** `/records` (parent-only)
+
+**Purpose:** Hours tracking, evaluations, portfolio, and MO-compliant exports.
+
+### Step-by-step
+
+1. **Navigate** to Records from sidebar (or `/records`)
+
+#### Hours Summary
+2. **View hours dashboard:**
+   - [ ] Total hours this school year (Aug 1 - Jun 30)
+   - [ ] Progress toward 1000-hour MO target
+   - [ ] Hours by subject bucket breakdown
+   - [ ] Per-child hours split
+3. **Manual hours entry:**
+   - [ ] Add hours for field trips, co-ops, etc.
+   - [ ] Select child, subject, date, minutes
+   - [ ] Entry saves to `families/{familyId}/hours`
+
+#### Evaluations (`/records/evaluations`)
+4. **Monthly evaluation form:**
+   - [ ] Navigate to evaluations sub-route
+   - [ ] Fill out monthly progress narrative
+   - [ ] Per-child, per-subject observations
+   - [ ] Save to `families/{familyId}/evaluations`
+
+#### Portfolio (`/records/portfolio`)
+5. **Demo night highlights:**
+   - [ ] Navigate to portfolio sub-route
+   - [ ] Select artifacts for showcase
+   - [ ] Add narrative context
+   - [ ] Preview portfolio layout
+
+#### Export Pack
+6. **Generate export:**
+   - [ ] CSV: hours log (date, child, subject, minutes)
+   - [ ] CSV: daily activity log
+   - [ ] Markdown: evaluations
+   - [ ] Markdown: portfolio highlights
+   - [ ] Download all as a bundle
+
+#### Weekly Review (`/weekly-review`)
+7. **AI weekly review:**
+   - [ ] Navigate to Weekly Review
+   - [ ] Select child and week
+   - [ ] View or generate review
+   - [ ] Review includes: progressSummary, paceAdjustments, planModifications, energyPattern, celebration
+   - [ ] Status: `draft` → `approved`
+   - [ ] Review saved to `families/{familyId}/weeklyReviews`
+
+### What to Watch For
+
+- Hours calculate correctly across date boundaries
+- School year starts Aug 1 (not Jan 1)
+- Export CSVs properly escape commas and quotes
+- Monthly evaluations don't overwrite previous months
+- Weekly review tone is warm and constructive (never shaming)
+
+---
+
+## 7. Quick Smoke Test (5 min)
+
+Run these 5 checks to verify the app is functional:
+
+### Check 1: App Loads & Auth (30s)
+- [ ] Navigate to the app URL
+- [ ] Profile selection page loads
+- [ ] Select parent profile
+- [ ] Today page renders with correct date
+
+### Check 2: Today Page Works (60s)
+- [ ] Select Lincoln as active child
+- [ ] Plan type toggle works (Normal ↔ MVD)
+- [ ] At least one session item is visible
+- [ ] Tap a session — result picker appears (hit/near/miss)
+
+### Check 3: Planner Chat Loads (60s)
+- [ ] Navigate to `/planner/chat`
+- [ ] Chat interface renders
+- [ ] Type a message and send
+- [ ] AI responds (may take a few seconds with real API)
+- [ ] If using emulator without API key: verify graceful error message
+
+### Check 4: Records Page (60s)
+- [ ] Navigate to `/records`
+- [ ] Hours summary loads (even if 0)
+- [ ] Subject breakdown renders
+- [ ] No console errors
+
+### Check 5: Navigation & Profile Switch (60s)
+- [ ] Sidebar opens (hamburger on mobile)
+- [ ] All expected nav items present
+- [ ] Switch to London's profile
+- [ ] Today page updates for London
+- [ ] Switch to Lincoln's kid profile — verify restricted nav (Today, My Stuff, Dad Lab only)
+
+---
+
+## 8. Common Issues & Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| **"Authentication required" error on AI calls** | Not logged in or auth token expired | Refresh the page to re-authenticate; check Firebase Auth emulator is running |
+| **"Missing CLAUDE_API_KEY secret"** | API key not set in Cloud Functions | Run `firebase functions:secrets:set CLAUDE_API_KEY` or create `functions/.secret.local` |
+| **AI returns empty response** | Model returned empty content block | Check Cloud Function logs; verify `max_tokens` is sufficient; may be a rate limit |
+| **Plan JSON parse error** | AI included markdown fences or preamble | The `sanitizeAndParseJson` helper strips fences; check if prompt instructions are being followed |
+| **"You do not have access to this family"** | `auth.uid !== familyId` | Family doc ID must match the authenticated user's UID |
+| **Enriched context missing** | Firestore collections empty or query failed | Check that `sessions`, `workbookConfigs`, `weeks`, `hours` collections have data; check for missing composite indexes |
+| **Weekly review not generating** | Scheduled function not deployed or no data | Deploy with `firebase deploy --only functions`; verify children exist; check that the previous week has session/hours data |
+| **Image generation fails** | OpenAI API key missing or DALL-E quota exceeded | Set `OPENAI_API_KEY` secret; check OpenAI billing dashboard |
+| **`<finding>` blocks not extracted** | AI response doesn't include the XML-like tags | Check evaluation system prompt is being sent; may need to re-run the evaluation |
+| **Hours showing 0 despite logging** | Wrong school year boundary | Hours query filters by `date >= schoolYearStart` (Aug 1); verify dates are stored as `YYYY-MM-DD` |
+| **MVD mode shows all items** | Items not properly tagged with `category` or `mvdEssential` | Check plan data in Firestore; `mvdEssential: true` and `category: "must-do"` required |
+| **Profile selection loop** | Profile not persisting in context | Check `ProfileProvider` state; may need to clear localStorage and re-select |
+| **TypeScript build fails with "enum" error** | Used `enum` instead of `as const` | `erasableSyntaxOnly` is enabled; convert to `as const` object pattern |
+| **Import errors** | Missing `type` keyword on type-only imports | `verbatimModuleSyntax` requires `import type` for types |
+| **Emulator functions timeout** | Cold start + API calls | Increase timeout in emulator config; first call is always slowest |
+| **Composite index error in Firestore** | Missing index for multi-field query | Click the link in the error message to create the index in Firebase Console |
+| **Dad Lab session won't start** | No plan created first | Create a lab plan before starting a session |
+| **Audio recording fails on mobile** | Browser permissions not granted | Ensure HTTPS (required for `getUserMedia`); check browser audio permissions |
+| **Export CSV has garbled characters** | Encoding issue | Exports should use UTF-8 BOM; check `records.logic.ts` CSV generation |
