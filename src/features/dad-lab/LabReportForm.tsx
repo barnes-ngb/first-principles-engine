@@ -451,6 +451,64 @@ export default function LabReportForm({
         </Stack>
       </Box>
 
+      {/* Child contributions summary (shown when completing an active lab) */}
+      {isCompleting && (
+        <Box>
+          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+            Kid Contributions
+          </Typography>
+          {children.map((child) => {
+            const cr = childReports[child.id]
+            const hasPrediction = !!cr?.prediction
+            const hasExplanation = !!cr?.explanation
+            const hasObservation = !!cr?.observation
+            const hasCreation = !!cr?.creation
+            const hasArtifacts = (cr?.artifacts?.length ?? 0) > 0
+            const hasContent = hasPrediction || hasExplanation || hasObservation || hasCreation || hasArtifacts
+            if (!hasContent) return null
+            return (
+              <Box
+                key={child.id}
+                sx={{ p: 1.5, mb: 1, borderRadius: 1, bgcolor: 'success.50', border: '1px solid', borderColor: 'success.200' }}
+              >
+                <Typography variant="subtitle2" color="success.main" sx={{ mb: 0.5 }}>
+                  {child.name}&apos;s Work
+                </Typography>
+                {cr?.prediction && (
+                  <Box sx={{ mb: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary">Prediction:</Typography>
+                    <Typography variant="body2">{cr.prediction}</Typography>
+                  </Box>
+                )}
+                {cr?.explanation && (
+                  <Box sx={{ mb: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary">Explanation:</Typography>
+                    <Typography variant="body2">{cr.explanation}</Typography>
+                  </Box>
+                )}
+                {cr?.observation && (
+                  <Box sx={{ mb: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary">Observation:</Typography>
+                    <Typography variant="body2">{cr.observation}</Typography>
+                  </Box>
+                )}
+                {cr?.creation && (
+                  <Box sx={{ mb: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary">Creation:</Typography>
+                    <Typography variant="body2">{cr.creation}</Typography>
+                  </Box>
+                )}
+                {hasArtifacts && (
+                  <Typography variant="caption" color="text.secondary">
+                    {cr!.artifacts.length} artifact{cr!.artifacts.length !== 1 ? 's' : ''} captured
+                  </Typography>
+                )}
+              </Box>
+            )
+          })}
+        </Box>
+      )}
+
       {/* Per-Child Sections (shown for active/completing or complete labs) */}
       {(isCompleting || isViewingComplete || (isEditing && report?.status !== DadLabStatus.Planned)) &&
         children.map((child) => {
