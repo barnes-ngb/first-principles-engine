@@ -300,11 +300,21 @@ export const plannerConversationDocId = (weekKey: string, childId: string): stri
 
 // ── Workbook Configs (Pace Gauge) ────────────────────────────
 
+const workbookConfigConverter: FirestoreDataConverter<WorkbookConfig> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as WorkbookConfig
+    return { ...data, id: snapshot.id }
+  },
+}
+
 /** Workbook config per child per workbook. Doc ID: {childId}_{workbookName_slug} */
 export const workbookConfigsCollection = (
   familyId: string,
 ): CollectionReference<WorkbookConfig> =>
-  collection(db, `families/${familyId}/workbookConfigs`) as CollectionReference<WorkbookConfig>
+  collection(db, `families/${familyId}/workbookConfigs`).withConverter(
+    workbookConfigConverter,
+  ) as CollectionReference<WorkbookConfig>
 
 export const workbookConfigDocId = (childId: string, workbookName: string): string =>
   `${childId}_${workbookName.toLowerCase().replace(/\s+/g, '-')}`
