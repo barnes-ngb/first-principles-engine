@@ -327,7 +327,7 @@ Duration: [estimated minutes]`,
 
   if (view === 'form') {
     return (
-      <Box sx={{ maxWidth: 600, mx: 'auto', p: 2 }}>
+      <Box sx={{ maxWidth: 600, mx: 'auto', px: 2, pt: { xs: 1, md: 2 }, pb: 2 }}>
         <Button startIcon={<ArrowBackIcon />} onClick={handleCancel} sx={{ mb: 2 }}>
           Back
         </Button>
@@ -344,7 +344,7 @@ Duration: [estimated minutes]`,
   }
 
   return (
-    <Box sx={{ maxWidth: 600, mx: 'auto', p: 2 }}>
+    <Box sx={{ maxWidth: 600, mx: 'auto', px: 2, pt: { xs: 1, md: 2 }, pb: 2 }}>
       <Typography variant="h5" sx={{ mb: 2, fontWeight: 700 }}>
         Dad Lab
       </Typography>
