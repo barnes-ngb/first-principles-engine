@@ -323,6 +323,7 @@ export interface HoursAdjustment {
   reason: string
   subjectBucket?: SubjectBucket
   location?: string
+  source?: string
   createdAt?: string
 }
 
