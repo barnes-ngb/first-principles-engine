@@ -512,9 +512,11 @@ describe('parseAIResponse', () => {
     expect(parseAIResponse(makeResponse(JSON.stringify({ days: [], minimumWin: 'x' })))).toBeNull()
   })
 
-  it('returns null when minimumWin is missing', () => {
+  it('defaults minimumWin when missing from AI response', () => {
     const plan = { days: [{ day: 'Monday', items: [{ title: 'X', estimatedMinutes: 10 }] }] }
-    expect(parseAIResponse(makeResponse(JSON.stringify(plan)))).toBeNull()
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result).not.toBeNull()
+    expect(result!.minimumWin).toBe('Complete the core items for each day.')
   })
 
   it('returns null when item title is missing', () => {
