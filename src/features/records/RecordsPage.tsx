@@ -21,6 +21,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import {
   addDoc,
+  deleteDoc,
   doc,
   getDocs,
   query,
@@ -390,6 +391,27 @@ function HoursComplianceTab() {
     }
   }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, activeChild, filePrefix, startDate, endDate])
 
+  const handleClearHoursData = useCallback(async () => {
+    if (!window.confirm('This will delete ALL manual hours entries and adjustments. Hours computed from daily logs will remain. Continue?')) return
+
+    try {
+      const hoursSnap = await getDocs(hoursCollection(familyId))
+      for (const docSnap of hoursSnap.docs) {
+        await deleteDoc(doc(hoursCollection(familyId), docSnap.id))
+      }
+
+      const adjSnap = await getDocs(hoursAdjustmentsCollection(familyId))
+      for (const docSnap of adjSnap.docs) {
+        await deleteDoc(doc(hoursAdjustmentsCollection(familyId), docSnap.id))
+      }
+
+      window.location.reload()
+    } catch (err) {
+      console.error('Failed to clear hours data:', err)
+      setSnackMessage({ text: `Failed to clear hours data: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+    }
+  }, [familyId])
+
   const hasData = hasHoursEntries || dayLogs.length > 0
 
   return (
@@ -670,6 +692,24 @@ function HoursComplianceTab() {
           </Stack>
         </Stack>
       </SectionCard>}
+
+      {activeChildId && !isLoading && (
+        <Box sx={{ mx: 2, mt: 4, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+          <Typography variant="caption" color="text.secondary" gutterBottom>
+            Admin
+          </Typography>
+          <Box sx={{ mt: 1 }}>
+            <Button
+              variant="outlined"
+              color="warning"
+              size="small"
+              onClick={handleClearHoursData}
+            >
+              Clear All Hours Data
+            </Button>
+          </Box>
+        </Box>
+      )}
 
       <Snackbar
         open={snackMessage !== null}
