@@ -74,6 +74,7 @@ interface LabReportFormProps {
   prefill?: Prefill
   children: Child[]
   completing?: boolean
+  readOnly?: boolean
   onSave: (report: DadLabReport) => Promise<void>
   onCancel: () => void
 }
@@ -123,6 +124,7 @@ export default function LabReportForm({
   prefill,
   children,
   completing = false,
+  readOnly,
   onSave,
   onCancel,
 }: LabReportFormProps) {
@@ -364,7 +366,7 @@ export default function LabReportForm({
     bestMoment, nextTime, totalMinutes, report, isCompleting, onSave, withSave,
   ])
 
-  const disabled = isViewingComplete
+  const disabled = readOnly === true
 
   // ── Render ──
 

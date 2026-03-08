@@ -107,6 +107,7 @@ export default function DadLabPage() {
   const [editingReport, setEditingReport] = useState<DadLabReport | undefined>()
   const [prefill, setPrefill] = useState<Prefill | undefined>()
   const [completing, setCompleting] = useState(false)
+  const [readOnly, setReadOnly] = useState(false)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<DadLabReport | undefined>()
   const [ideaOpen, setIdeaOpen] = useState(false)
@@ -133,10 +134,19 @@ export default function DadLabPage() {
     setView('form')
   }, [])
 
+  const handleView = useCallback((report: DadLabReport) => {
+    setEditingReport(report)
+    setPrefill(undefined)
+    setCompleting(false)
+    setReadOnly(true)
+    setView('form')
+  }, [])
+
   const handleEdit = useCallback((report: DadLabReport) => {
     setEditingReport(report)
     setPrefill(undefined)
     setCompleting(false)
+    setReadOnly(false)
     setView('form')
   }, [])
 
@@ -144,6 +154,7 @@ export default function DadLabPage() {
     setEditingReport(undefined)
     setPrefill(undefined)
     setCompleting(false)
+    setReadOnly(false)
     setView('list')
   }, [])
 
@@ -337,6 +348,7 @@ Duration: [estimated minutes]`,
           prefill={prefill}
           children={children}
           completing={completing}
+          readOnly={readOnly}
           onSave={handleSave}
           onCancel={handleCancel}
         />
@@ -422,7 +434,7 @@ Duration: [estimated minutes]`,
           </Typography>
           <Stack spacing={1.5} sx={{ mb: 3 }}>
             {completed.map((report) => (
-              <ReportCard key={report.id} report={report} familyId={familyId} onView={handleEdit} />
+              <ReportCard key={report.id} report={report} familyId={familyId} onView={handleView} onEdit={handleEdit} />
             ))}
           </Stack>
 
@@ -847,10 +859,12 @@ function ReportCard({
   report,
   familyId,
   onView,
+  onEdit,
 }: {
   report: DadLabReport
   familyId: string
   onView: (report: DadLabReport) => void
+  onEdit: (report: DadLabReport) => void
 }) {
   const artifactCount = Object.values(report.childReports).reduce(
     (acc, cr) => acc + (cr.artifacts?.length ?? 0),
@@ -911,14 +925,24 @@ function ReportCard({
               ) : null
             })()}
           </Box>
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<VisibilityIcon />}
-            onClick={() => onView(report)}
-          >
-            View
-          </Button>
+          <Stack direction="row" spacing={0.5}>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<EditIcon />}
+              onClick={() => onEdit(report)}
+            >
+              Edit
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<VisibilityIcon />}
+              onClick={() => onView(report)}
+            >
+              View
+            </Button>
+          </Stack>
         </Stack>
       </CardContent>
     </Card>
