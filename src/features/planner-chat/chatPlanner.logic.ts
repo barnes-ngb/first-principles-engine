@@ -471,11 +471,21 @@ function extractJsonObject(text: string): string | null {
 export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null {
   try {
     const jsonText = extractJsonObject(response.message)
-    if (!jsonText) return null
+    if (!jsonText) {
+      console.warn('[parseAIResponse] No JSON object found in response:', response.message.substring(0, 200))
+      return null
+    }
     const parsed = JSON.parse(jsonText) as Record<string, unknown>
 
-    if (!Array.isArray(parsed.days) || parsed.days.length === 0) return null
-    if (typeof parsed.minimumWin !== 'string') return null
+    if (!Array.isArray(parsed.days) || parsed.days.length === 0) {
+      console.warn('[parseAIResponse] Missing or empty days array')
+      return null
+    }
+
+    // minimumWin is nice-to-have, not required
+    const minimumWin = typeof parsed.minimumWin === 'string'
+      ? parsed.minimumWin
+      : 'Complete the core items for each day.'
 
     const days: DraftDayPlan[] = []
     for (const rawDay of parsed.days as Array<Record<string, unknown>>) {
@@ -499,7 +509,8 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
           skillTags: Array.isArray(rawItem.skillTags) ? (rawItem.skillTags as string[]).filter(Boolean) : [],
           isAppBlock: rawItem.isAppBlock === true,
           accepted: rawItem.accepted !== false,
-          mvdEssential: rawItem.mvdEssential === true ? true : undefined,
+          mvdEssential: rawItem.mvdEssential === true ? true : rawItem.category === 'must-do' ? true : undefined,
+          category: rawItem.category === 'must-do' || rawItem.category === 'choose' ? rawItem.category as 'must-do' | 'choose' : undefined,
         })
       }
 
@@ -529,8 +540,9 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
           }))
       : []
 
-    return { days, skipSuggestions, minimumWin: parsed.minimumWin as string }
-  } catch {
+    return { days, skipSuggestions, minimumWin }
+  } catch (err) {
+    console.error('[parseAIResponse] Parse error:', err, 'Raw:', response.message.substring(0, 300))
     return null
   }
 }

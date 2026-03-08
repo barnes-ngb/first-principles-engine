@@ -44,6 +44,11 @@ export const entryMinutes = (entry: HoursEntry): number => {
   return 0
 }
 
+function parseMinutesFromChecklist(label: string): number {
+  const match = label.match(/\((\d+)m\)/)
+  return match ? parseInt(match[1]) : 0
+}
+
 export const computeHoursSummary = (
   dayLogs: DayLog[],
   hoursEntries: HoursEntry[],
@@ -79,15 +84,34 @@ export const computeHoursSummary = (
     }
   } else {
     for (const log of filteredLogs) {
+      let blockMinutes = 0
+
+      // First: try blocks (existing logic)
       for (const block of log.blocks) {
         const minutes = block.actualMinutes ?? 0
         if (minutes <= 0) continue
+        blockMinutes += minutes
         const bucket = block.subjectBucket ?? 'Other'
         const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
         existing.total += minutes
         if (block.location === LearningLocation.Home) existing.home += minutes
         bySubjectMap.set(bucket, existing)
         byDate[log.date] = (byDate[log.date] ?? 0) + minutes
+      }
+
+      // Fallback: if blocks yielded zero minutes, count completed checklist items
+      if (blockMinutes === 0 && log.checklist) {
+        for (const item of log.checklist) {
+          if (!item.completed) continue
+          const minutes = item.estimatedMinutes ?? item.plannedMinutes ?? parseMinutesFromChecklist(item.label)
+          if (minutes <= 0) continue
+          const bucket = item.subjectBucket ?? 'Other'
+          const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
+          existing.total += minutes
+          existing.home += minutes // assume home
+          bySubjectMap.set(bucket, existing)
+          byDate[log.date] = (byDate[log.date] ?? 0) + minutes
+        }
       }
     }
   }

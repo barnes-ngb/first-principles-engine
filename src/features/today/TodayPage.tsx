@@ -930,12 +930,32 @@ export default function TodayPage() {
                             i === index ? { ...ci, completed: newCompleted } : ci
                           )
                           // Auto-set actualMinutes on corresponding block when checking
+                          const minutes = item.estimatedMinutes ?? item.plannedMinutes ?? 0
                           let updatedBlocks = dayLog.blocks
-                          if (newCompleted && item.plannedMinutes) {
+                          if (newCompleted && minutes > 0) {
                             updatedBlocks = dayLog.blocks.map((block) => {
                               const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
-                              if (matchesLabel && (block.actualMinutes == null || block.actualMinutes === 0)) {
-                                return { ...block, actualMinutes: item.plannedMinutes }
+                              const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
+                              const matchesTitle = block.title != null && (
+                                block.title === titleClean ||
+                                titleClean.toLowerCase().includes(block.title.toLowerCase())
+                              )
+                              if ((matchesLabel || matchesTitle) && (block.actualMinutes == null || block.actualMinutes === 0)) {
+                                return { ...block, actualMinutes: minutes }
+                              }
+                              return block
+                            })
+                          } else if (!newCompleted) {
+                            // Clear auto-populated actualMinutes when unchecking
+                            updatedBlocks = dayLog.blocks.map((block) => {
+                              const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
+                              const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
+                              const matchesTitle = block.title != null && (
+                                block.title === titleClean ||
+                                titleClean.toLowerCase().includes(block.title.toLowerCase())
+                              )
+                              if ((matchesLabel || matchesTitle) && block.actualMinutes === minutes) {
+                                return { ...block, actualMinutes: undefined }
                               }
                               return block
                             })
