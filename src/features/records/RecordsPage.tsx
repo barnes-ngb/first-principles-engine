@@ -3,6 +3,9 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Container from '@mui/material/Container'
+import Dialog from '@mui/material/Dialog'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import Divider from '@mui/material/Divider'
 import FormControl from '@mui/material/FormControl'
 import InputLabel from '@mui/material/InputLabel'
@@ -151,6 +154,17 @@ function HoursComplianceTab() {
   const [adjReason, setAdjReason] = useState('')
   const [adjSubject, setAdjSubject] = useState<SubjectBucket | ''>('')
   const [adjSaving, setAdjSaving] = useState(false)
+
+  // Backfill state
+  const [backfillOpen, setBackfillOpen] = useState(false)
+  const [backfillMonth, setBackfillMonth] = useState('')
+  const [backfillEntries, setBackfillEntries] = useState<Array<{subject: SubjectBucket, hours: number}>>([
+    { subject: SubjectBucket.Reading, hours: 0 },
+    { subject: SubjectBucket.LanguageArts, hours: 0 },
+    { subject: SubjectBucket.Math, hours: 0 },
+    { subject: SubjectBucket.Science, hours: 0 },
+    { subject: SubjectBucket.SocialStudies, hours: 0 },
+  ])
 
   const fetchRecords = useCallback(async () => {
     const hoursQuery = query(
@@ -313,6 +327,41 @@ function HoursComplianceTab() {
     }
   }, [adjDate, adjMinutes, adjReason, adjSubject, familyId, activeChildId, fetchRecords, applyRecords])
 
+  // Backfill handler
+  const handleSaveBackfill = useCallback(async () => {
+    if (!activeChildId || !backfillMonth) return
+
+    try {
+      const [year, month] = backfillMonth.split('-').map(Number)
+      const midMonth = `${backfillMonth}-15`
+
+      for (const entry of backfillEntries) {
+        if (entry.hours <= 0) continue
+        const minutes = Math.round(entry.hours * 60)
+
+        await addDoc(hoursAdjustmentsCollection(familyId), {
+          childId: activeChildId,
+          date: midMonth,
+          subjectBucket: entry.subject,
+          minutes,
+          reason: `Historical backfill: ${entry.subject} for ${year}-${String(month).padStart(2, '0')}`,
+          source: 'backfill',
+          createdAt: new Date().toISOString(),
+        })
+      }
+
+      setBackfillOpen(false)
+      setBackfillMonth('')
+      setBackfillEntries(backfillEntries.map(e => ({ ...e, hours: 0 })))
+      const data = await fetchRecords()
+      applyRecords(data)
+      setSnackMessage({ text: 'Historical hours saved', severity: 'success' })
+    } catch (err) {
+      console.error('Backfill failed:', err)
+      setSnackMessage({ text: `Backfill failed: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+    }
+  }, [activeChildId, backfillMonth, backfillEntries, familyId, fetchRecords, applyRecords])
+
   // Export handlers
   const filePrefix = childNameLower ? `${childNameLower}-` : ''
 
@@ -392,14 +441,20 @@ function HoursComplianceTab() {
   }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, activeChild, filePrefix, startDate, endDate])
 
   const handleClearHoursData = useCallback(async () => {
-    if (!window.confirm('This will delete ALL manual hours entries and adjustments. Hours computed from daily logs will remain. Continue?')) return
+    if (!window.confirm('This will delete manual hours entries and adjustments. Auto-generated hours (Dad Lab, etc.) will be kept. Continue?')) return
 
     try {
+      // Delete ONLY manual hours entries (no source tag or source === 'manual')
       const hoursSnap = await getDocs(hoursCollection(familyId))
       for (const docSnap of hoursSnap.docs) {
-        await deleteDoc(doc(hoursCollection(familyId), docSnap.id))
+        const data = docSnap.data()
+        const source = (data as unknown as Record<string, unknown>).source as string | undefined
+        if (!source || source === 'manual') {
+          await deleteDoc(doc(hoursCollection(familyId), docSnap.id))
+        }
       }
 
+      // Delete all adjustments (these are always manual)
       const adjSnap = await getDocs(hoursAdjustmentsCollection(familyId))
       for (const docSnap of adjSnap.docs) {
         await deleteDoc(doc(hoursAdjustmentsCollection(familyId), docSnap.id))
@@ -471,12 +526,28 @@ function HoursComplianceTab() {
               <Typography variant="subtitle1">
                 Core hours at Home: {formatHours(summary.coreHomeMinutes)}
               </Typography>
-              {summary.adjustmentMinutes !== 0 && (
-                <Typography variant="body2" color="text.secondary">
-                  Includes {summary.adjustmentMinutes > 0 ? '+' : ''}
-                  {summary.adjustmentMinutes} minutes in manual adjustments
-                </Typography>
-              )}
+              {(() => {
+                const backfillMinutes = adjustments
+                  .filter(a => a.source === 'backfill')
+                  .reduce((sum, a) => sum + a.minutes, 0)
+                const otherAdjMinutes = adjustments
+                  .filter(a => a.source !== 'backfill')
+                  .reduce((sum, a) => sum + a.minutes, 0)
+                return (
+                  <>
+                    {backfillMinutes > 0 && (
+                      <Typography variant="caption" color="text.secondary">
+                        Includes {(backfillMinutes / 60).toFixed(1)}h historical (backfill)
+                      </Typography>
+                    )}
+                    {otherAdjMinutes !== 0 && (
+                      <Typography variant="caption" color="text.secondary">
+                        Includes {otherAdjMinutes > 0 ? '+' : ''}{(otherAdjMinutes / 60).toFixed(1)}h manual adjustments
+                      </Typography>
+                    )}
+                  </>
+                )
+              })()}
               <Typography color="text.secondary" variant="body2">
                 Hours entries: {hoursEntries.length} | Day logs: {dayLogs.length}{' '}
                 | Adjustments: {adjustments.length}
@@ -638,6 +709,26 @@ function HoursComplianceTab() {
         </Stack>
       </SectionCard>}
 
+      {/* Backfill Historical Hours */}
+      {activeChildId && (
+        <SectionCard title="Backfill Historical Hours">
+          <Stack spacing={2}>
+            <Typography variant="body2" color="text.secondary">
+              Enter approximate monthly totals per subject for months before the app was set up.
+              These count toward MO compliance totals.
+            </Typography>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => setBackfillOpen(true)}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              + Add Historical Hours
+            </Button>
+          </Stack>
+        </SectionCard>
+      )}
+
       {/* Export Pack */}
       {activeChildId && <SectionCard title="Export Pack">
         <Stack spacing={2}>
@@ -710,6 +801,68 @@ function HoursComplianceTab() {
           </Box>
         </Box>
       )}
+
+      <Dialog open={backfillOpen} onClose={() => setBackfillOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add Historical Hours</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Enter approximate hours per subject for a past month. These count toward MO compliance totals.
+            </Typography>
+
+            <TextField
+              label="Month"
+              type="month"
+              value={backfillMonth}
+              onChange={e => setBackfillMonth(e.target.value)}
+              fullWidth
+              size="small"
+              slotProps={{ inputLabel: { shrink: true } }}
+              helperText="e.g., 2025-09 for September 2025"
+            />
+
+            {activeChildId && (
+              <Typography variant="caption" color="text.secondary">
+                Adding hours for: {activeChild?.name ?? 'selected child'}
+              </Typography>
+            )}
+
+            {backfillEntries.map((entry, i) => (
+              <Stack key={entry.subject} direction="row" spacing={1} alignItems="center">
+                <Typography variant="body2" sx={{ minWidth: 120 }}>
+                  {entry.subject}
+                </Typography>
+                <TextField
+                  type="number"
+                  size="small"
+                  value={entry.hours || ''}
+                  onChange={e => {
+                    const updated = [...backfillEntries]
+                    updated[i] = { ...entry, hours: parseFloat(e.target.value) || 0 }
+                    setBackfillEntries(updated)
+                  }}
+                  sx={{ width: 100 }}
+                  slotProps={{ htmlInput: { min: 0, max: 200, step: 0.5 } }}
+                />
+                <Typography variant="caption" color="text.secondary">hours</Typography>
+              </Stack>
+            ))}
+
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              Total: {backfillEntries.reduce((sum, e) => sum + e.hours, 0).toFixed(1)} hours
+            </Typography>
+
+            <Button
+              variant="contained"
+              onClick={handleSaveBackfill}
+              disabled={!backfillMonth || !activeChildId || backfillEntries.every(e => e.hours === 0)}
+              fullWidth
+            >
+              Save Historical Hours
+            </Button>
+          </Stack>
+        </DialogContent>
+      </Dialog>
 
       <Snackbar
         open={snackMessage !== null}
