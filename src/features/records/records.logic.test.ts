@@ -112,7 +112,7 @@ describe('computeHoursSummary', () => {
     expect(summary.byDate['2026-01-10']).toBe(75)
   })
 
-  it('prefers hours entries over dayLogs when entries exist', () => {
+  it('counts BOTH hours entries AND dayLogs additively', () => {
     const logs: DayLog[] = [
       {
         childId: 'child-a',
@@ -121,7 +121,7 @@ describe('computeHoursSummary', () => {
           {
             type: DayBlockType.Reading,
             subjectBucket: SubjectBucket.Reading,
-            actualMinutes: 999,
+            actualMinutes: 45,
             location: 'Home',
           },
         ],
@@ -132,15 +132,16 @@ describe('computeHoursSummary', () => {
       {
         date: '2026-01-10',
         minutes: 30,
-        subjectBucket: SubjectBucket.Reading,
+        subjectBucket: SubjectBucket.Science,
         location: 'Home',
       },
     ]
 
     const summary = computeHoursSummary(logs, entries, [])
 
-    // Should use entries (30), not logs (999)
-    expect(summary.totalMinutes).toBe(30)
+    // Should sum both: entries (30) + logs (45) = 75
+    expect(summary.totalMinutes).toBe(75)
+    expect(summary.bySubject.length).toBe(2)
   })
 
   it('applies adjustments', () => {
@@ -342,7 +343,22 @@ describe('generateDailyLogCsv', () => {
     expect(lines[1]).toContain('Read chapter 5')
   })
 
-  it('prefers hours entries when present', () => {
+  it('includes both hours entries and dayLogs in CSV', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Math,
+            subjectBucket: SubjectBucket.Math,
+            actualMinutes: 45,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
     const entries: HoursEntry[] = [
       {
         date: '2026-01-10',
@@ -353,11 +369,12 @@ describe('generateDailyLogCsv', () => {
       },
     ]
 
-    const csv = generateDailyLogCsv([], entries)
+    const csv = generateDailyLogCsv(logs, entries)
     const lines = csv.split('\n')
 
-    expect(lines.length).toBe(2) // header + 1 row
-    expect(lines[1]).toContain('30')
+    expect(lines.length).toBe(3) // header + 2 rows (1 entry + 1 log block)
+    expect(csv).toContain('30')
+    expect(csv).toContain('45')
   })
 
   it('escapes commas and quotes in notes', () => {
