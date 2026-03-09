@@ -69,49 +69,46 @@ export const computeHoursSummary = (
   const bySubjectMap = new Map<string, { total: number; home: number }>()
   const byDate: Record<string, number> = {}
 
-  const useEntries = filteredEntries.length > 0
+  // ── SOURCE 1: Hours entries (Dad Lab, manual entries, etc.) ──
+  for (const entry of filteredEntries) {
+    const minutes = entryMinutes(entry)
+    if (minutes <= 0) continue
+    const bucket = entry.subjectBucket ?? 'Other'
+    const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
+    existing.total += minutes
+    if (entry.location === LearningLocation.Home) existing.home += minutes
+    bySubjectMap.set(bucket, existing)
+    byDate[entry.date] = (byDate[entry.date] ?? 0) + minutes
+  }
 
-  if (useEntries) {
-    for (const entry of filteredEntries) {
-      const minutes = entryMinutes(entry)
+  // ── SOURCE 2: Day logs (blocks + checklist items) ──
+  for (const log of filteredLogs) {
+    let blockMinutes = 0
+
+    for (const block of log.blocks) {
+      const minutes = block.actualMinutes ?? 0
       if (minutes <= 0) continue
-      const bucket = entry.subjectBucket ?? 'Other'
+      blockMinutes += minutes
+      const bucket = block.subjectBucket ?? 'Other'
       const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
       existing.total += minutes
-      if (entry.location === LearningLocation.Home) existing.home += minutes
+      if (block.location === LearningLocation.Home) existing.home += minutes
       bySubjectMap.set(bucket, existing)
-      byDate[entry.date] = (byDate[entry.date] ?? 0) + minutes
+      byDate[log.date] = (byDate[log.date] ?? 0) + minutes
     }
-  } else {
-    for (const log of filteredLogs) {
-      let blockMinutes = 0
 
-      // First: try blocks (existing logic)
-      for (const block of log.blocks) {
-        const minutes = block.actualMinutes ?? 0
+    // If blocks yielded zero, count from completed checklist items
+    if (blockMinutes === 0 && log.checklist) {
+      for (const item of log.checklist) {
+        if (!item.completed) continue
+        const minutes = item.estimatedMinutes ?? item.plannedMinutes ?? parseMinutesFromChecklist(item.label)
         if (minutes <= 0) continue
-        blockMinutes += minutes
-        const bucket = block.subjectBucket ?? 'Other'
+        const bucket = item.subjectBucket ?? 'Other'
         const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
         existing.total += minutes
-        if (block.location === LearningLocation.Home) existing.home += minutes
+        existing.home += minutes // assume home
         bySubjectMap.set(bucket, existing)
         byDate[log.date] = (byDate[log.date] ?? 0) + minutes
-      }
-
-      // Fallback: if blocks yielded zero minutes, count completed checklist items
-      if (blockMinutes === 0 && log.checklist) {
-        for (const item of log.checklist) {
-          if (!item.completed) continue
-          const minutes = item.estimatedMinutes ?? item.plannedMinutes ?? parseMinutesFromChecklist(item.label)
-          if (minutes <= 0) continue
-          const bucket = item.subjectBucket ?? 'Other'
-          const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
-          existing.total += minutes
-          existing.home += minutes // assume home
-          bySubjectMap.set(bucket, existing)
-          byDate[log.date] = (byDate[log.date] ?? 0) + minutes
-        }
       }
     }
   }
@@ -199,38 +196,39 @@ export const generateDailyLogCsv = (
     'Notes',
   ])
 
-  const useEntries = hoursEntries.length > 0
+  // Include rows from BOTH sources (additive)
+  const entryRows = [...hoursEntries]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .filter((e) => entryMinutes(e) > 0)
+    .map((entry) =>
+      csvRow([
+        formatDateForCsv(entry.date),
+        entry.blockType ?? '',
+        entry.subjectBucket ?? '',
+        entry.location ?? '',
+        entryMinutes(entry),
+        entry.notes ?? '',
+      ]),
+    )
 
-  const rows = useEntries
-    ? [...hoursEntries]
-        .sort((a, b) => a.date.localeCompare(b.date))
-        .filter((e) => entryMinutes(e) > 0)
-        .map((entry) =>
+  const logRows = [...dayLogs]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .flatMap((log) =>
+      log.blocks
+        .filter((b) => (b.actualMinutes ?? 0) > 0)
+        .map((block) =>
           csvRow([
-            formatDateForCsv(entry.date),
-            entry.blockType ?? '',
-            entry.subjectBucket ?? '',
-            entry.location ?? '',
-            entryMinutes(entry),
-            entry.notes ?? '',
+            formatDateForCsv(log.date),
+            block.type,
+            block.subjectBucket ?? '',
+            block.location ?? '',
+            block.actualMinutes ?? 0,
+            block.notes ?? '',
           ]),
-        )
-    : [...dayLogs]
-        .sort((a, b) => a.date.localeCompare(b.date))
-        .flatMap((log) =>
-          log.blocks
-            .filter((b) => (b.actualMinutes ?? 0) > 0)
-            .map((block) =>
-              csvRow([
-                formatDateForCsv(log.date),
-                block.type,
-                block.subjectBucket ?? '',
-                block.location ?? '',
-                block.actualMinutes ?? 0,
-                block.notes ?? '',
-              ]),
-            ),
-        )
+        ),
+    )
+
+  const rows = [...entryRows, ...logRows]
 
   return [header, ...rows].join('\n')
 }
