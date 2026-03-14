@@ -224,6 +224,8 @@ export interface ChecklistItem {
   estimatedMinutes?: number
   /** Linked lesson card document ID (auto-generated on plan apply). */
   lessonCardId?: string
+  /** Engagement feedback: how the activity went */
+  engagement?: 'engaged' | 'okay' | 'struggled' | 'refused'
 }
 
 export interface ArtifactTags {
