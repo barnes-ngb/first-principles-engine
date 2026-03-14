@@ -819,6 +819,13 @@ export default function TodayPage() {
           setAddingItem(false)
         }
 
+        const handleEngagement = (index: number, engagement: ChecklistItemType['engagement']) => {
+          const updatedChecklist = rawChecklist.map((ci, i) =>
+            i === index ? { ...ci, engagement } : ci
+          )
+          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+        }
+
         return (
           <SectionCard title="Today's Plan" action={
             hasPlanItems ? (
@@ -901,97 +908,137 @@ export default function TodayPage() {
                   }
 
                   return (
-                    <Stack
-                      key={index}
-                      direction="row"
-                      spacing={0.5}
-                      alignItems="center"
-                      sx={{
-                        ...(item.completed ? { textDecoration: 'line-through', opacity: 0.6 } : {}),
-                        ...(isDimmed && !item.completed ? { opacity: 0.5 } : {}),
-                      }}
-                    >
-                      {dotColor && (
-                        <Box
-                          sx={{
-                            width: 10,
-                            height: 10,
-                            borderRadius: '50%',
-                            bgcolor: dotColor,
-                            flexShrink: 0,
+                    <Box key={index}>
+                      <Stack
+                        direction="row"
+                        spacing={0.5}
+                        alignItems="center"
+                        sx={{
+                          ...(item.completed ? { textDecoration: 'line-through', opacity: 0.6 } : {}),
+                          ...(isDimmed && !item.completed ? { opacity: 0.5 } : {}),
+                        }}
+                      >
+                        {dotColor && (
+                          <Box
+                            sx={{
+                              width: 10,
+                              height: 10,
+                              borderRadius: '50%',
+                              bgcolor: dotColor,
+                              flexShrink: 0,
+                            }}
+                          />
+                        )}
+                        <Checkbox
+                          checked={item.completed}
+                          onChange={() => {
+                            const newCompleted = !item.completed
+                            const updatedChecklist = dayLog.checklist!.map((ci, i) =>
+                              i === index ? { ...ci, completed: newCompleted } : ci
+                            )
+                            // Auto-set actualMinutes on corresponding block when checking
+                            const minutes = item.estimatedMinutes ?? item.plannedMinutes ?? 0
+                            let updatedBlocks = dayLog.blocks
+                            if (newCompleted && minutes > 0) {
+                              updatedBlocks = dayLog.blocks.map((block) => {
+                                const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
+                                const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
+                                const matchesTitle = block.title != null && (
+                                  block.title === titleClean ||
+                                  titleClean.toLowerCase().includes(block.title.toLowerCase())
+                                )
+                                if ((matchesLabel || matchesTitle) && (block.actualMinutes == null || block.actualMinutes === 0)) {
+                                  return { ...block, actualMinutes: minutes }
+                                }
+                                return block
+                              })
+                            } else if (!newCompleted) {
+                              // Clear auto-populated actualMinutes when unchecking
+                              updatedBlocks = dayLog.blocks.map((block) => {
+                                const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
+                                const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
+                                const matchesTitle = block.title != null && (
+                                  block.title === titleClean ||
+                                  titleClean.toLowerCase().includes(block.title.toLowerCase())
+                                )
+                                if ((matchesLabel || matchesTitle) && block.actualMinutes === minutes) {
+                                  return { ...block, actualMinutes: undefined }
+                                }
+                                return block
+                              })
+                            }
+                            persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist, blocks: updatedBlocks })
                           }}
                         />
-                      )}
-                      <Checkbox
-                        checked={item.completed}
-                        onChange={() => {
-                          const newCompleted = !item.completed
-                          const updatedChecklist = dayLog.checklist!.map((ci, i) =>
-                            i === index ? { ...ci, completed: newCompleted } : ci
-                          )
-                          // Auto-set actualMinutes on corresponding block when checking
-                          const minutes = item.estimatedMinutes ?? item.plannedMinutes ?? 0
-                          let updatedBlocks = dayLog.blocks
-                          if (newCompleted && minutes > 0) {
-                            updatedBlocks = dayLog.blocks.map((block) => {
-                              const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
-                              const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
-                              const matchesTitle = block.title != null && (
-                                block.title === titleClean ||
-                                titleClean.toLowerCase().includes(block.title.toLowerCase())
-                              )
-                              if ((matchesLabel || matchesTitle) && (block.actualMinutes == null || block.actualMinutes === 0)) {
-                                return { ...block, actualMinutes: minutes }
-                              }
-                              return block
-                            })
-                          } else if (!newCompleted) {
-                            // Clear auto-populated actualMinutes when unchecking
-                            updatedBlocks = dayLog.blocks.map((block) => {
-                              const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
-                              const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
-                              const matchesTitle = block.title != null && (
-                                block.title === titleClean ||
-                                titleClean.toLowerCase().includes(block.title.toLowerCase())
-                              )
-                              if ((matchesLabel || matchesTitle) && block.actualMinutes === minutes) {
-                                return { ...block, actualMinutes: undefined }
-                              }
-                              return block
-                            })
-                          }
-                          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist, blocks: updatedBlocks })
-                        }}
-                      />
-                      <Typography variant="body2" sx={{ flex: 1 }}>
-                        {item.label}
-                      </Typography>
-                      {item.plannedMinutes != null && item.plannedMinutes > 0 && (
-                        <Typography variant="caption" color="text.secondary">
-                          {item.plannedMinutes}m
+                        <Typography variant="body2" sx={{ flex: 1 }}>
+                          {item.label}
                         </Typography>
+                        {item.plannedMinutes != null && item.plannedMinutes > 0 && (
+                          <Typography variant="caption" color="text.secondary">
+                            {item.plannedMinutes}m
+                          </Typography>
+                        )}
+                        {isDimmed && !item.completed && (
+                          <Chip label="(stretch)" size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
+                        )}
+                        {!item.completed && (
+                          <Tooltip title={item.lessonCardId ? 'View lesson plan' : 'Help me teach this'}>
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                setTeachHelperItem(item)
+                                setTeachHelperOpen(true)
+                              }}
+                            >
+                              <SchoolIcon
+                                fontSize="small"
+                                color={item.lessonCardId ? 'primary' : 'action'}
+                                sx={item.lessonCardId ? undefined : { opacity: 0.5 }}
+                              />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Stack>
+                      {/* Engagement feedback: emoji row after completion */}
+                      {item.completed && !item.engagement && (
+                        <Stack direction="row" spacing={0.5} sx={{ ml: 5, mt: 0.5 }}>
+                          <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5, lineHeight: '24px' }}>
+                            How&apos;d it go?
+                          </Typography>
+                          {([
+                            { value: 'engaged' as const, emoji: '\u{1F60A}', label: 'Engaged' },
+                            { value: 'okay' as const, emoji: '\u{1F610}', label: 'Okay' },
+                            { value: 'struggled' as const, emoji: '\u{1F62B}', label: 'Struggled' },
+                            { value: 'refused' as const, emoji: '\u{274C}', label: 'Refused' },
+                          ]).map(opt => (
+                            <IconButton
+                              key={opt.value}
+                              size="small"
+                              onClick={() => handleEngagement(index, opt.value)}
+                              title={opt.label}
+                              sx={{ fontSize: '1.2rem', p: 0.5 }}
+                            >
+                              {opt.emoji}
+                            </IconButton>
+                          ))}
+                        </Stack>
                       )}
-                      {isDimmed && !item.completed && (
-                        <Chip label="(stretch)" size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
+                      {/* Show saved engagement as a small chip */}
+                      {item.engagement && (
+                        <Chip
+                          size="small"
+                          label={{
+                            engaged: '\u{1F60A} Engaged',
+                            okay: '\u{1F610} Okay',
+                            struggled: '\u{1F62B} Struggled',
+                            refused: '\u{274C} Refused',
+                          }[item.engagement]}
+                          sx={{ ml: 5, mt: 0.5, height: 22 }}
+                          onDelete={() => handleEngagement(index, undefined)}
+                          variant="outlined"
+                        />
                       )}
-                      {!item.completed && (
-                        <Tooltip title={item.lessonCardId ? 'View lesson plan' : 'Help me teach this'}>
-                          <IconButton
-                            size="small"
-                            onClick={() => {
-                              setTeachHelperItem(item)
-                              setTeachHelperOpen(true)
-                            }}
-                          >
-                            <SchoolIcon
-                              fontSize="small"
-                              color={item.lessonCardId ? 'primary' : 'action'}
-                              sx={item.lessonCardId ? undefined : { opacity: 0.5 }}
-                            />
-                          </IconButton>
-                        </Tooltip>
-                      )}
-                    </Stack>
+                    </Box>
                   )
                 })}
 
