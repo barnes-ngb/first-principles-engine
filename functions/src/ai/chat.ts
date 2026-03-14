@@ -80,12 +80,18 @@ interface WeekContext {
   heartQuestion?: string;
 }
 
+interface EngagementSummary {
+  activity: string;
+  counts: Record<string, number>;
+}
+
 interface EnrichedContext {
   sessions: SessionSummary[];
   workbookPaces: WorkbookPace[];
   week: WeekContext | null;
   hoursTotalMinutes: number;
   hoursTarget: number;
+  engagementSummaries: EngagementSummary[];
 }
 
 // ── Date helpers ────────────────────────────────────────────────
@@ -264,17 +270,60 @@ export async function loadHoursSummary(
   return { totalMinutes };
 }
 
+/** Load engagement data from recent day logs (last 14 days). */
+export async function loadEngagementSummary(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<EngagementSummary[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 14);
+  const cutoffStr = toDateString(cutoff);
+
+  const snap = await db
+    .collection(`families/${familyId}/days`)
+    .where("childId", "==", childId)
+    .where("date", ">=", cutoffStr)
+    .get();
+
+  const byActivity = new Map<string, Record<string, number>>();
+
+  for (const doc of snap.docs) {
+    const data = doc.data() as {
+      checklist?: Array<{ label?: string; engagement?: string }>;
+    };
+    if (!data.checklist) continue;
+    for (const item of data.checklist) {
+      if (!item.engagement || !item.label) continue;
+      const activity = item.label.replace(/\s*\(\d+m\)\s*$/, "");
+      if (!byActivity.has(activity)) {
+        byActivity.set(activity, { engaged: 0, okay: 0, struggled: 0, refused: 0 });
+      }
+      const counts = byActivity.get(activity)!;
+      if (counts[item.engagement] !== undefined) {
+        counts[item.engagement]++;
+      }
+    }
+  }
+
+  return [...byActivity.entries()].map(([activity, counts]) => ({
+    activity,
+    counts,
+  }));
+}
+
 /** Load all enriched context in parallel. Only called for plan/evaluate. */
 export async function loadEnrichedContext(
   db: Firestore,
   familyId: string,
   childId: string,
 ): Promise<EnrichedContext> {
-  const [sessions, workbookPaces, week, hours] = await Promise.all([
+  const [sessions, workbookPaces, week, hours, engagementSummaries] = await Promise.all([
     loadRecentSessions(db, familyId, childId),
     loadWorkbookPaces(db, familyId, childId),
     loadWeekContext(db, familyId),
     loadHoursSummary(db, familyId, childId),
+    loadEngagementSummary(db, familyId, childId),
   ]);
 
   return {
@@ -283,6 +332,7 @@ export async function loadEnrichedContext(
     week,
     hoursTotalMinutes: hours.totalMinutes,
     hoursTarget: 1000, // MO target hours
+    engagementSummaries,
   };
 }
 
@@ -398,6 +448,16 @@ export function buildSystemPrompt(
     lines.push(
       `Hours logged this year: ${totalHours} hours of ${enriched.hoursTarget} target (${pct}% complete)`,
     );
+
+    // ACTIVITY ENGAGEMENT
+    if (enriched.engagementSummaries.length > 0) {
+      lines.push("", "ACTIVITY ENGAGEMENT (recent):");
+      for (const { activity, counts } of enriched.engagementSummaries) {
+        const total = Object.values(counts).reduce((s, n) => s + n, 0);
+        const primary = Object.entries(counts).sort(([, a], [, b]) => b - a)[0];
+        lines.push(`- ${activity}: ${primary[0]} (${primary[1]}/${total} sessions)`);
+      }
+    }
   }
 
   // ── Plan output format (always last) ──────────────────────────
