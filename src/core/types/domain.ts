@@ -226,6 +226,12 @@ export interface ChecklistItem {
   lessonCardId?: string
   /** Engagement feedback: how the activity went */
   engagement?: 'engaged' | 'okay' | 'struggled' | 'refused'
+  /** Linked evidence artifact document ID (from per-item capture). */
+  evidenceArtifactId?: string
+  /** Manual or AI-generated review result for the captured work. */
+  gradeResult?: string
+  /** Guidance note when an item is skipped. */
+  skipGuidance?: string
 }
 
 export interface ArtifactTags {

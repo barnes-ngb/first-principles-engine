@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import AccessTimeIcon from '@mui/icons-material/AccessTime'
 import AddIcon from '@mui/icons-material/Add'
+import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import CheckIcon from '@mui/icons-material/Check'
@@ -12,6 +13,9 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import PrintIcon from '@mui/icons-material/Print'
 import SchoolIcon from '@mui/icons-material/School'
 import Accordion from '@mui/material/Accordion'
+import Dialog from '@mui/material/Dialog'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import AccordionDetails from '@mui/material/AccordionDetails'
 import AccordionSummary from '@mui/material/AccordionSummary'
 import Alert from '@mui/material/Alert'
@@ -178,6 +182,12 @@ export default function TodayPage() {
   const [newItemTitle, setNewItemTitle] = useState('')
   const [newItemMinutes, setNewItemMinutes] = useState(15)
   const [newItemSubject, setNewItemSubject] = useState<SubjectBucket>(SubjectBucket.Other)
+  // Per-item capture state
+  const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
+  const [captureNote, setCaptureNote] = useState('')
+  // Grade/review state (Approach A — manual input)
+  const [gradeNote, setGradeNote] = useState<{ index: number; text: string } | null>(null)
+
   const [artifactForm, setArtifactForm] = useState({
     childId: selectedChildId,
     evidenceType: EvidenceType.Note as EvidenceType,
@@ -596,6 +606,54 @@ export default function TodayPage() {
     [cardLadders],
   )
 
+  // --- Per-item capture handler (component-level for dialog access) ---
+
+  const handleItemPhotoCapture = useCallback(
+    async (file: File) => {
+      if (captureItemIndex === null || !dayLog?.checklist) return
+      const item = dayLog.checklist[captureItemIndex]
+      try {
+        const artifact = {
+          childId: selectedChildId,
+          title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${activeChild?.name ?? 'Student'}'s work`,
+          type: EvidenceType.Photo,
+          dayLogId: today,
+          createdAt: new Date().toISOString(),
+          tags: {
+            engineStage: EngineStage.Build,
+            domain: '',
+            subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
+            location: 'Home',
+            planItem: item.label,
+            ...(captureNote ? { note: captureNote } : {}),
+          },
+        }
+        const docRef = await addDoc(artifactsCollection(familyId), artifact as any)
+        const ext = file.name.split('.').pop() ?? 'jpg'
+        const filename = generateFilename(ext)
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+
+        // Link artifact to checklist item
+        const updatedChecklist = dayLog.checklist.map((ci, i) =>
+          i === captureItemIndex ? { ...ci, evidenceArtifactId: docRef.id } : ci
+        )
+        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+        setTodayArtifacts((prev) => [
+          { ...artifact, id: docRef.id, uri: downloadUrl } as Artifact,
+          ...prev,
+        ])
+        setCaptureItemIndex(null)
+        setCaptureNote('')
+        setSnackMessage({ text: 'Work captured!', severity: 'success' })
+      } catch (err) {
+        console.error('Item photo capture failed:', err)
+        setSnackMessage({ text: 'Photo upload failed. Try again.', severity: 'error' })
+      }
+    },
+    [captureItemIndex, captureNote, dayLog, selectedChildId, activeChild, today, familyId, persistDayLogImmediate, setSnackMessage],
+  )
+
   // --- Loading state ---
 
   const handleRoutineUpdate = useCallback(
@@ -897,6 +955,20 @@ export default function TodayPage() {
           persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
         }
 
+        const handleItemCapture = (index: number) => {
+          setCaptureItemIndex(index)
+          setCaptureNote('')
+        }
+
+        const handleSaveGradeNote = (index: number, text: string) => {
+          if (!dayLog?.checklist || !text.trim()) return
+          const updatedChecklist = dayLog.checklist.map((ci, i) =>
+            i === index ? { ...ci, gradeResult: text.trim() } : ci
+          )
+          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+          setGradeNote(null)
+        }
+
         return (
           <SectionCard title="Today's Plan" action={
             hasPlanItems ? (
@@ -1121,6 +1193,75 @@ export default function TodayPage() {
                           variant="outlined"
                         />
                       )}
+
+                      {/* Per-item capture — appears after checking off */}
+                      {item.completed && (
+                        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 5, mt: 0.5 }}>
+                          {/* Capture button */}
+                          {!item.evidenceArtifactId && (
+                            <IconButton
+                              size="small"
+                              onClick={() => handleItemCapture(index)}
+                              title="Capture work"
+                            >
+                              <CameraAltIcon fontSize="small" />
+                            </IconButton>
+                          )}
+                          {/* Show if evidence already captured */}
+                          {item.evidenceArtifactId && (
+                            <Chip size="small" label="Captured" variant="outlined" color="success" sx={{ height: 22 }} />
+                          )}
+                        </Stack>
+                      )}
+
+                      {/* Scan & Review: manual quick-check after capture */}
+                      {item.evidenceArtifactId && !item.gradeResult && gradeNote?.index !== index && (
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={() => setGradeNote({ index, text: '' })}
+                          sx={{ ml: 5, mt: 0.5, textTransform: 'none' }}
+                        >
+                          Quick Review
+                        </Button>
+                      )}
+
+                      {/* Grade note input (Approach A — manual) */}
+                      {gradeNote?.index === index && (
+                        <Stack spacing={1} sx={{ ml: 5, mt: 0.5 }}>
+                          <Typography variant="body2">Quick check: how did it go?</Typography>
+                          <TextField
+                            size="small"
+                            placeholder="e.g., 5/6 correct, missed regrouping on #4"
+                            value={gradeNote.text}
+                            onChange={(e) => setGradeNote({ index, text: e.target.value })}
+                            multiline
+                            rows={2}
+                            autoFocus
+                          />
+                          <Stack direction="row" spacing={1}>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => handleSaveGradeNote(index, gradeNote.text)}
+                              disabled={!gradeNote.text.trim()}
+                            >
+                              Save
+                            </Button>
+                            <Button size="small" onClick={() => setGradeNote(null)}>
+                              Cancel
+                            </Button>
+                          </Stack>
+                        </Stack>
+                      )}
+
+                      {/* Display saved grade result */}
+                      {item.gradeResult && (
+                        <Box sx={{ ml: 5, mt: 0.5, p: 1, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                          <Typography variant="caption" color="text.secondary">Review:</Typography>
+                          <Typography variant="body2">{item.gradeResult}</Typography>
+                        </Box>
+                      )}
                     </Box>
                   )
                 })}
@@ -1193,6 +1334,27 @@ export default function TodayPage() {
           </SectionCard>
         )
       })()}
+
+      {/* --- Per-item capture dialog --- */}
+      <Dialog open={captureItemIndex !== null} onClose={() => setCaptureItemIndex(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Capture: {captureItemIndex !== null ? dayLog.checklist?.[captureItemIndex]?.label?.replace(/\s*\(\d+m\)/, '') : ''}
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <PhotoCapture onCapture={(file: File) => { void handleItemPhotoCapture(file) }} />
+            <TextField
+              label="Quick note (optional)"
+              placeholder="What went well, what to work on..."
+              value={captureNote}
+              onChange={(e) => setCaptureNote(e.target.value)}
+              size="small"
+              multiline
+              rows={2}
+            />
+          </Stack>
+        </DialogContent>
+      </Dialog>
 
       {/* --- Quick Capture --- */}
       <div ref={artifactSectionRef} />
