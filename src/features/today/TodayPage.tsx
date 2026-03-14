@@ -9,6 +9,7 @@ import ChecklistIcon from '@mui/icons-material/Checklist'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import PrintIcon from '@mui/icons-material/Print'
 import SchoolIcon from '@mui/icons-material/School'
 import Accordion from '@mui/material/Accordion'
 import AccordionDetails from '@mui/material/AccordionDetails'
@@ -35,6 +36,7 @@ import Typography from '@mui/material/Typography'
 import {
   addDoc,
   doc,
+  getDoc,
   getDocs,
   query,
   updateDoc,
@@ -52,15 +54,17 @@ import SectionCard from '../../components/SectionCard'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   artifactsCollection,
+  skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
 import {
   generateFilename,
   uploadArtifactFile,
 } from '../../core/firebase/upload'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, ChecklistItem as ChecklistItemType, DayLog, LadderCardDefinition } from '../../core/types/domain'
+import type { Artifact, ChecklistItem as ChecklistItemType, DayLog, DraftDayPlan, DraftPlanItem, LadderCardDefinition, SkillSnapshot } from '../../core/types/domain'
 import { getLaddersForChild } from '../ladders/laddersCatalog'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
@@ -83,6 +87,7 @@ import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
 import LadderQuickLog from './LadderQuickLog'
 import RoutineSection from './RoutineSection'
+import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
 import { calculateXp } from './xp'
@@ -167,6 +172,8 @@ export default function TodayPage() {
   const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
   const [teachHelperOpen, setTeachHelperOpen] = useState(false)
   const [editingPlan, setEditingPlan] = useState(false)
+  const [printingMaterials, setPrintingMaterials] = useState(false)
+  const [todaySnapshot, setTodaySnapshot] = useState<SkillSnapshot | null>(null)
   const [addingItem, setAddingItem] = useState(false)
   const [newItemTitle, setNewItemTitle] = useState('')
   const [newItemMinutes, setNewItemMinutes] = useState(15)
@@ -241,6 +248,17 @@ export default function TodayPage() {
       setPlanType(dailyPlan.planType)
     }
   }, [dailyPlan])
+
+  const { chat: aiChat } = useAI()
+
+  // Load skill snapshot for print materials
+  useEffect(() => {
+    if (!selectedChildId) return
+    const ref = doc(skillSnapshotsCollection(familyId), selectedChildId)
+    getDoc(ref).then((snap) => {
+      if (snap.exists()) setTodaySnapshot(snap.data() as SkillSnapshot)
+    }).catch(() => { /* ignore */ })
+  }, [familyId, selectedChildId])
 
   /** Map energy level to plan type: normal → Normal Day, low/overwhelmed → MVD. */
   const energyToPlanType = (level: EnergyLevel): PlanType =>
@@ -354,6 +372,59 @@ export default function TodayPage() {
     },
     [dayLog, persistDayLogImmediate],
   )
+
+  // --- Print materials handler ---
+
+  const handlePrintTodayMaterials = useCallback(async () => {
+    if (!dayLog?.checklist || !selectedChildId) return
+    setPrintingMaterials(true)
+
+    try {
+      const parseMinutes = (label: string): number => {
+        const match = label.match(/\((\d+)m\)/)
+        return match ? parseInt(match[1]) : 15
+      }
+
+      const todayPlan: DraftDayPlan = {
+        day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+        timeBudgetMinutes: 150,
+        items: dayLog.checklist
+          .filter((i) => !i.completed)
+          .map((i) => ({
+            id: i.id ?? '',
+            title: i.label.replace(/\s*\(\d+m\)\s*$/, ''),
+            subjectBucket: (i.subjectBucket ?? SubjectBucket.Other) as DraftPlanItem['subjectBucket'],
+            estimatedMinutes: i.estimatedMinutes ?? i.plannedMinutes ?? parseMinutes(i.label),
+            skillTags: i.skillTags ?? [],
+            isAppBlock: false,
+            accepted: true,
+          })),
+      }
+
+      const prompt = buildMaterialsPrompt(
+        todayPlan,
+        activeChild?.name ?? 'Student',
+        todaySnapshot,
+        weekFocus?.theme,
+      )
+
+      const response = await aiChat({
+        familyId,
+        childId: selectedChildId,
+        taskType: TaskType.Chat,
+        messages: [{ role: 'user', content: prompt }],
+      })
+
+      if (response?.message) {
+        openPrintWindow(response.message)
+      }
+    } catch (err) {
+      console.error('Material generation failed:', err)
+      setSnackMessage({ text: 'Failed to generate materials. Try again.', severity: 'error' })
+    } finally {
+      setPrintingMaterials(false)
+    }
+  }, [dayLog, selectedChildId, activeChild, todaySnapshot, weekFocus, aiChat, familyId, setSnackMessage])
 
   // --- Artifact handlers ---
 
@@ -829,9 +900,21 @@ export default function TodayPage() {
         return (
           <SectionCard title="Today's Plan" action={
             hasPlanItems ? (
-              <IconButton size="small" onClick={() => { setEditingPlan(!editingPlan); setAddingItem(false) }}>
-                {editingPlan ? <CheckIcon /> : <EditIcon />}
-              </IconButton>
+              <Stack direction="row" spacing={0.5} alignItems="center">
+                <Button
+                  size="small"
+                  variant="text"
+                  startIcon={printingMaterials ? <CircularProgress size={14} /> : <PrintIcon />}
+                  onClick={handlePrintTodayMaterials}
+                  disabled={printingMaterials}
+                  sx={{ minWidth: 0, px: 1 }}
+                >
+                  {printingMaterials ? 'Generating...' : 'Print'}
+                </Button>
+                <IconButton size="small" onClick={() => { setEditingPlan(!editingPlan); setAddingItem(false) }}>
+                  {editingPlan ? <CheckIcon /> : <EditIcon />}
+                </IconButton>
+              </Stack>
             ) : undefined
           }>
             {hasPlanItems ? (
