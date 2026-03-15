@@ -67,6 +67,30 @@ function extractQuestFinding(text: string): EvaluationFinding | null {
   }
 }
 
+interface QuestSummaryBlock {
+  summary: string
+  frontier?: string
+  recommendations: Array<{
+    priority: number
+    skill: string
+    action: string
+    duration: string
+    frequency: string
+  }>
+  skipList?: Array<{ skill: string; reason: string }>
+}
+
+function parseQuestSummaryBlock(text: string): QuestSummaryBlock | null {
+  const regex = /<quest-summary>([\s\S]*?)<\/quest-summary>/
+  const match = regex.exec(text)
+  if (!match) return null
+  try {
+    return JSON.parse(match[1].trim()) as QuestSummaryBlock
+  } catch {
+    return null
+  }
+}
+
 function getDateString(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
@@ -86,6 +110,7 @@ export function useQuestSession() {
   const [streak, setStreak] = useState<QuestStreak>({ currentStreak: 0, lastQuestDate: null })
   const [lastAnswer, setLastAnswer] = useState<{ correct: boolean; correctAnswer: string; encouragement?: string } | null>(null)
   const [sessionSaved, setSessionSaved] = useState(false)
+  const [summarizing, setSummarizing] = useState(false)
   const [previousSessions, setPreviousSessions] = useState<Array<{ evaluatedAt: string }>>([])
 
   const conversationRef = useRef<AIChatMessage[]>([])
@@ -238,6 +263,7 @@ export function useQuestSession() {
       }
 
       setScreen(QuestScreen.Summary)
+      setSummarizing(true)
 
       // Calculate streak (including this session)
       const todayStr = getDateString(new Date())
@@ -250,6 +276,54 @@ export function useQuestSession() {
 
       if (!activeChildId) return
 
+      // Request AI-generated summary
+      let summaryText = `Interactive reading quest: ${finalState.totalCorrect}/${finalState.totalQuestions} correct, reached level ${finalState.currentLevel}`
+      let sessionRecommendations: EvaluationSession['recommendations'] = []
+
+      try {
+        const summaryMessage: AIChatMessage = {
+          role: 'user',
+          content: JSON.stringify({
+            action: 'summarize_session',
+            questions,
+            findings,
+            finalLevel: finalState.currentLevel,
+            totalCorrect: finalState.totalCorrect,
+            totalQuestions: finalState.totalQuestions,
+            domain: 'reading',
+          }),
+        }
+
+        const summaryResponse = await chat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.Quest,
+          messages: [...conversationRef.current, summaryMessage],
+          domain: 'reading',
+        })
+
+        if (summaryResponse) {
+          const parsed = parseQuestSummaryBlock(summaryResponse.message)
+          if (parsed) {
+            summaryText = parsed.summary
+            if (parsed.frontier) {
+              summaryText += ` Frontier: ${parsed.frontier}`
+            }
+            sessionRecommendations = (parsed.recommendations || []).map((r, i) => ({
+              priority: r.priority ?? i + 1,
+              skill: r.skill || '',
+              action: r.action || '',
+              duration: r.duration || '',
+              frequency: r.frequency || '',
+            }))
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to generate AI quest summary, using fallback', err)
+      } finally {
+        setSummarizing(false)
+      }
+
       // Save to Firestore
       const timestamp = Date.now()
       const docId = `interactive_${activeChildId}_${timestamp}`
@@ -260,8 +334,8 @@ export function useQuestSession() {
         status: 'complete',
         messages: [],
         findings,
-        recommendations: [],
-        summary: `Interactive reading quest: ${finalState.totalCorrect}/${finalState.totalQuestions} correct, reached level ${finalState.currentLevel}`,
+        recommendations: sessionRecommendations,
+        summary: summaryText,
         evaluatedAt: new Date().toISOString(),
         sessionType: 'interactive',
         questions,
@@ -338,7 +412,7 @@ export function useQuestSession() {
         }
       }
     },
-    [activeChildId, familyId, findings, previousSessions],
+    [activeChildId, familyId, findings, previousSessions, chat],
   )
 
   // ── Submit answer ─────────────────────────────────────────────
@@ -461,6 +535,7 @@ export function useQuestSession() {
     setFindings([])
     setLastAnswer(null)
     setSessionSaved(false)
+    setSummarizing(false)
     conversationRef.current = []
   }, [])
 
@@ -473,6 +548,7 @@ export function useQuestSession() {
     streak,
     lastAnswer,
     sessionSaved,
+    summarizing,
     aiLoading,
     aiError,
     startQuest,
