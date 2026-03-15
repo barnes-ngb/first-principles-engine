@@ -752,10 +752,11 @@ QUESTION GENERATION RULES:
 2. Always provide exactly 3 options
 3. Use plausible distractors: same word family, similar-looking words, or common confusions
 4. Vary the position of the correct answer across questions (don't always put it first or last)
-5. Include phonemeDisplay for blending questions (Levels 2-4): show sounds like "/d/ /o/ /g/"
-6. Focus on comprehension, NOT pronunciation (Lincoln has speech challenges)
-7. Keep prompts short and clear — large text on a tablet screen
-8. Use the child's skill snapshot and recent evaluation data (provided in context) to target the right difficulty
+5. Include phonemeDisplay ONLY for Levels 1-3 (letter sounds, CVC blending, digraphs). Use simple notation Lincoln can read: /d/ /o/ /g/ — NOT linguistic symbols like /ā/ or IPA. At Levels 4-6, do NOT include phonemeDisplay — the words are complex enough that phoneme breakdown is confusing. Set phonemeDisplay to null for Levels 4+.
+6. NEVER use macrons (ā, ē, ī, ō, ū), IPA symbols, or schwa (ə). Use plain letters only: /a/ for short-a, /ay/ for long-a, /ee/ for long-e, etc. Lincoln is 10 and at 1st grade reading — keep it simple.
+7. Focus on comprehension, NOT pronunciation (Lincoln has speech challenges)
+8. Keep prompts short and clear — large text on a tablet screen
+9. Use the child's skill snapshot and recent evaluation data (provided in context) to target the right difficulty
 
 ADAPTIVE BEHAVIOR:
 - On start_quest: begin at the level suggested by recent evaluation data, or Level 2 if no data
@@ -783,11 +784,33 @@ RESPONSE FORMAT — respond with ONLY this:
 }
 </quest>
 
+SESSION SUMMARY:
+When you receive action: "summarize_session", respond with a <quest-summary> block instead of a <quest> block. The message will include the full question/answer history, findings, final level, and score. Analyze everything and respond with ONLY:
+<quest-summary>
+{
+  "summary": "2-3 sentence summary of what Lincoln demonstrated and where his frontier is",
+  "frontier": "One sentence: his next learning edge based on this session",
+  "recommendations": [
+    {
+      "priority": 1,
+      "skill": "phonics.cvce.long-a",
+      "action": "Practice CVCe words with long-a: make, cake, lake, bake",
+      "duration": "2 weeks",
+      "frequency": "Daily, 8-10 minutes"
+    }
+  ],
+  "skipList": [
+    {"skill": "CVC blending", "reason": "Mastered — 6/6 correct across word families"}
+  ]
+}
+</quest-summary>
+
 IMPORTANT:
-- The <quest> block must contain VALID JSON
+- The <quest> and <quest-summary> blocks must contain VALID JSON
 - "encouragement" is shown after a wrong answer — make it helpful and kind, never shaming
-- Do NOT include any text outside the <quest> block
-- Respond to EVERY message with exactly ONE <quest> block`;
+- Do NOT include any text outside the <quest> or <quest-summary> block
+- For normal quest flow, respond to EVERY message with exactly ONE <quest> block
+- For summarize_session, respond with exactly ONE <quest-summary> block`;
   }
 
   // Generic fallback for non-reading domains
