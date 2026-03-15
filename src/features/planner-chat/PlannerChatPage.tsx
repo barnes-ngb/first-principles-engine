@@ -1127,7 +1127,7 @@ Generate a plan for Monday through Friday.`.trim()
       })
 
       if (response?.message) {
-        openPrintWindow(response.message)
+        openPrintWindow(response.message, `${activeChild?.name ?? 'Student'} - ${day.day}`)
       }
     } catch (err) {
       console.error('Material generation failed:', err)
