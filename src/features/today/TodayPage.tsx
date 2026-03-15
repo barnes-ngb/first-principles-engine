@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import AccessTimeIcon from '@mui/icons-material/AccessTime'
 import AddIcon from '@mui/icons-material/Add'
+import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import CheckIcon from '@mui/icons-material/Check'
@@ -9,8 +10,12 @@ import ChecklistIcon from '@mui/icons-material/Checklist'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import PrintIcon from '@mui/icons-material/Print'
 import SchoolIcon from '@mui/icons-material/School'
 import Accordion from '@mui/material/Accordion'
+import Dialog from '@mui/material/Dialog'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import AccordionDetails from '@mui/material/AccordionDetails'
 import AccordionSummary from '@mui/material/AccordionSummary'
 import Alert from '@mui/material/Alert'
@@ -35,6 +40,7 @@ import Typography from '@mui/material/Typography'
 import {
   addDoc,
   doc,
+  getDoc,
   getDocs,
   query,
   updateDoc,
@@ -52,15 +58,17 @@ import SectionCard from '../../components/SectionCard'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   artifactsCollection,
+  skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
 import {
   generateFilename,
   uploadArtifactFile,
 } from '../../core/firebase/upload'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, ChecklistItem as ChecklistItemType, DayLog, LadderCardDefinition } from '../../core/types/domain'
+import type { Artifact, ChecklistItem as ChecklistItemType, DayLog, DraftDayPlan, DraftPlanItem, LadderCardDefinition, SkillSnapshot } from '../../core/types/domain'
 import { getLaddersForChild } from '../ladders/laddersCatalog'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
@@ -83,6 +91,7 @@ import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
 import LadderQuickLog from './LadderQuickLog'
 import RoutineSection from './RoutineSection'
+import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
 import { calculateXp } from './xp'
@@ -167,10 +176,18 @@ export default function TodayPage() {
   const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
   const [teachHelperOpen, setTeachHelperOpen] = useState(false)
   const [editingPlan, setEditingPlan] = useState(false)
+  const [printingMaterials, setPrintingMaterials] = useState(false)
+  const [todaySnapshot, setTodaySnapshot] = useState<SkillSnapshot | null>(null)
   const [addingItem, setAddingItem] = useState(false)
   const [newItemTitle, setNewItemTitle] = useState('')
   const [newItemMinutes, setNewItemMinutes] = useState(15)
   const [newItemSubject, setNewItemSubject] = useState<SubjectBucket>(SubjectBucket.Other)
+  // Per-item capture state
+  const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
+  const [captureNote, setCaptureNote] = useState('')
+  // Grade/review state (Approach A — manual input)
+  const [gradeNote, setGradeNote] = useState<{ index: number; text: string } | null>(null)
+
   const [artifactForm, setArtifactForm] = useState({
     childId: selectedChildId,
     evidenceType: EvidenceType.Note as EvidenceType,
@@ -241,6 +258,17 @@ export default function TodayPage() {
       setPlanType(dailyPlan.planType)
     }
   }, [dailyPlan])
+
+  const { chat: aiChat } = useAI()
+
+  // Load skill snapshot for print materials
+  useEffect(() => {
+    if (!selectedChildId) return
+    const ref = doc(skillSnapshotsCollection(familyId), selectedChildId)
+    getDoc(ref).then((snap) => {
+      if (snap.exists()) setTodaySnapshot(snap.data() as SkillSnapshot)
+    }).catch(() => { /* ignore */ })
+  }, [familyId, selectedChildId])
 
   /** Map energy level to plan type: normal → Normal Day, low/overwhelmed → MVD. */
   const energyToPlanType = (level: EnergyLevel): PlanType =>
@@ -354,6 +382,59 @@ export default function TodayPage() {
     },
     [dayLog, persistDayLogImmediate],
   )
+
+  // --- Print materials handler ---
+
+  const handlePrintTodayMaterials = useCallback(async () => {
+    if (!dayLog?.checklist || !selectedChildId) return
+    setPrintingMaterials(true)
+
+    try {
+      const parseMinutes = (label: string): number => {
+        const match = label.match(/\((\d+)m\)/)
+        return match ? parseInt(match[1]) : 15
+      }
+
+      const todayPlan: DraftDayPlan = {
+        day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+        timeBudgetMinutes: 150,
+        items: dayLog.checklist
+          .filter((i) => !i.completed)
+          .map((i) => ({
+            id: i.id ?? '',
+            title: i.label.replace(/\s*\(\d+m\)\s*$/, ''),
+            subjectBucket: (i.subjectBucket ?? SubjectBucket.Other) as DraftPlanItem['subjectBucket'],
+            estimatedMinutes: i.estimatedMinutes ?? i.plannedMinutes ?? parseMinutes(i.label),
+            skillTags: i.skillTags ?? [],
+            isAppBlock: false,
+            accepted: true,
+          })),
+      }
+
+      const prompt = buildMaterialsPrompt(
+        todayPlan,
+        activeChild?.name ?? 'Student',
+        todaySnapshot,
+        weekFocus?.theme,
+      )
+
+      const response = await aiChat({
+        familyId,
+        childId: selectedChildId,
+        taskType: TaskType.Chat,
+        messages: [{ role: 'user', content: prompt }],
+      })
+
+      if (response?.message) {
+        openPrintWindow(response.message)
+      }
+    } catch (err) {
+      console.error('Material generation failed:', err)
+      setSnackMessage({ text: 'Failed to generate materials. Try again.', severity: 'error' })
+    } finally {
+      setPrintingMaterials(false)
+    }
+  }, [dayLog, selectedChildId, activeChild, todaySnapshot, weekFocus, aiChat, familyId, setSnackMessage])
 
   // --- Artifact handlers ---
 
@@ -523,6 +604,54 @@ export default function TodayPage() {
       return `${ladder?.title ?? 'Ladder'} \u00b7 ${rung?.name ?? 'Rung'}`
     },
     [cardLadders],
+  )
+
+  // --- Per-item capture handler (component-level for dialog access) ---
+
+  const handleItemPhotoCapture = useCallback(
+    async (file: File) => {
+      if (captureItemIndex === null || !dayLog?.checklist) return
+      const item = dayLog.checklist[captureItemIndex]
+      try {
+        const artifact = {
+          childId: selectedChildId,
+          title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${activeChild?.name ?? 'Student'}'s work`,
+          type: EvidenceType.Photo,
+          dayLogId: today,
+          createdAt: new Date().toISOString(),
+          tags: {
+            engineStage: EngineStage.Build,
+            domain: '',
+            subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
+            location: 'Home',
+            planItem: item.label,
+            ...(captureNote ? { note: captureNote } : {}),
+          },
+        }
+        const docRef = await addDoc(artifactsCollection(familyId), artifact)
+        const ext = file.name.split('.').pop() ?? 'jpg'
+        const filename = generateFilename(ext)
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+
+        // Link artifact to checklist item
+        const updatedChecklist = dayLog.checklist.map((ci, i) =>
+          i === captureItemIndex ? { ...ci, evidenceArtifactId: docRef.id } : ci
+        )
+        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+        setTodayArtifacts((prev) => [
+          { ...artifact, id: docRef.id, uri: downloadUrl } as Artifact,
+          ...prev,
+        ])
+        setCaptureItemIndex(null)
+        setCaptureNote('')
+        setSnackMessage({ text: 'Work captured!', severity: 'success' })
+      } catch (err) {
+        console.error('Item photo capture failed:', err)
+        setSnackMessage({ text: 'Photo upload failed. Try again.', severity: 'error' })
+      }
+    },
+    [captureItemIndex, captureNote, dayLog, selectedChildId, activeChild, today, familyId, persistDayLogImmediate, setSnackMessage],
   )
 
   // --- Loading state ---
@@ -826,12 +955,38 @@ export default function TodayPage() {
           persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
         }
 
+        const handleItemCapture = (index: number) => {
+          setCaptureItemIndex(index)
+          setCaptureNote('')
+        }
+
+        const handleSaveGradeNote = (index: number, text: string) => {
+          if (!dayLog?.checklist || !text.trim()) return
+          const updatedChecklist = dayLog.checklist.map((ci, i) =>
+            i === index ? { ...ci, gradeResult: text.trim() } : ci
+          )
+          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+          setGradeNote(null)
+        }
+
         return (
           <SectionCard title="Today's Plan" action={
             hasPlanItems ? (
-              <IconButton size="small" onClick={() => { setEditingPlan(!editingPlan); setAddingItem(false) }}>
-                {editingPlan ? <CheckIcon /> : <EditIcon />}
-              </IconButton>
+              <Stack direction="row" spacing={0.5} alignItems="center">
+                <Button
+                  size="small"
+                  variant="text"
+                  startIcon={printingMaterials ? <CircularProgress size={14} /> : <PrintIcon />}
+                  onClick={handlePrintTodayMaterials}
+                  disabled={printingMaterials}
+                  sx={{ minWidth: 0, px: 1 }}
+                >
+                  {printingMaterials ? 'Generating...' : 'Print'}
+                </Button>
+                <IconButton size="small" onClick={() => { setEditingPlan(!editingPlan); setAddingItem(false) }}>
+                  {editingPlan ? <CheckIcon /> : <EditIcon />}
+                </IconButton>
+              </Stack>
             ) : undefined
           }>
             {hasPlanItems ? (
@@ -1038,6 +1193,75 @@ export default function TodayPage() {
                           variant="outlined"
                         />
                       )}
+
+                      {/* Per-item capture — appears after checking off */}
+                      {item.completed && (
+                        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 5, mt: 0.5 }}>
+                          {/* Capture button */}
+                          {!item.evidenceArtifactId && (
+                            <IconButton
+                              size="small"
+                              onClick={() => handleItemCapture(index)}
+                              title="Capture work"
+                            >
+                              <CameraAltIcon fontSize="small" />
+                            </IconButton>
+                          )}
+                          {/* Show if evidence already captured */}
+                          {item.evidenceArtifactId && (
+                            <Chip size="small" label="Captured" variant="outlined" color="success" sx={{ height: 22 }} />
+                          )}
+                        </Stack>
+                      )}
+
+                      {/* Scan & Review: manual quick-check after capture */}
+                      {item.evidenceArtifactId && !item.gradeResult && gradeNote?.index !== index && (
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={() => setGradeNote({ index, text: '' })}
+                          sx={{ ml: 5, mt: 0.5, textTransform: 'none' }}
+                        >
+                          Quick Review
+                        </Button>
+                      )}
+
+                      {/* Grade note input (Approach A — manual) */}
+                      {gradeNote?.index === index && (
+                        <Stack spacing={1} sx={{ ml: 5, mt: 0.5 }}>
+                          <Typography variant="body2">Quick check: how did it go?</Typography>
+                          <TextField
+                            size="small"
+                            placeholder="e.g., 5/6 correct, missed regrouping on #4"
+                            value={gradeNote.text}
+                            onChange={(e) => setGradeNote({ index, text: e.target.value })}
+                            multiline
+                            rows={2}
+                            autoFocus
+                          />
+                          <Stack direction="row" spacing={1}>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => handleSaveGradeNote(index, gradeNote.text)}
+                              disabled={!gradeNote.text.trim()}
+                            >
+                              Save
+                            </Button>
+                            <Button size="small" onClick={() => setGradeNote(null)}>
+                              Cancel
+                            </Button>
+                          </Stack>
+                        </Stack>
+                      )}
+
+                      {/* Display saved grade result */}
+                      {item.gradeResult && (
+                        <Box sx={{ ml: 5, mt: 0.5, p: 1, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                          <Typography variant="caption" color="text.secondary">Review:</Typography>
+                          <Typography variant="body2">{item.gradeResult}</Typography>
+                        </Box>
+                      )}
                     </Box>
                   )
                 })}
@@ -1110,6 +1334,27 @@ export default function TodayPage() {
           </SectionCard>
         )
       })()}
+
+      {/* --- Per-item capture dialog --- */}
+      <Dialog open={captureItemIndex !== null} onClose={() => setCaptureItemIndex(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Capture: {captureItemIndex !== null ? dayLog.checklist?.[captureItemIndex]?.label?.replace(/\s*\(\d+m\)/, '') : ''}
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <PhotoCapture onCapture={(file: File) => { void handleItemPhotoCapture(file) }} />
+            <TextField
+              label="Quick note (optional)"
+              placeholder="What went well, what to work on..."
+              value={captureNote}
+              onChange={(e) => setCaptureNote(e.target.value)}
+              size="small"
+              multiline
+              rows={2}
+            />
+          </Stack>
+        </DialogContent>
+      </Dialog>
 
       {/* --- Quick Capture --- */}
       <div ref={artifactSectionRef} />

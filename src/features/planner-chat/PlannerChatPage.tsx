@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
+import PrintIcon from '@mui/icons-material/Print'
 import SendIcon from '@mui/icons-material/Send'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -49,6 +50,7 @@ import type {
   ChecklistItem,
   DayBlock,
   DayLog,
+  DraftDayPlan,
   DraftPlanItem,
   DraftWeeklyPlan,
   LessonCard,
@@ -90,6 +92,7 @@ import PlanPreviewCard from './PlanPreviewCard'
 import PlanSummaryPanel from './PlanSummaryPanel'
 import PhotoLabelForm from './PhotoLabelForm'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
+import { buildMaterialsPrompt, openPrintWindow } from './generateMaterials'
 
 
 function subjectToDayBlockType(subject: SubjectBucket): DayBlockType {
@@ -191,6 +194,9 @@ export default function PlannerChatPage() {
 
   // Confirmation dialog state
   const [confirmNewPlan, setConfirmNewPlan] = useState(false)
+
+  // Print materials state
+  const [generatingMaterials, setGeneratingMaterials] = useState<string | null>(null)
 
   // Generate activity state
   const [generatingItemId, setGeneratingItemId] = useState<string | null>(null)
@@ -1100,6 +1106,45 @@ Generate a plan for Monday through Friday.`.trim()
     })
   }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied])
 
+  // Generate printable materials for a day
+  const handleGenerateMaterials = useCallback(async (day: DraftDayPlan) => {
+    if (!activeChildId) return
+    setGeneratingMaterials(day.day)
+
+    try {
+      const prompt = buildMaterialsPrompt(
+        day,
+        activeChild?.name ?? 'Student',
+        snapshot,
+        weekPlan?.theme,
+      )
+
+      const response = await aiChat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.Chat,
+        messages: [{ role: 'user', content: prompt }],
+      })
+
+      if (response?.message) {
+        openPrintWindow(response.message)
+      }
+    } catch (err) {
+      console.error('Material generation failed:', err)
+      setSnack({ text: 'Failed to generate materials. Try again.', severity: 'error' })
+    } finally {
+      setGeneratingMaterials(null)
+    }
+  }, [activeChildId, activeChild, snapshot, weekPlan, aiChat, familyId])
+
+  const handleGenerateAllMaterials = useCallback(async () => {
+    if (!currentDraft) return
+    for (const day of currentDraft.days) {
+      await handleGenerateMaterials(day)
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+  }, [currentDraft, handleGenerateMaterials])
+
   // Generate activity for a plan item
   const handleGenerateActivity = useCallback(async (item: DraftPlanItem) => {
     if (!activeChildId) return
@@ -1650,6 +1695,39 @@ Generate a plan for Monday through Friday.`.trim()
                 Plan applied. Check This Week and Today pages for your generated
                 checklists and day blocks.
               </Alert>
+
+              {currentDraft && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="subtitle1" gutterBottom>Print Materials</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Generate printable worksheets for each day's activities.
+                  </Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    {currentDraft.days.map((day) => (
+                      <Button
+                        key={day.day}
+                        variant="outlined"
+                        size="small"
+                        onClick={() => handleGenerateMaterials(day)}
+                        disabled={generatingMaterials === day.day}
+                        startIcon={generatingMaterials === day.day ? <CircularProgress size={16} /> : <PrintIcon />}
+                      >
+                        {generatingMaterials === day.day ? 'Generating...' : `Print ${day.day}`}
+                      </Button>
+                    ))}
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={handleGenerateAllMaterials}
+                      disabled={!!generatingMaterials}
+                      startIcon={<PrintIcon />}
+                    >
+                      Print All Week
+                    </Button>
+                  </Stack>
+                </Box>
+              )}
+
               <Button
                 variant="contained"
                 color="primary"
