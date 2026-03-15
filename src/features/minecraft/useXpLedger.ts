@@ -22,14 +22,14 @@ export interface XpLedgerData {
 const DEFAULT_SOURCES = { routines: 0, quests: 0, books: 0 }
 
 export function useXpLedger(familyId: string, childId: string): XpLedgerData {
-  const [data, setData] = useState<{ totalXp: number; sources: XpLedger['sources'] } | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [snapshot, setSnapshot] = useState<{
+    key: string
+    totalXp: number
+    sources: XpLedger['sources']
+  } | null>(null)
 
   useEffect(() => {
-    if (!familyId || !childId) {
-      setLoading(false)
-      return
-    }
+    if (!familyId || !childId) return
 
     const ref = doc(xpLedgerCollection(familyId), childId)
     const unsub = onSnapshot(
@@ -37,24 +37,36 @@ export function useXpLedger(familyId: string, childId: string): XpLedgerData {
       (snap) => {
         if (snap.exists()) {
           const d = snap.data()
-          setData({ totalXp: d.totalXp ?? 0, sources: d.sources ?? DEFAULT_SOURCES })
+          setSnapshot({
+            key: `${familyId}_${childId}`,
+            totalXp: d.totalXp ?? 0,
+            sources: d.sources ?? DEFAULT_SOURCES,
+          })
         } else {
-          setData({ totalXp: 0, sources: DEFAULT_SOURCES })
+          setSnapshot({
+            key: `${familyId}_${childId}`,
+            totalXp: 0,
+            sources: DEFAULT_SOURCES,
+          })
         }
-        setLoading(false)
       },
       (err) => {
         console.warn('useXpLedger snapshot error', err)
-        setData({ totalXp: 0, sources: DEFAULT_SOURCES })
-        setLoading(false)
+        setSnapshot({
+          key: `${familyId}_${childId}`,
+          totalXp: 0,
+          sources: DEFAULT_SOURCES,
+        })
       },
     )
 
     return unsub
   }, [familyId, childId])
 
-  const totalXp = data?.totalXp ?? 0
-  const sources = data?.sources ?? DEFAULT_SOURCES
+  const expectedKey = familyId && childId ? `${familyId}_${childId}` : ''
+  const loading = Boolean(expectedKey) && snapshot?.key !== expectedKey
+  const totalXp = snapshot?.key === expectedKey ? snapshot.totalXp : 0
+  const sources = snapshot?.key === expectedKey ? snapshot.sources : DEFAULT_SOURCES
 
   return {
     totalXp,
