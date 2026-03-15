@@ -1,3 +1,5 @@
+> **Note:** This was the original project scope from February 2026. For current status, see `MASTER_OUTLINE.md`.
+
 # First Principles Engine — Master Scope
 Date: 2026-02-07
 

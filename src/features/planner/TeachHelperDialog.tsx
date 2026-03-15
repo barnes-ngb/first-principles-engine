@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CloseIcon from '@mui/icons-material/Close'
+import PrintIcon from '@mui/icons-material/Print'
 import SchoolIcon from '@mui/icons-material/School'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
@@ -15,10 +17,12 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { addDoc, doc, getDoc, getDocs, query, where } from 'firebase/firestore'
 
+import { useAI, TaskType } from '../../core/ai/useAI'
 import { useGenerateActivity } from '../../core/ai/useAI'
 import { lessonCardsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import type { ChecklistItem, LadderCardDefinition, LessonCard, SkillSnapshot } from '../../core/types/domain'
 import { fixUnicodeEscapes } from '../../core/utils/format'
+import { openPrintWindow } from '../planner-chat/generateMaterials'
 
 interface TeachHelperDialogProps {
   open: boolean
@@ -49,7 +53,9 @@ export default function TeachHelperDialog({
   const [lessonCard, setLessonCard] = useState<LessonCard | null>(null)
   const [loadedForKey, setLoadedForKey] = useState<string | null>(null)
   const { generate, loading: generating, error: generateError } = useGenerateActivity()
+  const { chat: aiChat } = useAI()
   const [localError, setLocalError] = useState<string | null>(null)
+  const [printingWorksheet, setPrintingWorksheet] = useState(false)
 
   // Derive a stable key for the current lesson card request
   const lessonCardKey = open && childId && item
@@ -192,6 +198,65 @@ export default function TeachHelperDialog({
       setLocalError(msg)
     }
   }, [item, childId, familyId, generate, lessonCardKey])
+
+  const handlePrintWorksheet = useCallback(async () => {
+    if (!item || !childId) return
+    setPrintingWorksheet(true)
+
+    try {
+      const lessonContext = activeLessonCard
+        ? `Lesson card: ${activeLessonCard.title}\nObjective: ${activeLessonCard.objective}\nSteps: ${activeLessonCard.steps.join('; ')}`
+        : ''
+
+      const prompt = `Generate a single Minecraft-themed printable worksheet for this activity:
+
+Activity: ${item.label}
+Child: ${childName} (age 10)
+Subject: ${item.subjectBucket ?? 'Other'}
+Duration: ${item.estimatedMinutes ?? item.plannedMinutes ?? 15} minutes
+${item.skipGuidance ? `Skip guidance: ${item.skipGuidance}` : ''}
+${lessonContext}
+${snapshot?.prioritySkills?.length ? `Skill focus: ${snapshot.prioritySkills.map((s) => `${s.label} (${s.level})`).join(', ')}` : ''}
+
+RULES:
+1. Return ONLY valid HTML starting with <html>. No markdown, no backticks.
+2. MINECRAFT THEMED — use Minecraft items, mobs, biomes in problems and scenarios.
+3. Include REAL CONTENT: actual problems, actual words, actual questions.
+4. ${item.subjectBucket === 'Math' ? 'Generate 6-8 math problems with work space. Include 2 guided examples at top.' : ''}
+${item.subjectBucket === 'Reading' || item.subjectBucket === 'LanguageArts' ? 'Generate a word list (8-10 words), sound boxes, and 3-4 sentences using target words.' : ''}
+5. Use this CSS for print-ready formatting:
+
+<html><head><style>
+  @page { margin: 0.5in; }
+  body { font-family: Arial, sans-serif; max-width: 7.5in; margin: 0 auto; }
+  .header { text-align: center; border-bottom: 3px solid #4a7c3f; padding-bottom: 12px; margin-bottom: 20px; background: linear-gradient(to right, #e8f5e9, #fff, #e8f5e9); padding: 12px; border-radius: 8px; }
+  .header h1 { font-size: 22pt; margin: 0; color: #2e7d32; }
+  .minecraft-box { border: 3px solid #4a7c3f; border-radius: 8px; padding: 16px; margin: 12px 0; background: #f9fbe7; }
+  .problem { margin: 16px 0; padding: 12px; border: 1px solid #c8e6c9; border-radius: 6px; }
+  .work-space { height: 80px; border: 1px dashed #aaa; margin: 8px 0; border-radius: 4px; }
+  .word-box { display: inline-block; border: 2px solid #4a7c3f; padding: 10px 20px; margin: 6px; font-size: 20pt; min-width: 100px; text-align: center; border-radius: 4px; font-weight: bold; }
+  .sound-box { display: inline-block; width: 50px; height: 50px; border: 2px solid #333; margin: 3px; text-align: center; line-height: 50px; font-size: 22pt; }
+  .line { border-bottom: 1px solid #999; height: 35px; margin: 8px 0; }
+  .example { background: #e8f5e9; padding: 12px; border-radius: 6px; border-left: 4px solid #4caf50; }
+  .drawing-box { width: 100%; height: 200px; border: 2px dashed #aaa; border-radius: 8px; margin: 12px 0; }
+</style></head><body>`
+
+      const response = await aiChat({
+        familyId,
+        childId,
+        taskType: TaskType.Chat,
+        messages: [{ role: 'user', content: prompt }],
+      })
+
+      if (response?.message) {
+        openPrintWindow(response.message, `${childName} - ${item.label}`)
+      }
+    } catch (err) {
+      console.error('Worksheet generation failed:', err)
+    } finally {
+      setPrintingWorksheet(false)
+    }
+  }, [item, childId, childName, familyId, activeLessonCard, snapshot, aiChat])
 
   const supports = snapshot?.supports ?? []
   const stopRules = snapshot?.stopRules ?? []
@@ -340,6 +405,19 @@ export default function TeachHelperDialog({
               )}
             </>
           )}
+
+          {/* Print Worksheet */}
+          <Divider />
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={printingWorksheet ? <CircularProgress size={16} /> : <PrintIcon />}
+            onClick={handlePrintWorksheet}
+            disabled={printingWorksheet}
+            fullWidth
+          >
+            {printingWorksheet ? 'Creating worksheet...' : 'Print Minecraft Worksheet'}
+          </Button>
 
           {/* Supports */}
           {supports.length > 0 && (

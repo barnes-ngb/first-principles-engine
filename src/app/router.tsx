@@ -19,6 +19,7 @@ import SettingsPage from '../features/settings/SettingsPage'
 import TodayPage from '../features/today/TodayPage'
 import DadLabPage from '../features/dad-lab/DadLabPage'
 import WeekPage from '../features/week/WeekPage'
+import KnowledgeMinePage from '../features/quest/KnowledgeMinePage'
 import WeeklyReviewPage from '../features/weekly-review/WeeklyReviewPage'
 
 const routes = [
@@ -50,6 +51,7 @@ const routes = [
       { path: '/planner/chat', element: <PlannerChatPage /> },
       { path: '/planner/legacy', element: <PlannerPage /> },
       { path: '/evaluate', element: <EvaluateChatPage /> },
+      { path: '/quest', element: <KnowledgeMinePage /> },
       { path: '/evaluation', element: <Navigate to="/progress" replace /> },
       { path: '/ladders', element: <LaddersPage /> },
       { path: '/kids', element: <KidsPage /> },
