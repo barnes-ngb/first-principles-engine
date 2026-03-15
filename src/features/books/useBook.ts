@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   addDoc,
   doc,
@@ -39,31 +39,24 @@ interface UseBookshelfResult {
 
 export function useBook(familyId: string, bookId: string | undefined): UseBookResult {
   const [book, setBook] = useState<Book | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!!familyId && !!bookId)
   const [saveState, setSaveState] = useState<SaveState>('idle')
-  const bookRef = useRef<Book | null>(null)
-
-  // Keep ref in sync
-  useEffect(() => {
-    bookRef.current = book
-  }, [book])
 
   // Load book
   useEffect(() => {
-    if (!familyId || !bookId) {
-      setLoading(false)
-      return
-    }
+    if (!familyId || !bookId) return
+    let cancelled = false
     const load = async () => {
-      setLoading(true)
       const docRef = doc(booksCollection(familyId), bookId)
       const snap = await getDoc(docRef)
+      if (cancelled) return
       if (snap.exists()) {
         setBook({ ...snap.data(), id: snap.id })
       }
       setLoading(false)
     }
     void load()
+    return () => { cancelled = true }
   }, [familyId, bookId])
 
   // Persist to Firestore
@@ -217,25 +210,24 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
 
 export function useBookshelf(familyId: string, childId: string): UseBookshelfResult {
   const [books, setBooks] = useState<Book[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!!familyId && !!childId)
 
   useEffect(() => {
-    if (!familyId || !childId) {
-      setLoading(false)
-      return
-    }
+    if (!familyId || !childId) return
+    let cancelled = false
     const load = async () => {
-      setLoading(true)
       const q = query(
         booksCollection(familyId),
         where('childId', '==', childId),
         orderBy('updatedAt', 'desc'),
       )
       const snap = await getDocs(q)
+      if (cancelled) return
       setBooks(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
       setLoading(false)
     }
     void load()
+    return () => { cancelled = true }
   }, [familyId, childId])
 
   const createBook = useCallback(
