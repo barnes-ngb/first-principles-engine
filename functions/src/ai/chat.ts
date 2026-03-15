@@ -85,6 +85,13 @@ interface EngagementSummary {
   counts: Record<string, number>;
 }
 
+/** A grade/review result from a captured worksheet or activity. */
+interface GradeResult {
+  activity: string;
+  result: string;
+  date: string;
+}
+
 interface EnrichedContext {
   sessions: SessionSummary[];
   workbookPaces: WorkbookPace[];
@@ -92,6 +99,7 @@ interface EnrichedContext {
   hoursTotalMinutes: number;
   hoursTarget: number;
   engagementSummaries: EngagementSummary[];
+  gradeResults: GradeResult[];
 }
 
 // ── Date helpers ────────────────────────────────────────────────
@@ -312,18 +320,56 @@ export async function loadEngagementSummary(
   }));
 }
 
+/** Load grade/review results from recent day logs (last 14 days). */
+export async function loadGradeResults(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<GradeResult[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 14);
+  const cutoffStr = toDateString(cutoff);
+
+  const snap = await db
+    .collection(`families/${familyId}/days`)
+    .where("childId", "==", childId)
+    .where("date", ">=", cutoffStr)
+    .get();
+
+  const results: GradeResult[] = [];
+
+  for (const doc of snap.docs) {
+    const data = doc.data() as {
+      date?: string;
+      checklist?: Array<{ label?: string; gradeResult?: string }>;
+    };
+    if (!data.checklist) continue;
+    for (const item of data.checklist) {
+      if (!item.gradeResult || !item.label) continue;
+      results.push({
+        activity: item.label.replace(/\s*\(\d+m\)\s*$/, ""),
+        result: item.gradeResult,
+        date: data.date || "unknown",
+      });
+    }
+  }
+
+  return results;
+}
+
 /** Load all enriched context in parallel. Only called for plan/evaluate. */
 export async function loadEnrichedContext(
   db: Firestore,
   familyId: string,
   childId: string,
 ): Promise<EnrichedContext> {
-  const [sessions, workbookPaces, week, hours, engagementSummaries] = await Promise.all([
+  const [sessions, workbookPaces, week, hours, engagementSummaries, gradeResults] = await Promise.all([
     loadRecentSessions(db, familyId, childId),
     loadWorkbookPaces(db, familyId, childId),
     loadWeekContext(db, familyId),
     loadHoursSummary(db, familyId, childId),
     loadEngagementSummary(db, familyId, childId),
+    loadGradeResults(db, familyId, childId),
   ]);
 
   return {
@@ -333,6 +379,7 @@ export async function loadEnrichedContext(
     hoursTotalMinutes: hours.totalMinutes,
     hoursTarget: 1000, // MO target hours
     engagementSummaries,
+    gradeResults,
   };
 }
 
@@ -456,6 +503,15 @@ export function buildSystemPrompt(
         const total = Object.values(counts).reduce((s, n) => s + n, 0);
         const primary = Object.entries(counts).sort(([, a], [, b]) => b - a)[0];
         lines.push(`- ${activity}: ${primary[0]} (${primary[1]}/${total} sessions)`);
+      }
+    }
+
+    // WORK REVIEW RESULTS
+    if (enriched.gradeResults.length > 0) {
+      lines.push("", "WORK REVIEW RESULTS (this period):");
+      lines.push("Use these results to adjust upcoming plans — reinforce weak areas, advance strong ones.");
+      for (const { activity, result, date } of enriched.gradeResults) {
+        lines.push(`- ${activity} (${date}): ${result}`);
       }
     }
   }

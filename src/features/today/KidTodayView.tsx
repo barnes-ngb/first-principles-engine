@@ -7,12 +7,19 @@ import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import LockIcon from '@mui/icons-material/Lock'
 import NoteIcon from '@mui/icons-material/Note'
-import { getDocs, query, where } from 'firebase/firestore'
+import Dialog from '@mui/material/Dialog'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
+import TextField from '@mui/material/TextField'
+import { addDoc, doc, getDocs, query, updateDoc, where } from 'firebase/firestore'
 
 import Page from '../../components/Page'
+import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
 import { artifactsCollection } from '../../core/firebase/firestore'
+import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import type { Artifact, ChecklistItem, Child, DayLog } from '../../core/types/domain'
+import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import MinecraftAvatar from '../minecraft/MinecraftAvatar'
 import ExplorerMap from './ExplorerMap'
 import KidCaptureForm from './KidCaptureForm'
@@ -117,6 +124,8 @@ export default function KidTodayView({
   const [selectedChoices, setSelectedChoices] = useState<Set<number>>(new Set())
   const [showCapture, setShowCapture] = useState<'photo' | 'note' | null>(null)
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
+  const [captureReflection, setCaptureReflection] = useState('')
 
   const checklist = useMemo(() => dayLog.checklist ?? [], [dayLog.checklist])
   const { mustDo, choose } = useMemo(() => categorizeItems(checklist), [checklist])
@@ -197,6 +206,51 @@ export default function KidTodayView({
     [checklist],
   )
 
+  const handleKidCapture = useCallback((index: number) => {
+    setCaptureItemIndex(index)
+    setCaptureReflection('')
+  }, [])
+
+  const handleKidPhotoCapture = useCallback(
+    async (file: File) => {
+      if (captureItemIndex === null || !dayLog.checklist) return
+      const item = dayLog.checklist[captureItemIndex]
+      try {
+        const artifact: Omit<Artifact, 'id'> = {
+          childId: child.id,
+          title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${child.name}'s work`,
+          type: EvidenceType.Photo,
+          dayLogId: today,
+          createdAt: new Date().toISOString(),
+          tags: {
+            engineStage: EngineStage.Build,
+            domain: '',
+            subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
+            location: 'Home',
+          },
+          ...(captureReflection ? { notes: captureReflection } : {}),
+        }
+        const docRef = await addDoc(artifactsCollection(familyId), artifact)
+        const ext = file.name.split('.').pop() ?? 'jpg'
+        const filename = generateFilename(ext)
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+
+        // Link artifact to checklist item
+        const updatedChecklist = dayLog.checklist.map((ci, i) =>
+          i === captureItemIndex ? { ...ci, evidenceArtifactId: docRef.id } : ci
+        )
+        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+        setArtifacts((prev) => [{ ...artifact, id: docRef.id, uri: downloadUrl } as Artifact, ...prev])
+        setCaptureItemIndex(null)
+        setCaptureReflection('')
+      } catch (err) {
+        console.error('Kid capture failed:', err)
+      }
+    },
+    [captureItemIndex, captureReflection, dayLog, child, today, familyId, persistDayLogImmediate],
+  )
+
   // No plan state
   if (checklist.length === 0) {
     return (
@@ -271,46 +325,66 @@ export default function KidTodayView({
           {mustDo.map((item) => {
             const absIndex = checklist.indexOf(item)
             return (
-              <Stack
-                key={absIndex}
-                direction="row"
-                alignItems="center"
-                spacing={1}
-                sx={{
-                  p: 1,
-                  borderRadius: 2,
-                  bgcolor: item.completed ? 'success.50' : 'background.paper',
-                  border: '1px solid',
-                  borderColor: item.completed ? 'success.200' : 'divider',
-                  minHeight: 56,
-                  cursor: 'pointer',
-                }}
-                onClick={() => handleToggleItem(absIndex)}
-              >
-                <Checkbox
-                  checked={item.completed}
+              <Box key={absIndex}>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  spacing={1}
                   sx={{
-                    '& .MuiSvgIcon-root': { fontSize: 28 },
-                    p: 0.5,
+                    p: 1,
+                    borderRadius: 2,
+                    bgcolor: item.completed ? 'success.50' : 'background.paper',
+                    border: '1px solid',
+                    borderColor: item.completed ? 'success.200' : 'divider',
+                    minHeight: 56,
+                    cursor: 'pointer',
                   }}
-                  color="success"
-                  tabIndex={-1}
-                />
-                <Typography
-                  variant="body1"
-                  sx={{
-                    flex: 1,
-                    textDecoration: item.completed ? 'line-through' : 'none',
-                    color: item.completed ? 'text.secondary' : 'text.primary',
-                    fontWeight: 500,
-                  }}
+                  onClick={() => handleToggleItem(absIndex)}
                 >
-                  {item.label}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {item.completed ? '✓' : getTimeLabel(item.estimatedMinutes ?? item.plannedMinutes)}
-                </Typography>
-              </Stack>
+                  <Checkbox
+                    checked={item.completed}
+                    sx={{
+                      '& .MuiSvgIcon-root': { fontSize: 28 },
+                      p: 0.5,
+                    }}
+                    color="success"
+                    tabIndex={-1}
+                  />
+                  <Typography
+                    variant="body1"
+                    sx={{
+                      flex: 1,
+                      textDecoration: item.completed ? 'line-through' : 'none',
+                      color: item.completed ? 'text.secondary' : 'text.primary',
+                      fontWeight: 500,
+                    }}
+                  >
+                    {item.label}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {item.completed ? '✓' : getTimeLabel(item.estimatedMinutes ?? item.plannedMinutes)}
+                  </Typography>
+                </Stack>
+                {/* Per-item capture for kids */}
+                {item.completed && !item.evidenceArtifactId && (
+                  <Box sx={{ ml: 5, mt: 0.5 }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<CameraAltIcon />}
+                      onClick={(e) => { e.stopPropagation(); handleKidCapture(absIndex) }}
+                      sx={{ minHeight: 36 }}
+                    >
+                      Show your work!
+                    </Button>
+                  </Box>
+                )}
+                {item.evidenceArtifactId && (
+                  <Typography variant="caption" color="success.main" sx={{ ml: 5, display: 'block' }}>
+                    Work captured!
+                  </Typography>
+                )}
+              </Box>
             )
           })}
         </Stack>
@@ -373,46 +447,66 @@ export default function KidTodayView({
               if (isSelected) {
                 // Selected choice acts like a must-do: checkable
                 return (
-                  <Stack
-                    key={absIndex}
-                    direction="row"
-                    alignItems="center"
-                    spacing={1}
-                    sx={{
-                      p: 1,
-                      borderRadius: 2,
-                      bgcolor: item.completed ? 'success.50' : 'info.50',
-                      border: '1px solid',
-                      borderColor: item.completed ? 'success.200' : 'info.200',
-                      minHeight: 56,
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => handleToggleItem(absIndex)}
-                  >
-                    <Checkbox
-                      checked={item.completed}
+                  <Box key={absIndex}>
+                    <Stack
+                      direction="row"
+                      alignItems="center"
+                      spacing={1}
                       sx={{
-                        '& .MuiSvgIcon-root': { fontSize: 28 },
-                        p: 0.5,
+                        p: 1,
+                        borderRadius: 2,
+                        bgcolor: item.completed ? 'success.50' : 'info.50',
+                        border: '1px solid',
+                        borderColor: item.completed ? 'success.200' : 'info.200',
+                        minHeight: 56,
+                        cursor: 'pointer',
                       }}
-                      color="success"
-                      tabIndex={-1}
-                    />
-                    <Typography
-                      variant="body1"
-                      sx={{
-                        flex: 1,
-                        textDecoration: item.completed ? 'line-through' : 'none',
-                        color: item.completed ? 'text.secondary' : 'text.primary',
-                        fontWeight: 500,
-                      }}
+                      onClick={() => handleToggleItem(absIndex)}
                     >
-                      {item.label}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {item.completed ? '✓' : getTimeLabel(item.estimatedMinutes ?? item.plannedMinutes)}
-                    </Typography>
-                  </Stack>
+                      <Checkbox
+                        checked={item.completed}
+                        sx={{
+                          '& .MuiSvgIcon-root': { fontSize: 28 },
+                          p: 0.5,
+                        }}
+                        color="success"
+                        tabIndex={-1}
+                      />
+                      <Typography
+                        variant="body1"
+                        sx={{
+                          flex: 1,
+                          textDecoration: item.completed ? 'line-through' : 'none',
+                          color: item.completed ? 'text.secondary' : 'text.primary',
+                          fontWeight: 500,
+                        }}
+                      >
+                        {item.label}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {item.completed ? '✓' : getTimeLabel(item.estimatedMinutes ?? item.plannedMinutes)}
+                      </Typography>
+                    </Stack>
+                    {/* Per-item capture for kids */}
+                    {item.completed && !item.evidenceArtifactId && (
+                      <Box sx={{ ml: 5, mt: 0.5 }}>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<CameraAltIcon />}
+                          onClick={(e) => { e.stopPropagation(); handleKidCapture(absIndex) }}
+                          sx={{ minHeight: 36 }}
+                        >
+                          Show your work!
+                        </Button>
+                      </Box>
+                    )}
+                    {item.evidenceArtifactId && (
+                      <Typography variant="caption" color="success.main" sx={{ ml: 5, display: 'block' }}>
+                        Work captured!
+                      </Typography>
+                    )}
+                  </Box>
                 )
               }
 
@@ -655,6 +749,27 @@ export default function KidTodayView({
           </Stack>
         )}
       </SectionCard>
+
+      {/* --- Per-item capture dialog for kids --- */}
+      <Dialog open={captureItemIndex !== null} onClose={() => setCaptureItemIndex(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          {captureItemIndex !== null ? dayLog.checklist?.[captureItemIndex]?.label?.replace(/\s*\(\d+m\)/, '') : ''}
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <PhotoCapture onCapture={(file: File) => { void handleKidPhotoCapture(file) }} />
+            <TextField
+              label="How did it go? (optional)"
+              placeholder={isLincoln ? 'I got the hard one!' : 'It was fun!'}
+              value={captureReflection}
+              onChange={(e) => setCaptureReflection(e.target.value)}
+              size="small"
+              multiline
+              rows={2}
+            />
+          </Stack>
+        </DialogContent>
+      </Dialog>
     </Page>
   )
 }
