@@ -426,7 +426,7 @@ export default function TodayPage() {
       })
 
       if (response?.message) {
-        openPrintWindow(response.message)
+        openPrintWindow(response.message, `${activeChild?.name ?? 'Student'} - Today`)
       }
     } catch (err) {
       console.error('Material generation failed:', err)
