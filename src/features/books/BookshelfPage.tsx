@@ -8,6 +8,7 @@ import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
@@ -15,6 +16,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
+import PrintIcon from '@mui/icons-material/Print'
 
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -22,6 +24,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Book } from '../../core/types/domain'
 import { COVER_STYLES } from './bookTypes'
 import { useBookshelf } from './useBook'
+import { printBook } from './printBook'
 
 export default function BookshelfPage() {
   const navigate = useNavigate()
@@ -39,6 +42,21 @@ export default function BookshelfPage() {
     isLincoln ? 'minecraft' : 'storybook',
   )
   const [creating, setCreating] = useState(false)
+  const [printingBookId, setPrintingBookId] = useState<string | null>(null)
+
+  const handlePrintBook = useCallback(
+    async (book: Book, e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (!book.id) return
+      setPrintingBookId(book.id)
+      try {
+        await printBook(book, childName)
+      } finally {
+        setPrintingBookId(null)
+      }
+    },
+    [childName],
+  )
 
   const handleCreateBook = useCallback(async () => {
     if (!newTitle.trim()) return
@@ -212,6 +230,21 @@ export default function BookshelfPage() {
                     sx={{ ml: 'auto', height: 20, fontSize: '0.65rem' }}
                   />
                 )}
+                <IconButton
+                  size="small"
+                  onClick={(e) => { void handlePrintBook(book, e) }}
+                  disabled={printingBookId === book.id}
+                  sx={{
+                    ml: book.status !== 'draft' ? 'auto' : 0,
+                    opacity: book.status === 'complete' ? 1 : 0.6,
+                  }}
+                >
+                  {printingBookId === book.id ? (
+                    <CircularProgress size={16} />
+                  ) : (
+                    <PrintIcon fontSize="small" />
+                  )}
+                </IconButton>
               </Stack>
             </Box>
           ))}

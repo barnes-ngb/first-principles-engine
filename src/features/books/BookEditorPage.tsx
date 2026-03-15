@@ -1,11 +1,16 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
-import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AddIcon from '@mui/icons-material/Add'
@@ -14,15 +19,38 @@ import MicIcon from '@mui/icons-material/Mic'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import StarIcon from '@mui/icons-material/Star'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
+import PrintIcon from '@mui/icons-material/Print'
 
 import Page from '../../components/Page'
+import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { BookPage } from '../../core/types/domain'
+import { useAI } from '../../core/ai/useAI'
+import type { BookPage, Sticker } from '../../core/types/domain'
+import type { ImageGenRequest } from '../../core/ai/useAI'
 import PageEditor from './PageEditor'
+import StickerPicker from './StickerPicker'
 import { useBook } from './useBook'
+import { printBook } from './printBook'
+
+type VoiceMode = 'record' | 'dictate'
+
+// Check Web Speech API availability
+const SpeechRecognitionClass =
+  typeof window !== 'undefined'
+    ? (window as unknown as Record<string, unknown>).SpeechRecognition ||
+      (window as unknown as Record<string, unknown>).webkitSpeechRecognition
+    : null
+const speechAvailable = !!SpeechRecognitionClass
+
+const AI_SCENE_STYLES = [
+  { value: 'minecraft', label: 'Minecraft' },
+  { value: 'storybook', label: 'Storybook' },
+  { value: 'comic', label: 'Comic Book' },
+  { value: 'realistic', label: 'Realistic' },
+] as const
 
 export default function BookEditorPage() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -42,11 +70,35 @@ export default function BookEditorPage() {
     updateBookMeta,
     addImageToPage,
     removeImageFromPage,
+    uploadAudio,
+    addAiImageToPage,
+    addStickerToPage,
   } = useBook(familyId, bookId)
+
+  const { generateImage, loading: aiLoading } = useAI()
 
   const [activePageIndex, setActivePageIndex] = useState(0)
   const [showPhotoCapture, setShowPhotoCapture] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
+
+  // Voice state
+  const [showVoicePanel, setShowVoicePanel] = useState(false)
+  const [voiceMode, setVoiceMode] = useState<VoiceMode>('record')
+  const [audioUploading, setAudioUploading] = useState(false)
+  const [isDictating, setIsDictating] = useState(false)
+  const recognitionRef = useRef<{ stop: () => void } | null>(null)
+
+  // AI Scene state
+  const [showAiDialog, setShowAiDialog] = useState(false)
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiStyle, setAiStyle] = useState(isLincoln ? 'minecraft' : 'storybook')
+  const [aiResult, setAiResult] = useState<{ url: string; storagePath: string } | null>(null)
+
+  // Sticker state
+  const [showStickerPicker, setShowStickerPicker] = useState(false)
+
+  // Print state
+  const [printing, setPrinting] = useState(false)
 
   const activePage = useMemo(
     () => book?.pages[activePageIndex] ?? null,
@@ -96,6 +148,103 @@ export default function BookEditorPage() {
     },
     [activePage, addImageToPage],
   )
+
+  // ── Voice: Audio recording ──────────────────────────────────────
+  const handleAudioCapture = useCallback(
+    async (blob: Blob) => {
+      if (!activePage) return
+      setAudioUploading(true)
+      await uploadAudio(activePage.id, blob)
+      setAudioUploading(false)
+      setShowVoicePanel(false)
+    },
+    [activePage, uploadAudio],
+  )
+
+  // ── Voice: Speech-to-text (dictation) ───────────────────────────
+  const startDictation = useCallback(() => {
+    if (!SpeechRecognitionClass || !activePage) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const recognition = new (SpeechRecognitionClass as any)() as any
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = 'en-US'
+
+    const baseText = activePage.text ?? ''
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (event: any) => {
+      let transcript = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript
+      }
+      updatePage(activePage.id, { text: baseText + transcript })
+    }
+    recognition.onerror = () => {
+      setIsDictating(false)
+    }
+    recognition.onend = () => {
+      setIsDictating(false)
+    }
+    recognition.start()
+    recognitionRef.current = recognition
+    setIsDictating(true)
+  }, [activePage, updatePage])
+
+  const stopDictation = useCallback(() => {
+    recognitionRef.current?.stop()
+    recognitionRef.current = null
+    setIsDictating(false)
+  }, [])
+
+  // ── AI Scene generation ─────────────────────────────────────────
+  const openAiDialog = useCallback(() => {
+    const prefill = activePage?.text
+      ? `Illustrate: ${activePage.text.slice(0, 100)}`
+      : ''
+    setAiPrompt(prefill)
+    setAiResult(null)
+    setShowAiDialog(true)
+  }, [activePage])
+
+  const handleGenerateScene = useCallback(async () => {
+    if (!aiPrompt.trim()) return
+    const result = await generateImage({
+      familyId,
+      prompt: aiPrompt.trim(),
+      style: `book-illustration-${aiStyle}` as ImageGenRequest['style'],
+      size: '1024x1024',
+    })
+    if (result) {
+      setAiResult({ url: result.url, storagePath: result.storagePath })
+    }
+  }, [aiPrompt, aiStyle, familyId, generateImage])
+
+  const handleUseAiImage = useCallback(() => {
+    if (!activePage || !aiResult) return
+    addAiImageToPage(activePage.id, aiResult.url, aiResult.storagePath, aiPrompt)
+    setShowAiDialog(false)
+    setAiResult(null)
+  }, [activePage, aiResult, aiPrompt, addAiImageToPage])
+
+  // ── Sticker ─────────────────────────────────────────────────────
+  const handleSelectSticker = useCallback(
+    (sticker: Sticker) => {
+      if (!activePage) return
+      addStickerToPage(activePage.id, sticker.url, sticker.storagePath, sticker.label)
+    },
+    [activePage, addStickerToPage],
+  )
+
+  // ── Print ───────────────────────────────────────────────────────
+  const handlePrint = useCallback(async () => {
+    if (!book) return
+    setPrinting(true)
+    try {
+      await printBook(book, childName)
+    } finally {
+      setPrinting(false)
+    }
+  }, [book, childName])
 
   if (loading) {
     return (
@@ -164,6 +313,16 @@ export default function BookEditorPage() {
           )}
         </Box>
         <SaveIndicator state={saveState} />
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={printing ? <CircularProgress size={16} /> : <PrintIcon />}
+          onClick={() => { void handlePrint() }}
+          disabled={printing}
+          sx={{ minHeight: 40 }}
+        >
+          {printing ? 'Building...' : 'Print'}
+        </Button>
       </Stack>
 
       {/* Page editor area */}
@@ -182,8 +341,80 @@ export default function BookEditorPage() {
             onUpdate={handlePageUpdate}
             onAddImage={handleAddImageFile}
             onRemoveImage={handleRemoveImage}
+            onReRecord={() => { setShowVoicePanel(true); setVoiceMode('record') }}
             childName={childName}
           />
+        </Box>
+      )}
+
+      {/* Voice panel (inline below editor) */}
+      {showVoicePanel && (
+        <Box sx={{ mt: 1, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+          <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+            <Chip
+              label="Record"
+              variant={voiceMode === 'record' ? 'filled' : 'outlined'}
+              onClick={() => setVoiceMode('record')}
+            />
+            {speechAvailable ? (
+              <Chip
+                label="Dictate"
+                variant={voiceMode === 'dictate' ? 'filled' : 'outlined'}
+                onClick={() => setVoiceMode('dictate')}
+              />
+            ) : (
+              <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
+                Dictation not available — use Record instead
+              </Typography>
+            )}
+          </Stack>
+
+          {voiceMode === 'record' ? (
+            <AudioRecorder
+              onCapture={(blob) => { void handleAudioCapture(blob) }}
+              uploading={audioUploading}
+            />
+          ) : (
+            <Stack spacing={2} alignItems="center">
+              {isDictating ? (
+                <>
+                  <Box
+                    sx={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: '50%',
+                      bgcolor: 'error.main',
+                      animation: 'pulse 1s infinite',
+                      '@keyframes pulse': {
+                        '0%': { opacity: 1 },
+                        '50%': { opacity: 0.4 },
+                        '100%': { opacity: 1 },
+                      },
+                    }}
+                  />
+                  <Typography variant="body2" color="text.secondary">
+                    Listening... speak your story
+                  </Typography>
+                  <Button variant="contained" color="error" onClick={stopDictation} sx={{ minHeight: 48 }}>
+                    Stop
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="outlined"
+                  startIcon={<MicIcon />}
+                  onClick={startDictation}
+                  sx={{ minHeight: 48 }}
+                >
+                  Speak your story
+                </Button>
+              )}
+            </Stack>
+          )}
+
+          <Button size="small" onClick={() => { setShowVoicePanel(false); stopDictation() }} sx={{ mt: 1 }}>
+            Close
+          </Button>
         </Box>
       )}
 
@@ -305,42 +536,30 @@ export default function BookEditorPage() {
         >
           Photo
         </Button>
-        <Tooltip title="Coming soon">
-          <span>
-            <Button
-              variant="outlined"
-              startIcon={<MicIcon />}
-              disabled
-              sx={{ minHeight: 48 }}
-            >
-              Speak
-            </Button>
-          </span>
-        </Tooltip>
-        <Tooltip title="Coming soon">
-          <span>
-            <Button
-              variant="outlined"
-              startIcon={<AutoAwesomeIcon />}
-              disabled
-              sx={{ minHeight: 48 }}
-            >
-              AI Scene
-            </Button>
-          </span>
-        </Tooltip>
-        <Tooltip title="Coming soon">
-          <span>
-            <Button
-              variant="outlined"
-              startIcon={<StarIcon />}
-              disabled
-              sx={{ minHeight: 48 }}
-            >
-              Sticker
-            </Button>
-          </span>
-        </Tooltip>
+        <Button
+          variant="outlined"
+          startIcon={<MicIcon />}
+          onClick={() => setShowVoicePanel(true)}
+          sx={{ minHeight: 48 }}
+        >
+          {speechAvailable ? 'Speak / Record' : 'Record'}
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<AutoAwesomeIcon />}
+          onClick={openAiDialog}
+          sx={{ minHeight: 48 }}
+        >
+          Make a picture
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<StarIcon />}
+          onClick={() => setShowStickerPicker(true)}
+          sx={{ minHeight: 48 }}
+        >
+          Sticker
+        </Button>
 
         {/* Delete page (only if > 1 page) */}
         {book.pages.length > 1 && (
@@ -355,6 +574,99 @@ export default function BookEditorPage() {
           </Button>
         )}
       </Stack>
+
+      {/* AI Scene generation dialog */}
+      <Dialog open={showAiDialog} onClose={() => setShowAiDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Make a Picture</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <TextField
+              label="Describe your picture"
+              placeholder="Describe your picture..."
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              fullWidth
+              multiline
+              minRows={2}
+              disabled={aiLoading}
+            />
+            <Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Style
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                {AI_SCENE_STYLES.map((s) => (
+                  <Chip
+                    key={s.value}
+                    label={s.label}
+                    variant={aiStyle === s.value ? 'filled' : 'outlined'}
+                    onClick={() => setAiStyle(s.value)}
+                    disabled={aiLoading}
+                  />
+                ))}
+              </Stack>
+            </Box>
+
+            {aiLoading && (
+              <Stack alignItems="center" spacing={1}>
+                <CircularProgress size={32} />
+                <Typography variant="body2" color="text.secondary">
+                  Creating your picture...
+                </Typography>
+              </Stack>
+            )}
+
+            {aiResult && (
+              <Box sx={{ textAlign: 'center' }}>
+                <Box
+                  component="img"
+                  src={aiResult.url}
+                  alt="Generated scene"
+                  sx={{
+                    maxWidth: '100%',
+                    maxHeight: 300,
+                    borderRadius: 2,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                  }}
+                />
+              </Box>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowAiDialog(false)} disabled={aiLoading}>
+            Cancel
+          </Button>
+          {aiResult ? (
+            <>
+              <Button onClick={() => { setAiResult(null) }} disabled={aiLoading}>
+                Try again
+              </Button>
+              <Button variant="contained" onClick={handleUseAiImage}>
+                Use this one
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="contained"
+              onClick={() => { void handleGenerateScene() }}
+              disabled={!aiPrompt.trim() || aiLoading}
+            >
+              Create!
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      {/* Sticker picker */}
+      <StickerPicker
+        open={showStickerPicker}
+        onClose={() => setShowStickerPicker(false)}
+        familyId={familyId}
+        onSelectSticker={handleSelectSticker}
+      />
     </Page>
   )
 }
+

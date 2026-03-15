@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
@@ -8,6 +9,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import CloseIcon from '@mui/icons-material/Close'
+import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 
 import type { BookPage } from '../../core/types/domain'
 import { PAGE_LAYOUTS } from './bookTypes'
@@ -17,6 +19,7 @@ interface PageEditorProps {
   onUpdate: (changes: Partial<BookPage>) => void
   onAddImage: (file: File) => void
   onRemoveImage?: (imageId: string) => void
+  onReRecord?: () => void
   childName: string
 }
 
@@ -25,6 +28,7 @@ export default function PageEditor({
   onUpdate,
   onAddImage,
   onRemoveImage,
+  onReRecord,
   childName,
 }: PageEditorProps) {
   const isLincoln = childName.toLowerCase() === 'lincoln'
@@ -156,6 +160,37 @@ export default function PageEditor({
           {imageSection}
           {textSection}
         </>
+      )}
+
+      {/* Audio playback */}
+      {page.audioUrl && (
+        <Box
+          sx={{
+            p: 1.5,
+            borderRadius: 2,
+            bgcolor: 'grey.50',
+            border: '1px solid',
+            borderColor: 'divider',
+          }}
+        >
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <VolumeUpIcon color="primary" fontSize="small" />
+            <Typography variant="body2" color="text.secondary" sx={{ flex: 'none' }}>
+              Listen to this page
+            </Typography>
+            <Box
+              component="audio"
+              controls
+              src={page.audioUrl}
+              sx={{ flex: 1, height: 36 }}
+            />
+          </Stack>
+          {onReRecord && (
+            <Button size="small" onClick={onReRecord} sx={{ mt: 0.5 }}>
+              Re-record
+            </Button>
+          )}
+        </Box>
       )}
 
       {/* Layout switcher */}
