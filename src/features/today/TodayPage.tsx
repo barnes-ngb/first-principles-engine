@@ -628,7 +628,7 @@ export default function TodayPage() {
             ...(captureNote ? { note: captureNote } : {}),
           },
         }
-        const docRef = await addDoc(artifactsCollection(familyId), artifact as any)
+        const docRef = await addDoc(artifactsCollection(familyId), artifact)
         const ext = file.name.split('.').pop() ?? 'jpg'
         const filename = generateFilename(ext)
         const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)

@@ -240,6 +240,8 @@ export interface ArtifactTags {
   subjectBucket: SubjectBucket
   location: string
   ladderRef?: { ladderId: string; rungId: string }
+  planItem?: string
+  note?: string
 }
 
 export interface Artifact {
