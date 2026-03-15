@@ -51,6 +51,7 @@ These are family/values documents maintained outside the repo. They inform AI pr
 | `src/core/types/enums.ts` | All enum-like `as const` objects and companion types |
 | `functions/src/ai/chat.ts` | Cloud Function: system prompt assembly, enriched context, quest prompt |
 | `src/features/quest/questTypes.ts` | Knowledge Mine types (QuestState, SessionQuestion, InteractiveSessionData) |
+| `src/features/quest/questAdaptive.ts` | Pure adaptive logic (level up/down, frustration limit, streak calculation) |
 
 ---
 
