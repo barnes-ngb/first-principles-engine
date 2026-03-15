@@ -261,6 +261,67 @@ export function useQuestSession() {
     [activeChildId, activeChild, familyId, chat],
   )
 
+  // ── End session ───────────────────────────────────────────────
+
+  const endSession = useCallback(
+    async (
+      questions: SessionQuestion[],
+      finalState: QuestState,
+      timedOut: boolean,
+    ) => {
+      // Stop timer
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+
+      setScreen(QuestScreen.Summary)
+
+      // Calculate streak (including this session)
+      const todayStr = getDateString(new Date())
+      const sessionsIncludingToday = [
+        { evaluatedAt: todayStr },
+        ...previousSessions,
+      ]
+      const newStreak = calculateStreak(sessionsIncludingToday)
+      setStreak(newStreak)
+
+      if (!activeChildId) return
+
+      // Save to Firestore
+      const timestamp = Date.now()
+      const docId = `interactive_${activeChildId}_${timestamp}`
+
+      const session: EvaluationSession & InteractiveSessionData = {
+        childId: activeChildId,
+        domain: 'reading',
+        status: 'complete',
+        messages: [],
+        findings,
+        recommendations: [],
+        summary: `Interactive reading quest: ${finalState.totalCorrect}/${finalState.totalQuestions} correct, reached level ${finalState.currentLevel}`,
+        evaluatedAt: new Date().toISOString(),
+        sessionType: 'interactive',
+        questions,
+        finalLevel: finalState.currentLevel,
+        totalCorrect: finalState.totalCorrect,
+        totalQuestions: finalState.totalQuestions,
+        diamondsMined: finalState.totalCorrect,
+        streakDays: newStreak.currentStreak,
+        timedOut,
+      }
+
+      try {
+        const ref = doc(evaluationSessionsCollection(familyId), docId)
+        await setDoc(ref, JSON.parse(JSON.stringify(session)))
+        setSessionSaved(true)
+      } catch (err) {
+        console.error('Failed to save quest session', err)
+      }
+    },
+    [activeChildId, familyId, findings, previousSessions],
+  )
+
   // ── Submit answer ─────────────────────────────────────────────
 
   const submitAnswer = useCallback(
@@ -405,68 +466,7 @@ export function useQuestSession() {
       questionStartRef.current = Date.now()
       setScreen(QuestScreen.Question)
     },
-    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat],
-  )
-
-  // ── End session ───────────────────────────────────────────────
-
-  const endSession = useCallback(
-    async (
-      questions: SessionQuestion[],
-      finalState: QuestState,
-      timedOut: boolean,
-    ) => {
-      // Stop timer
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-        timerRef.current = null
-      }
-
-      setScreen(QuestScreen.Summary)
-
-      // Calculate streak (including this session)
-      const todayStr = getDateString(new Date())
-      const sessionsIncludingToday = [
-        { evaluatedAt: todayStr },
-        ...previousSessions,
-      ]
-      const newStreak = calculateStreak(sessionsIncludingToday)
-      setStreak(newStreak)
-
-      if (!activeChildId) return
-
-      // Save to Firestore
-      const timestamp = Date.now()
-      const docId = `interactive_${activeChildId}_${timestamp}`
-
-      const session: EvaluationSession & InteractiveSessionData = {
-        childId: activeChildId,
-        domain: 'reading',
-        status: 'complete',
-        messages: [],
-        findings,
-        recommendations: [],
-        summary: `Interactive reading quest: ${finalState.totalCorrect}/${finalState.totalQuestions} correct, reached level ${finalState.currentLevel}`,
-        evaluatedAt: new Date().toISOString(),
-        sessionType: 'interactive',
-        questions,
-        finalLevel: finalState.currentLevel,
-        totalCorrect: finalState.totalCorrect,
-        totalQuestions: finalState.totalQuestions,
-        diamondsMined: finalState.totalCorrect,
-        streakDays: newStreak.currentStreak,
-        timedOut,
-      }
-
-      try {
-        const ref = doc(evaluationSessionsCollection(familyId), docId)
-        await setDoc(ref, JSON.parse(JSON.stringify(session)))
-        setSessionSaved(true)
-      } catch (err) {
-        console.error('Failed to save quest session', err)
-      }
-    },
-    [activeChildId, familyId, findings, previousSessions],
+    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
   )
 
   // ── Reset to intro ────────────────────────────────────────────
