@@ -102,6 +102,7 @@ interface EnrichedContext {
   hoursTarget: number;
   engagementSummaries: EngagementSummary[];
   gradeResults: GradeResult[];
+  draftBookCount: number;
 }
 
 // ── Date helpers ────────────────────────────────────────────────
@@ -359,19 +360,34 @@ export async function loadGradeResults(
   return results;
 }
 
+/** Load draft book count for child. */
+export async function loadDraftBookCount(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<number> {
+  const snap = await db
+    .collection(`families/${familyId}/books`)
+    .where("childId", "==", childId)
+    .where("status", "==", "draft")
+    .get();
+  return snap.size;
+}
+
 /** Load all enriched context in parallel. Only called for plan/evaluate. */
 export async function loadEnrichedContext(
   db: Firestore,
   familyId: string,
   childId: string,
 ): Promise<EnrichedContext> {
-  const [sessions, workbookPaces, week, hours, engagementSummaries, gradeResults] = await Promise.all([
+  const [sessions, workbookPaces, week, hours, engagementSummaries, gradeResults, draftBookCount] = await Promise.all([
     loadRecentSessions(db, familyId, childId),
     loadWorkbookPaces(db, familyId, childId),
     loadWeekContext(db, familyId),
     loadHoursSummary(db, familyId, childId),
     loadEngagementSummary(db, familyId, childId),
     loadGradeResults(db, familyId, childId),
+    loadDraftBookCount(db, familyId, childId),
   ]);
 
   return {
@@ -382,6 +398,7 @@ export async function loadEnrichedContext(
     hoursTarget: 1000, // MO target hours
     engagementSummaries,
     gradeResults,
+    draftBookCount,
   };
 }
 
@@ -508,6 +525,14 @@ export function buildSystemPrompt(
       }
     }
 
+    // BOOK STATUS
+    lines.push("", "BOOK STATUS:");
+    if (enriched.draftBookCount > 0) {
+      lines.push(`Draft books in progress: ${enriched.draftBookCount}. Suggest "Continue your book" as a choose activity instead of "Make a Book".`);
+    } else {
+      lines.push(`No draft books. "Make a Book" is available as a choose activity.`);
+    }
+
     // WORK REVIEW RESULTS
     if (enriched.gradeResults.length > 0) {
       lines.push("", "WORK REVIEW RESULTS (this period):");
@@ -584,6 +609,8 @@ Rules:
 - "estimatedMinutes" must be a positive number.
 - "mvdEssential" must be a boolean. Mark the 3-4 core items per day as true (Formation, core math, core reading, speech if applicable).
 - "category" must be either "must-do" or "choose". Core academics are "must-do", elective/fun activities are "choose".
+- "Make a Book" can be included as a "choose" category item. SubjectBucket: "LanguageArts". EstimatedMinutes: 15-20. It counts as both Language Arts and Art for compliance hours.
+- If the child has a draft book in progress (see BOOK STATUS in context), suggest "Continue your book" instead of "Make a Book".
 - "skipSuggestions" is an array of { "action": "skip"|"modify", "reason": "string", "replacement": "string", "evidence": "string" }.
 
 When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.`;

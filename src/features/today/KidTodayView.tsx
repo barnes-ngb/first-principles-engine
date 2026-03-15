@@ -13,6 +13,9 @@ import DialogTitle from '@mui/material/DialogTitle'
 import TextField from '@mui/material/TextField'
 import { addDoc, doc, getDocs, query, updateDoc, where } from 'firebase/firestore'
 
+import { useNavigate } from 'react-router-dom'
+import MenuBookIcon from '@mui/icons-material/MenuBook'
+
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
@@ -23,6 +26,7 @@ import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums
 import MinecraftAvatar from '../minecraft/MinecraftAvatar'
 import MinecraftXpBar from '../minecraft/MinecraftXpBar'
 import { useXpLedger } from '../minecraft/useXpLedger'
+import { useDraftBook } from '../books/useBook'
 import ExplorerMap from './ExplorerMap'
 import KidCaptureForm from './KidCaptureForm'
 import { calculateXp } from './xp'
@@ -123,11 +127,15 @@ export default function KidTodayView({
   isMvd,
   weekFocus,
 }: KidTodayViewProps) {
+  const navigate = useNavigate()
   const [selectedChoices, setSelectedChoices] = useState<Set<number>>(new Set())
   const [showCapture, setShowCapture] = useState<'photo' | 'note' | null>(null)
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
   const [captureReflection, setCaptureReflection] = useState('')
+
+  // Draft book for "Continue your book" card
+  const { draftBook } = useDraftBook(familyId, child.id)
 
   const checklist = useMemo(() => dayLog.checklist ?? [], [dayLog.checklist])
   const { mustDo, choose } = useMemo(() => categorizeItems(checklist), [checklist])
@@ -332,6 +340,7 @@ export default function KidTodayView({
         <Stack spacing={1}>
           {mustDo.map((item) => {
             const absIndex = checklist.indexOf(item)
+            const isBookItem = /book/i.test(item.label)
             return (
               <Box key={absIndex}>
                 <Stack
@@ -367,12 +376,30 @@ export default function KidTodayView({
                       fontWeight: 500,
                     }}
                   >
+                    {isBookItem && <MenuBookIcon sx={{ fontSize: 18, mr: 0.5, verticalAlign: 'text-bottom' }} />}
                     {item.label}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     {item.completed ? '✓' : getTimeLabel(item.estimatedMinutes ?? item.plannedMinutes)}
                   </Typography>
                 </Stack>
+                {/* Book item quick link */}
+                {isBookItem && !item.completed && (
+                  <Box sx={{ ml: 5, mt: 0.5 }}>
+                    <Button
+                      size="small"
+                      variant="text"
+                      startIcon={<MenuBookIcon />}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        navigate(item.bookId ? `/books/${item.bookId}` : '/books')
+                      }}
+                      sx={{ minHeight: 32, textTransform: 'none' }}
+                    >
+                      Go to My Books
+                    </Button>
+                  </Box>
+                )}
                 {/* Per-item capture for kids */}
                 {item.completed && !item.evidenceArtifactId && (
                   <Box sx={{ ml: 5, mt: 0.5 }}>
@@ -451,6 +478,7 @@ export default function KidTodayView({
               const absIndex = getAbsoluteIndex(item)
               const canSelect = mustDoDone && (isSelected || selectedChoices.size < maxChoices)
               const isLocked = !mustDoDone
+              const isChooseBookItem = /book/i.test(item.label)
 
               if (isSelected) {
                 // Selected choice acts like a must-do: checkable
@@ -489,12 +517,30 @@ export default function KidTodayView({
                           fontWeight: 500,
                         }}
                       >
+                        {isChooseBookItem && <MenuBookIcon sx={{ fontSize: 18, mr: 0.5, verticalAlign: 'text-bottom' }} />}
                         {item.label}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
                         {item.completed ? '✓' : getTimeLabel(item.estimatedMinutes ?? item.plannedMinutes)}
                       </Typography>
                     </Stack>
+                    {/* Book item quick link */}
+                    {isChooseBookItem && !item.completed && (
+                      <Box sx={{ ml: 5, mt: 0.5 }}>
+                        <Button
+                          size="small"
+                          variant="text"
+                          startIcon={<MenuBookIcon />}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            navigate(item.bookId ? `/books/${item.bookId}` : '/books')
+                          }}
+                          sx={{ minHeight: 32, textTransform: 'none' }}
+                        >
+                          Go to My Books
+                        </Button>
+                      </Box>
+                    )}
                     {/* Per-item capture for kids */}
                     {item.completed && !item.evidenceArtifactId && (
                       <Box sx={{ ml: 5, mt: 0.5 }}>
@@ -560,6 +606,7 @@ export default function KidTodayView({
                       fontWeight: 500,
                     }}
                   >
+                    {isChooseBookItem && <MenuBookIcon sx={{ fontSize: 18, mr: 0.5, verticalAlign: 'text-bottom' }} />}
                     {item.label}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
@@ -570,6 +617,61 @@ export default function KidTodayView({
             })}
           </Stack>
         </SectionCard>
+      )}
+
+      {/* ── CONTINUE YOUR BOOK ── */}
+      {draftBook && (
+        <Box
+          onClick={() => navigate(`/books/${draftBook.id}`)}
+          sx={{
+            p: 2,
+            borderRadius: 2,
+            border: '1px solid',
+            borderColor: isLincoln ? 'grey.700' : 'info.200',
+            bgcolor: isLincoln ? 'rgba(0,0,0,0.6)' : 'info.50',
+            cursor: 'pointer',
+            '&:hover': { borderColor: 'primary.main' },
+          }}
+        >
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <MenuBookIcon sx={{ color: isLincoln ? '#FCDB5B' : 'info.main', fontSize: 28 }} />
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography
+                variant="body1"
+                sx={{
+                  fontWeight: 600,
+                  ...(isLincoln
+                    ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.55rem', color: '#FFFFFF' }
+                    : {}),
+                }}
+              >
+                {isLincoln ? 'Continue crafting your book' : 'Continue your book'}
+              </Typography>
+              <Typography
+                variant="body2"
+                sx={{
+                  color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.secondary',
+                  ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.4rem' } : {}),
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                &ldquo;{draftBook.title}&rdquo; — {draftBook.pages.length} page{draftBook.pages.length !== 1 ? 's' : ''}
+              </Typography>
+            </Box>
+            <Typography
+              variant="body2"
+              sx={{
+                color: isLincoln ? '#FCDB5B' : 'info.main',
+                fontWeight: 600,
+                ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.45rem' } : {}),
+              }}
+            >
+              Open
+            </Typography>
+          </Stack>
+        </Box>
       )}
 
       {/* ── CELEBRATION ── */}

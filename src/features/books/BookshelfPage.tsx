@@ -149,7 +149,7 @@ export default function BookshelfPage() {
                 p: 2,
                 borderRadius: 2,
                 border: '1px solid',
-                borderColor: 'divider',
+                borderColor: book.isTogetherBook ? 'info.300' : 'divider',
                 bgcolor: isLincoln ? 'grey.900' : 'background.paper',
                 color: isLincoln ? 'grey.100' : 'text.primary',
                 cursor: 'pointer',
@@ -223,11 +223,18 @@ export default function BookshelfPage() {
                 <Typography variant="caption" color="text.secondary">
                   {formatDate(book.updatedAt)}
                 </Typography>
+                {book.isTogetherBook && (
+                  <Chip
+                    label="Together"
+                    size="small"
+                    sx={{ height: 20, fontSize: '0.65rem', bgcolor: 'info.100', color: 'info.800' }}
+                  />
+                )}
                 {book.status === 'draft' && (
                   <Chip
                     label="Draft"
                     size="small"
-                    sx={{ ml: 'auto', height: 20, fontSize: '0.65rem' }}
+                    sx={{ ml: book.isTogetherBook ? 0 : 'auto', height: 20, fontSize: '0.65rem' }}
                   />
                 )}
                 <IconButton

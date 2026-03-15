@@ -225,6 +225,8 @@ export interface ChecklistItem {
   estimatedMinutes?: number
   /** Linked lesson card document ID (auto-generated on plan apply). */
   lessonCardId?: string
+  /** Linked book ID (for "Make a Book" plan items). */
+  bookId?: string
   /** Engagement feedback: how the activity went */
   engagement?: 'engaged' | 'okay' | 'struggled' | 'refused'
   /** Linked evidence artifact document ID (from per-item capture). */
@@ -972,6 +974,10 @@ export interface Book {
   subjectBuckets: SubjectBucket[]
   /** Total editing time in minutes (accumulated across sessions) */
   totalMinutes?: number
+  /** When true, this is a Together Time book for both kids */
+  isTogetherBook?: boolean
+  /** All contributing children (used for Together Books) */
+  contributorIds?: string[]
 }
 
 export interface BookPage {
@@ -988,6 +994,8 @@ export interface BookPage {
   layout: 'image-top' | 'image-left' | 'full-image' | 'text-only'
   createdAt: string
   updatedAt: string
+  /** Which child contributed this page (for Together Books) */
+  contributorId?: string
 }
 
 export interface PageImage {
