@@ -10,6 +10,7 @@ import {
 import type {
   AIUsageEntry,
   Artifact,
+  Book,
   Child,
   DadLabReport,
   DailyPlan,
@@ -28,6 +29,7 @@ import type {
   Project,
   Session,
   SkillSnapshot,
+  Sticker,
   WeekPlan,
   WeeklyReview,
   WeeklyScore,
@@ -338,6 +340,14 @@ export const xpLedgerCollection = (
   familyId: string,
 ): CollectionReference<XpLedger> =>
   collection(db, `families/${familyId}/xpLedger`) as CollectionReference<XpLedger>
+
+// ── Books (Book Builder) ──────────────────────────────────────
+
+export const booksCollection = (familyId: string): CollectionReference<Book> =>
+  collection(db, `families/${familyId}/books`) as CollectionReference<Book>
+
+export const stickerLibraryCollection = (familyId: string): CollectionReference<Sticker> =>
+  collection(db, `families/${familyId}/stickerLibrary`) as CollectionReference<Sticker>
 
 // ── AI Usage ────────────────────────────────────────────────────
 

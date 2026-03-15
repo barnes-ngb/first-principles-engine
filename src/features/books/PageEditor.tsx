@@ -1,0 +1,181 @@
+import { useCallback } from 'react'
+import Box from '@mui/material/Box'
+import IconButton from '@mui/material/IconButton'
+import Stack from '@mui/material/Stack'
+import TextField from '@mui/material/TextField'
+import ToggleButton from '@mui/material/ToggleButton'
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
+import Typography from '@mui/material/Typography'
+import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
+import CloseIcon from '@mui/icons-material/Close'
+
+import type { BookPage } from '../../core/types/domain'
+import { PAGE_LAYOUTS } from './bookTypes'
+
+interface PageEditorProps {
+  page: BookPage
+  onUpdate: (changes: Partial<BookPage>) => void
+  onAddImage: (file: File) => void
+  onRemoveImage?: (imageId: string) => void
+  childName: string
+}
+
+export default function PageEditor({
+  page,
+  onUpdate,
+  onAddImage,
+  onRemoveImage,
+  childName,
+}: PageEditorProps) {
+  const isLincoln = childName.toLowerCase() === 'lincoln'
+  const firstImage = page.images[0] ?? null
+
+  const handleTextChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      onUpdate({ text: e.target.value })
+    },
+    [onUpdate],
+  )
+
+  const handleLayoutChange = useCallback(
+    (_: React.MouseEvent<HTMLElement>, value: BookPage['layout'] | null) => {
+      if (value) onUpdate({ layout: value })
+    },
+    [onUpdate],
+  )
+
+  const handleFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (file) onAddImage(file)
+      e.target.value = ''
+    },
+    [onAddImage],
+  )
+
+  const isFullImage = page.layout === 'full-image'
+  const isTextOnly = page.layout === 'text-only'
+  const isImageLeft = page.layout === 'image-left'
+
+  const imageSection = !isTextOnly && (
+    <Box
+      sx={{
+        width: isImageLeft ? '50%' : '100%',
+        minHeight: isFullImage ? 300 : 200,
+        bgcolor: 'grey.100',
+        borderRadius: 2,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      {firstImage ? (
+        <>
+          <Box
+            component="img"
+            src={firstImage.url}
+            alt={firstImage.label ?? 'Page image'}
+            sx={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              maxHeight: isFullImage ? 400 : 250,
+            }}
+          />
+          {onRemoveImage && (
+            <IconButton
+              size="small"
+              onClick={() => onRemoveImage(firstImage.id)}
+              sx={{
+                position: 'absolute',
+                top: 4,
+                right: 4,
+                bgcolor: 'rgba(0,0,0,0.5)',
+                color: 'white',
+                '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' },
+              }}
+            >
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          )}
+        </>
+      ) : (
+        <label style={{ cursor: 'pointer', textAlign: 'center', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+          />
+          <Stack alignItems="center" spacing={1}>
+            <AddPhotoAlternateIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
+            <Typography variant="body2" color="text.secondary">
+              Add a picture
+            </Typography>
+          </Stack>
+        </label>
+      )}
+    </Box>
+  )
+
+  const textSection = !isFullImage && (
+    <TextField
+      multiline
+      minRows={4}
+      maxRows={10}
+      fullWidth
+      value={page.text ?? ''}
+      onChange={handleTextChange}
+      placeholder={
+        isLincoln
+          ? 'Write your story...'
+          : 'What happens next in your story?'
+      }
+      sx={{
+        width: isImageLeft ? '50%' : '100%',
+        '& .MuiInputBase-root': {
+          fontSize: '1.1rem',
+          lineHeight: 1.6,
+        },
+      }}
+    />
+  )
+
+  return (
+    <Stack spacing={2}>
+      {/* Page content area */}
+      {isImageLeft ? (
+        <Stack direction="row" spacing={2} sx={{ alignItems: 'flex-start' }}>
+          {imageSection}
+          {textSection}
+        </Stack>
+      ) : (
+        <>
+          {imageSection}
+          {textSection}
+        </>
+      )}
+
+      {/* Layout switcher */}
+      <Box>
+        <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+          Page layout
+        </Typography>
+        <ToggleButtonGroup
+          value={page.layout}
+          exclusive
+          onChange={handleLayoutChange}
+          size="small"
+        >
+          {PAGE_LAYOUTS.map((layout) => (
+            <ToggleButton key={layout.value} value={layout.value} sx={{ textTransform: 'none', px: 1.5 }}>
+              {layout.label}
+            </ToggleButton>
+          ))}
+        </ToggleButtonGroup>
+      </Box>
+    </Stack>
+  )
+}

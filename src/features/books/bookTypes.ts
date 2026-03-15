@@ -1,0 +1,35 @@
+import type { BookPage } from '../../core/types/domain'
+
+export const COVER_STYLES = [
+  { value: 'storybook', label: 'Storybook' },
+  { value: 'minecraft', label: 'Minecraft' },
+  { value: 'comic', label: 'Comic Book' },
+  { value: 'photo', label: 'Photo Album' },
+] as const
+
+export const PAGE_LAYOUTS = [
+  { value: 'image-top', label: 'Picture on top' },
+  { value: 'image-left', label: 'Picture on left' },
+  { value: 'full-image', label: 'Full page picture' },
+  { value: 'text-only', label: 'Words only' },
+] as const
+
+export function generatePageId(): string {
+  return `page_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+}
+
+export function generateImageId(): string {
+  return `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+}
+
+export function createEmptyPage(pageNumber: number): BookPage {
+  return {
+    id: generatePageId(),
+    pageNumber,
+    text: '',
+    images: [],
+    layout: 'image-top',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+}
