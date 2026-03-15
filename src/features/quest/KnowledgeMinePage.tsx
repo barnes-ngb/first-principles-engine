@@ -5,8 +5,11 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import Page from '../../components/Page'
+import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { EvaluationDomain } from '../../core/types/enums'
+import MinecraftAvatar from '../minecraft/MinecraftAvatar'
+import { useXpLedger } from '../minecraft/useXpLedger'
 import QuestQuestionScreen, { QuestFeedback, QuestLoading } from './ReadingQuest'
 import QuestSummary from './QuestSummary'
 import type { QuestDomainConfig } from './questTypes'
@@ -60,8 +63,10 @@ function daysAgo(dateStr: string | null): string {
 }
 
 export default function KnowledgeMinePage() {
-  const { activeChild } = useActiveChild()
+  const { activeChild, activeChildId } = useActiveChild()
+  const familyId = useFamilyId()
   const quest = useQuestSession()
+  const xpLedger = useXpLedger(familyId, activeChildId ?? '')
 
   const childName = activeChild?.name || 'Explorer'
 
@@ -94,12 +99,40 @@ export default function KnowledgeMinePage() {
               fontFamily: MC.font,
               fontSize: '0.5rem',
               color: MC.white,
-              mb: 3,
+              mb: 2,
               lineHeight: 1.8,
             }}
           >
             Hey {childName}! Ready to mine some knowledge?
           </Typography>
+
+          {/* Avatar + armor tier */}
+          {!xpLedger.loading && (
+            <Stack direction="row" alignItems="center" justifyContent="center" spacing={2} sx={{ mb: 3 }}>
+              <MinecraftAvatar xp={xpLedger.totalXp} scale={2} />
+              <Box sx={{ textAlign: 'left' }}>
+                <Typography
+                  sx={{
+                    fontFamily: MC.font,
+                    fontSize: '0.45rem',
+                    color: xpLedger.armorTier.color,
+                    lineHeight: 1.8,
+                  }}
+                >
+                  {xpLedger.armorTier.title}
+                </Typography>
+                <Typography
+                  sx={{
+                    fontFamily: MC.font,
+                    fontSize: '0.4rem',
+                    color: MC.stone,
+                  }}
+                >
+                  {xpLedger.totalXp} XP
+                </Typography>
+              </Box>
+            </Stack>
+          )}
 
           {/* Domain cards */}
           <Stack spacing={1.5} sx={{ mb: 3 }}>
@@ -246,6 +279,7 @@ export default function KnowledgeMinePage() {
           finalLevel={quest.questState.currentLevel}
           streak={quest.streak}
           findings={quest.findings}
+          previousTotalXp={Math.max(0, xpLedger.totalXp - quest.questState.totalCorrect * 2)}
           onDone={quest.resetToIntro}
           onTryAgain={() => {
             quest.resetToIntro()
