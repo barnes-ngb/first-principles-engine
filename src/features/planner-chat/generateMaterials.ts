@@ -20,7 +20,7 @@ ${snapshot?.prioritySkills?.length ? `Skill focus: ${snapshot.prioritySkills.map
 ${theme ? `Week theme: ${theme}` : ''}
 
 ACTIVITIES:
-${items.map((i) => `- ${i.title} (${i.estimatedMinutes}m, ${i.subjectBucket})${i.skipGuidance ? ` [Skip guidance: ${i.skipGuidance}]` : ''}`).join('\n')}
+${items.map((i) => `- ${i.title} (${i.estimatedMinutes}m, ${i.subjectBucket})${i.skipSuggestion ? ` [Skip: ${i.skipSuggestion.reason}]` : ''}`).join('\n')}
 
 CRITICAL RULES:
 1. Return ONLY valid HTML. No markdown fences, no backticks, no explanation outside the HTML.
