@@ -20,6 +20,7 @@ const TaskType = {
   Evaluate: "evaluate",
   Generate: "generate",
   Chat: "chat",
+  Quest: "quest",
 } as const;
 type TaskType = (typeof TaskType)[keyof typeof TaskType];
 
@@ -46,6 +47,7 @@ function modelForTask(taskType: TaskType): string {
   switch (taskType) {
     case TaskType.Plan:
     case TaskType.Evaluate:
+    case TaskType.Quest:
       return "claude-sonnet-4-5-20250929";
     case TaskType.Generate:
     case TaskType.Chat:
@@ -526,6 +528,11 @@ export function buildSystemPrompt(
     lines.push("", buildEvaluationPrompt(domain || "reading"));
   }
 
+  // ── Quest interactive prompt ────────────────────────────────
+  if (taskType === TaskType.Quest) {
+    lines.push("", buildQuestPrompt(domain || "reading"));
+  }
+
   return lines.join("\n");
 }
 
@@ -722,6 +729,71 @@ The <complete> block's evidenceDefinitions should define what mastery looks like
 Evaluate the child's ${domain} skills using a structured diagnostic approach. Walk the parent through ONE step at a time. After each parent response, include a <finding> block with JSON containing skill, status (mastered/emerging/not-yet/not-tested), evidence, and notes. When done, output a <complete> block with summary, recommendations array, and nextEvalDate (YYYY-MM-DD, 4-6 weeks from ${today}).`;
 }
 
+// ── Quest interactive prompt ──────────────────────────────────
+
+function buildQuestPrompt(domain: string): string {
+  if (domain === "reading") {
+    return `ROLE: You are a Minecraft-themed Quest Master running an interactive reading assessment for Lincoln (10, neurodivergent, speech challenges). Lincoln is answering directly on his tablet — keep everything fun, encouraging, and in his language.
+
+INTERACTION FORMAT:
+- You receive JSON messages with "action": "start_quest" or "action": "answer" plus session state (currentLevel, consecutiveCorrect, consecutiveWrong, totalQuestions, totalCorrect).
+- You respond with ONLY a <quest> JSON block. No other text, no markdown, no explanation.
+
+READING SKILL PROGRESSION:
+- Level 1: Letter sounds (consonant sounds, short vowels)
+- Level 2: CVC blending by word family (-at, -an, -it, -ig, -ot, -ug, -en, -op)
+- Level 3: Digraphs (sh, ch, th, wh)
+- Level 4: Consonant blends (bl, cr, st, tr, fl, gr, nd, nk)
+- Level 5: CVCe / long vowels (silent-e pattern: make, bike, home, cute)
+- Level 6: Vowel teams (ea, ai, oa, ee, oo)
+
+QUESTION GENERATION RULES:
+1. Generate ONE multiple-choice question at a time
+2. Always provide exactly 3 options
+3. Use plausible distractors: same word family, similar-looking words, or common confusions
+4. Vary the position of the correct answer across questions (don't always put it first or last)
+5. Include phonemeDisplay for blending questions (Levels 2-4): show sounds like "/d/ /o/ /g/"
+6. Focus on comprehension, NOT pronunciation (Lincoln has speech challenges)
+7. Keep prompts short and clear — large text on a tablet screen
+8. Use the child's skill snapshot and recent evaluation data (provided in context) to target the right difficulty
+
+ADAPTIVE BEHAVIOR:
+- On start_quest: begin at the level suggested by recent evaluation data, or Level 2 if no data
+- After correct answer at current level: stay at level, vary the skill within the level
+- After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up
+- After LEVEL_DOWN (2 wrong in a row): drop to easier skills at the lower level
+- Generate a finding only when you have 2+ data points for a skill (not after every question)
+
+FINDING GENERATION:
+- Include a "finding" field in the quest JSON (null when insufficient data)
+- When you have enough evidence (2+ questions on related skills), set finding to:
+  {"skill": "phonics.cvc.short-o", "status": "mastered"|"emerging"|"not-yet", "evidence": "Read 3/3 -ot words correctly", "testedAt": "${new Date().toISOString()}"}
+
+RESPONSE FORMAT — respond with ONLY this:
+<quest>
+{
+  "level": 2,
+  "skill": "phonics.cvc.short-o",
+  "prompt": "What word is this?",
+  "phonemeDisplay": "/d/ /o/ /g/",
+  "options": ["dig", "dog", "dug"],
+  "correctAnswer": "dog",
+  "encouragement": "The middle sound is /o/ like in 'hot'!",
+  "finding": null
+}
+</quest>
+
+IMPORTANT:
+- The <quest> block must contain VALID JSON
+- "encouragement" is shown after a wrong answer — make it helpful and kind, never shaming
+- Do NOT include any text outside the <quest> block
+- Respond to EVERY message with exactly ONE <quest> block`;
+  }
+
+  // Generic fallback for non-reading domains
+  return `ROLE: You are a Minecraft-themed Quest Master running an interactive ${domain} assessment. Generate ONE multiple-choice question at a time as a <quest> JSON block with fields: level, skill, prompt, options (3 choices), correctAnswer, encouragement, finding (null or EvaluationFinding). Respond with ONLY the <quest> block.`;
+}
+
 // ── Callable Cloud Function ─────────────────────────────────────
 
 export const chat = onCall(
@@ -794,7 +866,7 @@ export const chat = onCall(
 
     // ── Load enriched context for plan/evaluate only ────────────
     const needsEnrichedContext =
-      taskType === TaskType.Plan || taskType === TaskType.Evaluate;
+      taskType === TaskType.Plan || taskType === TaskType.Evaluate || taskType === TaskType.Quest;
     let enriched: EnrichedContext | undefined;
     if (needsEnrichedContext) {
       try {
@@ -807,7 +879,7 @@ export const chat = onCall(
 
     // ── Load recent evaluation for plan context ──────────────
     let recentEvalContext = "";
-    if (taskType === TaskType.Plan) {
+    if (taskType === TaskType.Plan || taskType === TaskType.Quest) {
       try {
         const evalQuery = await db
           .collection(`families/${familyId}/evaluationSessions`)
@@ -891,7 +963,9 @@ export const chat = onCall(
         max_tokens:
           taskType === TaskType.Plan || taskType === TaskType.Evaluate
             ? 4096
-            : 1024,
+            : taskType === TaskType.Quest
+              ? 1024
+              : 1024,
         system: systemPrompt,
         messages: messages.map((m) => ({
           role: m.role,
