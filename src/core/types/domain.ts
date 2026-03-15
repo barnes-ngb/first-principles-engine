@@ -22,6 +22,7 @@ import type {
   SessionResult,
   SessionSymbol,
   SkillLevel,
+  StickerCategory,
   StreamKey,
   StreamId,
   SubjectBucket,
@@ -953,4 +954,61 @@ export interface XpLedger {
   totalXp: number
   sources: XpLedgerSources
   lastUpdatedAt: string
+}
+
+// ── Book Builder ──────────────────────────────────────────────
+
+export interface Book {
+  id?: string
+  childId: string
+  title: string
+  coverImageUrl?: string
+  coverStyle?: 'minecraft' | 'storybook' | 'comic' | 'photo'
+  pages: BookPage[]
+  status: 'draft' | 'complete'
+  createdAt: string
+  updatedAt: string
+  /** Subject tags for compliance hours logging */
+  subjectBuckets: SubjectBucket[]
+  /** Total editing time in minutes (accumulated across sessions) */
+  totalMinutes?: number
+}
+
+export interface BookPage {
+  id: string
+  pageNumber: number
+  /** Story text for this page */
+  text?: string
+  /** Voice narration audio URL (Firebase Storage) */
+  audioUrl?: string
+  audioStoragePath?: string
+  /** Images on this page (photos, AI scenes, stickers) */
+  images: PageImage[]
+  /** Page layout */
+  layout: 'image-top' | 'image-left' | 'full-image' | 'text-only'
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PageImage {
+  id: string
+  url: string
+  storagePath?: string
+  type: 'photo' | 'ai-generated' | 'sticker'
+  /** AI prompt used to generate this image */
+  prompt?: string
+  /** Label for accessibility and display */
+  label?: string
+}
+
+export interface Sticker {
+  id?: string
+  url: string
+  storagePath: string
+  label: string
+  category: StickerCategory
+  /** null = shared between kids, childId = personal */
+  childId?: string | null
+  prompt?: string
+  createdAt: string
 }
