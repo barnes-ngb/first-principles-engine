@@ -21,6 +21,9 @@ import StarIcon from '@mui/icons-material/Star'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import PrintIcon from '@mui/icons-material/Print'
 
+import FormControlLabel from '@mui/material/FormControlLabel'
+import Switch from '@mui/material/Switch'
+
 import Page from '../../components/Page'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
@@ -59,6 +62,8 @@ export default function BookEditorPage() {
   const { activeChild } = useActiveChild()
   const childName = activeChild?.name ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
+
+  const { children } = useActiveChild()
 
   const {
     book,
@@ -323,6 +328,37 @@ export default function BookEditorPage() {
         >
           {printing ? 'Building...' : 'Print'}
         </Button>
+      </Stack>
+
+      {/* Together Book toggle + contributor display */}
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 0.5 }}>
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={book.isTogetherBook ?? false}
+              onChange={(_, checked) => {
+                const allIds = children.map((c) => c.id)
+                updateBookMeta(checked
+                  ? { isTogetherBook: true, contributorIds: allIds }
+                  : { isTogetherBook: false, contributorIds: [] })
+              }}
+            />
+          }
+          label={
+            <Typography variant="body2" color="text.secondary">
+              Together Book
+            </Typography>
+          }
+          sx={{ m: 0 }}
+        />
+        {book.isTogetherBook && (
+          <Chip
+            size="small"
+            label={children.map((c) => c.name).join(' + ') || 'Together'}
+            sx={{ bgcolor: 'info.50', borderColor: 'info.200', border: '1px solid' }}
+          />
+        )}
       </Stack>
 
       {/* Page editor area */}

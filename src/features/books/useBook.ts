@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   addDoc,
   doc,
@@ -11,11 +11,12 @@ import {
 } from 'firebase/firestore'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
-import { booksCollection } from '../../core/firebase/firestore'
+import { artifactsCollection, booksCollection, hoursCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { useDebounce } from '../../core/hooks/useDebounce'
-import type { Book, BookPage, PageImage } from '../../core/types/domain'
+import type { Artifact, Book, BookPage, PageImage } from '../../core/types/domain'
 import type { SaveState } from '../../components/SaveIndicator'
+import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { createEmptyPage, generateImageId } from './bookTypes'
 
 interface UseBookResult {
@@ -26,24 +27,116 @@ interface UseBookResult {
   addPage: () => void
   deletePage: (pageId: string) => void
   reorderPages: (fromIndex: number, toIndex: number) => void
-  updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'subjectBuckets'>>) => void
+  updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds'>>) => void
   addImageToPage: (pageId: string, file: File) => Promise<void>
   removeImageFromPage: (pageId: string, imageId: string) => void
   uploadAudio: (pageId: string, blob: Blob) => Promise<void>
   addAiImageToPage: (pageId: string, url: string, storagePath: string, prompt: string) => void
   addStickerToPage: (pageId: string, stickerUrl: string, storagePath: string, label: string) => void
+  /** Whether this session used AI image generation (for Art hours) */
+  usedAiGeneration: boolean
 }
 
 interface UseBookshelfResult {
   books: Book[]
   loading: boolean
-  createBook: (title: string, coverStyle: Book['coverStyle']) => Promise<string>
+  createBook: (title: string, coverStyle: Book['coverStyle'], isTogetherBook?: boolean, contributorIds?: string[]) => Promise<string>
+}
+
+/** Get today as YYYY-MM-DD string. */
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+/** Log compliance hours for book editing session. */
+async function logBookHours(
+  familyId: string,
+  childId: string,
+  minutes: number,
+  bookTitle: string,
+  usedAiGeneration: boolean,
+): Promise<void> {
+  if (minutes < 1) return
+  const date = todayStr()
+
+  // Language Arts hours
+  await addDoc(hoursCollection(familyId), {
+    childId,
+    date,
+    minutes,
+    subjectBucket: SubjectBucket.LanguageArts,
+    notes: `Book: "${bookTitle}" (page editing)`,
+  })
+
+  // Art hours if AI generation was used
+  if (usedAiGeneration) {
+    await addDoc(hoursCollection(familyId), {
+      childId,
+      date,
+      minutes: Math.min(minutes, 5),
+      subjectBucket: SubjectBucket.Art,
+      notes: `Book illustrations: "${bookTitle}"`,
+    })
+  }
+}
+
+/** Create a portfolio artifact when a book is completed. */
+export async function createBookArtifact(familyId: string, book: Book): Promise<void> {
+  const artifact: Omit<Artifact, 'id'> = {
+    childId: book.childId,
+    title: `"${book.title}" — ${book.pages.length} page book`,
+    type: book.coverImageUrl ? EvidenceType.Photo : EvidenceType.Note,
+    content: `Book completed: "${book.title}" with ${book.pages.length} pages. ${book.pages.filter((p) => p.audioUrl).length} pages have narration.`,
+    createdAt: new Date().toISOString(),
+    tags: {
+      engineStage: EngineStage.Share,
+      domain: 'language-arts',
+      subjectBucket: SubjectBucket.LanguageArts,
+      location: 'Home',
+    },
+    notes: book.pages
+      .map((p, i) => `Page ${i + 1}: ${p.text?.slice(0, 50) || '(illustration only)'}`)
+      .join('\n'),
+    ...(book.coverImageUrl ? { uri: book.coverImageUrl } : {}),
+  }
+
+  await addDoc(artifactsCollection(familyId), artifact)
 }
 
 export function useBook(familyId: string, bookId: string | undefined): UseBookResult {
   const [book, setBook] = useState<Book | null>(null)
   const [loading, setLoading] = useState(!!familyId && !!bookId)
   const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [usedAiGeneration, setUsedAiGeneration] = useState(false)
+
+  // Session time tracking
+  const sessionStartRef = useRef<number>(Date.now())
+  const hoursLoggedRef = useRef(false)
+
+  // Reset session timer on mount
+  useEffect(() => {
+    sessionStartRef.current = Date.now()
+    hoursLoggedRef.current = false
+  }, [bookId])
+
+  // Log hours on unmount (navigate away / close)
+  useEffect(() => {
+    return () => {
+      const elapsed = Math.round((Date.now() - sessionStartRef.current) / 60000)
+      if (elapsed >= 1 && !hoursLoggedRef.current && book) {
+        hoursLoggedRef.current = true
+        // Update totalMinutes on the book
+        const newTotal = (book.totalMinutes ?? 0) + elapsed
+        if (familyId && bookId) {
+          const docRef = doc(booksCollection(familyId), bookId)
+          void setDoc(docRef, { totalMinutes: newTotal, updatedAt: new Date().toISOString() }, { merge: true })
+        }
+        void logBookHours(familyId, book.childId, elapsed, book.title, usedAiGeneration)
+      }
+    }
+    // Only run cleanup on unmount — intentionally stable deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [familyId, bookId, book?.childId, book?.title, book?.totalMinutes, usedAiGeneration])
 
   // Load book
   useEffect(() => {
@@ -142,10 +235,17 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   )
 
   const updateBookMeta = useCallback(
-    (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'subjectBuckets'>>) => {
-      applyUpdate((prev) => ({ ...prev, ...changes }))
+    (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds'>>) => {
+      applyUpdate((prev) => {
+        const next = { ...prev, ...changes }
+        // If status changes to 'complete', create portfolio artifact
+        if (changes.status === 'complete' && prev.status !== 'complete') {
+          void createBookArtifact(familyId, next)
+        }
+        return next
+      })
     },
-    [applyUpdate],
+    [applyUpdate, familyId],
   )
 
   const addImageToPage = useCallback(
@@ -228,6 +328,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
 
   const addAiImageToPage = useCallback(
     (pageId: string, url: string, storagePath: string, prompt: string) => {
+      setUsedAiGeneration(true)
       const image: PageImage = {
         id: generateImageId(),
         url,
@@ -282,6 +383,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     uploadAudio,
     addAiImageToPage,
     addStickerToPage,
+    usedAiGeneration,
   }
 }
 
@@ -293,14 +395,33 @@ export function useBookshelf(familyId: string, childId: string): UseBookshelfRes
     if (!familyId || !childId) return
     let cancelled = false
     const load = async () => {
-      const q = query(
+      // Load books where childId matches OR child is a contributor (Together Books)
+      const ownQ = query(
         booksCollection(familyId),
         where('childId', '==', childId),
         orderBy('updatedAt', 'desc'),
       )
-      const snap = await getDocs(q)
+      const togetherQ = query(
+        booksCollection(familyId),
+        where('contributorIds', 'array-contains', childId),
+        orderBy('updatedAt', 'desc'),
+      )
+      const [ownSnap, togetherSnap] = await Promise.all([getDocs(ownQ), getDocs(togetherQ)])
       if (cancelled) return
-      setBooks(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
+
+      const bookMap = new Map<string, Book>()
+      for (const d of ownSnap.docs) {
+        bookMap.set(d.id, { ...d.data(), id: d.id })
+      }
+      for (const d of togetherSnap.docs) {
+        if (!bookMap.has(d.id)) {
+          bookMap.set(d.id, { ...d.data(), id: d.id })
+        }
+      }
+      const all = [...bookMap.values()].sort(
+        (a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''),
+      )
+      setBooks(all)
       setLoading(false)
     }
     void load()
@@ -308,7 +429,7 @@ export function useBookshelf(familyId: string, childId: string): UseBookshelfRes
   }, [familyId, childId])
 
   const createBook = useCallback(
-    async (title: string, coverStyle: Book['coverStyle']): Promise<string> => {
+    async (title: string, coverStyle: Book['coverStyle'], isTogetherBook?: boolean, contributorIds?: string[]): Promise<string> => {
       const now = new Date().toISOString()
       const newBook: Omit<Book, 'id'> = {
         childId,
@@ -319,6 +440,7 @@ export function useBookshelf(familyId: string, childId: string): UseBookshelfRes
         createdAt: now,
         updatedAt: now,
         subjectBuckets: ['LanguageArts'],
+        ...(isTogetherBook ? { isTogetherBook: true, contributorIds: contributorIds ?? [] } : {}),
       }
       const docRef = await addDoc(booksCollection(familyId), newBook as Book)
       const created = { ...newBook, id: docRef.id }
@@ -329,4 +451,37 @@ export function useBookshelf(familyId: string, childId: string): UseBookshelfRes
   )
 
   return { books, loading, createBook }
+}
+
+/** Hook to load the most recent draft book for a child (for "Continue your book" card). */
+export function useDraftBook(familyId: string, childId: string): { draftBook: Book | null; loading: boolean } {
+  const [draftBook, setDraftBook] = useState<Book | null>(null)
+  const [loading, setLoading] = useState(!!familyId && !!childId)
+
+  useEffect(() => {
+    if (!familyId || !childId) {
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    const load = async () => {
+      const q = query(
+        booksCollection(familyId),
+        where('childId', '==', childId),
+        where('status', '==', 'draft'),
+        orderBy('updatedAt', 'desc'),
+      )
+      const snap = await getDocs(q)
+      if (cancelled) return
+      if (!snap.empty) {
+        const d = snap.docs[0]
+        setDraftBook({ ...d.data(), id: d.id })
+      }
+      setLoading(false)
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [familyId, childId])
+
+  return { draftBook, loading }
 }

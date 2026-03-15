@@ -129,6 +129,7 @@ describe("buildSystemPrompt", () => {
       hoursTarget: 1000,
       engagementSummaries: [],
       gradeResults: [],
+      draftBookCount: 0,
     });
 
     // RECENT PERFORMANCE
@@ -164,6 +165,7 @@ describe("buildSystemPrompt", () => {
       hoursTarget: 1000,
       engagementSummaries: [],
       gradeResults: [],
+      draftBookCount: 0,
     });
 
     expect(prompt).toContain("No recent session data available.");
