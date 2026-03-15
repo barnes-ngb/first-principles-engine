@@ -10,7 +10,7 @@ import type { ImageOptions } from "./aiService.js";
 export interface ImageGenRequest {
   familyId: string;
   prompt: string;
-  style?: "schedule-card" | "reward-chart" | "theme-illustration" | "general";
+  style?: "schedule-card" | "reward-chart" | "theme-illustration" | "book-illustration-minecraft" | "book-illustration-storybook" | "book-illustration-comic" | "book-illustration-realistic" | "book-sticker" | "general";
   size?: "1024x1024" | "1024x1792" | "1792x1024";
 }
 
@@ -32,6 +32,16 @@ const STYLE_PREFIXES: Record<string, string> = {
     "A cheerful, motivating reward chart illustration for a child. Bright colors, fun characters, encouraging tone. ",
   "theme-illustration":
     "A warm, educational illustration for a homeschool family learning theme. Kid-friendly, inviting art style. ",
+  "book-illustration-minecraft":
+    "A Minecraft-style pixel art scene illustration for a children's book page. Blocky, colorful, fun. ",
+  "book-illustration-storybook":
+    "A warm, hand-painted watercolor illustration for a children's picture book. Soft colors, gentle shapes, inviting. ",
+  "book-illustration-comic":
+    "A bold comic book panel illustration for a children's story. Dynamic lines, bright colors, expressive characters. ",
+  "book-illustration-realistic":
+    "A gentle, realistic illustration for a children's book. Warm lighting, friendly tone. ",
+  "book-sticker":
+    "A cute sticker illustration, die-cut sticker style, cartoon, simple, bold outline, white background. Child-friendly, colorful, no text. ",
   general: "",
 };
 
@@ -85,6 +95,11 @@ export const generateImage = onCall(
       "schedule-card",
       "reward-chart",
       "theme-illustration",
+      "book-illustration-minecraft",
+      "book-illustration-storybook",
+      "book-illustration-comic",
+      "book-illustration-realistic",
+      "book-sticker",
       "general",
     ]);
     if (style && !validStyles.has(style)) {

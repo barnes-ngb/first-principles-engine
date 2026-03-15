@@ -29,6 +29,9 @@ interface UseBookResult {
   updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'subjectBuckets'>>) => void
   addImageToPage: (pageId: string, file: File) => Promise<void>
   removeImageFromPage: (pageId: string, imageId: string) => void
+  uploadAudio: (pageId: string, blob: Blob) => Promise<void>
+  addAiImageToPage: (pageId: string, url: string, storagePath: string, prompt: string) => void
+  addStickerToPage: (pageId: string, stickerUrl: string, storagePath: string, label: string) => void
 }
 
 interface UseBookshelfResult {
@@ -195,6 +198,76 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     [applyUpdate],
   )
 
+  const uploadAudio = useCallback(
+    async (pageId: string, blob: Blob) => {
+      if (!familyId || !bookId) return
+      const ts = new Date().toISOString().replace(/[:.]/g, '-')
+      const filename = `audio_${pageId}_${ts}.webm`
+      const storagePath = `families/${familyId}/books/${bookId}/${filename}`
+      const storageRef = ref(storage, storagePath)
+
+      setSaveState('saving')
+      try {
+        await uploadBytes(storageRef, blob)
+        const url = await getDownloadURL(storageRef)
+        applyUpdate((prev) => ({
+          ...prev,
+          pages: prev.pages.map((p) =>
+            p.id === pageId
+              ? { ...p, audioUrl: url, audioStoragePath: storagePath, updatedAt: new Date().toISOString() }
+              : p,
+          ),
+        }))
+      } catch (err) {
+        console.error('Audio upload failed:', err)
+        setSaveState('error')
+      }
+    },
+    [familyId, bookId, applyUpdate],
+  )
+
+  const addAiImageToPage = useCallback(
+    (pageId: string, url: string, storagePath: string, prompt: string) => {
+      const image: PageImage = {
+        id: generateImageId(),
+        url,
+        storagePath,
+        type: 'ai-generated',
+        prompt,
+      }
+      applyUpdate((prev) => ({
+        ...prev,
+        pages: prev.pages.map((p) =>
+          p.id === pageId
+            ? { ...p, images: [...p.images, image], updatedAt: new Date().toISOString() }
+            : p,
+        ),
+      }))
+    },
+    [applyUpdate],
+  )
+
+  const addStickerToPage = useCallback(
+    (pageId: string, stickerUrl: string, storagePath: string, label: string) => {
+      const image: PageImage = {
+        id: generateImageId(),
+        url: stickerUrl,
+        storagePath,
+        type: 'sticker',
+        label,
+      }
+      applyUpdate((prev) => ({
+        ...prev,
+        pages: prev.pages.map((p) =>
+          p.id === pageId
+            ? { ...p, images: [...p.images, image], updatedAt: new Date().toISOString() }
+            : p,
+        ),
+      }))
+    },
+    [applyUpdate],
+  )
+
   return {
     book,
     loading,
@@ -206,6 +279,9 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     updateBookMeta,
     addImageToPage,
     removeImageFromPage,
+    uploadAudio,
+    addAiImageToPage,
+    addStickerToPage,
   }
 }
 
