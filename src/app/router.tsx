@@ -21,6 +21,8 @@ import DadLabPage from '../features/dad-lab/DadLabPage'
 import WeekPage from '../features/week/WeekPage'
 import KnowledgeMinePage from '../features/quest/KnowledgeMinePage'
 import WeeklyReviewPage from '../features/weekly-review/WeeklyReviewPage'
+import BookshelfPage from '../features/books/BookshelfPage'
+import BookEditorPage from '../features/books/BookEditorPage'
 
 const routes = [
   {
@@ -51,6 +53,8 @@ const routes = [
       { path: '/planner/chat', element: <PlannerChatPage /> },
       { path: '/planner/legacy', element: <PlannerPage /> },
       { path: '/evaluate', element: <EvaluateChatPage /> },
+      { path: '/books', element: <BookshelfPage /> },
+      { path: '/books/:bookId', element: <BookEditorPage /> },
       { path: '/quest', element: <KnowledgeMinePage /> },
       { path: '/evaluation', element: <Navigate to="/progress" replace /> },
       { path: '/ladders', element: <LaddersPage /> },

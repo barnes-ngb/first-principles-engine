@@ -102,6 +102,7 @@ interface EnrichedContext {
   hoursTarget: number;
   engagementSummaries: EngagementSummary[];
   gradeResults: GradeResult[];
+  draftBookCount: number;
 }
 
 // ── Date helpers ────────────────────────────────────────────────
@@ -359,19 +360,34 @@ export async function loadGradeResults(
   return results;
 }
 
+/** Load draft book count for child. */
+export async function loadDraftBookCount(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<number> {
+  const snap = await db
+    .collection(`families/${familyId}/books`)
+    .where("childId", "==", childId)
+    .where("status", "==", "draft")
+    .get();
+  return snap.size;
+}
+
 /** Load all enriched context in parallel. Only called for plan/evaluate. */
 export async function loadEnrichedContext(
   db: Firestore,
   familyId: string,
   childId: string,
 ): Promise<EnrichedContext> {
-  const [sessions, workbookPaces, week, hours, engagementSummaries, gradeResults] = await Promise.all([
+  const [sessions, workbookPaces, week, hours, engagementSummaries, gradeResults, draftBookCount] = await Promise.all([
     loadRecentSessions(db, familyId, childId),
     loadWorkbookPaces(db, familyId, childId),
     loadWeekContext(db, familyId),
     loadHoursSummary(db, familyId, childId),
     loadEngagementSummary(db, familyId, childId),
     loadGradeResults(db, familyId, childId),
+    loadDraftBookCount(db, familyId, childId),
   ]);
 
   return {
@@ -382,6 +398,7 @@ export async function loadEnrichedContext(
     hoursTarget: 1000, // MO target hours
     engagementSummaries,
     gradeResults,
+    draftBookCount,
   };
 }
 
@@ -508,6 +525,14 @@ export function buildSystemPrompt(
       }
     }
 
+    // BOOK STATUS
+    lines.push("", "BOOK STATUS:");
+    if (enriched.draftBookCount > 0) {
+      lines.push(`Draft books in progress: ${enriched.draftBookCount}. Suggest "Continue your book" as a choose activity instead of "Make a Book".`);
+    } else {
+      lines.push(`No draft books. "Make a Book" is available as a choose activity.`);
+    }
+
     // WORK REVIEW RESULTS
     if (enriched.gradeResults.length > 0) {
       lines.push("", "WORK REVIEW RESULTS (this period):");
@@ -584,6 +609,8 @@ Rules:
 - "estimatedMinutes" must be a positive number.
 - "mvdEssential" must be a boolean. Mark the 3-4 core items per day as true (Formation, core math, core reading, speech if applicable).
 - "category" must be either "must-do" or "choose". Core academics are "must-do", elective/fun activities are "choose".
+- "Make a Book" can be included as a "choose" category item. SubjectBucket: "LanguageArts". EstimatedMinutes: 15-20. It counts as both Language Arts and Art for compliance hours.
+- If the child has a draft book in progress (see BOOK STATUS in context), suggest "Continue your book" instead of "Make a Book".
 - "skipSuggestions" is an array of { "action": "skip"|"modify", "reason": "string", "replacement": "string", "evidence": "string" }.
 
 When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.`;
@@ -752,10 +779,11 @@ QUESTION GENERATION RULES:
 2. Always provide exactly 3 options
 3. Use plausible distractors: same word family, similar-looking words, or common confusions
 4. Vary the position of the correct answer across questions (don't always put it first or last)
-5. Include phonemeDisplay for blending questions (Levels 2-4): show sounds like "/d/ /o/ /g/"
-6. Focus on comprehension, NOT pronunciation (Lincoln has speech challenges)
-7. Keep prompts short and clear — large text on a tablet screen
-8. Use the child's skill snapshot and recent evaluation data (provided in context) to target the right difficulty
+5. Include phonemeDisplay ONLY for Levels 1-3 (letter sounds, CVC blending, digraphs). Use simple notation Lincoln can read: /d/ /o/ /g/ — NOT linguistic symbols like /ā/ or IPA. At Levels 4-6, do NOT include phonemeDisplay — the words are complex enough that phoneme breakdown is confusing. Set phonemeDisplay to null for Levels 4+.
+6. NEVER use macrons (ā, ē, ī, ō, ū), IPA symbols, or schwa (ə). Use plain letters only: /a/ for short-a, /ay/ for long-a, /ee/ for long-e, etc. Lincoln is 10 and at 1st grade reading — keep it simple.
+7. Focus on comprehension, NOT pronunciation (Lincoln has speech challenges)
+8. Keep prompts short and clear — large text on a tablet screen
+9. Use the child's skill snapshot and recent evaluation data (provided in context) to target the right difficulty
 
 ADAPTIVE BEHAVIOR:
 - On start_quest: begin at the level suggested by recent evaluation data, or Level 2 if no data
@@ -783,11 +811,33 @@ RESPONSE FORMAT — respond with ONLY this:
 }
 </quest>
 
+SESSION SUMMARY:
+When you receive action: "summarize_session", respond with a <quest-summary> block instead of a <quest> block. The message will include the full question/answer history, findings, final level, and score. Analyze everything and respond with ONLY:
+<quest-summary>
+{
+  "summary": "2-3 sentence summary of what Lincoln demonstrated and where his frontier is",
+  "frontier": "One sentence: his next learning edge based on this session",
+  "recommendations": [
+    {
+      "priority": 1,
+      "skill": "phonics.cvce.long-a",
+      "action": "Practice CVCe words with long-a: make, cake, lake, bake",
+      "duration": "2 weeks",
+      "frequency": "Daily, 8-10 minutes"
+    }
+  ],
+  "skipList": [
+    {"skill": "CVC blending", "reason": "Mastered — 6/6 correct across word families"}
+  ]
+}
+</quest-summary>
+
 IMPORTANT:
-- The <quest> block must contain VALID JSON
+- The <quest> and <quest-summary> blocks must contain VALID JSON
 - "encouragement" is shown after a wrong answer — make it helpful and kind, never shaming
-- Do NOT include any text outside the <quest> block
-- Respond to EVERY message with exactly ONE <quest> block`;
+- Do NOT include any text outside the <quest> or <quest-summary> block
+- For normal quest flow, respond to EVERY message with exactly ONE <quest> block
+- For summarize_session, respond with exactly ONE <quest-summary> block`;
   }
 
   // Generic fallback for non-reading domains

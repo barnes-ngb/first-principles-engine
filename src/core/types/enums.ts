@@ -303,6 +303,17 @@ export const RoutineItemKey = {
 } as const
 export type RoutineItemKey = (typeof RoutineItemKey)[keyof typeof RoutineItemKey]
 
+export const StickerCategory = {
+  Animals: 'animals',
+  Minecraft: 'minecraft',
+  Nature: 'nature',
+  People: 'people',
+  Fantasy: 'fantasy',
+  Vehicles: 'vehicles',
+  Custom: 'custom',
+} as const
+export type StickerCategory = (typeof StickerCategory)[keyof typeof StickerCategory]
+
 export const DadLabType = {
   Science: 'science',
   Engineering: 'engineering',

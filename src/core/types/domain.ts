@@ -22,6 +22,7 @@ import type {
   SessionResult,
   SessionSymbol,
   SkillLevel,
+  StickerCategory,
   StreamKey,
   StreamId,
   SubjectBucket,
@@ -224,6 +225,8 @@ export interface ChecklistItem {
   estimatedMinutes?: number
   /** Linked lesson card document ID (auto-generated on plan apply). */
   lessonCardId?: string
+  /** Linked book ID (for "Make a Book" plan items). */
+  bookId?: string
   /** Engagement feedback: how the activity went */
   engagement?: 'engaged' | 'okay' | 'struggled' | 'refused'
   /** Linked evidence artifact document ID (from per-item capture). */
@@ -938,4 +941,82 @@ export interface EvaluationRecommendation {
   duration: string
   materials?: string[]
   frequency: string
+}
+
+// ── XP Ledger (cumulative XP tracking) ────────────────────────
+
+export interface XpLedgerSources {
+  routines: number
+  quests: number
+  books: number
+}
+
+export interface XpLedger {
+  childId: string
+  totalXp: number
+  sources: XpLedgerSources
+  lastUpdatedAt: string
+}
+
+// ── Book Builder ──────────────────────────────────────────────
+
+export interface Book {
+  id?: string
+  childId: string
+  title: string
+  coverImageUrl?: string
+  coverStyle?: 'minecraft' | 'storybook' | 'comic' | 'photo'
+  pages: BookPage[]
+  status: 'draft' | 'complete'
+  createdAt: string
+  updatedAt: string
+  /** Subject tags for compliance hours logging */
+  subjectBuckets: SubjectBucket[]
+  /** Total editing time in minutes (accumulated across sessions) */
+  totalMinutes?: number
+  /** When true, this is a Together Time book for both kids */
+  isTogetherBook?: boolean
+  /** All contributing children (used for Together Books) */
+  contributorIds?: string[]
+}
+
+export interface BookPage {
+  id: string
+  pageNumber: number
+  /** Story text for this page */
+  text?: string
+  /** Voice narration audio URL (Firebase Storage) */
+  audioUrl?: string
+  audioStoragePath?: string
+  /** Images on this page (photos, AI scenes, stickers) */
+  images: PageImage[]
+  /** Page layout */
+  layout: 'image-top' | 'image-left' | 'full-image' | 'text-only'
+  createdAt: string
+  updatedAt: string
+  /** Which child contributed this page (for Together Books) */
+  contributorId?: string
+}
+
+export interface PageImage {
+  id: string
+  url: string
+  storagePath?: string
+  type: 'photo' | 'ai-generated' | 'sticker'
+  /** AI prompt used to generate this image */
+  prompt?: string
+  /** Label for accessibility and display */
+  label?: string
+}
+
+export interface Sticker {
+  id?: string
+  url: string
+  storagePath: string
+  label: string
+  category: StickerCategory
+  /** null = shared between kids, childId = personal */
+  childId?: string | null
+  prompt?: string
+  createdAt: string
 }

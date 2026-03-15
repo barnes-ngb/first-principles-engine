@@ -79,7 +79,8 @@
 - Streak tracking (consecutive days)
 - Saves to `evaluationSessions` with `sessionType: 'interactive'`
 - `InteractiveSessionData`: questions array, finalLevel, diamondsMined, streakDays
-- Findings extracted from AI responses and saved with session
+- Findings extracted from AI responses and auto-applied to skill snapshot
+- Pure adaptive logic module (`questAdaptive.ts`) with comprehensive tests
 - Quest prompt gets enriched context (child profile, skill snapshot, recent evaluation, engagement, grades)
 
 ### Dad Lab

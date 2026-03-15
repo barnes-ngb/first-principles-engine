@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { doc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
+import { doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
 
 import { useAI, TaskType } from '../../core/ai/useAI'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { evaluationSessionsCollection } from '../../core/firebase/firestore'
+import { evaluationSessionsCollection, skillSnapshotsCollection, xpLedgerCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { EvaluationFinding, EvaluationSession } from '../../core/types/domain'
+import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot } from '../../core/types/domain'
 import type { EvaluationDomain } from '../../core/types/enums'
+import { MasteryGate, SkillLevel } from '../../core/types/enums'
+import { calculateStreak, computeNextState, formatSkillLabel, shouldEndSession } from './questAdaptive'
 import type {
   InteractiveSessionData,
   QuestQuestion,
@@ -16,11 +18,6 @@ import type {
   SessionQuestion,
 } from './questTypes'
 import {
-  FRUSTRATION_LIMIT,
-  LEVEL_DOWN_STREAK,
-  LEVEL_UP_STREAK,
-  MAX_QUESTIONS,
-  MAX_SECONDS,
   QuestScreen,
 } from './questTypes'
 
@@ -70,43 +67,32 @@ function extractQuestFinding(text: string): EvaluationFinding | null {
   }
 }
 
-function getDateString(d: Date): string {
-  return d.toISOString().slice(0, 10)
+interface QuestSummaryBlock {
+  summary: string
+  frontier?: string
+  recommendations: Array<{
+    priority: number
+    skill: string
+    action: string
+    duration: string
+    frequency: string
+  }>
+  skipList?: Array<{ skill: string; reason: string }>
 }
 
-function calculateStreak(sessions: Array<{ evaluatedAt: string }>): QuestStreak {
-  if (sessions.length === 0) {
-    return { currentStreak: 0, lastQuestDate: null }
+function parseQuestSummaryBlock(text: string): QuestSummaryBlock | null {
+  const regex = /<quest-summary>([\s\S]*?)<\/quest-summary>/
+  const match = regex.exec(text)
+  if (!match) return null
+  try {
+    return JSON.parse(match[1].trim()) as QuestSummaryBlock
+  } catch {
+    return null
   }
+}
 
-  const dates = sessions
-    .map((s) => s.evaluatedAt.slice(0, 10))
-    .filter((v, i, a) => a.indexOf(v) === i) // unique dates
-    .sort()
-    .reverse()
-
-  const lastQuestDate = dates[0]
-  const today = getDateString(new Date())
-  const yesterday = getDateString(new Date(Date.now() - 86400000))
-
-  // Streak only counts if last quest was today or yesterday
-  if (lastQuestDate !== today && lastQuestDate !== yesterday) {
-    return { currentStreak: 0, lastQuestDate }
-  }
-
-  let streak = 1
-  for (let i = 1; i < dates.length; i++) {
-    const prev = new Date(dates[i - 1] + 'T00:00:00')
-    const curr = new Date(dates[i] + 'T00:00:00')
-    const diff = (prev.getTime() - curr.getTime()) / 86400000
-    if (diff === 1) {
-      streak++
-    } else {
-      break
-    }
-  }
-
-  return { currentStreak: streak, lastQuestDate }
+function getDateString(d: Date): string {
+  return d.toISOString().slice(0, 10)
 }
 
 // ── Hook ────────────────────────────────────────────────────────
@@ -124,6 +110,7 @@ export function useQuestSession() {
   const [streak, setStreak] = useState<QuestStreak>({ currentStreak: 0, lastQuestDate: null })
   const [lastAnswer, setLastAnswer] = useState<{ correct: boolean; correctAnswer: string; encouragement?: string } | null>(null)
   const [sessionSaved, setSessionSaved] = useState(false)
+  const [summarizing, setSummarizing] = useState(false)
   const [previousSessions, setPreviousSessions] = useState<Array<{ evaluatedAt: string }>>([])
 
   const conversationRef = useRef<AIChatMessage[]>([])
@@ -276,6 +263,7 @@ export function useQuestSession() {
       }
 
       setScreen(QuestScreen.Summary)
+      setSummarizing(true)
 
       // Calculate streak (including this session)
       const todayStr = getDateString(new Date())
@@ -288,6 +276,54 @@ export function useQuestSession() {
 
       if (!activeChildId) return
 
+      // Request AI-generated summary
+      let summaryText = `Interactive reading quest: ${finalState.totalCorrect}/${finalState.totalQuestions} correct, reached level ${finalState.currentLevel}`
+      let sessionRecommendations: EvaluationSession['recommendations'] = []
+
+      try {
+        const summaryMessage: AIChatMessage = {
+          role: 'user',
+          content: JSON.stringify({
+            action: 'summarize_session',
+            questions,
+            findings,
+            finalLevel: finalState.currentLevel,
+            totalCorrect: finalState.totalCorrect,
+            totalQuestions: finalState.totalQuestions,
+            domain: 'reading',
+          }),
+        }
+
+        const summaryResponse = await chat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.Quest,
+          messages: [...conversationRef.current, summaryMessage],
+          domain: 'reading',
+        })
+
+        if (summaryResponse) {
+          const parsed = parseQuestSummaryBlock(summaryResponse.message)
+          if (parsed) {
+            summaryText = parsed.summary
+            if (parsed.frontier) {
+              summaryText += ` Frontier: ${parsed.frontier}`
+            }
+            sessionRecommendations = (parsed.recommendations || []).map((r, i) => ({
+              priority: r.priority ?? i + 1,
+              skill: r.skill || '',
+              action: r.action || '',
+              duration: r.duration || '',
+              frequency: r.frequency || '',
+            }))
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to generate AI quest summary, using fallback', err)
+      } finally {
+        setSummarizing(false)
+      }
+
       // Save to Firestore
       const timestamp = Date.now()
       const docId = `interactive_${activeChildId}_${timestamp}`
@@ -298,8 +334,8 @@ export function useQuestSession() {
         status: 'complete',
         messages: [],
         findings,
-        recommendations: [],
-        summary: `Interactive reading quest: ${finalState.totalCorrect}/${finalState.totalQuestions} correct, reached level ${finalState.currentLevel}`,
+        recommendations: sessionRecommendations,
+        summary: summaryText,
         evaluatedAt: new Date().toISOString(),
         sessionType: 'interactive',
         questions,
@@ -318,8 +354,92 @@ export function useQuestSession() {
       } catch (err) {
         console.error('Failed to save quest session', err)
       }
+
+      // Add diamond XP to ledger
+      const XP_PER_DIAMOND = 2
+      const questXp = finalState.totalCorrect * XP_PER_DIAMOND
+
+      if (questXp > 0) {
+        try {
+          const ledgerRef = doc(xpLedgerCollection(familyId), activeChildId)
+          const ledgerSnap = await getDoc(ledgerRef)
+          const existing = ledgerSnap.exists()
+            ? ledgerSnap.data()
+            : { totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }
+
+          await setDoc(ledgerRef, {
+            childId: activeChildId,
+            totalXp: (existing.totalXp || 0) + questXp,
+            sources: {
+              routines: existing.sources?.routines || 0,
+              quests: (existing.sources?.quests || 0) + questXp,
+              books: existing.sources?.books || 0,
+            },
+            lastUpdatedAt: new Date().toISOString(),
+          })
+        } catch (err) {
+          console.warn('Failed to update XP ledger', err)
+        }
+      }
+
+      // Auto-apply findings to skill snapshot
+      if (findings.length > 0) {
+        try {
+          const snapshotRef = doc(skillSnapshotsCollection(familyId), activeChildId)
+          const snapshotSnap = await getDoc(snapshotRef)
+          const existing: Partial<SkillSnapshot> = snapshotSnap.exists()
+            ? snapshotSnap.data()
+            : {}
+
+          // Build priority skills from findings
+          const newPrioritySkills: PrioritySkill[] = findings
+            .filter((f) => f.status === 'emerging' || f.status === 'not-yet')
+            .map((f) => ({
+              tag: f.skill,
+              label: formatSkillLabel(f.skill),
+              level: SkillLevel.Emerging,
+              masteryGate: MasteryGate.NotYet,
+              notes: `${f.evidence} (Quest ${new Date().toLocaleDateString()})`,
+            }))
+
+          // Update mastered skills
+          for (const f of findings) {
+            if (f.status === 'mastered') {
+              const idx = newPrioritySkills.findIndex((s) => s.tag === f.skill)
+              if (idx < 0) {
+                newPrioritySkills.push({
+                  tag: f.skill,
+                  label: formatSkillLabel(f.skill),
+                  level: SkillLevel.Secure,
+                  masteryGate: MasteryGate.IndependentConsistent,
+                  notes: `${f.evidence} (Quest ${new Date().toLocaleDateString()})`,
+                })
+              }
+            }
+          }
+
+          // Merge: keep existing skills not covered by quest findings
+          const existingSkills = (existing.prioritySkills || []).filter(
+            (s) => !newPrioritySkills.some((n) => n.tag === s.tag),
+          )
+
+          const updated = {
+            childId: activeChildId,
+            prioritySkills: [...existingSkills, ...newPrioritySkills],
+            supports: existing.supports || [],
+            stopRules: existing.stopRules || [],
+            evidenceDefinitions: existing.evidenceDefinitions || [],
+            updatedAt: new Date().toISOString(),
+          }
+
+          await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)))
+        } catch (err) {
+          // Don't block session save if snapshot update fails
+          console.warn('Failed to auto-apply quest findings to skill snapshot', err)
+        }
+      }
     },
-    [activeChildId, familyId, findings, previousSessions],
+    [activeChildId, familyId, findings, previousSessions, chat],
   )
 
   // ── Submit answer ─────────────────────────────────────────────
@@ -357,44 +477,7 @@ export function useQuestSession() {
       setScreen(QuestScreen.Feedback)
 
       // Compute new adaptive state
-      let newLevel = questState.currentLevel
-      let newConsecutiveCorrect = questState.consecutiveCorrect
-      let newConsecutiveWrong = questState.consecutiveWrong
-      let newLevelDownsInARow = questState.levelDownsInARow
-      let newQuestionsThisLevel = questState.questionsThisLevel + 1
-      const newTotalCorrect = questState.totalCorrect + (correct ? 1 : 0)
-      const newTotalQuestions = questState.totalQuestions + 1
-
-      if (correct) {
-        newConsecutiveCorrect = questState.consecutiveCorrect + 1
-        newConsecutiveWrong = 0
-        newLevelDownsInARow = 0
-        if (newConsecutiveCorrect >= LEVEL_UP_STREAK && newLevel < 6) {
-          newLevel = questState.currentLevel + 1
-          newConsecutiveCorrect = 0
-          newQuestionsThisLevel = 0
-        }
-      } else {
-        newConsecutiveWrong = questState.consecutiveWrong + 1
-        newConsecutiveCorrect = 0
-        if (newConsecutiveWrong >= LEVEL_DOWN_STREAK && newLevel > 1) {
-          newLevel = questState.currentLevel - 1
-          newConsecutiveWrong = 0
-          newQuestionsThisLevel = 0
-          newLevelDownsInARow = questState.levelDownsInARow + 1
-        }
-      }
-
-      const newState: QuestState = {
-        ...questState,
-        currentLevel: newLevel,
-        consecutiveCorrect: newConsecutiveCorrect,
-        consecutiveWrong: newConsecutiveWrong,
-        levelDownsInARow: newLevelDownsInARow,
-        totalQuestions: newTotalQuestions,
-        totalCorrect: newTotalCorrect,
-        questionsThisLevel: newQuestionsThisLevel,
-      }
+      const newState = computeNextState(questState, correct)
       setQuestState(newState)
 
       // Feedback pause
@@ -402,11 +485,7 @@ export function useQuestSession() {
       await new Promise((resolve) => setTimeout(resolve, feedbackDuration))
 
       // Check end conditions
-      const timedOut = newState.elapsedSeconds >= MAX_SECONDS
-      const shouldEnd =
-        newTotalQuestions >= MAX_QUESTIONS ||
-        timedOut ||
-        newLevelDownsInARow >= FRUSTRATION_LIMIT
+      const { end: shouldEnd, timedOut } = shouldEndSession(newState)
 
       if (shouldEnd) {
         await endSession(updatedQuestions, newState, timedOut)
@@ -483,6 +562,7 @@ export function useQuestSession() {
     setFindings([])
     setLastAnswer(null)
     setSessionSaved(false)
+    setSummarizing(false)
     conversationRef.current = []
   }, [])
 
@@ -495,6 +575,7 @@ export function useQuestSession() {
     streak,
     lastAnswer,
     sessionSaved,
+    summarizing,
     aiLoading,
     aiError,
     startQuest,

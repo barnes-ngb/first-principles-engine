@@ -216,7 +216,9 @@ Quest uses Claude Sonnet (same tier as plan/evaluate) for higher-quality questio
 | File | Purpose |
 |---|---|
 | `questTypes.ts` | Types: QuestState, QuestQuestion, SessionQuestion, InteractiveSessionData, constants |
-| `useQuestSession.ts` | Hook: session lifecycle, adaptive state, AI communication, Firestore save, streak tracking |
+| `questAdaptive.ts` | Pure functions: `computeNextState`, `shouldEndSession`, `calculateStreak`, `formatSkillLabel` |
+| `questAdaptive.test.ts` | Tests for adaptive logic (level up/down, frustration limit, streak calculation) |
+| `useQuestSession.ts` | Hook: session lifecycle, AI communication, Firestore save, auto-apply findings to skill snapshot |
 | `KnowledgeMinePage.tsx` | Page component: intro screen with domain selection and streak display |
 | `ReadingQuest.tsx` | Quest UI: question display, option buttons, feedback (diamond/brick), loading states |
 | `QuestSummary.tsx` | Summary screen: diamonds mined, level reached, streak, findings list |

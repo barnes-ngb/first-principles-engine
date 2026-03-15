@@ -17,6 +17,8 @@ import { getDocs, query, where } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
 import Snackbar from '@mui/material/Snackbar'
 
+import MenuBookIcon from '@mui/icons-material/MenuBook'
+
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -218,6 +220,7 @@ export default function PortfolioPage() {
                 const artType = artifact.type as string
                 const isPhoto = artType === EvidenceType.Photo || artType === 'photo'
                 const isAudio = artType === EvidenceType.Audio || artType === 'audio'
+                const isBookArtifact = /page book/i.test(artifact.title ?? '')
 
                 return (
                   <Stack
@@ -238,6 +241,10 @@ export default function PortfolioPage() {
                       onChange={() => toggleArtifact(artifact.id ?? '')}
                       size="small"
                     />
+
+                    {isBookArtifact && !isPhoto && (
+                      <MenuBookIcon sx={{ fontSize: 40, color: 'info.main', flexShrink: 0 }} />
+                    )}
 
                     {isPhoto && artifact.uri && (
                       <Box
