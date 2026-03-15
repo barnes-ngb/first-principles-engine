@@ -459,10 +459,7 @@ export function useDraftBook(familyId: string, childId: string): { draftBook: Bo
   const [loading, setLoading] = useState(!!familyId && !!childId)
 
   useEffect(() => {
-    if (!familyId || !childId) {
-      setLoading(false)
-      return
-    }
+    if (!familyId || !childId) return
     let cancelled = false
     const load = async () => {
       const q = query(
