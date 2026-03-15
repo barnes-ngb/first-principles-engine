@@ -939,3 +939,18 @@ export interface EvaluationRecommendation {
   materials?: string[]
   frequency: string
 }
+
+// ── XP Ledger (cumulative XP tracking) ────────────────────────
+
+export interface XpLedgerSources {
+  routines: number
+  quests: number
+  books: number
+}
+
+export interface XpLedger {
+  childId: string
+  totalXp: number
+  sources: XpLedgerSources
+  lastUpdatedAt: string
+}

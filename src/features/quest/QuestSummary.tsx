@@ -4,6 +4,9 @@ import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import type { EvaluationFinding } from '../../core/types/domain'
+import type { ArmorTierInfo } from '../minecraft/armorTiers'
+import { getArmorTier, getNextTierProgress } from '../minecraft/armorTiers'
+import MinecraftAvatar from '../minecraft/MinecraftAvatar'
 import type { QuestStreak } from './questTypes'
 
 const MC = {
@@ -40,12 +43,16 @@ function formatSkillLabel(tag: string): string {
     .replace(/cvce/i, 'CVCe')
 }
 
+const XP_PER_DIAMOND = 2
+
 interface QuestSummaryProps {
   totalCorrect: number
   totalQuestions: number
   finalLevel: number
   streak: QuestStreak
   findings: EvaluationFinding[]
+  /** Total XP before this quest (for tier-up detection) */
+  previousTotalXp?: number
   onDone: () => void
   onTryAgain: () => void
 }
@@ -56,10 +63,19 @@ export default function QuestSummary({
   finalLevel,
   streak,
   findings,
+  previousTotalXp = 0,
   onDone,
   onTryAgain,
 }: QuestSummaryProps) {
   const navigate = useNavigate()
+
+  // XP calculations
+  const questXp = totalCorrect * XP_PER_DIAMOND
+  const newTotalXp = previousTotalXp + questXp
+  const previousTier: ArmorTierInfo = getArmorTier(previousTotalXp)
+  const newTier: ArmorTierInfo = getArmorTier(newTotalXp)
+  const tierUp = newTier.tier !== previousTier.tier
+  const { progress, xpToNext, next } = getNextTierProgress(newTotalXp)
 
   // Deduplicate findings by skill (keep the latest)
   const uniqueFindings = findings.reduce<EvaluationFinding[]>((acc, f) => {
@@ -123,6 +139,108 @@ export default function QuestSummary({
           {totalCorrect}/{totalQuestions} correct · Level {finalLevel}
         </Typography>
       </Box>
+
+      {/* Tier-up celebration */}
+      {tierUp && (
+        <Box
+          sx={{
+            bgcolor: MC.darkStone,
+            borderRadius: 2,
+            p: 2,
+            textAlign: 'center',
+            mb: 2,
+            border: `2px solid ${MC.gold}`,
+            animation: 'tier-up-glow 1.5s ease-in-out infinite',
+            '@keyframes tier-up-glow': {
+              '0%, 100%': { boxShadow: `0 0 8px ${MC.gold}40` },
+              '50%': { boxShadow: `0 0 20px ${MC.gold}80` },
+            },
+          }}
+        >
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.7rem',
+              color: MC.gold,
+              mb: 1.5,
+              lineHeight: 1.8,
+            }}
+          >
+            ARMOR UPGRADE!
+          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
+            <MinecraftAvatar tier={newTier} scale={4} />
+          </Box>
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.45rem',
+              color: MC.white,
+              lineHeight: 1.8,
+            }}
+          >
+            {previousTier.title} → {newTier.title}
+          </Typography>
+        </Box>
+      )}
+
+      {/* XP earned + armor progress */}
+      {questXp > 0 && (
+        <Box
+          sx={{
+            bgcolor: MC.darkStone,
+            borderRadius: 2,
+            p: 2,
+            textAlign: 'center',
+            mb: 2,
+            border: `1px solid ${MC.green}`,
+          }}
+        >
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.6rem',
+              color: MC.green,
+              mb: 1,
+            }}
+          >
+            +{questXp} XP!
+          </Typography>
+          {/* XP progress bar */}
+          <Box
+            sx={{
+              position: 'relative',
+              height: 12,
+              backgroundColor: '#1A1A1A',
+              border: '2px solid #3A3A3A',
+              borderRadius: 0,
+              overflow: 'hidden',
+              mb: 1,
+            }}
+          >
+            <Box
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                height: '100%',
+                width: `${progress * 100}%`,
+                background: 'linear-gradient(180deg, #7EFC20 0%, #5BC010 50%, #3A8008 100%)',
+                transition: 'width 0.5s ease-out',
+              }}
+            />
+          </Box>
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.4rem',
+              color: MC.stone,
+            }}
+          >
+            {newTier.label} · {next ? `${xpToNext} to ${next.label}` : 'MAX TIER'}
+          </Typography>
+        </Box>
+      )}
 
       {/* Streak */}
       {streak.currentStreak > 0 && (

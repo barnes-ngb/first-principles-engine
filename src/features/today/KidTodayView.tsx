@@ -21,6 +21,8 @@ import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload
 import type { Artifact, ChecklistItem, Child, DayLog } from '../../core/types/domain'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import MinecraftAvatar from '../minecraft/MinecraftAvatar'
+import MinecraftXpBar from '../minecraft/MinecraftXpBar'
+import { useXpLedger } from '../minecraft/useXpLedger'
 import ExplorerMap from './ExplorerMap'
 import KidCaptureForm from './KidCaptureForm'
 import { calculateXp } from './xp'
@@ -147,6 +149,7 @@ export default function KidTodayView({
 
   const isLincoln = child.name.toLowerCase() === 'lincoln'
   const todayXp = useMemo(() => calculateXp(dayLog), [dayLog])
+  const xpLedger = useXpLedger(familyId, child.id)
 
   const greeting = useMemo(() => getGreeting(child.name, isLincoln), [child.name, isLincoln])
   const celebrationMessage = useMemo(() => getCelebration(today, isLincoln), [today, isLincoln])
@@ -280,10 +283,10 @@ export default function KidTodayView({
       <Stack direction="row" alignItems="center" spacing={2}>
         {isLincoln && (
           <Box sx={{ flexShrink: 0 }}>
-            <MinecraftAvatar xp={todayXp * 10} scale={3} />
+            <MinecraftAvatar xp={xpLedger.totalXp} scale={3} />
           </Box>
         )}
-        <Box>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
             {greeting}
           </Typography>
@@ -302,6 +305,11 @@ export default function KidTodayView({
           )}
         </Box>
       </Stack>
+
+      {/* XP bar (Lincoln only) */}
+      {isLincoln && !xpLedger.loading && (
+        <MinecraftXpBar totalXp={xpLedger.totalXp} todayXp={todayXp} compact />
+      )}
 
       {/* Morning verse */}
       {weekFocus?.scriptureRef && (

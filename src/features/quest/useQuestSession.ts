@@ -4,7 +4,7 @@ import { doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/fi
 import { useAI, TaskType } from '../../core/ai/useAI'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { evaluationSessionsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { evaluationSessionsCollection, skillSnapshotsCollection, xpLedgerCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot } from '../../core/types/domain'
 import type { EvaluationDomain } from '../../core/types/enums'
@@ -353,6 +353,33 @@ export function useQuestSession() {
         setSessionSaved(true)
       } catch (err) {
         console.error('Failed to save quest session', err)
+      }
+
+      // Add diamond XP to ledger
+      const XP_PER_DIAMOND = 2
+      const questXp = finalState.totalCorrect * XP_PER_DIAMOND
+
+      if (questXp > 0) {
+        try {
+          const ledgerRef = doc(xpLedgerCollection(familyId), activeChildId)
+          const ledgerSnap = await getDoc(ledgerRef)
+          const existing = ledgerSnap.exists()
+            ? ledgerSnap.data()
+            : { totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }
+
+          await setDoc(ledgerRef, {
+            childId: activeChildId,
+            totalXp: (existing.totalXp || 0) + questXp,
+            sources: {
+              routines: existing.sources?.routines || 0,
+              quests: (existing.sources?.quests || 0) + questXp,
+              books: existing.sources?.books || 0,
+            },
+            lastUpdatedAt: new Date().toISOString(),
+          })
+        } catch (err) {
+          console.warn('Failed to update XP ledger', err)
+        }
       }
 
       // Auto-apply findings to skill snapshot

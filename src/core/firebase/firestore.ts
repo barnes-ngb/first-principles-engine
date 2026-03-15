@@ -32,6 +32,7 @@ import type {
   WeeklyReview,
   WeeklyScore,
   WorkbookConfig,
+  XpLedger,
 } from '../types/domain'
 import { app } from './firebase'
 
@@ -329,6 +330,14 @@ export const weeklyReviewsCollection = (
 /** Weekly review doc ID: {weekKey}_{childId} */
 export const weeklyReviewDocId = (weekKey: string, childId: string): string =>
   `${weekKey}_${childId}`
+
+// ── XP Ledger (cumulative XP tracking) ──────────────────────────
+
+/** XP ledger per child. Doc ID: {childId} */
+export const xpLedgerCollection = (
+  familyId: string,
+): CollectionReference<XpLedger> =>
+  collection(db, `families/${familyId}/xpLedger`) as CollectionReference<XpLedger>
 
 // ── AI Usage ────────────────────────────────────────────────────
 
