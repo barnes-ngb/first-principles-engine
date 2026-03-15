@@ -66,7 +66,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
       setSaveState('saving')
       try {
         const docRef = doc(booksCollection(familyId), bookId)
-        const { id: _id, ...data } = updated
+        const { id: _, ...data } = updated
         await setDoc(docRef, { ...data, updatedAt: new Date().toISOString() })
         setSaveState('saved')
       } catch (err) {
