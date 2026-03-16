@@ -154,7 +154,8 @@ export default function BookReaderPage() {
   }
 
   const bgColor = isLincoln ? '#1a1a2e' : '#faf5ef'
-  const textColor = isLincoln ? '#e0e0e0' : '#333'
+  const textColor = isLincoln ? '#e0e0e0' : '#3d3d3d'
+  const accentColor = isLincoln ? '#4caf50' : '#e8a0bf'
   const titleFont = isLincoln
     ? '"Press Start 2P", monospace'
     : '"Fredoka", cursive'
@@ -364,11 +365,16 @@ export default function BookReaderPage() {
                   day: 'numeric',
                 })}
               </Typography>
-              {isLincoln && (
-                <Typography variant="caption" sx={{ color: 'text.disabled', fontFamily: '"Press Start 2P", monospace', fontSize: '0.5rem' }}>
-                  First Principles Engine
-                </Typography>
-              )}
+              <Typography
+                variant="caption"
+                sx={{
+                  color: isLincoln ? 'text.disabled' : accentColor,
+                  fontFamily: titleFont,
+                  fontSize: isLincoln ? '0.5rem' : '0.75rem',
+                }}
+              >
+                First Principles Engine
+              </Typography>
             </Stack>
           )}
         </Box>

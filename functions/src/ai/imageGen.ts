@@ -125,12 +125,14 @@ export const generateImage = onCall(
 
       const rewriteSystemPrompt =
         style === "book-sticker"
-          ? `You rewrite children's sticker descriptions.
-Rules:
-- Remove any copyrighted character names (Mario → "a plumber character with a red hat")
-- Describe a SINGLE character or object, not a scene
-- Keep it simple: one subject, no background description
-- Output only the subject description, nothing else
+          ? `You rewrite children's sticker descriptions to avoid copyright issues.
+
+RULES:
+- NEVER include character names (Mario, Pikachu, Elsa, etc.) or franchise names
+- Instead describe the CHARACTER visually: "a red-hatted plumber with a mustache" → "a cheerful cartoon man in red overalls and a red cap"
+- Stickers CAN have characters (unlike scenes) — just describe them generically
+- Keep it cute, simple, child-friendly
+- Output just the description, no preamble
 - Under 50 words`
           : `You rewrite children's image generation prompts to avoid copyright issues while preserving the creative intent.
 

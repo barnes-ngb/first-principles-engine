@@ -76,7 +76,7 @@ export default function BookshelfPage() {
   const [genStoryIdea, setGenStoryIdea] = useState('')
   const [genWords, setGenWords] = useState('')
   const [genStyle, setGenStyle] = useState(isLincoln ? 'minecraft' : 'storybook')
-  const [genPageCount, setGenPageCount] = useState(10)
+  const [genPageCount, setGenPageCount] = useState(isLincoln ? 10 : 6)
 
   // Menu state
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
@@ -160,8 +160,8 @@ export default function BookshelfPage() {
     setNewTitle('')
     setGenStoryIdea('')
     setGenWords('')
-    setGenPageCount(10)
-  }, [])
+    setGenPageCount(isLincoln ? 10 : 6)
+  }, [isLincoln])
 
   const formatRelativeTime = (iso: string) => {
     try {
@@ -341,8 +341,8 @@ export default function BookshelfPage() {
                   borderRadius: 2,
                   border: '1px solid',
                   borderColor: book.isTogetherBook ? 'info.300' : 'divider',
-                  bgcolor: isLincoln ? 'grey.900' : 'background.paper',
-                  color: isLincoln ? 'grey.100' : 'text.primary',
+                  bgcolor: isLincoln ? 'grey.900' : '#fff8f0',
+                  color: isLincoln ? 'grey.100' : '#3d3d3d',
                   cursor: 'pointer',
                   transition: 'transform 0.15s, box-shadow 0.15s',
                   position: 'relative',
@@ -693,8 +693,8 @@ export default function BookshelfPage() {
                 label="What's your story about?"
                 placeholder={
                   isLincoln
-                    ? 'A Minecraft adventure where a boy and his cat find a portal to a candy world'
-                    : 'A princess who befriends a baby dragon'
+                    ? 'A Minecraft adventure with a cat and a dragon...'
+                    : 'A princess who finds a magic garden with talking animals...'
                 }
                 value={genStoryIdea}
                 onChange={(e) => setGenStoryIdea(e.target.value)}
@@ -706,7 +706,11 @@ export default function BookshelfPage() {
               />
               <TextField
                 label="Words to include (optional)"
-                placeholder="the, is, was, cat, dog, run, water, where, could"
+                placeholder={
+                  isLincoln
+                    ? 'the, is, was, cat, dog, run, water, where...'
+                    : 'cat, dog, big, little, happy, love, my, the...'
+                }
                 helperText="These words will appear in the story and be highlighted when reading"
                 value={genWords}
                 onChange={(e) => setGenWords(e.target.value)}
