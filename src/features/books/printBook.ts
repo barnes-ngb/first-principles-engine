@@ -10,6 +10,7 @@ const PAGE_SIZES = {
   letter: { widthMM: 279.4, heightMM: 215.9, widthPx: 1056, heightPx: 816 },
   'half-letter': { widthMM: 139.7, heightMM: 215.9, widthPx: 528, heightPx: 816 },
   a4: { widthMM: 297, heightMM: 210, widthPx: 1122, heightPx: 794 },
+  booklet: { widthMM: 279.4, heightMM: 215.9, widthPx: 1056, heightPx: 816 },
 } as const
 
 const BG_COLORS = {
@@ -35,8 +36,11 @@ export interface PrintBookOptions {
 
 async function fetchAsDataUri(url: string): Promise<string> {
   try {
-    const response = await fetch(url)
-    if (!response.ok) return url
+    const response = await fetch(url, { mode: 'cors' })
+    if (!response.ok) {
+      console.warn(`Image fetch failed (${response.status}): ${url.slice(0, 80)}...`)
+      return url
+    }
     const blob = await response.blob()
     return new Promise((resolve) => {
       const reader = new FileReader()
@@ -44,7 +48,8 @@ async function fetchAsDataUri(url: string): Promise<string> {
       reader.onerror = () => resolve(url)
       reader.readAsDataURL(blob)
     })
-  } catch {
+  } catch (err) {
+    console.warn('Image fetch CORS error:', err, url.slice(0, 80))
     return url
   }
 }
@@ -87,42 +92,123 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
   const imageMap = await prefetchBookImages(book)
   const resolveUrl = (url: string) => imageMap.get(url) ?? url
 
+  const isBooklet = settings.pageSize === 'booklet'
+
   const pdf = new jsPDF({
-    orientation: isLandscape ? 'landscape' : 'portrait',
+    orientation: isLandscape || isBooklet ? 'landscape' : 'portrait',
     unit: 'mm',
-    format: isLandscape ? [size.widthMM, size.heightMM] : [size.widthMM, size.heightMM],
+    format: [size.widthMM, size.heightMM],
   })
 
-  // Cover page
-  const coverDiv = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
-  coverDiv.innerHTML = buildCoverHtml(book, childName, colors, titleFont, size, resolveUrl)
-  document.body.appendChild(coverDiv)
-  await renderDivToPage(coverDiv, pdf, size)
-  document.body.removeChild(coverDiv)
+  if (isBooklet) {
+    await renderBooklet(pdf, book, childName, isLincoln, colors, titleFont, sightWordSet, settings.sightWordStyle, size, resolveUrl)
+  } else {
+    // Cover page
+    const coverDiv = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
+    coverDiv.innerHTML = buildCoverHtml(book, childName, colors, titleFont, size, resolveUrl)
+    document.body.appendChild(coverDiv)
+    await renderDivToPage(coverDiv, pdf, size)
+    document.body.removeChild(coverDiv)
 
-  // Content pages
-  for (let i = 0; i < book.pages.length; i++) {
-    const page = book.pages[i]
+    // Content pages
+    for (let i = 0; i < book.pages.length; i++) {
+      const page = book.pages[i]
+      pdf.addPage()
+      const div = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
+      div.innerHTML = buildPageHtml(page, colors, sightWordSet, settings.sightWordStyle, titleFont, size, isLandscape, resolveUrl)
+      document.body.appendChild(div)
+      await renderDivToPage(div, pdf, size)
+      document.body.removeChild(div)
+    }
+
+    // Back cover
     pdf.addPage()
-    const div = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
-    div.innerHTML = buildPageHtml(page, colors, sightWordSet, settings.sightWordStyle, titleFont, size, isLandscape, resolveUrl)
-    document.body.appendChild(div)
-    await renderDivToPage(div, pdf, size)
-    document.body.removeChild(div)
+    const backDiv = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
+    backDiv.innerHTML = buildBackCoverHtml(book, childName, isLincoln, colors, titleFont, sightWordSet.size > 0)
+    document.body.appendChild(backDiv)
+    await renderDivToPage(backDiv, pdf, size)
+    document.body.removeChild(backDiv)
   }
-
-  // Back cover
-  pdf.addPage()
-  const backDiv = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
-  backDiv.innerHTML = buildBackCoverHtml(book, childName, isLincoln, colors, titleFont, sightWordSet.size > 0)
-  document.body.appendChild(backDiv)
-  await renderDivToPage(backDiv, pdf, size)
-  document.body.removeChild(backDiv)
 
   // Download
   const slug = (book.title || 'Book').replace(/[^a-zA-Z0-9]+/g, '-')
   const date = new Date().toISOString().split('T')[0]
   pdf.save(`${slug}-${date}.pdf`)
+}
+
+/* ───────────────────── booklet rendering ───────────────────── */
+
+type BookletPage =
+  | { type: 'cover'; book: Book; childName: string }
+  | { type: 'content'; page: BookPage }
+  | { type: 'back'; book: Book; childName: string; isLincoln: boolean; hasSightWords: boolean }
+
+async function renderBooklet(
+  pdf: jsPDF,
+  book: Book,
+  childName: string,
+  isLincoln: boolean,
+  colors: Colors,
+  titleFont: string,
+  sightWordSet: Set<string>,
+  sightWordStyle: PrintSettings['sightWordStyle'],
+  size: Size,
+  resolveUrl: (url: string) => string,
+): Promise<void> {
+  const halfSize = PAGE_SIZES['half-letter']
+
+  // Assemble all book pages in order: cover, content pages, back cover
+  const allPages: BookletPage[] = [
+    { type: 'cover', book, childName },
+    ...book.pages.map((page): BookletPage => ({ type: 'content', page })),
+    { type: 'back', book, childName, isLincoln, hasSightWords: sightWordSet.size > 0 },
+  ]
+
+  for (let i = 0; i < allPages.length; i += 2) {
+    if (i > 0) pdf.addPage()
+
+    const left = allPages[i]
+    const right: BookletPage | undefined = allPages[i + 1]
+
+    const leftHtml = buildBookletHalfHtml(left, colors, titleFont, halfSize, sightWordSet, sightWordStyle, resolveUrl)
+    const rightHtml = right
+      ? buildBookletHalfHtml(right, colors, titleFont, halfSize, sightWordSet, sightWordStyle, resolveUrl)
+      : `<div style="flex:1;background:${colors.bg};"></div>`
+
+    const foldLine = '<div style="width:1px;border-left:1px dashed rgba(0,0,0,0.15);height:100%;flex-shrink:0;"></div>'
+
+    const sheetDiv = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
+    sheetDiv.innerHTML = `
+      <div style="display:flex;height:100%;width:100%;">
+        <div style="flex:1;overflow:hidden;">${leftHtml}</div>
+        ${foldLine}
+        <div style="flex:1;overflow:hidden;">${rightHtml}</div>
+      </div>
+    `
+
+    document.body.appendChild(sheetDiv)
+    await renderDivToPage(sheetDiv, pdf, size)
+    document.body.removeChild(sheetDiv)
+  }
+}
+
+function buildBookletHalfHtml(
+  item: BookletPage,
+  colors: Colors,
+  titleFont: string,
+  halfSize: Size,
+  sightWordSet: Set<string>,
+  sightWordStyle: PrintSettings['sightWordStyle'],
+  resolveUrl: (url: string) => string,
+): string {
+  switch (item.type) {
+    case 'cover':
+      return buildCoverHtml(item.book, item.childName, colors, titleFont, halfSize, resolveUrl)
+    case 'content':
+      return buildPageHtml(item.page, colors, sightWordSet, sightWordStyle, titleFont, halfSize, false, resolveUrl)
+    case 'back':
+      return buildBackCoverHtml(item.book, item.childName, item.isLincoln, colors, titleFont, item.hasSightWords)
+  }
 }
 
 /* ───────────────────── helpers ───────────────────── */
