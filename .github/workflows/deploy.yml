@@ -79,15 +79,39 @@ jobs:
 
       - name: Configure Storage CORS
         run: |
-          # The default bucket follows the pattern {project-id}.firebasestorage.app
-          # Try both new and legacy bucket names
-          BUCKET_NEW="${{ secrets.VITE_FIREBASE_STORAGE_BUCKET || 'barneshome-3dfbb.firebasestorage.app' }}"
+          # Use gcloud storage (properly uses Application Default Credentials from auth step)
+          # Try the new bucket naming format first, then legacy
+          BUCKET_NEW="${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}"
           BUCKET_LEGACY="barneshome-3dfbb.appspot.com"
 
-          echo "Setting CORS on storage bucket..."
-          gsutil cors set storage-cors.json "gs://${BUCKET_NEW}" 2>/dev/null || \
-          gsutil cors set storage-cors.json "gs://${BUCKET_LEGACY}" 2>/dev/null || \
-          echo "Warning: Could not set CORS on storage bucket. Try manually: gsutil cors set storage-cors.json gs://YOUR_BUCKET"
+          # Determine which bucket exists
+          BUCKET=""
+          if [ -n "$BUCKET_NEW" ]; then
+            echo "Trying bucket: $BUCKET_NEW"
+            if gcloud storage buckets describe "gs://$BUCKET_NEW" --format="value(name)" 2>/dev/null; then
+              BUCKET="$BUCKET_NEW"
+            fi
+          fi
+          if [ -z "$BUCKET" ]; then
+            echo "Trying legacy bucket: $BUCKET_LEGACY"
+            if gcloud storage buckets describe "gs://$BUCKET_LEGACY" --format="value(name)" 2>/dev/null; then
+              BUCKET="$BUCKET_LEGACY"
+            fi
+          fi
+
+          if [ -z "$BUCKET" ]; then
+            echo "::warning::Could not find storage bucket. CORS not configured."
+            exit 0
+          fi
+
+          echo "Setting CORS on gs://$BUCKET"
+          # The auth@v2 action sets GOOGLE_APPLICATION_CREDENTIALS which gsutil reads.
+          gsutil cors set storage-cors.json "gs://$BUCKET"
+          echo "CORS configured successfully on gs://$BUCKET"
+
+          # Verify
+          echo "Verifying CORS config:"
+          gsutil cors get "gs://$BUCKET"
 
       # ── Cloud Functions (when functions/ has changes) ────────────
       - name: Check for functions changes
