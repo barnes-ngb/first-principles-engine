@@ -1,73 +1,122 @@
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
 import type { Book, BookPage } from '../../core/types/domain'
+import type { PrintSettings } from './PrintSettingsDialog'
 import { TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
 
-// Portrait mobile-ish page size (px for rendering, mm for PDF)
-const PAGE_PX_W = 375
-const PAGE_PX_H = 667
-const PAGE_MM_W = 99.2 // 375px at 96dpi ≈ 99.2mm
-const PAGE_MM_H = 176.6 // 667px at 96dpi ≈ 176.6mm
+/* ───────────────────── page size & color constants ───────────────────── */
 
-/** Mastery-level highlight colors matching SightWordChip.tsx */
-const SIGHT_WORD_BG: Record<string, string> = {
-  new: 'rgba(33, 150, 243, 0.25)',
-  practicing: 'rgba(255, 193, 7, 0.3)',
-  familiar: 'rgba(76, 175, 80, 0.2)',
-  mastered: 'rgba(76, 175, 80, 0.08)',
+const PAGE_SIZES = {
+  letter: { widthMM: 279.4, heightMM: 215.9, widthPx: 1056, heightPx: 816 },
+  'half-letter': { widthMM: 139.7, heightMM: 215.9, widthPx: 528, heightPx: 816 },
+  a4: { widthMM: 297, heightMM: 210, widthPx: 1122, heightPx: 794 },
+} as const
+
+const BG_COLORS = {
+  white: { bg: '#ffffff', text: '#333333', imgBg: '#f5f5f5', sightWordBg: 'rgba(33, 150, 243, 0.2)' },
+  cream: { bg: '#faf5ef', text: '#333333', imgBg: '#f0ebe3', sightWordBg: 'rgba(33, 150, 243, 0.2)' },
+  dark: { bg: '#1a1a2e', text: '#e0e0e0', imgBg: 'rgba(255,255,255,0.05)', sightWordBg: 'rgba(66, 165, 245, 0.25)' },
+} as const
+
+const DEFAULT_SETTINGS: PrintSettings = {
+  pageSize: 'letter',
+  background: 'white',
+  sightWordStyle: 'highlighted',
 }
 
 export interface PrintBookOptions {
-  /** Child name — used for "By" line and filename */
   childName: string
-  /** True for Lincoln's Minecraft theme, false for London's storybook theme */
   isLincoln: boolean
-  /** Sight words to highlight (from book.sightWords) */
   sightWords?: string[]
+  settings?: PrintSettings
 }
 
-/**
- * Generate and download a PDF booklet that matches the in-app BookReaderPage
- * view 1:1 — same dark/light theme, fonts, sight-word highlights, and images.
- */
+/* ───────────────────── image pre-fetch (CORS fix) ───────────────────── */
+
+async function fetchAsDataUri(url: string): Promise<string> {
+  try {
+    const response = await fetch(url)
+    if (!response.ok) return url
+    const blob = await response.blob()
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result as string)
+      reader.onerror = () => resolve(url)
+      reader.readAsDataURL(blob)
+    })
+  } catch {
+    return url
+  }
+}
+
+async function prefetchBookImages(book: Book): Promise<Map<string, string>> {
+  const urls = new Set<string>()
+
+  const coverUrl = book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
+  if (coverUrl) urls.add(coverUrl)
+
+  for (const page of book.pages) {
+    for (const img of page.images) {
+      if (img.url) urls.add(img.url)
+    }
+  }
+
+  const entries = await Promise.all(
+    [...urls].map(async (url) => {
+      const dataUri = await fetchAsDataUri(url)
+      return [url, dataUri] as [string, string]
+    }),
+  )
+
+  return new Map(entries)
+}
+
+/* ───────────────────── main entry ───────────────────── */
+
 export async function printBook(book: Book, opts: PrintBookOptions): Promise<void> {
   const { childName, isLincoln, sightWords } = opts
-  const bgColor = isLincoln ? '#1a1a2e' : '#faf5ef'
-  const textColor = isLincoln ? '#e0e0e0' : '#333'
-  const titleFont = isLincoln
-    ? '"Press Start 2P", monospace'
-    : '"Fredoka", cursive'
+  const settings = opts.settings ?? DEFAULT_SETTINGS
+  const colors = BG_COLORS[settings.background]
+  const size = PAGE_SIZES[settings.pageSize]
+  const isLandscape = settings.pageSize !== 'half-letter'
+
+  const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
   const sightWordSet = new Set((sightWords ?? []).map((w) => w.toLowerCase()))
 
+  // Pre-fetch all images as base64 to avoid CORS issues
+  const imageMap = await prefetchBookImages(book)
+  const resolveUrl = (url: string) => imageMap.get(url) ?? url
+
   const pdf = new jsPDF({
-    orientation: 'portrait',
+    orientation: isLandscape ? 'landscape' : 'portrait',
     unit: 'mm',
-    format: [PAGE_MM_W, PAGE_MM_H],
+    format: isLandscape ? [size.widthMM, size.heightMM] : [size.widthMM, size.heightMM],
   })
 
-  // ── Cover page ──────────────────────────────────────────────────
-  const coverDiv = createHiddenDiv(bgColor)
-  coverDiv.innerHTML = buildCoverHtml(book, childName, bgColor, textColor, titleFont)
+  // Cover page
+  const coverDiv = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
+  coverDiv.innerHTML = buildCoverHtml(book, childName, colors, titleFont, size, resolveUrl)
   document.body.appendChild(coverDiv)
-  await renderDivToPage(coverDiv, pdf)
+  await renderDivToPage(coverDiv, pdf, size)
   document.body.removeChild(coverDiv)
 
-  // ── Content pages ───────────────────────────────────────────────
-  for (const page of book.pages) {
+  // Content pages
+  for (let i = 0; i < book.pages.length; i++) {
+    const page = book.pages[i]
     pdf.addPage()
-    const div = createHiddenDiv(bgColor)
-    div.innerHTML = buildPageHtml(page, isLincoln, bgColor, textColor, sightWordSet)
+    const div = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
+    div.innerHTML = buildPageHtml(page, colors, sightWordSet, settings.sightWordStyle, titleFont, size, isLandscape, resolveUrl)
     document.body.appendChild(div)
-    await renderDivToPage(div, pdf)
+    await renderDivToPage(div, pdf, size)
     document.body.removeChild(div)
   }
 
-  // ── Back cover ──────────────────────────────────────────────────
+  // Back cover
   pdf.addPage()
-  const backDiv = createHiddenDiv(bgColor)
-  backDiv.innerHTML = buildBackCoverHtml(book, childName, isLincoln, bgColor, textColor, titleFont, sightWordSet.size > 0)
+  const backDiv = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
+  backDiv.innerHTML = buildBackCoverHtml(book, childName, isLincoln, colors, titleFont, sightWordSet.size > 0)
   document.body.appendChild(backDiv)
-  await renderDivToPage(backDiv, pdf)
+  await renderDivToPage(backDiv, pdf, size)
   document.body.removeChild(backDiv)
 
   // Download
@@ -78,24 +127,25 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
 
 /* ───────────────────── helpers ───────────────────── */
 
-function createHiddenDiv(bgColor: string): HTMLDivElement {
+type Colors = (typeof BG_COLORS)[keyof typeof BG_COLORS]
+type Size = (typeof PAGE_SIZES)[keyof typeof PAGE_SIZES]
+
+function createHiddenDiv(bgColor: string, widthPx: number, heightPx: number): HTMLDivElement {
   const div = document.createElement('div')
-  div.style.cssText = `position:fixed;left:-9999px;top:0;width:${PAGE_PX_W}px;height:${PAGE_PX_H}px;background:${bgColor};overflow:hidden;`
+  div.style.cssText = `position:fixed;left:-9999px;top:0;width:${widthPx}px;height:${heightPx}px;background:${bgColor};overflow:hidden;`
   return div
 }
 
-async function renderDivToPage(div: HTMLDivElement, pdf: jsPDF): Promise<void> {
+async function renderDivToPage(div: HTMLDivElement, pdf: jsPDF, size: Size): Promise<void> {
   const canvas = await html2canvas(div, {
-    width: PAGE_PX_W,
-    height: PAGE_PX_H,
-    scale: 2, // 2× for sharp print
-    useCORS: true,
-    allowTaint: true,
-    backgroundColor: null, // preserve themed background
+    width: size.widthPx,
+    height: size.heightPx,
+    scale: 2,
+    backgroundColor: null,
     logging: false,
   })
-  const imgData = canvas.toDataURL('image/jpeg', 0.95)
-  pdf.addImage(imgData, 'JPEG', 0, 0, PAGE_MM_W, PAGE_MM_H)
+  const imgData = canvas.toDataURL('image/png')
+  pdf.addImage(imgData, 'PNG', 0, 0, size.widthMM, size.heightMM)
 }
 
 /* ───────────────────── cover ───────────────────── */
@@ -103,29 +153,30 @@ async function renderDivToPage(div: HTMLDivElement, pdf: jsPDF): Promise<void> {
 function buildCoverHtml(
   book: Book,
   childName: string,
-  bgColor: string,
-  textColor: string,
+  colors: Colors,
   titleFont: string,
+  size: Size,
+  resolveUrl: (url: string) => string,
 ): string {
-  const coverUrl =
-    book.coverImageUrl ??
-    book.pages.find((p) => p.images.length > 0)?.images[0]?.url
+  const coverUrl = book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
+  const isPixel = titleFont.includes('Press Start')
+  const maxImgHeight = Math.round(size.heightPx * 0.55)
 
   const coverImg = coverUrl
-    ? `<img src="${escapeHtml(coverUrl)}" crossorigin="anonymous"
-        style="max-width:80%;max-height:300px;border-radius:12px;object-fit:contain;box-shadow:0 4px 12px rgba(0,0,0,0.3);" />`
+    ? `<img src="${escapeHtml(resolveUrl(coverUrl))}"
+        style="max-width:70%;max-height:${maxImgHeight}px;border-radius:12px;object-fit:contain;box-shadow:0 4px 16px rgba(0,0,0,0.15);" />`
     : ''
 
   return `
     <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                height:100%;padding:24px;text-align:center;background:${bgColor};color:${textColor};">
+                height:100%;padding:40px;text-align:center;background:${colors.bg};color:${colors.text};">
       ${coverImg}
-      <h1 style="font-family:${titleFont};font-size:${titleFont.includes('Press Start') ? '14px' : '28px'};
-                  margin:24px 0 8px;color:${textColor};font-weight:700;">
+      <h1 style="font-family:${titleFont};font-size:${isPixel ? '16px' : '36px'};
+                  margin:32px 0 12px;color:${colors.text};font-weight:700;">
         ${escapeHtml(book.title)}
       </h1>
-      <p style="font-family:${titleFont};font-size:${titleFont.includes('Press Start') ? '9px' : '18px'};
-                color:${textColor};opacity:0.7;margin:0;">
+      <p style="font-family:${titleFont};font-size:${isPixel ? '10px' : '20px'};
+                color:${colors.text};opacity:0.6;margin:0;">
         By ${escapeHtml(childName)}
       </p>
     </div>
@@ -136,59 +187,93 @@ function buildCoverHtml(
 
 function buildPageHtml(
   page: BookPage,
-  isLincoln: boolean,
-  bgColor: string,
-  textColor: string,
+  colors: Colors,
   sightWordSet: Set<string>,
+  sightWordStyle: PrintSettings['sightWordStyle'],
+  _titleFont: string,
+  size: Size,
+  isLandscape: boolean,
+  resolveUrl: (url: string) => string,
 ): string {
-  const imgBg = isLincoln ? 'rgba(255,255,255,0.05)' : '#f5f5f5'
-
-  // Images
-  const imagesHtml =
-    page.images.length > 0
-      ? `<div style="position:relative;width:100%;height:280px;border-radius:8px;overflow:hidden;background:${imgBg};">
-          ${page.images
-            .map((img) => {
-              const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
-              const fit = img.type === 'sticker' ? 'contain' : 'cover'
-              return `<img src="${escapeHtml(img.url)}" crossorigin="anonymous"
-                style="position:absolute;left:${pos.x}%;top:${pos.y}%;width:${pos.width}%;height:${pos.height}%;
-                       object-fit:${fit};border-radius:4px;" />`
-            })
-            .join('')}
-        </div>`
-      : ''
-
-  // Text (with sight-word highlighting)
-  const textCss = getTextCssForPage(page)
+  const hasImages = page.images.length > 0
+  const textCss = getTextCssForPage(page, isLandscape)
   const textContent = page.text
-    ? highlightSightWordsHtml(page.text, sightWordSet)
-    : ''
-  const textHtml = textContent
-    ? `<div style="padding:8px 4px;font-size:${textCss.fontSize};line-height:${textCss.lineHeight};
-                   font-family:${textCss.fontFamily};color:${textColor};">
-        ${textContent}
-      </div>`
+    ? highlightSightWordsHtml(page.text, sightWordSet, sightWordStyle, colors)
     : ''
 
-  // Audio note
   const audioNote = page.audioUrl
-    ? `<p style="font-size:10px;color:${textColor};opacity:0.4;text-align:center;margin:4px 0 0;">
+    ? `<p style="font-size:10px;color:${colors.text};opacity:0.4;text-align:center;margin:4px 0 0;">
         This page has audio narration — listen in the app.
       </p>`
     : ''
 
+  if (isLandscape && hasImages) {
+    // Landscape: image left 55%, text right 40%
+    const imgHeight = Math.round(size.heightPx * 0.75)
+    const imagesHtml = buildImagesHtml(page, colors, imgHeight, resolveUrl)
+
+    return `
+      <div style="display:flex;flex-direction:row;align-items:stretch;height:100%;padding:32px;gap:32px;
+                  background:${colors.bg};box-sizing:border-box;">
+        <div style="flex:0 0 55%;display:flex;align-items:center;justify-content:center;">
+          ${imagesHtml}
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:16px 8px;">
+          <div style="font-size:${textCss.fontSize};line-height:${textCss.lineHeight};
+                      font-family:${textCss.fontFamily};color:${colors.text};">
+            ${textContent}
+          </div>
+          ${audioNote}
+          <p style="font-size:10px;color:${colors.text};opacity:0.25;text-align:right;margin-top:auto;">
+            ${page.pageNumber}
+          </p>
+        </div>
+      </div>
+    `
+  }
+
+  // Portrait / half-letter: image top, text bottom
+  const imagesHtml = hasImages
+    ? buildImagesHtml(page, colors, Math.round(size.heightPx * 0.5), resolveUrl)
+    : ''
+
+  const textHtml = textContent
+    ? `<div style="padding:12px 8px;font-size:${textCss.fontSize};line-height:${textCss.lineHeight};
+                   font-family:${textCss.fontFamily};color:${colors.text};">
+        ${textContent}
+      </div>`
+    : ''
+
   return `
-    <div style="display:flex;flex-direction:column;gap:8px;height:100%;padding:16px;
-                background:${bgColor};box-sizing:border-box;">
+    <div style="display:flex;flex-direction:column;gap:12px;height:100%;padding:24px;
+                background:${colors.bg};box-sizing:border-box;">
       ${imagesHtml}
       ${textHtml}
       ${audioNote}
-      <p style="font-size:9px;color:${textColor};opacity:0.3;text-align:right;margin-top:auto;">
+      <p style="font-size:10px;color:${colors.text};opacity:0.25;text-align:right;margin-top:auto;">
         ${page.pageNumber}
       </p>
     </div>
   `
+}
+
+function buildImagesHtml(
+  page: BookPage,
+  colors: Colors,
+  containerHeight: number,
+  resolveUrl: (url: string) => string,
+): string {
+  return `<div style="position:relative;width:100%;height:${containerHeight}px;border-radius:12px;overflow:hidden;background:${colors.imgBg};">
+    ${page.images
+      .map((img) => {
+        const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+        const fit = img.type === 'sticker' ? 'contain' : 'cover'
+        return `<img src="${escapeHtml(resolveUrl(img.url))}"
+          style="position:absolute;left:${pos.x}%;top:${pos.y}%;width:${pos.width}%;height:${pos.height}%;
+                 object-fit:${fit};border-radius:4px;" />`
+      })
+      .join('')}
+  </div>`
 }
 
 /* ───────────────────── back cover ───────────────────── */
@@ -197,33 +282,33 @@ function buildBackCoverHtml(
   book: Book,
   childName: string,
   isLincoln: boolean,
-  bgColor: string,
-  textColor: string,
+  colors: Colors,
   titleFont: string,
   isSightWordBook: boolean,
 ): string {
-  const headingFontSize = titleFont.includes('Press Start') ? '11px' : '22px'
+  const isPixel = titleFont.includes('Press Start')
+  const headingFontSize = isPixel ? '12px' : '24px'
 
   const mainContent = isSightWordBook
-    ? `<p style="font-family:${titleFont};font-size:${headingFontSize};color:${textColor};font-weight:700;margin:0 0 12px;">
+    ? `<p style="font-family:${titleFont};font-size:${headingFontSize};color:${colors.text};font-weight:700;margin:0 0 12px;">
         Great reading!
       </p>`
-    : `<p style="font-family:${titleFont};font-size:${headingFontSize};color:${textColor};font-weight:700;margin:0 0 12px;">
+    : `<p style="font-family:${titleFont};font-size:${headingFontSize};color:${colors.text};font-weight:700;margin:0 0 12px;">
         Made by ${escapeHtml(childName)}
       </p>`
 
   const dateStr = formatDate(book.createdAt)
   const fpeLine = isLincoln
-    ? `<p style="font-family:'Press Start 2P',monospace;font-size:7px;color:${textColor};opacity:0.3;margin-top:32px;">
+    ? `<p style="font-family:'Press Start 2P',monospace;font-size:7px;color:${colors.text};opacity:0.3;margin-top:32px;">
         First Principles Engine
       </p>`
     : ''
 
   return `
     <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                height:100%;padding:40px;text-align:center;background:${bgColor};color:${textColor};">
+                height:100%;padding:40px;text-align:center;background:${colors.bg};color:${colors.text};">
       ${mainContent}
-      <p style="font-size:13px;color:${textColor};opacity:0.5;margin:0;">${dateStr}</p>
+      <p style="font-size:14px;color:${colors.text};opacity:0.5;margin:0;">${dateStr}</p>
       ${fpeLine}
     </div>
   `
@@ -231,25 +316,48 @@ function buildBackCoverHtml(
 
 /* ───────────────────── text utilities ───────────────────── */
 
-function getTextCssForPage(page: BookPage): { fontSize: string; lineHeight: number; fontFamily: string } {
+function getTextCssForPage(
+  page: BookPage,
+  isLandscape: boolean,
+): { fontSize: string; lineHeight: number; fontFamily: string } {
   const sizeKey = page.textSize ?? 'medium'
   const fontKey = page.textFont ?? 'print'
   const sizeStyles = TEXT_SIZE_STYLES[sizeKey]
   const fontFamily = TEXT_FONT_FAMILIES[fontKey]
+
+  // Scale up font for print (landscape pages are bigger)
+  const basePx = parseFloat(sizeStyles.fontSize)
+  const scaledPx = isLandscape ? basePx * 1.4 : basePx * 1.2
+
   return {
-    fontSize: sizeStyles.fontSize,
+    fontSize: `${scaledPx}rem`,
     lineHeight: sizeStyles.lineHeight,
     fontFamily: fontFamily === 'inherit' ? 'Georgia, serif' : fontFamily,
   }
 }
 
-/**
- * Convert plain text to HTML with sight-word spans highlighted using the same
- * colors as SightWordChip in the app. For print we just apply the background
- * color — no interactive popover needed.
- */
-function highlightSightWordsHtml(text: string, sightWordSet: Set<string>): string {
-  if (sightWordSet.size === 0) return escapeHtml(text)
+function renderSightWord(
+  word: string,
+  style: PrintSettings['sightWordStyle'],
+  colors: Colors,
+): string {
+  switch (style) {
+    case 'highlighted':
+      return `<span style="padding:2px 6px;border-radius:4px;background:${colors.sightWordBg};font-weight:700;">${escapeHtml(word)}</span>`
+    case 'bold':
+      return `<span style="font-weight:700;text-decoration:underline;">${escapeHtml(word)}</span>`
+    case 'plain':
+      return escapeHtml(word)
+  }
+}
+
+function highlightSightWordsHtml(
+  text: string,
+  sightWordSet: Set<string>,
+  style: PrintSettings['sightWordStyle'],
+  colors: Colors,
+): string {
+  if (sightWordSet.size === 0 || style === 'plain') return escapeHtml(text)
 
   const tokens = text.split(/(\s+)/)
   return tokens
@@ -262,8 +370,7 @@ function highlightSightWordsHtml(text: string, sightWordSet: Set<string>): strin
       const [, prefix, word, suffix] = match
       const lower = word.toLowerCase()
       if (sightWordSet.has(lower)) {
-        const bg = SIGHT_WORD_BG['new'] // default highlight for print
-        return `${escapeHtml(prefix)}<span style="padding:1px 3px;border-radius:3px;background:${bg};font-weight:700;">${escapeHtml(word)}</span>${escapeHtml(suffix)}`
+        return `${escapeHtml(prefix)}${renderSightWord(word, style, colors)}${escapeHtml(suffix)}`
       }
       return escapeHtml(token)
     })
