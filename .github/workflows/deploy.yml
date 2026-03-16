@@ -105,13 +105,13 @@ jobs:
           fi
 
           echo "Setting CORS on gs://$BUCKET"
-          # The auth@v2 action sets GOOGLE_APPLICATION_CREDENTIALS which gsutil reads.
-          gsutil cors set storage-cors.json "gs://$BUCKET"
+          # Use gcloud storage (not gsutil) — it properly uses ADC from auth@v2
+          gcloud storage buckets update "gs://$BUCKET" --cors-file=storage-cors.json
           echo "CORS configured successfully on gs://$BUCKET"
 
           # Verify
           echo "Verifying CORS config:"
-          gsutil cors get "gs://$BUCKET"
+          gcloud storage buckets describe "gs://$BUCKET" --format="json(cors_config)"
 
       # ── Cloud Functions (when functions/ has changes) ────────────
       - name: Check for functions changes
