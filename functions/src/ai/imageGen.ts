@@ -41,7 +41,7 @@ const STYLE_PREFIXES: Record<string, string> = {
   "book-illustration-realistic":
     "A gentle realistic background scene for a children's book page. Environment only, no people or characters. Warm lighting, friendly atmosphere. ",
   "book-sticker":
-    "A cute sticker illustration, die-cut sticker style, cartoon, simple, bold outline, white background. Child-friendly, colorful, no text. ",
+    "A single cartoon character or object on a PLAIN SOLID WHITE (#FFFFFF) background. Die-cut sticker style with thick bold black outline around the subject. The subject should be centered, take up about 70% of the image, and be completely surrounded by white space on all sides. Simple, colorful, child-friendly, no text, no scenery, no patterns in the background. The background MUST be pure solid white with nothing else. ",
   general: "",
 };
 
@@ -54,6 +54,100 @@ export function buildImagePrompt(
   const safetyPostfix =
     " Safe for children, family-friendly, no text overlays.";
   return `${prefix}${userPrompt}.${safetyPostfix}`;
+}
+
+// ── Sticker background removal ──────────────────────────────────
+
+/**
+ * Remove the background from a sticker image using edge-based approach.
+ *
+ * Strategy:
+ * 1. Convert to PNG with alpha channel
+ * 2. Sample the corner pixels to determine background color
+ * 3. Make all pixels within a tolerance of the background color transparent
+ * 4. Apply a slight feather to the edges for clean cutout
+ */
+async function removeStickerBackground(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sharp: any,
+  buffer: Buffer,
+): Promise<Buffer> {
+  const image = sharp(buffer).ensureAlpha();
+  const { width, height } = await image.metadata();
+
+  if (!width || !height) return buffer;
+
+  // Get raw pixel data
+  const { data, info } = await image
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const channels = info.channels; // 4 (RGBA)
+  const pixels = new Uint8ClampedArray(
+    data.buffer,
+    data.byteOffset,
+    data.length,
+  );
+
+  // Sample corners to find background color (average of 4 corner 5x5 regions)
+  const sampleSize = 5;
+  const corners = [
+    { x: 0, y: 0 }, // top-left
+    { x: width - sampleSize, y: 0 }, // top-right
+    { x: 0, y: height - sampleSize }, // bottom-left
+    { x: width - sampleSize, y: height - sampleSize }, // bottom-right
+  ];
+
+  let rSum = 0,
+    gSum = 0,
+    bSum = 0,
+    count = 0;
+  for (const corner of corners) {
+    for (let dy = 0; dy < sampleSize; dy++) {
+      for (let dx = 0; dx < sampleSize; dx++) {
+        const idx = ((corner.y + dy) * width + (corner.x + dx)) * channels;
+        rSum += pixels[idx];
+        gSum += pixels[idx + 1];
+        bSum += pixels[idx + 2];
+        count++;
+      }
+    }
+  }
+  const bgR = Math.round(rSum / count);
+  const bgG = Math.round(gSum / count);
+  const bgB = Math.round(bSum / count);
+
+  // Make pixels similar to background transparent
+  // Use a generous tolerance since DALL-E backgrounds aren't perfectly uniform
+  const tolerance = 45;
+  const edgeSoftness = 25; // gradual alpha falloff near the tolerance boundary
+
+  for (let i = 0; i < pixels.length; i += channels) {
+    const r = pixels[i];
+    const g = pixels[i + 1];
+    const b = pixels[i + 2];
+
+    const dist = Math.sqrt(
+      (r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2,
+    );
+
+    if (dist < tolerance) {
+      // Fully transparent
+      pixels[i + 3] = 0;
+    } else if (dist < tolerance + edgeSoftness) {
+      // Gradual falloff for smooth edges
+      const alpha = Math.round(((dist - tolerance) / edgeSoftness) * 255);
+      pixels[i + 3] = Math.min(pixels[i + 3], alpha);
+    }
+    // else: keep original alpha (fully opaque)
+  }
+
+  // Reconstruct image with transparency
+  return sharp(Buffer.from(pixels.buffer), {
+    raw: { width, height, channels: 4 },
+  })
+    .png()
+    .toBuffer();
 }
 
 // ── Callable Cloud Function ─────────────────────────────────────
@@ -123,10 +217,16 @@ export const generateImage = onCall(
       const { default: Anthropic } = await import("@anthropic-ai/sdk");
       const claude = new Anthropic({ apiKey: claudeApiKey.value() });
 
-      const rewriteResult = await claude.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 300,
-        system: `You rewrite children's image generation prompts to avoid copyright issues while preserving the creative intent.
+      const rewriteSystemPrompt =
+        style === "book-sticker"
+          ? `You rewrite children's sticker descriptions.
+Rules:
+- Remove any copyrighted character names (Mario → "a plumber character with a red hat")
+- Describe a SINGLE character or object, not a scene
+- Keep it simple: one subject, no background description
+- Output only the subject description, nothing else
+- Under 50 words`
+          : `You rewrite children's image generation prompts to avoid copyright issues while preserving the creative intent.
 
 RULES:
 - NEVER include character names (Mario, Luigi, Pikachu, Elsa, Spider-Man, Steve, etc.)
@@ -143,7 +243,12 @@ RULES:
 - Maintain the kid's creative intent — just make it about the WORLD not the CHARACTER
 - The output should start directly with the scene description, no preamble
 
-IMPORTANT: The child will overlay their own characters on top of this scene. So generate a BACKGROUND, not a character portrait.`,
+IMPORTANT: The child will overlay their own characters on top of this scene. So generate a BACKGROUND, not a character portrait.`;
+
+      const rewriteResult = await claude.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 300,
+        system: rewriteSystemPrompt,
         messages: [{ role: "user", content: prompt }],
       });
 
@@ -224,6 +329,23 @@ IMPORTANT: The child will overlay their own characters on top of this scene. So 
       );
     }
 
+    // ── Remove background for sticker-style images ─────────────
+    let processedBuffer = imageBuffer;
+    const contentType = "image/png";
+
+    if (style === "book-sticker") {
+      try {
+        const { default: sharp } = await import("sharp");
+        processedBuffer = await removeStickerBackground(sharp, imageBuffer);
+      } catch (bgErr) {
+        console.warn(
+          "Sticker background removal failed, using original:",
+          bgErr,
+        );
+        // Fall through with original image
+      }
+    }
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const filename = `${timestamp}.png`;
     const storagePath = `families/${familyId}/generated-images/${filename}`;
@@ -234,9 +356,9 @@ IMPORTANT: The child will overlay their own characters on top of this scene. So 
     const { randomUUID } = await import("crypto");
     const downloadToken = randomUUID();
 
-    await file.save(imageBuffer, {
+    await file.save(processedBuffer, {
       metadata: {
-        contentType: "image/png",
+        contentType,
         metadata: {
           generatedBy: "dall-e-3",
           originalPrompt: prompt,

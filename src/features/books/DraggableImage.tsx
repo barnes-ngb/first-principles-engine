@@ -16,7 +16,7 @@ interface DraggableImageProps {
 const DEFAULT_POSITIONS: Record<PageImage['type'], { x: number; y: number; width: number; height: number }> = {
   photo: { x: 0, y: 0, width: 100, height: 100 },
   'ai-generated': { x: 0, y: 0, width: 100, height: 100 },
-  sticker: { x: 60, y: 10, width: 25, height: 25 },
+  sticker: { x: 25, y: 15, width: 50, height: 50 },
 }
 
 function clamp(val: number, min: number, max: number) {
@@ -159,6 +159,7 @@ export default function DraggableImage({
           height: '100%',
           objectFit: image.type === 'sticker' ? 'contain' : 'cover',
           pointerEvents: 'none',
+          ...(image.type === 'sticker' ? { mixBlendMode: 'multiply' } : {}),
         }}
       />
       {selected && onRemove && (
