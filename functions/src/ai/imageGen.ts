@@ -41,7 +41,7 @@ const STYLE_PREFIXES: Record<string, string> = {
   "book-illustration-realistic":
     "A gentle realistic background scene for a children's book page. Environment only, no people or characters. Warm lighting, friendly atmosphere. ",
   "book-sticker":
-    "A single cartoon character or object on a PLAIN SOLID WHITE (#FFFFFF) background. Die-cut sticker style with thick bold black outline around the subject. The subject should be centered, take up about 70% of the image, and be completely surrounded by white space on all sides. Simple, colorful, child-friendly, no text, no scenery, no patterns in the background. The background MUST be pure solid white with nothing else. ",
+    "A single cute cartoon character or object, sticker style. Bold clean outline, colorful flat fill, simple shapes, fun and expressive. Child-friendly, no text, no background elements. ",
   general: "",
 };
 
@@ -54,100 +54,6 @@ export function buildImagePrompt(
   const safetyPostfix =
     " Safe for children, family-friendly, no text overlays.";
   return `${prefix}${userPrompt}.${safetyPostfix}`;
-}
-
-// ── Sticker background removal ──────────────────────────────────
-
-/**
- * Remove the background from a sticker image using edge-based approach.
- *
- * Strategy:
- * 1. Convert to PNG with alpha channel
- * 2. Sample the corner pixels to determine background color
- * 3. Make all pixels within a tolerance of the background color transparent
- * 4. Apply a slight feather to the edges for clean cutout
- */
-async function removeStickerBackground(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sharp: any,
-  buffer: Buffer,
-): Promise<Buffer> {
-  const image = sharp(buffer).ensureAlpha();
-  const { width, height } = await image.metadata();
-
-  if (!width || !height) return buffer;
-
-  // Get raw pixel data
-  const { data, info } = await image
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  const channels = info.channels; // 4 (RGBA)
-  const pixels = new Uint8ClampedArray(
-    data.buffer,
-    data.byteOffset,
-    data.length,
-  );
-
-  // Sample corners to find background color (average of 4 corner 5x5 regions)
-  const sampleSize = 5;
-  const corners = [
-    { x: 0, y: 0 }, // top-left
-    { x: width - sampleSize, y: 0 }, // top-right
-    { x: 0, y: height - sampleSize }, // bottom-left
-    { x: width - sampleSize, y: height - sampleSize }, // bottom-right
-  ];
-
-  let rSum = 0,
-    gSum = 0,
-    bSum = 0,
-    count = 0;
-  for (const corner of corners) {
-    for (let dy = 0; dy < sampleSize; dy++) {
-      for (let dx = 0; dx < sampleSize; dx++) {
-        const idx = ((corner.y + dy) * width + (corner.x + dx)) * channels;
-        rSum += pixels[idx];
-        gSum += pixels[idx + 1];
-        bSum += pixels[idx + 2];
-        count++;
-      }
-    }
-  }
-  const bgR = Math.round(rSum / count);
-  const bgG = Math.round(gSum / count);
-  const bgB = Math.round(bSum / count);
-
-  // Make pixels similar to background transparent
-  // Use a generous tolerance since DALL-E backgrounds aren't perfectly uniform
-  const tolerance = 45;
-  const edgeSoftness = 25; // gradual alpha falloff near the tolerance boundary
-
-  for (let i = 0; i < pixels.length; i += channels) {
-    const r = pixels[i];
-    const g = pixels[i + 1];
-    const b = pixels[i + 2];
-
-    const dist = Math.sqrt(
-      (r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2,
-    );
-
-    if (dist < tolerance) {
-      // Fully transparent
-      pixels[i + 3] = 0;
-    } else if (dist < tolerance + edgeSoftness) {
-      // Gradual falloff for smooth edges
-      const alpha = Math.round(((dist - tolerance) / edgeSoftness) * 255);
-      pixels[i + 3] = Math.min(pixels[i + 3], alpha);
-    }
-    // else: keep original alpha (fully opaque)
-  }
-
-  // Reconstruct image with transparency
-  return sharp(Buffer.from(pixels.buffer), {
-    raw: { width, height, channels: 4 },
-  })
-    .png()
-    .toBuffer();
 }
 
 // ── Callable Cloud Function ─────────────────────────────────────
@@ -261,13 +167,18 @@ IMPORTANT: The child will overlay their own characters on top of this scene. So 
       console.warn("Prompt rewrite failed, using original:", rewriteErr);
     }
 
-    // ── Generate image via DALL-E 3 ─────────────────────────────
+    // ── Generate image ──────────────────────────────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
-
     const dallePrompt = buildImagePrompt(safePrompt, style);
+
+    // Use gpt-image-1 for stickers (native transparent bg), DALL-E 3 for everything else
+    const isSticker = style === "book-sticker";
     const imageOpts: ImageOptions = {
-      size: size ?? "1024x1024",
-      quality: "standard",
+      model: isSticker ? "gpt-image-1" : "dall-e-3",
+      size: isSticker ? "1024x1024" : (size ?? "1024x1024"),
+      quality: isSticker ? undefined : "standard",
+      background: isSticker ? "transparent" : undefined,
+      outputFormat: isSticker ? "png" : undefined,
     };
 
     let imageResponse;
@@ -275,9 +186,10 @@ IMPORTANT: The child will overlay their own characters on top of this scene. So 
       imageResponse = await provider.generateImage(dallePrompt, imageOpts);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("DALL-E generation failed:", {
+      console.error("Image generation failed:", {
         prompt: prompt.slice(0, 100),
         style,
+        model: imageOpts.model,
         error: errMsg,
       });
 
@@ -309,41 +221,30 @@ IMPORTANT: The child will overlay their own characters on top of this scene. So 
       );
     }
 
-    if (!imageResponse.url) {
-      throw new HttpsError("internal", "Image generation returned no URL.");
-    }
-
-    // ── Download image and upload to Firebase Storage ────────────
-    let imageBuffer: Buffer;
-    try {
-      const response = await fetch(imageResponse.url);
-      if (!response.ok) {
-        throw new Error(`Download failed: HTTP ${response.status}`);
-      }
-      imageBuffer = Buffer.from(await response.arrayBuffer());
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      throw new HttpsError(
-        "internal",
-        `Failed to download generated image: ${errMsg}`,
-      );
-    }
-
-    // ── Remove background for sticker-style images ─────────────
-    let processedBuffer = imageBuffer;
+    // ── Get image buffer ──────────────────────────────────────
+    let processedBuffer: Buffer;
     const contentType = "image/png";
 
-    if (style === "book-sticker") {
+    if (imageResponse.b64Data) {
+      // gpt-image-1 returns base64 — decode directly (already has transparency)
+      processedBuffer = Buffer.from(imageResponse.b64Data, "base64");
+    } else if (imageResponse.url) {
+      // DALL-E 3 returns a URL — download it
       try {
-        const { default: sharp } = await import("sharp");
-        processedBuffer = await removeStickerBackground(sharp, imageBuffer);
-      } catch (bgErr) {
-        console.warn(
-          "Sticker background removal failed, using original:",
-          bgErr,
+        const response = await fetch(imageResponse.url);
+        if (!response.ok) {
+          throw new Error(`Download failed: HTTP ${response.status}`);
+        }
+        processedBuffer = Buffer.from(await response.arrayBuffer());
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        throw new HttpsError(
+          "internal",
+          `Failed to download generated image: ${errMsg}`,
         );
-        // Fall through with original image
       }
+    } else {
+      throw new HttpsError("internal", "Image generation returned no data.");
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -360,7 +261,7 @@ IMPORTANT: The child will overlay their own characters on top of this scene. So 
       metadata: {
         contentType,
         metadata: {
-          generatedBy: "dall-e-3",
+          generatedBy: imageOpts.model ?? "dall-e-3",
           originalPrompt: prompt,
           style: style ?? "general",
           firebaseStorageDownloadTokens: downloadToken,
@@ -374,7 +275,7 @@ IMPORTANT: The child will overlay their own characters on top of this scene. So 
     const db = getFirestore();
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "image-generation",
-      model: "dall-e-3",
+      model: imageOpts.model ?? "dall-e-3",
       prompt: prompt.slice(0, 200),
       style: style ?? "general",
       size: size ?? "1024x1024",
