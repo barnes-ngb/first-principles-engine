@@ -280,11 +280,15 @@ export default function BookEditorPage() {
     if (!book) return
     setPrinting(true)
     try {
-      await printBook(book, childName)
+      await printBook(book, {
+        childName,
+        isLincoln,
+        sightWords: book.sightWords,
+      })
     } finally {
       setPrinting(false)
     }
-  }, [book, childName])
+  }, [book, childName, isLincoln])
 
   // ── Finish flow ───────────────────────────────────────────────────
   const coverCandidates = useMemo(() => {
