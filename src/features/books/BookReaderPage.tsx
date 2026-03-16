@@ -34,7 +34,7 @@ export default function BookReaderPage() {
   const isLincoln = childName.toLowerCase() === 'lincoln'
 
   const { book, loading } = useBook(familyId, bookId)
-  const isSightWordBook = book?.bookType === 'sight-word' && (book.sightWords?.length ?? 0) > 0
+  const isSightWordBook = (book?.sightWords?.length ?? 0) > 0
   const { progressMap, recordInteraction } = useSightWordProgress(
     isSightWordBook ? familyId : '',
     isSightWordBook ? childId : '',

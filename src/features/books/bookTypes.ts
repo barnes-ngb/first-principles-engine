@@ -5,6 +5,15 @@ export const COVER_STYLES = [
   { value: 'minecraft', label: 'Minecraft' },
   { value: 'comic', label: 'Comic Book' },
   { value: 'photo', label: 'Photo Album' },
+  { value: 'realistic', label: 'Realistic' },
+] as const
+
+/** Styles available for AI-generated book illustrations. */
+export const GENERATION_STYLES = [
+  { value: 'minecraft', label: 'Minecraft' },
+  { value: 'storybook', label: 'Storybook' },
+  { value: 'comic', label: 'Comic Book' },
+  { value: 'realistic', label: 'Realistic' },
 ] as const
 
 export const PAGE_LAYOUTS = [
