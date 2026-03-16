@@ -79,8 +79,11 @@ jobs:
 
       - name: Configure Storage CORS
         run: |
-          # Use gcloud storage (properly uses Application Default Credentials from auth step)
-          # Try the new bucket naming format first, then legacy
+          # Explicitly activate the service account so gcloud/gsutil have full auth.
+          # The auth@v2 action sets GOOGLE_APPLICATION_CREDENTIALS but doesn't always
+          # activate it in gcloud's internal auth chain (CORS update uses gsutil transport).
+          gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"
+
           BUCKET_NEW="${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}"
           BUCKET_LEGACY="barneshome-3dfbb.appspot.com"
 
@@ -105,13 +108,12 @@ jobs:
           fi
 
           echo "Setting CORS on gs://$BUCKET"
-          # The auth@v2 action sets GOOGLE_APPLICATION_CREDENTIALS which gsutil reads.
-          gsutil cors set storage-cors.json "gs://$BUCKET"
+          gcloud storage buckets update "gs://$BUCKET" --cors-file=storage-cors.json
           echo "CORS configured successfully on gs://$BUCKET"
 
           # Verify
           echo "Verifying CORS config:"
-          gsutil cors get "gs://$BUCKET"
+          gcloud storage buckets describe "gs://$BUCKET" --format="json(cors_config)"
 
       # ── Cloud Functions (when functions/ has changes) ────────────
       - name: Check for functions changes
