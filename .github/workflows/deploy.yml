@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0  # Full history for reliable diff
 
       - uses: actions/setup-node@v4
         with:
@@ -62,7 +62,8 @@ jobs:
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
         run: npm run build
 
-      - name: Deploy to Firebase Hosting
+      # ── Deploy hosting + rules (always) ──────────────────────────
+      - name: Deploy Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
@@ -70,11 +71,20 @@ jobs:
           channelId: live
           projectId: barneshome-3dfbb
 
-      # ── Cloud Functions (only when functions/ changes) ──────────
+      - name: Deploy Firestore rules + indexes
+        run: npx firebase-tools@latest deploy --only firestore --project barneshome-3dfbb --non-interactive --force
+
+      - name: Deploy Storage rules
+        run: npx firebase-tools@latest deploy --only storage --project barneshome-3dfbb --non-interactive --force
+
+      # ── Cloud Functions (when functions/ has changes) ────────────
       - name: Check for functions changes
         id: functions-changed
         run: |
-          if git diff --quiet HEAD~1 HEAD -- functions/; then
+          # Compare functions/ against the merge base to catch all changes
+          # even when multiple PRs are merged at once
+          MERGE_BASE=$(git merge-base HEAD HEAD~1 2>/dev/null || echo "HEAD~1")
+          if git diff --quiet "$MERGE_BASE" HEAD -- functions/; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"

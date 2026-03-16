@@ -1,18 +1,17 @@
-import { useCallback } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
-import CloseIcon from '@mui/icons-material/Close'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 
 import type { BookPage } from '../../core/types/domain'
 import { PAGE_LAYOUTS } from './bookTypes'
+import DraggableImage from './DraggableImage'
 
 interface PageEditorProps {
   page: BookPage
@@ -20,6 +19,7 @@ interface PageEditorProps {
   onAddImage: (file: File) => void
   onRemoveImage?: (imageId: string) => void
   onReRecord?: () => void
+  onImagePositionChange?: (imageId: string, position: { x: number; y: number; width: number; height: number }) => void
   childName: string
 }
 
@@ -29,10 +29,12 @@ export default function PageEditor({
   onAddImage,
   onRemoveImage,
   onReRecord,
+  onImagePositionChange,
   childName,
 }: PageEditorProps) {
   const isLincoln = childName.toLowerCase() === 'lincoln'
-  const firstImage = page.images[0] ?? null
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
+  const imageContainerRef = useRef<HTMLDivElement>(null)
 
   const handleTextChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -63,48 +65,31 @@ export default function PageEditor({
 
   const imageSection = !isTextOnly && (
     <Box
+      ref={imageContainerRef}
       sx={{
         width: isImageLeft ? '50%' : '100%',
         minHeight: isFullImage ? 300 : 200,
+        height: isFullImage ? 400 : 250,
         bgcolor: 'grey.100',
         borderRadius: 2,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
         position: 'relative',
         overflow: 'hidden',
+        touchAction: 'none',
       }}
+      onClick={() => setSelectedImageId(null)}
     >
-      {firstImage ? (
-        <>
-          <Box
-            component="img"
-            src={firstImage.url}
-            alt={firstImage.label ?? 'Page image'}
-            sx={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'contain',
-              maxHeight: isFullImage ? 400 : 250,
-            }}
+      {page.images.length > 0 ? (
+        page.images.map((img, idx) => (
+          <DraggableImage
+            key={img.id}
+            image={img}
+            selected={selectedImageId === img.id}
+            onSelect={() => setSelectedImageId(img.id)}
+            onPositionChange={(pos) => onImagePositionChange?.(img.id, pos)}
+            onRemove={onRemoveImage ? () => onRemoveImage(img.id) : undefined}
+            style={{ zIndex: idx + 1 }}
           />
-          {onRemoveImage && (
-            <IconButton
-              size="small"
-              onClick={() => onRemoveImage(firstImage.id)}
-              sx={{
-                position: 'absolute',
-                top: 4,
-                right: 4,
-                bgcolor: 'rgba(0,0,0,0.5)',
-                color: 'white',
-                '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' },
-              }}
-            >
-              <CloseIcon fontSize="small" />
-            </IconButton>
-          )}
-        </>
+        ))
       ) : (
         <label style={{ cursor: 'pointer', textAlign: 'center', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <input

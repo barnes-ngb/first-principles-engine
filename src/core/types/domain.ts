@@ -1007,6 +1007,8 @@ export interface PageImage {
   prompt?: string
   /** Label for accessibility and display */
   label?: string
+  /** Position and size within the page image container (percentage-based) */
+  position?: { x: number; y: number; width: number; height: number }
 }
 
 export interface Sticker {
