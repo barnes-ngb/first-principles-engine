@@ -10,7 +10,7 @@ import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 
 import type { BookPage } from '../../core/types/domain'
-import { PAGE_LAYOUTS } from './bookTypes'
+import { PAGE_LAYOUTS, TEXT_SIZES, TEXT_FONTS, TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
 import DraggableImage from './DraggableImage'
 
 interface PageEditorProps {
@@ -58,6 +58,23 @@ export default function PageEditor({
     },
     [onAddImage],
   )
+
+  const handleTextSizeChange = useCallback(
+    (_: React.MouseEvent<HTMLElement>, value: BookPage['textSize'] | null) => {
+      if (value) onUpdate({ textSize: value })
+    },
+    [onUpdate],
+  )
+
+  const handleTextFontChange = useCallback(
+    (_: React.MouseEvent<HTMLElement>, value: BookPage['textFont'] | null) => {
+      if (value) onUpdate({ textFont: value })
+    },
+    [onUpdate],
+  )
+
+  const textSizeKey = page.textSize ?? 'medium'
+  const textFontKey = page.textFont ?? 'print'
 
   const isFullImage = page.layout === 'full-image'
   const isTextOnly = page.layout === 'text-only'
@@ -125,8 +142,9 @@ export default function PageEditor({
       sx={{
         width: isImageLeft ? '50%' : '100%',
         '& .MuiInputBase-root': {
-          fontSize: '1.1rem',
-          lineHeight: 1.6,
+          fontSize: TEXT_SIZE_STYLES[textSizeKey].fontSize,
+          lineHeight: TEXT_SIZE_STYLES[textSizeKey].lineHeight,
+          fontFamily: TEXT_FONT_FAMILIES[textFontKey],
         },
       }}
     />
@@ -192,6 +210,53 @@ export default function PageEditor({
           {PAGE_LAYOUTS.map((layout) => (
             <ToggleButton key={layout.value} value={layout.value} sx={{ textTransform: 'none', px: 1.5 }}>
               {layout.label}
+            </ToggleButton>
+          ))}
+        </ToggleButtonGroup>
+      </Box>
+
+      {/* Text size toggle */}
+      <Box>
+        <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+          Text size
+        </Typography>
+        <ToggleButtonGroup
+          value={textSizeKey}
+          exclusive
+          onChange={handleTextSizeChange}
+          size="small"
+        >
+          {TEXT_SIZES.map((s) => (
+            <ToggleButton key={s.value} value={s.value} sx={{ textTransform: 'none', px: 1.5 }}>
+              {s.label}
+            </ToggleButton>
+          ))}
+        </ToggleButtonGroup>
+      </Box>
+
+      {/* Text font toggle */}
+      <Box>
+        <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+          Font
+        </Typography>
+        <ToggleButtonGroup
+          value={textFontKey}
+          exclusive
+          onChange={handleTextFontChange}
+          size="small"
+        >
+          {TEXT_FONTS.map((f) => (
+            <ToggleButton
+              key={f.value}
+              value={f.value}
+              sx={{
+                textTransform: 'none',
+                px: 1.5,
+                fontFamily: TEXT_FONT_FAMILIES[f.value],
+                fontSize: f.value === 'pixel' ? '0.6rem' : undefined,
+              }}
+            >
+              {f.label}
             </ToggleButton>
           ))}
         </ToggleButtonGroup>

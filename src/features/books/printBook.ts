@@ -1,6 +1,7 @@
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
-import type { Book } from '../../core/types/domain'
+import type { Book, BookPage } from '../../core/types/domain'
+import { TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
 
 // Letter landscape dimensions in mm
 const PAGE_W = 279.4
@@ -79,7 +80,22 @@ function buildCoverHtml(book: Book, childName: string): string {
   `
 }
 
-function buildPageHtml(page: { text?: string; images: { url: string; type?: string; position?: { x: number; y: number; width: number; height: number } }[]; audioUrl?: string; pageNumber: number }): string {
+function getTextCssForPage(page: BookPage): { fontSize: string; lineHeight: number; fontFamily: string } {
+  const sizeKey = page.textSize ?? 'medium'
+  const fontKey = page.textFont ?? 'print'
+  const sizeStyles = TEXT_SIZE_STYLES[sizeKey]
+  const fontFamily = TEXT_FONT_FAMILIES[fontKey]
+  // Scale up for print (rendered at 1056px width)
+  const printScale = 1.3
+  const rawSize = parseFloat(sizeStyles.fontSize)
+  return {
+    fontSize: `${(rawSize * printScale * 16).toFixed(0)}px`,
+    lineHeight: sizeStyles.lineHeight,
+    fontFamily: fontFamily === 'inherit' ? 'Georgia, serif' : fontFamily,
+  }
+}
+
+function buildPageHtml(page: BookPage): string {
   const imagesHtml = page.images.map((img) => {
     const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
     const fit = img.type === 'sticker' ? 'contain' : 'cover'
@@ -90,8 +106,9 @@ function buildPageHtml(page: { text?: string; images: { url: string; type?: stri
     ? `<div style="position:relative; flex:6; overflow:hidden;">${imagesHtml}</div>`
     : ''
 
+  const textCss = getTextCssForPage(page)
   const textHtml = page.text
-    ? `<div style="flex:4;padding:24px 40px;font-size:22px;line-height:1.7;color:#333;">
+    ? `<div style="flex:4;padding:24px 40px;font-size:${textCss.fontSize};line-height:${textCss.lineHeight};font-family:${textCss.fontFamily};color:#333;">
         ${escapeHtml(page.text)}
       </div>`
     : ''
