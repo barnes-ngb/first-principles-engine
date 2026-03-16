@@ -849,36 +849,40 @@ IMPORTANT:
 
 // ── Story generation prompt ──────────────────────────────────────
 
-function buildStoryPrompt(sightWords: string[], theme: string, pageCount: number): string {
-  return `You are a children's story writer creating a sight word reader for Lincoln, a 10-year-old boy who loves Minecraft.
+function buildStoryPrompt(
+  storyIdea: string,
+  words: string[],
+  pageCount: number,
+): string {
+  const hasWords = words.length > 0;
+  const wordSection = hasWords
+    ? `\nWORDS TO INCLUDE (use every word at least once, common words multiple times):\n${words.join(", ")}\n`
+    : "";
 
-SIGHT WORDS TO USE (MANDATORY — use EVERY word at least once):
-${sightWords.join(", ")}
+  return `You are a children's story writer creating an illustrated book for Lincoln, a 10-year-old boy who loves Minecraft. He reads at approximately 1st grade level.
 
-THEME: ${theme || "A Minecraft adventure"}
-
+STORY IDEA: ${storyIdea || "A fun adventure — surprise me!"}
+${wordSection}
 RULES:
 - Write a ${pageCount}-page story. Each page has 2-4 short sentences.
-- You MUST use every word from the sight word list at least once. Use common words (the, is, and, was) multiple times.
-- Sentences should be simple. Lincoln reads at approximately 1st grade level.
-- CVC words (cat, dog, hat, run, sun) can appear freely — they reinforce his phonics.
-- Use the theme to make the story exciting. Minecraft vocabulary (portal, diamond, sword, armor, cube) is a bonus.
-- Each page should be a story beat: beginning, adventure, climax, resolution.
-- Do NOT use words significantly above 1st grade level unless they're on the sight word list.
-- Keep it fun, adventurous, warm. This is Lincoln's language, not a textbook.
+- Keep sentences simple and readable for a 1st grader. CVC words are great.
+- Each page should be a story beat — beginning, rising action, climax, resolution.
+- Make it exciting and fun. This is Lincoln's language — adventures, quests, discoveries.
+- For each page, also write a short image description (1-2 sentences) describing what the SCENE looks like. Focus on the environment/setting, not characters — the scene will be generated as a background illustration.
+${hasWords ? "- You MUST use every word from the word list at least once in the story." : ""}
+${hasWords ? "- On each page, list which provided words appear on that page." : ""}
+- Do NOT use words significantly above 1st grade level unless they are in the word list.
 
-OUTPUT: Respond ONLY with valid JSON, no markdown fences:
+OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
 {
   "title": "Story Title",
   "pages": [
     {
       "pageNumber": 1,
       "text": "The sun was up. Link and his cat were at the park.",
-      "sightWordsOnPage": ["the", "sun", "was", "up", "his", "cat", "were", "the", "park"]
+      "sceneDescription": "A bright sunny park with green grass, a wooden bench, and tall trees. A path leads to a pond."${hasWords ? ',\n      "wordsOnPage": ["the", "sun", "was", "up", "his", "cat", "were", "park"]' : ""}
     }
-  ],
-  "allSightWordsUsed": ["the", "sun", "was"],
-  "missedWords": []
+  ]${hasWords ? ',\n  "allWordsUsed": ["the", "sun", "was"],\n  "missedWords": []' : ""}
 }`;
 }
 
@@ -1060,15 +1064,17 @@ export const chat = onCall(
     // ── Handle generateStory task type ──────────────────────────
     if (taskType === TaskType.GenerateStory) {
       // For story generation, use the story prompt instead of the normal system prompt
-      let storyConfig: { sightWords: string[]; theme: string; pageCount: number };
+      let storyConfig: { storyIdea?: string; sightWords?: string[]; words?: string[]; theme?: string; pageCount?: number };
       try {
         storyConfig = JSON.parse(messages[0].content);
       } catch {
-        throw new HttpsError("invalid-argument", "generateStory requires JSON with sightWords, theme, and pageCount.");
+        throw new HttpsError("invalid-argument", "generateStory requires JSON with story parameters.");
       }
+      const storyWords = storyConfig.words ?? storyConfig.sightWords ?? [];
+      const storyIdea = storyConfig.storyIdea ?? storyConfig.theme ?? "";
       const storySystemPrompt = buildStoryPrompt(
-        storyConfig.sightWords,
-        storyConfig.theme,
+        storyIdea,
+        storyWords,
         storyConfig.pageCount ?? 10,
       );
 

@@ -13,7 +13,10 @@ import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
 import ListItemIcon from '@mui/material/ListItemIcon'
 import ListItemText from '@mui/material/ListItemText'
+import Slider from '@mui/material/Slider'
 import Stack from '@mui/material/Stack'
+import Tab from '@mui/material/Tab'
+import Tabs from '@mui/material/Tabs'
 import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
@@ -34,9 +37,13 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
 import type { Book } from '../../core/types/domain'
-import { COVER_STYLES } from './bookTypes'
+import { COVER_STYLES, GENERATION_STYLES } from './bookTypes'
 import { useBookshelf } from './useBook'
+import { useBookGenerator } from './useBookGenerator'
 import { printBook } from './printBook'
+import GenerationProgress from './GenerationProgress'
+
+type BookFilter = 'all' | 'creative' | 'generated' | 'sight-word'
 
 export default function BookshelfPage() {
   const navigate = useNavigate()
@@ -50,14 +57,24 @@ export default function BookshelfPage() {
   const isParent = profile === UserProfile.Parents
 
   const { books, loading, createBook, deleteBook } = useBookshelf(familyId, childId)
+  const { generateBook, progress, generating, resetProgress } = useBookGenerator()
 
-  const [bookFilter, setBookFilter] = useState<'all' | 'creative' | 'sight-word'>('all')
+  const [bookFilter, setBookFilter] = useState<BookFilter>('all')
   const [showNewDialog, setShowNewDialog] = useState(false)
+  const [dialogTab, setDialogTab] = useState(0) // 0 = Blank, 1 = Generate
+
+  // Blank book state
   const [newTitle, setNewTitle] = useState('')
   const [newCoverStyle, setNewCoverStyle] = useState<Book['coverStyle']>(
     isLincoln ? 'minecraft' : 'storybook',
   )
   const [creating, setCreating] = useState(false)
+
+  // Generate book state
+  const [genStoryIdea, setGenStoryIdea] = useState('')
+  const [genWords, setGenWords] = useState('')
+  const [genStyle, setGenStyle] = useState(isLincoln ? 'minecraft' : 'storybook')
+  const [genPageCount, setGenPageCount] = useState(10)
 
   // Menu state
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
@@ -87,6 +104,52 @@ export default function BookshelfPage() {
     }
   }, [newTitle, newCoverStyle, createBook, navigate])
 
+  const handleGenerateBook = useCallback(async () => {
+    if (!genStoryIdea.trim() && !genWords.trim()) return
+    setShowNewDialog(false)
+
+    const words = genWords
+      .split(/[,\n]+/)
+      .map((w) => w.trim().toLowerCase())
+      .filter(Boolean)
+
+    const bookId = await generateBook(
+      familyId,
+      childId,
+      genStoryIdea.trim(),
+      words,
+      genStyle,
+      genPageCount,
+    )
+
+    if (bookId) {
+      // Brief delay so user sees "done" state
+      setTimeout(() => {
+        resetProgress()
+        navigate(`/books/${bookId}`)
+      }, 1500)
+    }
+  }, [
+    genStoryIdea,
+    genWords,
+    genStyle,
+    genPageCount,
+    familyId,
+    childId,
+    generateBook,
+    resetProgress,
+    navigate,
+  ])
+
+  const handleCloseNewDialog = useCallback(() => {
+    setShowNewDialog(false)
+    setDialogTab(0)
+    setNewTitle('')
+    setGenStoryIdea('')
+    setGenWords('')
+    setGenPageCount(10)
+  }, [])
+
   const formatRelativeTime = (iso: string) => {
     try {
       const now = new Date()
@@ -112,9 +175,11 @@ export default function BookshelfPage() {
   const sortedBooks = useMemo(() => {
     let filtered = books
     if (bookFilter === 'creative') {
-      filtered = books.filter(b => b.bookType !== 'sight-word')
+      filtered = books.filter((b) => b.bookType !== 'sight-word' && b.bookType !== 'generated')
+    } else if (bookFilter === 'generated') {
+      filtered = books.filter((b) => b.bookType === 'generated')
     } else if (bookFilter === 'sight-word') {
-      filtered = books.filter(b => b.bookType === 'sight-word')
+      filtered = books.filter((b) => b.bookType === 'sight-word')
     }
     return [...filtered].sort((a, b) => {
       if (a.status === 'draft' && b.status !== 'draft') return -1
@@ -129,6 +194,22 @@ export default function BookshelfPage() {
         <Stack alignItems="center" py={4}>
           <CircularProgress />
         </Stack>
+      </Page>
+    )
+  }
+
+  // Show generation progress overlay when generating
+  if (progress && progress.phase !== 'done') {
+    return (
+      <Page>
+        <GenerationProgress progress={progress} isLincoln={isLincoln} />
+        {progress.phase === 'error' && (
+          <Stack alignItems="center" sx={{ mt: 2 }}>
+            <Button variant="outlined" onClick={resetProgress}>
+              Back to Bookshelf
+            </Button>
+          </Stack>
+        )}
       </Page>
     )
   }
@@ -153,12 +234,23 @@ export default function BookshelfPage() {
         <ToggleButtonGroup
           value={bookFilter}
           exclusive
-          onChange={(_, val) => { if (val) setBookFilter(val) }}
+          onChange={(_, val) => {
+            if (val) setBookFilter(val)
+          }}
           size="small"
         >
-          <ToggleButton value="all" sx={{ textTransform: 'none', minHeight: 36 }}>All Books</ToggleButton>
-          <ToggleButton value="creative" sx={{ textTransform: 'none', minHeight: 36 }}>My Stories</ToggleButton>
-          <ToggleButton value="sight-word" sx={{ textTransform: 'none', minHeight: 36 }}>Sight Word Readers</ToggleButton>
+          <ToggleButton value="all" sx={{ textTransform: 'none', minHeight: 36 }}>
+            All Books
+          </ToggleButton>
+          <ToggleButton value="creative" sx={{ textTransform: 'none', minHeight: 36 }}>
+            My Stories
+          </ToggleButton>
+          <ToggleButton value="generated" sx={{ textTransform: 'none', minHeight: 36 }}>
+            Generated
+          </ToggleButton>
+          <ToggleButton value="sight-word" sx={{ textTransform: 'none', minHeight: 36 }}>
+            Sight Words
+          </ToggleButton>
         </ToggleButtonGroup>
         <Box sx={{ flex: 1 }} />
         {isParent && (
@@ -220,13 +312,17 @@ export default function BookshelfPage() {
           }}
         >
           {sortedBooks.map((book) => {
-            const coverUrl = book.coverImageUrl
-              ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
+            const coverUrl =
+              book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
 
             return (
               <Box
                 key={book.id}
-                onClick={() => navigate(book.status === 'complete' ? `/books/${book.id}/read` : `/books/${book.id}`)}
+                onClick={() =>
+                  navigate(
+                    book.status === 'complete' ? `/books/${book.id}/read` : `/books/${book.id}`,
+                  )
+                }
                 sx={{
                   p: 2,
                   borderRadius: 2,
@@ -316,7 +412,14 @@ export default function BookshelfPage() {
                   {book.title}
                 </Typography>
 
-                <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 'auto', pt: 1 }} flexWrap="wrap" useFlexGap>
+                <Stack
+                  direction="row"
+                  spacing={0.5}
+                  alignItems="center"
+                  sx={{ mt: 'auto', pt: 1 }}
+                  flexWrap="wrap"
+                  useFlexGap
+                >
                   <Typography variant="caption" color="text.secondary">
                     {book.pages.length} page{book.pages.length !== 1 ? 's' : ''}
                   </Typography>
@@ -330,14 +433,38 @@ export default function BookshelfPage() {
                     <Chip
                       label="Together"
                       size="small"
-                      sx={{ height: 20, fontSize: '0.65rem', bgcolor: 'info.100', color: 'info.800' }}
+                      sx={{
+                        height: 20,
+                        fontSize: '0.65rem',
+                        bgcolor: 'info.100',
+                        color: 'info.800',
+                      }}
                     />
                   )}
-                  {book.bookType === 'sight-word' && (
+                  {(book.sightWords?.length ?? 0) > 0 && (
                     <Chip
-                      label={`Sight Words${book.sightWords ? ` (${book.sightWords.length})` : ''}`}
+                      label={`${book.sightWords!.length} words`}
                       size="small"
-                      sx={{ height: 20, fontSize: '0.65rem', bgcolor: 'primary.100', color: 'primary.800', fontWeight: 600 }}
+                      sx={{
+                        height: 20,
+                        fontSize: '0.65rem',
+                        bgcolor: 'primary.100',
+                        color: 'primary.800',
+                        fontWeight: 600,
+                      }}
+                    />
+                  )}
+                  {book.bookType === 'generated' && (
+                    <Chip
+                      label="AI"
+                      size="small"
+                      sx={{
+                        height: 20,
+                        fontSize: '0.65rem',
+                        bgcolor: 'secondary.100',
+                        color: 'secondary.800',
+                        fontWeight: 600,
+                      }}
                     />
                   )}
                   {book.status === 'complete' ? (
@@ -357,7 +484,14 @@ export default function BookshelfPage() {
                     <Chip
                       label="Draft"
                       size="small"
-                      sx={{ ml: book.isTogetherBook || book.bookType === 'sight-word' ? 0 : 'auto', height: 20, fontSize: '0.65rem' }}
+                      sx={{
+                        ml:
+                          book.isTogetherBook || book.bookType === 'sight-word'
+                            ? 0
+                            : 'auto',
+                        height: 20,
+                        fontSize: '0.65rem',
+                      }}
                     />
                   )}
                 </Stack>
@@ -394,121 +528,232 @@ export default function BookshelfPage() {
       <Menu
         anchorEl={menuAnchor}
         open={!!menuAnchor}
-        onClose={() => { setMenuAnchor(null); setMenuBookId(null) }}
+        onClose={() => {
+          setMenuAnchor(null)
+          setMenuBookId(null)
+        }}
         onClick={(e) => e.stopPropagation()}
       >
-        <MenuItem onClick={() => {
-          setMenuAnchor(null)
-          if (menuBookId) navigate(`/books/${menuBookId}/read`)
-          setMenuBookId(null)
-        }}>
-          <ListItemIcon><AutoStoriesIcon fontSize="small" /></ListItemIcon>
+        <MenuItem
+          onClick={() => {
+            setMenuAnchor(null)
+            if (menuBookId) navigate(`/books/${menuBookId}/read`)
+            setMenuBookId(null)
+          }}
+        >
+          <ListItemIcon>
+            <AutoStoriesIcon fontSize="small" />
+          </ListItemIcon>
           <ListItemText>Read</ListItemText>
         </MenuItem>
-        <MenuItem onClick={() => {
-          setMenuAnchor(null)
-          if (menuBookId) navigate(`/books/${menuBookId}`)
-          setMenuBookId(null)
-        }}>
-          <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
+        <MenuItem
+          onClick={() => {
+            setMenuAnchor(null)
+            if (menuBookId) navigate(`/books/${menuBookId}`)
+            setMenuBookId(null)
+          }}
+        >
+          <ListItemIcon>
+            <EditIcon fontSize="small" />
+          </ListItemIcon>
           <ListItemText>Edit</ListItemText>
         </MenuItem>
-        <MenuItem onClick={() => {
-          setMenuAnchor(null)
-          const target = sortedBooks.find((b) => b.id === menuBookId)
-          if (target) void handlePrintBook(target)
-          setMenuBookId(null)
-        }}>
-          <ListItemIcon><PrintIcon fontSize="small" /></ListItemIcon>
+        <MenuItem
+          onClick={() => {
+            setMenuAnchor(null)
+            const target = sortedBooks.find((b) => b.id === menuBookId)
+            if (target) void handlePrintBook(target)
+            setMenuBookId(null)
+          }}
+        >
+          <ListItemIcon>
+            <PrintIcon fontSize="small" />
+          </ListItemIcon>
           <ListItemText>Print</ListItemText>
         </MenuItem>
-        <MenuItem onClick={() => {
-          setMenuAnchor(null)
-          const target = sortedBooks.find((b) => b.id === menuBookId)
-          if (target) setDeleteTarget(target)
-          setMenuBookId(null)
-        }}>
-          <ListItemIcon><DeleteOutlineIcon fontSize="small" color="error" /></ListItemIcon>
+        <MenuItem
+          onClick={() => {
+            setMenuAnchor(null)
+            const target = sortedBooks.find((b) => b.id === menuBookId)
+            if (target) setDeleteTarget(target)
+            setMenuBookId(null)
+          }}
+        >
+          <ListItemIcon>
+            <DeleteOutlineIcon fontSize="small" color="error" />
+          </ListItemIcon>
           <ListItemText sx={{ color: 'error.main' }}>Delete</ListItemText>
         </MenuItem>
       </Menu>
 
       {/* Delete confirmation dialog */}
-      <Dialog
-        open={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        maxWidth="xs"
-        fullWidth
-      >
+      <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Delete book?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete &quot;{deleteTarget?.title}&quot;? This can&apos;t be undone.
+            Are you sure you want to delete &quot;{deleteTarget?.title}&quot;? This can&apos;t be
+            undone.
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteTarget(null)}>Cancel</Button>
-          <Button color="error" variant="contained" onClick={() => { void handleDeleteBook() }}>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => {
+              void handleDeleteBook()
+            }}
+          >
             Delete
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* New book dialog */}
-      <Dialog
-        open={showNewDialog}
-        onClose={() => setShowNewDialog(false)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>
-          {isLincoln ? 'Craft a New Book' : 'Make a New Book'}
-        </DialogTitle>
+      {/* New book dialog — two tabs: Blank Book / Generate a Book */}
+      <Dialog open={showNewDialog} onClose={handleCloseNewDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>{isLincoln ? 'Craft a New Book' : 'Make a New Book'}</DialogTitle>
         <DialogContent>
-          <Stack spacing={3} sx={{ pt: 1 }}>
-            <TextField
-              label="Book title"
-              placeholder={
-                isLincoln ? 'The Creeper Story' : 'My Adventure Book'
-              }
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateBook() }}
-              fullWidth
-              autoFocus
-            />
-            <Box>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Cover style
-              </Typography>
-              <ToggleButtonGroup
-                value={newCoverStyle}
-                exclusive
-                onChange={(_, val) => { if (val) setNewCoverStyle(val) }}
-                sx={{ flexWrap: 'wrap' }}
-              >
-                {COVER_STYLES.map((style) => (
-                  <ToggleButton
-                    key={style.value}
-                    value={style.value}
-                    sx={{ textTransform: 'none', px: 2, minHeight: 48 }}
-                  >
-                    {style.label}
-                  </ToggleButton>
-                ))}
-              </ToggleButtonGroup>
-            </Box>
-          </Stack>
+          <Tabs
+            value={dialogTab}
+            onChange={(_, v) => setDialogTab(v)}
+            sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
+          >
+            <Tab label="Blank Book" sx={{ textTransform: 'none' }} />
+            <Tab label="Generate a Book" sx={{ textTransform: 'none' }} />
+          </Tabs>
+
+          {/* Tab 0: Blank Book (existing flow) */}
+          {dialogTab === 0 && (
+            <Stack spacing={3} sx={{ pt: 1 }}>
+              <TextField
+                label="Book title"
+                placeholder={isLincoln ? 'The Creeper Story' : 'My Adventure Book'}
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleCreateBook()
+                }}
+                fullWidth
+                autoFocus
+              />
+              <Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  Cover style
+                </Typography>
+                <ToggleButtonGroup
+                  value={newCoverStyle}
+                  exclusive
+                  onChange={(_, val) => {
+                    if (val) setNewCoverStyle(val)
+                  }}
+                  sx={{ flexWrap: 'wrap' }}
+                >
+                  {COVER_STYLES.map((style) => (
+                    <ToggleButton
+                      key={style.value}
+                      value={style.value}
+                      sx={{ textTransform: 'none', px: 2, minHeight: 48 }}
+                    >
+                      {style.label}
+                    </ToggleButton>
+                  ))}
+                </ToggleButtonGroup>
+              </Box>
+            </Stack>
+          )}
+
+          {/* Tab 1: Generate a Book */}
+          {dialogTab === 1 && (
+            <Stack spacing={3} sx={{ pt: 1 }}>
+              <TextField
+                label="What's your story about?"
+                placeholder={
+                  isLincoln
+                    ? 'A Minecraft adventure where a boy and his cat find a portal to a candy world'
+                    : 'A princess who befriends a baby dragon'
+                }
+                value={genStoryIdea}
+                onChange={(e) => setGenStoryIdea(e.target.value)}
+                fullWidth
+                multiline
+                minRows={2}
+                maxRows={4}
+                autoFocus
+              />
+              <TextField
+                label="Words to include (optional)"
+                placeholder="the, is, was, cat, dog, run, water, where, could"
+                helperText="These words will appear in the story and be highlighted when reading"
+                value={genWords}
+                onChange={(e) => setGenWords(e.target.value)}
+                fullWidth
+                multiline
+                minRows={2}
+                maxRows={3}
+              />
+              <Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  Illustration style
+                </Typography>
+                <ToggleButtonGroup
+                  value={genStyle}
+                  exclusive
+                  onChange={(_, val) => {
+                    if (val) setGenStyle(val)
+                  }}
+                  sx={{ flexWrap: 'wrap' }}
+                >
+                  {GENERATION_STYLES.map((style) => (
+                    <ToggleButton
+                      key={style.value}
+                      value={style.value}
+                      sx={{ textTransform: 'none', px: 2, minHeight: 48 }}
+                    >
+                      {style.label}
+                    </ToggleButton>
+                  ))}
+                </ToggleButtonGroup>
+              </Box>
+              <Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  Pages: {genPageCount}
+                </Typography>
+                <Slider
+                  value={genPageCount}
+                  onChange={(_, v) => setGenPageCount(v as number)}
+                  min={5}
+                  max={15}
+                  step={1}
+                  marks
+                  valueLabelDisplay="auto"
+                />
+              </Box>
+            </Stack>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowNewDialog(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={() => { void handleCreateBook() }}
-            disabled={!newTitle.trim() || creating}
-          >
-            {creating ? 'Creating...' : 'Create'}
-          </Button>
+          <Button onClick={handleCloseNewDialog}>Cancel</Button>
+          {dialogTab === 0 ? (
+            <Button
+              variant="contained"
+              onClick={() => {
+                void handleCreateBook()
+              }}
+              disabled={!newTitle.trim() || creating}
+            >
+              {creating ? 'Creating...' : 'Create'}
+            </Button>
+          ) : (
+            <Button
+              variant="contained"
+              onClick={() => {
+                void handleGenerateBook()
+              }}
+              disabled={(!genStoryIdea.trim() && !genWords.trim()) || generating}
+            >
+              {generating ? 'Generating...' : 'Generate!'}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
     </Page>
