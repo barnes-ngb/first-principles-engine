@@ -8,7 +8,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import EditIcon from '@mui/icons-material/Edit'
-import PrintIcon from '@mui/icons-material/Print'
+import DownloadIcon from '@mui/icons-material/Download'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import CircularProgress from '@mui/material/CircularProgress'
 
@@ -99,15 +99,19 @@ export default function BookReaderPage() {
     void recordInteraction(word, action)
   }, [recordInteraction])
 
-  const handlePrint = useCallback(async () => {
+  const handleDownloadPdf = useCallback(async () => {
     if (!book) return
     setPrinting(true)
     try {
-      await printBook(book, childName)
+      await printBook(book, {
+        childName,
+        isLincoln,
+        sightWords: book.sightWords,
+      })
     } finally {
       setPrinting(false)
     }
-  }, [book, childName])
+  }, [book, childName, isLincoln])
 
   if (loading) {
     return (
@@ -413,12 +417,12 @@ export default function BookReaderPage() {
         <Button
           size="small"
           variant="outlined"
-          startIcon={printing ? <CircularProgress size={14} /> : <PrintIcon />}
-          onClick={() => { void handlePrint() }}
+          startIcon={printing ? <CircularProgress size={14} /> : <DownloadIcon />}
+          onClick={() => { void handleDownloadPdf() }}
           disabled={printing}
           sx={{ minHeight: 36, color: textColor, borderColor: textColor }}
         >
-          Print
+          {printing ? 'Creating PDF...' : 'Download PDF'}
         </Button>
       </Stack>
     </Box>

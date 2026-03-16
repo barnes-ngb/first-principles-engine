@@ -29,7 +29,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/Edit'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
-import PrintIcon from '@mui/icons-material/Print'
+import DownloadIcon from '@mui/icons-material/Download'
 
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -86,9 +86,13 @@ export default function BookshelfPage() {
   const handlePrintBook = useCallback(
     async (book: Book) => {
       if (!book.id) return
-      await printBook(book, childName)
+      await printBook(book, {
+        childName,
+        isLincoln,
+        sightWords: book.sightWords,
+      })
     },
-    [childName],
+    [childName, isLincoln],
   )
 
   const handleCreateBook = useCallback(async () => {
@@ -567,9 +571,9 @@ export default function BookshelfPage() {
           }}
         >
           <ListItemIcon>
-            <PrintIcon fontSize="small" />
+            <DownloadIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>Print</ListItemText>
+          <ListItemText>Download PDF</ListItemText>
         </MenuItem>
         <MenuItem
           onClick={() => {
