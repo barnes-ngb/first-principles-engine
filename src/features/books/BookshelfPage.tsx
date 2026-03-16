@@ -41,6 +41,8 @@ import { COVER_STYLES, GENERATION_STYLES } from './bookTypes'
 import { useBookshelf } from './useBook'
 import { useBookGenerator } from './useBookGenerator'
 import { printBook } from './printBook'
+import PrintSettingsDialog from './PrintSettingsDialog'
+import type { PrintSettings } from './PrintSettingsDialog'
 import GenerationProgress from './GenerationProgress'
 
 type BookFilter = 'all' | 'creative' | 'generated' | 'sight-word'
@@ -83,16 +85,23 @@ export default function BookshelfPage() {
   // Delete confirmation state
   const [deleteTarget, setDeleteTarget] = useState<Book | null>(null)
 
+  // Print state
+  const [showPrintSettings, setShowPrintSettings] = useState(false)
+  const [printTarget, setPrintTarget] = useState<Book | null>(null)
+
   const handlePrintBook = useCallback(
-    async (book: Book) => {
-      if (!book.id) return
-      await printBook(book, {
+    async (settings: PrintSettings) => {
+      if (!printTarget?.id) return
+      setShowPrintSettings(false)
+      await printBook(printTarget, {
         childName,
         isLincoln,
-        sightWords: book.sightWords,
+        sightWords: printTarget.sightWords,
+        settings,
       })
+      setPrintTarget(null)
     },
-    [childName, isLincoln],
+    [printTarget, childName, isLincoln],
   )
 
   const handleCreateBook = useCallback(async () => {
@@ -566,7 +575,10 @@ export default function BookshelfPage() {
           onClick={() => {
             setMenuAnchor(null)
             const target = sortedBooks.find((b) => b.id === menuBookId)
-            if (target) void handlePrintBook(target)
+            if (target) {
+              setPrintTarget(target)
+              setShowPrintSettings(true)
+            }
             setMenuBookId(null)
           }}
         >
@@ -612,6 +624,14 @@ export default function BookshelfPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Print settings dialog */}
+      <PrintSettingsDialog
+        open={showPrintSettings}
+        onClose={() => { setShowPrintSettings(false); setPrintTarget(null) }}
+        onPrint={(s) => { void handlePrintBook(s) }}
+        hasSightWords={(printTarget?.sightWords?.length ?? 0) > 0}
+      />
 
       {/* New book dialog — two tabs: Blank Book / Generate a Book */}
       <Dialog open={showNewDialog} onClose={handleCloseNewDialog} maxWidth="sm" fullWidth>

@@ -18,6 +18,8 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { BookPage } from '../../core/types/domain'
 import { useBook } from './useBook'
 import { printBook } from './printBook'
+import PrintSettingsDialog from './PrintSettingsDialog'
+import type { PrintSettings } from './PrintSettingsDialog'
 import { TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
 import { renderTextWithSightWords } from './highlightSightWords'
 import { useSightWordProgress } from './useSightWordProgress'
@@ -44,6 +46,7 @@ export default function BookReaderPage() {
   const [touchStart, setTouchStart] = useState<number | null>(null)
   const [swipeOffset, setSwipeOffset] = useState(0)
   const [printing, setPrinting] = useState(false)
+  const [showPrintSettings, setShowPrintSettings] = useState(false)
   const [totalWordsEncountered, setTotalWordsEncountered] = useState(0)
   const seenPagesRef = useRef<Set<number>>(new Set())
 
@@ -99,14 +102,16 @@ export default function BookReaderPage() {
     void recordInteraction(word, action)
   }, [recordInteraction])
 
-  const handleDownloadPdf = useCallback(async () => {
+  const handleDownloadPdf = useCallback(async (settings: PrintSettings) => {
     if (!book) return
+    setShowPrintSettings(false)
     setPrinting(true)
     try {
       await printBook(book, {
         childName,
         isLincoln,
         sightWords: book.sightWords,
+        settings,
       })
     } finally {
       setPrinting(false)
@@ -418,13 +423,21 @@ export default function BookReaderPage() {
           size="small"
           variant="outlined"
           startIcon={printing ? <CircularProgress size={14} /> : <DownloadIcon />}
-          onClick={() => { void handleDownloadPdf() }}
+          onClick={() => setShowPrintSettings(true)}
           disabled={printing}
           sx={{ minHeight: 36, color: textColor, borderColor: textColor }}
         >
           {printing ? 'Creating PDF...' : 'Download PDF'}
         </Button>
       </Stack>
+
+      {/* Print settings dialog */}
+      <PrintSettingsDialog
+        open={showPrintSettings}
+        onClose={() => setShowPrintSettings(false)}
+        onPrint={(s) => { void handleDownloadPdf(s) }}
+        hasSightWords={(book.sightWords?.length ?? 0) > 0}
+      />
     </Box>
   )
 }

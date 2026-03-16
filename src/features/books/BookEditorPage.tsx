@@ -41,6 +41,8 @@ import PageEditor from './PageEditor'
 import StickerPicker from './StickerPicker'
 import { useBook } from './useBook'
 import { printBook } from './printBook'
+import PrintSettingsDialog from './PrintSettingsDialog'
+import type { PrintSettings } from './PrintSettingsDialog'
 
 type VoiceMode = 'record' | 'dictate'
 
@@ -130,6 +132,7 @@ export default function BookEditorPage() {
 
   // Print state
   const [printing, setPrinting] = useState(false)
+  const [showPrintSettings, setShowPrintSettings] = useState(false)
 
   const activePage = useMemo(
     () => book?.pages[activePageIndex] ?? null,
@@ -276,14 +279,16 @@ export default function BookEditorPage() {
   )
 
   // ── Print ───────────────────────────────────────────────────────
-  const handlePrint = useCallback(async () => {
+  const handlePrint = useCallback(async (settings: PrintSettings) => {
     if (!book) return
+    setShowPrintSettings(false)
     setPrinting(true)
     try {
       await printBook(book, {
         childName,
         isLincoln,
         sightWords: book.sightWords,
+        settings,
       })
     } finally {
       setPrinting(false)
@@ -397,7 +402,7 @@ export default function BookEditorPage() {
           variant="outlined"
           size="small"
           startIcon={printing ? <CircularProgress size={16} /> : <PrintIcon />}
-          onClick={() => { void handlePrint() }}
+          onClick={() => setShowPrintSettings(true)}
           disabled={printing}
           sx={{ minHeight: 40 }}
         >
@@ -965,6 +970,14 @@ export default function BookEditorPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Print settings dialog */}
+      <PrintSettingsDialog
+        open={showPrintSettings}
+        onClose={() => setShowPrintSettings(false)}
+        onPrint={(s) => { void handlePrint(s) }}
+        hasSightWords={(book.sightWords?.length ?? 0) > 0}
+      />
 
       {/* Celebration overlay */}
       {showCelebration && (
