@@ -147,6 +147,9 @@ export default function BookEditorPage() {
   // Sticker state
   const [showStickerPicker, setShowStickerPicker] = useState(false)
 
+  // Sketch background cleanup toggle (default ON when page has existing images)
+  const [autoCleanSketch, setAutoCleanSketch] = useState(true)
+
   // Overlay guidance (shown after placing an AI scene)
   const [showOverlayGuide, setShowOverlayGuide] = useState(false)
 
@@ -186,10 +189,10 @@ export default function BookEditorPage() {
   const handlePhotoCapture = useCallback(
     async (file: File) => {
       if (!activePage) return
-      await addImageToPage(activePage.id, file)
+      await addImageToPage(activePage.id, file, { cleanBackground: autoCleanSketch })
       setShowPhotoCapture(false)
     },
-    [activePage, addImageToPage],
+    [activePage, addImageToPage, autoCleanSketch],
   )
 
   const handleRemoveImage = useCallback(
@@ -211,9 +214,9 @@ export default function BookEditorPage() {
   const handleAddImageFile = useCallback(
     (file: File) => {
       if (!activePage) return
-      void addImageToPage(activePage.id, file)
+      void addImageToPage(activePage.id, file, { cleanBackground: autoCleanSketch })
     },
-    [activePage, addImageToPage],
+    [activePage, addImageToPage, autoCleanSketch],
   )
 
   // ── Voice: Audio recording ──────────────────────────────────────
@@ -757,6 +760,21 @@ export default function BookEditorPage() {
         )}
       </Stack>
 
+      {/* Clean sketch background toggle (visible when page has images) */}
+      {activePage && activePage.images.length > 0 && (
+        <FormControlLabel
+          control={
+            <Switch
+              checked={autoCleanSketch}
+              onChange={(_, v) => setAutoCleanSketch(v)}
+              size="small"
+            />
+          }
+          label="Clean sketch background"
+          sx={{ ml: 0, '& .MuiTypography-root': { fontSize: '0.75rem' } }}
+        />
+      )}
+
       {/* Overlay guidance banner (shown after placing an AI scene) */}
       {showOverlayGuide && (
         <Alert
@@ -915,7 +933,7 @@ export default function BookEditorPage() {
                           input.onchange = (e) => {
                             const file = (e.target as HTMLInputElement).files?.[0]
                             if (file && activePage) {
-                              void addImageToPage(activePage.id, file)
+                              void addImageToPage(activePage.id, file, { cleanBackground: autoCleanSketch })
                             }
                           }
                           input.click()
