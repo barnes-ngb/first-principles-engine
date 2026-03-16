@@ -28,6 +28,8 @@ import type {
   PlannerSession,
   Project,
   Session,
+  SightWordList,
+  SightWordProgress,
   SkillSnapshot,
   Sticker,
   WeekPlan,
@@ -348,6 +350,20 @@ export const booksCollection = (familyId: string): CollectionReference<Book> =>
 
 export const stickerLibraryCollection = (familyId: string): CollectionReference<Sticker> =>
   collection(db, `families/${familyId}/stickerLibrary`) as CollectionReference<Sticker>
+
+// ── Sight Word Progress ──────────────────────────────────────────
+
+/** Sight word progress: families/{familyId}/sightWordProgress/{childId_word} */
+export const sightWordProgressCollection = (familyId: string) =>
+  collection(db, `families/${familyId}/sightWordProgress`) as CollectionReference<SightWordProgress>
+
+/** Doc ID format: {childId}_{word} (e.g., "lincoln123_the") */
+export const sightWordProgressDocId = (childId: string, word: string): string =>
+  `${childId}_${word.toLowerCase().replace(/\s+/g, '-')}`
+
+/** Sight word lists: families/{familyId}/sightWordLists/{listId} */
+export const sightWordListsCollection = (familyId: string) =>
+  collection(db, `families/${familyId}/sightWordLists`) as CollectionReference<SightWordList>
 
 // ── AI Usage ────────────────────────────────────────────────────
 

@@ -21,6 +21,7 @@ const TaskType = {
   Generate: "generate",
   Chat: "chat",
   Quest: "quest",
+  GenerateStory: "generateStory",
 } as const;
 type TaskType = (typeof TaskType)[keyof typeof TaskType];
 
@@ -48,6 +49,7 @@ function modelForTask(taskType: TaskType): string {
     case TaskType.Plan:
     case TaskType.Evaluate:
     case TaskType.Quest:
+    case TaskType.GenerateStory:
       return "claude-sonnet-4-5-20250929";
     case TaskType.Generate:
     case TaskType.Chat:
@@ -611,6 +613,7 @@ Rules:
 - "category" must be either "must-do" or "choose". Core academics are "must-do", elective/fun activities are "choose".
 - "Make a Book" can be included as a "choose" category item. SubjectBucket: "LanguageArts". EstimatedMinutes: 15-20. It counts as both Language Arts and Art for compliance hours.
 - If the child has a draft book in progress (see BOOK STATUS in context), suggest "Continue your book" instead of "Make a Book".
+- If the child has sight word stories available (see SIGHT WORD PROGRESS in context), suggest reading one as a "choose" activity. Reference specific word counts and mastery progress.
 - "skipSuggestions" is an array of { "action": "skip"|"modify", "reason": "string", "replacement": "string", "evidence": "string" }.
 
 When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.`;
@@ -844,6 +847,74 @@ IMPORTANT:
   return `ROLE: You are a Minecraft-themed Quest Master running an interactive ${domain} assessment. Generate ONE multiple-choice question at a time as a <quest> JSON block with fields: level, skill, prompt, options (3 choices), correctAnswer, encouragement, finding (null or EvaluationFinding). Respond with ONLY the <quest> block.`;
 }
 
+// ── Story generation prompt ──────────────────────────────────────
+
+function buildStoryPrompt(sightWords: string[], theme: string, pageCount: number): string {
+  return `You are a children's story writer creating a sight word reader for Lincoln, a 10-year-old boy who loves Minecraft.
+
+SIGHT WORDS TO USE (MANDATORY — use EVERY word at least once):
+${sightWords.join(", ")}
+
+THEME: ${theme || "A Minecraft adventure"}
+
+RULES:
+- Write a ${pageCount}-page story. Each page has 2-4 short sentences.
+- You MUST use every word from the sight word list at least once. Use common words (the, is, and, was) multiple times.
+- Sentences should be simple. Lincoln reads at approximately 1st grade level.
+- CVC words (cat, dog, hat, run, sun) can appear freely — they reinforce his phonics.
+- Use the theme to make the story exciting. Minecraft vocabulary (portal, diamond, sword, armor, cube) is a bonus.
+- Each page should be a story beat: beginning, adventure, climax, resolution.
+- Do NOT use words significantly above 1st grade level unless they're on the sight word list.
+- Keep it fun, adventurous, warm. This is Lincoln's language, not a textbook.
+
+OUTPUT: Respond ONLY with valid JSON, no markdown fences:
+{
+  "title": "Story Title",
+  "pages": [
+    {
+      "pageNumber": 1,
+      "text": "The sun was up. Link and his cat were at the park.",
+      "sightWordsOnPage": ["the", "sun", "was", "up", "his", "cat", "were", "the", "park"]
+    }
+  ],
+  "allSightWordsUsed": ["the", "sun", "was"],
+  "missedWords": []
+}`;
+}
+
+// ── Sight word context loader ───────────────────────────────────
+
+/** Load sight word mastery summary for child. */
+async function loadSightWordSummary(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<string> {
+  const snap = await db
+    .collection(`families/${familyId}/sightWordProgress`)
+    .get();
+
+  // Filter to this child's progress (doc ID starts with childId_)
+  const progress = snap.docs
+    .filter(d => d.id.startsWith(`${childId}_`))
+    .map(d => d.data() as { masteryLevel: string; word: string });
+
+  if (progress.length === 0) return "";
+
+  const mastered = progress.filter(p => p.masteryLevel === "mastered").length;
+  const familiar = progress.filter(p => p.masteryLevel === "familiar").length;
+  const practicing = progress.filter(p => p.masteryLevel === "practicing").length;
+  const new_ = progress.filter(p => p.masteryLevel === "new").length;
+
+  const weakWords = progress
+    .filter(p => p.masteryLevel === "new" || p.masteryLevel === "practicing")
+    .map(p => p.word)
+    .slice(0, 15)
+    .join(", ");
+
+  return `SIGHT WORD PROGRESS: ${mastered} mastered, ${familiar} familiar, ${practicing} practicing, ${new_} new (${progress.length} total tracked).${weakWords ? ` Words needing work: ${weakWords}` : ""}`;
+}
+
 // ── Callable Cloud Function ─────────────────────────────────────
 
 export const chat = onCall(
@@ -927,6 +998,16 @@ export const chat = onCall(
       }
     }
 
+    // ── Load sight word summary for plan/evaluate context ────────
+    let sightWordContext = "";
+    if (needsEnrichedContext) {
+      try {
+        sightWordContext = await loadSightWordSummary(db, familyId, childId);
+      } catch (err) {
+        console.warn("Failed to load sight word summary:", err);
+      }
+    }
+
     // ── Load recent evaluation for plan context ──────────────
     let recentEvalContext = "";
     if (taskType === TaskType.Plan || taskType === TaskType.Quest) {
@@ -976,6 +1057,54 @@ export const chat = onCall(
       }
     }
 
+    // ── Handle generateStory task type ──────────────────────────
+    if (taskType === TaskType.GenerateStory) {
+      // For story generation, use the story prompt instead of the normal system prompt
+      let storyConfig: { sightWords: string[]; theme: string; pageCount: number };
+      try {
+        storyConfig = JSON.parse(messages[0].content);
+      } catch {
+        throw new HttpsError("invalid-argument", "generateStory requires JSON with sightWords, theme, and pageCount.");
+      }
+      const storySystemPrompt = buildStoryPrompt(
+        storyConfig.sightWords,
+        storyConfig.theme,
+        storyConfig.pageCount ?? 10,
+      );
+
+      const model = modelForTask(taskType);
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const client = new Anthropic({ apiKey: claudeApiKey.value() });
+      const completion = await client.messages.create({
+        model,
+        max_tokens: 4096,
+        system: storySystemPrompt,
+        messages: [{ role: "user", content: "Generate the story now." }],
+      });
+
+      const firstBlock = completion.content[0];
+      const responseText = firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
+      const usage = {
+        inputTokens: completion.usage.input_tokens,
+        outputTokens: completion.usage.output_tokens,
+      };
+
+      try {
+        await db.collection(`families/${familyId}/aiUsage`).add({
+          childId,
+          taskType,
+          model,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (logErr) {
+        console.warn("Failed to log AI usage:", logErr);
+      }
+
+      return { message: responseText, model, usage };
+    }
+
     // ── Assemble system prompt ─────────────────────────────────
     const systemPrompt = buildSystemPrompt(
       {
@@ -988,7 +1117,7 @@ export const chat = onCall(
       taskType,
       enriched,
       domain,
-    ) + recentEvalContext;
+    ) + recentEvalContext + (sightWordContext ? `\n\n${sightWordContext}` : "");
 
     // ── Call Claude ─────────────────────────────────────────────
     const model = modelForTask(taskType);

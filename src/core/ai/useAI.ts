@@ -10,6 +10,7 @@ export const TaskType = {
   Generate: 'generate',
   Chat: 'chat',
   Quest: 'quest',
+  GenerateStory: 'generateStory',
 } as const
 export type TaskType = (typeof TaskType)[keyof typeof TaskType]
 

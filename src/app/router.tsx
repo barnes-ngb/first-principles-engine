@@ -24,6 +24,8 @@ import WeeklyReviewPage from '../features/weekly-review/WeeklyReviewPage'
 import BookshelfPage from '../features/books/BookshelfPage'
 import BookEditorPage from '../features/books/BookEditorPage'
 import BookReaderPage from '../features/books/BookReaderPage'
+import CreateSightWordBook from '../features/books/CreateSightWordBook'
+import SightWordDashboard from '../features/books/SightWordDashboard'
 
 const routes = [
   {
@@ -55,6 +57,8 @@ const routes = [
       { path: '/planner/legacy', element: <PlannerPage /> },
       { path: '/evaluate', element: <EvaluateChatPage /> },
       { path: '/books', element: <BookshelfPage /> },
+      { path: '/books/create-story', element: <CreateSightWordBook /> },
+      { path: '/books/sight-words', element: <SightWordDashboard /> },
       { path: '/books/:bookId', element: <BookEditorPage /> },
       { path: '/books/:bookId/read', element: <BookReaderPage /> },
       { path: '/quest', element: <KnowledgeMinePage /> },

@@ -14,6 +14,7 @@ export type AiModel = (typeof AiModel)[keyof typeof AiModel];
 /** Image generation models. */
 export const ImageModel = {
   DallE3: "dall-e-3",
+  GptImage1: "gpt-image-1",
 } as const;
 export type ImageModel = (typeof ImageModel)[keyof typeof ImageModel];
 
@@ -50,14 +51,20 @@ export interface ChatResponse {
 
 /** Options for image generation. */
 export interface ImageOptions {
-  model?: ImageModel;
-  size?: "1024x1024" | "1024x1792" | "1792x1024";
-  quality?: "standard" | "hd";
+  model?: string;
+  size?: string;
+  quality?: string;
+  /** For gpt-image-1: 'transparent', 'opaque', or 'auto' */
+  background?: "transparent" | "opaque" | "auto";
+  /** Output format: 'png' (default), 'jpeg', 'webp' */
+  outputFormat?: "png" | "jpeg" | "webp";
 }
 
 /** Response from image generation. */
 export interface ImageResponse {
   url: string;
+  /** Base64-encoded image data (gpt-image-1 returns this instead of URL) */
+  b64Data?: string;
   revisedPrompt?: string;
 }
 
