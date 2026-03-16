@@ -23,6 +23,7 @@ import KnowledgeMinePage from '../features/quest/KnowledgeMinePage'
 import WeeklyReviewPage from '../features/weekly-review/WeeklyReviewPage'
 import BookshelfPage from '../features/books/BookshelfPage'
 import BookEditorPage from '../features/books/BookEditorPage'
+import BookReaderPage from '../features/books/BookReaderPage'
 
 const routes = [
   {
@@ -55,6 +56,7 @@ const routes = [
       { path: '/evaluate', element: <EvaluateChatPage /> },
       { path: '/books', element: <BookshelfPage /> },
       { path: '/books/:bookId', element: <BookEditorPage /> },
+      { path: '/books/:bookId/read', element: <BookReaderPage /> },
       { path: '/quest', element: <KnowledgeMinePage /> },
       { path: '/evaluation', element: <Navigate to="/progress" replace /> },
       { path: '/ladders', element: <LaddersPage /> },

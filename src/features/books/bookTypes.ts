@@ -22,6 +22,30 @@ export function generateImageId(): string {
   return `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
 }
 
+export const TEXT_SIZE_STYLES = {
+  big: { fontSize: '1.8rem', lineHeight: 1.4 },
+  medium: { fontSize: '1.1rem', lineHeight: 1.6 },
+  small: { fontSize: '0.9rem', lineHeight: 1.5 },
+} as const
+
+export const TEXT_FONT_FAMILIES = {
+  handwriting: '"Fredoka", cursive',
+  print: 'inherit',
+  pixel: '"Press Start 2P", monospace',
+} as const
+
+export const TEXT_SIZES = [
+  { value: 'big', label: 'Big' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'small', label: 'Small' },
+] as const
+
+export const TEXT_FONTS = [
+  { value: 'handwriting', label: 'Handwriting' },
+  { value: 'print', label: 'Print' },
+  { value: 'pixel', label: 'Pixel' },
+] as const
+
 export function createEmptyPage(pageNumber: number): BookPage {
   return {
     id: generatePageId(),

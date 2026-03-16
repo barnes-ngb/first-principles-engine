@@ -996,6 +996,10 @@ export interface BookPage {
   updatedAt: string
   /** Which child contributed this page (for Together Books) */
   contributorId?: string
+  /** Text display size */
+  textSize?: 'big' | 'medium' | 'small'
+  /** Text font family */
+  textFont?: 'handwriting' | 'print' | 'pixel'
 }
 
 export interface PageImage {
