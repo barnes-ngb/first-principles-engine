@@ -965,7 +965,7 @@ export interface Book {
   childId: string
   title: string
   coverImageUrl?: string
-  coverStyle?: 'minecraft' | 'storybook' | 'comic' | 'photo'
+  coverStyle?: 'minecraft' | 'storybook' | 'comic' | 'photo' | 'realistic'
   pages: BookPage[]
   status: 'draft' | 'complete'
   createdAt: string
@@ -978,8 +978,8 @@ export interface Book {
   isTogetherBook?: boolean
   /** All contributing children (used for Together Books) */
   contributorIds?: string[]
-  /** Book type: 'creative' for kid-made books, 'sight-word' for reading practice */
-  bookType?: 'creative' | 'sight-word'
+  /** Book type: 'creative' for kid-made books, 'sight-word' for reading practice, 'generated' for AI-generated stories */
+  bookType?: 'creative' | 'sight-word' | 'generated'
   /** How this book was created */
   source?: 'manual' | 'ai-generated'
   /** Target sight words for this book (sight-word type only) */
@@ -988,9 +988,11 @@ export interface Book {
   theme?: string
   /** The prompt/parameters used to generate this story */
   generationConfig?: {
+    storyIdea?: string
     words: string[]
-    theme: string
-    difficulty: 'simple' | 'moderate'
+    style?: string
+    theme?: string
+    difficulty?: 'simple' | 'moderate'
     pageCount: number
   }
 }
