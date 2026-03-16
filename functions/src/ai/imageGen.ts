@@ -1,7 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
-import { openaiApiKey } from "./aiConfig.js";
+import { claudeApiKey, openaiApiKey } from "./aiConfig.js";
 import { createOpenAiProvider } from "./providers/openai.js";
 import type { ImageOptions } from "./aiService.js";
 
@@ -33,13 +33,13 @@ const STYLE_PREFIXES: Record<string, string> = {
   "theme-illustration":
     "A warm, educational illustration for a homeschool family learning theme. Kid-friendly, inviting art style. ",
   "book-illustration-minecraft":
-    "A Minecraft-style pixel art scene illustration for a children's book page. Blocky, colorful, fun. ",
+    "A blocky pixel art voxel world scene for a children's book page. Environment only, no characters or people. Colorful blocks, dramatic terrain, bright sky. ",
   "book-illustration-storybook":
-    "A warm, hand-painted watercolor illustration for a children's picture book. Soft colors, gentle shapes, inviting. ",
+    "A warm hand-painted watercolor scene for a children's picture book page. Background environment only, no characters. Soft colors, gentle shapes, inviting landscape. ",
   "book-illustration-comic":
-    "A bold comic book panel illustration for a children's story. Dynamic lines, bright colors, expressive characters. ",
+    "A bold comic book background panel for a children's story. Dynamic environment, no characters. Bright colors, dramatic perspective, action lines. ",
   "book-illustration-realistic":
-    "A gentle, realistic illustration for a children's book. Warm lighting, friendly tone. ",
+    "A gentle realistic background scene for a children's book page. Environment only, no people or characters. Warm lighting, friendly atmosphere. ",
   "book-sticker":
     "A cute sticker illustration, die-cut sticker style, cartoon, simple, bold outline, white background. Child-friendly, colorful, no text. ",
   general: "",
@@ -59,7 +59,7 @@ export function buildImagePrompt(
 // ── Callable Cloud Function ─────────────────────────────────────
 
 export const generateImage = onCall(
-  { secrets: [openaiApiKey] },
+  { secrets: [openaiApiKey, claudeApiKey] },
   async (request): Promise<ImageGenResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
     if (!request.auth) {
@@ -117,10 +117,49 @@ export const generateImage = onCall(
       );
     }
 
+    // ── Rewrite prompt for DALL-E safety via Claude ─────────────
+    let safePrompt = prompt;
+    try {
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const claude = new Anthropic({ apiKey: claudeApiKey.value() });
+
+      const rewriteResult = await claude.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 300,
+        system: `You rewrite children's image generation prompts to avoid copyright issues while preserving the creative intent.
+
+RULES:
+- NEVER include character names (Mario, Luigi, Pikachu, Elsa, Spider-Man, Steve, etc.)
+- NEVER include franchise names (Minecraft, Pokemon, Mario Bros, Disney, Marvel, etc.)
+- Instead, describe the VISUAL STYLE and WORLD without naming the IP:
+  - "Minecraft" → "blocky pixel art voxel world"
+  - "Mario" → "colorful platformer video game world with brick blocks, green pipes, golden coins"
+  - "Pokemon" → "cute cartoon creatures in a grassy meadow"
+  - "Frozen/Elsa" → "magical ice palace with snowflakes and northern lights"
+  - "Spider-Man" → "comic book city rooftop scene at sunset"
+- ALWAYS describe a SCENE or ENVIRONMENT, not a character doing something
+- If the kid describes a character action ("Mario jumps over a pit"), convert to a scene ("a deep pit with lava below in a colorful platformer world, brick platforms floating above")
+- Keep the output under 100 words
+- Maintain the kid's creative intent — just make it about the WORLD not the CHARACTER
+- The output should start directly with the scene description, no preamble
+
+IMPORTANT: The child will overlay their own characters on top of this scene. So generate a BACKGROUND, not a character portrait.`,
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      const firstBlock = rewriteResult.content[0];
+      if (firstBlock?.type === "text") {
+        safePrompt = firstBlock.text;
+      }
+    } catch (rewriteErr) {
+      // If rewrite fails, proceed with the original prompt
+      console.warn("Prompt rewrite failed, using original:", rewriteErr);
+    }
+
     // ── Generate image via DALL-E 3 ─────────────────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
 
-    const dallePrompt = buildImagePrompt(prompt, style);
+    const dallePrompt = buildImagePrompt(safePrompt, style);
     const imageOpts: ImageOptions = {
       size: size ?? "1024x1024",
       quality: "standard",
@@ -192,6 +231,9 @@ export const generateImage = onCall(
     const bucket = getStorage().bucket();
     const file = bucket.file(storagePath);
 
+    const { randomUUID } = await import("crypto");
+    const downloadToken = randomUUID();
+
     await file.save(imageBuffer, {
       metadata: {
         contentType: "image/png",
@@ -199,15 +241,12 @@ export const generateImage = onCall(
           generatedBy: "dall-e-3",
           originalPrompt: prompt,
           style: style ?? "general",
+          firebaseStorageDownloadTokens: downloadToken,
         },
       },
     });
 
-    // Make file publicly accessible (storage rules control read access)
-    await file.makePublic();
-
-    // Use persistent public URL (does not expire)
-    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
+    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
 
     // ── Log usage to Firestore ─────────────────────────────────
     const db = getFirestore();

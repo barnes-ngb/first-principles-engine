@@ -56,6 +56,18 @@ const AI_SCENE_STYLES = [
   { value: 'realistic', label: 'Realistic' },
 ] as const
 
+const WORLD_CHIPS = [
+  { emoji: '\u{1F3D4}\uFE0F', label: 'Adventure world' },
+  { emoji: '\u{1F3F0}', label: 'Castle / kingdom' },
+  { emoji: '\u{1F30A}', label: 'Ocean / underwater' },
+  { emoji: '\u{1F332}', label: 'Forest / jungle' },
+  { emoji: '\u{1F680}', label: 'Space' },
+  { emoji: '\u{1F3D9}\uFE0F', label: 'City' },
+  { emoji: '\u{1F30B}', label: 'Lava / volcano' },
+  { emoji: '\u{2744}\uFE0F', label: 'Ice / snow' },
+  { emoji: '\u{1F3AA}', label: 'Fantasy' },
+] as const
+
 export default function BookEditorPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const navigate = useNavigate()
@@ -103,6 +115,9 @@ export default function BookEditorPage() {
 
   // Sticker state
   const [showStickerPicker, setShowStickerPicker] = useState(false)
+
+  // Overlay guidance (shown after placing an AI scene)
+  const [showOverlayGuide, setShowOverlayGuide] = useState(false)
 
   // Print state
   const [printing, setPrinting] = useState(false)
@@ -239,6 +254,7 @@ export default function BookEditorPage() {
     addAiImageToPage(activePage.id, aiResult.url, aiResult.storagePath, aiPrompt)
     setShowAiDialog(false)
     setAiResult(null)
+    setShowOverlayGuide(true)
   }, [activePage, aiResult, aiPrompt, addAiImageToPage])
 
   // ── Sticker ─────────────────────────────────────────────────────
@@ -597,7 +613,7 @@ export default function BookEditorPage() {
           onClick={openAiDialog}
           sx={{ minHeight: 48 }}
         >
-          Make a picture
+          Make a scene
         </Button>
         <Button
           variant="outlined"
@@ -622,14 +638,75 @@ export default function BookEditorPage() {
         )}
       </Stack>
 
+      {/* Overlay guidance banner (shown after placing an AI scene) */}
+      {showOverlayGuide && (
+        <Alert
+          severity="info"
+          onClose={() => setShowOverlayGuide(false)}
+          sx={{ mt: 1 }}
+        >
+          <Typography variant="body2" gutterBottom fontWeight={600}>
+            Scene added! Now add your characters:
+          </Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 0.5 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<PhotoCameraIcon />}
+              onClick={() => { setShowOverlayGuide(false); setShowPhotoCapture(true) }}
+              sx={{ minHeight: 36 }}
+            >
+              Upload a photo
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<StarIcon />}
+              onClick={() => { setShowOverlayGuide(false); setShowStickerPicker(true) }}
+              sx={{ minHeight: 36 }}
+            >
+              Add a sticker
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled
+              sx={{ minHeight: 36 }}
+            >
+              Draw a character (coming soon)
+            </Button>
+          </Stack>
+        </Alert>
+      )}
+
       {/* AI Scene generation dialog */}
       <Dialog open={showAiDialog} onClose={() => setShowAiDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Make a Picture</DialogTitle>
+        <DialogTitle>Make a Scene</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
+            {/* World type quick-pick chips */}
+            <Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                What kind of world?
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                {WORLD_CHIPS.map((w) => (
+                  <Chip
+                    key={w.label}
+                    label={`${w.emoji} ${w.label}`}
+                    variant="outlined"
+                    onClick={() => setAiPrompt((prev) => prev ? prev : `${w.label} with `)}
+                    disabled={aiLoading}
+                    size="small"
+                    sx={{ mb: 0.5 }}
+                  />
+                ))}
+              </Stack>
+            </Box>
+
             <TextField
-              label="Describe your picture"
-              placeholder="Describe your picture..."
+              label="Describe the scene"
+              placeholder="Describe the world your character will explore..."
               value={aiPrompt}
               onChange={(e) => setAiPrompt(e.target.value)}
               fullWidth
@@ -637,6 +714,11 @@ export default function BookEditorPage() {
               minRows={2}
               disabled={aiLoading}
             />
+
+            <Typography variant="caption" color="text.secondary">
+              Tip: Describe the world — add your own characters after!
+            </Typography>
+
             <Box>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 Style
@@ -658,14 +740,26 @@ export default function BookEditorPage() {
               <Stack alignItems="center" spacing={1}>
                 <CircularProgress size={32} />
                 <Typography variant="body2" color="text.secondary">
-                  Creating your picture...
+                  Creating your scene...
                 </Typography>
               </Stack>
             )}
 
             {aiError && !aiLoading && (
-              <Alert severity="error" sx={{ mt: 1 }}>
-                {aiError.message || 'Failed to generate image. Please try again.'}
+              <Alert severity="warning" sx={{ mt: 1 }}>
+                {aiError.message.includes('blocked') || aiError.message.includes('safety') || aiError.message.includes('safety filter') ? (
+                  <>
+                    <Typography variant="body2" gutterBottom>
+                      Oops! The picture maker can&apos;t use character names like Mario or Elsa.
+                    </Typography>
+                    <Typography variant="body2">
+                      Try describing the <strong>world</strong> instead — like &quot;a colorful world
+                      with brick castles and golden coins.&quot; Then add your own characters!
+                    </Typography>
+                  </>
+                ) : (
+                  <Typography variant="body2">{aiError.message || 'Failed to generate image. Please try again.'}</Typography>
+                )}
               </Alert>
             )}
 
