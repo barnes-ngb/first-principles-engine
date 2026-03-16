@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { addDoc } from 'firebase/firestore'
+import { addDoc, doc, getDoc, setDoc } from 'firebase/firestore'
 
 import { useAI } from '../../core/ai/useAI'
 import type { TaskType } from '../../core/ai/useAI'
@@ -91,85 +91,33 @@ export function useBookGenerator() {
         return null
       }
 
-      // Phase 2: Generate illustrations for each page
-      const illustratedPages: BookPage[] = []
-      const failedPages: number[] = []
-      const illustrationStyle = `book-illustration-${style}` as
-        | 'book-illustration-minecraft'
-        | 'book-illustration-storybook'
-        | 'book-illustration-comic'
-        | 'book-illustration-realistic'
-
-      for (let i = 0; i < story.pages.length; i++) {
-        const page = story.pages[i]
-        setProgress({
-          phase: 'illustrating',
-          currentPage: i + 1,
-          totalPages: story.pages.length,
-          message: `Illustrating page ${i + 1} of ${story.pages.length}...`,
-          lastImageUrl:
-            illustratedPages.length > 0
-              ? illustratedPages[illustratedPages.length - 1].images[0]?.url
-              : undefined,
-        })
-
-        let images: PageImage[] = []
-
-        if (page.sceneDescription) {
-          try {
-            const imgResult = await generateImage({
-              familyId,
-              prompt: page.sceneDescription,
-              style: illustrationStyle,
-              size: '1024x1024',
-            })
-
-            if (imgResult) {
-              images = [
-                {
-                  id: generateImageId(),
-                  url: imgResult.url,
-                  storagePath: imgResult.storagePath,
-                  type: 'ai-generated',
-                  prompt: page.sceneDescription,
-                },
-              ]
-            }
-          } catch {
-            console.warn(`Illustration failed for page ${i + 1}`)
-            failedPages.push(i + 1)
-          }
-        }
-
-        illustratedPages.push({
-          id: generatePageId(),
-          pageNumber: i + 1,
-          text: page.text,
-          images,
-          layout: images.length > 0 ? 'image-top' : 'text-only',
-          sightWordsOnPage: page.wordsOnPage ?? [],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        })
-      }
-
-      // Phase 3: Save to Firestore
+      // Phase 2: Save book with TEXT ONLY immediately
+      // This ensures the book is persisted before the long illustration phase,
+      // which can take 50-80 seconds and may cause Android WebView to suspend.
       setProgress({
         phase: 'saving',
         currentPage: 0,
-        totalPages: 0,
-        message: 'Saving your book...',
+        totalPages: story.pages.length,
+        message: 'Saving your story...',
       })
 
       const now = new Date().toISOString()
-      const coverUrl = illustratedPages[0]?.images[0]?.url ?? undefined
+      const textOnlyPages: BookPage[] = story.pages.map((page, i) => ({
+        id: generatePageId(),
+        pageNumber: i + 1,
+        text: page.text,
+        images: [],
+        layout: 'text-only' as const,
+        sightWordsOnPage: page.wordsOnPage ?? [],
+        createdAt: now,
+        updatedAt: now,
+      }))
 
       const newBook: Omit<Book, 'id'> = {
         childId,
         title: story.title,
-        coverImageUrl: coverUrl,
         coverStyle: style as Book['coverStyle'],
-        pages: illustratedPages,
+        pages: textOnlyPages,
         status: 'draft',
         createdAt: now,
         updatedAt: now,
@@ -185,32 +133,101 @@ export function useBookGenerator() {
         },
       }
 
+      let bookId: string
       try {
         const docRef = await addDoc(booksCollection(familyId), newBook as Book)
-
-        setProgress({
-          phase: 'done',
-          currentPage: 0,
-          totalPages: 0,
-          message:
-            failedPages.length > 0
-              ? `Book created! ${failedPages.length} page${failedPages.length > 1 ? 's' : ''} need illustrations — you can add photos or drawings in the editor.`
-              : 'Your book is ready!',
-          lastImageUrl: coverUrl,
-        })
-        setGenerating(false)
-        return docRef.id
+        bookId = docRef.id
       } catch (err) {
-        console.error('Failed to save generated book:', err)
-        setProgress({
-          phase: 'error',
-          currentPage: 0,
-          totalPages: 0,
-          message: 'Failed to save book',
-        })
+        console.error('Failed to save book text:', err)
+        setProgress({ phase: 'error', currentPage: 0, totalPages: 0, message: 'Failed to save book' })
         setGenerating(false)
         return null
       }
+
+      // Phase 3: Generate illustrations and UPDATE the saved book as each completes
+      const failedPages: number[] = []
+      const bookRef = doc(booksCollection(familyId), bookId)
+      const illustrationStyle = `book-illustration-${style}` as
+        | 'book-illustration-minecraft'
+        | 'book-illustration-storybook'
+        | 'book-illustration-comic'
+        | 'book-illustration-realistic'
+        | 'book-illustration-garden-warfare'
+        | 'book-illustration-platformer'
+
+      let lastImageUrl: string | undefined
+
+      for (let i = 0; i < story.pages.length; i++) {
+        const page = story.pages[i]
+        setProgress({
+          phase: 'illustrating',
+          currentPage: i + 1,
+          totalPages: story.pages.length,
+          message: `Illustrating page ${i + 1} of ${story.pages.length}...`,
+          lastImageUrl,
+        })
+
+        if (!page.sceneDescription) continue
+
+        try {
+          const imgResult = await generateImage({
+            familyId,
+            prompt: page.sceneDescription,
+            style: illustrationStyle,
+            size: '1024x1024',
+          })
+
+          if (imgResult) {
+            lastImageUrl = imgResult.url
+            const pageImage: PageImage = {
+              id: generateImageId(),
+              url: imgResult.url,
+              storagePath: imgResult.storagePath,
+              type: 'ai-generated',
+              prompt: page.sceneDescription,
+            }
+
+            // Read current doc, update the page, write back
+            try {
+              const snap = await getDoc(bookRef)
+              if (snap.exists()) {
+                const current = snap.data() as Book
+                const updatedPages = current.pages.map((p, idx) =>
+                  idx === i
+                    ? { ...p, images: [pageImage], layout: 'image-top' as const, updatedAt: new Date().toISOString() }
+                    : p,
+                )
+                await setDoc(bookRef, {
+                  ...current,
+                  pages: updatedPages,
+                  coverImageUrl: i === 0 ? imgResult.url : current.coverImageUrl,
+                  updatedAt: new Date().toISOString(),
+                })
+              }
+            } catch (saveErr) {
+              console.warn(`Failed to save illustration for page ${i + 1}:`, saveErr)
+              // Image was generated but save failed — count as partial failure
+              failedPages.push(i + 1)
+            }
+          }
+        } catch (err) {
+          console.warn(`Illustration failed for page ${i + 1}:`, err)
+          failedPages.push(i + 1)
+        }
+      }
+
+      setProgress({
+        phase: 'done',
+        currentPage: 0,
+        totalPages: 0,
+        message:
+          failedPages.length > 0
+            ? `Book created! ${failedPages.length} page${failedPages.length > 1 ? 's' : ''} need illustrations — you can add photos or drawings in the editor.`
+            : 'Your book is ready!',
+        lastImageUrl,
+      })
+      setGenerating(false)
+      return bookId
     },
     [chat, generateImage],
   )

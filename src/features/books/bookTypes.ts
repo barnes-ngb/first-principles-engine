@@ -6,6 +6,8 @@ export const COVER_STYLES = [
   { value: 'comic', label: 'Comic Book' },
   { value: 'photo', label: 'Photo Album' },
   { value: 'realistic', label: 'Realistic' },
+  { value: 'garden-warfare', label: 'Garden Battle' },
+  { value: 'platformer', label: 'Platformer World' },
 ] as const
 
 /** Styles available for AI-generated book illustrations. */

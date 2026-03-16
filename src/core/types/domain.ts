@@ -965,7 +965,7 @@ export interface Book {
   childId: string
   title: string
   coverImageUrl?: string
-  coverStyle?: 'minecraft' | 'storybook' | 'comic' | 'photo' | 'realistic'
+  coverStyle?: 'minecraft' | 'storybook' | 'comic' | 'photo' | 'realistic' | 'garden-warfare' | 'platformer'
   pages: BookPage[]
   status: 'draft' | 'complete'
   createdAt: string
