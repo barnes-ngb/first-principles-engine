@@ -10,7 +10,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 
 export interface PrintSettings {
-  pageSize: 'letter' | 'half-letter' | 'a4'
+  pageSize: 'letter' | 'half-letter' | 'a4' | 'booklet'
   background: 'white' | 'cream' | 'dark'
   sightWordStyle: 'highlighted' | 'bold' | 'plain'
 }
@@ -64,7 +64,16 @@ export default function PrintSettingsDialog({
               <ToggleButton value="a4" sx={{ textTransform: 'none' }}>
                 A4
               </ToggleButton>
+              <ToggleButton value="booklet" sx={{ textTransform: 'none' }}>
+                Booklet (fold & staple)
+              </ToggleButton>
             </ToggleButtonGroup>
+            {settings.pageSize === 'booklet' && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                Prints 2 pages per sheet. Fold each sheet in half, stack, and staple the edge to
+                make a mini book!
+              </Typography>
+            )}
           </div>
 
           {/* Background */}
