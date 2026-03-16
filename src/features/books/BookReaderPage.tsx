@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { addDoc } from 'firebase/firestore'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -15,14 +16,76 @@ import CircularProgress from '@mui/material/CircularProgress'
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { BookPage } from '../../core/types/domain'
+import { artifactsCollection, hoursCollection } from '../../core/firebase/firestore'
+import type { Book, BookPage } from '../../core/types/domain'
+import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { useBook } from './useBook'
 import { printBook } from './printBook'
 import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
 import { TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
-import { renderTextWithSightWords } from './highlightSightWords'
+import { renderInteractiveText } from './highlightSightWords'
 import { useSightWordProgress } from './useSightWordProgress'
+
+// ── Reading session helpers ──────────────────────────────────────
+
+/** Log reading time as compliance hours */
+async function logReadingHours(
+  familyId: string,
+  childId: string,
+  minutes: number,
+  bookTitle: string,
+  completed: boolean,
+  pagesRead: number,
+  totalPages: number,
+  sightWordCount: number,
+): Promise<void> {
+  if (minutes < 1) return
+  const date = new Date().toISOString().slice(0, 10)
+
+  const notes = completed
+    ? `Read "${bookTitle}" (${totalPages} pages, completed)${sightWordCount > 0 ? ` — ${sightWordCount} sight words` : ''}`
+    : `Read "${bookTitle}" (${pagesRead}/${totalPages} pages)${sightWordCount > 0 ? ` — ${sightWordCount} sight words` : ''}`
+
+  await addDoc(hoursCollection(familyId), {
+    childId,
+    date,
+    minutes,
+    subjectBucket: SubjectBucket.LanguageArts,
+    notes,
+  })
+}
+
+/** Create a portfolio artifact when a book is read to completion */
+async function logReadingCompletion(
+  familyId: string,
+  book: Book,
+  childName: string,
+  _pagesRead: number,
+  _totalPages: number,
+): Promise<void> {
+  const hasSightWords = (book.sightWords?.length ?? 0) > 0
+  const coverUrl = book.coverImageUrl ?? book.pages.find(p => p.images.length > 0)?.images[0]?.url
+
+  await addDoc(artifactsCollection(familyId), {
+    childId: book.childId,
+    title: `Read "${book.title}"`,
+    type: coverUrl ? EvidenceType.Photo : EvidenceType.Note,
+    content: [
+      `${childName} read "${book.title}" — ${book.pages.length} pages`,
+      hasSightWords ? `Practiced ${book.sightWords!.length} sight words` : null,
+      `Completed reading on ${new Date().toLocaleDateString()}`,
+    ].filter(Boolean).join('. '),
+    createdAt: new Date().toISOString(),
+    tags: {
+      engineStage: EngineStage.Share,
+      domain: 'language-arts',
+      subjectBucket: SubjectBucket.LanguageArts,
+      location: 'Home',
+    },
+    ...(coverUrl ? { uri: coverUrl } : {}),
+  })
+}
 
 const SWIPE_THRESHOLD = 50
 
@@ -49,6 +112,12 @@ export default function BookReaderPage() {
   const [showPrintSettings, setShowPrintSettings] = useState(false)
   const [totalWordsEncountered, setTotalWordsEncountered] = useState(0)
   const seenPagesRef = useRef<Set<number>>(new Set())
+
+  // Session tracking
+  const sessionStartRef = useRef<number>(Date.now())
+  const pagesViewedRef = useRef<Set<number>>(new Set())
+  const completedRef = useRef(false)
+  const hoursLoggedRef = useRef(false)
 
   // Total pages: cover + content pages + back cover
   const totalPages = useMemo(() => (book ? book.pages.length + 2 : 0), [book])
@@ -97,6 +166,43 @@ export default function BookReaderPage() {
       void recordInteraction(word, 'seen')
     }
   }, [currentPage, isSightWordBook, book, recordInteraction])
+
+  // Track which pages have been viewed
+  useEffect(() => {
+    pagesViewedRef.current.add(currentPage)
+  }, [currentPage])
+
+  // Detect book completion — reaching the last page (back cover)
+  useEffect(() => {
+    if (currentPage === totalPages - 1 && !completedRef.current && book) {
+      completedRef.current = true
+      void logReadingCompletion(familyId, book, childName, pagesViewedRef.current.size, totalPages)
+    }
+  }, [currentPage, totalPages, book, familyId, childName])
+
+  // Log reading hours when leaving the reader
+  useEffect(() => {
+    return () => {
+      if (hoursLoggedRef.current || !book) return
+      hoursLoggedRef.current = true
+
+      const elapsed = Math.round((Date.now() - sessionStartRef.current) / 60000)
+      if (elapsed < 1) return
+
+      void logReadingHours(
+        familyId,
+        book.childId,
+        elapsed,
+        book.title,
+        completedRef.current,
+        pagesViewedRef.current.size,
+        totalPages,
+        book.sightWords?.length ?? 0,
+      )
+    }
+    // Only run cleanup on unmount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [familyId, book?.childId, book?.title, totalPages])
 
   const handleWordTap = useCallback((word: string, action: 'help' | 'known') => {
     void recordInteraction(word, action)
@@ -299,7 +405,7 @@ export default function BookReaderPage() {
                 </Box>
               )}
 
-              {/* Text */}
+              {/* Text — all words tappable for TTS, sight words get colored chips */}
               {contentPage.text && (
                 <Typography
                   component="div"
@@ -309,14 +415,12 @@ export default function BookReaderPage() {
                     color: textColor,
                   }}
                 >
-                  {isSightWordBook && book.sightWords
-                    ? renderTextWithSightWords(
-                        contentPage.text,
-                        book.sightWords,
-                        handleWordTap,
-                        progressMap,
-                      )
-                    : contentPage.text}
+                  {renderInteractiveText(
+                    contentPage.text,
+                    book.sightWords ?? [],
+                    handleWordTap,
+                    progressMap,
+                  )}
                 </Typography>
               )}
 
@@ -357,6 +461,13 @@ export default function BookReaderPage() {
                 >
                   Made by {childName}
                 </Typography>
+              )}
+              {completedRef.current && (
+                <Chip
+                  label={isLincoln ? '\u26CF\uFE0F Achievement: Reader!' : '\u{1F31F} Great reading!'}
+                  color="success"
+                  sx={{ mt: 2, fontWeight: 700 }}
+                />
               )}
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                 {new Date(book.createdAt).toLocaleDateString(undefined, {
