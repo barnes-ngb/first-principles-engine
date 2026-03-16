@@ -93,6 +93,7 @@ export function useBookGenerator() {
 
       // Phase 2: Generate illustrations for each page
       const illustratedPages: BookPage[] = []
+      const failedPages: number[] = []
       const illustrationStyle = `book-illustration-${style}` as
         | 'book-illustration-minecraft'
         | 'book-illustration-storybook'
@@ -136,6 +137,7 @@ export function useBookGenerator() {
             }
           } catch {
             console.warn(`Illustration failed for page ${i + 1}`)
+            failedPages.push(i + 1)
           }
         }
 
@@ -190,7 +192,10 @@ export function useBookGenerator() {
           phase: 'done',
           currentPage: 0,
           totalPages: 0,
-          message: 'Your book is ready!',
+          message:
+            failedPages.length > 0
+              ? `Book created! ${failedPages.length} page${failedPages.length > 1 ? 's' : ''} need illustrations — you can add photos or drawings in the editor.`
+              : 'Your book is ready!',
           lastImageUrl: coverUrl,
         })
         setGenerating(false)
