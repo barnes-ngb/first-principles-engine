@@ -24,6 +24,7 @@ import PrintIcon from '@mui/icons-material/Print'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import Switch from '@mui/material/Switch'
 
+import Alert from '@mui/material/Alert'
 import Page from '../../components/Page'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
@@ -78,9 +79,10 @@ export default function BookEditorPage() {
     uploadAudio,
     addAiImageToPage,
     addStickerToPage,
+    updateImagePosition,
   } = useBook(familyId, bookId)
 
-  const { generateImage, loading: aiLoading } = useAI()
+  const { generateImage, loading: aiLoading, error: aiError } = useAI()
 
   const [activePageIndex, setActivePageIndex] = useState(0)
   const [showPhotoCapture, setShowPhotoCapture] = useState(false)
@@ -144,6 +146,14 @@ export default function BookEditorPage() {
       removeImageFromPage(activePage.id, imageId)
     },
     [activePage, removeImageFromPage],
+  )
+
+  const handleImagePositionChange = useCallback(
+    (imageId: string, position: { x: number; y: number; width: number; height: number }) => {
+      if (!activePage) return
+      updateImagePosition(activePage.id, imageId, position)
+    },
+    [activePage, updateImagePosition],
   )
 
   const handleAddImageFile = useCallback(
@@ -377,6 +387,7 @@ export default function BookEditorPage() {
             onUpdate={handlePageUpdate}
             onAddImage={handleAddImageFile}
             onRemoveImage={handleRemoveImage}
+            onImagePositionChange={handleImagePositionChange}
             onReRecord={() => { setShowVoicePanel(true); setVoiceMode('record') }}
             childName={childName}
           />
@@ -650,6 +661,12 @@ export default function BookEditorPage() {
                   Creating your picture...
                 </Typography>
               </Stack>
+            )}
+
+            {aiError && !aiLoading && (
+              <Alert severity="error" sx={{ mt: 1 }}>
+                {aiError.message || 'Failed to generate image. Please try again.'}
+              </Alert>
             )}
 
             {aiResult && (

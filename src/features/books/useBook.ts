@@ -33,6 +33,7 @@ interface UseBookResult {
   uploadAudio: (pageId: string, blob: Blob) => Promise<void>
   addAiImageToPage: (pageId: string, url: string, storagePath: string, prompt: string) => void
   addStickerToPage: (pageId: string, stickerUrl: string, storagePath: string, label: string) => void
+  updateImagePosition: (pageId: string, imageId: string, position: PageImage['position']) => void
   /** Whether this session used AI image generation (for Art hours) */
   usedAiGeneration: boolean
 }
@@ -348,6 +349,26 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     [applyUpdate],
   )
 
+  const updateImagePosition = useCallback(
+    (pageId: string, imageId: string, position: PageImage['position']) => {
+      applyUpdate((prev) => ({
+        ...prev,
+        pages: prev.pages.map((p) =>
+          p.id === pageId
+            ? {
+                ...p,
+                images: p.images.map((img) =>
+                  img.id === imageId ? { ...img, position } : img,
+                ),
+                updatedAt: new Date().toISOString(),
+              }
+            : p,
+        ),
+      }))
+    },
+    [applyUpdate],
+  )
+
   const addStickerToPage = useCallback(
     (pageId: string, stickerUrl: string, storagePath: string, label: string) => {
       const image: PageImage = {
@@ -383,6 +404,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     uploadAudio,
     addAiImageToPage,
     addStickerToPage,
+    updateImagePosition,
     usedAiGeneration,
   }
 }
