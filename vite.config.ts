@@ -34,6 +34,9 @@ export default defineConfig({
       'firebase-functions/params': fileURLToPath(
         new URL('./functions/src/ai/providers/__stubs__/firebase-functions-params.ts', import.meta.url),
       ),
+      sharp: fileURLToPath(
+        new URL('./functions/src/ai/providers/__stubs__/sharp.ts', import.meta.url),
+      ),
     },
   },
 })
