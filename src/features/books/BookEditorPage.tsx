@@ -13,7 +13,10 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import AddIcon from '@mui/icons-material/Add'
+import AutoStoriesIcon from '@mui/icons-material/AutoStories'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import MicIcon from '@mui/icons-material/Mic'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
@@ -92,6 +95,7 @@ export default function BookEditorPage() {
     addAiImageToPage,
     addStickerToPage,
     updateImagePosition,
+    reorderPages,
   } = useBook(familyId, bookId)
 
   const { generateImage, loading: aiLoading, error: aiError } = useAI()
@@ -118,6 +122,11 @@ export default function BookEditorPage() {
 
   // Overlay guidance (shown after placing an AI scene)
   const [showOverlayGuide, setShowOverlayGuide] = useState(false)
+
+  // Finish flow state
+  const [showFinishDialog, setShowFinishDialog] = useState(false)
+  const [selectedCoverUrl, setSelectedCoverUrl] = useState<string | null>(null)
+  const [showCelebration, setShowCelebration] = useState(false)
 
   // Print state
   const [printing, setPrinting] = useState(false)
@@ -277,6 +286,33 @@ export default function BookEditorPage() {
     }
   }, [book, childName])
 
+  // ── Finish flow ───────────────────────────────────────────────────
+  const coverCandidates = useMemo(() => {
+    if (!book) return []
+    return book.pages
+      .filter((p) => p.images.length > 0)
+      .map((p) => p.images[0].url)
+  }, [book])
+
+  const handleOpenFinishDialog = useCallback(() => {
+    setSelectedCoverUrl(coverCandidates[0] ?? null)
+    setShowFinishDialog(true)
+  }, [coverCandidates])
+
+  const handleFinishBook = useCallback(() => {
+    if (!book) return
+    updateBookMeta({
+      status: 'complete',
+      ...(selectedCoverUrl ? { coverImageUrl: selectedCoverUrl } : {}),
+    })
+    setShowFinishDialog(false)
+    setShowCelebration(true)
+    setTimeout(() => {
+      setShowCelebration(false)
+      navigate(`/books/${bookId}/read`)
+    }, 2000)
+  }, [book, selectedCoverUrl, updateBookMeta, navigate, bookId])
+
   if (loading) {
     return (
       <Page>
@@ -347,12 +383,32 @@ export default function BookEditorPage() {
         <Button
           variant="outlined"
           size="small"
+          startIcon={<AutoStoriesIcon />}
+          onClick={() => navigate(`/books/${bookId}/read`)}
+          sx={{ minHeight: 40 }}
+        >
+          Read
+        </Button>
+        <Button
+          variant="outlined"
+          size="small"
           startIcon={printing ? <CircularProgress size={16} /> : <PrintIcon />}
           onClick={() => { void handlePrint() }}
           disabled={printing}
           sx={{ minHeight: 40 }}
         >
           {printing ? 'Building...' : 'Print'}
+        </Button>
+        <Button
+          variant="contained"
+          size="small"
+          color="success"
+          startIcon={<CheckCircleIcon />}
+          onClick={handleOpenFinishDialog}
+          disabled={book.status === 'complete'}
+          sx={{ minHeight: 40 }}
+        >
+          {book.status === 'complete' ? 'Finished!' : 'Finish My Book'}
         </Button>
       </Stack>
 
@@ -589,6 +645,35 @@ export default function BookEditorPage() {
         </Box>
       </Box>
 
+      {/* Page reorder arrows */}
+      {book.pages.length > 1 && (
+        <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 0.5 }}>
+          <IconButton
+            size="small"
+            disabled={activePageIndex === 0}
+            onClick={() => {
+              reorderPages(activePageIndex, activePageIndex - 1)
+              setActivePageIndex(activePageIndex - 1)
+            }}
+          >
+            <ArrowBackIcon fontSize="small" />
+          </IconButton>
+          <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
+            Move page
+          </Typography>
+          <IconButton
+            size="small"
+            disabled={activePageIndex === book.pages.length - 1}
+            onClick={() => {
+              reorderPages(activePageIndex, activePageIndex + 1)
+              setActivePageIndex(activePageIndex + 1)
+            }}
+          >
+            <ArrowForwardIcon fontSize="small" />
+          </IconButton>
+        </Stack>
+      )}
+
       {/* Action buttons */}
       <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
         <Button
@@ -813,6 +898,102 @@ export default function BookEditorPage() {
         familyId={familyId}
         onSelectSticker={handleSelectSticker}
       />
+
+      {/* Finish dialog */}
+      <Dialog open={showFinishDialog} onClose={() => setShowFinishDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Your book is ready!</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            {coverCandidates.length > 0 && (
+              <>
+                <Typography variant="body2" color="text.secondary">
+                  Pick a cover image:
+                </Typography>
+                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                  {coverCandidates.map((url) => (
+                    <Box
+                      key={url}
+                      onClick={() => setSelectedCoverUrl(url)}
+                      sx={{
+                        width: 80,
+                        height: 80,
+                        borderRadius: 1,
+                        overflow: 'hidden',
+                        border: '3px solid',
+                        borderColor: selectedCoverUrl === url ? 'success.main' : 'divider',
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Box component="img" src={url} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </Box>
+                  ))}
+                  <Box
+                    onClick={() => setSelectedCoverUrl(null)}
+                    sx={{
+                      width: 80,
+                      height: 80,
+                      borderRadius: 1,
+                      border: '3px solid',
+                      borderColor: selectedCoverUrl === null ? 'success.main' : 'divider',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      bgcolor: 'grey.100',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Typography variant="caption" color="text.secondary">None</Typography>
+                  </Box>
+                </Stack>
+              </>
+            )}
+            <Typography variant="body2" color="text.secondary">
+              You can always come back and edit!
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowFinishDialog(false)}>Keep working</Button>
+          <Button variant="contained" color="success" onClick={handleFinishBook}>
+            Finish!
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Celebration overlay */}
+      {showCelebration && (
+        <Box
+          sx={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: 'rgba(0,0,0,0.7)',
+          }}
+        >
+          <Stack alignItems="center" spacing={2}>
+            <Typography
+              variant="h4"
+              sx={{
+                color: 'white',
+                fontWeight: 700,
+                textAlign: 'center',
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                fontSize: isLincoln ? '0.9rem' : undefined,
+              }}
+            >
+              {isLincoln ? 'Achievement Unlocked: Author!' : 'Beautiful book!'}
+            </Typography>
+            <Typography sx={{ fontSize: '3rem' }}>
+              {isLincoln ? '\u{2B50}' : '\u{1F338}'}
+            </Typography>
+          </Stack>
+        </Box>
+      )}
     </Page>
   )
 }

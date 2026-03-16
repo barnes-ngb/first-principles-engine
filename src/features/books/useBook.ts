@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   addDoc,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -27,7 +28,7 @@ interface UseBookResult {
   addPage: () => void
   deletePage: (pageId: string) => void
   reorderPages: (fromIndex: number, toIndex: number) => void
-  updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds'>>) => void
+  updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds'>>) => void
   addImageToPage: (pageId: string, file: File) => Promise<void>
   removeImageFromPage: (pageId: string, imageId: string) => void
   uploadAudio: (pageId: string, blob: Blob) => Promise<void>
@@ -42,6 +43,7 @@ interface UseBookshelfResult {
   books: Book[]
   loading: boolean
   createBook: (title: string, coverStyle: Book['coverStyle'], isTogetherBook?: boolean, contributorIds?: string[]) => Promise<string>
+  deleteBook: (bookId: string) => Promise<void>
 }
 
 /** Get today as YYYY-MM-DD string. */
@@ -236,7 +238,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   )
 
   const updateBookMeta = useCallback(
-    (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds'>>) => {
+    (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds'>>) => {
       applyUpdate((prev) => {
         const next = { ...prev, ...changes }
         // If status changes to 'complete', create portfolio artifact
@@ -472,7 +474,16 @@ export function useBookshelf(familyId: string, childId: string): UseBookshelfRes
     [familyId, childId],
   )
 
-  return { books, loading, createBook }
+  const deleteBook = useCallback(
+    async (bookId: string) => {
+      if (!familyId) return
+      await deleteDoc(doc(booksCollection(familyId), bookId))
+      setBooks((prev) => prev.filter((b) => b.id !== bookId))
+    },
+    [familyId],
+  )
+
+  return { books, loading, createBook, deleteBook }
 }
 
 /** Hook to load the most recent draft book for a child (for "Continue your book" card). */
