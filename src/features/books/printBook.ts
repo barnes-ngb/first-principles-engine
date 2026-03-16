@@ -1,6 +1,8 @@
+import { ref, getBlob } from 'firebase/storage'
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
 import type { Book, BookPage } from '../../core/types/domain'
+import { storage } from '../../core/firebase/storage'
 import type { PrintSettings } from './PrintSettingsDialog'
 import { TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
 
@@ -32,48 +34,88 @@ export interface PrintBookOptions {
   settings?: PrintSettings
 }
 
-/* ───────────────────── image pre-fetch (CORS fix) ───────────────────── */
+/* ───────────────────── image pre-fetch (Firebase SDK) ───────────────────── */
 
-async function fetchAsDataUri(url: string): Promise<string> {
-  try {
-    const response = await fetch(url, { mode: 'cors' })
-    if (!response.ok) {
-      console.warn(`Image fetch failed (${response.status}): ${url.slice(0, 80)}...`)
-      return url
-    }
-    const blob = await response.blob()
-    return new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onloadend = () => resolve(reader.result as string)
-      reader.onerror = () => resolve(url)
-      reader.readAsDataURL(blob)
-    })
-  } catch (err) {
-    console.warn('Image fetch CORS error:', err, url.slice(0, 80))
-    return url
-  }
+/**
+ * Convert a Blob to a base64 data URI.
+ */
+function blobToDataUri(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
 }
 
-async function prefetchBookImages(book: Book): Promise<Map<string, string>> {
-  const urls = new Set<string>()
-
-  const coverUrl = book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
-  if (coverUrl) urls.add(coverUrl)
-
-  for (const page of book.pages) {
-    for (const img of page.images) {
-      if (img.url) urls.add(img.url)
+/**
+ * Fetch an image as a base64 data URI using Firebase Storage SDK (no CORS needed).
+ * Falls back to browser fetch, then to original URL.
+ */
+async function fetchAsDataUri(url: string, storagePath?: string): Promise<string> {
+  // Strategy 1: Use Firebase Storage SDK with storagePath (no CORS needed)
+  if (storagePath) {
+    try {
+      const storageRef = ref(storage, storagePath)
+      const blob = await getBlob(storageRef)
+      return await blobToDataUri(blob)
+    } catch (err) {
+      console.warn('Firebase SDK getBlob failed, trying fetch:', storagePath, err)
     }
   }
 
-  const entries = await Promise.all(
-    [...urls].map(async (url) => {
-      const dataUri = await fetchAsDataUri(url)
+  // Strategy 2: Direct fetch (works if CORS is configured on bucket)
+  try {
+    const response = await fetch(url, { mode: 'cors' })
+    if (response.ok) {
+      const blob = await response.blob()
+      return await blobToDataUri(blob)
+    }
+  } catch {
+    console.warn('Fetch CORS failed for:', url.slice(0, 80))
+  }
+
+  // Strategy 3: Return original URL (html2canvas will try its best)
+  return url
+}
+
+/**
+ * Pre-fetch all unique images in a book as base64 data URIs.
+ * Uses Firebase Storage SDK when storagePath is available (bypasses CORS).
+ */
+async function prefetchBookImages(book: Book): Promise<Map<string, string>> {
+  // Collect all unique images with their storage paths
+  const imageEntries: Array<{ url: string; storagePath?: string }> = []
+  const seen = new Set<string>()
+
+  // Cover image
+  const coverUrl = book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
+  if (coverUrl && !seen.has(coverUrl)) {
+    seen.add(coverUrl)
+    // Find the storagePath for the cover URL
+    const coverImg = book.pages.flatMap((p) => p.images).find((img) => img.url === coverUrl)
+    imageEntries.push({ url: coverUrl, storagePath: coverImg?.storagePath })
+  }
+
+  // Page images
+  for (const page of book.pages) {
+    for (const img of page.images) {
+      if (img.url && !seen.has(img.url)) {
+        seen.add(img.url)
+        imageEntries.push({ url: img.url, storagePath: img.storagePath })
+      }
+    }
+  }
+
+  // Fetch all in parallel
+  const results = await Promise.all(
+    imageEntries.map(async ({ url, storagePath }) => {
+      const dataUri = await fetchAsDataUri(url, storagePath)
       return [url, dataUri] as [string, string]
     }),
   )
 
-  return new Map(entries)
+  return new Map(results)
 }
 
 /* ───────────────────── main entry ───────────────────── */
