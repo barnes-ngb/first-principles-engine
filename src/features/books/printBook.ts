@@ -79,12 +79,15 @@ function buildCoverHtml(book: Book, childName: string): string {
   `
 }
 
-function buildPageHtml(page: { text?: string; images: { url: string }[]; audioUrl?: string; pageNumber: number }): string {
-  const image = page.images[0]
-  const imageHtml = image
-    ? `<div style="flex:6;display:flex;align-items:center;justify-content:center;overflow:hidden;">
-        <img src="${escapeHtml(image.url)}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;" crossorigin="anonymous" />
-      </div>`
+function buildPageHtml(page: { text?: string; images: { url: string; type?: string; position?: { x: number; y: number; width: number; height: number } }[]; audioUrl?: string; pageNumber: number }): string {
+  const imagesHtml = page.images.map((img) => {
+    const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+    const fit = img.type === 'sticker' ? 'contain' : 'cover'
+    return `<img src="${escapeHtml(img.url)}" style="position:absolute; left:${pos.x}%; top:${pos.y}%; width:${pos.width}%; height:${pos.height}%; object-fit:${fit}; border-radius:4px;" crossorigin="anonymous" />`
+  }).join('')
+
+  const imageArea = page.images.length > 0
+    ? `<div style="position:relative; flex:6; overflow:hidden;">${imagesHtml}</div>`
     : ''
 
   const textHtml = page.text
@@ -99,7 +102,7 @@ function buildPageHtml(page: { text?: string; images: { url: string }[]; audioUr
 
   return `
     <div style="display:flex;flex-direction:column;height:100%;padding:20px;">
-      ${imageHtml}
+      ${imageArea}
       ${textHtml}
       ${audioNote}
       <p style="font-size:10px;color:#ccc;text-align:right;margin-top:auto;">${page.pageNumber}</p>
