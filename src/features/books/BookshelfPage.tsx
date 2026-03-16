@@ -19,7 +19,9 @@ import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
+import BarChartIcon from '@mui/icons-material/BarChart'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/Edit'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
@@ -29,6 +31,8 @@ import PrintIcon from '@mui/icons-material/Print'
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useProfile } from '../../core/profile/useProfile'
+import { UserProfile } from '../../core/types/enums'
 import type { Book } from '../../core/types/domain'
 import { COVER_STYLES } from './bookTypes'
 import { useBookshelf } from './useBook'
@@ -42,8 +46,12 @@ export default function BookshelfPage() {
   const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
 
+  const { profile } = useProfile()
+  const isParent = profile === UserProfile.Parents
+
   const { books, loading, createBook, deleteBook } = useBookshelf(familyId, childId)
 
+  const [bookFilter, setBookFilter] = useState<'all' | 'creative' | 'sight-word'>('all')
   const [showNewDialog, setShowNewDialog] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [newCoverStyle, setNewCoverStyle] = useState<Book['coverStyle']>(
@@ -102,12 +110,18 @@ export default function BookshelfPage() {
 
   // Sort: drafts first (most recently edited), then completed
   const sortedBooks = useMemo(() => {
-    return [...books].sort((a, b) => {
+    let filtered = books
+    if (bookFilter === 'creative') {
+      filtered = books.filter(b => b.bookType !== 'sight-word')
+    } else if (bookFilter === 'sight-word') {
+      filtered = books.filter(b => b.bookType === 'sight-word')
+    }
+    return [...filtered].sort((a, b) => {
       if (a.status === 'draft' && b.status !== 'draft') return -1
       if (a.status !== 'draft' && b.status === 'draft') return 1
       return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
     })
-  }, [books])
+  }, [books, bookFilter])
 
   if (loading) {
     return (
@@ -133,6 +147,43 @@ export default function BookshelfPage() {
       >
         My Books
       </Typography>
+
+      {/* Filter tabs + parent actions */}
+      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+        <ToggleButtonGroup
+          value={bookFilter}
+          exclusive
+          onChange={(_, val) => { if (val) setBookFilter(val) }}
+          size="small"
+        >
+          <ToggleButton value="all" sx={{ textTransform: 'none', minHeight: 36 }}>All Books</ToggleButton>
+          <ToggleButton value="creative" sx={{ textTransform: 'none', minHeight: 36 }}>My Stories</ToggleButton>
+          <ToggleButton value="sight-word" sx={{ textTransform: 'none', minHeight: 36 }}>Sight Word Readers</ToggleButton>
+        </ToggleButtonGroup>
+        <Box sx={{ flex: 1 }} />
+        {isParent && (
+          <>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<AutoFixHighIcon />}
+              onClick={() => navigate('/books/create-story')}
+              sx={{ minHeight: 36, textTransform: 'none' }}
+            >
+              Create Sight Word Story
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<BarChartIcon />}
+              onClick={() => navigate('/books/sight-words')}
+              sx={{ minHeight: 36, textTransform: 'none' }}
+            >
+              Sight Word Progress
+            </Button>
+          </>
+        )}
+      </Stack>
 
       {books.length === 0 ? (
         /* Empty state */
@@ -265,7 +316,7 @@ export default function BookshelfPage() {
                   {book.title}
                 </Typography>
 
-                <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 'auto', pt: 1 }}>
+                <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 'auto', pt: 1 }} flexWrap="wrap" useFlexGap>
                   <Typography variant="caption" color="text.secondary">
                     {book.pages.length} page{book.pages.length !== 1 ? 's' : ''}
                   </Typography>
@@ -280,6 +331,13 @@ export default function BookshelfPage() {
                       label="Together"
                       size="small"
                       sx={{ height: 20, fontSize: '0.65rem', bgcolor: 'info.100', color: 'info.800' }}
+                    />
+                  )}
+                  {book.bookType === 'sight-word' && (
+                    <Chip
+                      label={`Sight Words${book.sightWords ? ` (${book.sightWords.length})` : ''}`}
+                      size="small"
+                      sx={{ height: 20, fontSize: '0.65rem', bgcolor: 'primary.100', color: 'primary.800', fontWeight: 600 }}
                     />
                   )}
                   {book.status === 'complete' ? (
@@ -299,7 +357,7 @@ export default function BookshelfPage() {
                     <Chip
                       label="Draft"
                       size="small"
-                      sx={{ ml: book.isTogetherBook ? 0 : 'auto', height: 20, fontSize: '0.65rem' }}
+                      sx={{ ml: book.isTogetherBook || book.bookType === 'sight-word' ? 0 : 'auto', height: 20, fontSize: '0.65rem' }}
                     />
                   )}
                 </Stack>

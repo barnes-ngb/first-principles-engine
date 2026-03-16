@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
@@ -18,6 +19,8 @@ import type { BookPage } from '../../core/types/domain'
 import { useBook } from './useBook'
 import { printBook } from './printBook'
 import { TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
+import { renderTextWithSightWords } from './highlightSightWords'
+import { useSightWordProgress } from './useSightWordProgress'
 
 const SWIPE_THRESHOLD = 50
 
@@ -27,14 +30,22 @@ export default function BookReaderPage() {
   const familyId = useFamilyId()
   const { activeChild } = useActiveChild()
   const childName = activeChild?.name ?? ''
+  const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
 
   const { book, loading } = useBook(familyId, bookId)
+  const isSightWordBook = book?.bookType === 'sight-word' && (book.sightWords?.length ?? 0) > 0
+  const { progressMap, recordInteraction } = useSightWordProgress(
+    isSightWordBook ? familyId : '',
+    isSightWordBook ? childId : '',
+  )
 
   const [currentPage, setCurrentPage] = useState(0)
   const [touchStart, setTouchStart] = useState<number | null>(null)
   const [swipeOffset, setSwipeOffset] = useState(0)
   const [printing, setPrinting] = useState(false)
+  const [totalWordsEncountered, setTotalWordsEncountered] = useState(0)
+  const seenPagesRef = useRef<Set<number>>(new Set())
 
   // Total pages: cover + content pages + back cover
   const totalPages = useMemo(() => (book ? book.pages.length + 2 : 0), [book])
@@ -64,6 +75,29 @@ export default function BookReaderPage() {
     },
     [touchStart, currentPage, totalPages],
   )
+
+  // Record sight word encounters when viewing a page
+  useEffect(() => {
+    if (!isSightWordBook || !book) return
+    const contentPageIndex = currentPage - 1
+    if (contentPageIndex < 0 || contentPageIndex >= book.pages.length) return
+    if (seenPagesRef.current.has(contentPageIndex)) return
+    seenPagesRef.current.add(contentPageIndex)
+
+    const page = book.pages[contentPageIndex]
+    const wordsOnPage = page.sightWordsOnPage ?? []
+    const uniqueWords = [...new Set(wordsOnPage.map(w => w.toLowerCase()))]
+    setTotalWordsEncountered(prev => prev + uniqueWords.length)
+
+    // Batch record 'seen' for each unique word on this page
+    for (const word of uniqueWords) {
+      void recordInteraction(word, 'seen')
+    }
+  }, [currentPage, isSightWordBook, book, recordInteraction])
+
+  const handleWordTap = useCallback((word: string, action: 'help' | 'known') => {
+    void recordInteraction(word, action)
+  }, [recordInteraction])
 
   const handlePrint = useCallback(async () => {
     if (!book) return
@@ -258,13 +292,21 @@ export default function BookReaderPage() {
               {/* Text */}
               {contentPage.text && (
                 <Typography
+                  component="div"
                   sx={{
                     px: 1,
                     ...getTextStyles(contentPage),
                     color: textColor,
                   }}
                 >
-                  {contentPage.text}
+                  {isSightWordBook && book.sightWords
+                    ? renderTextWithSightWords(
+                        contentPage.text,
+                        book.sightWords,
+                        handleWordTap,
+                        progressMap,
+                      )
+                    : contentPage.text}
                 </Typography>
               )}
 
@@ -286,12 +328,26 @@ export default function BookReaderPage() {
           {/* Back cover */}
           {currentPage === totalPages - 1 && (
             <Stack alignItems="center" spacing={3} sx={{ textAlign: 'center', py: 6 }}>
-              <Typography
-                variant="h5"
-                sx={{ fontFamily: titleFont, fontSize: isLincoln ? '0.7rem' : '1.4rem' }}
-              >
-                Made by {childName}
-              </Typography>
+              {isSightWordBook ? (
+                <>
+                  <Typography
+                    variant="h5"
+                    sx={{ fontFamily: titleFont, fontSize: isLincoln ? '0.7rem' : '1.4rem' }}
+                  >
+                    Great reading!
+                  </Typography>
+                  <Typography variant="h6" sx={{ color: 'primary.main' }}>
+                    You practiced {totalWordsEncountered} sight words!
+                  </Typography>
+                </>
+              ) : (
+                <Typography
+                  variant="h5"
+                  sx={{ fontFamily: titleFont, fontSize: isLincoln ? '0.7rem' : '1.4rem' }}
+                >
+                  Made by {childName}
+                </Typography>
+              )}
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                 {new Date(book.createdAt).toLocaleDateString(undefined, {
                   year: 'numeric',
@@ -308,6 +364,18 @@ export default function BookReaderPage() {
           )}
         </Box>
       </Box>
+
+      {/* Sight word page count */}
+      {isSightWordBook && contentPage?.sightWordsOnPage && (
+        <Stack direction="row" justifyContent="center" sx={{ px: 2, pb: 0.5 }}>
+          <Chip
+            label={`${new Set(contentPage.sightWordsOnPage.map(w => w.toLowerCase())).size} sight words on this page`}
+            size="small"
+            variant="outlined"
+            sx={{ fontSize: '0.7rem', height: 24 }}
+          />
+        </Stack>
+      )}
 
       {/* Bottom bar */}
       <Stack
