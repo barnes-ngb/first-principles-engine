@@ -10,7 +10,7 @@ import type { ImageOptions } from "./aiService.js";
 export interface ImageGenRequest {
   familyId: string;
   prompt: string;
-  style?: "schedule-card" | "reward-chart" | "theme-illustration" | "book-illustration-minecraft" | "book-illustration-storybook" | "book-illustration-comic" | "book-illustration-realistic" | "book-sticker" | "general";
+  style?: "schedule-card" | "reward-chart" | "theme-illustration" | "book-illustration-minecraft" | "book-illustration-storybook" | "book-illustration-comic" | "book-illustration-realistic" | "book-illustration-garden-warfare" | "book-illustration-platformer" | "book-sticker" | "general";
   size?: "1024x1024" | "1024x1792" | "1792x1024";
 }
 
@@ -40,6 +40,10 @@ const STYLE_PREFIXES: Record<string, string> = {
     "A bold comic book background panel for a children's story. Dynamic environment, no characters. Bright colors, dramatic perspective, action lines. ",
   "book-illustration-realistic":
     "A gentle realistic background scene for a children's book page. Environment only, no people or characters. Warm lighting, friendly atmosphere. ",
+  "book-illustration-garden-warfare":
+    "A fun cartoon garden battle scene for a children's book page. Bright green garden with sunflowers, pea shooters, walnuts as barriers, silly cartoon zombies in the background. Colorful, humorous, family-friendly. Environment only, no specific characters. ",
+  "book-illustration-platformer":
+    "A colorful side-scrolling platformer video game world for a children's book page. Bright blue sky, floating brick platforms, green pipes, golden coins, fluffy clouds with eyes, mushrooms, starry power-ups. Cheerful and inviting. Environment only, no characters. ",
   "book-sticker":
     "A single cute cartoon character or object, sticker style. Bold clean outline, colorful flat fill, simple shapes, fun and expressive. Child-friendly, no text, no background elements. ",
   general: "",
@@ -99,6 +103,8 @@ export const generateImage = onCall(
       "book-illustration-storybook",
       "book-illustration-comic",
       "book-illustration-realistic",
+      "book-illustration-garden-warfare",
+      "book-illustration-platformer",
       "book-sticker",
       "general",
     ]);

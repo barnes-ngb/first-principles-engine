@@ -63,7 +63,7 @@ export interface GenerateResponse {
 export interface ImageGenRequest {
   familyId: string
   prompt: string
-  style?: 'schedule-card' | 'reward-chart' | 'theme-illustration' | 'book-illustration-minecraft' | 'book-illustration-storybook' | 'book-illustration-comic' | 'book-illustration-realistic' | 'book-sticker' | 'general'
+  style?: 'schedule-card' | 'reward-chart' | 'theme-illustration' | 'book-illustration-minecraft' | 'book-illustration-storybook' | 'book-illustration-comic' | 'book-illustration-realistic' | 'book-illustration-garden-warfare' | 'book-illustration-platformer' | 'book-sticker' | 'general'
   size?: '1024x1024' | '1024x1792' | '1792x1024'
 }
 

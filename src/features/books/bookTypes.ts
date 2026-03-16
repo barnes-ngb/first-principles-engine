@@ -11,7 +11,9 @@ export const COVER_STYLES = [
 /** Styles available for AI-generated book illustrations. */
 export const GENERATION_STYLES = [
   { value: 'minecraft', label: 'Minecraft' },
+  { value: 'garden-warfare', label: 'Garden Battle' },
   { value: 'storybook', label: 'Storybook' },
+  { value: 'platformer', label: 'Platformer World' },
   { value: 'comic', label: 'Comic Book' },
   { value: 'realistic', label: 'Realistic' },
 ] as const
