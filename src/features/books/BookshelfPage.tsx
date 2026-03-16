@@ -50,7 +50,6 @@ export default function BookshelfPage() {
     isLincoln ? 'minecraft' : 'storybook',
   )
   const [creating, setCreating] = useState(false)
-  const [printingBookId, setPrintingBookId] = useState<string | null>(null)
 
   // Menu state
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
@@ -60,15 +59,9 @@ export default function BookshelfPage() {
   const [deleteTarget, setDeleteTarget] = useState<Book | null>(null)
 
   const handlePrintBook = useCallback(
-    async (book: Book, e: React.MouseEvent) => {
-      e.stopPropagation()
+    async (book: Book) => {
       if (!book.id) return
-      setPrintingBookId(book.id)
-      try {
-        await printBook(book, childName)
-      } finally {
-        setPrintingBookId(null)
-      }
+      await printBook(book, childName)
     },
     [childName],
   )
@@ -362,10 +355,10 @@ export default function BookshelfPage() {
           <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Edit</ListItemText>
         </MenuItem>
-        <MenuItem onClick={(e) => {
+        <MenuItem onClick={() => {
           setMenuAnchor(null)
           const target = sortedBooks.find((b) => b.id === menuBookId)
-          if (target) void handlePrintBook(target, e as unknown as React.MouseEvent)
+          if (target) void handlePrintBook(target)
           setMenuBookId(null)
         }}>
           <ListItemIcon><PrintIcon fontSize="small" /></ListItemIcon>
