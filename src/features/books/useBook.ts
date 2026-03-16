@@ -19,6 +19,7 @@ import type { Artifact, Book, BookPage, PageImage } from '../../core/types/domai
 import type { SaveState } from '../../components/SaveIndicator'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { createEmptyPage, generateImageId } from './bookTypes'
+import { cleanSketchBackground } from './cleanSketch'
 
 interface UseBookResult {
   book: Book | null
@@ -29,7 +30,7 @@ interface UseBookResult {
   deletePage: (pageId: string) => void
   reorderPages: (fromIndex: number, toIndex: number) => void
   updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds'>>) => void
-  addImageToPage: (pageId: string, file: File) => Promise<void>
+  addImageToPage: (pageId: string, file: File, options?: { cleanBackground?: boolean }) => Promise<void>
   removeImageFromPage: (pageId: string, imageId: string) => void
   uploadAudio: (pageId: string, blob: Blob) => Promise<void>
   addAiImageToPage: (pageId: string, url: string, storagePath: string, prompt: string) => void
@@ -252,10 +253,25 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   )
 
   const addImageToPage = useCallback(
-    async (pageId: string, file: File) => {
+    async (pageId: string, file: File, options?: { cleanBackground?: boolean }) => {
       if (!familyId || !bookId) return
+
+      // Smart overlay detection: is there already an image on this page?
+      const currentPage = book?.pages.find((p) => p.id === pageId)
+      const isOverlay = (currentPage?.images.length ?? 0) > 0
+
+      // If overlaying and cleanup requested, remove paper background
+      let processedFile = file
+      if (isOverlay && options?.cleanBackground && file.type.startsWith('image/')) {
+        try {
+          processedFile = await cleanSketchBackground(file)
+        } catch {
+          console.warn('Sketch cleanup failed, using original')
+        }
+      }
+
       const imageId = generateImageId()
-      const ext = file.name.split('.').pop() ?? 'jpg'
+      const ext = processedFile.name.split('.').pop() ?? 'jpg'
       const ts = new Date().toISOString().replace(/[:.]/g, '-')
       const filename = `${ts}.${ext}`
       const storagePath = `families/${familyId}/books/${bookId}/${filename}`
@@ -263,13 +279,20 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
 
       setSaveState('saving')
       try {
-        await uploadBytes(storageRef, file)
+        await uploadBytes(storageRef, processedFile)
         const url = await getDownloadURL(storageRef)
+
+        // Smart default position: overlay size if layering on existing image
+        const overlayPosition = isOverlay
+          ? { x: 10, y: 10, width: 40, height: 40 }
+          : undefined
+
         const image: PageImage = {
           id: imageId,
           url,
           storagePath,
           type: 'photo',
+          ...(overlayPosition ? { position: overlayPosition } : {}),
         }
         applyUpdate((prev) => ({
           ...prev,
@@ -284,7 +307,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
         setSaveState('error')
       }
     },
-    [familyId, bookId, applyUpdate],
+    [familyId, bookId, applyUpdate, book],
   )
 
   const removeImageFromPage = useCallback(
