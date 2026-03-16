@@ -978,6 +978,21 @@ export interface Book {
   isTogetherBook?: boolean
   /** All contributing children (used for Together Books) */
   contributorIds?: string[]
+  /** Book type: 'creative' for kid-made books, 'sight-word' for reading practice */
+  bookType?: 'creative' | 'sight-word'
+  /** How this book was created */
+  source?: 'manual' | 'ai-generated'
+  /** Target sight words for this book (sight-word type only) */
+  sightWords?: string[]
+  /** Theme used for AI generation */
+  theme?: string
+  /** The prompt/parameters used to generate this story */
+  generationConfig?: {
+    words: string[]
+    theme: string
+    difficulty: 'simple' | 'moderate'
+    pageCount: number
+  }
 }
 
 export interface BookPage {
@@ -1000,6 +1015,8 @@ export interface BookPage {
   textSize?: 'big' | 'medium' | 'small'
   /** Text font family */
   textFont?: 'handwriting' | 'print' | 'pixel'
+  /** Which sight words appear on this page (sight-word books only) */
+  sightWordsOnPage?: string[]
 }
 
 export interface PageImage {
@@ -1024,5 +1041,33 @@ export interface Sticker {
   /** null = shared between kids, childId = personal */
   childId?: string | null
   prompt?: string
+  createdAt: string
+}
+
+// ── Sight Word Progress ──────────────────────────────────────
+
+export interface SightWordProgress {
+  word: string
+  /** Total times seen across all stories */
+  encounters: number
+  /** Times child tapped "I know this" */
+  selfReportedKnown: number
+  /** Times child tapped for pronunciation help */
+  helpRequested: number
+  /** Parent confirmed mastery */
+  shellyConfirmed: boolean
+  /** Computed mastery level */
+  masteryLevel: 'new' | 'practicing' | 'familiar' | 'mastered'
+  firstSeen: string
+  lastSeen: string
+  lastLevelChange: string
+}
+
+export interface SightWordList {
+  id?: string
+  childId: string
+  name: string
+  words: string[]
+  source: 'manual' | 'evaluation' | 'curriculum'
   createdAt: string
 }
