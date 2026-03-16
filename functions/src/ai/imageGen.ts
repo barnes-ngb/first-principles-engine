@@ -4,7 +4,6 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey, openaiApiKey } from "./aiConfig.js";
 import { createOpenAiProvider } from "./providers/openai.js";
 import type { ImageOptions } from "./aiService.js";
-import type Sharp from "sharp";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -69,7 +68,8 @@ export function buildImagePrompt(
  * 4. Apply a slight feather to the edges for clean cutout
  */
 async function removeStickerBackground(
-  sharp: typeof Sharp,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sharp: any,
   buffer: Buffer,
 ): Promise<Buffer> {
   const image = sharp(buffer).ensureAlpha();
