@@ -21,6 +21,8 @@ import type { AIUsageEntry } from '../../core/types/domain'
 const MODEL_LABELS: Record<string, string> = {
   'claude-sonnet-4-20250514': 'Claude Sonnet',
   'claude-haiku-4-5-20251001': 'Claude Haiku',
+  'dall-e-3': 'DALL-E 3',
+  'gpt-image-1': 'GPT Image',
 }
 
 const TASK_TYPE_LABELS: Record<string, string> = {
@@ -28,6 +30,16 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   evaluate: 'Evaluation',
   generate: 'Generation',
   chat: 'Chat',
+  'image-generation': 'Image Generation',
+}
+
+/** Models priced per-call (no token counts). */
+const IMAGE_MODELS = new Set(['dall-e-3', 'gpt-image-1'])
+
+/** Approximate cost per image call (USD). */
+const IMAGE_COST_PER_CALL: Record<string, number> = {
+  'dall-e-3': 0.04,
+  'gpt-image-1': 0.02,
 }
 
 /** Approximate cost per 1M tokens (USD). */
@@ -40,6 +52,12 @@ const COST_PER_M_OUTPUT: Record<string, number> = {
   'claude-haiku-4-5-20251001': 4,
 }
 
+/** Safely coerce a possibly-undefined/NaN token count to a number. */
+function safeTokens(n: unknown): number {
+  const v = Number(n)
+  return Number.isFinite(v) ? v : 0
+}
+
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
@@ -49,10 +67,14 @@ function formatTokens(n: number): string {
 function estimateCost(entries: AIUsageEntry[]): number {
   let cost = 0
   for (const e of entries) {
-    const inputRate = COST_PER_M_INPUT[e.model] ?? 1
-    const outputRate = COST_PER_M_OUTPUT[e.model] ?? 5
-    cost += (e.inputTokens / 1_000_000) * inputRate
-    cost += (e.outputTokens / 1_000_000) * outputRate
+    if (IMAGE_MODELS.has(e.model)) {
+      cost += IMAGE_COST_PER_CALL[e.model] ?? 0.04
+    } else {
+      const inputRate = COST_PER_M_INPUT[e.model] ?? 1
+      const outputRate = COST_PER_M_OUTPUT[e.model] ?? 5
+      cost += (safeTokens(e.inputTokens) / 1_000_000) * inputRate
+      cost += (safeTokens(e.outputTokens) / 1_000_000) * outputRate
+    }
   }
   return cost
 }
@@ -98,7 +120,11 @@ export default function AIUsagePanel() {
 
   const totalCalls = entries.length
   const totalTokens = useMemo(
-    () => entries.reduce((sum, e) => sum + e.inputTokens + e.outputTokens, 0),
+    () =>
+      entries.reduce((sum, e) => {
+        if (IMAGE_MODELS.has(e.model)) return sum
+        return sum + safeTokens(e.inputTokens) + safeTokens(e.outputTokens)
+      }, 0),
     [entries],
   )
   const cost = useMemo(() => estimateCost(entries), [entries])
@@ -108,9 +134,12 @@ export default function AIUsagePanel() {
     const map = new Map<string, { calls: number; tokens: number }>()
     for (const e of entries) {
       const prev = map.get(e.model) ?? { calls: 0, tokens: 0 }
+      const isImage = IMAGE_MODELS.has(e.model)
       map.set(e.model, {
         calls: prev.calls + 1,
-        tokens: prev.tokens + e.inputTokens + e.outputTokens,
+        tokens: isImage
+          ? prev.tokens
+          : prev.tokens + safeTokens(e.inputTokens) + safeTokens(e.outputTokens),
       })
     }
     return [...map.entries()]
@@ -186,7 +215,9 @@ export default function AIUsagePanel() {
                     </TableCell>
                     <TableCell align="right">{row.calls}</TableCell>
                     <TableCell align="right">
-                      {formatTokens(row.tokens)}
+                      {IMAGE_MODELS.has(row.model)
+                        ? '—'
+                        : formatTokens(row.tokens)}
                     </TableCell>
                   </TableRow>
                 ))}
