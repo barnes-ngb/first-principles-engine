@@ -124,9 +124,10 @@ export function useBookGenerator() {
         subjectBuckets: ['LanguageArts' as SubjectBucket],
         bookType: 'generated',
         source: 'ai-generated',
-        sightWords: words.length > 0 ? words : undefined,
+        // Only include optional fields when they have values — Firestore rejects undefined
+        ...(words.length > 0 ? { sightWords: words } : {}),
         generationConfig: {
-          storyIdea,
+          storyIdea: storyIdea || '',
           words,
           style,
           pageCount,
@@ -200,7 +201,10 @@ export function useBookGenerator() {
                 await setDoc(bookRef, {
                   ...current,
                   pages: updatedPages,
-                  coverImageUrl: i === 0 ? imgResult.url : current.coverImageUrl,
+                  // Only set coverImageUrl if we have a value — avoid writing undefined
+                  ...(i === 0
+                    ? { coverImageUrl: imgResult.url }
+                    : current.coverImageUrl ? { coverImageUrl: current.coverImageUrl } : {}),
                   updatedAt: new Date().toISOString(),
                 })
               }
