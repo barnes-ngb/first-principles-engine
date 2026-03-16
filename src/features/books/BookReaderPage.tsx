@@ -61,8 +61,6 @@ async function logReadingCompletion(
   familyId: string,
   book: Book,
   childName: string,
-  _pagesRead: number,
-  _totalPages: number,
 ): Promise<void> {
   const hasSightWords = (book.sightWords?.length ?? 0) > 0
   const coverUrl = book.coverImageUrl ?? book.pages.find(p => p.images.length > 0)?.images[0]?.url
@@ -176,7 +174,7 @@ export default function BookReaderPage() {
   useEffect(() => {
     if (currentPage === totalPages - 1 && !completedRef.current && book) {
       completedRef.current = true
-      void logReadingCompletion(familyId, book, childName, pagesViewedRef.current.size, totalPages)
+      void logReadingCompletion(familyId, book, childName)
     }
   }, [currentPage, totalPages, book, familyId, childName])
 
