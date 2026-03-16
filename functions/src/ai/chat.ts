@@ -849,29 +849,55 @@ IMPORTANT:
 
 // ── Story generation prompt ──────────────────────────────────────
 
-function buildStoryPrompt(
-  storyIdea: string,
-  words: string[],
-  pageCount: number,
-): string {
+interface StoryGenInput {
+  storyIdea: string;
+  words: string[];
+  pageCount: number;
+  childName: string;
+  childAge?: number;
+  childInterests?: string;
+  readingLevel?: string;
+}
+
+function buildStoryPrompt(input: StoryGenInput): string {
+  const {
+    storyIdea,
+    words,
+    pageCount,
+    childName,
+    childAge,
+    childInterests,
+    readingLevel,
+  } = input;
   const hasWords = words.length > 0;
+
+  // Child-specific context
+  const isYounger = (childAge ?? 10) <= 7;
+  const interests =
+    childInterests ||
+    (isYounger
+      ? "animals, drawing, fairy tales"
+      : "Minecraft, adventures, quests");
+  const level = readingLevel || (isYounger ? "pre-K to kindergarten" : "1st grade");
+
   const wordSection = hasWords
     ? `\nWORDS TO INCLUDE (use every word at least once, common words multiple times):\n${words.join(", ")}\n`
     : "";
 
-  return `You are a children's story writer creating an illustrated book for Lincoln, a 10-year-old boy who loves Minecraft. He reads at approximately 1st grade level.
+  return `You are a children's story writer creating an illustrated book for ${childName}, a ${childAge ?? 10}-year-old child who loves ${interests}.
 
-STORY IDEA: ${storyIdea || "A fun adventure — surprise me!"}
+STORY IDEA: ${storyIdea || (isYounger ? "A fun story with animals and a happy ending" : "A fun adventure — surprise me!")}
 ${wordSection}
 RULES:
-- Write a ${pageCount}-page story. Each page has 2-4 short sentences.
-- Keep sentences simple and readable for a 1st grader. CVC words are great.
-- Each page should be a story beat — beginning, rising action, climax, resolution.
-- Make it exciting and fun. This is Lincoln's language — adventures, quests, discoveries.
-- For each page, also write a short image description (1-2 sentences) describing what the SCENE looks like. Focus on the environment/setting, not characters — the scene will be generated as a background illustration.
+- Write a ${pageCount}-page story. Each page has ${isYounger ? "1-2 short sentences" : "2-4 short sentences"}.
+- ${isYounger ? "Use very simple words. Short sentences only. Lots of repetition is good." : "Keep sentences simple and readable. CVC words are great."}
+- Reading level: ${level}
+- Each page should be a story beat — beginning, ${isYounger ? "middle, happy ending" : "rising action, climax, resolution"}.
+- Make it ${isYounger ? "warm, gentle, and encouraging. Think picture book for a young reader." : "exciting and fun. Adventures, quests, discoveries."}
+- For each page, write a short image description (1-2 sentences) describing what the SCENE looks like. Focus on the environment/setting, not characters.
 ${hasWords ? "- You MUST use every word from the word list at least once in the story." : ""}
 ${hasWords ? "- On each page, list which provided words appear on that page." : ""}
-- Do NOT use words significantly above 1st grade level unless they are in the word list.
+- Do NOT use words significantly above ${level} level unless they are in the word list.
 
 OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
 {
@@ -879,10 +905,10 @@ OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
   "pages": [
     {
       "pageNumber": 1,
-      "text": "The sun was up. Link and his cat were at the park.",
-      "sceneDescription": "A bright sunny park with green grass, a wooden bench, and tall trees. A path leads to a pond."${hasWords ? ',\n      "wordsOnPage": ["the", "sun", "was", "up", "his", "cat", "were", "park"]' : ""}
+      "text": "${isYounger ? "A little cat sat in the sun." : "The sun was up. Link and his cat were at the park."}",
+      "sceneDescription": "${isYounger ? "A cozy sunny garden with flowers and a fluffy orange cat curled up on a stone path." : "A bright sunny park with green grass, a wooden bench, and tall trees."}"${hasWords ? ',\n      "wordsOnPage": ["the", "sun", "cat"]' : ""}
     }
-  ]${hasWords ? ',\n  "allWordsUsed": ["the", "sun", "was"],\n  "missedWords": []' : ""}
+  ]${hasWords ? ',\n  "allWordsUsed": ["the", "sun", "cat"],\n  "missedWords": []' : ""}
 }`;
 }
 
@@ -1072,11 +1098,39 @@ export const chat = onCall(
       }
       const storyWords = storyConfig.words ?? storyConfig.sightWords ?? [];
       const storyIdea = storyConfig.storyIdea ?? storyConfig.theme ?? "";
-      const storySystemPrompt = buildStoryPrompt(
+
+      // Load child profile for personalized story
+      const storyChildName = childData.name ?? "the reader";
+      let storyChildAge = 10;
+      const childFullDoc = await db
+        .doc(`families/${familyId}/children/${childId}`)
+        .get();
+      const childFullData = childFullDoc.data() as {
+        birthdate?: string;
+      } | undefined;
+      if (childFullData?.birthdate) {
+        const birth = new Date(childFullData.birthdate);
+        storyChildAge = Math.floor(
+          (Date.now() - birth.getTime()) / (365.25 * 24 * 60 * 60 * 1000),
+        );
+      }
+
+      // Child-specific interests and reading level
+      const isLondon = storyChildName.toLowerCase() === "london";
+      const childInterests = isLondon
+        ? "animals, drawing, fairy tales, colors, nature"
+        : "Minecraft, dragons, quests, building, adventures";
+      const readingLevel = isLondon ? "pre-K to kindergarten" : "1st grade";
+
+      const storySystemPrompt = buildStoryPrompt({
         storyIdea,
-        storyWords,
-        storyConfig.pageCount ?? 10,
-      );
+        words: storyWords,
+        pageCount: storyConfig.pageCount ?? 10,
+        childName: storyChildName,
+        childAge: storyChildAge,
+        childInterests,
+        readingLevel,
+      });
 
       const model = modelForTask(taskType);
       const { default: Anthropic } = await import("@anthropic-ai/sdk");

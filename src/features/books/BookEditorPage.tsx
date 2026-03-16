@@ -21,9 +21,11 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import MicIcon from '@mui/icons-material/Mic'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import StarIcon from '@mui/icons-material/Star'
+import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import PrintIcon from '@mui/icons-material/Print'
 
+import Divider from '@mui/material/Divider'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import Switch from '@mui/material/Switch'
 
@@ -54,14 +56,21 @@ const SpeechRecognitionClass =
     : null
 const speechAvailable = !!SpeechRecognitionClass
 
-const AI_SCENE_STYLES = [
+const AI_SCENE_STYLES_LINCOLN = [
   { value: 'minecraft', label: 'Minecraft' },
   { value: 'storybook', label: 'Storybook' },
   { value: 'comic', label: 'Comic Book' },
   { value: 'realistic', label: 'Realistic' },
 ] as const
 
-const WORLD_CHIPS = [
+const AI_SCENE_STYLES_LONDON = [
+  { value: 'storybook', label: 'Storybook' },
+  { value: 'comic', label: 'Comic Book' },
+  { value: 'realistic', label: 'Realistic' },
+  { value: 'minecraft', label: 'Pixel Art' },
+] as const
+
+const WORLD_CHIPS_LINCOLN = [
   { emoji: '\u{1F3D4}\uFE0F', label: 'Adventure world' },
   { emoji: '\u{1F3F0}', label: 'Castle / kingdom' },
   { emoji: '\u{1F30A}', label: 'Ocean / underwater' },
@@ -71,6 +80,17 @@ const WORLD_CHIPS = [
   { emoji: '\u{1F30B}', label: 'Lava / volcano' },
   { emoji: '\u{2744}\uFE0F', label: 'Ice / snow' },
   { emoji: '\u{1F3AA}', label: 'Fantasy' },
+] as const
+
+const WORLD_CHIPS_LONDON = [
+  { emoji: '\u{1F338}', label: 'Fairy garden' },
+  { emoji: '\u{1F431}', label: 'Animal kingdom' },
+  { emoji: '\u{1F3F0}', label: 'Princess castle' },
+  { emoji: '\u{1F30A}', label: 'Ocean / mermaids' },
+  { emoji: '\u{1F308}', label: 'Rainbow land' },
+  { emoji: '\u{1F3A8}', label: 'Art studio' },
+  { emoji: '\u{1F332}', label: 'Enchanted forest' },
+  { emoji: '\u{2601}\uFE0F', label: 'Cloud kingdom' },
 ] as const
 
 export default function BookEditorPage() {
@@ -784,7 +804,7 @@ export default function BookEditorPage() {
                 What kind of world?
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                {WORLD_CHIPS.map((w) => (
+                {(isLincoln ? WORLD_CHIPS_LINCOLN : WORLD_CHIPS_LONDON).map((w) => (
                   <Chip
                     key={w.label}
                     label={`${w.emoji} ${w.label}`}
@@ -818,7 +838,7 @@ export default function BookEditorPage() {
                 Style
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap">
-                {AI_SCENE_STYLES.map((s) => (
+                {(isLincoln ? AI_SCENE_STYLES_LINCOLN : AI_SCENE_STYLES_LONDON).map((s) => (
                   <Chip
                     key={s.value}
                     label={s.label}
@@ -842,15 +862,64 @@ export default function BookEditorPage() {
             {aiError && !aiLoading && (
               <Alert severity="warning" sx={{ mt: 1 }}>
                 {aiError.message.includes('blocked') || aiError.message.includes('safety') || aiError.message.includes('safety filter') ? (
-                  <>
-                    <Typography variant="body2" gutterBottom>
-                      Oops! The picture maker can&apos;t use character names like Mario or Elsa.
+                  <Stack spacing={1.5}>
+                    <Typography variant="body2">
+                      The picture maker couldn&apos;t create that image.
                     </Typography>
                     <Typography variant="body2">
-                      Try describing the <strong>world</strong> instead — like &quot;a colorful world
-                      with brick castles and golden coins.&quot; Then add your own characters!
+                      <strong>Try one of these:</strong>
                     </Typography>
-                  </>
+                    <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+                      <li>
+                        <Typography variant="body2">
+                          Describe the <strong>world</strong> instead of characters
+                          — &quot;a colorful world with brick castles&quot; works great
+                        </Typography>
+                      </li>
+                      <li>
+                        <Typography variant="body2">
+                          Use a different style (Storybook or Comic Book work best)
+                        </Typography>
+                      </li>
+                    </Box>
+                    <Divider />
+                    <Typography variant="body2" color="text.secondary">
+                      Or add your own picture:
+                    </Typography>
+                    <Stack direction="row" spacing={1}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<PhotoCameraIcon />}
+                        onClick={() => {
+                          setShowAiDialog(false)
+                          setShowPhotoCapture(true)
+                        }}
+                      >
+                        Upload a photo
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<AddPhotoAlternateIcon />}
+                        onClick={() => {
+                          setShowAiDialog(false)
+                          const input = document.createElement('input')
+                          input.type = 'file'
+                          input.accept = 'image/*'
+                          input.onchange = (e) => {
+                            const file = (e.target as HTMLInputElement).files?.[0]
+                            if (file && activePage) {
+                              void addImageToPage(activePage.id, file)
+                            }
+                          }
+                          input.click()
+                        }}
+                      >
+                        Import a drawing
+                      </Button>
+                    </Stack>
+                  </Stack>
                 ) : (
                   <Typography variant="body2">{aiError.message || 'Failed to generate image. Please try again.'}</Typography>
                 )}
