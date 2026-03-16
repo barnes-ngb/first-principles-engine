@@ -58,6 +58,7 @@ const speechAvailable = !!SpeechRecognitionClass
 
 const AI_SCENE_STYLES_LINCOLN = [
   { value: 'minecraft', label: 'Minecraft' },
+  { value: 'garden-warfare', label: 'Garden Battle' },
   { value: 'storybook', label: 'Storybook' },
   { value: 'comic', label: 'Comic Book' },
   { value: 'realistic', label: 'Realistic' },
@@ -65,6 +66,7 @@ const AI_SCENE_STYLES_LINCOLN = [
 
 const AI_SCENE_STYLES_LONDON = [
   { value: 'storybook', label: 'Storybook' },
+  { value: 'platformer', label: 'Platformer World' },
   { value: 'comic', label: 'Comic Book' },
   { value: 'realistic', label: 'Realistic' },
   { value: 'minecraft', label: 'Pixel Art' },
@@ -80,6 +82,7 @@ const WORLD_CHIPS_LINCOLN = [
   { emoji: '\u{1F30B}', label: 'Lava / volcano' },
   { emoji: '\u{2744}\uFE0F', label: 'Ice / snow' },
   { emoji: '\u{1F3AA}', label: 'Fantasy' },
+  { emoji: '\u{1F33B}', label: 'Garden battle' },
 ] as const
 
 const WORLD_CHIPS_LONDON = [
@@ -91,6 +94,8 @@ const WORLD_CHIPS_LONDON = [
   { emoji: '\u{1F3A8}', label: 'Art studio' },
   { emoji: '\u{1F332}', label: 'Enchanted forest' },
   { emoji: '\u{2601}\uFE0F', label: 'Cloud kingdom' },
+  { emoji: '\u{1F344}', label: 'Platformer world' },
+  { emoji: '\u{2B50}', label: 'Power-up land' },
 ] as const
 
 export default function BookEditorPage() {

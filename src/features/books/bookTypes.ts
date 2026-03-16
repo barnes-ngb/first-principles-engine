@@ -6,12 +6,16 @@ export const COVER_STYLES = [
   { value: 'comic', label: 'Comic Book' },
   { value: 'photo', label: 'Photo Album' },
   { value: 'realistic', label: 'Realistic' },
+  { value: 'garden-warfare', label: 'Garden Battle' },
+  { value: 'platformer', label: 'Platformer World' },
 ] as const
 
 /** Styles available for AI-generated book illustrations. */
 export const GENERATION_STYLES = [
   { value: 'minecraft', label: 'Minecraft' },
+  { value: 'garden-warfare', label: 'Garden Battle' },
   { value: 'storybook', label: 'Storybook' },
+  { value: 'platformer', label: 'Platformer World' },
   { value: 'comic', label: 'Comic Book' },
   { value: 'realistic', label: 'Realistic' },
 ] as const

@@ -26,11 +26,15 @@ export default function SightWordChip({ word, masteryLevel, onTapHelp, onTapKnow
 
   const handleClick = useCallback((e: React.MouseEvent<HTMLElement>) => {
     e.stopPropagation()
+    // Speak immediately on tap
+    const utterance = new SpeechSynthesisUtterance(word)
+    utterance.rate = 0.85
+    speechSynthesis.speak(utterance)
+    // Then show popover with additional options
     setAnchorEl(e.currentTarget)
-    // Auto-dismiss after 3 seconds
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => setAnchorEl(null), 3000)
-  }, [])
+  }, [word])
 
   const handleClose = useCallback(() => {
     clearTimeout(timerRef.current)
@@ -38,13 +42,33 @@ export default function SightWordChip({ word, masteryLevel, onTapHelp, onTapKnow
   }, [])
 
   const handleHelp = useCallback(() => {
-    // Use Web Speech API
     const utterance = new SpeechSynthesisUtterance(word)
     utterance.rate = 0.8
     speechSynthesis.speak(utterance)
     onTapHelp()
     handleClose()
   }, [word, onTapHelp, handleClose])
+
+  const handleSoundOut = useCallback(() => {
+    // Speak each letter sound with pauses
+    const letters = word.toLowerCase().split('')
+    let delay = 0
+    letters.forEach((letter) => {
+      setTimeout(() => {
+        const utterance = new SpeechSynthesisUtterance(letter)
+        utterance.rate = 0.6
+        speechSynthesis.speak(utterance)
+      }, delay)
+      delay += 600
+    })
+    // Then speak the whole word after a pause
+    setTimeout(() => {
+      const utterance = new SpeechSynthesisUtterance(word)
+      utterance.rate = 0.8
+      speechSynthesis.speak(utterance)
+    }, delay + 400)
+    handleClose()
+  }, [word, handleClose])
 
   const handleKnown = useCallback(() => {
     onTapKnown()
@@ -84,7 +108,15 @@ export default function SightWordChip({ word, masteryLevel, onTapHelp, onTapKnow
             onClick={handleHelp}
             sx={{ minHeight: 40, fontSize: '0.85rem' }}
           >
-            Hear it
+            🔊 Hear it
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={handleSoundOut}
+            sx={{ minHeight: 40, fontSize: '0.85rem' }}
+          >
+            🔤 Sound it out
           </Button>
           <Button
             size="small"
@@ -93,7 +125,7 @@ export default function SightWordChip({ word, masteryLevel, onTapHelp, onTapKnow
             onClick={handleKnown}
             sx={{ minHeight: 40, fontSize: '0.85rem' }}
           >
-            I know this!
+            ✅ I know this!
           </Button>
         </Stack>
       </Popover>
