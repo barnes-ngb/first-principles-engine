@@ -126,21 +126,64 @@ export const generateImage = onCall(
       quality: "standard",
     };
 
-    const imageResponse = await provider.generateImage(dallePrompt, imageOpts);
+    let imageResponse;
+    try {
+      imageResponse = await provider.generateImage(dallePrompt, imageOpts);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("DALL-E generation failed:", {
+        prompt: prompt.slice(0, 100),
+        style,
+        error: errMsg,
+      });
+
+      if (
+        errMsg.includes("content_policy") ||
+        errMsg.includes("safety") ||
+        errMsg.includes("blocked")
+      ) {
+        throw new HttpsError(
+          "invalid-argument",
+          "That prompt was blocked by the image generator's safety filter. Try describing the scene differently — avoid character names like Mario, Elsa, etc.",
+        );
+      }
+      if (errMsg.includes("rate_limit") || errMsg.includes("429")) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "Image generation is busy right now. Wait a moment and try again.",
+        );
+      }
+      if (errMsg.includes("invalid_api_key") || errMsg.includes("401")) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Image generation is not configured correctly. Ask Dad to check the API key.",
+        );
+      }
+      throw new HttpsError(
+        "internal",
+        `Image generation failed: ${errMsg.slice(0, 200)}`,
+      );
+    }
 
     if (!imageResponse.url) {
       throw new HttpsError("internal", "Image generation returned no URL.");
     }
 
     // ── Download image and upload to Firebase Storage ────────────
-    const response = await fetch(imageResponse.url);
-    if (!response.ok) {
+    let imageBuffer: Buffer;
+    try {
+      const response = await fetch(imageResponse.url);
+      if (!response.ok) {
+        throw new Error(`Download failed: HTTP ${response.status}`);
+      }
+      imageBuffer = Buffer.from(await response.arrayBuffer());
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       throw new HttpsError(
         "internal",
-        "Failed to download generated image from provider.",
+        `Failed to download generated image: ${errMsg}`,
       );
     }
-    const imageBuffer = Buffer.from(await response.arrayBuffer());
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const filename = `${timestamp}.png`;
@@ -160,11 +203,11 @@ export const generateImage = onCall(
       },
     });
 
-    // Make publicly readable via signed URL (valid for 7 days)
-    const [downloadUrl] = await file.getSignedUrl({
-      action: "read",
-      expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
-    });
+    // Make file publicly accessible (storage rules control read access)
+    await file.makePublic();
+
+    // Use persistent public URL (does not expire)
+    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
 
     // ── Log usage to Firestore ─────────────────────────────────
     const db = getFirestore();
