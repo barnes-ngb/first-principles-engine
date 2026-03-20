@@ -33,6 +33,7 @@ import {
   evaluationSessionsCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
+import { addXpEvent } from '../../core/xp/addXpEvent'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type {
   ChatMessage,
@@ -479,10 +480,21 @@ export default function EvaluateChatPage() {
 
       await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)))
       setSnackText('Skill snapshot updated! Priority skills, supports, stop rules, and evidence all set.')
+
+      // Award XP for completing an evaluation (once per evaluation session)
+      if (sessionDocId) {
+        void addXpEvent(
+          familyId,
+          activeChildId,
+          'EVALUATION_COMPLETE',
+          25,
+          `eval_${sessionDocId}`,
+        )
+      }
     } catch (err) {
       console.error('Failed to apply findings to skill snapshot', err)
     }
-  }, [activeChildId, familyId, findings, recommendations, completeData])
+  }, [activeChildId, familyId, findings, recommendations, completeData, sessionDocId])
 
   // ── Clear & Restart ───────────────────────────────────────
 

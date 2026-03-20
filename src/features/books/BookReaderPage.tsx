@@ -19,6 +19,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { artifactsCollection, hoursCollection } from '../../core/firebase/firestore'
 import type { Book, BookPage } from '../../core/types/domain'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { addXpEvent } from '../../core/xp/addXpEvent'
 import { useBook } from './useBook'
 import { printBook } from './printBook'
 import PrintSettingsDialog from './PrintSettingsDialog'
@@ -178,7 +179,7 @@ export default function BookReaderPage() {
     }
   }, [currentPage, totalPages, book, familyId, childName])
 
-  // Log reading hours when leaving the reader
+  // Log reading hours and award XP when leaving the reader
   useEffect(() => {
     return () => {
       if (hoursLoggedRef.current || !book) return
@@ -197,10 +198,20 @@ export default function BookReaderPage() {
         totalPages,
         book.sightWords?.length ?? 0,
       )
+
+      // Award XP for reading session (once per book per day)
+      const date = new Date().toISOString().slice(0, 10)
+      void addXpEvent(
+        familyId,
+        book.childId,
+        'BOOK_READ',
+        15,
+        `book_${book.id ?? 'unknown'}_${date}`,
+      )
     }
     // Only run cleanup on unmount
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [familyId, book?.childId, book?.title, totalPages])
+  }, [familyId, book?.childId, book?.title, book?.id, totalPages])
 
   const handleWordTap = useCallback((word: string, action: 'help' | 'known') => {
     void recordInteraction(word, action)

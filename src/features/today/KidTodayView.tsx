@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
@@ -23,6 +23,7 @@ import { artifactsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import type { Artifact, ChecklistItem, Child, DayLog } from '../../core/types/domain'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { addXpEvent } from '../../core/xp/addXpEvent'
 import MinecraftAvatar from '../minecraft/MinecraftAvatar'
 import MinecraftXpBar from '../minecraft/MinecraftXpBar'
 import { useXpLedger } from '../minecraft/useXpLedger'
@@ -161,6 +162,21 @@ export default function KidTodayView({
 
   const greeting = useMemo(() => getGreeting(child.name, isLincoln), [child.name, isLincoln])
   const celebrationMessage = useMemo(() => getCelebration(today, isLincoln), [today, isLincoln])
+
+  // Award XP when all must-do items are completed (once per day per child)
+  const prevMustDoDoneRef = useRef(false)
+  useEffect(() => {
+    if (mustDoDone && !prevMustDoDoneRef.current && child.id && familyId) {
+      void addXpEvent(
+        familyId,
+        child.id,
+        'CHECKLIST_DAY_COMPLETE',
+        10,
+        `checklist_${today}`,
+      )
+    }
+    prevMustDoDoneRef.current = mustDoDone
+  }, [mustDoDone, child.id, familyId, today])
 
   // Load artifacts for today
   const loadArtifacts = useCallback(() => {
