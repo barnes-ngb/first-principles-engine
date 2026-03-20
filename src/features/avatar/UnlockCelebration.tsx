@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import type { ArmorPiece, AvatarProfile } from '../../core/types/domain'
@@ -12,6 +12,22 @@ interface UnlockCelebrationProps {
 
 export default function UnlockCelebration({ newPiece, profile, onDismiss }: UnlockCelebrationProps) {
   const [visible, setVisible] = useState(false)
+
+  // Pre-compute random positions once per unlock so render stays pure.
+  // Must be called unconditionally (before any early return).
+  const pixelParticles = useMemo(
+    () =>
+      Array.from({ length: 20 }, (_, i) => ({
+        left: Math.floor(Math.random() * 100),
+        top: Math.floor(Math.random() * 100),
+        dx: Math.floor((Math.random() - 0.5) * 200),
+        dy: Math.floor((Math.random() - 0.5) * 200),
+        colorIdx: i % 3,
+      })),
+    // Recompute when a new piece unlocks
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [newPiece],
+  )
 
   useEffect(() => {
     if (!newPiece) return
@@ -53,21 +69,21 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
       {isLincoln ? (
         // Pixel explosion: green squares
         <Box sx={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
-          {[...Array(20)].map((_, i) => (
+          {pixelParticles.map((p, i) => (
             <Box
               key={i}
               sx={{
                 position: 'absolute',
                 width: 12,
                 height: 12,
-                bgcolor: i % 3 === 0 ? '#7EFC20' : i % 3 === 1 ? '#FFD700' : '#00BFFF',
-                left: `${Math.random() * 100}%`,
-                top: `${Math.random() * 100}%`,
+                bgcolor: p.colorIdx === 0 ? '#7EFC20' : p.colorIdx === 1 ? '#FFD700' : '#00BFFF',
+                left: `${p.left}%`,
+                top: `${p.top}%`,
                 animation: `pixelExplode${i % 4} 1.2s ease-out forwards`,
                 [`@keyframes pixelExplode${i % 4}`]: {
                   from: { transform: 'scale(0)', opacity: 1 },
                   to: {
-                    transform: `translate(${(Math.random() - 0.5) * 200}px, ${(Math.random() - 0.5) * 200}px) scale(1.5)`,
+                    transform: `translate(${p.dx}px, ${p.dy}px) scale(1.5)`,
                     opacity: 0,
                   },
                 },
