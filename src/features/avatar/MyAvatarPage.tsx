@@ -155,6 +155,10 @@ export default function MyAvatarPage() {
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   ).current
 
+  // Dev overlay state
+  const [showArmoredRef, setShowArmoredRef] = useState(false)
+  const [reCropping, setReCropping] = useState(false)
+
   // Track previous state for celebrations
   const prevPiecesCountRef = useRef(0)
   const prevTierRef = useRef<string | null>(null)
@@ -565,7 +569,7 @@ export default function MyAvatarPage() {
           />
         </Box>
 
-        {/* ── Full armor on! state ───────────────────────────────── */}
+        {/* ── Armor status text ──────────────────────────────────── */}
         {allEarnedApplied ? (
           <Box
             sx={{
@@ -585,15 +589,19 @@ export default function MyAvatarPage() {
                 fontSize: isLincoln ? '0.65rem' : '22px',
                 fontWeight: 700,
                 color: isLincoln ? '#FFD700' : '#9C27B0',
-                animation: !reducedMotion ? 'fullArmorPulse 2s ease-in-out infinite' : undefined,
-                '@keyframes fullArmorPulse': {
-                  '0%':   { opacity: 1 },
-                  '50%':  { opacity: 0.82 },
-                  '100%': { opacity: 1 },
-                },
+                ...(allSixEarned && !reducedMotion ? {
+                  animation: 'fullArmorPulse 2s ease-in-out infinite',
+                  '@keyframes fullArmorPulse': {
+                    '0%':   { opacity: 1 },
+                    '50%':  { opacity: 0.82 },
+                    '100%': { opacity: 1 },
+                  },
+                } : {}),
               }}
             >
-              {isLincoln ? '⚔️ Full armor on! Ready for today.' : '✨ Full armor on! You\'re ready!'}
+              {allSixEarned
+                ? (isLincoln ? '⚔️ Full armor on! Ready for today.' : '✨ Full armor on! You\'re ready!')
+                : `${earnedPieces.length} of ${ARMOR_PIECES.length} pieces equipped — keep going!`}
             </Typography>
           </Box>
         ) : (
@@ -915,6 +923,73 @@ export default function MyAvatarPage() {
             <Typography sx={{ fontSize: '14px', fontWeight: 700, color: '#f44336', mb: 1 }}>
               DEV: Armor Reference + Crop Regions ({profile.currentTier})
             </Typography>
+
+            {/* Dev action buttons */}
+            <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
+              <Button
+                variant="outlined"
+                size="small"
+                disabled={reCropping}
+                onClick={async () => {
+                  const armorRefUrl = profile.armorReferenceUrls?.[profile.currentTier]
+                  if (!armorRefUrl) return
+                  setReCropping(true)
+                  try {
+                    const results = await cropAllArmorRegions(armorRefUrl)
+                    setCroppedImages(results)
+                    // Log crop dimensions to console for debugging
+                    for (const region of ARMOR_REGIONS) {
+                      const srcW = Math.round((region.widthPct / 100) * 1024)
+                      const srcH = Math.round((region.heightPct / 100) * 1024)
+                      console.log(`[DEV] ${region.pieceId}: ${srcW}×${srcH}px (from 1024×1024)`)
+                    }
+                  } catch (err) {
+                    console.error('Re-crop failed:', err)
+                  } finally {
+                    setReCropping(false)
+                  }
+                }}
+                sx={{ borderColor: '#f44336', color: '#f44336', fontSize: '11px' }}
+              >
+                {reCropping ? 'Re-cropping...' : 'Re-crop Armor'}
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => setShowArmoredRef((v) => !v)}
+                sx={{ borderColor: '#f44336', color: '#f44336', fontSize: '11px' }}
+              >
+                {showArmoredRef ? 'Hide Armored Reference' : 'Show Armored Reference'}
+              </Button>
+            </Box>
+
+            {/* Side-by-side: base vs armored reference */}
+            {showArmoredRef && (
+              <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', justifyContent: 'center' }}>
+                <Box sx={{ flex: '1 1 140px', maxWidth: 200, textAlign: 'center' }}>
+                  <Typography sx={{ fontSize: '10px', color: '#999', mb: 0.5 }}>Base Character</Typography>
+                  {(profile.photoTransformUrl ?? profile.baseCharacterUrl) && (
+                    <Box
+                      component="img"
+                      src={profile.photoTransformUrl ?? profile.baseCharacterUrl}
+                      alt="Base (dev)"
+                      sx={{ width: '100%', imageRendering: 'pixelated', border: '1px solid #333' }}
+                    />
+                  )}
+                </Box>
+                <Box sx={{ flex: '1 1 140px', maxWidth: 200, textAlign: 'center' }}>
+                  <Typography sx={{ fontSize: '10px', color: '#999', mb: 0.5 }}>Armored Reference</Typography>
+                  <Box
+                    component="img"
+                    src={profile.armorReferenceUrls[profile.currentTier]}
+                    alt="Armored ref (dev)"
+                    sx={{ width: '100%', imageRendering: 'pixelated', border: '1px solid #333' }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Armor reference with region overlays */}
             <Box sx={{ position: 'relative', width: '100%', maxWidth: 340, mx: 'auto' }}>
               <Box
                 component="img"
