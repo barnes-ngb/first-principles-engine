@@ -1,9 +1,7 @@
 import type {
   EngineStage,
   EvidenceType,
-  MasteryGate,
   SessionSymbol,
-  SkillLevel,
   StreamKey,
   SubjectBucket,
   SupportLevel,
