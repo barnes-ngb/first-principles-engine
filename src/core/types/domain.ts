@@ -1046,6 +1046,110 @@ export interface Sticker {
   createdAt: string
 }
 
+// ── Avatar + Armor of God ─────────────────────────────────────────
+
+export type ArmorPiece =
+  | 'belt_of_truth'
+  | 'breastplate_of_righteousness'
+  | 'shoes_of_peace'
+  | 'shield_of_faith'
+  | 'helmet_of_salvation'
+  | 'sword_of_the_spirit'
+
+export const ARMOR_PIECES: {
+  id: ArmorPiece
+  name: string
+  scripture: string
+  scriptureText: string
+  xpRequired: number
+  lincolnDescription: string
+  londonDescription: string
+}[] = [
+  {
+    id: 'belt_of_truth',
+    name: 'Belt of Truth',
+    scripture: 'Ephesians 6:14a',
+    scriptureText: 'Stand firm then, with the belt of truth buckled around your waist.',
+    xpRequired: 50,
+    lincolnDescription: 'a glowing golden belt with truth inscribed on it',
+    londonDescription: 'a sparkling golden ribbon belt with a star buckle',
+  },
+  {
+    id: 'breastplate_of_righteousness',
+    name: 'Breastplate of Righteousness',
+    scripture: 'Ephesians 6:14b',
+    scriptureText: 'With the breastplate of righteousness in place.',
+    xpRequired: 150,
+    lincolnDescription: 'a shining chest plate armor engraved with a cross',
+    londonDescription: 'a bright shining heart-shaped chest piece with a cross emblem',
+  },
+  {
+    id: 'shoes_of_peace',
+    name: 'Shoes of Peace',
+    scripture: 'Ephesians 6:15',
+    scriptureText: 'With your feet fitted with the readiness that comes from the gospel of peace.',
+    xpRequired: 300,
+    lincolnDescription: 'sturdy adventurer boots with a peaceful glow beneath them',
+    londonDescription: 'colorful winged sneakers with a soft glowing trail',
+  },
+  {
+    id: 'shield_of_faith',
+    name: 'Shield of Faith',
+    scripture: 'Ephesians 6:16',
+    scriptureText: 'Take up the shield of faith, with which you can extinguish all the flaming arrows of the evil one.',
+    xpRequired: 500,
+    lincolnDescription: 'a large blocky shield with a cross and rays of light',
+    londonDescription: 'a round rainbow shield with a shining cross in the center',
+  },
+  {
+    id: 'helmet_of_salvation',
+    name: 'Helmet of Salvation',
+    scripture: 'Ephesians 6:17a',
+    scriptureText: 'Take the helmet of salvation.',
+    xpRequired: 750,
+    lincolnDescription: 'a gleaming helmet with the word SAVED across the visor',
+    londonDescription: 'a bright crown-helmet hybrid with a star on top',
+  },
+  {
+    id: 'sword_of_the_spirit',
+    name: 'Sword of the Spirit',
+    scripture: 'Ephesians 6:17b',
+    scriptureText: 'And the sword of the Spirit, which is the word of God.',
+    xpRequired: 1000,
+    lincolnDescription: 'a glowing sword made of light with scripture etched on the blade',
+    londonDescription: 'a sparkling magic wand-sword glowing with golden light',
+  },
+]
+
+export const XP_EVENTS = {
+  QUEST_DIAMOND: 2,           // already wired in quest system
+  CHECKLIST_DAY_COMPLETE: 10, // all must-do items checked off
+  BOOK_READ: 15,              // reading session logged on book close
+  EVALUATION_COMPLETE: 25,    // full evaluation chat completed
+} as const
+
+export interface AvatarProfile {
+  childId: string
+  themeStyle: 'minecraft' | 'platformer'
+  unlockedPieces: ArmorPiece[]
+  /** Firebase Storage download URLs keyed by piece ID */
+  generatedImageUrls: Partial<Record<ArmorPiece, string>>
+  customAvatarUrl?: string    // post-all-6 custom generation
+  photoTransformUrl?: string  // Phase 2
+  totalXp: number             // cached from xpLedger for quick reads
+  updatedAt: string
+}
+
+/** Append-only log for XP dedup. Doc ID: {childId}_{dedupKey} */
+export interface XpEventLogEntry {
+  childId: string
+  type: string
+  amount: number
+  dedupKey: string
+  meta?: Record<string, string>
+  awardedAt: string
+}
+
 // ── Sight Word Progress ──────────────────────────────────────
 
 export interface SightWordProgress {
