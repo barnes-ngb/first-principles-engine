@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useState } from 'react'
+import { forwardRef, useEffect, useMemo, useState } from 'react'
 import Box from '@mui/material/Box'
 import CircularProgress from '@mui/material/CircularProgress'
 import Typography from '@mui/material/Typography'
@@ -7,6 +7,23 @@ import type { ArmorPiece, AvatarProfile } from '../../core/types'
 import { ARMOR_PIECES } from '../../core/types'
 import { ARMOR_REGIONS } from '../../core/avatar/cropArmorRegions'
 import { isPieceEarned } from './armorUtils'
+
+// Dev overlay: show crop region rectangles when ?dev=true is in URL
+function useDevMode(): boolean {
+  return useMemo(() => {
+    if (typeof window === 'undefined') return false
+    return new URLSearchParams(window.location.search).get('dev') === 'true'
+  }, [])
+}
+
+const DEV_REGION_COLORS: Record<ArmorPiece, string> = {
+  helmet_of_salvation: 'rgba(255, 0, 0, 0.35)',
+  breastplate_of_righteousness: 'rgba(0, 255, 0, 0.35)',
+  belt_of_truth: 'rgba(0, 0, 255, 0.35)',
+  shoes_of_peace: 'rgba(255, 255, 0, 0.35)',
+  shield_of_faith: 'rgba(255, 0, 255, 0.35)',
+  sword_of_the_spirit: 'rgba(0, 255, 255, 0.35)',
+}
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -77,6 +94,7 @@ const CharacterDisplay = forwardRef<HTMLDivElement, CharacterDisplayProps>(
     const isLincoln = profile.themeStyle === 'minecraft'
     const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
     const reducedMotion = useReducedMotion()
+    const devMode = useDevMode()
 
     const appliedCount = appliedPieces.length
     const earnedCount = ARMOR_PIECES.filter((p) => isPieceEarned(profile, p.id)).length
@@ -300,6 +318,40 @@ const CharacterDisplay = forwardRef<HTMLDivElement, CharacterDisplayProps>(
             />
           )
         })}
+
+        {/* Dev overlay: show crop region rectangles for tuning */}
+        {devMode && ARMOR_REGIONS.map((region) => (
+          <Box
+            key={`dev-${region.pieceId}`}
+            sx={{
+              position: 'absolute',
+              top: `${region.topPct}%`,
+              left: `${region.leftPct}%`,
+              width: `${region.widthPct}%`,
+              height: `${region.heightPct}%`,
+              bgcolor: DEV_REGION_COLORS[region.pieceId],
+              border: '1px solid rgba(255,255,255,0.8)',
+              pointerEvents: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 10,
+            }}
+          >
+            <Typography
+              sx={{
+                fontSize: '8px',
+                color: '#fff',
+                fontWeight: 700,
+                textShadow: '0 0 3px #000',
+                textAlign: 'center',
+                lineHeight: 1.1,
+              }}
+            >
+              {region.pieceId.split('_').slice(0, 2).join(' ')}
+            </Typography>
+          </Box>
+        ))}
       </Box>
     )
   },

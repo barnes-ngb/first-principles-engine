@@ -28,6 +28,12 @@ function getLegacyImageUrl(
   return (entry.generatedImageUrls as Record<string, string | undefined>)[tier]
 }
 
+function getXpAwayText(profile: AvatarProfile, pieceDef: { xpToUnlockStone: number }): string {
+  const away = pieceDef.xpToUnlockStone - profile.totalXp
+  if (away <= 0) return `${pieceDef.xpToUnlockStone} XP needed`
+  return `${away} XP away`
+}
+
 interface ArmorPieceButtonProps {
   pieceId: ArmorPiece
   profile: AvatarProfile
@@ -66,10 +72,10 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
         sx={{
           position: 'relative',
           flexShrink: 0,
-          minWidth: 130,
-          width: 130,
-          minHeight: 170,
-          height: 170,
+          minWidth: 140,
+          width: 140,
+          minHeight: 180,
+          height: 180,
           cursor: 'pointer',
           display: 'flex',
           flexDirection: 'column',
@@ -140,7 +146,7 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
             fontWeight: 500,
             color: earned
               ? (isLincoln ? '#ccc' : 'text.primary')
-              : (isLincoln ? '#444' : 'text.disabled'),
+              : (isLincoln ? '#555' : 'text.disabled'),
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
             ...(isLincoln ? { fontSize: '0.42rem', lineHeight: 1.5 } : {}),
             whiteSpace: 'normal',
@@ -155,17 +161,17 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
           sx={{
             textAlign: 'center',
             lineHeight: 1.2,
-            fontSize: '12px',
+            fontSize: '14px',
             color: isLincoln ? '#666' : '#999',
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
             ...(isLincoln ? { fontSize: '0.32rem' } : {}),
           }}
         >
-          {earned ? pieceDef.scripture : `${pieceDef.xpToUnlockStone} XP needed`}
+          {earned ? pieceDef.scripture : getXpAwayText(profile, pieceDef)}
         </Typography>
 
-        {/* Applied badge */}
-        {appliedToday && (
+        {/* Applied badge or "Put it on!" hint */}
+        {appliedToday ? (
           <Typography
             sx={{
               fontSize: '12px',
@@ -178,7 +184,21 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
           >
             ✓ Applied today
           </Typography>
-        )}
+        ) : earned ? (
+          <Typography
+            sx={{
+              fontSize: '12px',
+              color: accentColor,
+              fontWeight: 600,
+              textAlign: 'center',
+              lineHeight: 1,
+              opacity: 0.8,
+              ...(isLincoln ? { fontSize: '0.32rem', fontFamily: '"Press Start 2P", monospace' } : {}),
+            }}
+          >
+            Put it on!
+          </Typography>
+        ) : null}
       </Box>
     )
   },
