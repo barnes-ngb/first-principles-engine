@@ -1256,8 +1256,23 @@ export interface AvatarProfile {
   baseCharacterUrl?: string
   /** Phase 2: photo → character transform result */
   photoTransformUrl?: string
+  /** Cohesive set sheets: tier → sheet URL (3×2 grid, all 6 pieces) */
+  armorSheetUrls?: Partial<Record<string, string>>
   totalXp: number   // cached from xpLedger for quick reads
   updatedAt: string
+}
+
+/**
+ * Maps each armor piece to its 0-indexed position in the 3×2 sheet image.
+ * Order (left-to-right, top-to-bottom): belt, breastplate, shoes, shield, helmet, sword.
+ */
+export const ARMOR_PIECE_SHEET_INDEX: Record<ArmorPiece, number> = {
+  belt_of_truth: 0,
+  breastplate_of_righteousness: 1,
+  shoes_of_peace: 2,
+  shield_of_faith: 3,
+  helmet_of_salvation: 4,
+  sword_of_the_spirit: 5,
 }
 
 export interface DailyArmorSession {
