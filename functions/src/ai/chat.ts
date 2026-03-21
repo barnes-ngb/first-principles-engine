@@ -1427,11 +1427,6 @@ export const analyzeEvaluationPatterns = onCall(
       );
     }
 
-    // Load skill snapshot for neurodivergent context
-    const snapshotSnap = await db
-      .doc(`families/${familyId}/skillSnapshots/${childId}`)
-      .get();
-
     // Build neurodivergent description from known child profiles
     // (in a real system this would come from child profile flags)
     const neurodivergentDesc = childName.toLowerCase() === "lincoln"
