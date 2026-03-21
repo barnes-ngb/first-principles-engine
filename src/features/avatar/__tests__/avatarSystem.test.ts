@@ -12,6 +12,8 @@ import type {
   PlatformerTier,
 } from '../../../core/types'
 import { PIECE_OVERLAY_POSITIONS } from '../armorUtils'
+import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../voxel/buildArmorPiece'
+import { ARMOR_PIECE_TO_VOXEL, DEFAULT_CHARACTER_FEATURES } from '../../../core/types'
 import { getTodayDateString } from '../../../core/avatar/getDailyArmorSession'
 
 // ── ARMOR_PIECES data integrity ──────────────────────────────────
@@ -555,6 +557,80 @@ describe('AvatarProfile new structure', () => {
     const withBase: AvatarProfile = { ...sampleProfile, baseCharacterUrl: 'https://example.com/base.png' }
     const shouldGenerate = !withBase.baseCharacterUrl
     expect(shouldGenerate).toBe(false)
+  })
+})
+
+// ── Voxel Armor System ──────────────────────────────────────────────
+
+describe('VOXEL_ARMOR_PIECES', () => {
+  it('has exactly 6 pieces', () => {
+    expect(VOXEL_ARMOR_PIECES).toHaveLength(6)
+  })
+
+  it('has ascending XP thresholds', () => {
+    for (let i = 1; i < VOXEL_ARMOR_PIECES.length; i++) {
+      expect(XP_THRESHOLDS[VOXEL_ARMOR_PIECES[i].id])
+        .toBeGreaterThanOrEqual(XP_THRESHOLDS[VOXEL_ARMOR_PIECES[i - 1].id])
+    }
+  })
+
+  it('belt starts at 0 XP', () => {
+    expect(XP_THRESHOLDS.belt).toBe(0)
+  })
+
+  it('sword requires 1000 XP', () => {
+    expect(XP_THRESHOLDS.sword).toBe(1000)
+  })
+
+  it('piece IDs are unique', () => {
+    const ids = VOXEL_ARMOR_PIECES.map((p) => p.id)
+    expect(new Set(ids).size).toBe(6)
+  })
+
+  it('each piece has name, verse, and verseText', () => {
+    for (const piece of VOXEL_ARMOR_PIECES) {
+      expect(piece.name).toBeTruthy()
+      expect(piece.verse).toBeTruthy()
+      expect(piece.verseText).toBeTruthy()
+    }
+  })
+})
+
+describe('ARMOR_PIECE_TO_VOXEL mapping', () => {
+  it('maps all 6 ArmorPiece IDs to VoxelArmorPieceId', () => {
+    const armorPieceIds: ArmorPiece[] = [
+      'belt_of_truth', 'breastplate_of_righteousness', 'shoes_of_peace',
+      'shield_of_faith', 'helmet_of_salvation', 'sword_of_the_spirit',
+    ]
+    for (const id of armorPieceIds) {
+      expect(ARMOR_PIECE_TO_VOXEL[id]).toBeDefined()
+    }
+  })
+
+  it('maps belt_of_truth → belt', () => {
+    expect(ARMOR_PIECE_TO_VOXEL.belt_of_truth).toBe('belt')
+  })
+
+  it('maps sword_of_the_spirit → sword', () => {
+    expect(ARMOR_PIECE_TO_VOXEL.sword_of_the_spirit).toBe('sword')
+  })
+})
+
+describe('DEFAULT_CHARACTER_FEATURES', () => {
+  it('has valid hex skin tone', () => {
+    expect(DEFAULT_CHARACTER_FEATURES.skinTone).toMatch(/^#[0-9a-fA-F]{6}$/)
+  })
+
+  it('has valid hex hair color', () => {
+    expect(DEFAULT_CHARACTER_FEATURES.hairColor).toMatch(/^#[0-9a-fA-F]{6}$/)
+  })
+
+  it('has a valid hair style', () => {
+    expect(['short', 'medium', 'long', 'curly']).toContain(DEFAULT_CHARACTER_FEATURES.hairStyle)
+  })
+
+  it('has a valid hair length', () => {
+    expect(['above_ear', 'ear_length', 'shoulder', 'below_shoulder']).toContain(DEFAULT_CHARACTER_FEATURES.hairLength)
   })
 })
 

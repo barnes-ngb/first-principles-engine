@@ -52,3 +52,9 @@ export type {
   ArmorReferenceRequest,
   ArmorReferenceResponse,
 } from "./imageTasks/armorReference.js";
+
+export { extractFeatures } from "./imageTasks/extractFeatures.js";
+export type {
+  ExtractFeaturesRequest,
+  ExtractFeaturesResponse,
+} from "./imageTasks/extractFeatures.js";
