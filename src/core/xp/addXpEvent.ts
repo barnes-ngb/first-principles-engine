@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore'
 
 function stripUndefined<T extends object>(obj: T): Partial<T> {
   return Object.fromEntries(
@@ -79,14 +79,22 @@ export async function addXpEvent(
     lastUpdatedAt: new Date().toISOString(),
   })
 
+  // ── Compute real total from event log (source of truth) ─────
+  const eventLogSnap = await getDocs(
+    query(xpEventLogCollection(familyId), where('childId', '==', childId)),
+  )
+  const realTotal = eventLogSnap.docs
+    .filter((d) => !(d.data() as unknown as Record<string, unknown>)._deleted)
+    .reduce((sum, d) => sum + ((d.data().amount as number) ?? 0), 0)
+
   // ── Update cached totalXp on avatarProfile ───────────────────
   const profileRef = doc(avatarProfilesCollection(familyId), childId)
   const profileSnap = await getDoc(profileRef)
   if (profileSnap.exists()) {
     const profile = profileSnap.data()
-    await setDoc(profileRef, stripUndefined({ ...profile, totalXp: newTotal, updatedAt: new Date().toISOString() }))
+    await setDoc(profileRef, stripUndefined({ ...profile, totalXp: realTotal, updatedAt: new Date().toISOString() }))
   }
 
   // ── Check for armor unlocks ──────────────────────────────────
-  await checkAndUnlockArmor(familyId, childId, newTotal)
+  await checkAndUnlockArmor(familyId, childId, realTotal)
 }
