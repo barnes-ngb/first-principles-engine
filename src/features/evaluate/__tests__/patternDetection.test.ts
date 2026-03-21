@@ -384,7 +384,7 @@ describe('FoundationsSection rendering logic', () => {
   })
 
   it('hides loading skeleton when patternAnalysisState is done', () => {
-    const patternAnalysisState = 'done'
+    const patternAnalysisState: string = 'done'
     const isLoading = patternAnalysisState === 'loading'
     expect(isLoading).toBe(false)
   })

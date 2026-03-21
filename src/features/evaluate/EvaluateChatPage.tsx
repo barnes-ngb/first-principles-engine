@@ -282,6 +282,38 @@ export default function EvaluateChatPage() {
     [activeChildId, domain, familyId, sessionDocId, recommendations, completeSummary, nextEvalDate],
   )
 
+  // ── Trigger pattern analysis after <complete> ────────────────
+
+  const triggerPatternAnalysis = useCallback(
+    async (sessionId: string, allFindings: EvaluationFinding[]) => {
+      if (!activeChildId) return
+      setPatternAnalysisState('loading')
+      try {
+        const result = await analyzePatterns({
+          familyId,
+          childId: activeChildId,
+          evaluationSessionId: sessionId,
+          currentFindings: allFindings.map((f) => ({
+            skill: f.skill,
+            status: f.status,
+            evidence: f.evidence,
+            notes: f.notes,
+          })),
+        })
+        if (result) {
+          setConceptualBlocks(result.blocks as ConceptualBlock[])
+          setBlocksSummary(result.summary)
+        }
+        setPatternAnalysisState('done')
+      } catch (err) {
+        console.warn('Pattern analysis failed:', err)
+        setPatternAnalysisState('done')
+        setBlocksSummary(undefined)
+      }
+    },
+    [activeChildId, familyId, analyzePatterns],
+  )
+
   // ── Start evaluation (first AI message) ─────────────────────
 
   const startEvaluation = useCallback(async () => {
@@ -535,38 +567,6 @@ export default function EvaluateChatPage() {
     setConceptualBlocks([])
     setBlocksSummary(undefined)
   }, [])
-
-  // ── Trigger pattern analysis after <complete> ────────────────
-
-  const triggerPatternAnalysis = useCallback(
-    async (sessionId: string, allFindings: EvaluationFinding[]) => {
-      if (!activeChildId) return
-      setPatternAnalysisState('loading')
-      try {
-        const result = await analyzePatterns({
-          familyId,
-          childId: activeChildId,
-          evaluationSessionId: sessionId,
-          currentFindings: allFindings.map((f) => ({
-            skill: f.skill,
-            status: f.status,
-            evidence: f.evidence,
-            notes: f.notes,
-          })),
-        })
-        if (result) {
-          setConceptualBlocks(result.blocks as ConceptualBlock[])
-          setBlocksSummary(result.summary)
-        }
-        setPatternAnalysisState('done')
-      } catch (err) {
-        console.warn('Pattern analysis failed:', err)
-        setPatternAnalysisState('done')
-        setBlocksSummary(undefined)
-      }
-    },
-    [activeChildId, familyId, analyzePatterns],
-  )
 
   // ── Download Report ─────────────────────────────────────────
 
