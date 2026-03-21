@@ -102,15 +102,20 @@ function buildBelt(scale: number, yOffset: number): THREE.Group {
   const mat = new THREE.MeshLambertMaterial({ color: colors.color })
   const accentMat = new THREE.MeshLambertMaterial({ color: colors.accent })
 
-  // Belt band around waist
-  const band = box(1.1 * scale, 0.2 * scale, 0.65 * scale, mat)
-  band.position.set(0, (1.55 + yOffset) * scale, 0)
+  // Main belt band — slightly wider than torso, sits at waist
+  const band = box(1.14 * scale, 0.2 * scale, 0.72 * scale, mat)
+  band.position.set(0, (1.35 + yOffset) * scale, 0)
   group.add(band)
 
-  // Buckle at front center
-  const buckle = box(0.2 * scale, 0.18 * scale, 0.08 * scale, accentMat)
-  buckle.position.set(0, (1.55 + yOffset) * scale, 0.35 * scale)
+  // Buckle — raised, centered front
+  const buckle = box(0.22 * scale, 0.22 * scale, 0.1 * scale, accentMat)
+  buckle.position.set(0, (1.35 + yOffset) * scale, 0.42 * scale)
   group.add(buckle)
+
+  // Buckle detail (inner rectangle)
+  const inner = box(0.12 * scale, 0.12 * scale, 0.02 * scale, new THREE.MeshLambertMaterial({ color: 0xb8860b }))
+  inner.position.set(0, (1.35 + yOffset) * scale, 0.48 * scale)
+  group.add(inner)
 
   return group
 }
@@ -120,20 +125,34 @@ function buildBreastplate(scale: number, yOffset: number): THREE.Group {
   const colors = ARMOR_PIECE_COLORS.breastplate
   const mat = new THREE.MeshLambertMaterial({ color: colors.color })
   const accentMat = new THREE.MeshLambertMaterial({ color: colors.accent })
+  const rimMat = new THREE.MeshLambertMaterial({ color: 0xb8860b })
 
-  // Main chest plate
-  const chest = box(1.1 * scale, 1.25 * scale, 0.65 * scale, mat)
+  // Main chest plate — wider & deeper than torso so it wraps around visibly
+  const chest = box(1.12 * scale, 0.85 * scale, 0.72 * scale, mat)
   chest.position.set(0, (2.05 + yOffset) * scale, 0)
   group.add(chest)
 
+  // Shoulder guards
+  const shoulderL = box(0.3 * scale, 0.2 * scale, 0.6 * scale, mat)
+  shoulderL.position.set(-0.6 * scale, (2.45 + yOffset) * scale, 0)
+  group.add(shoulderL)
+  const shoulderR = box(0.3 * scale, 0.2 * scale, 0.6 * scale, mat)
+  shoulderR.position.set(0.6 * scale, (2.45 + yOffset) * scale, 0)
+  group.add(shoulderR)
+
   // Golden cross emblem on front
-  const crossV = box(0.08 * scale, 0.4 * scale, 0.05 * scale, accentMat)
-  crossV.position.set(0, (2.15 + yOffset) * scale, 0.35 * scale)
+  const crossV = box(0.08 * scale, 0.4 * scale, 0.06 * scale, accentMat)
+  crossV.position.set(0, (2.1 + yOffset) * scale, 0.4 * scale)
   group.add(crossV)
 
-  const crossH = box(0.3 * scale, 0.08 * scale, 0.05 * scale, accentMat)
-  crossH.position.set(0, (2.25 + yOffset) * scale, 0.35 * scale)
+  const crossH = box(0.28 * scale, 0.08 * scale, 0.06 * scale, accentMat)
+  crossH.position.set(0, (2.2 + yOffset) * scale, 0.4 * scale)
   group.add(crossH)
+
+  // Bottom rim (decorative, sits right at belt boundary)
+  const rim = box(1.14 * scale, 0.06 * scale, 0.74 * scale, rimMat)
+  rim.position.set(0, (1.60 + yOffset) * scale, 0)
+  group.add(rim)
 
   return group
 }

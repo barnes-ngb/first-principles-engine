@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-/** Animate a piece scaling in with a glow effect */
+/** Animate a piece scaling in with glow light + elastic overshoot */
 export function animateEquip(
   pieceGroup: THREE.Group,
   onComplete?: () => void,
@@ -8,34 +8,58 @@ export function animateEquip(
   pieceGroup.visible = true
   pieceGroup.scale.set(0.01, 0.01, 0.01)
 
-  const duration = 600
-  const startTime = Date.now()
+  // Store original colors for emissive reset
+  pieceGroup.traverse((child) => {
+    if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
+      child.userData.originalColor = child.material.color.clone()
+    }
+  })
 
-  function step() {
-    const elapsed = Date.now() - startTime
-    const progress = Math.min(elapsed / duration, 1)
+  // Create temporary glow light at the piece's center
+  const bounds = new THREE.Box3().setFromObject(pieceGroup)
+  const center = bounds.getCenter(new THREE.Vector3())
+  const glow = new THREE.PointLight(0x4caf50, 2, 3)
+  glow.position.copy(center)
+  pieceGroup.parent?.add(glow)
 
-    // Elastic ease-out for satisfying snap
-    const ease = 1 - Math.pow(1 - progress, 3) * Math.cos(progress * Math.PI * 0.5)
+  const duration = 700
+  const startTime = performance.now()
+
+  function step(now: number) {
+    const elapsed = now - startTime
+    const t = Math.min(elapsed / duration, 1)
+
+    // Elastic overshoot: piece pops past 1.0 then settles
+    let ease: number
+    if (t < 0.6) {
+      ease = (t / 0.6) * 1.15
+    } else {
+      ease = 1.15 - 0.15 * ((t - 0.6) / 0.4)
+    }
 
     pieceGroup.scale.set(ease, ease, ease)
 
-    // Glow: brighten materials during animation, settle to normal
+    // Glow fades out
+    glow.intensity = 2 * (1 - t)
+
+    // Flash the materials bright then settle
+    const brightness = Math.max(0, 1 - t * 1.5)
     pieceGroup.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
-        const mat = child.material
-        if (mat.color) {
-          mat.emissive = mat.color.clone().multiplyScalar(
-            Math.max(0, (1 - progress) * 0.5),
-          )
+        const origColor = child.userData.originalColor as THREE.Color | undefined
+        if (origColor) {
+          child.material.emissive = origColor.clone().multiplyScalar(brightness * 0.6)
         }
       }
     })
 
-    if (progress < 1) {
+    if (t < 1) {
       requestAnimationFrame(step)
     } else {
-      // Reset emissive to 0 on complete
+      // Cleanup
+      pieceGroup.parent?.remove(glow)
+      glow.dispose()
+      pieceGroup.scale.set(1, 1, 1)
       pieceGroup.traverse((child) => {
         if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
           child.material.emissive = new THREE.Color(0x000000)
@@ -44,7 +68,7 @@ export function animateEquip(
       onComplete?.()
     }
   }
-  step()
+  requestAnimationFrame(step)
 }
 
 /** Animate a piece scaling out */
@@ -53,10 +77,10 @@ export function animateUnequip(
   onComplete?: () => void,
 ): void {
   const duration = 300
-  const startTime = Date.now()
+  const startTime = performance.now()
 
-  function step() {
-    const elapsed = Date.now() - startTime
+  function step(now: number) {
+    const elapsed = now - startTime
     const progress = Math.min(elapsed / duration, 1)
     const ease = 1 - progress
 
@@ -70,5 +94,5 @@ export function animateUnequip(
       onComplete?.()
     }
   }
-  step()
+  requestAnimationFrame(step)
 }
