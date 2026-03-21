@@ -1,29 +1,22 @@
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import { callClaude, logAiUsage } from "../chatTypes.js";
-import { buildSystemPrompt, modelForTask } from "../chat.js";
+import { modelForTask } from "../chat.js";
+import { buildContextForTask } from "../contextSlices.js";
 
 /**
  * Handles both "chat" and "generate" task types.
- * These share the same code path — no enriched context, haiku model.
+ * These share the same code path — minimal context, haiku model.
  */
 export const handleChat = async (
   ctx: ChatTaskContext,
 ): Promise<ChatTaskResult> => {
-  const { db, familyId, childId, childData, snapshotData, messages, domain, apiKey } = ctx;
+  const { db, familyId, childId, childData, snapshotData, messages, apiKey } = ctx;
 
-  const systemPrompt = buildSystemPrompt(
-    {
-      name: childData.name,
-      grade: childData.grade,
-      prioritySkills: snapshotData?.prioritySkills,
-      supports: snapshotData?.supports,
-      stopRules: snapshotData?.stopRules,
-    },
-    "chat",
-    undefined,
-    domain,
-  );
+  const sections = await buildContextForTask("chat", {
+    db, familyId, childId, childData, snapshotData,
+  });
 
+  const systemPrompt = sections.join("\n\n");
   const model = modelForTask("chat");
 
   const result = await callClaude({
@@ -37,6 +30,8 @@ export const handleChat = async (
   if (!result.text) {
     console.warn("Claude returned empty response", { model, taskType: "chat" });
   }
+
+  console.log(`[AI] taskType=chat inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`);
 
   await logAiUsage(db, familyId, {
     childId,

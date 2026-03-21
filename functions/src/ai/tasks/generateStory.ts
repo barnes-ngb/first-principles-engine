@@ -71,6 +71,8 @@ export const handleGenerateStory = async (
     messages: [{ role: "user", content: "Generate the story now." }],
   });
 
+  console.log(`[AI] taskType=generateStory inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`);
+
   await logAiUsage(db, familyId, {
     childId,
     taskType: "generateStory",
