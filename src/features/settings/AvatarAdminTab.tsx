@@ -211,7 +211,7 @@ export default function AvatarAdminTab() {
           updatedPieces.push({
             pieceId: pieceDef.id,
             unlockedTiers: themeStyle === 'minecraft' ? ['stone'] : [],
-            unlockedTiersPlatformer: themeStyle === 'platformer' ? ['basic'] : undefined,
+            ...(themeStyle === 'platformer' ? { unlockedTiersPlatformer: ['basic' as PlatformerTier] } : {}),
             generatedImageUrls: {},
           })
         } else {
@@ -268,9 +268,9 @@ export default function AvatarAdminTab() {
                       unlockedTiers: themeStyle === 'minecraft'
                         ? [...new Set([...p.unlockedTiers, nextTier as ArmorTier])]
                         : p.unlockedTiers,
-                      unlockedTiersPlatformer: themeStyle === 'platformer'
-                        ? [...new Set([...(p.unlockedTiersPlatformer ?? []), nextTier as PlatformerTier])]
-                        : p.unlockedTiersPlatformer,
+                      ...(themeStyle === 'platformer' ? {
+                        unlockedTiersPlatformer: [...new Set([...(p.unlockedTiersPlatformer ?? []), nextTier as PlatformerTier])],
+                      } : {}),
                       generatedImageUrls: { ...p.generatedImageUrls, [nextTier]: result.data.url },
                     }
                   : p,
@@ -344,7 +344,10 @@ export default function AvatarAdminTab() {
     }
   }, [profile, familyId, activeChildId])
 
-  const selectedChild = children.find((c) => c.id === activeChildId)
+  const uniqueChildren = children.filter(
+    (child, index, self) => index === self.findIndex((c) => c.id === child.id),
+  )
+  const selectedChild = uniqueChildren.find((c) => c.id === activeChildId)
   const nextPiece = ARMOR_PIECES.find((p) => !profile || !isPieceEarned(profile, p.id))
   const xpToNext = nextPiece && profile ? Math.max(nextPiece.xpToUnlockStone - profile.totalXp, 0) : 0
   const earnedCount = profile ? profile.pieces.filter((p) =>
@@ -365,7 +368,7 @@ export default function AvatarAdminTab() {
           onChange={(_, val) => { if (val) setActiveChildId(val) }}
           size="small"
         >
-          {children.map((c) => (
+          {uniqueChildren.map((c) => (
             <ToggleButton key={c.id} value={c.id}>
               {c.name}
             </ToggleButton>
