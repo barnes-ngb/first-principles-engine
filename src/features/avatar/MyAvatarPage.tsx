@@ -906,6 +906,60 @@ export default function MyAvatarPage() {
             </Typography>
           )}
         </Box>
+
+        {/* ── Dev overlay: armor reference with crop regions ────── */}
+        {typeof window !== 'undefined' &&
+          new URLSearchParams(window.location.search).get('dev') === 'true' &&
+          profile.armorReferenceUrls?.[profile.currentTier] && (
+          <Box sx={{ mt: 3, p: 2, border: '2px dashed #f44336', borderRadius: 2 }}>
+            <Typography sx={{ fontSize: '14px', fontWeight: 700, color: '#f44336', mb: 1 }}>
+              DEV: Armor Reference + Crop Regions ({profile.currentTier})
+            </Typography>
+            <Box sx={{ position: 'relative', width: '100%', maxWidth: 340, mx: 'auto' }}>
+              <Box
+                component="img"
+                src={profile.armorReferenceUrls[profile.currentTier]}
+                alt="Armor reference (dev)"
+                sx={{ width: '100%', display: 'block', imageRendering: isLincoln ? 'pixelated' : 'auto' }}
+              />
+              {ARMOR_REGIONS.map((region) => {
+                const colors: Record<string, string> = {
+                  helmet_of_salvation: 'rgba(255,0,0,0.3)',
+                  breastplate_of_righteousness: 'rgba(0,255,0,0.3)',
+                  belt_of_truth: 'rgba(0,0,255,0.3)',
+                  shoes_of_peace: 'rgba(255,255,0,0.3)',
+                  shield_of_faith: 'rgba(255,0,255,0.3)',
+                  sword_of_the_spirit: 'rgba(0,255,255,0.3)',
+                }
+                return (
+                  <Box
+                    key={region.pieceId}
+                    sx={{
+                      position: 'absolute',
+                      top: `${region.topPct}%`,
+                      left: `${region.leftPct}%`,
+                      width: `${region.widthPct}%`,
+                      height: `${region.heightPct}%`,
+                      bgcolor: colors[region.pieceId] ?? 'rgba(255,255,255,0.3)',
+                      border: '1px solid #fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    <Typography sx={{ fontSize: '7px', color: '#fff', fontWeight: 700, textShadow: '0 0 3px #000', textAlign: 'center' }}>
+                      {region.pieceId.replace(/_/g, ' ')}
+                    </Typography>
+                  </Box>
+                )
+              })}
+            </Box>
+            <Typography sx={{ fontSize: '11px', color: '#999', mt: 1 }}>
+              Base: {profile.photoTransformUrl ? 'photo transform' : profile.baseCharacterUrl ? 'generated' : 'none'}
+            </Typography>
+          </Box>
+        )}
       </Page>
 
       {/* ── Unequip confirmation dialog ────────────────────────── */}

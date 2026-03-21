@@ -56,7 +56,7 @@ export const ARMOR_PIECES: {
     name: 'Belt of Truth',
     scripture: 'Ephesians 6:14',
     verseText: 'Stand firm then, with the belt of truth buckled around your waist.',
-    xpToUnlockStone: 50,
+    xpToUnlockStone: 0,
     xpToUnlockDiamond: 0,
     xpToUnlockNetherite: 0,
     lincolnStonePrompt: 'a simple stone-textured belt with a plain iron buckle, pixel art style, no background, transparent PNG, item only',
