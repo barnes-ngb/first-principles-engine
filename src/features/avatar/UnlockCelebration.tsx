@@ -10,6 +10,15 @@ interface UnlockCelebrationProps {
   onDismiss: () => void
 }
 
+/** Get stone/basic tier image URL for the newly unlocked piece. */
+function getNewPieceImageUrl(profile: AvatarProfile, pieceId: ArmorPiece): string | undefined {
+  const entry = profile.pieces.find((p) => p.pieceId === pieceId)
+  if (!entry) return undefined
+  // Show stone/basic tier image since that's what just unlocked
+  const stoneTier = profile.themeStyle === 'minecraft' ? 'stone' : 'basic'
+  return (entry.generatedImageUrls as Record<string, string | undefined>)[stoneTier]
+}
+
 export default function UnlockCelebration({ newPiece, profile, onDismiss }: UnlockCelebrationProps) {
   const [visible, setVisible] = useState(false)
 
@@ -43,7 +52,7 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
 
   const pieceDef = ARMOR_PIECES.find((p) => p.id === newPiece)
   const isLincoln = profile?.themeStyle === 'minecraft'
-  const imageUrl = profile?.generatedImageUrls[newPiece]
+  const imageUrl = profile ? getNewPieceImageUrl(profile, newPiece) : undefined
 
   return (
     <Box
@@ -128,7 +137,7 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
             sx={{
               width: 180,
               height: 180,
-              objectFit: 'cover',
+              objectFit: 'contain',
               borderRadius: isLincoln ? 0 : 4,
               border: `4px solid ${isLincoln ? '#7EFC20' : '#E8A0BF'}`,
               imageRendering: isLincoln ? 'pixelated' : 'auto',
@@ -152,7 +161,19 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
             textShadow: isLincoln ? '0 0 20px rgba(126,252,32,0.8)' : '0 0 20px rgba(156,39,176,0.4)',
           }}
         >
-          {pieceDef?.name} UNLOCKED!
+          NEW PIECE UNLOCKED!
+        </Typography>
+
+        <Typography
+          sx={{
+            fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+            fontSize: isLincoln ? '0.55rem' : '1.1rem',
+            fontWeight: 700,
+            color: isLincoln ? '#FFD700' : '#E91E63',
+            textAlign: 'center',
+          }}
+        >
+          {pieceDef?.name}
         </Typography>
 
         <Typography
