@@ -597,15 +597,17 @@ export interface BaseCharacterResponse {
 
 const BASE_CHARACTER_RAW_PROMPTS: Record<"minecraft" | "platformer", string> = {
   minecraft:
-    "Full body pixel art character, blocky square character design, " +
-    "10-year-old boy, standing upright with arms relaxed at sides, " +
-    "neutral ready pose, plain dark stone background, no armor, no weapons, " +
-    "simple plain clothing, centered in frame, square format, no text, no watermarks",
+    "Full body pixel art character, blocky square 8-bit style, simple humanoid figure, " +
+    "standing upright facing forward, arms relaxed at sides, plain brown tunic and " +
+    "trousers only, NO armor, NO weapons, NO shield, NO sword, NO boots with detail, " +
+    "simple flat shoes only, neutral ready pose, dark stone background, " +
+    "centered in frame, square format, no text, no watermarks",
   platformer:
-    "Full body cartoon platformer character, cute rounded style, " +
-    "6-year-old girl, standing upright with arms relaxed at sides, " +
-    "happy neutral pose, plain light blue background, no armor, " +
-    "simple colorful outfit, centered in frame, square format, no text, no watermarks",
+    "Full body cute cartoon character, rounded cheerful platformer style, simple " +
+    "humanoid girl figure, standing upright facing forward, arms relaxed at sides, " +
+    "plain simple colorful dress only, NO armor, NO weapons, NO accessories, " +
+    "simple flat shoes only, happy neutral pose, light blue background, " +
+    "centered in frame, square format, no text, no watermarks",
 };
 
 /**

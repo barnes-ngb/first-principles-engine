@@ -1268,6 +1268,19 @@ export interface DailyArmorSession {
   completedAt?: string  // ISO string — set when all earned pieces applied
 }
 
+/** Pixel-percentage positions for overlaying each piece on the base character image. */
+export const PIECE_POSITIONS: Record<
+  ArmorPiece,
+  { topPct: number; leftPct: number; widthPct: number; heightPct: number }
+> = {
+  helmet_of_salvation:           { topPct: 2,  leftPct: 28, widthPct: 44, heightPct: 22 },
+  breastplate_of_righteousness:  { topPct: 24, leftPct: 18, widthPct: 64, heightPct: 28 },
+  belt_of_truth:                 { topPct: 50, leftPct: 22, widthPct: 56, heightPct: 12 },
+  shoes_of_peace:                { topPct: 78, leftPct: 8,  widthPct: 84, heightPct: 20 },
+  shield_of_faith:               { topPct: 28, leftPct: 2,  widthPct: 34, heightPct: 38 },
+  sword_of_the_spirit:           { topPct: 28, leftPct: 64, widthPct: 34, heightPct: 42 },
+}
+
 /** Append-only log for XP dedup. Doc ID: {childId}_{dedupKey} */
 export interface XpEventLogEntry {
   childId: string

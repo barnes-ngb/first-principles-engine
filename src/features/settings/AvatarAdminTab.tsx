@@ -79,6 +79,8 @@ export default function AvatarAdminTab() {
   const [xpAmount, setXpAmount] = useState(10)
   const [feedback, setFeedback] = useState<{ severity: 'success' | 'error'; message: string } | null>(null)
   const [upgrading, setUpgrading] = useState(false)
+  const [regenBaseChar, setRegenBaseChar] = useState(false)
+  const [regenPieces, setRegenPieces] = useState(false)
 
   // Confirmation dialogs
   const [deletePiece, setDeletePiece] = useState<ArmorPiece | null>(null)
@@ -211,7 +213,7 @@ export default function AvatarAdminTab() {
           updatedPieces.push({
             pieceId: pieceDef.id,
             unlockedTiers: themeStyle === 'minecraft' ? ['stone'] : [],
-            unlockedTiersPlatformer: themeStyle === 'platformer' ? ['basic'] : undefined,
+            ...(themeStyle === 'platformer' ? { unlockedTiersPlatformer: ['basic' as PlatformerTier] } : {}),
             generatedImageUrls: {},
           })
         } else {
@@ -268,9 +270,9 @@ export default function AvatarAdminTab() {
                       unlockedTiers: themeStyle === 'minecraft'
                         ? [...new Set([...p.unlockedTiers, nextTier as ArmorTier])]
                         : p.unlockedTiers,
-                      unlockedTiersPlatformer: themeStyle === 'platformer'
-                        ? [...new Set([...(p.unlockedTiersPlatformer ?? []), nextTier as PlatformerTier])]
-                        : p.unlockedTiersPlatformer,
+                      ...(themeStyle === 'platformer' ? {
+                        unlockedTiersPlatformer: [...new Set([...(p.unlockedTiersPlatformer ?? []), nextTier as PlatformerTier])],
+                      } : {}),
                       generatedImageUrls: { ...p.generatedImageUrls, [nextTier]: result.data.url },
                     }
                   : p,
@@ -344,7 +346,52 @@ export default function AvatarAdminTab() {
     }
   }, [profile, familyId, activeChildId])
 
-  const selectedChild = children.find((c) => c.id === activeChildId)
+  // ── Regenerate base character ─────────────────────────────────
+  const handleRegenBaseChar = useCallback(async () => {
+    if (!profile || !familyId || !activeChildId) return
+    setRegenBaseChar(true)
+    try {
+      const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
+      await setDoc(profileRef, stripUndefined({
+        ...profile,
+        baseCharacterUrl: undefined,
+        photoTransformUrl: undefined,
+        updatedAt: new Date().toISOString(),
+      }))
+      setFeedback({ severity: 'success', message: 'Base character cleared — will regenerate on next visit to My Armor.' })
+    } catch (err) {
+      console.error('Regen base char failed:', err)
+      setFeedback({ severity: 'error', message: 'Failed to clear base character.' })
+    } finally {
+      setRegenBaseChar(false)
+    }
+  }, [profile, familyId, activeChildId])
+
+  // ── Regenerate piece images ────────────────────────────────────
+  const handleRegenPieceImages = useCallback(async () => {
+    if (!profile || !familyId || !activeChildId) return
+    setRegenPieces(true)
+    try {
+      const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
+      const updatedPieces = profile.pieces.map((p) => ({ ...p, generatedImageUrls: {} }))
+      await setDoc(profileRef, stripUndefined({
+        ...profile,
+        pieces: updatedPieces,
+        updatedAt: new Date().toISOString(),
+      }))
+      setFeedback({ severity: 'success', message: 'Piece image URLs cleared — will regenerate next time each piece is viewed.' })
+    } catch (err) {
+      console.error('Regen piece images failed:', err)
+      setFeedback({ severity: 'error', message: 'Failed to clear piece images.' })
+    } finally {
+      setRegenPieces(false)
+    }
+  }, [profile, familyId, activeChildId])
+
+  const uniqueChildren = children.filter(
+    (child, index, self) => index === self.findIndex((c) => c.id === child.id),
+  )
+  const selectedChild = uniqueChildren.find((c) => c.id === activeChildId)
   const nextPiece = ARMOR_PIECES.find((p) => !profile || !isPieceEarned(profile, p.id))
   const xpToNext = nextPiece && profile ? Math.max(nextPiece.xpToUnlockStone - profile.totalXp, 0) : 0
   const earnedCount = profile ? profile.pieces.filter((p) =>
@@ -365,7 +412,7 @@ export default function AvatarAdminTab() {
           onChange={(_, val) => { if (val) setActiveChildId(val) }}
           size="small"
         >
-          {children.map((c) => (
+          {uniqueChildren.map((c) => (
             <ToggleButton key={c.id} value={c.id}>
               {c.name}
             </ToggleButton>
@@ -402,6 +449,26 @@ export default function AvatarAdminTab() {
                 All 6 pieces earned at {profile.currentTier} tier!
               </Typography>
             )}
+          </Stack>
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => void handleRegenBaseChar()}
+              disabled={regenBaseChar}
+              startIcon={regenBaseChar ? <CircularProgress size={14} /> : undefined}
+            >
+              Regenerate Base Character
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => void handleRegenPieceImages()}
+              disabled={regenPieces || earnedCount === 0}
+              startIcon={regenPieces ? <CircularProgress size={14} /> : undefined}
+            >
+              Regenerate Piece Images
+            </Button>
           </Stack>
         </Paper>
       )}
