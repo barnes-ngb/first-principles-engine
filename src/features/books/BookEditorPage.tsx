@@ -41,6 +41,7 @@ import type { BookPage, Sticker } from '../../core/types/domain'
 import type { ImageGenRequest } from '../../core/ai/useAI'
 import PageEditor from './PageEditor'
 import StickerPicker from './StickerPicker'
+import type { ImagePosition } from './DraggableImage'
 import { useBook } from './useBook'
 import { printBook } from './printBook'
 import PrintSettingsDialog from './PrintSettingsDialog'
@@ -204,7 +205,7 @@ export default function BookEditorPage() {
   )
 
   const handleImagePositionChange = useCallback(
-    (imageId: string, position: { x: number; y: number; width: number; height: number }) => {
+    (imageId: string, position: ImagePosition) => {
       if (!activePage) return
       updateImagePosition(activePage.id, imageId, position)
     },

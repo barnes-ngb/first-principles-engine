@@ -353,6 +353,8 @@ export default function BookshelfPage() {
                   display: 'flex',
                   flexDirection: 'column',
                   minHeight: 140,
+                  maxWidth: 200,
+                  width: '100%',
                 }}
               >
                 {/* 3-dot menu */}
@@ -382,17 +384,19 @@ export default function BookshelfPage() {
                     src={coverUrl}
                     sx={{
                       width: '100%',
-                      height: 80,
+                      aspectRatio: '2/3',
                       objectFit: 'cover',
+                      objectPosition: 'center top',
                       borderRadius: 1,
                       mb: 1,
+                      display: 'block',
                     }}
                   />
                 ) : (
                   <Box
                     sx={{
                       width: '100%',
-                      height: 80,
+                      aspectRatio: '2/3',
                       borderRadius: 1,
                       mb: 1,
                       bgcolor: isLincoln ? 'grey.800' : 'grey.100',
