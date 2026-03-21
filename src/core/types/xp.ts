@@ -56,7 +56,7 @@ export const ARMOR_PIECES: {
     name: 'Belt of Truth',
     scripture: 'Ephesians 6:14',
     verseText: 'Stand firm then, with the belt of truth buckled around your waist.',
-    xpToUnlockStone: 50,
+    xpToUnlockStone: 0,
     xpToUnlockDiamond: 0,
     xpToUnlockNetherite: 0,
     lincolnStonePrompt: 'a simple stone-textured belt with a plain iron buckle, pixel art style, no background, transparent PNG, item only',
@@ -175,10 +175,14 @@ export interface AvatarProfile {
   currentTier: ArmorTier | PlatformerTier
   /** DALL-E base character (full body, no armor), generated once */
   baseCharacterUrl?: string
-  /** Phase 2: photo → character transform result */
+  /** Phase 2: photo → character transform result (bare pixel character from photo) */
   photoTransformUrl?: string
   /** Cohesive set sheets: tier → sheet URL (3×2 grid, all 6 pieces) */
   armorSheetUrls?: Partial<Record<string, string>>
+  /** Armor reference images: tier → full armed character image URL */
+  armorReferenceUrls?: Partial<Record<string, string>>
+  /** Cached client-side crops from armor reference (optional — can re-crop) */
+  croppedRegionUrls?: Partial<Record<ArmorPiece, string>>
   totalXp: number   // cached from xpLedger for quick reads
   updatedAt: string
 }

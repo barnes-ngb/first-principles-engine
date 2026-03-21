@@ -21,14 +21,14 @@ describe('ARMOR_PIECES', () => {
     expect(ARMOR_PIECES).toHaveLength(6)
   })
 
-  it('has ascending xpToUnlockStone thresholds', () => {
+  it('has ascending xpToUnlockStone thresholds (allowing 0 for first piece)', () => {
     for (let i = 1; i < ARMOR_PIECES.length; i++) {
       expect(ARMOR_PIECES[i].xpToUnlockStone).toBeGreaterThan(ARMOR_PIECES[i - 1].xpToUnlockStone)
     }
   })
 
-  it('starts at 50 XP (stone) for the first piece', () => {
-    expect(ARMOR_PIECES[0].xpToUnlockStone).toBe(50)
+  it('starts at 0 XP (stone) for the first piece (Belt of Truth)', () => {
+    expect(ARMOR_PIECES[0].xpToUnlockStone).toBe(0)
   })
 
   it('ends at 1000 XP (stone) for the last piece', () => {
@@ -126,18 +126,23 @@ function getNewlyEligiblePieces(
 }
 
 describe('Stone unlock logic', () => {
-  it('unlocks no pieces at 0 XP', () => {
-    expect(getNewlyEligiblePieces(0, [], 'minecraft')).toHaveLength(0)
+  it('unlocks belt_of_truth at 0 XP (immediate unlock)', () => {
+    const result = getNewlyEligiblePieces(0, [], 'minecraft')
+    expect(result).toHaveLength(1)
+    expect(result[0]).toBe('belt_of_truth')
   })
 
-  it('unlocks belt_of_truth at exactly 50 XP', () => {
+  it('still unlocks belt_of_truth at 50 XP if not already earned', () => {
     const result = getNewlyEligiblePieces(50, [], 'minecraft')
     expect(result).toContain('belt_of_truth')
     expect(result).toHaveLength(1)
   })
 
-  it('does not unlock at 49 XP', () => {
-    expect(getNewlyEligiblePieces(49, [], 'minecraft')).toHaveLength(0)
+  it('does not unlock breastplate at 49 XP (belt unlocks at 0, breastplate at 150)', () => {
+    const result = getNewlyEligiblePieces(49, [], 'minecraft')
+    // Belt (0 XP) should unlock, but not breastplate (150 XP)
+    expect(result).toHaveLength(1)
+    expect(result[0]).toBe('belt_of_truth')
   })
 
   it('does not re-unlock already earned pieces', () => {
