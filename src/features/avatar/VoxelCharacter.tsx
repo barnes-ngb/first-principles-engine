@@ -31,7 +31,6 @@ export default function VoxelCharacter({
   animateUnequipPiece,
   onEquipAnimDone,
   onUnequipAnimDone,
-  height = '55vw',
 }: VoxelCharacterProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -65,10 +64,10 @@ export default function VoxelCharacter({
     scene.background = new THREE.Color(0x0d1117) // Dark background
     sceneRef.current = scene
 
-    // Camera
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100)
-    camera.position.set(0, 2.2, 6.5)
-    camera.lookAt(0, 1.8, 0)
+    // Camera — closer + lower FOV for heroic framing
+    const camera = new THREE.PerspectiveCamera(30, width / height, 0.1, 100)
+    camera.position.set(0, 1.8, 6.5)
+    camera.lookAt(0, 1.2, 0)
     cameraRef.current = camera
 
     // Lighting
@@ -116,11 +115,24 @@ export default function VoxelCharacter({
     controlsRef.current = createTouchControls(renderer.domElement)
 
     // Animation loop
+    const clock = new THREE.Clock()
+    const baseY = character.position.y
+
     function animate() {
       rafRef.current = requestAnimationFrame(animate)
 
       if (controlsRef.current && characterRef.current) {
         updateRotation(characterRef.current, controlsRef.current)
+      }
+
+      // Idle animation — gentle bob + subtle arm sway
+      if (characterRef.current) {
+        const time = clock.getElapsedTime()
+        characterRef.current.position.y = baseY + Math.sin(time * 1.5) * 0.04
+        const armL = characterRef.current.getObjectByName('armL')
+        const armR = characterRef.current.getObjectByName('armR')
+        if (armL) armL.rotation.z = Math.sin(time * 0.8) * 0.03
+        if (armR) armR.rotation.z = -Math.sin(time * 0.8 + 0.5) * 0.03
       }
 
       renderer.render(scene, camera)
@@ -213,9 +225,9 @@ export default function VoxelCharacter({
         width: '100%',
         maxWidth: 400,
         mx: 'auto',
-        height,
-        maxHeight: 400,
-        borderRadius: 0,
+        aspectRatio: '3 / 4',
+        maxHeight: '55vh',
+        borderRadius: '12px',
         border: '2px solid #7EFC20',
         overflow: 'hidden',
         bgcolor: '#0d1117',
@@ -225,6 +237,7 @@ export default function VoxelCharacter({
         userSelect: 'none',
         WebkitUserSelect: 'none',
         touchAction: 'none',
+        position: 'relative',
       }}
     />
   )

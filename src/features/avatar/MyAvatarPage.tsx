@@ -5,7 +5,6 @@ import { getFunctions, httpsCallable } from 'firebase/functions'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import Card from '@mui/material/Card'
 import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
@@ -15,7 +14,6 @@ import DialogTitle from '@mui/material/DialogTitle'
 import LinearProgress from '@mui/material/LinearProgress'
 import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
-import LockIcon from '@mui/icons-material/Lock'
 
 import Page from '../../components/Page'
 import { app } from '../../core/firebase/firebase'
@@ -29,7 +27,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
-import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, DEFAULT_CHARACTER_FEATURES } from '../../core/types'
+import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, VOXEL_TO_ARMOR_PIECE, DEFAULT_CHARACTER_FEATURES } from '../../core/types'
 import type {
   ArmorPiece,
   AvatarProfile,
@@ -38,6 +36,8 @@ import type {
   VoxelArmorPieceId,
 } from '../../core/types'
 
+import { ArmorIcon } from './icons/ArmorIcons'
+import type { ArmorTierColor } from './icons/ArmorIcons'
 import VoxelCharacter from './VoxelCharacter'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
@@ -88,40 +88,6 @@ function playArmorFanfare(delaySeconds = 0) {
   } catch {
     // Web Audio not available — silently skip
   }
-}
-
-// ── Verse Card ─────────────────────────────────────────────────────
-
-function VerseCardInline({ piece }: { piece: ArmorPieceMeta }) {
-  return (
-    <Card
-      sx={{
-        backgroundColor: '#1a1a2e',
-        border: '1px solid rgba(76,175,80,0.3)',
-        p: 2,
-        mx: 1,
-      }}
-    >
-      <Typography
-        variant="caption"
-        sx={{ color: '#4caf50', fontFamily: 'monospace' }}
-      >
-        {piece.verse}
-      </Typography>
-      <Typography
-        variant="body1"
-        sx={{
-          color: '#fff',
-          fontFamily: 'monospace',
-          mt: 1,
-          fontSize: '18px',
-          fontStyle: 'italic',
-        }}
-      >
-        &ldquo;{piece.verseText}&rdquo;
-      </Typography>
-    </Card>
-  )
 }
 
 // ── Component ─────────────────────────────────────────────────────
@@ -384,9 +350,12 @@ export default function MyAvatarPage() {
       if (isApplied) {
         setUnequipPiece(piece.id)
       } else if (isUnlocked) {
-        setSelectedPiece(piece)
+        // Toggle verse card: tap same piece to close, different to switch
+        setSelectedPiece((prev) => prev?.id === piece.id ? null : piece)
+      } else {
+        // Locked pieces: show verse card (but no equip button)
+        setSelectedPiece((prev) => prev?.id === piece.id ? null : piece)
       }
-      // Locked pieces: show verse but not apply
     },
     [profile, session],
   )
@@ -410,13 +379,32 @@ export default function MyAvatarPage() {
     setUnequipPiece(null)
   }, [unequipPiece, familyId, childId, today])
 
+  // ── Screen flash on equip ──────────────────────────────────────
+  const flashContainerRef = useRef<HTMLDivElement>(null)
+
   // ── Animation complete handlers ─────────────────────────────────
   const handleEquipAnimDone = useCallback(() => {
     setAnimateEquipId(null)
     // Particles at center
     setParticles({ x: window.innerWidth / 2, y: window.innerHeight / 3 })
     setTimeout(() => setParticles(null), 600)
-  }, [])
+
+    // Screen flash
+    const container = flashContainerRef.current
+    if (container) {
+      const flash = document.createElement('div')
+      flash.style.cssText = `
+        position: absolute; inset: 0;
+        background: ${isLincoln ? 'rgba(126, 252, 32, 0.2)' : 'rgba(232, 160, 191, 0.2)'};
+        pointer-events: none;
+        border-radius: inherit;
+        z-index: 10;
+        animation: flashFade 0.5s ease-out forwards;
+      `
+      container.appendChild(flash)
+      setTimeout(() => flash.remove(), 600)
+    }
+  }, [isLincoln])
 
   const handleUnequipAnimDone = useCallback(() => {
     setAnimateUnequipId(null)
@@ -476,7 +464,17 @@ export default function MyAvatarPage() {
         </Box>
 
         {/* ── 3D Character Display ─────────────────────────────── */}
-        <Box sx={{ mb: 1.5 }}>
+        <Box
+          ref={flashContainerRef}
+          sx={{
+            mb: 1.5,
+            position: 'relative',
+            '@keyframes flashFade': {
+              '0%': { opacity: 1 },
+              '100%': { opacity: 0 },
+            },
+          }}
+        >
           <VoxelCharacter
             features={features}
             ageGroup={ageGroup}
@@ -485,7 +483,6 @@ export default function MyAvatarPage() {
             animateUnequipPiece={animateUnequipId}
             onEquipAnimDone={handleEquipAnimDone}
             onUnequipAnimDone={handleUnequipAnimDone}
-            height="55vw"
           />
         </Box>
 
@@ -567,68 +564,109 @@ export default function MyAvatarPage() {
         >
           {VOXEL_ARMOR_PIECES.map((piece) => {
             const isUnlocked = profile.totalXp >= XP_THRESHOLDS[piece.id]
-            const armorPieceId = ARMOR_PIECES.find(
-              (p) => ARMOR_PIECE_TO_VOXEL[p.id] === piece.id,
-            )?.id
+            const armorPieceId = VOXEL_TO_ARMOR_PIECE[piece.id]
             const isApplied = armorPieceId ? appliedPieces.includes(armorPieceId) : false
+            const isSelected = selectedPiece?.id === piece.id
 
             return (
               <Box
                 key={piece.id}
                 onClick={() => handlePieceTap(piece)}
                 sx={{
-                  minWidth: 120,
-                  maxWidth: 120,
+                  minWidth: 130,
+                  maxWidth: 130,
+                  height: 160,
                   scrollSnapAlign: 'start',
-                  p: 1.5,
-                  borderRadius: isLincoln ? 0 : 2,
-                  border: `2px solid ${
-                    isApplied ? accentColor
-                    : isUnlocked ? (isLincoln ? '#555' : '#ccc')
-                    : (isLincoln ? '#222' : '#e0e0e0')
-                  }`,
+                  p: '12px 8px',
+                  borderRadius: isLincoln ? '2px' : '12px',
+                  border: isSelected
+                    ? `2px solid ${accentColor}`
+                    : isApplied
+                      ? `2px solid ${accentColor}`
+                      : isUnlocked
+                        ? `1.5px solid ${isLincoln ? 'rgba(126,252,32,0.4)' : 'rgba(232,160,191,0.4)'}`
+                        : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
                   bgcolor: isApplied
-                    ? (isLincoln ? 'rgba(126,252,32,0.1)' : 'rgba(232,160,191,0.1)')
-                    : (isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'),
-                  cursor: isUnlocked ? 'pointer' : 'default',
-                  opacity: isUnlocked ? 1 : 0.5,
-                  transition: 'border-color 200ms, background-color 200ms',
+                    ? (isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.15)')
+                    : isUnlocked
+                      ? (isLincoln ? 'rgba(126,252,32,0.06)' : 'rgba(232,160,191,0.06)')
+                      : (isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'),
+                  cursor: 'pointer',
+                  opacity: isUnlocked ? 1 : 0.45,
+                  transition: 'all 0.2s ease',
                   textAlign: 'center',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
-                  gap: 0.5,
+                  justifyContent: 'center',
+                  gap: '8px',
+                  position: 'relative',
+                  flexShrink: 0,
                 }}
               >
-                {isUnlocked ? (
-                  <Typography sx={{ fontSize: '28px' }}>
-                    {isApplied ? '✅' : '⚔️'}
-                  </Typography>
-                ) : (
-                  <LockIcon sx={{ fontSize: 28, color: isLincoln ? '#444' : '#bbb' }} />
+                {/* Equipped badge */}
+                {isApplied && (
+                  <Box sx={{
+                    position: 'absolute', top: 8, right: 8,
+                    width: 22, height: 22, borderRadius: '50%',
+                    bgcolor: isLincoln ? '#7EFC20' : '#E8A0BF',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <Typography sx={{ color: isLincoln ? '#000' : '#fff', fontSize: 14, fontWeight: 500, lineHeight: 1 }}>
+                      ✓
+                    </Typography>
+                  </Box>
                 )}
+
+                {/* Lock badge */}
+                {!isUnlocked && (
+                  <Box sx={{
+                    position: 'absolute', top: 8, right: 8,
+                    fontSize: 16, opacity: 0.5,
+                  }}>
+                    🔒
+                  </Box>
+                )}
+
+                {/* SVG icon */}
+                <Box sx={{ width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ArmorIcon
+                    pieceId={armorPieceId}
+                    size={48}
+                    tier={(profile.currentTier ?? 'stone') as ArmorTierColor}
+                    locked={!isUnlocked}
+                    applied={isApplied}
+                  />
+                </Box>
+
+                {/* Piece name */}
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.3rem' : '0.75rem',
-                    fontWeight: 600,
-                    color: isApplied ? accentColor : textColor,
+                    fontSize: isLincoln ? '0.28rem' : '13px',
+                    fontWeight: 500,
+                    color: isUnlocked ? textColor : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'),
                     lineHeight: 1.2,
+                    textAlign: 'center',
                   }}
                 >
-                  {piece.name.split(' ')[0]}
+                  {piece.name.split(' ').slice(0, 2).join(' ')}
                 </Typography>
-                {!isUnlocked && (
-                  <Typography
-                    sx={{
-                      fontSize: isLincoln ? '0.25rem' : '0.65rem',
-                      color: isLincoln ? '#555' : '#aaa',
-                      fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    }}
-                  >
-                    {XP_THRESHOLDS[piece.id]} XP
-                  </Typography>
-                )}
+
+                {/* Status text */}
+                <Typography
+                  sx={{
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                    fontSize: isLincoln ? '0.22rem' : '11px',
+                    color: isApplied
+                      ? accentColor
+                      : isUnlocked
+                        ? (isLincoln ? 'rgba(126,252,32,0.7)' : 'rgba(232,160,191,0.8)')
+                        : (isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'),
+                  }}
+                >
+                  {isApplied ? 'Equipped' : isUnlocked ? 'Tap to equip' : `${XP_THRESHOLDS[piece.id]} XP`}
+                </Typography>
               </Box>
             )
           })}
@@ -636,9 +674,70 @@ export default function MyAvatarPage() {
 
         {/* ── Verse Card (for selected piece) ──────────────────── */}
         {selectedPiece && (
-          <Box sx={{ mt: 2, px: 1 }}>
-            <VerseCardInline piece={selectedPiece} />
-            <Box sx={{ display: 'flex', gap: 1, mt: 1.5, px: 1 }}>
+          <Box
+            sx={{
+              mt: 1.5,
+              mx: 1,
+              p: '16px 20px',
+              bgcolor: isLincoln ? 'rgba(26, 26, 46, 0.95)' : 'rgba(255, 254, 249, 0.95)',
+              border: `1.5px solid ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(232,160,191,0.3)'}`,
+              borderRadius: '12px',
+              position: 'relative',
+              animation: 'slideUp 0.3s ease-out',
+              '@keyframes slideUp': {
+                '0%': { opacity: 0, transform: 'translateY(8px)' },
+                '100%': { opacity: 1, transform: 'translateY(0)' },
+              },
+            }}
+          >
+            {/* Close button */}
+            <Box
+              component="button"
+              onClick={(e: React.MouseEvent) => { e.stopPropagation(); setSelectedPiece(null) }}
+              sx={{
+                position: 'absolute', top: 8, right: 12,
+                background: 'none', border: 'none',
+                color: isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.3)',
+                fontSize: 18, cursor: 'pointer', p: '4px',
+              }}
+            >
+              ✕
+            </Box>
+
+            {/* Piece name */}
+            <Typography sx={{
+              fontFamily: titleFont,
+              fontSize: isLincoln ? '0.55rem' : '16px',
+              fontWeight: 500,
+              color: accentColor,
+              mb: 0.5,
+            }}>
+              {selectedPiece.name}
+            </Typography>
+
+            {/* Verse reference */}
+            <Typography sx={{
+              fontFamily: 'monospace',
+              fontSize: isLincoln ? '0.35rem' : '12px',
+              color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)',
+              mb: 1.25,
+            }}>
+              {selectedPiece.verse}
+            </Typography>
+
+            {/* Verse text */}
+            <Typography sx={{
+              fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+              fontSize: isLincoln ? '0.45rem' : '15px',
+              color: textColor,
+              lineHeight: 1.6,
+              fontStyle: 'italic',
+            }}>
+              &ldquo;{selectedPiece.verseText}&rdquo;
+            </Typography>
+
+            {/* Equip button — only for unlocked, unequipped pieces */}
+            {profile.totalXp >= XP_THRESHOLDS[selectedPiece.id] && (
               <Button
                 variant="contained"
                 fullWidth
@@ -647,30 +746,20 @@ export default function MyAvatarPage() {
                   setSelectedPiece(null)
                 }}
                 sx={{
+                  mt: 2,
                   bgcolor: accentColor,
                   color: isLincoln ? '#000' : '#fff',
                   fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.5rem' : '18px',
+                  fontSize: isLincoln ? '0.45rem' : '16px',
                   fontWeight: 700,
-                  py: 1.5,
+                  py: 1.25,
                   borderRadius: isLincoln ? 0 : 3,
                   '&:hover': { bgcolor: accentColor, opacity: 0.85 },
                 }}
               >
                 Put it on!
               </Button>
-              <Button
-                variant="text"
-                onClick={() => setSelectedPiece(null)}
-                sx={{
-                  color: isLincoln ? '#666' : '#aaa',
-                  fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.35rem' : '14px',
-                }}
-              >
-                Close
-              </Button>
-            </Box>
+            )}
           </Box>
         )}
 
