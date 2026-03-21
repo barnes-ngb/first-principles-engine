@@ -46,3 +46,9 @@ export type {
   ArmorSheetRequest,
   ArmorSheetResponse,
 } from "./imageTasks/armorSheet.js";
+
+export { generateArmorReference } from "./imageTasks/armorReference.js";
+export type {
+  ArmorReferenceRequest,
+  ArmorReferenceResponse,
+} from "./imageTasks/armorReference.js";

@@ -66,17 +66,19 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
         sx={{
           position: 'relative',
           flexShrink: 0,
-          width: 120,
-          height: 160,
+          minWidth: 130,
+          width: 130,
+          minHeight: 170,
+          height: 170,
           cursor: 'pointer',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'flex-start',
           gap: 0.75,
-          pt: 1.25,
+          pt: 1.5,
           pb: 1,
-          px: 0.75,
+          px: 1.5,
           borderRadius: isLincoln ? 0 : 2,
           border: '2px solid',
           borderColor,
@@ -134,13 +136,13 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
           sx={{
             textAlign: 'center',
             lineHeight: 1.3,
-            fontSize: '14px',
+            fontSize: '15px',
             fontWeight: 500,
             color: earned
               ? (isLincoln ? '#ccc' : 'text.primary')
               : (isLincoln ? '#444' : 'text.disabled'),
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-            ...(isLincoln ? { fontSize: '0.38rem', lineHeight: 1.5 } : {}),
+            ...(isLincoln ? { fontSize: '0.42rem', lineHeight: 1.5 } : {}),
             whiteSpace: 'normal',
             wordBreak: 'break-word',
           }}
@@ -153,10 +155,10 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
           sx={{
             textAlign: 'center',
             lineHeight: 1.2,
-            fontSize: '11px',
+            fontSize: '12px',
             color: isLincoln ? '#666' : '#999',
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-            ...(isLincoln ? { fontSize: '0.28rem' } : {}),
+            ...(isLincoln ? { fontSize: '0.32rem' } : {}),
           }}
         >
           {earned ? pieceDef.scripture : `${pieceDef.xpToUnlockStone} XP needed`}
@@ -166,12 +168,12 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
         {appliedToday && (
           <Typography
             sx={{
-              fontSize: '11px',
+              fontSize: '12px',
               color: isLincoln ? '#7EFC20' : '#2e7d32',
               fontWeight: 600,
               textAlign: 'center',
               lineHeight: 1,
-              ...(isLincoln ? { fontSize: '0.28rem', fontFamily: '"Press Start 2P", monospace' } : {}),
+              ...(isLincoln ? { fontSize: '0.32rem', fontFamily: '"Press Start 2P", monospace' } : {}),
             }}
           >
             ✓ Applied today

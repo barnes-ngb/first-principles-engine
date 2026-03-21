@@ -237,7 +237,7 @@ export default function VerseCard({
             variant="h6"
             sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.65rem' : '22px',
+              fontSize: isLincoln ? '0.75rem' : '26px',
               fontWeight: 500,
               color: accentColor,
               textAlign: 'center',
@@ -300,15 +300,15 @@ export default function VerseCard({
                 onClick={() => handleWordTap(idx)}
                 sx={{
                   display: 'inline-block',
-                  px: 0.5,
-                  py: 0.25,
+                  px: '8px',
+                  py: '6px',
                   m: '2px',
                   borderRadius: 1,
                   cursor: 'pointer',
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '0.55rem' : '18px',
+                  fontSize: isLincoln ? '0.6rem' : '22px',
                   fontStyle: 'italic',
-                  lineHeight: 1.6,
+                  lineHeight: 1.7,
                   transition: 'background-color 200ms ease, color 200ms ease, transform 150ms ease',
                   backgroundColor: currentWordIndex === idx
                     ? (isLincoln ? 'rgba(126,252,32,0.25)' : 'rgba(255,200,50,0.3)')
@@ -385,7 +385,7 @@ export default function VerseCard({
             sx={{
               color: isLincoln ? '#888' : '#999',
               fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-              fontSize: isLincoln ? '0.4rem' : '13px',
+              fontSize: isLincoln ? '0.45rem' : '15px',
             }}
           >
             {pieceDef.scripture}
@@ -402,10 +402,10 @@ export default function VerseCard({
                 bgcolor: accentColor,
                 color: isLincoln ? '#000' : '#fff',
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.55rem' : '18px',
+                fontSize: isLincoln ? '0.6rem' : '20px',
                 fontWeight: 700,
-                py: 1.75,
-                minHeight: 56,
+                py: 2,
+                minHeight: 60,
                 borderRadius: isLincoln ? 0 : 3,
                 '&:hover': { bgcolor: isLincoln ? '#5FC420' : '#d486a8' },
               }}
