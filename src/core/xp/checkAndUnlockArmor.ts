@@ -4,110 +4,357 @@ import { getFunctions, httpsCallable } from 'firebase/functions'
 import { app } from '../firebase/firebase'
 import { avatarProfilesCollection } from '../firebase/firestore'
 import { ARMOR_PIECES } from '../types/domain'
-import type { ArmorPiece, AvatarProfile } from '../types/domain'
+import type {
+  ArmorPiece,
+  ArmorPieceProgress,
+  ArmorTier,
+  AvatarProfile,
+  PlatformerTier,
+} from '../types/domain'
 
-interface AvatarImageRequest {
+// ── Cloud Function types ─────────────────────────────────────────
+
+interface ArmorPieceGenRequest {
   familyId: string
   childId: string
-  pieceId: ArmorPiece
+  pieceId: string
+  tier: string
   themeStyle: 'minecraft' | 'platformer'
-  pieceDescription: string
+  prompt: string
 }
 
-interface AvatarImageResponse {
+interface ArmorPieceGenResponse {
   url: string
   storagePath: string
 }
 
-const functions = getFunctions(app)
-const generateAvatarImageFn = httpsCallable<AvatarImageRequest, AvatarImageResponse>(
-  functions,
-  'generateAvatarPiece',
-)
+// ── Helpers ──────────────────────────────────────────────────────
+
+/** Get the ArmorPieceProgress entry for a piece, or undefined. */
+function getPieceProgress(
+  pieces: ArmorPieceProgress[],
+  pieceId: ArmorPiece,
+): ArmorPieceProgress | undefined {
+  return pieces.find((p) => p.pieceId === pieceId)
+}
+
+/** Check if a piece has been unlocked at the stone/basic level. */
+function hasStoneTier(
+  progress: ArmorPieceProgress | undefined,
+  themeStyle: 'minecraft' | 'platformer',
+): boolean {
+  if (!progress) return false
+  if (themeStyle === 'minecraft') return progress.unlockedTiers.includes('stone')
+  return (progress.unlockedTiersPlatformer ?? []).includes('basic')
+}
+
+/** Check if a piece has been unlocked at the diamond/powerup level. */
+function hasDiamondTier(
+  progress: ArmorPieceProgress | undefined,
+  themeStyle: 'minecraft' | 'platformer',
+): boolean {
+  if (!progress) return false
+  if (themeStyle === 'minecraft') return progress.unlockedTiers.includes('diamond')
+  return (progress.unlockedTiersPlatformer ?? []).includes('powerup')
+}
+
+/** Get the prompt for a piece at a specific tier. */
+function getPromptForTier(
+  pieceId: ArmorPiece,
+  tier: ArmorTier | PlatformerTier,
+): string {
+  const pieceDef = ARMOR_PIECES.find((p) => p.id === pieceId)
+  if (!pieceDef) return ''
+  switch (tier) {
+    case 'stone':    return pieceDef.lincolnStonePrompt
+    case 'diamond':  return pieceDef.lincolnDiamondPrompt
+    case 'netherite': return pieceDef.lincolnNetheritePrompt
+    case 'basic':    return pieceDef.londonBasicPrompt
+    case 'powerup':  return pieceDef.londonPowerupPrompt
+    case 'champion': return pieceDef.londonChampionPrompt
+  }
+}
+
+/** Migrate a profile from the old unlockedPieces/generatedImageUrls shape if needed. */
+function ensureNewProfileStructure(raw: Record<string, unknown>): AvatarProfile {
+  if (Array.isArray(raw.pieces)) return raw as unknown as AvatarProfile
+
+  // Legacy migration: convert unlockedPieces + generatedImageUrls → pieces
+  const unlockedPieces = (raw.unlockedPieces as ArmorPiece[] | undefined) ?? []
+  const generatedImageUrls = (raw.generatedImageUrls as Record<string, string> | undefined) ?? {}
+  const themeStyle = (raw.themeStyle as 'minecraft' | 'platformer') ?? 'minecraft'
+
+  const pieces: ArmorPieceProgress[] = unlockedPieces.map((id) => ({
+    pieceId: id,
+    unlockedTiers: themeStyle === 'minecraft' ? (['stone'] as ArmorTier[]) : [],
+    unlockedTiersPlatformer: themeStyle === 'platformer' ? (['basic'] as PlatformerTier[]) : undefined,
+    generatedImageUrls: {
+      [themeStyle === 'minecraft' ? 'stone' : 'basic']: generatedImageUrls[id],
+    },
+  }))
+
+  return {
+    childId: raw.childId as string,
+    themeStyle,
+    pieces,
+    currentTier: themeStyle === 'minecraft' ? 'stone' : 'basic',
+    baseCharacterUrl: (raw.starterImageUrl as string | undefined),
+    photoTransformUrl: (raw.photoTransformUrl as string | undefined),
+    totalXp: (raw.totalXp as number) ?? 0,
+    updatedAt: (raw.updatedAt as string) ?? new Date().toISOString(),
+  }
+}
+
+// ── Main export ──────────────────────────────────────────────────
+
+export interface ArmorUnlockResult {
+  /** Pieces newly unlocked at stone/basic tier */
+  newlyUnlockedPieces: ArmorPiece[]
+  /** Set if a full-set tier upgrade happened */
+  tierUpgrade?: {
+    from: ArmorTier | PlatformerTier
+    to: ArmorTier | PlatformerTier
+  }
+}
 
 /**
- * Reads the child's current totalXp (or uses the provided value),
- * checks ARMOR_PIECES thresholds, and unlocks any newly eligible pieces.
- * For each newly unlocked piece, triggers DALL-E generation and saves the URL.
+ * Checks whether new armor pieces should unlock based on the child's totalXp,
+ * and whether all 6 stone/basic pieces trigger a full-set tier upgrade.
  *
- * Returns the array of newly unlocked pieces (empty if none).
+ * - Unlocks stone/basic pieces individually as XP accumulates.
+ * - When all 6 have stone/basic: upgrades currentTier → diamond/powerup,
+ *   generates all 6 next-tier images.
+ * - When all 6 have diamond/powerup: upgrades → netherite/champion.
  */
 export async function checkAndUnlockArmor(
   familyId: string,
   childId: string,
   totalXp?: number,
-): Promise<ArmorPiece[]> {
-  if (!familyId || !childId) return []
+): Promise<ArmorUnlockResult> {
+  if (!familyId || !childId) return { newlyUnlockedPieces: [] }
 
-  // ── Read avatar profile ──────────────────────────────────────
   const profileRef = doc(avatarProfilesCollection(familyId), childId)
   const profileSnap = await getDoc(profileRef)
 
-  let profile: AvatarProfile
-  if (profileSnap.exists()) {
-    profile = profileSnap.data()
-  } else {
-    // No profile yet — nothing to unlock
-    return []
-  }
+  if (!profileSnap.exists()) return { newlyUnlockedPieces: [] }
 
+  const profile = ensureNewProfileStructure(
+    profileSnap.data() as unknown as Record<string, unknown>,
+  )
   const xp = totalXp ?? profile.totalXp ?? 0
-  const alreadyUnlocked = new Set(profile.unlockedPieces ?? [])
+  const { themeStyle } = profile
+  const pieces = [...profile.pieces]
 
-  // ── Find newly eligible pieces ───────────────────────────────
+  // ── Find newly eligible stone/basic pieces ───────────────────
   const newlyUnlocked: ArmorPiece[] = []
-  for (const piece of ARMOR_PIECES) {
-    if (xp >= piece.xpRequired && !alreadyUnlocked.has(piece.id)) {
-      newlyUnlocked.push(piece.id)
+  for (const pieceDef of ARMOR_PIECES) {
+    const existing = getPieceProgress(pieces, pieceDef.id)
+    if (!hasStoneTier(existing, themeStyle) && xp >= pieceDef.xpToUnlockStone) {
+      newlyUnlocked.push(pieceDef.id)
+      if (existing) {
+        // Add stone tier to existing entry
+        if (themeStyle === 'minecraft') {
+          existing.unlockedTiers = [...existing.unlockedTiers, 'stone']
+        } else {
+          existing.unlockedTiersPlatformer = [
+            ...(existing.unlockedTiersPlatformer ?? []),
+            'basic',
+          ]
+        }
+      } else {
+        // Create new entry
+        pieces.push({
+          pieceId: pieceDef.id,
+          unlockedTiers: themeStyle === 'minecraft' ? ['stone'] : [],
+          unlockedTiersPlatformer: themeStyle === 'platformer' ? ['basic'] : undefined,
+          generatedImageUrls: {},
+        })
+      }
     }
   }
 
-  if (newlyUnlocked.length === 0) return []
+  if (newlyUnlocked.length === 0 && !shouldUpgradeTier(pieces, themeStyle, profile.currentTier)) {
+    // No changes — update totalXp if needed
+    if (xp !== profile.totalXp) {
+      await setDoc(profileRef, { ...profile, pieces, totalXp: xp, updatedAt: new Date().toISOString() })
+    }
+    return { newlyUnlockedPieces: [] }
+  }
 
-  // ── Update unlockedPieces immediately (before image gen) ─────
-  const updatedPieces = [...profile.unlockedPieces, ...newlyUnlocked]
+  // ── Save immediately before async image gen ──────────────────
   await setDoc(profileRef, {
     ...profile,
-    unlockedPieces: updatedPieces,
+    pieces,
     totalXp: xp,
     updatedAt: new Date().toISOString(),
   })
 
-  // ── Generate images for newly unlocked pieces ────────────────
+  // ── Generate stone images for newly unlocked pieces ──────────
+  const fns = getFunctions(app)
+  const generateArmorPieceFn = httpsCallable<ArmorPieceGenRequest, ArmorPieceGenResponse>(
+    fns,
+    'generateArmorPiece',
+  )
+
+  const stoneTier: ArmorTier | PlatformerTier = themeStyle === 'minecraft' ? 'stone' : 'basic'
   for (const pieceId of newlyUnlocked) {
-    const pieceDef = ARMOR_PIECES.find((p) => p.id === pieceId)
-    if (!pieceDef) continue
-
-    const pieceDescription =
-      profile.themeStyle === 'minecraft'
-        ? pieceDef.lincolnDescription
-        : pieceDef.londonDescription
-
+    const prompt = getPromptForTier(pieceId, stoneTier)
     try {
-      const result = await generateAvatarImageFn({
+      const result = await generateArmorPieceFn({
         familyId,
         childId,
         pieceId,
-        themeStyle: profile.themeStyle,
-        pieceDescription,
+        tier: stoneTier,
+        themeStyle,
+        prompt,
       })
-
-      // Write image URL back to avatarProfile
-      const refreshedSnap = await getDoc(profileRef)
-      const refreshed = refreshedSnap.exists() ? refreshedSnap.data() : profile
+      const refreshed = await getDoc(profileRef)
+      const refreshedProfile = refreshed.exists()
+        ? ensureNewProfileStructure(refreshed.data() as unknown as Record<string, unknown>)
+        : profile
+      const updatedPieces = refreshedProfile.pieces.map((p) =>
+        p.pieceId === pieceId
+          ? {
+              ...p,
+              generatedImageUrls: {
+                ...p.generatedImageUrls,
+                [stoneTier]: result.data.url,
+              },
+            }
+          : p,
+      )
       await setDoc(profileRef, {
-        ...refreshed,
-        generatedImageUrls: {
-          ...(refreshed.generatedImageUrls ?? {}),
-          [pieceId]: result.data.url,
-        },
+        ...refreshedProfile,
+        pieces: updatedPieces,
         updatedAt: new Date().toISOString(),
       })
     } catch (err) {
-      console.warn(`Avatar image generation failed for ${pieceId}:`, err)
-      // Continue — piece is still unlocked, image can be regenerated later
+      console.warn(`Armor image generation failed for ${pieceId} (${stoneTier}):`, err)
     }
   }
 
-  return newlyUnlocked
+  // ── Check for tier upgrade ───────────────────────────────────
+  const latestSnap = await getDoc(profileRef)
+  const latestProfile = latestSnap.exists()
+    ? ensureNewProfileStructure(latestSnap.data() as unknown as Record<string, unknown>)
+    : { ...profile, pieces }
+
+  const upgradeResult = await performTierUpgradeIfEligible(
+    familyId,
+    childId,
+    latestProfile,
+    profileRef,
+    generateArmorPieceFn,
+  )
+
+  return { newlyUnlockedPieces: newlyUnlocked, tierUpgrade: upgradeResult }
+}
+
+// ── Tier upgrade helpers ─────────────────────────────────────────
+
+function shouldUpgradeTier(
+  pieces: ArmorPieceProgress[],
+  themeStyle: 'minecraft' | 'platformer',
+  currentTier: ArmorTier | PlatformerTier,
+): boolean {
+  if (pieces.length < ARMOR_PIECES.length) return false
+
+  if (currentTier === 'stone' || currentTier === 'basic') {
+    // All 6 have stone/basic → upgrade to diamond/powerup
+    return pieces.every((p) => hasStoneTier(p, themeStyle))
+  }
+  if (currentTier === 'diamond' || currentTier === 'powerup') {
+    // All 6 have diamond/powerup → upgrade to netherite/champion
+    return pieces.every((p) => hasDiamondTier(p, themeStyle))
+  }
+  return false
+}
+
+function getNextTier(
+  current: ArmorTier | PlatformerTier,
+): (ArmorTier | PlatformerTier) | null {
+  if (current === 'stone')    return 'diamond'
+  if (current === 'diamond')  return 'netherite'
+  if (current === 'basic')    return 'powerup'
+  if (current === 'powerup')  return 'champion'
+  return null
+}
+
+async function performTierUpgradeIfEligible(
+  familyId: string,
+  childId: string,
+  profile: AvatarProfile,
+  profileRef: ReturnType<typeof doc>,
+  generateFn: ReturnType<typeof httpsCallable<ArmorPieceGenRequest, ArmorPieceGenResponse>>,
+): Promise<ArmorUnlockResult['tierUpgrade']> {
+  if (!shouldUpgradeTier(profile.pieces, profile.themeStyle, profile.currentTier)) {
+    return undefined
+  }
+
+  const nextTier = getNextTier(profile.currentTier)
+  if (!nextTier) return undefined
+
+  // Update currentTier immediately
+  const updatedProfile = { ...profile, currentTier: nextTier, updatedAt: new Date().toISOString() }
+  await setDoc(profileRef, updatedProfile)
+
+  // Generate all 6 next-tier images in parallel
+  const generatePromises = ARMOR_PIECES.map(async (pieceDef) => {
+    const prompt = getPromptForTier(pieceDef.id, nextTier)
+    try {
+      const result = await generateFn({
+        familyId,
+        childId,
+        pieceId: pieceDef.id,
+        tier: nextTier,
+        themeStyle: profile.themeStyle,
+        prompt,
+      })
+      return { pieceId: pieceDef.id, url: result.data.url }
+    } catch (err) {
+      console.warn(`Tier upgrade image gen failed for ${pieceDef.id} (${nextTier}):`, err)
+      return null
+    }
+  })
+
+  const results = await Promise.all(generatePromises)
+
+  // Write all new image URLs
+  const finalSnap = await getDoc(profileRef)
+  const finalProfile = finalSnap.exists()
+    ? ensureNewProfileStructure(finalSnap.data() as unknown as Record<string, unknown>)
+    : updatedProfile
+
+  const updatedPieces = finalProfile.pieces.map((p) => {
+    const result = results.find((r) => r?.pieceId === p.pieceId)
+    if (!result) return p
+    return {
+      ...p,
+      unlockedTiers:
+        profile.themeStyle === 'minecraft'
+          ? [...p.unlockedTiers, nextTier as ArmorTier].filter(
+              (t, i, arr) => arr.indexOf(t) === i,
+            )
+          : p.unlockedTiers,
+      unlockedTiersPlatformer:
+        profile.themeStyle === 'platformer'
+          ? [...(p.unlockedTiersPlatformer ?? []), nextTier as PlatformerTier].filter(
+              (t, i, arr) => arr.indexOf(t) === i,
+            )
+          : p.unlockedTiersPlatformer,
+      generatedImageUrls: {
+        ...p.generatedImageUrls,
+        [nextTier]: result.url,
+      },
+    }
+  })
+
+  await setDoc(profileRef, {
+    ...finalProfile,
+    pieces: updatedPieces,
+    currentTier: nextTier,
+    updatedAt: new Date().toISOString(),
+  })
+
+  return { from: profile.currentTier, to: nextTier }
 }

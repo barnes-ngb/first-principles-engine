@@ -4,6 +4,7 @@ import LockIcon from '@mui/icons-material/Lock'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import type { ArmorPiece, AvatarProfile } from '../../core/types/domain'
 import { ARMOR_PIECES } from '../../core/types/domain'
+import { isPieceEarned } from './CharacterDisplay'
 
 interface ArmorPieceCardProps {
   pieceId: ArmorPiece
@@ -11,13 +12,20 @@ interface ArmorPieceCardProps {
   onTap: (pieceId: ArmorPiece) => void
 }
 
+function getPieceImageUrl(profile: AvatarProfile, pieceId: ArmorPiece): string | undefined {
+  const entry = profile.pieces.find((p) => p.pieceId === pieceId)
+  if (!entry) return undefined
+  const tier = profile.currentTier
+  return (entry.generatedImageUrls as Record<string, string | undefined>)[tier]
+}
+
 export default function ArmorPieceCard({ pieceId, profile, onTap }: ArmorPieceCardProps) {
   const pieceDef = ARMOR_PIECES.find((p) => p.id === pieceId)
   if (!pieceDef) return null
 
   const isLincoln = profile?.themeStyle === 'minecraft'
-  const isUnlocked = profile?.unlockedPieces.includes(pieceId) ?? false
-  const imageUrl = profile?.generatedImageUrls[pieceId]
+  const isUnlocked = profile ? isPieceEarned(profile, pieceId) : false
+  const imageUrl = profile ? getPieceImageUrl(profile, pieceId) : undefined
 
   const bgColor = isLincoln
     ? (isUnlocked ? 'rgba(78,160,78,0.15)' : 'rgba(0,0,0,0.5)')
@@ -57,13 +65,12 @@ export default function ArmorPieceCard({ pieceId, profile, onTap }: ArmorPieceCa
           sx={{
             width: '100%',
             aspectRatio: '1',
-            objectFit: 'cover',
+            objectFit: 'contain',
             borderRadius: isLincoln ? 0 : 2,
             imageRendering: isLincoln ? 'pixelated' : 'auto',
           }}
         />
       ) : isUnlocked ? (
-        // Unlocked but image still generating
         <Box
           sx={{
             width: '100%',
@@ -77,7 +84,6 @@ export default function ArmorPieceCard({ pieceId, profile, onTap }: ArmorPieceCa
           ✨
         </Box>
       ) : (
-        // Locked
         <Box
           sx={{
             display: 'flex',
@@ -96,7 +102,7 @@ export default function ArmorPieceCard({ pieceId, profile, onTap }: ArmorPieceCa
               textAlign: 'center',
             }}
           >
-            {pieceDef.xpRequired} XP
+            {pieceDef.xpToUnlockStone} XP
           </Typography>
         </Box>
       )}

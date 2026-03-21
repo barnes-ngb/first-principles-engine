@@ -13,7 +13,7 @@ import { checkAndUnlockArmor } from './checkAndUnlockArmor'
 function mapTypeToSource(type: keyof typeof XP_EVENTS): 'routines' | 'quests' | 'books' {
   if (type === 'QUEST_DIAMOND') return 'quests'
   if (type === 'BOOK_READ') return 'books'
-  return 'routines'
+  return 'routines'  // CHECKLIST_DAY_COMPLETE, EVALUATION_COMPLETE, ARMOR_DAILY_COMPLETE → routines
 }
 
 /**

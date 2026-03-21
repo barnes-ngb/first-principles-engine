@@ -13,10 +13,17 @@ interface ArmorPieceModalProps {
   onClose: () => void
 }
 
+function getPieceImageUrl(profile: AvatarProfile, pieceId: ArmorPiece): string | undefined {
+  const entry = profile.pieces.find((p) => p.pieceId === pieceId)
+  if (!entry) return undefined
+  const tier = profile.currentTier
+  return (entry.generatedImageUrls as Record<string, string | undefined>)[tier]
+}
+
 export default function ArmorPieceModal({ pieceId, profile, onClose }: ArmorPieceModalProps) {
   const pieceDef = pieceId ? ARMOR_PIECES.find((p) => p.id === pieceId) : null
   const isLincoln = profile?.themeStyle === 'minecraft'
-  const imageUrl = pieceId ? profile?.generatedImageUrls[pieceId] : undefined
+  const imageUrl = pieceId && profile ? getPieceImageUrl(profile, pieceId) : undefined
 
   const bgColor = isLincoln ? '#1a1a2e' : '#fff9f0'
   const textColor = isLincoln ? '#e0e0e0' : '#3d3d3d'
@@ -40,12 +47,7 @@ export default function ArmorPieceModal({ pieceId, profile, onClose }: ArmorPiec
       <DialogContent sx={{ p: 3, position: 'relative' }}>
         <IconButton
           onClick={onClose}
-          sx={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            color: textColor,
-          }}
+          sx={{ position: 'absolute', top: 8, right: 8, color: textColor }}
           size="small"
         >
           <CloseIcon />
@@ -53,7 +55,6 @@ export default function ArmorPieceModal({ pieceId, profile, onClose }: ArmorPiec
 
         {pieceDef && (
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-            {/* Image */}
             {imageUrl ? (
               <Box
                 component="img"
@@ -62,7 +63,7 @@ export default function ArmorPieceModal({ pieceId, profile, onClose }: ArmorPiec
                 sx={{
                   width: 200,
                   height: 200,
-                  objectFit: 'cover',
+                  objectFit: 'contain',
                   borderRadius: isLincoln ? 0 : 3,
                   imageRendering: isLincoln ? 'pixelated' : 'auto',
                   border: `2px solid ${accentColor}`,
@@ -85,7 +86,6 @@ export default function ArmorPieceModal({ pieceId, profile, onClose }: ArmorPiec
               </Box>
             )}
 
-            {/* Piece name */}
             <Typography
               variant="h6"
               sx={{
@@ -99,7 +99,6 @@ export default function ArmorPieceModal({ pieceId, profile, onClose }: ArmorPiec
               {pieceDef.name}
             </Typography>
 
-            {/* Scripture reference */}
             <Typography
               variant="caption"
               sx={{
@@ -111,7 +110,6 @@ export default function ArmorPieceModal({ pieceId, profile, onClose }: ArmorPiec
               {pieceDef.scripture}
             </Typography>
 
-            {/* Scripture text */}
             <Box
               sx={{
                 bgcolor: isLincoln ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
@@ -130,11 +128,10 @@ export default function ArmorPieceModal({ pieceId, profile, onClose }: ArmorPiec
                   lineHeight: 1.6,
                 }}
               >
-                "{pieceDef.scriptureText}"
+                "{pieceDef.verseText}"
               </Typography>
             </Box>
 
-            {/* Footer note */}
             <Typography
               variant="caption"
               sx={{

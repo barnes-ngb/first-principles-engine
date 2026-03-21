@@ -1,67 +1,43 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore'
+import { doc, onSnapshot, setDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import Box from '@mui/material/Box'
-import Button from '@mui/material/Button'
-import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
-import Dialog from '@mui/material/Dialog'
-import DialogActions from '@mui/material/DialogActions'
-import DialogContent from '@mui/material/DialogContent'
-import DialogContentText from '@mui/material/DialogContentText'
-import DialogTitle from '@mui/material/DialogTitle'
 import LinearProgress from '@mui/material/LinearProgress'
-import Stack from '@mui/material/Stack'
-import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
-import RefreshIcon from '@mui/icons-material/Refresh'
 
 import Page from '../../components/Page'
 import { app } from '../../core/firebase/firebase'
-import { avatarProfilesCollection } from '../../core/firebase/firestore'
+import { avatarProfilesCollection, dailyArmorSessionsCollection, dailyArmorSessionDocId } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { addXpEvent } from '../../core/xp/addXpEvent'
+import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
 import { ARMOR_PIECES } from '../../core/types/domain'
-import type { ArmorPiece, AvatarProfile } from '../../core/types/domain'
-import ArmorPieceCard from './ArmorPieceCard'
-import ArmorPieceModal from './ArmorPieceModal'
+import type { ArmorPiece, AvatarProfile, DailyArmorSession } from '../../core/types/domain'
+
+import ArmorPieceButton from './ArmorPieceButton'
+import CharacterDisplay, { isPieceEarned } from './CharacterDisplay'
+import TierUpgradeCelebration from './TierUpgradeCelebration'
 import UnlockCelebration from './UnlockCelebration'
+import VerseCard from './VerseCard'
 
-const LINCOLN_QUICK_PICKS = ['In a cave', 'Fighting a dragon', 'With a torch']
-const LONDON_QUICK_PICKS = ['In a flower field', 'Flying', 'With an animal friend']
+// ── Helpers ───────────────────────────────────────────────────────
 
-/** Resize an image file to max 1024x1024 and return base64 + mimeType */
-async function resizeImageToBase64(
-  file: File,
-  maxDimension = 1024,
-): Promise<{ base64: string; mimeType: string }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    const url = URL.createObjectURL(file)
-    img.onload = () => {
-      const { width, height } = img
-      const scale = Math.min(1, maxDimension / Math.max(width, height))
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(width * scale)
-      canvas.height = Math.round(height * scale)
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return reject(new Error('Canvas context unavailable'))
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      URL.revokeObjectURL(url)
-      const mimeType = 'image/png'
-      const dataUrl = canvas.toDataURL(mimeType)
-      const base64 = dataUrl.split(',')[1] ?? ''
-      resolve({ base64, mimeType })
-    }
-    img.onerror = () => {
-      URL.revokeObjectURL(url)
-      reject(new Error('Failed to load image'))
-    }
-    img.src = url
-  })
+function getEarnedPieces(profile: AvatarProfile): ArmorPiece[] {
+  return ARMOR_PIECES.filter((p) => isPieceEarned(profile, p.id)).map((p) => p.id)
 }
+
+function getNextUnlockPiece(profile: AvatarProfile): { id: ArmorPiece; xpNeeded: number } | null {
+  const allEarned = new Set(getEarnedPieces(profile))
+  const next = ARMOR_PIECES.find((p) => !allEarned.has(p.id))
+  if (!next) return null
+  return { id: next.id, xpNeeded: Math.max(next.xpToUnlockStone - profile.totalXp, 0) }
+}
+
+
+// ── Component ─────────────────────────────────────────────────────
 
 export default function MyAvatarPage() {
   const familyId = useFamilyId()
@@ -70,74 +46,72 @@ export default function MyAvatarPage() {
   const isLincoln = activeChild?.name?.toLowerCase() === 'lincoln'
 
   const [profile, setProfile] = useState<AvatarProfile | null>(null)
+  const [session, setSession] = useState<DailyArmorSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedPiece, setSelectedPiece] = useState<ArmorPiece | null>(null)
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
-  const [customPrompt, setCustomPrompt] = useState('')
-  const [generating, setGenerating] = useState(false)
+  const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
+  const [baseCharGenerating, setBaseCharGenerating] = useState(false)
 
-  // Starter image state
-  const [starterGenerating, setStarterGenerating] = useState(false)
+  // Track previous state to detect changes
+  const prevPiecesCountRef = useRef(0)
+  const prevTierRef = useRef<string | null>(null)
+  const today = getTodayDateString()
 
-  // Photo transform state
-  const [photoFile, setPhotoFile] = useState<File | null>(null)
-  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null)
-  const [transforming, setTransforming] = useState(false)
-  const [transformError, setTransformError] = useState<string | null>(null)
-  const [changeAvatarOpen, setChangeAvatarOpen] = useState(false)
-
-  // Track previous unlockedPieces count to detect new unlocks
-  const prevUnlockedCountRef = useRef(0)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // ── Theme styles ────────────────────────────────────────────────
-  const bgColor = isLincoln ? '#1a1a2e' : '#faf5ef'
+  // Theme
+  const bgColor = isLincoln ? '#0d1117' : '#faf5ef'
   const textColor = isLincoln ? '#e0e0e0' : '#3d3d3d'
   const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
-  // ── Ensure avatar profile exists ────────────────────────────────
+  // ── Ensure avatar profile exists ──────────────────────────────
   useEffect(() => {
     if (!familyId || !childId) return
-
     const profileRef = doc(avatarProfilesCollection(familyId), childId)
-
     const ensureProfile = async () => {
+      const { getDoc } = await import('firebase/firestore')
       const snap = await getDoc(profileRef)
       if (!snap.exists()) {
-        await setDoc(profileRef, {
+        const newProfile: AvatarProfile = {
           childId,
           themeStyle: isLincoln ? 'minecraft' : 'platformer',
-          unlockedPieces: [],
-          generatedImageUrls: {},
+          pieces: [],
+          currentTier: isLincoln ? 'stone' : 'basic',
           totalXp: 0,
           updatedAt: new Date().toISOString(),
-        } satisfies AvatarProfile)
+        }
+        await setDoc(profileRef, newProfile)
       }
     }
     void ensureProfile()
   }, [familyId, childId, isLincoln])
 
-  // ── Real-time listener for avatar profile ───────────────────────
+  // ── Real-time profile listener ─────────────────────────────────
   useEffect(() => {
     if (!familyId || !childId) return
-
     setLoading(true)
     const profileRef = doc(avatarProfilesCollection(familyId), childId)
     const unsub = onSnapshot(
       profileRef,
       (snap) => {
         if (snap.exists()) {
-          const data = snap.data()
+          const data = snap.data() as AvatarProfile
           setProfile(data)
 
-          // Detect new unlock for celebration
-          const count = data.unlockedPieces?.length ?? 0
-          if (count > prevUnlockedCountRef.current && prevUnlockedCountRef.current > 0) {
-            const newPiece = data.unlockedPieces[count - 1]
+          // Detect new stone unlock
+          const earnedCount = getEarnedPieces(data).length
+          if (earnedCount > prevPiecesCountRef.current && prevPiecesCountRef.current > 0) {
+            const earned = getEarnedPieces(data)
+            const newPiece = earned[earned.length - 1]
             setCelebrationPiece(newPiece)
           }
-          prevUnlockedCountRef.current = count
+          prevPiecesCountRef.current = earnedCount
+
+          // Detect tier upgrade
+          if (prevTierRef.current && data.currentTier !== prevTierRef.current) {
+            setTierCelebration({ from: prevTierRef.current, to: data.currentTier })
+          }
+          prevTierRef.current = data.currentTier
         }
         setLoading(false)
       },
@@ -146,165 +120,109 @@ export default function MyAvatarPage() {
     return unsub
   }, [familyId, childId])
 
-  // ── Generate starter image on first load if missing ─────────────
+  // ── Real-time session listener ─────────────────────────────────
+  useEffect(() => {
+    if (!familyId || !childId) return
+    const docId = dailyArmorSessionDocId(childId, today)
+    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+
+    const unsub = onSnapshot(sessionRef, async (snap) => {
+      if (snap.exists()) {
+        setSession(snap.data())
+      } else {
+        // Create fresh session for today
+        const newSession: DailyArmorSession = {
+          familyId,
+          childId,
+          date: today,
+          appliedPieces: [],
+        }
+        await setDoc(sessionRef, newSession)
+        setSession(newSession)
+      }
+    })
+    return unsub
+  }, [familyId, childId, today])
+
+  // ── Generate base character on first visit ─────────────────────
   useEffect(() => {
     if (!profile || !familyId || !childId) return
-    if (profile.starterImageUrl) return  // already cached
-    if (starterGenerating) return
+    if (profile.baseCharacterUrl) return   // already generated
+    if (baseCharGenerating) return
 
-    setStarterGenerating(true)
+    setBaseCharGenerating(true)
     const fns = getFunctions(app)
-    const generateStarterAvatarFn = httpsCallable<
+    const generateBaseCharacterFn = httpsCallable<
       { familyId: string; childId: string; themeStyle: string },
       { url: string }
-    >(fns, 'generateStarterAvatar')
+    >(fns, 'generateBaseCharacter')
 
-    generateStarterAvatarFn({ familyId, childId, themeStyle: profile.themeStyle })
+    generateBaseCharacterFn({ familyId, childId, themeStyle: profile.themeStyle })
       .then(async (result) => {
         const profileRef = doc(avatarProfilesCollection(familyId), childId)
+        const { getDoc } = await import('firebase/firestore')
+        const snap = await getDoc(profileRef)
+        const current = snap.exists() ? snap.data() as AvatarProfile : profile
         await setDoc(profileRef, {
-          ...profile,
-          starterImageUrl: result.data.url,
+          ...current,
+          baseCharacterUrl: result.data.url,
           updatedAt: new Date().toISOString(),
         })
       })
       .catch((err) => {
-        console.error('Starter avatar generation failed:', err)
+        console.error('Base character generation failed:', err)
       })
       .finally(() => {
-        setStarterGenerating(false)
+        setBaseCharGenerating(false)
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.childId, profile?.starterImageUrl])
+  }, [profile?.childId, profile?.baseCharacterUrl])
 
-  // ── XP progress toward next piece ───────────────────────────────
-  const nextPiece = ARMOR_PIECES.find((p) => !(profile?.unlockedPieces ?? []).includes(p.id))
-  const allUnlocked = (profile?.unlockedPieces ?? []).length === ARMOR_PIECES.length
-  const totalXp = profile?.totalXp ?? 0
-  const progressPercent = nextPiece
-    ? Math.min((totalXp / nextPiece.xpRequired) * 100, 100)
-    : 100
-  const xpToNext = nextPiece ? Math.max(nextPiece.xpRequired - totalXp, 0) : 0
+  // ── Apply a piece ──────────────────────────────────────────────
+  const handleApplyPiece = useCallback(
+    async (pieceId: ArmorPiece) => {
+      if (!profile || !familyId || !childId || !session) return
+      if (session.appliedPieces.includes(pieceId)) return
 
-  // ── Hero image priority: photoTransform > lastUnlockedPiece > starter ──
-  const lastUnlockedId =
-    (profile?.unlockedPieces.length ?? 0) > 0
-      ? profile!.unlockedPieces[profile!.unlockedPieces.length - 1]
-      : null
+      setSelectedPiece(null)
 
-  const heroImageUrl =
-    profile?.photoTransformUrl ??
-    (lastUnlockedId ? profile?.generatedImageUrls[lastUnlockedId] : undefined)
+      const updatedApplied = [...session.appliedPieces, pieceId]
+      const docId = dailyArmorSessionDocId(childId, today)
+      const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
 
-  const showPhotoTransformBadge = !!profile?.photoTransformUrl
+      const earnedPieces = getEarnedPieces(profile)
+      const allApplied = earnedPieces.every((p) => updatedApplied.includes(p))
 
-  // ── Custom avatar generation ─────────────────────────────────────
-  const handleGenerateCustom = useCallback(async () => {
-    if (!profile || !familyId || !childId || !customPrompt.trim()) return
-    setGenerating(true)
-    try {
-      const fns = getFunctions(app)
-      const generateAvatarImageFn = httpsCallable<
-        { familyId: string; childId: string; pieceId: string; themeStyle: string; pieceDescription: string },
-        { url: string }
-      >(fns, 'generateAvatarPiece')
-
-      const result = await generateAvatarImageFn({
-        familyId,
-        childId,
-        pieceId: 'custom',
-        themeStyle: profile.themeStyle,
-        pieceDescription: customPrompt.trim(),
+      await setDoc(sessionRef, {
+        ...session,
+        appliedPieces: updatedApplied,
+        ...(allApplied ? { completedAt: new Date().toISOString() } : {}),
       })
 
-      const profileRef = doc(avatarProfilesCollection(familyId), childId)
-      await setDoc(profileRef, {
-        ...profile,
-        customAvatarUrl: result.data.url,
-        updatedAt: new Date().toISOString(),
-      })
-    } catch (err) {
-      console.error('Custom avatar generation failed:', err)
-    } finally {
-      setGenerating(false)
-    }
-  }, [profile, familyId, childId, customPrompt])
-
-  // ── Photo file selection ─────────────────────────────────────────
-  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setPhotoFile(file)
-    setTransformError(null)
-    const url = URL.createObjectURL(file)
-    setPhotoPreviewUrl(url)
-  }
-
-  // ── Photo transform ──────────────────────────────────────────────
-  const handleTransform = useCallback(async () => {
-    if (!profile || !familyId || !childId || !photoFile) return
-    setTransforming(true)
-    setTransformError(null)
-    try {
-      const { base64, mimeType } = await resizeImageToBase64(photoFile)
-      const fns = getFunctions(app)
-      const transformFn = httpsCallable<
-        { familyId: string; childId: string; themeStyle: string; photoBase64: string; photoMimeType: string },
-        { url: string }
-      >(fns, 'transformAvatarPhoto', { timeout: 120000 })
-
-      const result = await transformFn({
-        familyId,
-        childId,
-        themeStyle: profile.themeStyle,
-        photoBase64: base64,
-        photoMimeType: mimeType,
-      })
-
-      const profileRef = doc(avatarProfilesCollection(familyId), childId)
-      await setDoc(profileRef, {
-        ...profile,
-        photoTransformUrl: result.data.url,
-        updatedAt: new Date().toISOString(),
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.toLowerCase().includes("couldn't transform")) {
-        setTransformError(msg)
-      } else {
-        setTransformError("Something went wrong. Try a different photo!")
+      // Award ARMOR_DAILY_COMPLETE XP once per day when all earned pieces applied
+      if (allApplied && familyId && childId) {
+        void addXpEvent(
+          familyId,
+          childId,
+          'ARMOR_DAILY_COMPLETE',
+          5,
+          `armor_daily_${today}`,
+        )
       }
-      console.error('Photo transform failed:', err)
-    } finally {
-      setTransforming(false)
-    }
-  }, [profile, familyId, childId, photoFile])
+    },
+    [profile, familyId, childId, session, today],
+  )
 
-  // ── Use transformed photo as avatar ─────────────────────────────
-  const handleUseAsAvatar = useCallback(async (url: string) => {
-    if (!profile || !familyId || !childId) return
-    const profileRef = doc(avatarProfilesCollection(familyId), childId)
-    await setDoc(profileRef, {
-      ...profile,
-      photoTransformUrl: url,
-      updatedAt: new Date().toISOString(),
-    })
-  }, [profile, familyId, childId])
+  // ── Computed values ────────────────────────────────────────────
+  const appliedPieces = session?.appliedPieces ?? []
+  const earnedPieces = profile ? getEarnedPieces(profile) : []
+  const allEarnedApplied = earnedPieces.length > 0 && earnedPieces.every((p) => appliedPieces.includes(p))
+  const nextUnlock = profile ? getNextUnlockPiece(profile) : null
+  const allSixEarned = earnedPieces.length === ARMOR_PIECES.length
 
-  // ── Remove photo transform (revert to armor/starter) ────────────
-  const handleChangeAvatar = useCallback(async () => {
-    if (!profile || !familyId || !childId) return
-    const profileRef = doc(avatarProfilesCollection(familyId), childId)
-    await setDoc(profileRef, {
-      ...profile,
-      photoTransformUrl: undefined,
-      updatedAt: new Date().toISOString(),
-    })
-    setChangeAvatarOpen(false)
-    setPhotoFile(null)
-    setPhotoPreviewUrl(null)
-    setTransformError(null)
-  }, [profile, familyId, childId])
+  const xpProgress = nextUnlock && profile
+    ? Math.min((profile.totalXp / ARMOR_PIECES.find((p) => p.id === nextUnlock.id)!.xpToUnlockStone) * 100, 100)
+    : 100
 
   if (loading) {
     return (
@@ -314,592 +232,198 @@ export default function MyAvatarPage() {
     )
   }
 
+  if (!profile) return null
+
   return (
-    <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 6 }}>
+    <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 8 }}>
       <Page>
-        {/* ── 1. Hero Section ─────────────────────────────────────── */}
-        <Box sx={{ textAlign: 'center', py: 3 }}>
+        {/* ── Header ────────────────────────────────────────────── */}
+        <Box sx={{ textAlign: 'center', pt: 2, pb: 1 }}>
           <Typography
-            variant="h4"
+            variant="h5"
             sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.8rem' : '2rem',
+              fontSize: isLincoln ? '0.7rem' : '1.8rem',
               fontWeight: 700,
               color: accentColor,
-              mb: 2,
             }}
           >
             {isLincoln ? '⚔️ My Armor' : '✨ My Armor of God'}
           </Typography>
-
-          {/* Hero image: photoTransform > lastUnlocked > starter > placeholder */}
-          <Box sx={{ position: 'relative', display: 'inline-block' }}>
-            {heroImageUrl ? (
-              <Box
-                component="img"
-                src={heroImageUrl}
-                alt="Your character"
-                sx={{
-                  width: 200,
-                  height: 200,
-                  objectFit: 'cover',
-                  borderRadius: isLincoln ? 0 : 4,
-                  border: `4px solid ${accentColor}`,
-                  imageRendering: isLincoln ? 'pixelated' : 'auto',
-                  mx: 'auto',
-                  display: 'block',
-                }}
-              />
-            ) : starterGenerating ? (
-              <Box
-                sx={{
-                  width: 200,
-                  height: 200,
-                  mx: 'auto',
-                  borderRadius: isLincoln ? 0 : 4,
-                  border: `4px solid ${accentColor}`,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 1,
-                  bgcolor: isLincoln ? 'rgba(126,252,32,0.05)' : 'rgba(232,160,191,0.1)',
-                }}
-              >
-                <CircularProgress size={32} sx={{ color: accentColor }} />
-                <Typography
-                  variant="caption"
-                  sx={{
-                    color: isLincoln ? '#aaa' : '#999',
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.3rem' : '0.65rem',
-                    textAlign: 'center',
-                    px: 1,
-                  }}
-                >
-                  Creating your character...
-                </Typography>
-              </Box>
-            ) : profile?.starterImageUrl ? (
-              <Box
-                component="img"
-                src={profile.starterImageUrl}
-                alt="Your starter character"
-                sx={{
-                  width: 200,
-                  height: 200,
-                  objectFit: 'cover',
-                  borderRadius: isLincoln ? 0 : 4,
-                  border: `4px dashed ${accentColor}`,
-                  imageRendering: isLincoln ? 'pixelated' : 'auto',
-                  mx: 'auto',
-                  display: 'block',
-                  opacity: 0.85,
-                }}
-              />
-            ) : (
-              <Box
-                sx={{
-                  width: 200,
-                  height: 200,
-                  mx: 'auto',
-                  borderRadius: isLincoln ? 0 : 4,
-                  border: `4px dashed ${accentColor}`,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 1,
-                }}
-              >
-                <Typography sx={{ fontSize: '3rem' }}>🛡️</Typography>
-                <Typography
-                  variant="caption"
-                  sx={{
-                    color: isLincoln ? '#666' : '#aaa',
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.38rem' : '0.7rem',
-                    textAlign: 'center',
-                    px: 2,
-                  }}
-                >
-                  Earn XP to unlock your first piece!
-                </Typography>
-              </Box>
-            )}
-
-            {/* Photo transform badge + change button */}
-            {showPhotoTransformBadge && (
-              <Box
-                sx={{
-                  position: 'absolute',
-                  bottom: 4,
-                  right: 4,
-                  display: 'flex',
-                  gap: 0.5,
-                  alignItems: 'center',
-                }}
-              >
-                <Box
-                  sx={{
-                    bgcolor: isLincoln ? '#333' : '#fff8',
-                    borderRadius: 1,
-                    px: 0.75,
-                    py: 0.25,
-                  }}
-                >
-                  <Typography
-                    sx={{
-                      fontSize: '0.55rem',
-                      fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                      color: accentColor,
-                    }}
-                  >
-                    Generated
-                  </Typography>
-                </Box>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => setChangeAvatarOpen(true)}
-                  sx={{
-                    minWidth: 0,
-                    px: 0.75,
-                    py: 0.25,
-                    fontSize: '0.55rem',
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    borderColor: accentColor,
-                    color: accentColor,
-                    lineHeight: 1.2,
-                    borderRadius: isLincoln ? 0 : 1,
-                  }}
-                >
-                  Change
-                </Button>
-              </Box>
-            )}
-          </Box>
-
           <Typography
             sx={{
-              mt: 2,
-              fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-              fontSize: isLincoln ? '0.5rem' : '1.1rem',
-              color: textColor,
+              mt: 0.5,
+              fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+              fontSize: isLincoln ? '0.4rem' : '0.85rem',
+              color: isLincoln ? '#666' : '#999',
             }}
           >
-            {activeChild?.name} — {totalXp} XP
+            {activeChild?.name} — {profile.totalXp} XP • {profile.currentTier.toUpperCase()} tier
           </Typography>
         </Box>
 
-        {/* ── 2. XP Progress Bar ────────────────────────────────────── */}
-        <Box sx={{ mb: 3, px: 1 }}>
-          {allUnlocked ? (
+        {/* ── Character Display (60% of screen) ─────────────────── */}
+        <Box sx={{ mb: 1.5 }}>
+          <CharacterDisplay
+            profile={profile}
+            appliedPieces={appliedPieces}
+            height="55vw"
+          />
+        </Box>
+
+        {/* All applied celebration */}
+        {allEarnedApplied && (
+          <Box
+            sx={{
+              textAlign: 'center',
+              py: 1,
+              mb: 1,
+              animation: 'fullArmorPop 0.4s ease-out',
+              '@keyframes fullArmorPop': {
+                from: { transform: 'scale(0.9)', opacity: 0 },
+                to: { transform: 'scale(1)', opacity: 1 },
+              },
+            }}
+          >
+            <Typography
+              sx={{
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '0.55rem' : '1rem',
+                fontWeight: 700,
+                color: accentColor,
+              }}
+            >
+              {isLincoln ? '⚔️ Full armor on! Ready for today!' : '✨ Full armor on! You\'re ready!'}
+            </Typography>
+          </Box>
+        )}
+
+        {/* ── XP Progress (compact) ──────────────────────────────── */}
+        <Box sx={{ mb: 2, px: 1 }}>
+          {!allSixEarned && nextUnlock ? (
+            <>
+              <Typography
+                variant="caption"
+                sx={{
+                  display: 'block',
+                  mb: 0.5,
+                  color: isLincoln ? '#888' : 'text.secondary',
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                  fontSize: isLincoln ? '0.32rem' : '0.72rem',
+                }}
+              >
+                Next: {ARMOR_PIECES.find((p) => p.id === nextUnlock.id)?.name} — {nextUnlock.xpNeeded} XP away
+              </Typography>
+              <LinearProgress
+                variant="determinate"
+                value={xpProgress}
+                sx={{
+                  height: 8,
+                  borderRadius: isLincoln ? 0 : 4,
+                  bgcolor: isLincoln ? '#222' : '#eee',
+                  '& .MuiLinearProgress-bar': {
+                    bgcolor: accentColor,
+                    borderRadius: isLincoln ? 0 : 4,
+                  },
+                }}
+              />
+            </>
+          ) : allSixEarned ? (
             <Typography
               sx={{
                 textAlign: 'center',
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                fontSize: isLincoln ? '0.5rem' : '1rem',
+                fontSize: isLincoln ? '0.4rem' : '0.85rem',
                 color: accentColor,
                 fontWeight: 700,
               }}
             >
-              You have the full Armor of God! ⚔️
+              Full set! {profile.currentTier !== 'netherite' && profile.currentTier !== 'champion'
+                ? 'Tier upgrade coming soon ⬆️'
+                : 'Max tier reached! ⚔️'}
             </Typography>
-          ) : (profile?.unlockedPieces.length ?? 0) === 0 ? (
-            <Typography
-              variant="body2"
-              sx={{
-                textAlign: 'center',
-                color: isLincoln ? '#aaa' : 'text.secondary',
-                fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                fontSize: isLincoln ? '0.42rem' : '0.8rem',
-              }}
-            >
-              0 / 50 XP — Earn your first piece of armor!
-            </Typography>
-          ) : (
-            <>
-              <Typography
-                variant="body2"
-                sx={{
-                  mb: 1,
-                  color: isLincoln ? '#aaa' : 'text.secondary',
-                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                  fontSize: isLincoln ? '0.42rem' : '0.8rem',
-                }}
-              >
-                {xpToNext} more XP to unlock {nextPiece?.name}
-              </Typography>
-              <LinearProgress
-                variant="determinate"
-                value={progressPercent}
-                sx={{
-                  height: 12,
-                  borderRadius: isLincoln ? 0 : 6,
-                  bgcolor: isLincoln ? '#333' : '#eee',
-                  '& .MuiLinearProgress-bar': {
-                    bgcolor: accentColor,
-                    borderRadius: isLincoln ? 0 : 6,
-                  },
-                }}
-              />
-              <Typography
-                variant="caption"
-                sx={{
-                  mt: 0.5,
-                  display: 'block',
-                  color: isLincoln ? '#666' : 'text.disabled',
-                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                  fontSize: isLincoln ? '0.38rem' : '0.65rem',
-                }}
-              >
-                {totalXp} / {nextPiece?.xpRequired} XP
-              </Typography>
-            </>
-          )}
+          ) : null}
         </Box>
 
-        {/* ── 3. Armor Pieces Grid ─────────────────────────────────── */}
+        {/* ── Piece Selector Row ─────────────────────────────────── */}
         <Box
           sx={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: 1.5,
-            mb: 3,
+            overflowX: 'auto',
+            display: 'flex',
+            gap: 1,
+            pb: 1,
+            px: 0.5,
+            // Hide scrollbar visually but keep functional
+            scrollbarWidth: 'thin',
+            '&::-webkit-scrollbar': { height: 4 },
+            '&::-webkit-scrollbar-thumb': { bgcolor: isLincoln ? '#333' : '#ddd', borderRadius: 2 },
           }}
         >
-          {ARMOR_PIECES.map((piece) => (
-            <ArmorPieceCard
-              key={piece.id}
-              pieceId={piece.id}
+          {ARMOR_PIECES.map((pieceDef) => (
+            <ArmorPieceButton
+              key={pieceDef.id}
+              pieceId={pieceDef.id}
               profile={profile}
+              appliedToday={appliedPieces.includes(pieceDef.id)}
               onTap={setSelectedPiece}
             />
           ))}
         </Box>
 
-        {/* ── 4. Photo Transform Card ───────────────────────────────── */}
+        {/* ── Phase 2 Photo Transform Scaffold ──────────────────── */}
         <Box
           sx={{
-            mb: 3,
+            mt: 3,
             p: 2,
             borderRadius: isLincoln ? 0 : 3,
-            border: `2px solid ${isLincoln ? '#444' : '#ddd'}`,
-            bgcolor: isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+            border: `2px dashed ${isLincoln ? '#333' : '#ddd'}`,
+            bgcolor: isLincoln ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
+            opacity: 0.6,
           }}
         >
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-            <CameraAltIcon sx={{ color: accentColor, fontSize: 20 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CameraAltIcon sx={{ color: isLincoln ? '#555' : '#bbb', fontSize: 20 }} />
             <Typography
-              variant="h6"
               sx={{
-                fontFamily: titleFont,
-                fontSize: isLincoln ? '0.55rem' : '1rem',
-                color: accentColor,
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                fontSize: isLincoln ? '0.4rem' : '0.85rem',
+                color: isLincoln ? '#555' : '#bbb',
               }}
             >
-              Transform YOUR Photo
+              Transform YOUR Photo — Coming Soon
             </Typography>
-          </Stack>
-
-          <Typography
-            variant="body2"
-            sx={{
-              mb: 2,
-              color: isLincoln ? '#aaa' : 'text.secondary',
-              fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-              fontSize: isLincoln ? '0.38rem' : '0.8rem',
-            }}
-          >
-            Upload a photo of yourself and become your warrior!
-          </Typography>
-
-          {/* File picker */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            style={{ display: 'none' }}
-            onChange={handlePhotoSelect}
-          />
-          <Button
-            variant="outlined"
-            fullWidth
-            onClick={() => fileInputRef.current?.click()}
-            sx={{
-              mb: 2,
-              borderColor: accentColor,
-              color: accentColor,
-              borderRadius: isLincoln ? 0 : 2,
-              fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-              fontSize: isLincoln ? '0.4rem' : undefined,
-            }}
-          >
-            {photoFile ? 'Change Photo' : 'Upload a Photo'}
-          </Button>
-
-          {/* Photo preview */}
-          {photoPreviewUrl && (
-            <Box
-              component="img"
-              src={photoPreviewUrl}
-              alt="Your photo"
-              sx={{
-                width: 128,
-                height: 128,
-                objectFit: 'cover',
-                borderRadius: isLincoln ? 0 : 2,
-                border: `2px solid ${accentColor}`,
-                display: 'block',
-                mb: 2,
-              }}
-            />
-          )}
-
-          {/* Transform button */}
-          {photoFile && (
-            <Button
-              variant="contained"
-              fullWidth
-              onClick={handleTransform}
-              disabled={transforming}
-              sx={{
-                mb: 1,
-                bgcolor: accentColor,
-                color: isLincoln ? '#000' : '#fff',
-                fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                fontSize: isLincoln ? '0.4rem' : undefined,
-                '&:hover': { bgcolor: isLincoln ? '#5FC420' : '#d486a8' },
-                borderRadius: isLincoln ? 0 : 2,
-              }}
-            >
-              {transforming ? 'Transforming... this takes about 20 seconds' : 'Transform Me!'}
-            </Button>
-          )}
-
-          {transforming && (
-            <LinearProgress
-              sx={{
-                mb: 1,
-                borderRadius: 1,
-                bgcolor: isLincoln ? '#333' : '#eee',
-                '& .MuiLinearProgress-bar': { bgcolor: accentColor },
-              }}
-            />
-          )}
-
-          {/* Error */}
-          {transformError && (
-            <Typography
-              variant="body2"
-              sx={{
-                color: '#f44336',
-                fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                fontSize: isLincoln ? '0.38rem' : '0.8rem',
-                mb: 1,
-              }}
-            >
-              {transformError}
-            </Typography>
-          )}
-
-          {/* Result */}
-          {profile?.photoTransformUrl && !transforming && (
-            <Box sx={{ mt: 1 }}>
-              <Box
-                component="img"
-                src={profile.photoTransformUrl}
-                alt="Transformed character"
-                sx={{
-                  width: '100%',
-                  maxWidth: 256,
-                  borderRadius: isLincoln ? 0 : 3,
-                  border: `2px solid ${accentColor}`,
-                  imageRendering: isLincoln ? 'pixelated' : 'auto',
-                  display: 'block',
-                  mb: 1,
-                }}
-              />
-              <Stack direction="row" spacing={1}>
-                <Button
-                  variant="contained"
-                  size="small"
-                  onClick={() => void handleUseAsAvatar(profile.photoTransformUrl!)}
-                  sx={{
-                    bgcolor: accentColor,
-                    color: isLincoln ? '#000' : '#fff',
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.35rem' : undefined,
-                    borderRadius: isLincoln ? 0 : 2,
-                    '&:hover': { bgcolor: isLincoln ? '#5FC420' : '#d486a8' },
-                  }}
-                >
-                  Use as My Avatar
-                </Button>
-                {photoFile && (
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    startIcon={<RefreshIcon />}
-                    onClick={handleTransform}
-                    disabled={transforming}
-                    sx={{
-                      borderColor: accentColor,
-                      color: accentColor,
-                      fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                      fontSize: isLincoln ? '0.35rem' : undefined,
-                      borderRadius: isLincoln ? 0 : 2,
-                    }}
-                  >
-                    Try Again
-                  </Button>
-                )}
-              </Stack>
-            </Box>
-          )}
-        </Box>
-
-        {/* ── 5. Custom Avatar Section (all 6 unlocked) ─────────────── */}
-        {allUnlocked && profile && (
-          <Box
-            sx={{
-              mb: 3,
-              p: 2,
-              borderRadius: isLincoln ? 0 : 3,
-              border: `2px solid ${accentColor}`,
-              bgcolor: isLincoln ? 'rgba(126,252,32,0.05)' : 'rgba(232,160,191,0.1)',
-            }}
-          >
-            <Typography
-              variant="h6"
-              sx={{
-                fontFamily: titleFont,
-                fontSize: isLincoln ? '0.6rem' : '1.1rem',
-                color: accentColor,
-                mb: 1,
-              }}
-            >
-              Create Your Champion!
-            </Typography>
-
-            <Typography
-              variant="body2"
-              sx={{
-                mb: 2,
-                color: isLincoln ? '#aaa' : 'text.secondary',
-                fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                fontSize: isLincoln ? '0.4rem' : '0.875rem',
-              }}
-            >
-              Describe your ultimate warrior...
-            </Typography>
-
-            {/* Quick-pick chips */}
-            <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2, gap: 1 }}>
-              {(isLincoln ? LINCOLN_QUICK_PICKS : LONDON_QUICK_PICKS).map((pick) => (
-                <Chip
-                  key={pick}
-                  label={pick}
-                  size="small"
-                  onClick={() => setCustomPrompt((prev) => prev ? `${prev}, ${pick}` : pick)}
-                  sx={{
-                    bgcolor: isLincoln ? '#333' : '#fce4ec',
-                    color: isLincoln ? '#7EFC20' : '#c2185b',
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.38rem' : undefined,
-                    cursor: 'pointer',
-                  }}
-                />
-              ))}
-            </Stack>
-
-            <TextField
-              fullWidth
-              multiline
-              rows={2}
-              placeholder={
-                isLincoln
-                  ? 'A warrior standing on a mountain...'
-                  : 'A princess in a flower field...'
-              }
-              value={customPrompt}
-              onChange={(e) => setCustomPrompt(e.target.value)}
-              size="small"
-              sx={{
-                mb: 2,
-                '& .MuiOutlinedInput-root': {
-                  bgcolor: isLincoln ? 'rgba(255,255,255,0.05)' : 'white',
-                  color: textColor,
-                },
-              }}
-            />
-
-            {profile.customAvatarUrl && (
-              <Box
-                component="img"
-                src={profile.customAvatarUrl}
-                alt="Your custom avatar"
-                sx={{
-                  width: '100%',
-                  maxWidth: 300,
-                  borderRadius: isLincoln ? 0 : 3,
-                  border: `2px solid ${accentColor}`,
-                  imageRendering: isLincoln ? 'pixelated' : 'auto',
-                  mb: 2,
-                  display: 'block',
-                }}
-              />
-            )}
-
-            <Button
-              variant="contained"
-              fullWidth
-              startIcon={<AutoAwesomeIcon />}
-              onClick={handleGenerateCustom}
-              disabled={generating || !customPrompt.trim()}
-              sx={{
-                bgcolor: accentColor,
-                color: isLincoln ? '#000' : '#fff',
-                fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                fontSize: isLincoln ? '0.45rem' : undefined,
-                '&:hover': { bgcolor: isLincoln ? '#5FC420' : '#d486a8' },
-                borderRadius: isLincoln ? 0 : 2,
-              }}
-            >
-              {generating ? 'Generating...' : 'Generate My Champion!'}
-            </Button>
           </Box>
-        )}
+          {/* Phase 2: Upload photo → gpt-image-1 image-to-image
+            * Transform into themeStyle character (pixel art blocky or platformer cute)
+            * Save to avatarProfile.photoTransformUrl
+            * Display as base character layer instead of generated baseCharacterUrl */}
+        </Box>
       </Page>
 
-      {/* ── Piece detail modal ────────────────────────────────────── */}
-      <ArmorPieceModal
+      {/* ── Verse Card modal ──────────────────────────────────── */}
+      <VerseCard
         pieceId={selectedPiece}
         profile={profile}
+        alreadyApplied={selectedPiece ? appliedPieces.includes(selectedPiece) : false}
+        onApply={handleApplyPiece}
         onClose={() => setSelectedPiece(null)}
       />
 
-      {/* ── Unlock celebration overlay ────────────────────────────── */}
+      {/* ── Single piece unlock celebration ──────────────────── */}
       <UnlockCelebration
         newPiece={celebrationPiece}
         profile={profile}
         onDismiss={() => setCelebrationPiece(null)}
       />
 
-      {/* ── Change avatar confirmation dialog ─────────────────────── */}
-      <Dialog open={changeAvatarOpen} onClose={() => setChangeAvatarOpen(false)}>
-        <DialogTitle>Change Avatar?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            This will remove your transformed photo and show your armor piece instead. You can always transform a new photo!
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setChangeAvatarOpen(false)}>Cancel</Button>
-          <Button onClick={() => void handleChangeAvatar()} color="error">Remove Photo</Button>
-        </DialogActions>
-      </Dialog>
+      {/* ── Full set tier upgrade celebration ────────────────── */}
+      <TierUpgradeCelebration
+        visible={Boolean(tierCelebration)}
+        fromTier={tierCelebration?.from ?? ''}
+        toTier={tierCelebration?.to ?? ''}
+        profile={profile}
+        onDismiss={() => setTierCelebration(null)}
+      />
     </Box>
   )
 }

@@ -14,6 +14,7 @@ import type {
   Book,
   Child,
   DadLabReport,
+  DailyArmorSession,
   DailyPlan,
   DayLog,
   Evaluation,
@@ -393,6 +394,18 @@ export const xpEventLogCollection = (
 /** Build a dedup doc ID for XP events. */
 export const xpEventLogDocId = (childId: string, dedupKey: string): string =>
   `${childId}_${dedupKey}`
+
+// ── Daily Armor Sessions ──────────────────────────────────────
+
+/** Daily armor session. Doc ID: {childId}-{YYYY-MM-DD} */
+export const dailyArmorSessionsCollection = (
+  familyId: string,
+): CollectionReference<DailyArmorSession> =>
+  collection(db, `families/${familyId}/dailyArmorSessions`) as CollectionReference<DailyArmorSession>
+
+/** Build doc ID for a daily armor session. */
+export const dailyArmorSessionDocId = (childId: string, date: string): string =>
+  `${childId}-${date}`
 
 // ── Evaluation Sessions (Diagnostic Assessment Chat) ──────────
 

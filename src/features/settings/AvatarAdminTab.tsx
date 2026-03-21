@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { doc, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore'
 import { getDocs, limit } from 'firebase/firestore'
+import { getFunctions, httpsCallable } from 'firebase/functions'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -19,16 +21,45 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import DeleteIcon from '@mui/icons-material/Delete'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
+import UpgradeIcon from '@mui/icons-material/Upgrade'
 
+import { app } from '../../core/firebase/firebase'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { avatarProfilesCollection, xpEventLogCollection } from '../../core/firebase/firestore'
+import {
+  avatarProfilesCollection,
+  dailyArmorSessionsCollection,
+  dailyArmorSessionDocId,
+  xpEventLogCollection,
+} from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
 import { ARMOR_PIECES } from '../../core/types/domain'
-import type { ArmorPiece, AvatarProfile, XpEventLogEntry } from '../../core/types/domain'
+import type {
+  ArmorPiece,
+  ArmorPieceProgress,
+  ArmorTier,
+  AvatarProfile,
+  DailyArmorSession,
+  PlatformerTier,
+  XpEventLogEntry,
+} from '../../core/types/domain'
 
-/** Recompute which armor pieces should be unlocked given totalXp. */
-function computeEligiblePieces(totalXp: number): ArmorPiece[] {
-  return ARMOR_PIECES.filter((p) => totalXp >= p.xpRequired).map((p) => p.id)
+// ── Helpers ──────────────────────────────────────────────────────
+
+function isPieceEarned(profile: AvatarProfile, pieceId: ArmorPiece): boolean {
+  const entry = profile.pieces.find((p) => p.pieceId === pieceId)
+  if (!entry) return false
+  if (profile.themeStyle === 'minecraft') return entry.unlockedTiers.length > 0
+  return (entry.unlockedTiersPlatformer ?? []).length > 0
+}
+
+const NEXT_TIER: Record<string, ArmorTier | PlatformerTier | null> = {
+  stone: 'diamond',
+  diamond: 'netherite',
+  netherite: null,
+  basic: 'powerup',
+  powerup: 'champion',
+  champion: null,
 }
 
 export default function AvatarAdminTab() {
@@ -36,13 +67,17 @@ export default function AvatarAdminTab() {
   const { children, activeChildId, setActiveChildId } = useActiveChild()
 
   const [profile, setProfile] = useState<AvatarProfile | null>(null)
+  const [todaySession, setTodaySession] = useState<DailyArmorSession | null>(null)
   const [recentEvents, setRecentEvents] = useState<XpEventLogEntry[]>([])
   const [xpAmount, setXpAmount] = useState(10)
   const [feedback, setFeedback] = useState<{ severity: 'success' | 'error'; message: string } | null>(null)
+  const [upgrading, setUpgrading] = useState(false)
 
   // Confirmation dialogs
   const [deletePiece, setDeletePiece] = useState<ArmorPiece | null>(null)
   const [resetOpen, setResetOpen] = useState(false)
+
+  const today = getTodayDateString()
 
   // ── Listen to profile ──────────────────────────────────────────
   useEffect(() => {
@@ -54,7 +89,18 @@ export default function AvatarAdminTab() {
     return unsub
   }, [familyId, activeChildId])
 
-  // ── Listen to recent XP events ─────────────────────────────────
+  // ── Listen to today's session ─────────────────────────────────
+  useEffect(() => {
+    if (!familyId || !activeChildId) return
+    const docId = dailyArmorSessionDocId(activeChildId, today)
+    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+    const unsub = onSnapshot(sessionRef, (snap) => {
+      setTodaySession(snap.exists() ? snap.data() : null)
+    })
+    return unsub
+  }, [familyId, activeChildId, today])
+
+  // ── Listen to recent XP events ────────────────────────────────
   useEffect(() => {
     if (!familyId || !activeChildId) return
     const q = query(
@@ -69,18 +115,37 @@ export default function AvatarAdminTab() {
     return unsub
   }, [familyId, activeChildId])
 
-  // ── Adjust XP ──────────────────────────────────────────────────
+  // ── Adjust XP ─────────────────────────────────────────────────
   const handleAdjustXp = useCallback(
     async (delta: number) => {
       if (!profile || !familyId || !activeChildId) return
       const newXp = Math.max(0, profile.totalXp + delta)
 
-      // Recompute unlocked pieces
-      const eligible = computeEligiblePieces(newXp)
-      const updatedUnlocked = profile.unlockedPieces.filter((p) => eligible.includes(p))
-      // Add any newly eligible pieces
-      for (const p of eligible) {
-        if (!updatedUnlocked.includes(p)) updatedUnlocked.push(p)
+      // Recompute unlocked pieces — add newly eligible stone pieces
+      const updatedPieces: ArmorPieceProgress[] = [...profile.pieces]
+      for (const pieceDef of ARMOR_PIECES) {
+        const existing = updatedPieces.find((p) => p.pieceId === pieceDef.id)
+        const alreadyEarned = existing && (
+          profile.themeStyle === 'minecraft'
+            ? existing.unlockedTiers.length > 0
+            : (existing.unlockedTiersPlatformer ?? []).length > 0
+        )
+        if (!alreadyEarned && newXp >= pieceDef.xpToUnlockStone) {
+          if (existing) {
+            if (profile.themeStyle === 'minecraft') {
+              existing.unlockedTiers = [...existing.unlockedTiers, 'stone']
+            } else {
+              existing.unlockedTiersPlatformer = [...(existing.unlockedTiersPlatformer ?? []), 'basic']
+            }
+          } else {
+            updatedPieces.push({
+              pieceId: pieceDef.id,
+              unlockedTiers: profile.themeStyle === 'minecraft' ? ['stone'] : [],
+              unlockedTiersPlatformer: profile.themeStyle === 'platformer' ? ['basic'] : undefined,
+              generatedImageUrls: {},
+            })
+          }
+        }
       }
 
       const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
@@ -88,11 +153,10 @@ export default function AvatarAdminTab() {
         await setDoc(profileRef, {
           ...profile,
           totalXp: newXp,
-          unlockedPieces: updatedUnlocked,
+          pieces: updatedPieces,
           updatedAt: new Date().toISOString(),
         })
 
-        // Log XP event
         const eventRef = doc(xpEventLogCollection(familyId), `${activeChildId}_admin_${Date.now()}`)
         await setDoc(eventRef, {
           childId: activeChildId,
@@ -112,19 +176,124 @@ export default function AvatarAdminTab() {
     [profile, familyId, activeChildId],
   )
 
-  // ── Delete a piece ─────────────────────────────────────────────
+  // ── Force tier upgrade (testing) ──────────────────────────────
+  const handleForceTierUpgrade = useCallback(async () => {
+    if (!profile || !familyId || !activeChildId) return
+    const nextTier = NEXT_TIER[profile.currentTier]
+    if (!nextTier) {
+      setFeedback({ severity: 'error', message: 'Already at max tier.' })
+      return
+    }
+
+    setUpgrading(true)
+    try {
+      const fns = getFunctions(app)
+      const generateArmorPieceFn = httpsCallable<
+        { familyId: string; childId: string; pieceId: string; tier: string; themeStyle: string; prompt: string },
+        { url: string }
+      >(fns, 'generateArmorPiece')
+
+      const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
+
+      // Make sure all 6 pieces exist with the stone/basic tier
+      let updatedPieces = [...profile.pieces]
+      const themeStyle = profile.themeStyle
+      for (const pieceDef of ARMOR_PIECES) {
+        const existing = updatedPieces.find((p) => p.pieceId === pieceDef.id)
+        if (!existing) {
+          updatedPieces.push({
+            pieceId: pieceDef.id,
+            unlockedTiers: themeStyle === 'minecraft' ? ['stone'] : [],
+            unlockedTiersPlatformer: themeStyle === 'platformer' ? ['basic'] : undefined,
+            generatedImageUrls: {},
+          })
+        } else {
+          if (themeStyle === 'minecraft' && !existing.unlockedTiers.includes('stone')) {
+            existing.unlockedTiers = [...existing.unlockedTiers, 'stone']
+          }
+          if (themeStyle === 'platformer' && !(existing.unlockedTiersPlatformer ?? []).includes('basic')) {
+            existing.unlockedTiersPlatformer = [...(existing.unlockedTiersPlatformer ?? []), 'basic']
+          }
+        }
+      }
+
+      // Update tier
+      await setDoc(profileRef, {
+        ...profile,
+        pieces: updatedPieces,
+        currentTier: nextTier,
+        updatedAt: new Date().toISOString(),
+      })
+
+      // Generate images for the new tier in parallel
+      const TIER_PROMPTS: Record<string, Record<string, string>> = {
+        minecraft: {
+          diamond: 'lincolnDiamondPrompt',
+          netherite: 'lincolnNetheritePrompt',
+        },
+        platformer: {
+          powerup: 'londonPowerupPrompt',
+          champion: 'londonChampionPrompt',
+        },
+      }
+
+      const promptKey = TIER_PROMPTS[themeStyle]?.[nextTier]
+      if (promptKey) {
+        await Promise.all(
+          ARMOR_PIECES.map(async (pieceDef) => {
+            const prompt = (pieceDef as unknown as Record<string, string>)[promptKey] ?? ''
+            try {
+              const result = await generateArmorPieceFn({
+                familyId,
+                childId: activeChildId,
+                pieceId: pieceDef.id,
+                tier: nextTier,
+                themeStyle,
+                prompt,
+              })
+              // Write image URL
+              const snap = await (await import('firebase/firestore')).getDoc(profileRef)
+              const current = snap.exists() ? snap.data() as AvatarProfile : profile
+              const newPieces = current.pieces.map((p) =>
+                p.pieceId === pieceDef.id
+                  ? {
+                      ...p,
+                      unlockedTiers: themeStyle === 'minecraft'
+                        ? [...new Set([...p.unlockedTiers, nextTier as ArmorTier])]
+                        : p.unlockedTiers,
+                      unlockedTiersPlatformer: themeStyle === 'platformer'
+                        ? [...new Set([...(p.unlockedTiersPlatformer ?? []), nextTier as PlatformerTier])]
+                        : p.unlockedTiersPlatformer,
+                      generatedImageUrls: { ...p.generatedImageUrls, [nextTier]: result.data.url },
+                    }
+                  : p,
+              )
+              await setDoc(profileRef, { ...current, pieces: newPieces, updatedAt: new Date().toISOString() })
+            } catch (err) {
+              console.warn(`Force upgrade image gen failed for ${pieceDef.id}:`, err)
+            }
+          })
+        )
+      }
+
+      setFeedback({ severity: 'success', message: `Tier upgraded to ${nextTier}! Generating images...` })
+    } catch (err) {
+      console.error('Force tier upgrade failed:', err)
+      setFeedback({ severity: 'error', message: 'Force upgrade failed.' })
+    } finally {
+      setUpgrading(false)
+    }
+  }, [profile, familyId, activeChildId])
+
+  // ── Delete a piece ────────────────────────────────────────────
   const handleDeletePiece = useCallback(async () => {
     if (!profile || !familyId || !activeChildId || !deletePiece) return
     const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
 
-    const updatedUrls = { ...profile.generatedImageUrls }
-    delete updatedUrls[deletePiece]
-
     try {
       await setDoc(profileRef, {
         ...profile,
-        unlockedPieces: profile.unlockedPieces.filter((p) => p !== deletePiece),
-        generatedImageUrls: updatedUrls,
+        pieces: profile.pieces.filter((p) => p.pieceId !== deletePiece),
         updatedAt: new Date().toISOString(),
       })
       setFeedback({ severity: 'success', message: `Removed ${ARMOR_PIECES.find((p) => p.id === deletePiece)?.name ?? deletePiece}` })
@@ -136,13 +305,12 @@ export default function AvatarAdminTab() {
     }
   }, [profile, familyId, activeChildId, deletePiece])
 
-  // ── Reset avatar ───────────────────────────────────────────────
+  // ── Reset avatar ──────────────────────────────────────────────
   const handleReset = useCallback(async () => {
     if (!profile || !familyId || !activeChildId) return
     const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
 
     try {
-      // Clear XP event log for this child
       const logSnap = await getDocs(
         query(xpEventLogCollection(familyId), where('childId', '==', activeChildId)),
       )
@@ -153,16 +321,15 @@ export default function AvatarAdminTab() {
       await setDoc(profileRef, {
         childId: profile.childId,
         themeStyle: profile.themeStyle,
-        unlockedPieces: [],
-        generatedImageUrls: {},
-        customAvatarUrl: undefined,
+        pieces: [],
+        currentTier: profile.themeStyle === 'minecraft' ? 'stone' : 'basic',
+        baseCharacterUrl: profile.baseCharacterUrl, // keep base character
         photoTransformUrl: undefined,
-        starterImageUrl: profile.starterImageUrl, // keep starter
         totalXp: 0,
         updatedAt: new Date().toISOString(),
       } satisfies AvatarProfile)
 
-      setFeedback({ severity: 'success', message: 'Avatar reset. Starter image kept.' })
+      setFeedback({ severity: 'success', message: 'Avatar reset. Base character kept.' })
     } catch (err) {
       console.error('Avatar reset failed:', err)
       setFeedback({ severity: 'error', message: 'Failed to reset avatar.' })
@@ -172,8 +339,12 @@ export default function AvatarAdminTab() {
   }, [profile, familyId, activeChildId])
 
   const selectedChild = children.find((c) => c.id === activeChildId)
-  const nextPiece = ARMOR_PIECES.find((p) => !(profile?.unlockedPieces ?? []).includes(p.id))
-  const xpToNext = nextPiece ? Math.max(nextPiece.xpRequired - (profile?.totalXp ?? 0), 0) : 0
+  const nextPiece = ARMOR_PIECES.find((p) => !profile || !isPieceEarned(profile, p.id))
+  const xpToNext = nextPiece && profile ? Math.max(nextPiece.xpToUnlockStone - profile.totalXp, 0) : 0
+  const earnedCount = profile ? profile.pieces.filter((p) =>
+    profile.themeStyle === 'minecraft' ? p.unlockedTiers.length > 0 : (p.unlockedTiersPlatformer ?? []).length > 0
+  ).length : 0
+  const canUpgradeTier = profile && NEXT_TIER[profile.currentTier] !== null
 
   return (
     <Stack spacing={3}>
@@ -210,20 +381,45 @@ export default function AvatarAdminTab() {
               Total XP: <strong>{profile.totalXp}</strong>
             </Typography>
             <Typography variant="body2">
-              Pieces unlocked: <strong>{profile.unlockedPieces.length} of {ARMOR_PIECES.length}</strong>
+              Current Tier: <strong style={{ textTransform: 'capitalize' }}>{profile.currentTier}</strong>
+            </Typography>
+            <Typography variant="body2">
+              Pieces earned: <strong>{earnedCount} of {ARMOR_PIECES.length}</strong>
             </Typography>
             {nextPiece && (
               <Typography variant="body2">
                 Next unlock: <strong>{nextPiece.name}</strong> ({xpToNext} XP needed)
               </Typography>
             )}
-            {!nextPiece && (
+            {earnedCount === ARMOR_PIECES.length && (
               <Typography variant="body2" color="success.main">
-                All 6 pieces unlocked!
+                All 6 pieces earned at {profile.currentTier} tier!
               </Typography>
             )}
           </Stack>
         </Paper>
+      )}
+
+      {/* ── Today's Session ─────────────────────────────────────── */}
+      {todaySession && (
+        <Box>
+          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+            Today's Session ({today})
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Applied pieces: {todaySession.appliedPieces.length === 0
+              ? 'None yet'
+              : todaySession.appliedPieces.map((p) =>
+                  ARMOR_PIECES.find((ap) => ap.id === p)?.name ?? p
+                ).join(', ')
+            }
+          </Typography>
+          {todaySession.completedAt && (
+            <Typography variant="body2" color="success.main">
+              ✅ Completed at {new Date(todaySession.completedAt).toLocaleTimeString()}
+            </Typography>
+          )}
+        </Box>
       )}
 
       {/* ── XP Adjustment ───────────────────────────────────────── */}
@@ -260,7 +456,6 @@ export default function AvatarAdminTab() {
           </Button>
         </Stack>
 
-        {/* Recent XP events */}
         {recentEvents.length > 0 && (
           <Box>
             <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
@@ -288,59 +483,87 @@ export default function AvatarAdminTab() {
 
       <Divider />
 
+      {/* ── Force Tier Upgrade (testing) ─────────────────────────── */}
+      {canUpgradeTier && (
+        <Box>
+          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+            Force Tier Upgrade (Testing)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Upgrades {profile?.currentTier} → {profile ? NEXT_TIER[profile.currentTier] : '?'} regardless of XP.
+            Generates all 6 new-tier images via AI.
+          </Typography>
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={upgrading ? <CircularProgress size={16} /> : <UpgradeIcon />}
+            onClick={() => void handleForceTierUpgrade()}
+            disabled={upgrading}
+          >
+            {upgrading ? 'Generating images...' : `Force upgrade to ${profile ? NEXT_TIER[profile.currentTier] : '?'}`}
+          </Button>
+        </Box>
+      )}
+
+      <Divider />
+
       {/* ── Unlocked pieces ─────────────────────────────────────── */}
       <Box>
         <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-          Unlocked Pieces
+          Earned Pieces
         </Typography>
-        {(profile?.unlockedPieces.length ?? 0) === 0 ? (
+        {earnedCount === 0 ? (
           <Typography variant="body2" color="text.secondary">
-            No pieces unlocked yet.
+            No pieces earned yet.
           </Typography>
         ) : (
           <Stack spacing={1}>
-            {(profile?.unlockedPieces ?? []).map((pieceId) => {
-              const piece = ARMOR_PIECES.find((p) => p.id === pieceId)
-              const imgUrl = profile?.generatedImageUrls[pieceId]
-              return (
-                <Stack key={pieceId} direction="row" alignItems="center" spacing={1.5}>
-                  {imgUrl ? (
-                    <Box
-                      component="img"
-                      src={imgUrl}
-                      alt={piece?.name}
-                      sx={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 1, border: '1px solid #ddd' }}
-                    />
-                  ) : (
-                    <Box
-                      sx={{
-                        width: 48,
-                        height: 48,
-                        borderRadius: 1,
-                        border: '1px dashed #ddd',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <Typography sx={{ fontSize: '1.2rem' }}>🛡️</Typography>
-                    </Box>
-                  )}
-                  <Typography variant="body2" sx={{ flex: 1 }}>
-                    {piece?.name ?? pieceId}
-                  </Typography>
-                  <Button
-                    size="small"
-                    color="error"
-                    variant="outlined"
-                    startIcon={<DeleteIcon />}
-                    onClick={() => setDeletePiece(pieceId)}
-                  >
-                    Delete
-                  </Button>
-                </Stack>
+            {(profile?.pieces ?? [])
+              .filter((entry) =>
+                profile!.themeStyle === 'minecraft'
+                  ? entry.unlockedTiers.length > 0
+                  : (entry.unlockedTiersPlatformer ?? []).length > 0,
               )
-            })}
+              .map((entry) => {
+                const piece = ARMOR_PIECES.find((p) => p.id === entry.pieceId)
+                const currentTierImg = profile
+                  ? (entry.generatedImageUrls as Record<string, string | undefined>)[profile.currentTier]
+                  : undefined
+                return (
+                  <Stack key={entry.pieceId} direction="row" alignItems="center" spacing={1.5}>
+                    {currentTierImg ? (
+                      <Box
+                        component="img"
+                        src={currentTierImg}
+                        alt={piece?.name}
+                        sx={{ width: 48, height: 48, objectFit: 'contain', borderRadius: 1, border: '1px solid #ddd' }}
+                      />
+                    ) : (
+                      <Box
+                        sx={{
+                          width: 48, height: 48, borderRadius: 1,
+                          border: '1px dashed #ddd',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        <Typography sx={{ fontSize: '1.2rem' }}>🛡️</Typography>
+                      </Box>
+                    )}
+                    <Typography variant="body2" sx={{ flex: 1 }}>
+                      {piece?.name ?? entry.pieceId}
+                    </Typography>
+                    <Button
+                      size="small"
+                      color="error"
+                      variant="outlined"
+                      startIcon={<DeleteIcon />}
+                      onClick={() => setDeletePiece(entry.pieceId)}
+                    >
+                      Remove
+                    </Button>
+                  </Stack>
+                )
+              })}
           </Stack>
         )}
       </Box>
@@ -361,7 +584,7 @@ export default function AvatarAdminTab() {
           Reset Avatar
         </Button>
         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-          Clears all XP, unlocked pieces, and custom images. Keeps starter image.
+          Clears all XP, pieces, and tier. Keeps base character image.
         </Typography>
       </Box>
 
@@ -378,7 +601,7 @@ export default function AvatarAdminTab() {
         <DialogContent>
           <DialogContentText>
             Remove {ARMOR_PIECES.find((p) => p.id === deletePiece)?.name ?? deletePiece} from{' '}
-            {selectedChild?.name ?? 'this child'}'s armor? The image is kept in Storage in case they re-unlock it.
+            {selectedChild?.name ?? 'this child'}'s armor? Images are kept in Storage.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
@@ -392,7 +615,7 @@ export default function AvatarAdminTab() {
         <DialogTitle>Reset Avatar?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            This will reset all of {selectedChild?.name ?? 'this child'}'s armor progress — XP, unlocked pieces, and custom images. Are you sure?
+            This will reset all of {selectedChild?.name ?? 'this child'}'s armor progress — XP, earned pieces, and tier. Are you sure?
           </DialogContentText>
         </DialogContent>
         <DialogActions>

@@ -458,6 +458,262 @@ RULES:
   },
 );
 
+// ── New Armor Piece Generation (gpt-image-1, transparent PNG) ────
+
+export interface NewArmorPieceRequest {
+  familyId: string
+  childId: string
+  pieceId: string
+  tier: string  // stone | diamond | netherite | basic | powerup | champion
+  themeStyle: "minecraft" | "platformer"
+  prompt: string
+}
+
+export interface NewArmorPieceResponse {
+  url: string
+  storagePath: string
+}
+
+/**
+ * Generate a single armor piece item image using gpt-image-1.
+ * Pieces are transparent-background PNG items intended to be layered over the base character.
+ * Storage path: families/{familyId}/avatars/{childId}/{pieceId}-{tier}.png
+ */
+export const generateArmorPiece = onCall(
+  { secrets: [openaiApiKey, claudeApiKey] },
+  async (request): Promise<NewArmorPieceResponse> => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { familyId, childId, pieceId, tier, themeStyle, prompt: rawPrompt } =
+      request.data as NewArmorPieceRequest;
+
+    if (!familyId || !childId || !pieceId || !tier || !themeStyle || !rawPrompt) {
+      throw new HttpsError("invalid-argument", "Missing required fields.");
+    }
+    if (request.auth.uid !== familyId) {
+      throw new HttpsError("permission-denied", "You do not have access to this family.");
+    }
+
+    // ── Rewrite for copyright safety ────────────────────────────
+    let safePrompt = rawPrompt;
+    try {
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const claude = new Anthropic({ apiKey: claudeApiKey.value() });
+      const rewriteResult = await claude.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 200,
+        system: `You rewrite children's image generation prompts to avoid copyright issues while preserving creative intent.
+RULES:
+- NEVER include character names or franchise names (no Minecraft, Mario, Nintendo, Steve, etc.)
+- Describe the visual style and piece without naming copyrighted IP
+- Keep it under 60 words
+- Output just the description, no preamble`,
+        messages: [{ role: "user", content: rawPrompt }],
+      });
+      const firstBlock = rewriteResult.content[0];
+      if (firstBlock?.type === "text") safePrompt = firstBlock.text;
+    } catch {
+      // Proceed with original on rewrite failure
+    }
+
+    // ── Generate with gpt-image-1 (native transparent background) ─
+    let resultBase64: string;
+    try {
+      const { default: OpenAI } = await import("openai");
+      const openai = new OpenAI({ apiKey: openaiApiKey.value() });
+
+      const response = await openai.images.generate({
+        model: "gpt-image-1",
+        prompt: `${safePrompt}. Safe for children, family-friendly.`,
+        n: 1,
+        size: "1024x1024",
+        background: "transparent",
+        output_format: "png",
+      } as Parameters<typeof openai.images.generate>[0]);
+
+      const b64 = response.data?.[0]?.b64_json;
+      if (!b64) throw new Error("No image data returned from gpt-image-1.");
+      resultBase64 = b64;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      throw new HttpsError("internal", `Armor piece image generation failed: ${errMsg.slice(0, 200)}`);
+    }
+
+    // ── Save to Storage ──────────────────────────────────────────
+    const imageBuffer = Buffer.from(resultBase64, "base64");
+    const storagePath = `families/${familyId}/avatars/${childId}/${pieceId}-${tier}.png`;
+    const bucket = getStorage().bucket();
+    const file = bucket.file(storagePath);
+    const { randomUUID } = await import("crypto");
+    const downloadToken = randomUUID();
+
+    await file.save(imageBuffer, {
+      metadata: {
+        contentType: "image/png",
+        metadata: {
+          generatedBy: "gpt-image-1",
+          pieceId,
+          tier,
+          childId,
+          themeStyle,
+          firebaseStorageDownloadTokens: downloadToken,
+        },
+      },
+    });
+
+    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+
+    // ── Log usage ────────────────────────────────────────────────
+    const db = getFirestore();
+    await db.collection(`families/${familyId}/aiUsage`).add({
+      taskType: "armor-piece-generation",
+      model: "gpt-image-1",
+      childId,
+      pieceId,
+      tier,
+      themeStyle,
+      storagePath,
+      createdAt: new Date().toISOString(),
+    });
+
+    return { url: downloadUrl, storagePath };
+  },
+);
+
+// ── Base Character Generation (DALL-E 3, full body no armor) ──────
+
+export interface BaseCharacterRequest {
+  familyId: string
+  childId: string
+  themeStyle: "minecraft" | "platformer"
+}
+
+export interface BaseCharacterResponse {
+  url: string
+  storagePath: string
+}
+
+const BASE_CHARACTER_RAW_PROMPTS: Record<"minecraft" | "platformer", string> = {
+  minecraft:
+    "Full body pixel art character, blocky square character design, " +
+    "10-year-old boy, standing upright with arms relaxed at sides, " +
+    "neutral ready pose, plain dark stone background, no armor, no weapons, " +
+    "simple plain clothing, centered in frame, square format, no text, no watermarks",
+  platformer:
+    "Full body cartoon platformer character, cute rounded style, " +
+    "6-year-old girl, standing upright with arms relaxed at sides, " +
+    "happy neutral pose, plain light blue background, no armor, " +
+    "simple colorful outfit, centered in frame, square format, no text, no watermarks",
+};
+
+/**
+ * Generate the base character image (full body, no armor) using DALL-E 3.
+ * Generated once per child and cached at baseCharacterUrl.
+ * Storage path: families/{familyId}/avatars/{childId}/base-character.png
+ */
+export const generateBaseCharacter = onCall(
+  { secrets: [openaiApiKey, claudeApiKey] },
+  async (request): Promise<BaseCharacterResponse> => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { familyId, childId, themeStyle } = request.data as BaseCharacterRequest;
+
+    if (!familyId || !childId || !themeStyle) {
+      throw new HttpsError("invalid-argument", "Missing required fields.");
+    }
+    if (request.auth.uid !== familyId) {
+      throw new HttpsError("permission-denied", "You do not have access to this family.");
+    }
+
+    const rawPrompt = BASE_CHARACTER_RAW_PROMPTS[themeStyle];
+
+    // ── Rewrite for copyright safety ────────────────────────────
+    let safePrompt = rawPrompt;
+    try {
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const claude = new Anthropic({ apiKey: claudeApiKey.value() });
+      const rewriteResult = await claude.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 200,
+        system: `You rewrite children's image generation prompts to avoid copyright issues while preserving creative intent.
+RULES:
+- NEVER include character names or franchise names (no Minecraft, Mario, Nintendo, Steve, etc.)
+- Describe the visual style and character without naming copyrighted IP
+- Keep it under 80 words
+- Output just the description, no preamble`,
+        messages: [{ role: "user", content: rawPrompt }],
+      });
+      const firstBlock = rewriteResult.content[0];
+      if (firstBlock?.type === "text") safePrompt = firstBlock.text;
+    } catch {
+      // Proceed with original on rewrite failure
+    }
+
+    // ── Generate with DALL-E 3 ───────────────────────────────────
+    const provider = createOpenAiProvider(openaiApiKey.value());
+    let imageResponse;
+    try {
+      imageResponse = await provider.generateImage(
+        `${safePrompt}. Safe for children, family-friendly.`,
+        { model: "dall-e-3", size: "1024x1024", quality: "standard" },
+      );
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      throw new HttpsError("internal", `Base character generation failed: ${errMsg.slice(0, 200)}`);
+    }
+
+    // ── Download image buffer ────────────────────────────────────
+    let imageBuffer: Buffer;
+    if (imageResponse.b64Data) {
+      imageBuffer = Buffer.from(imageResponse.b64Data, "base64");
+    } else if (imageResponse.url) {
+      const resp = await fetch(imageResponse.url);
+      if (!resp.ok) throw new HttpsError("internal", "Failed to download base character image.");
+      imageBuffer = Buffer.from(await resp.arrayBuffer());
+    } else {
+      throw new HttpsError("internal", "Base character generation returned no data.");
+    }
+
+    // ── Save to Storage ──────────────────────────────────────────
+    const storagePath = `families/${familyId}/avatars/${childId}/base-character.png`;
+    const bucket = getStorage().bucket();
+    const file = bucket.file(storagePath);
+    const { randomUUID } = await import("crypto");
+    const downloadToken = randomUUID();
+
+    await file.save(imageBuffer, {
+      metadata: {
+        contentType: "image/png",
+        metadata: {
+          generatedBy: "dall-e-3",
+          childId,
+          themeStyle,
+          firebaseStorageDownloadTokens: downloadToken,
+        },
+      },
+    });
+
+    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+
+    // ── Log usage ────────────────────────────────────────────────
+    const db = getFirestore();
+    await db.collection(`families/${familyId}/aiUsage`).add({
+      taskType: "base-character-generation",
+      model: "dall-e-3",
+      childId,
+      themeStyle,
+      storagePath,
+      createdAt: new Date().toISOString(),
+    });
+
+    return { url: downloadUrl, storagePath };
+  },
+);
+
 /** Build the final DALL-E prompt with style context and safety guardrails. */
 export function buildImagePrompt(
   userPrompt: string,
