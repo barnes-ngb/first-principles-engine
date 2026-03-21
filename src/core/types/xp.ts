@@ -11,6 +11,16 @@ export interface XpLedger {
   totalXp: number
   sources: XpLedgerSources
   lastUpdatedAt: string
+  /** Present on per-event docs (doc ID: {childId}_{dedupKey}). Absent on cumulative docs. */
+  dedupKey?: string
+  /** XP event type (per-event docs only). */
+  type?: string
+  /** XP amount for this single event (per-event docs only). */
+  amount?: number
+  /** Optional metadata (per-event docs only). */
+  meta?: Record<string, string>
+  /** ISO timestamp of when XP was awarded (per-event docs only). */
+  awardedAt?: string
 }
 
 // ── Avatar + Armor of God ─────────────────────────────────────────
@@ -207,7 +217,10 @@ export const PIECE_POSITIONS: Record<
   sword_of_the_spirit:           { topPct: 28, leftPct: 64, widthPct: 34, heightPct: 42 },
 }
 
-/** Append-only log for XP dedup. Doc ID: {childId}_{dedupKey} */
+/**
+ * @deprecated Use XpLedger with dedupKey instead. Kept for migration compatibility.
+ * Append-only log for XP dedup. Doc ID: {childId}_{dedupKey}
+ */
 export interface XpEventLogEntry {
   childId: string
   type: string

@@ -8,9 +8,8 @@ function stripUndefined<T extends object>(obj: T): Partial<T> {
 
 import {
   avatarProfilesCollection,
-  xpEventLogCollection,
-  xpEventLogDocId,
   xpLedgerCollection,
+  xpLedgerDocId,
 } from '../firebase/firestore'
 import type { XP_EVENTS } from '../types'
 import { checkAndUnlockArmor } from './checkAndUnlockArmor'
@@ -25,8 +24,9 @@ function mapTypeToSource(type: keyof typeof XP_EVENTS): 'routines' | 'quests' | 
 /**
  * Award XP to a child, with dedup guard.
  *
- * Writes to xpEventLog (dedup key), then increments xpLedger,
- * then checks for new armor unlocks.
+ * Dedup and event tracking are handled via per-event docs in xpLedger
+ * (doc ID: {childId}_{dedupKey}). The cumulative doc (doc ID: {childId})
+ * is also updated atomically.
  *
  * @param dedupKey - Unique key for this event (e.g., `checklist_2026-03-20`,
  *   `book_${bookId}_2026-03-20`, `eval_${sessionId}`)
@@ -41,30 +41,37 @@ export async function addXpEvent(
 ): Promise<void> {
   if (!familyId || !childId || amount <= 0) return
 
-  // ── Dedup check ──────────────────────────────────────────────
-  const logDocId = xpEventLogDocId(childId, dedupKey)
-  const logRef = doc(xpEventLogCollection(familyId), logDocId)
-  const logSnap = await getDoc(logRef)
-  if (logSnap.exists()) return // already awarded
+  // ── Dedup check (per-event doc in xpLedger) ────────────────
+  const eventDocId = xpLedgerDocId(childId, dedupKey)
+  const eventRef = doc(xpLedgerCollection(familyId), eventDocId)
+  const eventSnap = await getDoc(eventRef)
+  if (eventSnap.exists()) return // already awarded
 
-  // ── Write dedup entry ────────────────────────────────────────
-  await setDoc(logRef, {
+  // ── Write per-event entry to xpLedger ──────────────────────
+  const sourceKey = mapTypeToSource(type)
+  await setDoc(eventRef, {
     childId,
+    totalXp: amount,
+    sources: {
+      routines: sourceKey === 'routines' ? amount : 0,
+      quests: sourceKey === 'quests' ? amount : 0,
+      books: sourceKey === 'books' ? amount : 0,
+    },
+    dedupKey,
     type,
     amount,
-    dedupKey,
     meta: meta ?? {},
     awardedAt: new Date().toISOString(),
+    lastUpdatedAt: new Date().toISOString(),
   })
 
-  // ── Increment XP ledger ──────────────────────────────────────
+  // ── Update cumulative XP ledger doc ────────────────────────
   const ledgerRef = doc(xpLedgerCollection(familyId), childId)
   const ledgerSnap = await getDoc(ledgerRef)
   const existing = ledgerSnap.exists()
     ? ledgerSnap.data()
     : { totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }
 
-  const sourceKey = mapTypeToSource(type)
   const newTotal = (existing.totalXp ?? 0) + amount
 
   await setDoc(ledgerRef, {
@@ -79,15 +86,15 @@ export async function addXpEvent(
     lastUpdatedAt: new Date().toISOString(),
   })
 
-  // ── Compute real total from event log (source of truth) ─────
-  const eventLogSnap = await getDocs(
-    query(xpEventLogCollection(familyId), where('childId', '==', childId)),
+  // ── Compute real total from per-event xpLedger docs ────────
+  const eventDocsSnap = await getDocs(
+    query(xpLedgerCollection(familyId), where('childId', '==', childId), where('dedupKey', '!=', null)),
   )
-  const realTotal = eventLogSnap.docs
+  const realTotal = eventDocsSnap.docs
     .filter((d) => !(d.data() as unknown as Record<string, unknown>)._deleted)
     .reduce((sum, d) => sum + ((d.data().amount as number) ?? 0), 0)
 
-  // ── Update cached totalXp on avatarProfile ───────────────────
+  // ── Update cached totalXp on avatarProfile ─────────────────
   const profileRef = doc(avatarProfilesCollection(familyId), childId)
   const profileSnap = await getDoc(profileRef)
   if (profileSnap.exists()) {
@@ -95,6 +102,6 @@ export async function addXpEvent(
     await setDoc(profileRef, stripUndefined({ ...profile, totalXp: realTotal, updatedAt: new Date().toISOString() }))
   }
 
-  // ── Check for armor unlocks ──────────────────────────────────
+  // ── Check for armor unlocks ────────────────────────────────
   await checkAndUnlockArmor(familyId, childId, realTotal)
 }
