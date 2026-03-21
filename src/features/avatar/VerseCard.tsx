@@ -14,13 +14,11 @@ interface VerseCardProps {
   pieceId: ArmorPiece | null
   profile: AvatarProfile | null
   alreadyApplied: boolean
-  /** Pre-cropped image URL from the armor sheet (preferred over legacy per-piece URL) */
   croppedImageUrl?: string
   onApply: (pieceId: ArmorPiece) => void
   onClose: () => void
 }
 
-/** Get the image URL for the current tier of a piece (legacy per-piece storage). */
 function getPieceImageUrl(
   profile: AvatarProfile,
   pieceId: ArmorPiece,
@@ -31,6 +29,70 @@ function getPieceImageUrl(
   return (entry.generatedImageUrls as Record<string, string | undefined>)[tier]
 }
 
+// ── TTS helper ─────────────────────────────────────────────────────
+
+function startReading(
+  verseText: string,
+  startWordIdx: number,
+  onWordIndex: (idx: number) => void,
+  onEnd: () => void,
+): SpeechSynthesisUtterance {
+  const words = verseText.split(/\s+/)
+  const substring = words.slice(startWordIdx).join(' ')
+
+  const utterance = new SpeechSynthesisUtterance(substring)
+  utterance.rate = 0.75
+  utterance.pitch = 1.0
+
+  // Select a warm voice if available
+  const voices = window.speechSynthesis.getVoices()
+  const preferred = voices.find((v) =>
+    v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Moira'),
+  )
+  if (preferred) utterance.voice = preferred
+
+  let boundaryFired = false
+
+  utterance.addEventListener('boundary', (event) => {
+    if (event.name !== 'word') return
+    boundaryFired = true
+    // Map charIndex in substring to word index in full verse
+    let charCount = 0
+    for (let i = 0; i < words.length - startWordIdx; i++) {
+      if (charCount + words[startWordIdx + i].length > event.charIndex) {
+        onWordIndex(startWordIdx + i)
+        return
+      }
+      charCount += words[startWordIdx + i].length + 1
+    }
+  })
+
+  utterance.addEventListener('start', () => {
+    // Fallback timer if boundary events never fire
+    let idx = startWordIdx
+    const interval = setInterval(() => {
+      if (boundaryFired) {
+        clearInterval(interval)
+        return
+      }
+      onWordIndex(idx)
+      idx++
+      if (idx >= words.length) clearInterval(interval)
+    }, (verseText.length / Math.max(words.length, 1)) * (1000 / 0.75) / words.length)
+
+    utterance.addEventListener('end', () => clearInterval(interval), { once: true })
+  })
+
+  utterance.addEventListener('end', () => {
+    onEnd()
+  })
+
+  window.speechSynthesis.speak(utterance)
+  return utterance
+}
+
+// ── Component ─────────────────────────────────────────────────────
+
 export default function VerseCard({
   pieceId,
   profile,
@@ -39,9 +101,11 @@ export default function VerseCard({
   onApply,
   onClose,
 }: VerseCardProps) {
-  const [speakingWordIdx, setSpeakingWordIdx] = useState<number | null>(null)
+  const [currentWordIndex, setCurrentWordIndex] = useState<number>(-1)
+  const [isReading, setIsReading] = useState(false)
+  const [hasRead, setHasRead] = useState(false)
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
-  const boundaryHandledRef = useRef(false)
+  const autoStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const pieceDef = pieceId ? ARMOR_PIECES.find((p) => p.id === pieceId) : null
   const isLincoln = profile?.themeStyle === 'minecraft'
@@ -53,73 +117,92 @@ export default function VerseCard({
   const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
-  // ── Auto-read verse on open ──────────────────────────────────────
+  const words = pieceDef ? pieceDef.verseText.split(/\s+/) : []
+
+  // ── Stop reading ────────────────────────────────────────────────
+  const stopReading = useCallback(() => {
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel()
+    if (autoStartTimerRef.current) clearTimeout(autoStartTimerRef.current)
+    utteranceRef.current = null
+    setIsReading(false)
+    setCurrentWordIndex(-1)
+  }, [])
+
+  // ── Start reading from word index ───────────────────────────────
+  const beginReading = useCallback(
+    (fromWord = 0) => {
+      if (!pieceDef || !('speechSynthesis' in window)) return
+      window.speechSynthesis.cancel()
+
+      setIsReading(true)
+      setCurrentWordIndex(fromWord)
+
+      const utterance = startReading(
+        pieceDef.verseText,
+        fromWord,
+        (idx) => setCurrentWordIndex(idx),
+        () => {
+          setIsReading(false)
+          setCurrentWordIndex(-1)
+          setHasRead(true)
+        },
+      )
+      utteranceRef.current = utterance
+    },
+    [pieceDef],
+  )
+
+  // ── Auto-start on open ──────────────────────────────────────────
   useEffect(() => {
     if (!pieceId || !pieceDef) return
-    if (!('speechSynthesis' in window)) return
+    setCurrentWordIndex(-1)
+    setIsReading(false)
+    setHasRead(false)
 
-    // Cancel any existing speech
-    window.speechSynthesis.cancel()
-    setSpeakingWordIdx(null)
-    boundaryHandledRef.current = false
-
-    const utterance = new SpeechSynthesisUtterance(pieceDef.verseText)
-    utterance.rate = 0.75
-    utterance.pitch = 1.0
-
-    const words = pieceDef.verseText.split(/\s+/)
-    utterance.addEventListener('boundary', (event) => {
-      if (event.name === 'word') {
-        // Estimate which word we're on based on charIndex
-        let charCount = 0
-        for (let i = 0; i < words.length; i++) {
-          if (charCount + words[i].length >= event.charIndex) {
-            setSpeakingWordIdx(i)
-            break
-          }
-          charCount += words[i].length + 1 // +1 for space
+    // Delay to let card-open animation complete
+    autoStartTimerRef.current = setTimeout(() => {
+      // Trigger voices load then begin
+      if ('speechSynthesis' in window) {
+        // Ensure voices are loaded (async on some browsers)
+        const voices = window.speechSynthesis.getVoices()
+        if (voices.length === 0) {
+          window.speechSynthesis.onvoiceschanged = () => beginReading(0)
+        } else {
+          beginReading(0)
         }
       }
-    })
-
-    utterance.addEventListener('end', () => {
-      setSpeakingWordIdx(null)
-    })
-
-    utteranceRef.current = utterance
-    window.speechSynthesis.speak(utterance)
+    }, 400)
 
     return () => {
-      window.speechSynthesis.cancel()
-      setSpeakingWordIdx(null)
+      if (autoStartTimerRef.current) clearTimeout(autoStartTimerRef.current)
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel()
+      setIsReading(false)
+      setCurrentWordIndex(-1)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pieceId])
 
-  // ── Tap a single word to speak it ───────────────────────────────
-  const handleWordTap = useCallback((word: string) => {
-    if (!('speechSynthesis' in window)) return
-    window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(word)
-    u.rate = 0.7
-    u.pitch = 1.0
-    window.speechSynthesis.speak(u)
-  }, [])
+  // ── Tap a word → restart from that word ────────────────────────
+  const handleWordTap = useCallback(
+    (wordIdx: number) => {
+      if (!('speechSynthesis' in window)) return
+      beginReading(wordIdx)
+    },
+    [beginReading],
+  )
 
   const handleApply = () => {
     if (!pieceId) return
-    window.speechSynthesis.cancel()
+    stopReading()
     onApply(pieceId)
   }
 
   const handleClose = () => {
-    window.speechSynthesis.cancel()
+    stopReading()
     onClose()
   }
 
   if (!pieceDef || !profile) return null
-
-  const words = pieceDef.verseText.split(/\s+/)
 
   return (
     <Dialog
@@ -141,13 +224,7 @@ export default function VerseCard({
         {/* Close button */}
         <IconButton
           onClick={handleClose}
-          sx={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            color: textColor,
-            zIndex: 1,
-          }}
+          sx={{ position: 'absolute', top: 8, right: 8, color: textColor, zIndex: 1 }}
           size="small"
           aria-label="close"
         >
@@ -155,7 +232,7 @@ export default function VerseCard({
         </IconButton>
 
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-          {/* Piece name header */}
+          {/* Piece name */}
           <Typography
             variant="h6"
             sx={{
@@ -202,12 +279,12 @@ export default function VerseCard({
             </Box>
           )}
 
-          {/* Verse text — tappable word chips */}
+          {/* Verse text — tappable word spans with highlight */}
           <Box
             sx={{
               display: 'flex',
               flexWrap: 'wrap',
-              gap: 0.5,
+              gap: 0,
               justifyContent: 'center',
               p: 1.5,
               bgcolor: isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
@@ -220,29 +297,86 @@ export default function VerseCard({
               <Box
                 key={idx}
                 component="span"
-                onClick={() => handleWordTap(word)}
+                onClick={() => handleWordTap(idx)}
                 sx={{
-                  cursor: 'pointer',
-                  px: 0.75,
+                  display: 'inline-block',
+                  px: 0.5,
                   py: 0.25,
+                  m: '2px',
                   borderRadius: 1,
+                  cursor: 'pointer',
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
                   fontSize: isLincoln ? '0.55rem' : '18px',
-                  lineHeight: 1.6,
                   fontStyle: 'italic',
-                  bgcolor: speakingWordIdx === idx
-                    ? (isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(232,160,191,0.4)')
+                  lineHeight: 1.6,
+                  transition: 'background-color 200ms ease, color 200ms ease, transform 150ms ease',
+                  backgroundColor: currentWordIndex === idx
+                    ? (isLincoln ? 'rgba(126,252,32,0.25)' : 'rgba(255,200,50,0.3)')
                     : 'transparent',
-                  color: speakingWordIdx === idx ? accentColor : textColor,
-                  transition: 'background-color 0.15s, color 0.15s',
+                  color: currentWordIndex === idx ? (isLincoln ? '#7EFC20' : '#b8860b') : textColor,
+                  transform: currentWordIndex === idx ? 'scale(1.1)' : 'scale(1)',
+                  fontWeight: currentWordIndex === idx ? 600 : 400,
                   '&:hover': {
-                    bgcolor: isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.2)',
+                    bgcolor: isLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.2)',
                   },
                 }}
               >
                 {word}
               </Box>
             ))}
+          </Box>
+
+          {/* TTS controls */}
+          <Box sx={{ display: 'flex', gap: 1, width: '100%' }}>
+            {isReading ? (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={stopReading}
+                sx={{
+                  flex: 1,
+                  borderColor: accentColor,
+                  color: accentColor,
+                  fontFamily: titleFont,
+                  fontSize: isLincoln ? '0.38rem' : '14px',
+                  borderRadius: isLincoln ? 0 : 2,
+                }}
+              >
+                ■ Stop
+              </Button>
+            ) : hasRead ? (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => beginReading(0)}
+                sx={{
+                  flex: 1,
+                  borderColor: accentColor,
+                  color: accentColor,
+                  fontFamily: titleFont,
+                  fontSize: isLincoln ? '0.38rem' : '14px',
+                  borderRadius: isLincoln ? 0 : 2,
+                }}
+              >
+                ↩ Read again
+              </Button>
+            ) : (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => beginReading(0)}
+                sx={{
+                  flex: 1,
+                  borderColor: accentColor,
+                  color: accentColor,
+                  fontFamily: titleFont,
+                  fontSize: isLincoln ? '0.38rem' : '14px',
+                  borderRadius: isLincoln ? 0 : 2,
+                }}
+              >
+                ▶ Read it
+              </Button>
+            )}
           </Box>
 
           {/* Scripture reference */}
@@ -257,7 +391,7 @@ export default function VerseCard({
             {pieceDef.scripture}
           </Typography>
 
-          {/* Put it on button */}
+          {/* Put it on / already wearing */}
           {!alreadyApplied ? (
             <Button
               variant="contained"

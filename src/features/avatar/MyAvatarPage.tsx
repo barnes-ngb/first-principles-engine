@@ -23,8 +23,12 @@ import type { ArmorPiece, AvatarProfile, DailyArmorSession } from '../../core/ty
 import { cropArmorPiece } from '../../core/avatar/cropArmorSheet'
 
 import ArmorPieceButton from './ArmorPieceButton'
+import AttachAnimation from './AttachAnimation'
+import type { AttachAnimState } from './AttachAnimation'
 import CharacterDisplay from './CharacterDisplay'
-import { isPieceEarned } from './armorUtils'
+import Particles from './Particles'
+import { isPieceEarned, PIECE_OVERLAY_POSITIONS } from './armorUtils'
+import type { ArmorTierColor } from './icons/ArmorIcons'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
 import UnlockCelebration from './UnlockCelebration'
 import VerseCard from './VerseCard'
@@ -48,6 +52,71 @@ function getNextUnlockPiece(profile: AvatarProfile): { id: ArmorPiece; xpNeeded:
   return { id: next.id, xpNeeded: Math.max(next.xpToUnlockStone - profile.totalXp, 0) }
 }
 
+function toTierColor(tier: string): ArmorTierColor {
+  const valid: ArmorTierColor[] = ['stone', 'diamond', 'netherite', 'basic', 'powerup', 'champion']
+  return valid.includes(tier as ArmorTierColor) ? (tier as ArmorTierColor) : 'stone'
+}
+
+/** Parse a CSS dimension string (e.g. '40%', '4px') relative to a container size */
+function parseDim(value: string, containerSize: number): number {
+  if (value.endsWith('%')) return (parseFloat(value) / 100) * containerSize
+  return parseFloat(value)
+}
+
+/**
+ * Compute the center point (viewport coords) of a piece overlay
+ * within the character display container element.
+ */
+function getLandingCenter(
+  containerEl: HTMLElement,
+  pieceId: ArmorPiece,
+): { x: number; y: number } {
+  const r = containerEl.getBoundingClientRect()
+  const pos = PIECE_OVERLAY_POSITIONS[pieceId]
+  const w = parseDim(pos.width, r.width)
+  const h = w // overlays are roughly square
+  const top = parseDim(pos.top, r.height)
+
+  let left: number
+  if (pos.left) {
+    const lv = parseDim(pos.left, r.width)
+    // translateX(-50%) means center it
+    left = pos.transform?.includes('translateX(-50%)') ? lv - w / 2 : lv
+  } else if (pos.right) {
+    left = r.width - parseDim(pos.right, r.width) - w
+  } else {
+    left = 0
+  }
+
+  return {
+    x: r.left + left + w / 2,
+    y: r.top + top + h / 2,
+  }
+}
+
+// ── Fanfare (Web Audio API) ────────────────────────────────────────
+
+function playArmorFanfare(delaySeconds = 0) {
+  try {
+    const ctx = new AudioContext()
+    const notes = [523, 659, 784, 1047] // C5, E5, G5, C6
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.frequency.value = freq
+      osc.type = 'triangle'
+      const t = ctx.currentTime + delaySeconds + i * 0.12
+      gain.gain.setValueAtTime(0.15, t)
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3)
+      osc.start(t)
+      osc.stop(t + 0.3)
+    })
+  } catch {
+    // Web Audio not available — silently skip
+  }
+}
 
 // ── Component ─────────────────────────────────────────────────────
 
@@ -64,7 +133,6 @@ export default function MyAvatarPage() {
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
   const [baseCharGenerating, setBaseCharGenerating] = useState(false)
-  /** Cropped data URLs keyed by pieceId — populated lazily from armor sheet */
   const [croppedImages, setCroppedImages] = useState<Partial<Record<ArmorPiece, string>>>({})
 
   // Photo transform
@@ -73,7 +141,19 @@ export default function MyAvatarPage() {
   const [photoTransformError, setPhotoTransformError] = useState<string | null>(null)
   const photoInputRef = useRef<HTMLInputElement>(null)
 
-  // Track previous state to detect changes
+  // Animation state
+  const [attachAnim, setAttachAnim] = useState<AttachAnimState | null>(null)
+  const [lastAppliedPiece, setLastAppliedPiece] = useState<ArmorPiece | null>(null)
+  const [particles, setParticles] = useState<{ x: number; y: number } | null>(null)
+  const charDisplayRef = useRef<HTMLDivElement | null>(null)
+  const buttonRefsMap = useRef<Partial<Record<ArmorPiece, HTMLDivElement>>>({})
+
+  // Reduced motion
+  const reducedMotion = useRef(
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  ).current
+
+  // Track previous state for celebrations
   const prevPiecesCountRef = useRef(0)
   const prevTierRef = useRef<string | null>(null)
   const today = getTodayDateString()
@@ -118,7 +198,6 @@ export default function MyAvatarPage() {
           const data = ensureNewProfileStructure(snap.data() as unknown as Record<string, unknown>)
           setProfile(data)
 
-          // Detect new stone unlock
           const earnedCount = getEarnedPieces(data).length
           if (earnedCount > prevPiecesCountRef.current && prevPiecesCountRef.current > 0) {
             const earned = getEarnedPieces(data)
@@ -127,7 +206,6 @@ export default function MyAvatarPage() {
           }
           prevPiecesCountRef.current = earnedCount
 
-          // Detect tier upgrade
           if (prevTierRef.current && data.currentTier !== prevTierRef.current) {
             setTierCelebration({ from: prevTierRef.current, to: data.currentTier })
           }
@@ -150,7 +228,6 @@ export default function MyAvatarPage() {
       if (snap.exists()) {
         setSession(snap.data())
       } else {
-        // Create fresh session for today
         const newSession: DailyArmorSession = {
           familyId,
           childId,
@@ -164,13 +241,12 @@ export default function MyAvatarPage() {
     return unsub
   }, [familyId, childId, today])
 
-  // ── Crop armor pieces from sheet when sheet URL is available ──
+  // ── Crop armor pieces from sheet ───────────────────────────────
   useEffect(() => {
     if (!profile) return
     const sheetUrl = profile.armorSheetUrls?.[profile.currentTier]
     if (!sheetUrl) return
 
-    // Reset cropped cache when tier changes
     setCroppedImages({})
 
     let cancelled = false
@@ -183,7 +259,7 @@ export default function MyAvatarPage() {
             const dataUrl = await cropArmorPiece(sheetUrl, pieceIndex, 256)
             if (!cancelled) results[pieceDef.id] = dataUrl
           } catch {
-            // Silently fall back to legacy per-piece URL
+            // Fall back to legacy per-piece URL
           }
         }),
       )
@@ -197,7 +273,7 @@ export default function MyAvatarPage() {
   // ── Generate base character on first visit ─────────────────────
   useEffect(() => {
     if (!profile || !familyId || !childId) return
-    if (profile.baseCharacterUrl) return   // already generated
+    if (profile.baseCharacterUrl) return
     if (baseCharGenerating) return
 
     setBaseCharGenerating(true)
@@ -219,7 +295,7 @@ export default function MyAvatarPage() {
           updatedAt: new Date().toISOString(),
         })
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Base character generation failed:', err)
       })
       .finally(() => {
@@ -228,11 +304,10 @@ export default function MyAvatarPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.childId, profile?.baseCharacterUrl])
 
-  // ── Photo select (crop + resize via canvas) ────────────────────
+  // ── Photo select ───────────────────────────────────────────────
   const handlePhotoSelect = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    // Reset input so same file can be re-selected after cancel
     e.target.value = ''
 
     const reader = new FileReader()
@@ -269,7 +344,6 @@ export default function MyAvatarPage() {
         { url: string }
       >(fns, 'transformAvatarPhoto')
 
-      // Extract base64 and mimeType from data URL
       const [header, base64] = photoPreviewUrl.split(',')
       const mimeType = header.split(':')[1].split(';')[0]
 
@@ -309,11 +383,35 @@ export default function MyAvatarPage() {
       setSelectedPiece(null)
 
       const updatedApplied = [...session.appliedPieces, pieceId]
-      const docId = dailyArmorSessionDocId(childId, today)
-      const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
-
       const earnedPieces = getEarnedPieces(profile)
       const allApplied = earnedPieces.every((p) => updatedApplied.includes(p))
+
+      // Fanfare must be triggered in user-gesture context — schedule notes ~1.5s out
+      if (allApplied && isLincoln) {
+        playArmorFanfare(1.5)
+      }
+
+      // Start fly animation (skip if reduced motion)
+      if (!reducedMotion) {
+        const buttonEl = buttonRefsMap.current[pieceId]
+        const charEl = charDisplayRef.current
+
+        if (buttonEl && charEl) {
+          const launchRect = buttonEl.getBoundingClientRect()
+          const landingCenter = getLandingCenter(charEl, pieceId)
+
+          setAttachAnim({
+            pieceId,
+            tier: toTierColor(profile.currentTier),
+            launchRect,
+            landingCenter,
+          })
+        }
+      }
+
+      // Write to Firestore in parallel with animation
+      const docId = dailyArmorSessionDocId(childId, today)
+      const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
 
       await setDoc(sessionRef, {
         ...session,
@@ -321,19 +419,25 @@ export default function MyAvatarPage() {
         ...(allApplied ? { completedAt: new Date().toISOString() } : {}),
       })
 
-      // Award ARMOR_DAILY_COMPLETE XP once per day when all earned pieces applied
       if (allApplied && familyId && childId) {
-        void addXpEvent(
-          familyId,
-          childId,
-          'ARMOR_DAILY_COMPLETE',
-          5,
-          `armor_daily_${today}`,
-        )
+        void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
       }
     },
-    [profile, familyId, childId, session, today],
+    [profile, familyId, childId, session, today, isLincoln, reducedMotion],
   )
+
+  // ── Animation complete handler ─────────────────────────────────
+  const handleAnimComplete = useCallback(() => {
+    if (!attachAnim) return
+    const { pieceId, landingCenter } = attachAnim
+    setAttachAnim(null)
+    setLastAppliedPiece(pieceId)
+    setParticles({ x: landingCenter.x, y: landingCenter.y })
+    setTimeout(() => {
+      setParticles(null)
+      setLastAppliedPiece(null)
+    }, 600)
+  }, [attachAnim])
 
   // ── Computed values ────────────────────────────────────────────
   const appliedPieces = session?.appliedPieces ?? []
@@ -384,88 +488,96 @@ export default function MyAvatarPage() {
           </Typography>
         </Box>
 
-        {/* ── Character Display (60% of screen) ─────────────────── */}
+        {/* ── Character Display ──────────────────────────────────── */}
         <Box sx={{ mb: 1.5 }}>
           <CharacterDisplay
+            ref={charDisplayRef}
             profile={profile}
             appliedPieces={appliedPieces}
             height="55vw"
+            lastAppliedPiece={lastAppliedPiece}
           />
         </Box>
 
-        {/* All applied celebration */}
-        {allEarnedApplied && (
+        {/* ── Full armor on! state ───────────────────────────────── */}
+        {allEarnedApplied ? (
           <Box
             sx={{
               textAlign: 'center',
               py: 1,
               mb: 1,
-              animation: 'fullArmorPop 0.4s ease-out',
-              '@keyframes fullArmorPop': {
-                from: { transform: 'scale(0.9)', opacity: 0 },
-                to: { transform: 'scale(1)', opacity: 1 },
+              animation: !reducedMotion ? 'fullArmorFadeIn 0.5s ease-out' : undefined,
+              '@keyframes fullArmorFadeIn': {
+                from: { opacity: 0, transform: 'scale(0.9)' },
+                to:   { opacity: 1, transform: 'scale(1)' },
               },
             }}
           >
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.55rem' : '1rem',
+                fontSize: isLincoln ? '0.6rem' : '1.1rem',
                 fontWeight: 700,
-                color: accentColor,
+                color: isLincoln ? '#FFD700' : '#9C27B0',
+                animation: !reducedMotion ? 'fullArmorPulse 2s ease-in-out infinite' : undefined,
+                '@keyframes fullArmorPulse': {
+                  '0%':   { opacity: 1 },
+                  '50%':  { opacity: 0.82 },
+                  '100%': { opacity: 1 },
+                },
               }}
             >
-              {isLincoln ? '⚔️ Full armor on! Ready for today!' : '✨ Full armor on! You\'re ready!'}
+              {isLincoln ? '⚔️ Full armor on! Ready for today.' : '✨ Full armor on! You\'re ready!'}
             </Typography>
           </Box>
-        )}
-
-        {/* ── XP Progress (compact) ──────────────────────────────── */}
-        <Box sx={{ mb: 2, px: 1 }}>
-          {!allSixEarned && nextUnlock ? (
-            <>
+        ) : (
+          /* ── XP Progress ────────────────────────────────────────── */
+          <Box sx={{ mb: 2, px: 1 }}>
+            {!allSixEarned && nextUnlock ? (
+              <>
+                <Typography
+                  sx={{
+                    display: 'block',
+                    mb: 0.75,
+                    color: isLincoln ? '#aaa' : 'text.primary',
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                    fontSize: isLincoln ? '0.35rem' : '14px',
+                    fontWeight: 500,
+                  }}
+                >
+                  Next: {ARMOR_PIECES.find((p) => p.id === nextUnlock.id)?.name} — {nextUnlock.xpNeeded} XP away
+                </Typography>
+                <LinearProgress
+                  variant="determinate"
+                  value={xpProgress}
+                  sx={{
+                    height: 10,
+                    borderRadius: isLincoln ? 0 : 5,
+                    bgcolor: isLincoln ? '#222' : '#eee',
+                    '& .MuiLinearProgress-bar': {
+                      bgcolor: accentColor,
+                      borderRadius: isLincoln ? 0 : 5,
+                    },
+                  }}
+                />
+              </>
+            ) : allSixEarned ? (
               <Typography
                 sx={{
-                  display: 'block',
-                  mb: 0.75,
-                  color: isLincoln ? '#aaa' : 'text.primary',
-                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                  fontSize: isLincoln ? '0.35rem' : '14px',
-                  fontWeight: 500,
+                  textAlign: 'center',
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                  fontSize: isLincoln ? '0.4rem' : '0.85rem',
+                  color: accentColor,
+                  fontWeight: 700,
                 }}
               >
-                Next: {ARMOR_PIECES.find((p) => p.id === nextUnlock.id)?.name} — {nextUnlock.xpNeeded} XP away
+                Full set! {profile.currentTier !== 'netherite' && profile.currentTier !== 'champion'
+                  ? 'Tier upgrade coming soon ⬆️'
+                  : 'Max tier reached! ⚔️'}
               </Typography>
-              <LinearProgress
-                variant="determinate"
-                value={xpProgress}
-                sx={{
-                  height: 10,
-                  borderRadius: isLincoln ? 0 : 5,
-                  bgcolor: isLincoln ? '#222' : '#eee',
-                  '& .MuiLinearProgress-bar': {
-                    bgcolor: accentColor,
-                    borderRadius: isLincoln ? 0 : 5,
-                  },
-                }}
-              />
-            </>
-          ) : allSixEarned ? (
-            <Typography
-              sx={{
-                textAlign: 'center',
-                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                fontSize: isLincoln ? '0.4rem' : '0.85rem',
-                color: accentColor,
-                fontWeight: 700,
-              }}
-            >
-              Full set! {profile.currentTier !== 'netherite' && profile.currentTier !== 'champion'
-                ? 'Tier upgrade coming soon ⬆️'
-                : 'Max tier reached! ⚔️'}
-            </Typography>
-          ) : null}
-        </Box>
+            ) : null}
+          </Box>
+        )}
 
         {/* ── Piece Selector Row ─────────────────────────────────── */}
         <Box
@@ -476,7 +588,6 @@ export default function MyAvatarPage() {
             pb: 1,
             px: '16px',
             scrollSnapType: 'x mandatory',
-            // Hide scrollbar visually but keep functional
             scrollbarWidth: 'thin',
             '&::-webkit-scrollbar': { height: 4 },
             '&::-webkit-scrollbar-thumb': { bgcolor: isLincoln ? '#333' : '#ddd', borderRadius: 2 },
@@ -485,6 +596,7 @@ export default function MyAvatarPage() {
           {ARMOR_PIECES.map((pieceDef) => (
             <ArmorPieceButton
               key={pieceDef.id}
+              ref={(el) => { if (el) buttonRefsMap.current[pieceDef.id] = el }}
               pieceId={pieceDef.id}
               profile={profile}
               appliedToday={appliedPieces.includes(pieceDef.id)}
@@ -621,14 +733,33 @@ export default function MyAvatarPage() {
         onClose={() => setSelectedPiece(null)}
       />
 
-      {/* ── Single piece unlock celebration ──────────────────── */}
+      {/* ── Fly animation ──────────────────────────────────────── */}
+      {attachAnim && (
+        <AttachAnimation
+          {...attachAnim}
+          onComplete={handleAnimComplete}
+        />
+      )}
+
+      {/* ── Particle burst ─────────────────────────────────────── */}
+      {particles && profile && (
+        <Particles
+          x={particles.x}
+          y={particles.y}
+          themeStyle={profile.themeStyle}
+          tier={profile.currentTier}
+          onDone={() => setParticles(null)}
+        />
+      )}
+
+      {/* ── Unlock celebration ─────────────────────────────────── */}
       <UnlockCelebration
         newPiece={celebrationPiece}
         profile={profile}
         onDismiss={() => setCelebrationPiece(null)}
       />
 
-      {/* ── Full set tier upgrade celebration ────────────────── */}
+      {/* ── Tier upgrade celebration ───────────────────────────── */}
       <TierUpgradeCelebration
         upgrade={tierCelebration}
         profile={profile}
