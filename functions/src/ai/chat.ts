@@ -15,7 +15,7 @@ interface ChatMessage {
  *  - "plan" / "evaluate" → Sonnet (complex reasoning)
  *  - "generate" / "chat"  → Haiku  (routine generation)
  */
-const TaskType = {
+export const TaskType = {
   Plan: "plan",
   Evaluate: "evaluate",
   Generate: "generate",
@@ -23,9 +23,7 @@ const TaskType = {
   Quest: "quest",
   GenerateStory: "generateStory",
 } as const;
-type TaskType = (typeof TaskType)[keyof typeof TaskType];
-
-const TASK_TYPES = new Set<string>(Object.values(TaskType));
+export type TaskType = (typeof TaskType)[keyof typeof TaskType];
 
 interface ChatRequest {
   familyId: string;
@@ -44,7 +42,7 @@ interface ChatResponse {
 
 // ── Model mapping ───────────────────────────────────────────────
 
-function modelForTask(taskType: TaskType): string {
+export function modelForTask(taskType: TaskType): string {
   switch (taskType) {
     case TaskType.Plan:
     case TaskType.Evaluate:
@@ -849,7 +847,7 @@ IMPORTANT:
 
 // ── Story generation prompt ──────────────────────────────────────
 
-interface StoryGenInput {
+export interface StoryGenInput {
   storyIdea: string;
   words: string[];
   pageCount: number;
@@ -859,7 +857,7 @@ interface StoryGenInput {
   readingLevel?: string;
 }
 
-function buildStoryPrompt(input: StoryGenInput): string {
+export function buildStoryPrompt(input: StoryGenInput): string {
   const {
     storyIdea,
     words,
@@ -915,7 +913,7 @@ OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
 // ── Sight word context loader ───────────────────────────────────
 
 /** Load sight word mastery summary for child. */
-async function loadSightWordSummary(
+export async function loadSightWordSummary(
   db: Firestore,
   familyId: string,
   childId: string,
@@ -965,10 +963,13 @@ export const chat = onCall(
     if (!childId || typeof childId !== "string") {
       throw new HttpsError("invalid-argument", "childId is required.");
     }
-    if (!taskType || !TASK_TYPES.has(taskType)) {
+    // ── Validate task type via registry ──────────────────────────
+    const { CHAT_TASKS } = await import("./tasks/index.js");
+    const handler = CHAT_TASKS[taskType];
+    if (!handler) {
       throw new HttpsError(
         "invalid-argument",
-        `taskType must be one of: ${[...TASK_TYPES].join(", ")}`,
+        `taskType must be one of: ${Object.keys(CHAT_TASKS).join(", ")}`,
       );
     }
     if (!Array.isArray(messages) || messages.length === 0) {
@@ -983,6 +984,15 @@ export const chat = onCall(
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",
+      );
+    }
+
+    // ── API key check ──────────────────────────────────────────
+    const apiKey = claudeApiKey.value();
+    if (!apiKey) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Missing CLAUDE_API_KEY secret. Run: firebase functions:secrets:set CLAUDE_API_KEY",
       );
     }
 
@@ -1015,227 +1025,24 @@ export const chat = onCall(
         })
       : undefined;
 
-    // ── Load enriched context for plan/evaluate only ────────────
-    const needsEnrichedContext =
-      taskType === TaskType.Plan || taskType === TaskType.Evaluate || taskType === TaskType.Quest;
-    let enriched: EnrichedContext | undefined;
-    if (needsEnrichedContext) {
-      try {
-        enriched = await loadEnrichedContext(db, familyId, childId);
-      } catch (err) {
-        console.warn("Failed to load enriched context, proceeding without it:", err);
-        // Continue without enriched context rather than failing the whole request
-      }
-    }
-
-    // ── Load sight word summary for plan/evaluate context ────────
-    let sightWordContext = "";
-    if (needsEnrichedContext) {
-      try {
-        sightWordContext = await loadSightWordSummary(db, familyId, childId);
-      } catch (err) {
-        console.warn("Failed to load sight word summary:", err);
-      }
-    }
-
-    // ── Load recent evaluation for plan context ──────────────
-    let recentEvalContext = "";
-    if (taskType === TaskType.Plan || taskType === TaskType.Quest) {
-      try {
-        const evalQuery = await db
-          .collection(`families/${familyId}/evaluationSessions`)
-          .where("childId", "==", childId)
-          .where("status", "==", "complete")
-          .orderBy("evaluatedAt", "desc")
-          .limit(1)
-          .get();
-
-        if (!evalQuery.empty) {
-          const evalData = evalQuery.docs[0].data() as {
-            domain?: string;
-            evaluatedAt?: string;
-            summary?: string;
-            recommendations?: Array<{
-              priority: number;
-              skill: string;
-              action: string;
-              frequency: string;
-              duration: string;
-            }>;
-          };
-
-          if (evalData.summary) {
-            const evalLines: string[] = [];
-            evalLines.push("", "RECENT EVALUATION:");
-            evalLines.push(`Domain: ${evalData.domain || "unknown"}`);
-            evalLines.push(`Date: ${evalData.evaluatedAt || "unknown"}`);
-            evalLines.push(`Summary: ${evalData.summary}`);
-            if (evalData.recommendations?.length) {
-              evalLines.push("Recommendations:");
-              for (const rec of evalData.recommendations) {
-                evalLines.push(
-                  `- Priority ${rec.priority}: ${rec.skill} — ${rec.action} (${rec.frequency}, ${rec.duration})`,
-                );
-              }
-            }
-            recentEvalContext = evalLines.join("\n");
-          }
-        }
-      } catch (err) {
-        // If the query fails (e.g., missing composite index), log but don't block
-        console.warn("Failed to load recent evaluation for plan context:", err);
-      }
-    }
-
-    // ── Handle generateStory task type ──────────────────────────
-    if (taskType === TaskType.GenerateStory) {
-      // For story generation, use the story prompt instead of the normal system prompt
-      let storyConfig: { storyIdea?: string; sightWords?: string[]; words?: string[]; theme?: string; pageCount?: number };
-      try {
-        storyConfig = JSON.parse(messages[0].content);
-      } catch {
-        throw new HttpsError("invalid-argument", "generateStory requires JSON with story parameters.");
-      }
-      const storyWords = storyConfig.words ?? storyConfig.sightWords ?? [];
-      const storyIdea = storyConfig.storyIdea ?? storyConfig.theme ?? "";
-
-      // Load child profile for personalized story
-      const storyChildName = childData.name ?? "the reader";
-      let storyChildAge = 10;
-      const childFullDoc = await db
-        .doc(`families/${familyId}/children/${childId}`)
-        .get();
-      const childFullData = childFullDoc.data() as {
-        birthdate?: string;
-      } | undefined;
-      if (childFullData?.birthdate) {
-        const birth = new Date(childFullData.birthdate);
-        storyChildAge = Math.floor(
-          (Date.now() - birth.getTime()) / (365.25 * 24 * 60 * 60 * 1000),
-        );
-      }
-
-      // Child-specific interests and reading level
-      const isLondon = storyChildName.toLowerCase() === "london";
-      const childInterests = isLondon
-        ? "animals, drawing, fairy tales, colors, nature"
-        : "Minecraft, dragons, quests, building, adventures";
-      const readingLevel = isLondon ? "pre-K to kindergarten" : "1st grade";
-
-      const storySystemPrompt = buildStoryPrompt({
-        storyIdea,
-        words: storyWords,
-        pageCount: storyConfig.pageCount ?? 10,
-        childName: storyChildName,
-        childAge: storyChildAge,
-        childInterests,
-        readingLevel,
-      });
-
-      const model = modelForTask(taskType);
-      const { default: Anthropic } = await import("@anthropic-ai/sdk");
-      const client = new Anthropic({ apiKey: claudeApiKey.value() });
-      const completion = await client.messages.create({
-        model,
-        max_tokens: 4096,
-        system: storySystemPrompt,
-        messages: [{ role: "user", content: "Generate the story now." }],
-      });
-
-      const firstBlock = completion.content[0];
-      const responseText = firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
-      const usage = {
-        inputTokens: completion.usage.input_tokens,
-        outputTokens: completion.usage.output_tokens,
-      };
-
-      try {
-        await db.collection(`families/${familyId}/aiUsage`).add({
-          childId,
-          taskType,
-          model,
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          createdAt: new Date().toISOString(),
-        });
-      } catch (logErr) {
-        console.warn("Failed to log AI usage:", logErr);
-      }
-
-      return { message: responseText, model, usage };
-    }
-
-    // ── Assemble system prompt ─────────────────────────────────
-    const systemPrompt = buildSystemPrompt(
-      {
-        name: childData.name,
-        grade: childData.grade,
-        prioritySkills: snapshotData?.prioritySkills,
-        supports: snapshotData?.supports,
-        stopRules: snapshotData?.stopRules,
-      },
-      taskType,
-      enriched,
-      domain,
-    ) + recentEvalContext + (sightWordContext ? `\n\n${sightWordContext}` : "");
-
-    // ── Call Claude ─────────────────────────────────────────────
-    const model = modelForTask(taskType);
-
-    let responseText: string;
-    let usage: { inputTokens: number; outputTokens: number };
-
+    // ── Dispatch to handler ────────────────────────────────────
     try {
-      const apiKey = claudeApiKey.value();
-      if (!apiKey) {
-        throw new HttpsError(
-          "failed-precondition",
-          "Missing CLAUDE_API_KEY secret. Run: firebase functions:secrets:set CLAUDE_API_KEY",
-        );
-      }
-
-      const { default: Anthropic } = await import("@anthropic-ai/sdk");
-      const client = new Anthropic({ apiKey });
-
-      const completion = await client.messages.create({
-        model,
-        max_tokens:
-          taskType === TaskType.Plan || taskType === TaskType.Evaluate
-            ? 4096
-            : taskType === TaskType.Quest
-              ? 1024
-              : 1024,
-        system: systemPrompt,
-        messages: messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
+      return await handler({
+        db,
+        familyId,
+        childId,
+        childData,
+        snapshotData,
+        messages,
+        domain,
+        apiKey,
       });
-
-      const firstBlock = completion.content[0];
-      responseText =
-        firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
-
-      if (!responseText) {
-        console.warn("Claude returned empty response", {
-          model,
-          taskType,
-          stopReason: completion.stop_reason,
-        });
-      }
-
-      usage = {
-        inputTokens: completion.usage.input_tokens,
-        outputTokens: completion.usage.output_tokens,
-      };
     } catch (err) {
-      // Re-throw HttpsError as-is (e.g. our own failed-precondition above)
       if (err instanceof HttpsError) throw err;
 
       const errMsg =
         err instanceof Error ? err.message : "Unknown AI provider error";
-      console.error("Claude API call failed:", {
-        model,
+      console.error("Chat task failed:", {
         taskType,
         childId,
         error: errMsg,
@@ -1246,306 +1053,8 @@ export const chat = onCall(
         `AI service error: ${errMsg}`,
       );
     }
-
-    // ── Log usage to Firestore ─────────────────────────────────
-    try {
-      await db.collection(`families/${familyId}/aiUsage`).add({
-        childId,
-        taskType,
-        model,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        createdAt: new Date().toISOString(),
-      });
-    } catch (logErr) {
-      // Don't fail the request if usage logging fails
-      console.warn("Failed to log AI usage:", logErr);
-    }
-
-    return { message: responseText, model, usage };
   },
 );
 
-// ── analyzeEvaluationPatterns ────────────────────────────────────
-
-interface AnalyzePatternsRequest {
-  familyId: string;
-  childId: string;
-  /** The evaluation session ID that just completed */
-  evaluationSessionId: string;
-  /** Findings from the just-completed session */
-  currentFindings: Array<{
-    skill: string;
-    status: string;
-    evidence: string;
-    notes?: string;
-  }>;
-}
-
-interface ConceptualBlockResult {
-  name: string;
-  affectedSkills: string[];
-  recommendation: "ADDRESS_NOW" | "DEFER";
-  rationale: string;
-  strategies?: string[];
-  deferNote?: string;
-  detectedAt: string;
-  evaluationSessionId: string;
-}
-
-interface AnalyzePatternsResponse {
-  blocks: ConceptualBlockResult[];
-  summary: string;
-}
-
-function buildPatternAnalysisPrompt(
-  _childName: string,
-  childAge: number | null,
-  neurodivergentDesc: string,
-): string {
-  const ageStr = childAge ? `${childAge} years old` : "school age";
-  const ndStr = neurodivergentDesc
-    ? ` The child has: ${neurodivergentDesc}.`
-    : "";
-
-  return `You are an educational diagnostician helping a homeschool parent understand patterns in their child's learning.
-
-The child is ${ageStr}.${ndStr}
-
-You have been given:
-- Findings from today's evaluation
-- Historical evaluation sessions (last several sessions)
-- Current skill snapshot
-
-Your job is to identify CONCEPTUAL BLOCKS — foundational gaps that explain multiple surface-level struggles. For each block you identify:
-
-1. Name the block clearly (e.g. "Phonological awareness", "Working memory load", "Sound-symbol correspondence")
-2. List which skills it appears to affect
-3. Give a clear recommendation: ADDRESS NOW or DEFER
-   - ADDRESS NOW: if it's foundational and blocking progress on multiple fronts
-   - DEFER: if it's a developmental gap that may resolve naturally, or requires specialist support beyond homeschool scope
-4. If ADDRESS NOW: suggest 1-2 concrete strategies appropriate for homeschool
-5. If DEFER: suggest what to circle back to and approximately when (e.g. "revisit at age 8", "after sight words are stable")
-
-Respond ONLY in this JSON format:
-{
-  "blocks": [
-    {
-      "name": string,
-      "affectedSkills": string[],
-      "recommendation": "ADDRESS_NOW" | "DEFER",
-      "rationale": string,
-      "strategies": string[],
-      "deferNote": string
-    }
-  ],
-  "summary": string
-}
-
-Identify 1-3 blocks maximum. If no clear pattern exists, return an empty blocks array.
-Do not speculate beyond what the data supports.
-Use plain, jargon-free language — a homeschool parent reads these, not a specialist.
-Do NOT diagnose clinical conditions — identify patterns and suggest strategies only.
-ADDRESS_NOW blocks must always include a non-empty strategies array.
-DEFER blocks must always include a non-empty deferNote string.`;
-}
-
-export const analyzeEvaluationPatterns = onCall(
-  { secrets: [claudeApiKey] },
-  async (request): Promise<AnalyzePatternsResponse> => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
-
-    const { familyId, childId, evaluationSessionId, currentFindings } =
-      request.data as AnalyzePatternsRequest;
-
-    if (!familyId || typeof familyId !== "string") {
-      throw new HttpsError("invalid-argument", "familyId is required.");
-    }
-    if (!childId || typeof childId !== "string") {
-      throw new HttpsError("invalid-argument", "childId is required.");
-    }
-    if (!evaluationSessionId || typeof evaluationSessionId !== "string") {
-      throw new HttpsError("invalid-argument", "evaluationSessionId is required.");
-    }
-    if (!Array.isArray(currentFindings)) {
-      throw new HttpsError("invalid-argument", "currentFindings must be an array.");
-    }
-
-    if (request.auth.uid !== familyId) {
-      throw new HttpsError(
-        "permission-denied",
-        "You do not have access to this family.",
-      );
-    }
-
-    const db = getFirestore();
-
-    // Load last 5 completed evaluation sessions for this child
-    const histSnap = await db
-      .collection(`families/${familyId}/evaluationSessions`)
-      .where("childId", "==", childId)
-      .where("status", "==", "complete")
-      .orderBy("evaluatedAt", "desc")
-      .limit(5)
-      .get();
-
-    // Skip the current session (it may already be saved as complete)
-    const historicalSessions = histSnap.docs
-      .filter((d) => d.id !== evaluationSessionId)
-      .map((d) => d.data() as {
-        domain?: string;
-        evaluatedAt?: string;
-        summary?: string;
-        findings?: Array<{ skill: string; status: string; evidence: string; notes?: string }>;
-        recommendations?: Array<{ skill: string; action: string }>;
-      });
-
-    // Need at least 2 historical sessions (excluding current) to detect patterns
-    if (historicalSessions.length < 2) {
-      return {
-        blocks: [],
-        summary: "Not enough evaluation history to detect patterns yet.",
-      };
-    }
-
-    // Load child profile
-    const childSnap = await db
-      .doc(`families/${familyId}/children/${childId}`)
-      .get();
-    const childData = childSnap.exists
-      ? (childSnap.data() as { name?: string; birthdate?: string; grade?: string })
-      : {};
-
-    const childName = childData.name ?? "the child";
-    let childAge: number | null = null;
-    if (childData.birthdate) {
-      const birth = new Date(childData.birthdate);
-      childAge = Math.floor(
-        (Date.now() - birth.getTime()) / (365.25 * 24 * 60 * 60 * 1000),
-      );
-    }
-
-    // Build neurodivergent description from known child profiles
-    // (in a real system this would come from child profile flags)
-    const neurodivergentDesc = childName.toLowerCase() === "lincoln"
-      ? "speech challenges, neurodivergent, benefits from short routines and frequent wins"
-      : "";
-
-    // Assemble context for the AI
-    const historicalContext = historicalSessions
-      .map((s, i) => {
-        const findings = (s.findings || [])
-          .map((f) => `  - ${f.skill}: ${f.status} (${f.evidence})`)
-          .join("\n");
-        return `Session ${i + 1} (${s.domain || "unknown"}, ${s.evaluatedAt?.slice(0, 10) || "unknown date"}):
-Summary: ${s.summary || "no summary"}
-Findings:
-${findings || "  (none)"}`;
-      })
-      .join("\n\n");
-
-    const currentFindingsText = currentFindings
-      .map((f) => `  - ${f.skill}: ${f.status} (${f.evidence}${f.notes ? ` — ${f.notes}` : ""})`)
-      .join("\n");
-
-    const userMessage = `Today's evaluation findings:
-${currentFindingsText}
-
-Historical evaluation sessions (${historicalSessions.length} prior sessions):
-${historicalContext}
-
-Please identify any conceptual blocks in the pattern above.`;
-
-    const systemPrompt = buildPatternAnalysisPrompt(childName, childAge, neurodivergentDesc);
-    const model = "claude-sonnet-4-5-20250929";
-
-    const apiKey = claudeApiKey.value();
-    if (!apiKey) {
-      throw new HttpsError(
-        "failed-precondition",
-        "Missing CLAUDE_API_KEY secret.",
-      );
-    }
-
-    const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const client = new Anthropic({ apiKey });
-
-    const completion = await client.messages.create({
-      model,
-      max_tokens: 2048,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-    });
-
-    const firstBlock = completion.content[0];
-    const responseText =
-      firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
-
-    // Log usage
-    try {
-      await db.collection(`families/${familyId}/aiUsage`).add({
-        childId,
-        taskType: "analyzePatterns",
-        model,
-        inputTokens: completion.usage.input_tokens,
-        outputTokens: completion.usage.output_tokens,
-        createdAt: new Date().toISOString(),
-      });
-    } catch (logErr) {
-      console.warn("Failed to log AI usage:", logErr);
-    }
-
-    // Parse the response
-    let parsed: { blocks: ConceptualBlockResult[]; summary: string };
-    try {
-      // Strip markdown fences if present
-      const cleaned = responseText.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-      const raw = JSON.parse(cleaned) as {
-        blocks?: Array<{
-          name?: string;
-          affectedSkills?: string[];
-          recommendation?: string;
-          rationale?: string;
-          strategies?: string[];
-          deferNote?: string;
-        }>;
-        summary?: string;
-      };
-      const now = new Date().toISOString();
-
-      const blocks: ConceptualBlockResult[] = (raw.blocks || [])
-        .slice(0, 3)
-        .map((b) => {
-          const rec = b.recommendation === "ADDRESS_NOW" ? "ADDRESS_NOW" : "DEFER";
-          const result: ConceptualBlockResult = {
-            name: b.name || "Unknown block",
-            affectedSkills: b.affectedSkills || [],
-            recommendation: rec,
-            rationale: b.rationale || "",
-            detectedAt: now,
-            evaluationSessionId,
-          };
-          if (rec === "ADDRESS_NOW" && b.strategies?.length) {
-            result.strategies = b.strategies;
-          } else if (rec === "ADDRESS_NOW") {
-            result.strategies = ["Consult with a specialist for targeted strategies."];
-          }
-          if (rec === "DEFER" && b.deferNote) {
-            result.deferNote = b.deferNote;
-          } else if (rec === "DEFER") {
-            result.deferNote = "Revisit when foundational skills are more stable.";
-          }
-          return result;
-        });
-
-      parsed = { blocks, summary: raw.summary || "" };
-    } catch {
-      console.warn("Failed to parse pattern analysis response:", responseText);
-      parsed = { blocks: [], summary: "" };
-    }
-
-    return parsed;
-  },
-);
+// ── analyzeEvaluationPatterns (extracted to tasks/analyzePatterns.ts) ──
+export { analyzeEvaluationPatterns } from "./tasks/analyzePatterns.js";
