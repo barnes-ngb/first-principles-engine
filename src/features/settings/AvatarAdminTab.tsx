@@ -352,12 +352,14 @@ export default function AvatarAdminTab() {
     setRegenBaseChar(true)
     try {
       const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
-      await setDoc(profileRef, stripUndefined({
-        ...profile,
-        baseCharacterUrl: undefined,
-        photoTransformUrl: undefined,
+      await setDoc(profileRef, {
+        childId: profile.childId,
+        themeStyle: profile.themeStyle,
+        pieces: profile.pieces,
+        currentTier: profile.currentTier,
+        totalXp: profile.totalXp,
         updatedAt: new Date().toISOString(),
-      }))
+      } satisfies AvatarProfile)
       setFeedback({ severity: 'success', message: 'Base character cleared — will regenerate on next visit to My Armor.' })
     } catch (err) {
       console.error('Regen base char failed:', err)
