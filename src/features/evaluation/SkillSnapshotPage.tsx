@@ -42,6 +42,7 @@ import {
   defaultStopRules,
   defaultSupports,
 } from './lincolnDefaults'
+import FoundationsSection from '../evaluate/FoundationsSection'
 import QuickCheckPanel from './QuickCheckPanel'
 
 function computePaceText(wb: WorkbookConfig): { text: string; color: string } | null {
@@ -496,6 +497,16 @@ export default function SkillSnapshotPage() {
               </Button>
             </Stack>
           </SectionCard>
+
+          {/* Conceptual Foundations (from most recent evaluation pattern analysis) */}
+          {snapshot.conceptualBlocks && snapshot.conceptualBlocks.length > 0 && (
+            <SectionCard title="Conceptual Foundations">
+              <FoundationsSection
+                blocks={snapshot.conceptualBlocks}
+                summary={undefined}
+              />
+            </SectionCard>
+          )}
 
           {/* Supports */}
           <SectionCard title="Default Supports / Adaptations">
