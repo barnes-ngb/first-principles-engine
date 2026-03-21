@@ -15,16 +15,9 @@ import RotateRightIcon from '@mui/icons-material/RotateRight'
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import type { PageImage } from '../../core/types/domain'
-
-/** Extended position including rotation (degrees) and zIndex. */
-export interface ImagePosition {
-  x: number
-  y: number
-  width: number
-  height: number
-  rotation: number
-  zIndex: number
-}
+import { clampPosition } from './draggableImageUtils'
+import type { ImagePosition } from './draggableImageUtils'
+export type { ImagePosition } from './draggableImageUtils'
 
 interface DraggableImageProps {
   image: PageImage
@@ -46,23 +39,6 @@ const DEFAULT_POSITIONS: Record<PageImage['type'], { x: number; y: number; width
 const ROTATION_STEP = 15
 /** Nudge per arrow button tap (px). Converted to % via container size. */
 const NUDGE_PX = 5
-
-export function clampPosition(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): { x: number; y: number } {
-  // Allow up to 80% off-canvas on any edge (at least 20% visible).
-  const minX = -(width * 0.8)
-  const maxX = 100 - width * 0.2
-  const minY = -(height * 0.8)
-  const maxY = 100 - height * 0.2
-  return {
-    x: Math.min(Math.max(x, minX), maxX),
-    y: Math.min(Math.max(y, minY), maxY),
-  }
-}
 
 function clamp(val: number, min: number, max: number) {
   return Math.min(Math.max(val, min), max)
