@@ -1299,7 +1299,7 @@ interface AnalyzePatternsResponse {
 }
 
 function buildPatternAnalysisPrompt(
-  childName: string,
+  _childName: string,
   childAge: number | null,
   neurodivergentDesc: string,
 ): string {
