@@ -210,20 +210,16 @@ export function ArmorPieceButtonWithSheet({
   cachedCroppedUrl,
   ...rest
 }: ArmorPieceButtonWithSheetProps) {
-  const [croppedUrl, setCroppedUrl] = useState<string | undefined>(cachedCroppedUrl)
+  const [asyncCroppedUrl, setAsyncCroppedUrl] = useState<string | undefined>(undefined)
 
   useEffect(() => {
-    if (cachedCroppedUrl) {
-      setCroppedUrl(cachedCroppedUrl)
-      return
-    }
-    if (!sheetUrl) return
+    if (cachedCroppedUrl || !sheetUrl) return
     let cancelled = false
     const pieceIndex = ARMOR_PIECE_SHEET_INDEX[pieceId]
     cropArmorPiece(sheetUrl, pieceIndex, 256)
       .then((dataUrl) => {
         if (!cancelled) {
-          setCroppedUrl(dataUrl)
+          setAsyncCroppedUrl(dataUrl)
           onCropped?.(pieceId, dataUrl)
         }
       })
@@ -233,5 +229,5 @@ export function ArmorPieceButtonWithSheet({
     return () => { cancelled = true }
   }, [sheetUrl, pieceId, cachedCroppedUrl, onCropped])
 
-  return <ArmorPieceButton {...rest} pieceId={pieceId} croppedImageUrl={croppedUrl} />
+  return <ArmorPieceButton {...rest} pieceId={pieceId} croppedImageUrl={cachedCroppedUrl ?? asyncCroppedUrl} />
 }
