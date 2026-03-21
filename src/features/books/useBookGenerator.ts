@@ -4,9 +4,102 @@ import { addDoc, doc, getDoc, setDoc } from 'firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
 import type { TaskType } from '../../core/ai/useAI'
 import { booksCollection } from '../../core/firebase/firestore'
-import type { Book, BookPage, PageImage } from '../../core/types/domain'
+import type { Book, BookPage, BookTheme, PageImage } from '../../core/types/domain'
 import type { SubjectBucket } from '../../core/types/enums'
 import { generateImageId, generatePageId } from './bookTypes'
+
+/**
+ * Infer a BookTheme from the story idea text, sight words list, and style.
+ * Simple keyword matching — no AI call needed.
+ */
+export function inferBookTheme(storyIdea: string, words: string[], style: string): BookTheme {
+  if (words.length > 0) return 'sight_words'
+
+  const text = (storyIdea + ' ' + style).toLowerCase()
+
+  if (
+    text.includes('minecraft') ||
+    text.includes('creeper') ||
+    text.includes('cave') ||
+    text.includes('nether') ||
+    text.includes('enderman') ||
+    text.includes('pickaxe') ||
+    text.includes('diamond') ||
+    text.includes('crafting')
+  ) return 'minecraft'
+
+  if (
+    text.includes('animal') ||
+    text.includes('dog') ||
+    text.includes('cat') ||
+    text.includes('bunny') ||
+    text.includes('rabbit') ||
+    text.includes('bear') ||
+    text.includes('lion') ||
+    text.includes('horse') ||
+    text.includes('pig') ||
+    text.includes('bird') ||
+    text.includes('fish') ||
+    text.includes('fox') ||
+    text.includes('deer') ||
+    text.includes('whale') ||
+    text.includes('elephant')
+  ) return 'animals'
+
+  if (
+    text.includes('dragon') ||
+    text.includes('fairy') ||
+    text.includes('wizard') ||
+    text.includes('magic') ||
+    text.includes('princess') ||
+    text.includes('castle') ||
+    text.includes('unicorn') ||
+    text.includes('enchant') ||
+    text.includes('potion')
+  ) return 'fantasy'
+
+  if (
+    text.includes('adventure') ||
+    text.includes('quest') ||
+    text.includes('hero') ||
+    text.includes('journey') ||
+    text.includes('explore') ||
+    text.includes('mission') ||
+    text.includes('treasure') ||
+    text.includes('sword') ||
+    text.includes('knight')
+  ) return 'adventure'
+
+  if (
+    text.includes('family') ||
+    text.includes('mom') ||
+    text.includes('dad') ||
+    text.includes('brother') ||
+    text.includes('sister') ||
+    text.includes('grandma') ||
+    text.includes('grandpa')
+  ) return 'family'
+
+  if (
+    text.includes('science') ||
+    text.includes('robot') ||
+    text.includes('space') ||
+    text.includes('planet') ||
+    text.includes('experiment') ||
+    text.includes('lab')
+  ) return 'science'
+
+  if (
+    text.includes('faith') ||
+    text.includes('god') ||
+    text.includes('jesus') ||
+    text.includes('prayer') ||
+    text.includes('bible') ||
+    text.includes('church')
+  ) return 'faith'
+
+  return 'other'
+}
 
 export interface GenerationProgress {
   phase: 'writing' | 'illustrating' | 'saving' | 'done' | 'error'
@@ -42,6 +135,7 @@ export function useBookGenerator() {
       words: string[],
       style: string,
       pageCount: number,
+      bookTheme?: BookTheme,
     ): Promise<string | null> => {
       setGenerating(true)
 
@@ -113,6 +207,8 @@ export function useBookGenerator() {
         updatedAt: now,
       }))
 
+      const inferredTheme = bookTheme ?? inferBookTheme(storyIdea, words, style)
+
       const newBook: Omit<Book, 'id'> = {
         childId,
         title: story.title,
@@ -124,12 +220,14 @@ export function useBookGenerator() {
         subjectBuckets: ['LanguageArts' as SubjectBucket],
         bookType: 'generated',
         source: 'ai-generated',
+        theme: inferredTheme,
         // Only include optional fields when they have values — Firestore rejects undefined
         ...(words.length > 0 ? { sightWords: words } : {}),
         generationConfig: {
           storyIdea: storyIdea || '',
           words,
           style,
+          theme: inferredTheme,
           pageCount,
         },
       }
