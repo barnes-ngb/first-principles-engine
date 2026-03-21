@@ -769,14 +769,14 @@ export default function AvatarAdminTab() {
               {recentEvents.map((ev, i) => (
                 <Stack key={i} direction="row" justifyContent="space-between" alignItems="center">
                   <Typography variant="caption" color="text.secondary">
-                    {ev.type} — {ev.awardedAt.slice(0, 10)}
+                    {ev.type} — {(ev.awardedAt ?? '').slice(0, 10)}
                   </Typography>
                   <Typography
                     variant="caption"
                     fontWeight={700}
-                    color={ev.amount >= 0 ? 'success.main' : 'error.main'}
+                    color={(ev.amount ?? 0) >= 0 ? 'success.main' : 'error.main'}
                   >
-                    {ev.amount >= 0 ? '+' : ''}{ev.amount} XP
+                    {(ev.amount ?? 0) >= 0 ? '+' : ''}{ev.amount ?? 0} XP
                   </Typography>
                 </Stack>
               ))}
