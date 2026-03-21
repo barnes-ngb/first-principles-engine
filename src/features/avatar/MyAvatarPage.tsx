@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
-import { doc, onSnapshot, setDoc } from 'firebase/firestore'
+import { arrayRemove, deleteField, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import LinearProgress from '@mui/material/LinearProgress'
 import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
@@ -130,6 +135,7 @@ export default function MyAvatarPage() {
   const [session, setSession] = useState<DailyArmorSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedPiece, setSelectedPiece] = useState<ArmorPiece | null>(null)
+  const [unequipPiece, setUnequipPiece] = useState<ArmorPiece | null>(null)
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
   const [baseCharGenerating, setBaseCharGenerating] = useState(false)
@@ -426,6 +432,32 @@ export default function MyAvatarPage() {
     [profile, familyId, childId, session, today, isLincoln, reducedMotion],
   )
 
+  // ── Piece tap handler (open verse card or unequip dialog) ─────
+  const handlePieceTap = useCallback(
+    (pieceId: ArmorPiece) => {
+      if (!profile || !session) return
+      if (session.appliedPieces.includes(pieceId)) {
+        setUnequipPiece(pieceId)
+      } else if (isPieceEarned(profile, pieceId)) {
+        setSelectedPiece(pieceId)
+      }
+      // Locked pieces: do nothing
+    },
+    [profile, session],
+  )
+
+  // ── Unequip a piece for today ──────────────────────────────────
+  const handleUnequip = useCallback(async () => {
+    if (!unequipPiece || !familyId || !childId) return
+    const docId = dailyArmorSessionDocId(childId, today)
+    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+    await updateDoc(sessionRef, {
+      appliedPieces: arrayRemove(unequipPiece),
+      completedAt: deleteField(),
+    })
+    setUnequipPiece(null)
+  }, [unequipPiece, familyId, childId, today])
+
   // ── Animation complete handler ─────────────────────────────────
   const handleAnimComplete = useCallback(() => {
     if (!attachAnim) return
@@ -601,7 +633,7 @@ export default function MyAvatarPage() {
               profile={profile}
               appliedToday={appliedPieces.includes(pieceDef.id)}
               croppedImageUrl={croppedImages[pieceDef.id]}
-              onTap={setSelectedPiece}
+              onTap={handlePieceTap}
             />
           ))}
         </Box>
@@ -722,6 +754,20 @@ export default function MyAvatarPage() {
           )}
         </Box>
       </Page>
+
+      {/* ── Unequip confirmation dialog ────────────────────────── */}
+      <Dialog open={!!unequipPiece} onClose={() => setUnequipPiece(null)}>
+        <DialogTitle>{ARMOR_PIECES.find((p) => p.id === unequipPiece)?.name} is on</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Take it off for today?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setUnequipPiece(null)}>Keep it on</Button>
+          <Button color="warning" onClick={() => void handleUnequip()}>Take it off</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* ── Verse Card modal ──────────────────────────────────── */}
       <VerseCard
