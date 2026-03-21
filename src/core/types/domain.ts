@@ -1030,8 +1030,10 @@ export interface PageImage {
   prompt?: string
   /** Label for accessibility and display */
   label?: string
-  /** Position and size within the page image container (percentage-based) */
-  position?: { x: number; y: number; width: number; height: number }
+  /** Position and size within the page image container (percentage-based).
+   *  x, y, width, height: 0–100, percentage of container dimensions.
+   *  rotation: degrees (0–359). zIndex: stacking order integer. */
+  position?: { x: number; y: number; width: number; height: number; rotation?: number; zIndex?: number }
 }
 
 export interface Sticker {
