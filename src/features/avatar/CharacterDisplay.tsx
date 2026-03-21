@@ -87,8 +87,10 @@ const CharacterDisplay = forwardRef<HTMLDivElement, CharacterDisplayProps>(
     useEffect(() => {
       if (!lastAppliedPiece || reducedMotion) return
 
-      setBouncingPiece(lastAppliedPiece)
-      setFlashActive(true)
+      const t0 = setTimeout(() => {
+        setBouncingPiece(lastAppliedPiece)
+        setFlashActive(true)
+      }, 0)
 
       const t1 = setTimeout(() => {
         setFlashActive(false)
@@ -104,6 +106,7 @@ const CharacterDisplay = forwardRef<HTMLDivElement, CharacterDisplayProps>(
       }, 700)
 
       return () => {
+        clearTimeout(t0)
         clearTimeout(t1)
         clearTimeout(t2)
         clearTimeout(t3)
