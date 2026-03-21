@@ -147,7 +147,7 @@ RULES:
       const openai = new OpenAI({ apiKey: openaiApiKey.value() });
 
       const { Blob } = await import("buffer");
-      const imageBlob = new Blob([baseImageBuffer], { type: "image/png" });
+      const imageBlob = new Blob([new Uint8Array(baseImageBuffer)], { type: "image/png" });
       const imageFile = new File([imageBlob], "base-character.png", { type: "image/png" });
 
       const response = await openai.images.edit({
