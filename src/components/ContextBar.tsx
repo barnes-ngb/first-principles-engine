@@ -8,7 +8,7 @@ import CalendarTodayIcon from '@mui/icons-material/CalendarToday'
 import DateRangeIcon from '@mui/icons-material/DateRange'
 import ScienceIcon from '@mui/icons-material/Science'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
-import type { Child } from '../core/types/domain'
+import type { Child } from '../core/types'
 import { formatDateShort, formatWeekShort, navTo, weekRangeFromDateKey } from '../core/utils/dateKey'
 
 export type ContextBarPage = 'today' | 'week' | 'artifacts'

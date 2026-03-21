@@ -3,7 +3,7 @@ import Chip from '@mui/material/Chip'
 import TextField from '@mui/material/TextField'
 
 import { SKILL_TAG_CATALOG, suggestTagsForSubject } from '../core/types/skillTags'
-import type { SkillTag } from '../core/types/domain'
+import type { SkillTag } from '../core/types'
 
 interface SkillTagPickerProps {
   value: SkillTag[]

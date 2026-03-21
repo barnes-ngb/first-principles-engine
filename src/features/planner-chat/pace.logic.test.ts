@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { WorkbookConfig } from '../../core/types/domain'
+import type { WorkbookConfig } from '../../core/types'
 import { PaceStatus, SubjectBucket } from '../../core/types/enums'
 import {
   buildPaceSuggestion,

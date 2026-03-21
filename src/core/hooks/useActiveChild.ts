@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 
 import { useProfile } from '../profile/useProfile'
-import type { Child } from '../types/domain'
+import type { Child } from '../types'
 import { UserProfile } from '../types/enums'
 import { PROFILE_CHILDREN, useChildren } from './useChildren'
 

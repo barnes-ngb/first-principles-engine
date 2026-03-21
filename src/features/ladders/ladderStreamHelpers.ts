@@ -2,7 +2,7 @@ import type {
   LadderCardDefinition,
   LadderProgress,
   LadderSessionEntry,
-} from '../../core/types/domain'
+} from '../../core/types'
 import type { StreamKey } from '../../core/types/enums'
 
 /** Filter ladder definitions that have a streamKey assigned. */

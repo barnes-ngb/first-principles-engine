@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { SightWordProgress } from '../../core/types/domain'
+import type { SightWordProgress } from '../../core/types'
 import SightWordChip from './SightWordChip'
 import TappableWord from './TappableWord'
 

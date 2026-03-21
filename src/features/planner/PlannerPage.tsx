@@ -43,7 +43,7 @@ import type {
   PlannerSession,
   SkillSnapshot,
   WeeklyPlanItem,
-} from '../../core/types/domain'
+} from '../../core/types'
 import {
   AssignmentAction,
   DayBlockType,

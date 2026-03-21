@@ -12,7 +12,7 @@ import {
   xpEventLogDocId,
   xpLedgerCollection,
 } from '../firebase/firestore'
-import type { XP_EVENTS } from '../types/domain'
+import type { XP_EVENTS } from '../types'
 import { checkAndUnlockArmor } from './checkAndUnlockArmor'
 
 /** Map XP event types to XpLedger source buckets. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { SightWordProgress } from '../../core/types/domain'
+import type { SightWordProgress } from '../../core/types'
 import { computeMasteryLevel, recordEncounter, summarizeMastery } from './sightWordMastery'
 
 function makeProgress(overrides: Partial<SightWordProgress> = {}): SightWordProgress {

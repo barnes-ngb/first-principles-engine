@@ -36,7 +36,7 @@ import {
   generateFilename,
   uploadArtifactFile,
 } from '../../core/firebase/upload'
-import type { LabSession, LabStageCapture, Project } from '../../core/types/domain'
+import type { LabSession, LabStageCapture, Project } from '../../core/types'
 import {
   EngineStage,
   EvidenceType,

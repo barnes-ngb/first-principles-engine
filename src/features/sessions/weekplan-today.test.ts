@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { Child, DayLog, WeekPlan } from '../../core/types/domain'
+import type { Child, DayLog, WeekPlan } from '../../core/types'
 import { DayBlockType } from '../../core/types/enums'
 import { buildTodayBlocks, BlockStatus } from './weekplan-today'
 

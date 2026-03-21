@@ -2,7 +2,7 @@ import type {
   LadderCardDefinition,
   LadderProgress,
   LadderSessionEntry,
-} from '../../core/types/domain'
+} from '../../core/types'
 import {
   SessionSymbol,
   SupportLevel,

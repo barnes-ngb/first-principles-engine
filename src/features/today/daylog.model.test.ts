@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DayBlockType, RoutineItemKey, SubjectBucket } from '../../core/types/enums'
-import type { DayLog } from '../../core/types/domain'
+import type { DayLog } from '../../core/types'
 import {
   autoFillBlockMinutes,
   createDefaultDayLog,

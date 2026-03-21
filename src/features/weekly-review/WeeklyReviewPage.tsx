@@ -28,7 +28,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { app } from '../../core/firebase/firebase'
 import { weeklyReviewsCollection, weeklyReviewDocId } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { PaceAdjustment, WeeklyReview } from '../../core/types/domain'
+import type { PaceAdjustment, WeeklyReview } from '../../core/types'
 import { AdjustmentDecision, ReviewStatus } from '../../core/types/enums'
 import { getWeekRange } from '../../core/utils/time'
 

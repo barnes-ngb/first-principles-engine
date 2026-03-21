@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { DayBlock } from '../types/domain'
+import type { DayBlock } from '../types'
 import { DayBlockType, SubjectBucket } from '../types/enums'
 import {
   autoTagBlocks,

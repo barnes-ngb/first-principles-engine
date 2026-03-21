@@ -68,7 +68,7 @@ import {
   uploadArtifactFile,
 } from '../../core/firebase/upload'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, ChecklistItem as ChecklistItemType, DayLog, DraftDayPlan, DraftPlanItem, LadderCardDefinition, SkillSnapshot } from '../../core/types/domain'
+import type { Artifact, ChecklistItem as ChecklistItemType, DayLog, DraftDayPlan, DraftPlanItem, LadderCardDefinition, SkillSnapshot } from '../../core/types'
 import { getLaddersForChild } from '../ladders/laddersCatalog'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {

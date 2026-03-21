@@ -19,7 +19,7 @@ import type {
   SkillSnapshot,
   StopRule,
   SupportDefault,
-} from '../../types/domain'
+} from '../../types'
 import type { EnergyLevel } from '../../types/enums'
 import type { EnergyPatternResult } from '../../utils/energyPatterns'
 import { formatEnergyPatternsForPrompt } from '../../utils/energyPatterns'

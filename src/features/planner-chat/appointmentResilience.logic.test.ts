@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest'
-import type { DraftDayPlan, DraftWeeklyPlan } from '../../core/types/domain'
+import type { DraftDayPlan, DraftWeeklyPlan } from '../../core/types'
 import { DayType, SubjectBucket } from '../../core/types/enums'
 import { resetIdCounter } from './chatPlanner.logic'
 import {

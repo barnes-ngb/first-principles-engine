@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { advanceLessonNumber, clonePlanWithAdvancedLessons } from './repeatWeek.logic'
-import type { DraftWeeklyPlan } from '../../core/types/domain'
+import type { DraftWeeklyPlan } from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
 
 describe('advanceLessonNumber', () => {

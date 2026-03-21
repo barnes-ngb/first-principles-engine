@@ -6,7 +6,7 @@ import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
-import type { PaceGaugeResult } from '../../core/types/domain'
+import type { PaceGaugeResult } from '../../core/types'
 import { PaceStatus } from '../../core/types/enums'
 
 interface PaceGaugePanelProps {

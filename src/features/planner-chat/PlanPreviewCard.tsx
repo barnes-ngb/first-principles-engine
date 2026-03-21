@@ -9,7 +9,7 @@ import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
-import type { DraftPlanItem, DraftWeeklyPlan } from '../../core/types/domain'
+import type { DraftPlanItem, DraftWeeklyPlan } from '../../core/types'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { dayTotalMinutes } from './chatPlanner.logic'
 

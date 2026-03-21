@@ -50,7 +50,7 @@ import type {
   Evaluation,
   HoursAdjustment,
   HoursEntry,
-} from '../../core/types/domain'
+} from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
 import { formatDateForInput } from '../../core/utils/format'
 import { getSchoolYearRange } from '../../core/utils/time'

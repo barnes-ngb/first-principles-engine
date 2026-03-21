@@ -4,7 +4,7 @@ import type {
   SkillSnapshot,
   SkipSuggestion,
   WeeklyPlanItem,
-} from '../../core/types/domain'
+} from '../../core/types'
 import { AssignmentAction, SubjectBucket } from '../../core/types/enums'
 
 /** Default app blocks that run "on rails" */

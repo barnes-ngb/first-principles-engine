@@ -6,7 +6,7 @@ import type {
   Evaluation,
   HoursAdjustment,
   HoursEntry,
-} from '../../core/types/domain'
+} from '../../core/types'
 import {
   DayBlockType,
   EngineStage,

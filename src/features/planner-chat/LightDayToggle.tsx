@@ -2,7 +2,7 @@ import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
-import type { DayTypeConfig } from '../../core/types/domain'
+import type { DayTypeConfig } from '../../core/types'
 import { DayType } from '../../core/types/enums'
 import { WEEK_DAYS } from './chatPlanner.logic'
 

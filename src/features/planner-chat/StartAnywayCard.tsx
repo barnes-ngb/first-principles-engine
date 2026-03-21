@@ -8,7 +8,7 @@ import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
-import type { StartAnywayScript } from '../../core/types/domain'
+import type { StartAnywayScript } from '../../core/types'
 
 interface StartAnywayCardProps {
   script: StartAnywayScript

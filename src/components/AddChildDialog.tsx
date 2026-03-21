@@ -10,7 +10,7 @@ import { addDoc } from 'firebase/firestore'
 
 import { useFamilyId } from '../core/auth/useAuth'
 import { childrenCollection } from '../core/firebase/firestore'
-import type { Child } from '../core/types/domain'
+import type { Child } from '../core/types'
 
 interface AddChildDialogProps {
   open: boolean

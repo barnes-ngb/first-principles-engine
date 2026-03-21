@@ -2,8 +2,8 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import LockIcon from '@mui/icons-material/Lock'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import type { ArmorPiece, AvatarProfile } from '../../core/types/domain'
-import { ARMOR_PIECES } from '../../core/types/domain'
+import type { ArmorPiece, AvatarProfile } from '../../core/types'
+import { ARMOR_PIECES } from '../../core/types'
 import { isPieceEarned } from './armorUtils'
 
 interface ArmorPieceCardProps {

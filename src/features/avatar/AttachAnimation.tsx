@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { ArmorPiece } from '../../core/types/domain'
+import type { ArmorPiece } from '../../core/types'
 import type { ArmorTierColor } from './icons/ArmorIcons'
 import { ArmorIcon } from './icons/ArmorIcons'
 

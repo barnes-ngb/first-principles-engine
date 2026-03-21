@@ -26,7 +26,7 @@ import {
   artifactsCollection,
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { Artifact } from '../../core/types/domain'
+import type { Artifact } from '../../core/types'
 import { EvidenceType } from '../../core/types/enums'
 import {
   generatePortfolioMarkdown,

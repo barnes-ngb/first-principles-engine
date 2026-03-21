@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ARMOR_PIECES,
   XP_EVENTS,
-} from '../../../core/types/domain'
+} from '../../../core/types'
 import type {
   ArmorPiece,
   ArmorPieceProgress,
@@ -10,7 +10,7 @@ import type {
   AvatarProfile,
   DailyArmorSession,
   PlatformerTier,
-} from '../../../core/types/domain'
+} from '../../../core/types'
 import { PIECE_OVERLAY_POSITIONS } from '../armorUtils'
 import { getTodayDateString } from '../../../core/avatar/getDailyArmorSession'
 

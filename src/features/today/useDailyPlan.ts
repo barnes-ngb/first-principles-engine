@@ -5,7 +5,7 @@ import {
   dailyPlanDocId,
   dailyPlansCollection,
 } from '../../core/firebase/firestore'
-import type { DailyPlan } from '../../core/types/domain'
+import type { DailyPlan } from '../../core/types'
 import type { EnergyLevel, PlanType } from '../../core/types/enums'
 
 interface UseDailyPlanOptions {

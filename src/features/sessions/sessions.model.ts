@@ -1,4 +1,4 @@
-import type { PlannedSession } from '../../core/types/domain'
+import type { PlannedSession } from '../../core/types'
 import { StreamId } from '../../core/types/enums'
 
 /** Maps StreamId → the Firestore ladder doc ID prefix (child-specific). */

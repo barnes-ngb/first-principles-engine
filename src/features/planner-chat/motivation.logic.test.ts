@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { SkillSnapshot } from '../../core/types/domain'
+import type { SkillSnapshot } from '../../core/types'
 import { SkillLevel } from '../../core/types/enums'
 import {
   buildAllScripts,

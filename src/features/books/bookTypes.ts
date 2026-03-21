@@ -1,4 +1,4 @@
-import type { BookPage } from '../../core/types/domain'
+import type { BookPage } from '../../core/types'
 
 export const COVER_STYLES = [
   { value: 'storybook', label: 'Storybook' },

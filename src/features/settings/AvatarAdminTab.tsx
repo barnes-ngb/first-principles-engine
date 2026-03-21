@@ -36,7 +36,7 @@ import {
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
 import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
-import { ARMOR_PIECES } from '../../core/types/domain'
+import { ARMOR_PIECES } from '../../core/types'
 import type {
   ArmorPiece,
   ArmorPieceProgress,
@@ -45,7 +45,7 @@ import type {
   DailyArmorSession,
   PlatformerTier,
   XpEventLogEntry,
-} from '../../core/types/domain'
+} from '../../core/types'
 
 // ── Helpers ──────────────────────────────────────────────────────
 

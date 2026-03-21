@@ -30,7 +30,7 @@ import type {
   Ladder,
   MilestoneProgress,
   Rung,
-} from '../../core/types/domain'
+} from '../../core/types'
 import {
   canMarkAchieved,
   getActiveRungId,

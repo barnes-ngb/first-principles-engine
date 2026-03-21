@@ -11,7 +11,7 @@ import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 
-import type { LadderCardDefinition, LadderProgress } from '../../core/types/domain'
+import type { LadderCardDefinition, LadderProgress } from '../../core/types'
 import { SessionSymbol, SupportLevel } from '../../core/types/enums'
 import type { ApplySessionInput } from './ladderProgress'
 

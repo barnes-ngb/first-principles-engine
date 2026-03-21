@@ -11,7 +11,7 @@ import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 
-import type { SkillSnapshot } from '../../core/types/domain'
+import type { SkillSnapshot } from '../../core/types'
 import type { SkillLevel } from '../../core/types/enums'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 

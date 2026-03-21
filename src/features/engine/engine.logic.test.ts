@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { MilestoneProgress } from '../../core/types/domain'
+import type { MilestoneProgress } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import {
   computeLoopStatus,
