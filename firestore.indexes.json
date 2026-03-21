@@ -1,7 +1,15 @@
 {
   "indexes": [
     {
-      "collectionGroup": "xpEventLog",
+      "collectionGroup": "xpLedger",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "childId", "order": "ASCENDING" },
+        { "fieldPath": "dedupKey", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "xpLedger",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "childId", "order": "ASCENDING" },
