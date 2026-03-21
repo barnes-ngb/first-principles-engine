@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -63,13 +63,9 @@ export default function StoryGuidePage() {
   const accentColor = isLincoln ? '#4caf50' : '#f06292'
   const accentHover = isLincoln ? '#388e3c' : '#e91e8c'
 
-  // ── Watch for wizard completion ──────────────────────────────
-
-  useEffect(() => {
-    if (guide.isDone && wizardStep === 'questions') {
-      setWizardStep('questions-done')
-    }
-  }, [guide.isDone, wizardStep])
+  // Derive transition from 'questions' → 'questions-done' without an effect
+  const effectiveWizardStep: WizardStep =
+    guide.isDone && wizardStep === 'questions' ? 'questions-done' : wizardStep
 
   // ── AI shaping step ──────────────────────────────────────────
 
@@ -156,7 +152,7 @@ export default function StoryGuidePage() {
 
   // ── Render: generation in progress ───────────────────────────
 
-  if (wizardStep === 'generating' && progress) {
+  if (effectiveWizardStep === 'generating' && progress) {
     return (
       <Page>
         <GenerationProgress progress={progress} isLincoln={isLincoln} />
@@ -179,7 +175,7 @@ export default function StoryGuidePage() {
 
   // ── Render: questions wizard ─────────────────────────────────
 
-  if (wizardStep === 'questions') {
+  if (effectiveWizardStep === 'questions') {
     return (
       <Page>
         <Stack spacing={2} sx={{ py: 1 }}>
@@ -238,7 +234,7 @@ export default function StoryGuidePage() {
 
   // ── Render: questions done — offer AI shaping ────────────────
 
-  if (wizardStep === 'questions-done') {
+  if (effectiveWizardStep === 'questions-done') {
     return (
       <Page>
         <Stack spacing={3} sx={{ maxWidth: 480, mx: 'auto', py: 2 }}>
@@ -300,7 +296,7 @@ export default function StoryGuidePage() {
 
   // ── Render: AI shaping question ──────────────────────────────
 
-  if (wizardStep === 'ai-shaping') {
+  if (effectiveWizardStep === 'ai-shaping') {
     return (
       <Page>
         <Stack spacing={3} sx={{ maxWidth: 480, mx: 'auto', py: 2 }}>

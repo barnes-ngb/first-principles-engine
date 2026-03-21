@@ -181,11 +181,13 @@ export default function BookReaderPage() {
 
   // Log reading hours and award XP when leaving the reader
   useEffect(() => {
+    const sessionStart = sessionStartRef.current
+    const pagesViewed = pagesViewedRef.current
     return () => {
       if (hoursLoggedRef.current || !book) return
       hoursLoggedRef.current = true
 
-      const elapsed = Math.round((Date.now() - sessionStartRef.current) / 60000)
+      const elapsed = Math.round((Date.now() - sessionStart) / 60000)
       if (elapsed < 1) return
 
       void logReadingHours(
@@ -194,7 +196,7 @@ export default function BookReaderPage() {
         elapsed,
         book.title,
         completedRef.current,
-        pagesViewedRef.current.size,
+        pagesViewed.size,
         totalPages,
         book.sightWords?.length ?? 0,
       )

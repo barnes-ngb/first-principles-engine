@@ -73,12 +73,46 @@ export interface ImageGenResponse {
   revisedPrompt?: string
 }
 
+// ── Pattern analysis types (mirrored from functions/src/ai/chat.ts) ──
+
+export interface AnalyzePatternsRequest {
+  familyId: string
+  childId: string
+  evaluationSessionId: string
+  currentFindings: Array<{
+    skill: string
+    status: string
+    evidence: string
+    notes?: string
+  }>
+}
+
+export interface ConceptualBlockResult {
+  name: string
+  affectedSkills: string[]
+  recommendation: 'ADDRESS_NOW' | 'DEFER'
+  rationale: string
+  strategies?: string[]
+  deferNote?: string
+  detectedAt: string
+  evaluationSessionId: string
+}
+
+export interface AnalyzePatternsResponse {
+  blocks: ConceptualBlockResult[]
+  summary: string
+}
+
 // ── Hook ────────────────────────────────────────────────────────
 
 const functions = getFunctions(app)
 const chatFn = httpsCallable<ChatRequest, ChatResponse>(functions, 'chat')
 const generateFn = httpsCallable<GenerateRequest, GenerateResponse>(functions, 'generateActivity')
 const imageGenFn = httpsCallable<ImageGenRequest, ImageGenResponse>(functions, 'generateImage')
+const analyzePatternsFn = httpsCallable<AnalyzePatternsRequest, AnalyzePatternsResponse>(
+  functions,
+  'analyzeEvaluationPatterns',
+)
 
 export function useAI() {
   const [loading, setLoading] = useState(false)
@@ -121,7 +155,27 @@ export function useAI() {
     [],
   )
 
-  return { chat, generateImage, loading, error } as const
+  const analyzePatterns = useCallback(
+    async (request: AnalyzePatternsRequest): Promise<AnalyzePatternsResponse | null> => {
+      setLoading(true)
+      setError(null)
+      try {
+        const result = await analyzePatternsFn(request)
+        return result.data
+      } catch (err) {
+        const fireErr = err as { code?: string; message?: string; details?: string }
+        const message =
+          fireErr.details || fireErr.message || (err instanceof Error ? err.message : String(err))
+        setError(new Error(message))
+        return null
+      } finally {
+        setLoading(false)
+      }
+    },
+    [],
+  )
+
+  return { chat, generateImage, analyzePatterns, loading, error } as const
 }
 
 export function useGenerateActivity() {

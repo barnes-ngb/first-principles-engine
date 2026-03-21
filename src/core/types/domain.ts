@@ -578,6 +578,17 @@ export interface EvidenceDefinition {
   description: string
 }
 
+export interface ConceptualBlock {
+  name: string
+  affectedSkills: string[]
+  recommendation: 'ADDRESS_NOW' | 'DEFER'
+  rationale: string
+  strategies?: string[]
+  deferNote?: string
+  detectedAt: string
+  evaluationSessionId: string
+}
+
 export interface SkillSnapshot {
   id?: string
   childId: string
@@ -585,6 +596,9 @@ export interface SkillSnapshot {
   supports: SupportDefault[]
   stopRules: StopRule[]
   evidenceDefinitions: EvidenceDefinition[]
+  /** Conceptual blocks detected by pattern analysis (most recent evaluation only) */
+  conceptualBlocks?: ConceptualBlock[]
+  blocksUpdatedAt?: string
   createdAt?: string
   updatedAt?: string
 }

@@ -1,5 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+// Web Speech API types (not universally present in TS DOM lib)
+interface SpeechRecognition extends EventTarget {
+  lang: string
+  interimResults: boolean
+  maxAlternatives: number
+  onresult: ((event: SpeechRecognitionEvent) => void) | null
+  onerror: ((event: Event) => void) | null
+  onend: (() => void) | null
+  start(): void
+  stop(): void
+  abort(): void
+}
+declare const SpeechRecognition: { new (): SpeechRecognition }
+interface SpeechRecognitionEvent extends Event {
+  readonly results: SpeechRecognitionResultList
+}
+declare global {
+  interface Window {
+    SpeechRecognition?: typeof SpeechRecognition
+  }
+}
+
 // ── Question definitions ─────────────────────────────────────────
 
 export interface StoryQuestion {

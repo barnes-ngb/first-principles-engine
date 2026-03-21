@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { clampPosition } from './DraggableImage'
+import { clampPosition } from './draggableImageUtils'
 
 // ── clampPosition ──────────────────────────────────────────────
 
