@@ -5,14 +5,16 @@ export interface TouchControlState {
   prevX: number
   targetRotY: number
   currentRotY: number
+  velocityY: number
   autoRotate: boolean
-  lastTouchTime: number
+  lastInteractionTime: number
 }
 
-const AUTO_ROTATE_DELAY = 3000
-const ROTATION_SPEED = 0.008
-const LERP_FACTOR = 0.1
+const AUTO_ROTATE_DELAY = 4000
 const AUTO_ROTATE_SPEED = 0.003
+const DRAG_SENSITIVITY = 0.006
+const LERP_FACTOR = 0.08
+const FRICTION = 0.95
 
 export function createTouchControls(canvas: HTMLCanvasElement): TouchControlState {
   const state: TouchControlState = {
@@ -20,58 +22,57 @@ export function createTouchControls(canvas: HTMLCanvasElement): TouchControlStat
     prevX: 0,
     targetRotY: 0,
     currentRotY: 0,
+    velocityY: 0,
     autoRotate: true,
-    lastTouchTime: 0,
+    lastInteractionTime: 0,
+  }
+
+  function onPointerDown(x: number) {
+    state.isDragging = true
+    state.prevX = x
+    state.velocityY = 0
+    state.autoRotate = false
+    state.lastInteractionTime = performance.now()
+  }
+
+  function onPointerMove(x: number) {
+    if (!state.isDragging) return
+    const dx = x - state.prevX
+    state.velocityY = dx * DRAG_SENSITIVITY
+    state.targetRotY += state.velocityY
+    state.prevX = x
+  }
+
+  function onPointerUp() {
+    state.isDragging = false
+    state.lastInteractionTime = performance.now()
+    // Momentum: velocity carries forward, decayed by friction in the loop
   }
 
   // ── Touch events ────────────────────────────────────────────────
   canvas.addEventListener('touchstart', (e: TouchEvent) => {
-    if (e.touches.length === 1) {
-      state.isDragging = true
-      state.prevX = e.touches[0].clientX
-      state.autoRotate = false
-      state.lastTouchTime = Date.now()
-    }
+    if (e.touches.length === 1) onPointerDown(e.touches[0].clientX)
   }, { passive: true })
 
   canvas.addEventListener('touchmove', (e: TouchEvent) => {
-    if (state.isDragging && e.touches.length === 1) {
-      const dx = e.touches[0].clientX - state.prevX
-      state.targetRotY += dx * ROTATION_SPEED
-      state.prevX = e.touches[0].clientX
-      state.lastTouchTime = Date.now()
-    }
+    if (e.touches.length === 1) onPointerMove(e.touches[0].clientX)
   }, { passive: true })
 
-  canvas.addEventListener('touchend', () => {
-    state.isDragging = false
-    state.lastTouchTime = Date.now()
-  }, { passive: true })
+  canvas.addEventListener('touchend', () => onPointerUp(), { passive: true })
 
   // ── Mouse events (desktop/dev testing) ──────────────────────────
-  canvas.addEventListener('mousedown', (e: MouseEvent) => {
-    state.isDragging = true
-    state.prevX = e.clientX
-    state.autoRotate = false
-    state.lastTouchTime = Date.now()
-  })
+  canvas.addEventListener('mousedown', (e: MouseEvent) => onPointerDown(e.clientX))
 
-  canvas.addEventListener('mousemove', (e: MouseEvent) => {
-    if (state.isDragging) {
-      const dx = e.clientX - state.prevX
-      state.targetRotY += dx * ROTATION_SPEED
-      state.prevX = e.clientX
-      state.lastTouchTime = Date.now()
-    }
-  })
+  const handleMouseMove = (e: MouseEvent) => {
+    if (state.isDragging) onPointerMove(e.clientX)
+  }
+  const handleMouseUp = () => onPointerUp()
 
-  canvas.addEventListener('mouseup', () => {
-    state.isDragging = false
-    state.lastTouchTime = Date.now()
-  })
+  window.addEventListener('mousemove', handleMouseMove)
+  window.addEventListener('mouseup', handleMouseUp)
 
   canvas.addEventListener('mouseleave', () => {
-    state.isDragging = false
+    // Don't stop drag on leave — mouseup on window handles it
   })
 
   return state
@@ -82,9 +83,15 @@ export function updateRotation(
   character: THREE.Group,
   state: TouchControlState,
 ): void {
-  // Auto-rotate resume after 3s of no touch
-  if (!state.autoRotate && Date.now() - state.lastTouchTime > AUTO_ROTATE_DELAY) {
-    state.autoRotate = true
+  if (!state.isDragging) {
+    // Apply momentum with friction
+    state.velocityY *= FRICTION
+    state.targetRotY += state.velocityY
+
+    // Resume auto-rotate after delay
+    if (performance.now() - state.lastInteractionTime > AUTO_ROTATE_DELAY) {
+      state.autoRotate = true
+    }
   }
 
   if (state.autoRotate) {
