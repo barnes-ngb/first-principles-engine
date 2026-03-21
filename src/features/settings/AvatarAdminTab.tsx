@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { doc, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore'
+import { deleteDoc, doc, getDoc, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore'
 import { getDocs, limit } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import Alert from '@mui/material/Alert'
@@ -16,17 +16,18 @@ import InputAdornment from '@mui/material/InputAdornment'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
-import ToggleButton from '@mui/material/ToggleButton'
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
+import Chip from '@mui/material/Chip'
 import DeleteIcon from '@mui/icons-material/Delete'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
+import Tooltip from '@mui/material/Tooltip'
 import UpgradeIcon from '@mui/icons-material/Upgrade'
 
 import { app } from '../../core/firebase/firebase'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   avatarProfilesCollection,
+  childrenCollection,
   dailyArmorSessionsCollection,
   dailyArmorSessionDocId,
   xpEventLogCollection,
@@ -89,6 +90,11 @@ export default function AvatarAdminTab() {
   const [resetOpen, setResetOpen] = useState(false)
   const [regenBaseCharConfirmOpen, setRegenBaseCharConfirmOpen] = useState(false)
   const [recalcXpLoading, setRecalcXpLoading] = useState(false)
+
+  // Delete profile state
+  const [deleteProfileChild, setDeleteProfileChild] = useState<{ docId: string; name: string } | null>(null)
+  const [deleteProfileInfo, setDeleteProfileInfo] = useState<{ totalXp: number; earnedPieces: number } | null>(null)
+  const [deleteProfileLoading, setDeleteProfileLoading] = useState(false)
 
   const today = getTodayDateString()
 
@@ -324,23 +330,38 @@ export default function AvatarAdminTab() {
     const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
 
     try {
-      const logSnap = await getDocs(
-        query(xpEventLogCollection(familyId), where('childId', '==', activeChildId)),
-      )
-      for (const d of logSnap.docs) {
-        await setDoc(d.ref, { ...d.data(), _deleted: true } as unknown as XpEventLogEntry)
-      }
-
+      // 1. Reset the avatarProfile fields (keep base character and photo transform)
       await setDoc(profileRef, {
         childId: profile.childId,
         themeStyle: profile.themeStyle,
         pieces: [],
         currentTier: profile.themeStyle === 'minecraft' ? 'stone' : 'basic',
         ...(profile.baseCharacterUrl ? { baseCharacterUrl: profile.baseCharacterUrl } : {}),
+        ...(profile.photoTransformUrl ? { photoTransformUrl: profile.photoTransformUrl } : {}),
         armorSheetUrls: {},
         totalXp: 0,
         updatedAt: new Date().toISOString(),
       } satisfies AvatarProfile)
+
+      // 2. Delete all xpEventLog entries for this child
+      const xpEventDocs = await getDocs(
+        query(xpEventLogCollection(familyId), where('childId', '==', activeChildId)),
+      )
+      await Promise.all(xpEventDocs.docs.map((d) => deleteDoc(d.ref)))
+
+      // 3. Delete all xpLedger entries for this child
+      const ledgerRef = doc(xpLedgerCollection(familyId), activeChildId)
+      const ledgerSnap = await getDoc(ledgerRef)
+      if (ledgerSnap.exists()) {
+        await deleteDoc(ledgerRef)
+      }
+
+      // 4. Delete today's dailyArmorSession for this child
+      const sessionRef = doc(dailyArmorSessionsCollection(familyId), dailyArmorSessionDocId(activeChildId, today))
+      const sessionSnap = await getDoc(sessionRef)
+      if (sessionSnap.exists()) {
+        await deleteDoc(sessionRef)
+      }
 
       setFeedback({ severity: 'success', message: 'Avatar reset. Base character kept.' })
     } catch (err) {
@@ -349,7 +370,7 @@ export default function AvatarAdminTab() {
     } finally {
       setResetOpen(false)
     }
-  }, [profile, familyId, activeChildId])
+  }, [profile, familyId, activeChildId, today])
 
   // ── Regenerate base character ─────────────────────────────────
   const handleRegenBaseChar = useCallback(async () => {
@@ -419,6 +440,101 @@ export default function AvatarAdminTab() {
     }
   }, [familyId, activeChildId])
 
+  // ── Delete avatar profile ────────────────────────────────────
+  const handleOpenDeleteProfile = useCallback(async (childDocId: string, childName: string) => {
+    setDeleteProfileChild({ docId: childDocId, name: childName })
+    setDeleteProfileInfo(null)
+    // Fetch profile stats for the confirmation dialog
+    try {
+      const profileRef = doc(avatarProfilesCollection(familyId!), childDocId)
+      const profileSnap = await getDoc(profileRef)
+      if (profileSnap.exists()) {
+        const p = profileSnap.data() as AvatarProfile
+        const earned = p.pieces.filter((piece) =>
+          p.themeStyle === 'minecraft'
+            ? piece.unlockedTiers.length > 0
+            : (piece.unlockedTiersPlatformer ?? []).length > 0,
+        ).length
+        setDeleteProfileInfo({ totalXp: p.totalXp, earnedPieces: earned })
+      } else {
+        setDeleteProfileInfo({ totalXp: 0, earnedPieces: 0 })
+      }
+    } catch {
+      setDeleteProfileInfo({ totalXp: 0, earnedPieces: 0 })
+    }
+  }, [familyId])
+
+  const handleDeleteProfile = useCallback(async () => {
+    if (!familyId || !deleteProfileChild) return
+    setDeleteProfileLoading(true)
+    const childDocId = deleteProfileChild.docId
+    try {
+      // 1. Delete the avatarProfile document
+      const profileRef = doc(avatarProfilesCollection(familyId), childDocId)
+      const profileSnap = await getDoc(profileRef)
+      if (profileSnap.exists()) {
+        await deleteDoc(profileRef)
+      }
+
+      // 2. Delete all xpEventLog entries for this child
+      const xpDocs = await getDocs(
+        query(xpEventLogCollection(familyId), where('childId', '==', childDocId)),
+      )
+      await Promise.all(xpDocs.docs.map((d) => deleteDoc(d.ref)))
+
+      // 3. Delete all xpLedger entries for this child
+      const ledgerRef = doc(xpLedgerCollection(familyId), childDocId)
+      const ledgerSnap = await getDoc(ledgerRef)
+      if (ledgerSnap.exists()) {
+        await deleteDoc(ledgerRef)
+      }
+
+      // 4. Delete the child document itself
+      const childRef = doc(childrenCollection(familyId), childDocId)
+      await deleteDoc(childRef)
+
+      setFeedback({ severity: 'success', message: 'Avatar profile deleted.' })
+
+      // If we deleted the active child, switch to another
+      if (activeChildId === childDocId && children.length > 1) {
+        const remaining = children.find((c) => c.id !== childDocId)
+        if (remaining) setActiveChildId(remaining.id)
+      }
+    } catch (err) {
+      console.error('Delete profile failed:', err)
+      setFeedback({ severity: 'error', message: 'Failed to delete avatar profile.' })
+    } finally {
+      setDeleteProfileLoading(false)
+      setDeleteProfileChild(null)
+    }
+  }, [familyId, deleteProfileChild, activeChildId, children, setActiveChildId])
+
+  // ── Duplicate detection ──────────────────────────────────────
+  const profilesByName = children.reduce((acc, child) => {
+    if (!acc[child.name]) acc[child.name] = []
+    acc[child.name].push(child)
+    return acc
+  }, {} as Record<string, typeof children>)
+
+  const isDuplicate = (childId: string) => {
+    const child = children.find((c) => c.id === childId)
+    if (!child) return false
+    return (profilesByName[child.name]?.length ?? 0) > 1
+  }
+
+  const canDeleteProfile = (childId: string) => {
+    // Allow deletion if it's a duplicate
+    if (isDuplicate(childId)) return true
+    // For non-duplicates, check if active profile has 0 XP and 0 pieces
+    if (childId === activeChildId && profile) {
+      const earned = profile.pieces.filter((p) =>
+        profile.themeStyle === 'minecraft' ? p.unlockedTiers.length > 0 : (p.unlockedTiersPlatformer ?? []).length > 0,
+      ).length
+      return profile.totalXp === 0 && earned === 0
+    }
+    return false
+  }
+
   // ── Regenerate piece images ────────────────────────────────────
   const handleRegenPieceImages = useCallback(async () => {
     if (!profile || !familyId || !activeChildId) return
@@ -479,10 +595,7 @@ export default function AvatarAdminTab() {
     }
   }, [profile, familyId, activeChildId])
 
-  const uniqueChildren = children.filter(
-    (child, index, self) => index === self.findIndex((c) => c.id === child.id),
-  )
-  const selectedChild = uniqueChildren.find((c) => c.id === activeChildId)
+  const selectedChild = children.find((c) => c.id === activeChildId)
   const nextPiece = ARMOR_PIECES.find((p) => !profile || !isPieceEarned(profile, p.id))
   const xpToNext = nextPiece && profile ? Math.max(nextPiece.xpToUnlockStone - profile.totalXp, 0) : 0
   const earnedCount = profile ? profile.pieces.filter((p) =>
@@ -497,18 +610,34 @@ export default function AvatarAdminTab() {
         <Typography variant="subtitle2" color="text.secondary" gutterBottom>
           Select Child
         </Typography>
-        <ToggleButtonGroup
-          value={activeChildId}
-          exclusive
-          onChange={(_, val) => { if (val) setActiveChildId(val) }}
-          size="small"
-        >
-          {uniqueChildren.map((c) => (
-            <ToggleButton key={c.id} value={c.id}>
-              {c.name}
-            </ToggleButton>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          {children.map((c) => (
+            <Chip
+              key={c.id}
+              label={
+                <Stack direction="row" alignItems="center" spacing={0.5}>
+                  <span>{c.name}</span>
+                  {isDuplicate(c.id) && (
+                    <Typography variant="caption" color="warning.main" sx={{ fontSize: '0.65rem' }}>
+                      (duplicate)
+                    </Typography>
+                  )}
+                </Stack>
+              }
+              color={c.id === activeChildId ? 'primary' : 'default'}
+              variant={c.id === activeChildId ? 'filled' : 'outlined'}
+              onClick={() => setActiveChildId(c.id)}
+              onDelete={canDeleteProfile(c.id) ? () => void handleOpenDeleteProfile(c.id, c.name) : undefined}
+              deleteIcon={
+                canDeleteProfile(c.id) ? (
+                  <Tooltip title="Delete this avatar profile">
+                    <DeleteIcon fontSize="small" />
+                  </Tooltip>
+                ) : undefined
+              }
+            />
           ))}
-        </ToggleButtonGroup>
+        </Stack>
       </Box>
 
       {/* ── Status card ─────────────────────────────────────────── */}
@@ -808,17 +937,64 @@ export default function AvatarAdminTab() {
         </DialogActions>
       </Dialog>
 
+      {/* ── Delete profile confirmation ─────────────────────────── */}
+      <Dialog open={!!deleteProfileChild} onClose={() => setDeleteProfileChild(null)}>
+        <DialogTitle>Delete this avatar profile?</DialogTitle>
+        <DialogContent>
+          <DialogContentText component="div">
+            <Typography variant="body2" gutterBottom>
+              Child name: <strong>{deleteProfileChild?.name}</strong>
+            </Typography>
+            <Typography variant="body2" gutterBottom>
+              Total XP: <strong>{deleteProfileInfo?.totalXp ?? 0}</strong>
+            </Typography>
+            <Typography variant="body2" gutterBottom>
+              Pieces earned: <strong>{deleteProfileInfo?.earnedPieces ?? 0} of {ARMOR_PIECES.length}</strong>
+            </Typography>
+            <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+              This will permanently delete this avatar profile and all its XP data.
+            </Typography>
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteProfileChild(null)}>Cancel</Button>
+          <Button
+            color="error"
+            onClick={() => void handleDeleteProfile()}
+            disabled={deleteProfileLoading}
+            startIcon={deleteProfileLoading ? <CircularProgress size={14} /> : undefined}
+          >
+            Delete Profile
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* ── Reset confirmation ──────────────────────────────────── */}
       <Dialog open={resetOpen} onClose={() => setResetOpen(false)}>
-        <DialogTitle>Reset Avatar?</DialogTitle>
+        <DialogTitle>Reset {selectedChild?.name ?? 'this child'}'s armor progress?</DialogTitle>
         <DialogContent>
-          <DialogContentText>
-            This will reset all of {selectedChild?.name ?? 'this child'}'s armor progress — XP, earned pieces, and tier. Are you sure?
+          <DialogContentText component="div">
+            <Typography variant="body2" gutterBottom>
+              This will permanently delete:
+            </Typography>
+            <Box component="ul" sx={{ pl: 2, mt: 0.5, mb: 1 }}>
+              <li><Typography variant="body2">All XP ({profile?.totalXp ?? 0} XP)</Typography></li>
+              <li><Typography variant="body2">All earned armor pieces ({earnedCount} of {ARMOR_PIECES.length})</Typography></li>
+              <li><Typography variant="body2">All XP event history</Typography></li>
+              <li><Typography variant="body2">Today's armor session</Typography></li>
+            </Box>
+            <Typography variant="body2" gutterBottom>
+              This will keep:
+            </Typography>
+            <Box component="ul" sx={{ pl: 2, mt: 0.5 }}>
+              <li><Typography variant="body2">{selectedChild?.name}'s base character image</Typography></li>
+              <li><Typography variant="body2">{selectedChild?.name}'s photo transform (if any)</Typography></li>
+            </Box>
           </DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setResetOpen(false)}>Cancel</Button>
-          <Button color="error" onClick={() => void handleReset()}>Reset</Button>
+          <Button color="error" onClick={() => void handleReset()}>Reset Everything</Button>
         </DialogActions>
       </Dialog>
     </Stack>
