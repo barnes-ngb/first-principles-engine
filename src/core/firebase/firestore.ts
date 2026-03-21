@@ -38,7 +38,6 @@ import type {
   WeeklyReview,
   WeeklyScore,
   WorkbookConfig,
-  XpEventLogEntry,
   XpLedger,
 } from '../types/domain'
 import { app } from './firebase'
@@ -383,16 +382,8 @@ export const avatarProfilesCollection = (
 ): CollectionReference<AvatarProfile> =>
   collection(db, `families/${familyId}/avatarProfiles`) as CollectionReference<AvatarProfile>
 
-// ── XP Event Log (dedup) ──────────────────────────────────────
-
-/** XP event log for dedup. Doc ID: {childId}_{dedupKey} */
-export const xpEventLogCollection = (
-  familyId: string,
-): CollectionReference<XpEventLogEntry> =>
-  collection(db, `families/${familyId}/xpEventLog`) as CollectionReference<XpEventLogEntry>
-
-/** Build a dedup doc ID for XP events. */
-export const xpEventLogDocId = (childId: string, dedupKey: string): string =>
+/** Build a dedup doc ID for XP ledger event entries. */
+export const xpLedgerEventDocId = (childId: string, dedupKey: string): string =>
   `${childId}_${dedupKey}`
 
 // ── Daily Armor Sessions ──────────────────────────────────────

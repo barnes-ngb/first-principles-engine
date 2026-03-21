@@ -970,6 +970,12 @@ export interface XpLedger {
   totalXp: number
   sources: XpLedgerSources
   lastUpdatedAt: string
+  /** Present on per-event docs (doc ID: {childId}_{dedupKey}), not on cumulative summary. */
+  dedupKey?: string
+  type?: string
+  amount?: number
+  awardedAt?: string
+  meta?: Record<string, string>
 }
 
 // ── Book Builder ──────────────────────────────────────────────
@@ -1296,7 +1302,7 @@ export const PIECE_POSITIONS: Record<
   sword_of_the_spirit:           { topPct: 28, leftPct: 64, widthPct: 34, heightPct: 42 },
 }
 
-/** Append-only log for XP dedup. Doc ID: {childId}_{dedupKey} */
+/** @deprecated Use XpLedger event entries instead. Kept for migration reference only. */
 export interface XpEventLogEntry {
   childId: string
   type: string

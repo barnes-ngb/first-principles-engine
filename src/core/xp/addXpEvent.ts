@@ -8,9 +8,8 @@ function stripUndefined<T extends object>(obj: T): Partial<T> {
 
 import {
   avatarProfilesCollection,
-  xpEventLogCollection,
-  xpEventLogDocId,
   xpLedgerCollection,
+  xpLedgerEventDocId,
 } from '../firebase/firestore'
 import type { XP_EVENTS } from '../types/domain'
 import { checkAndUnlockArmor } from './checkAndUnlockArmor'
@@ -25,8 +24,8 @@ function mapTypeToSource(type: keyof typeof XP_EVENTS): 'routines' | 'quests' | 
 /**
  * Award XP to a child, with dedup guard.
  *
- * Writes to xpEventLog (dedup key), then increments xpLedger,
- * then checks for new armor unlocks.
+ * Writes a per-event entry to xpLedger (with dedupKey for dedup),
+ * then updates the cumulative xpLedger summary and avatarProfile.
  *
  * @param dedupKey - Unique key for this event (e.g., `checklist_2026-03-20`,
  *   `book_${bookId}_2026-03-20`, `eval_${sessionId}`)
@@ -41,23 +40,23 @@ export async function addXpEvent(
 ): Promise<void> {
   if (!familyId || !childId || amount <= 0) return
 
-  // ── Dedup check ──────────────────────────────────────────────
-  const logDocId = xpEventLogDocId(childId, dedupKey)
-  const logRef = doc(xpEventLogCollection(familyId), logDocId)
-  const logSnap = await getDoc(logRef)
-  if (logSnap.exists()) return // already awarded
+  // ── Dedup check (query xpLedger for existing event entry) ──
+  const eventDocId = xpLedgerEventDocId(childId, dedupKey)
+  const eventRef = doc(xpLedgerCollection(familyId), eventDocId)
+  const eventSnap = await getDoc(eventRef)
+  if (eventSnap.exists()) return // already awarded
 
-  // ── Write dedup entry ────────────────────────────────────────
-  await setDoc(logRef, {
+  // ── Write event entry to xpLedger (dedup + audit trail) ────
+  await setDoc(eventRef, {
     childId,
     type,
     amount,
     dedupKey,
     meta: meta ?? {},
     awardedAt: new Date().toISOString(),
-  })
+  } as Record<string, unknown>)
 
-  // ── Increment XP ledger ──────────────────────────────────────
+  // ── Update cumulative XP ledger summary ────────────────────
   const ledgerRef = doc(xpLedgerCollection(familyId), childId)
   const ledgerSnap = await getDoc(ledgerRef)
   const existing = ledgerSnap.exists()
@@ -79,15 +78,16 @@ export async function addXpEvent(
     lastUpdatedAt: new Date().toISOString(),
   })
 
-  // ── Compute real total from event log (source of truth) ─────
-  const eventLogSnap = await getDocs(
-    query(xpEventLogCollection(familyId), where('childId', '==', childId)),
+  // ── Compute real total from xpLedger event entries ─────────
+  const allDocs = await getDocs(
+    query(xpLedgerCollection(familyId), where('childId', '==', childId)),
   )
-  const realTotal = eventLogSnap.docs
+  const realTotal = allDocs.docs
+    .filter((d) => d.id !== childId) // exclude cumulative summary doc
     .filter((d) => !(d.data() as unknown as Record<string, unknown>)._deleted)
     .reduce((sum, d) => sum + ((d.data().amount as number) ?? 0), 0)
 
-  // ── Update cached totalXp on avatarProfile ───────────────────
+  // ── Update cached totalXp on avatarProfile ─────────────────
   const profileRef = doc(avatarProfilesCollection(familyId), childId)
   const profileSnap = await getDoc(profileRef)
   if (profileSnap.exists()) {
@@ -95,6 +95,6 @@ export async function addXpEvent(
     await setDoc(profileRef, stripUndefined({ ...profile, totalXp: realTotal, updatedAt: new Date().toISOString() }))
   }
 
-  // ── Check for armor unlocks ──────────────────────────────────
+  // ── Check for armor unlocks ────────────────────────────────
   await checkAndUnlockArmor(familyId, childId, realTotal)
 }

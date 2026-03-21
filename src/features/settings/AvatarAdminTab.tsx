@@ -30,8 +30,8 @@ import {
   childrenCollection,
   dailyArmorSessionsCollection,
   dailyArmorSessionDocId,
-  xpEventLogCollection,
   xpLedgerCollection,
+  xpLedgerEventDocId,
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
@@ -44,7 +44,7 @@ import type {
   AvatarProfile,
   DailyArmorSession,
   PlatformerTier,
-  XpEventLogEntry,
+  XpLedger,
 } from '../../core/types/domain'
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ export default function AvatarAdminTab() {
 
   const [profile, setProfile] = useState<AvatarProfile | null>(null)
   const [todaySession, setTodaySession] = useState<DailyArmorSession | null>(null)
-  const [recentEvents, setRecentEvents] = useState<XpEventLogEntry[]>([])
+  const [recentEvents, setRecentEvents] = useState<XpLedger[]>([])
   const [xpAmount, setXpAmount] = useState(10)
   const [feedback, setFeedback] = useState<{ severity: 'success' | 'error'; message: string } | null>(null)
   const [upgrading, setUpgrading] = useState(false)
@@ -119,17 +119,23 @@ export default function AvatarAdminTab() {
     return unsub
   }, [familyId, activeChildId, today])
 
-  // ── Listen to recent XP events ────────────────────────────────
+  // ── Listen to recent XP events (from xpLedger event entries) ──
   useEffect(() => {
     if (!familyId || !activeChildId) return
     const q = query(
-      xpEventLogCollection(familyId),
+      xpLedgerCollection(familyId),
       where('childId', '==', activeChildId),
-      orderBy('awardedAt', 'desc'),
-      limit(10),
+      where('dedupKey', '>=', ''),
+      orderBy('dedupKey'),
+      limit(20),
     )
     const unsub = onSnapshot(q, (snap) => {
-      setRecentEvents(snap.docs.map((d) => d.data()))
+      const events = snap.docs
+        .filter((d) => d.id !== activeChildId) // exclude cumulative summary doc
+        .map((d) => d.data())
+        .sort((a, b) => (b.awardedAt ?? '').localeCompare(a.awardedAt ?? ''))
+        .slice(0, 10)
+      setRecentEvents(events)
     })
     return unsub
   }, [familyId, activeChildId])
@@ -176,15 +182,16 @@ export default function AvatarAdminTab() {
           updatedAt: new Date().toISOString(),
         }))
 
-        const eventRef = doc(xpEventLogCollection(familyId), `${activeChildId}_admin_${Date.now()}`)
+        const adjustDedupKey = `admin_${Date.now()}`
+        const eventRef = doc(xpLedgerCollection(familyId), xpLedgerEventDocId(activeChildId, adjustDedupKey))
         await setDoc(eventRef, {
           childId: activeChildId,
           type: 'parent_adjustment',
           amount: delta,
-          dedupKey: `admin_${Date.now()}`,
+          dedupKey: adjustDedupKey,
           meta: { note: delta > 0 ? 'Parent added XP' : 'Parent removed XP' },
           awardedAt: new Date().toISOString(),
-        } satisfies XpEventLogEntry)
+        } as Partial<XpLedger>)
 
         setFeedback({ severity: 'success', message: `XP ${delta > 0 ? 'added' : 'removed'}: ${Math.abs(delta)}` })
       } catch (err) {
@@ -343,18 +350,11 @@ export default function AvatarAdminTab() {
         updatedAt: new Date().toISOString(),
       } satisfies AvatarProfile)
 
-      // 2. Delete all xpEventLog entries for this child
-      const xpEventDocs = await getDocs(
-        query(xpEventLogCollection(familyId), where('childId', '==', activeChildId)),
+      // 2. Delete all xpLedger entries for this child (event entries + summary)
+      const xpLedgerDocs = await getDocs(
+        query(xpLedgerCollection(familyId), where('childId', '==', activeChildId)),
       )
-      await Promise.all(xpEventDocs.docs.map((d) => deleteDoc(d.ref)))
-
-      // 3. Delete all xpLedger entries for this child
-      const ledgerRef = doc(xpLedgerCollection(familyId), activeChildId)
-      const ledgerSnap = await getDoc(ledgerRef)
-      if (ledgerSnap.exists()) {
-        await deleteDoc(ledgerRef)
-      }
+      await Promise.all(xpLedgerDocs.docs.map((d) => deleteDoc(d.ref)))
 
       // 4. Delete today's dailyArmorSession for this child
       const sessionRef = doc(dailyArmorSessionsCollection(familyId), dailyArmorSessionDocId(activeChildId, today))
@@ -403,11 +403,12 @@ export default function AvatarAdminTab() {
     if (!familyId || !activeChildId) return
     setRecalcXpLoading(true)
     try {
-      // Sum all non-deleted XP event log entries for this child
+      // Sum all non-deleted XP event entries in xpLedger for this child
       const logSnap = await getDocs(
-        query(xpEventLogCollection(familyId), where('childId', '==', activeChildId)),
+        query(xpLedgerCollection(familyId), where('childId', '==', activeChildId)),
       )
       const realTotal = logSnap.docs
+        .filter((d) => d.id !== activeChildId) // exclude cumulative summary doc
         .filter((d) => !(d.data() as unknown as Record<string, unknown>)._deleted)
         .reduce((sum, d) => sum + ((d.data().amount as number) ?? 0), 0)
 
@@ -476,18 +477,11 @@ export default function AvatarAdminTab() {
         await deleteDoc(profileRef)
       }
 
-      // 2. Delete all xpEventLog entries for this child
+      // 2. Delete all xpLedger entries for this child (event entries + summary)
       const xpDocs = await getDocs(
-        query(xpEventLogCollection(familyId), where('childId', '==', childDocId)),
+        query(xpLedgerCollection(familyId), where('childId', '==', childDocId)),
       )
       await Promise.all(xpDocs.docs.map((d) => deleteDoc(d.ref)))
-
-      // 3. Delete all xpLedger entries for this child
-      const ledgerRef = doc(xpLedgerCollection(familyId), childDocId)
-      const ledgerSnap = await getDoc(ledgerRef)
-      if (ledgerSnap.exists()) {
-        await deleteDoc(ledgerRef)
-      }
 
       // 4. Delete the child document itself
       const childRef = doc(childrenCollection(familyId), childDocId)
@@ -778,14 +772,14 @@ export default function AvatarAdminTab() {
               {recentEvents.map((ev, i) => (
                 <Stack key={i} direction="row" justifyContent="space-between" alignItems="center">
                   <Typography variant="caption" color="text.secondary">
-                    {ev.type} — {ev.awardedAt.slice(0, 10)}
+                    {ev.type} — {ev.awardedAt?.slice(0, 10)}
                   </Typography>
                   <Typography
                     variant="caption"
                     fontWeight={700}
-                    color={ev.amount >= 0 ? 'success.main' : 'error.main'}
+                    color={(ev.amount ?? 0) >= 0 ? 'success.main' : 'error.main'}
                   >
-                    {ev.amount >= 0 ? '+' : ''}{ev.amount} XP
+                    {(ev.amount ?? 0) >= 0 ? '+' : ''}{ev.amount ?? 0} XP
                   </Typography>
                 </Stack>
               ))}
