@@ -14,11 +14,13 @@ interface VerseCardProps {
   pieceId: ArmorPiece | null
   profile: AvatarProfile | null
   alreadyApplied: boolean
+  /** Pre-cropped image URL from the armor sheet (preferred over legacy per-piece URL) */
+  croppedImageUrl?: string
   onApply: (pieceId: ArmorPiece) => void
   onClose: () => void
 }
 
-/** Get the image URL for the current tier of a piece. */
+/** Get the image URL for the current tier of a piece (legacy per-piece storage). */
 function getPieceImageUrl(
   profile: AvatarProfile,
   pieceId: ArmorPiece,
@@ -33,6 +35,7 @@ export default function VerseCard({
   pieceId,
   profile,
   alreadyApplied,
+  croppedImageUrl,
   onApply,
   onClose,
 }: VerseCardProps) {
@@ -42,7 +45,8 @@ export default function VerseCard({
 
   const pieceDef = pieceId ? ARMOR_PIECES.find((p) => p.id === pieceId) : null
   const isLincoln = profile?.themeStyle === 'minecraft'
-  const imageUrl = pieceId && profile ? getPieceImageUrl(profile, pieceId) : undefined
+  const legacyImageUrl = pieceId && profile ? getPieceImageUrl(profile, pieceId) : undefined
+  const imageUrl = croppedImageUrl ?? legacyImageUrl
 
   const bgColor = isLincoln ? '#0d1117' : '#fffef9'
   const textColor = isLincoln ? '#e0e0e0' : '#3d3d3d'
@@ -156,8 +160,8 @@ export default function VerseCard({
             variant="h6"
             sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.6rem' : '1.3rem',
-              fontWeight: 700,
+              fontSize: isLincoln ? '0.65rem' : '22px',
+              fontWeight: 500,
               color: accentColor,
               textAlign: 'center',
               pr: 4,
@@ -223,7 +227,8 @@ export default function VerseCard({
                   py: 0.25,
                   borderRadius: 1,
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '0.5rem' : '1.1rem',
+                  fontSize: isLincoln ? '0.55rem' : '18px',
+                  lineHeight: 1.6,
                   fontStyle: 'italic',
                   bgcolor: speakingWordIdx === idx
                     ? (isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(232,160,191,0.4)')
@@ -246,7 +251,7 @@ export default function VerseCard({
             sx={{
               color: isLincoln ? '#888' : '#999',
               fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-              fontSize: isLincoln ? '0.38rem' : '0.75rem',
+              fontSize: isLincoln ? '0.4rem' : '13px',
             }}
           >
             {pieceDef.scripture}
@@ -263,9 +268,10 @@ export default function VerseCard({
                 bgcolor: accentColor,
                 color: isLincoln ? '#000' : '#fff',
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.5rem' : '1.1rem',
+                fontSize: isLincoln ? '0.55rem' : '18px',
                 fontWeight: 700,
-                py: 1.5,
+                py: 1.75,
+                minHeight: 56,
                 borderRadius: isLincoln ? 0 : 3,
                 '&:hover': { bgcolor: isLincoln ? '#5FC420' : '#d486a8' },
               }}
@@ -276,7 +282,7 @@ export default function VerseCard({
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.45rem' : '0.9rem',
+                fontSize: isLincoln ? '0.5rem' : '16px',
                 color: isLincoln ? '#7EFC20' : '#9C27B0',
                 fontWeight: 700,
                 textAlign: 'center',

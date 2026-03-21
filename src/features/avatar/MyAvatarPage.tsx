@@ -18,8 +18,9 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
-import { ARMOR_PIECES } from '../../core/types/domain'
+import { ARMOR_PIECES, ARMOR_PIECE_SHEET_INDEX } from '../../core/types/domain'
 import type { ArmorPiece, AvatarProfile, DailyArmorSession } from '../../core/types/domain'
+import { cropArmorPiece } from '../../core/avatar/cropArmorSheet'
 
 import ArmorPieceButton from './ArmorPieceButton'
 import CharacterDisplay from './CharacterDisplay'
@@ -63,6 +64,8 @@ export default function MyAvatarPage() {
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
   const [baseCharGenerating, setBaseCharGenerating] = useState(false)
+  /** Cropped data URLs keyed by pieceId — populated lazily from armor sheet */
+  const [croppedImages, setCroppedImages] = useState<Partial<Record<ArmorPiece, string>>>({})
 
   // Photo transform
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null)
@@ -160,6 +163,36 @@ export default function MyAvatarPage() {
     })
     return unsub
   }, [familyId, childId, today])
+
+  // ── Crop armor pieces from sheet when sheet URL is available ──
+  useEffect(() => {
+    if (!profile) return
+    const sheetUrl = profile.armorSheetUrls?.[profile.currentTier]
+    if (!sheetUrl) return
+
+    // Reset cropped cache when tier changes
+    setCroppedImages({})
+
+    let cancelled = false
+    const cropAll = async () => {
+      const results: Partial<Record<ArmorPiece, string>> = {}
+      await Promise.all(
+        ARMOR_PIECES.map(async (pieceDef) => {
+          const pieceIndex = ARMOR_PIECE_SHEET_INDEX[pieceDef.id]
+          try {
+            const dataUrl = await cropArmorPiece(sheetUrl, pieceIndex, 256)
+            if (!cancelled) results[pieceDef.id] = dataUrl
+          } catch {
+            // Silently fall back to legacy per-piece URL
+          }
+        }),
+      )
+      if (!cancelled) setCroppedImages(results)
+    }
+    void cropAll()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.armorSheetUrls, profile?.currentTier])
 
   // ── Generate base character on first visit ─────────────────────
   useEffect(() => {
@@ -343,7 +376,7 @@ export default function MyAvatarPage() {
             sx={{
               mt: 0.5,
               fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-              fontSize: isLincoln ? '0.4rem' : '0.85rem',
+              fontSize: isLincoln ? '0.42rem' : '13px',
               color: isLincoln ? '#666' : '#999',
             }}
           >
@@ -392,13 +425,13 @@ export default function MyAvatarPage() {
           {!allSixEarned && nextUnlock ? (
             <>
               <Typography
-                variant="caption"
                 sx={{
                   display: 'block',
-                  mb: 0.5,
-                  color: isLincoln ? '#888' : 'text.secondary',
+                  mb: 0.75,
+                  color: isLincoln ? '#aaa' : 'text.primary',
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                  fontSize: isLincoln ? '0.32rem' : '0.72rem',
+                  fontSize: isLincoln ? '0.35rem' : '14px',
+                  fontWeight: 500,
                 }}
               >
                 Next: {ARMOR_PIECES.find((p) => p.id === nextUnlock.id)?.name} — {nextUnlock.xpNeeded} XP away
@@ -407,12 +440,12 @@ export default function MyAvatarPage() {
                 variant="determinate"
                 value={xpProgress}
                 sx={{
-                  height: 8,
-                  borderRadius: isLincoln ? 0 : 4,
+                  height: 10,
+                  borderRadius: isLincoln ? 0 : 5,
                   bgcolor: isLincoln ? '#222' : '#eee',
                   '& .MuiLinearProgress-bar': {
                     bgcolor: accentColor,
-                    borderRadius: isLincoln ? 0 : 4,
+                    borderRadius: isLincoln ? 0 : 5,
                   },
                 }}
               />
@@ -439,9 +472,10 @@ export default function MyAvatarPage() {
           sx={{
             overflowX: 'auto',
             display: 'flex',
-            gap: 1,
+            gap: '12px',
             pb: 1,
-            px: 0.5,
+            px: '16px',
+            scrollSnapType: 'x mandatory',
             // Hide scrollbar visually but keep functional
             scrollbarWidth: 'thin',
             '&::-webkit-scrollbar': { height: 4 },
@@ -454,6 +488,7 @@ export default function MyAvatarPage() {
               pieceId={pieceDef.id}
               profile={profile}
               appliedToday={appliedPieces.includes(pieceDef.id)}
+              croppedImageUrl={croppedImages[pieceDef.id]}
               onTap={setSelectedPiece}
             />
           ))}
@@ -581,6 +616,7 @@ export default function MyAvatarPage() {
         pieceId={selectedPiece}
         profile={profile}
         alreadyApplied={selectedPiece ? appliedPieces.includes(selectedPiece) : false}
+        croppedImageUrl={selectedPiece ? croppedImages[selectedPiece] : undefined}
         onApply={handleApplyPiece}
         onClose={() => setSelectedPiece(null)}
       />
