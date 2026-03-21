@@ -58,7 +58,6 @@ export function animateEquip(
     } else {
       // Cleanup
       pieceGroup.parent?.remove(glow)
-      glow.dispose()
       pieceGroup.scale.set(1, 1, 1)
       pieceGroup.traverse((child) => {
         if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
