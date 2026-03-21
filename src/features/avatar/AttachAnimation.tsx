@@ -25,7 +25,6 @@ export default function AttachAnimation({
   pieceId,
   tier,
   regionRect,
-  landingCenter,
   onComplete,
 }: AttachAnimationProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
