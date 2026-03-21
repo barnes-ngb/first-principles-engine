@@ -597,17 +597,18 @@ export interface BaseCharacterResponse {
 
 const BASE_CHARACTER_RAW_PROMPTS: Record<"minecraft" | "platformer", string> = {
   minecraft:
-    "Full body pixel art character, blocky square 8-bit style, simple humanoid figure, " +
-    "standing upright facing forward, arms relaxed at sides, plain brown tunic and " +
-    "trousers only, NO armor, NO weapons, NO shield, NO sword, NO boots with detail, " +
-    "simple flat shoes only, neutral ready pose, dark stone background, " +
-    "centered in frame, square format, no text, no watermarks",
+    "Pixel art video game character, blocky 8-bit style, full body, facing forward, " +
+    "arms relaxed at sides, neutral stance. Wearing ONLY a plain brown tunic and " +
+    "plain brown trousers. Absolutely NO armor of any kind. NO chest plate. " +
+    "NO helmet. NO shield. NO sword. NO weapons. NO boots with details. " +
+    "Plain flat shoes only. NO accessories. NO equipment. Simple plain clothing only. " +
+    "Dark stone background. Centered in frame. Square format. No text. No watermarks.",
   platformer:
-    "Full body cute cartoon character, rounded cheerful platformer style, simple " +
-    "humanoid girl figure, standing upright facing forward, arms relaxed at sides, " +
-    "plain simple colorful dress only, NO armor, NO weapons, NO accessories, " +
-    "simple flat shoes only, happy neutral pose, light blue background, " +
-    "centered in frame, square format, no text, no watermarks",
+    "Cute cartoon platformer character, rounded cheerful style, full body, facing " +
+    "forward, arms relaxed at sides, happy neutral pose. Wearing ONLY a simple plain " +
+    "colorful dress. Absolutely NO armor of any kind. NO helmet. NO shield. " +
+    "NO weapon. NO accessories. NO equipment. Plain flat shoes only. " +
+    "Light blue background. Centered in frame. Square format. No text. No watermarks.",
 };
 
 /**
