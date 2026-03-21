@@ -387,7 +387,7 @@ export default function AvatarAdminTab() {
         query(xpEventLogCollection(familyId), where('childId', '==', activeChildId)),
       )
       const realTotal = logSnap.docs
-        .filter((d) => !(d.data() as Record<string, unknown>)._deleted)
+        .filter((d) => !(d.data() as unknown as Record<string, unknown>)._deleted)
         .reduce((sum, d) => sum + ((d.data().amount as number) ?? 0), 0)
 
       // Write real total to xpLedger and avatarProfile
