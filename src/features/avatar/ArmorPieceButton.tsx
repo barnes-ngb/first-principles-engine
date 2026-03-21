@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import LockIcon from '@mui/icons-material/Lock'
 
 import type { ArmorPiece, AvatarProfile } from '../../core/types/domain'
 import { ARMOR_PIECES, ARMOR_PIECE_SHEET_INDEX } from '../../core/types/domain'
@@ -80,7 +81,11 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
           borderColor,
           bgcolor: bgColor,
           transition: 'transform 0.15s, box-shadow 0.15s',
-          '&:hover': earned && !appliedToday ? { transform: 'scale(1.04)', boxShadow: 3 } : {},
+          '&:hover': earned
+            ? (appliedToday
+                ? { transform: 'scale(0.97)', borderColor: 'error.light', boxShadow: 1 }
+                : { transform: 'scale(1.04)', boxShadow: 3 })
+            : {},
           scrollSnapAlign: 'start',
         }}
       >
@@ -106,8 +111,8 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
             </Box>
           )
         ) : (
-          <Box sx={{ width: 90, height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <ArmorIcon pieceId={pieceId} size={72} tier={tier} locked />
+          <Box sx={{ width: 90, height: 90, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0, gap: 0.5 }}>
+            <LockIcon sx={{ fontSize: 40, color: isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)' }} />
           </Box>
         )}
 

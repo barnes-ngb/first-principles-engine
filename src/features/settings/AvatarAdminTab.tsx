@@ -30,6 +30,7 @@ import {
   dailyArmorSessionsCollection,
   dailyArmorSessionDocId,
   xpEventLogCollection,
+  xpLedgerCollection,
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
@@ -86,6 +87,8 @@ export default function AvatarAdminTab() {
   // Confirmation dialogs
   const [deletePiece, setDeletePiece] = useState<ArmorPiece | null>(null)
   const [resetOpen, setResetOpen] = useState(false)
+  const [regenBaseCharConfirmOpen, setRegenBaseCharConfirmOpen] = useState(false)
+  const [recalcXpLoading, setRecalcXpLoading] = useState(false)
 
   const today = getTodayDateString()
 
@@ -352,8 +355,10 @@ export default function AvatarAdminTab() {
   const handleRegenBaseChar = useCallback(async () => {
     if (!profile || !familyId || !activeChildId) return
     setRegenBaseChar(true)
+    setRegenBaseCharConfirmOpen(false)
     try {
       const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
+      // Clear both baseCharacterUrl and photoTransformUrl so a fresh bare character generates
       await setDoc(profileRef, {
         childId: profile.childId,
         themeStyle: profile.themeStyle,
@@ -361,6 +366,7 @@ export default function AvatarAdminTab() {
         currentTier: profile.currentTier,
         totalXp: profile.totalXp,
         updatedAt: new Date().toISOString(),
+        // Omitting baseCharacterUrl and photoTransformUrl clears them
       } satisfies AvatarProfile)
       setFeedback({ severity: 'success', message: 'Base character cleared — will regenerate on next visit to My Armor.' })
     } catch (err) {
@@ -370,6 +376,48 @@ export default function AvatarAdminTab() {
       setRegenBaseChar(false)
     }
   }, [profile, familyId, activeChildId])
+
+  // ── Recalculate XP from event log ─────────────────────────────
+  const handleRecalcXp = useCallback(async () => {
+    if (!familyId || !activeChildId) return
+    setRecalcXpLoading(true)
+    try {
+      // Sum all non-deleted XP event log entries for this child
+      const logSnap = await getDocs(
+        query(xpEventLogCollection(familyId), where('childId', '==', activeChildId)),
+      )
+      const realTotal = logSnap.docs
+        .filter((d) => !(d.data() as unknown as Record<string, unknown>)._deleted)
+        .reduce((sum, d) => sum + ((d.data().amount as number) ?? 0), 0)
+
+      // Write real total to xpLedger and avatarProfile
+      const ledgerRef = doc(xpLedgerCollection(familyId), activeChildId)
+      const ledgerSnap = await (await import('firebase/firestore')).getDoc(ledgerRef)
+      const existingSources = ledgerSnap.exists()
+        ? ledgerSnap.data().sources
+        : { routines: 0, quests: 0, books: 0 }
+      await setDoc(ledgerRef, {
+        childId: activeChildId,
+        totalXp: realTotal,
+        sources: existingSources,
+        lastUpdatedAt: new Date().toISOString(),
+      })
+
+      const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
+      const profileSnap = await (await import('firebase/firestore')).getDoc(profileRef)
+      if (profileSnap.exists()) {
+        const p = profileSnap.data() as AvatarProfile
+        await setDoc(profileRef, stripUndefined({ ...p, totalXp: realTotal, updatedAt: new Date().toISOString() }))
+      }
+
+      setFeedback({ severity: 'success', message: `Recalculated: ${realTotal} XP` })
+    } catch (err) {
+      console.error('Recalc XP failed:', err)
+      setFeedback({ severity: 'error', message: 'Failed to recalculate XP.' })
+    } finally {
+      setRecalcXpLoading(false)
+    }
+  }, [familyId, activeChildId])
 
   // ── Regenerate piece images ────────────────────────────────────
   const handleRegenPieceImages = useCallback(async () => {
@@ -497,7 +545,7 @@ export default function AvatarAdminTab() {
             <Button
               size="small"
               variant="outlined"
-              onClick={() => void handleRegenBaseChar()}
+              onClick={() => setRegenBaseCharConfirmOpen(true)}
               disabled={regenBaseChar}
               startIcon={regenBaseChar ? <CircularProgress size={14} /> : undefined}
             >
@@ -521,6 +569,16 @@ export default function AvatarAdminTab() {
               startIcon={regenPieces ? <CircularProgress size={14} /> : undefined}
             >
               Regenerate Piece Images
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              color="secondary"
+              onClick={() => void handleRecalcXp()}
+              disabled={recalcXpLoading}
+              startIcon={recalcXpLoading ? <CircularProgress size={14} /> : undefined}
+            >
+              Recalculate XP
             </Button>
           </Stack>
         </Paper>
@@ -720,6 +778,20 @@ export default function AvatarAdminTab() {
           {feedback.message}
         </Alert>
       )}
+
+      {/* ── Regen base character confirmation ───────────────────── */}
+      <Dialog open={regenBaseCharConfirmOpen} onClose={() => setRegenBaseCharConfirmOpen(false)}>
+        <DialogTitle>Regenerate Base Character?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This will generate a new base character. The old one will be replaced, and any photo transform will also be cleared.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRegenBaseCharConfirmOpen(false)}>Cancel</Button>
+          <Button color="primary" onClick={() => void handleRegenBaseChar()}>Regenerate</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* ── Delete piece confirmation ────────────────────────────── */}
       <Dialog open={!!deletePiece} onClose={() => setDeletePiece(null)}>
