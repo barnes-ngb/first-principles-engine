@@ -81,6 +81,7 @@ export default function AvatarAdminTab() {
   const [upgrading, setUpgrading] = useState(false)
   const [regenBaseChar, setRegenBaseChar] = useState(false)
   const [regenPieces, setRegenPieces] = useState(false)
+  const [regenArmorSheet, setRegenArmorSheet] = useState(false)
 
   // Confirmation dialogs
   const [deletePiece, setDeletePiece] = useState<ArmorPiece | null>(null)
@@ -333,6 +334,7 @@ export default function AvatarAdminTab() {
         pieces: [],
         currentTier: profile.themeStyle === 'minecraft' ? 'stone' : 'basic',
         ...(profile.baseCharacterUrl ? { baseCharacterUrl: profile.baseCharacterUrl } : {}),
+        armorSheetUrls: {},
         totalXp: 0,
         updatedAt: new Date().toISOString(),
       } satisfies AvatarProfile)
@@ -387,6 +389,45 @@ export default function AvatarAdminTab() {
       setFeedback({ severity: 'error', message: 'Failed to clear piece images.' })
     } finally {
       setRegenPieces(false)
+    }
+  }, [profile, familyId, activeChildId])
+
+  // ── Regenerate armor sheet ─────────────────────────────────────
+  const handleRegenArmorSheet = useCallback(async () => {
+    if (!profile || !familyId || !activeChildId) return
+    setRegenArmorSheet(true)
+    try {
+      const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
+
+      // Clear the current tier's sheet URL so the page knows to regenerate
+      const updatedSheetUrls = { ...(profile.armorSheetUrls ?? {}) }
+      delete updatedSheetUrls[profile.currentTier]
+      await setDoc(profileRef, stripUndefined({
+        ...profile,
+        armorSheetUrls: updatedSheetUrls,
+        updatedAt: new Date().toISOString(),
+      }))
+
+      // Call the generateArmorSheet cloud function
+      const fns = getFunctions(app)
+      const generateArmorSheetFn = httpsCallable<
+        { familyId: string; childId: string; themeStyle: string; tier: string },
+        { url: string; storagePath: string }
+      >(fns, 'generateArmorSheet')
+
+      await generateArmorSheetFn({
+        familyId,
+        childId: activeChildId,
+        themeStyle: profile.themeStyle,
+        tier: profile.currentTier,
+      })
+
+      setFeedback({ severity: 'success', message: `Armor set regenerated for ${profile.currentTier} tier! Navigate to My Armor to see it.` })
+    } catch (err) {
+      console.error('Regen armor sheet failed:', err)
+      setFeedback({ severity: 'error', message: 'Failed to regenerate armor set.' })
+    } finally {
+      setRegenArmorSheet(false)
     }
   }, [profile, familyId, activeChildId])
 
@@ -452,7 +493,7 @@ export default function AvatarAdminTab() {
               </Typography>
             )}
           </Stack>
-          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
             <Button
               size="small"
               variant="outlined"
@@ -461,6 +502,16 @@ export default function AvatarAdminTab() {
               startIcon={regenBaseChar ? <CircularProgress size={14} /> : undefined}
             >
               Regenerate Base Character
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              color="primary"
+              onClick={() => void handleRegenArmorSheet()}
+              disabled={regenArmorSheet}
+              startIcon={regenArmorSheet ? <CircularProgress size={14} /> : undefined}
+            >
+              {regenArmorSheet ? 'Generating armor set… ~20s' : 'Regenerate Armor Set'}
             </Button>
             <Button
               size="small"
