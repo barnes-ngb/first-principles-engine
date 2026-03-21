@@ -1,3 +1,5 @@
+import { startStep } from '../../core/utils/perf'
+
 /**
  * Remove white/light background from an uploaded sketch image.
  * Uses Canvas API to convert near-white pixels to transparent.
@@ -11,6 +13,7 @@ export async function cleanSketchBackground(
   },
 ): Promise<File> {
   const threshold = options?.threshold ?? 210
+  const endTotal = startStep('cleanSketchBackground')
 
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -20,6 +23,7 @@ export async function cleanSketchBackground(
       canvas.height = img.height
       const ctx = canvas.getContext('2d')
       if (!ctx) {
+        endTotal()
         resolve(file)
         return
       }
@@ -60,6 +64,7 @@ export async function cleanSketchBackground(
       const bgBrightness = (bgR + bgG + bgB) / 3
       if (bgBrightness < 150) {
         // Dark background — probably not a sketch on paper, skip cleanup
+        endTotal()
         resolve(file)
         return
       }
@@ -89,15 +94,20 @@ export async function cleanSketchBackground(
       canvas.toBlob(
         (blob) => {
           if (blob) {
+            endTotal()
             resolve(new File([blob], file.name.replace(/\.\w+$/, '.png'), { type: 'image/png' }))
           } else {
+            endTotal()
             resolve(file)
           }
         },
         'image/png',
       )
     }
-    img.onerror = () => reject(new Error('Failed to load image'))
+    img.onerror = () => {
+      endTotal()
+      reject(new Error('Failed to load image'))
+    }
     const objectUrl = URL.createObjectURL(file)
     img.src = objectUrl
   })
