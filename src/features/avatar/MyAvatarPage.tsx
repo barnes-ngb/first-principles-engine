@@ -18,7 +18,8 @@ import { ARMOR_PIECES } from '../../core/types/domain'
 import type { ArmorPiece, AvatarProfile, DailyArmorSession } from '../../core/types/domain'
 
 import ArmorPieceButton from './ArmorPieceButton'
-import CharacterDisplay, { isPieceEarned } from './CharacterDisplay'
+import CharacterDisplay from './CharacterDisplay'
+import { isPieceEarned } from './armorUtils'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
 import UnlockCelebration from './UnlockCelebration'
 import VerseCard from './VerseCard'
@@ -418,9 +419,7 @@ export default function MyAvatarPage() {
 
       {/* ── Full set tier upgrade celebration ────────────────── */}
       <TierUpgradeCelebration
-        visible={Boolean(tierCelebration)}
-        fromTier={tierCelebration?.from ?? ''}
-        toTier={tierCelebration?.to ?? ''}
+        upgrade={tierCelebration}
         profile={profile}
         onDismiss={() => setTierCelebration(null)}
       />

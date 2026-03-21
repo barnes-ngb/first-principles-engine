@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect } from 'react'
 import Box from '@mui/material/Box'
 import LinearProgress from '@mui/material/LinearProgress'
 import Typography from '@mui/material/Typography'
@@ -6,13 +6,26 @@ import Typography from '@mui/material/Typography'
 import type { AvatarProfile } from '../../core/types/domain'
 import { ARMOR_PIECES } from '../../core/types/domain'
 
+export interface TierUpgrade {
+  from: string
+  to: string
+}
+
 interface TierUpgradeCelebrationProps {
-  visible: boolean
-  fromTier: string
-  toTier: string
+  upgrade: TierUpgrade | null
   profile: AvatarProfile | null
   onDismiss: () => void
 }
+
+// Pre-computed particle positions (deterministic, no runtime randomness)
+const PARTICLES = Array.from({ length: 30 }, (_, i) => ({
+  left: (i * 37 + 11) % 100,
+  top:  (i * 53 + 7)  % 100,
+  dx:   ((i * 73 + 31) % 300) - 150,
+  dy:   ((i * 61 + 17) % 300) - 150,
+  colorIdx: i % 4,
+  delay: (i * 80) % 800,
+}))
 
 const TIER_LABELS: Record<string, string> = {
   stone: 'STONE',
@@ -24,45 +37,23 @@ const TIER_LABELS: Record<string, string> = {
 }
 
 export default function TierUpgradeCelebration({
-  visible,
-  fromTier,
-  toTier,
+  upgrade,
   profile,
   onDismiss,
 }: TierUpgradeCelebrationProps) {
-  const [show, setShow] = useState(false)
-
   useEffect(() => {
-    if (!visible) return
-    setShow(true)
-    const timer = setTimeout(() => {
-      setShow(false)
-      setTimeout(onDismiss, 400)
-    }, 6000)
+    if (!upgrade) return
+    const timer = setTimeout(onDismiss, 6000)
     return () => clearTimeout(timer)
-  }, [visible, onDismiss])
+  }, [upgrade, onDismiss])
 
-  // Particle positions — stable across renders
-  const particles = useMemo(
-    () =>
-      Array.from({ length: 30 }, (_, i) => ({
-        left: Math.floor(Math.random() * 100),
-        top: Math.floor(Math.random() * 100),
-        dx: Math.floor((Math.random() - 0.5) * 300),
-        dy: Math.floor((Math.random() - 0.5) * 300),
-        colorIdx: i % 4,
-        delay: (i * 80) % 800,
-      })),
-    [visible], // eslint-disable-line react-hooks/exhaustive-deps
-  )
+  if (!upgrade || !profile) return null
 
-  if (!show || !profile) return null
-
+  const { from: fromTier, to: toTier } = upgrade
   const isLincoln = profile.themeStyle === 'minecraft'
   const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
-  // How many new-tier images are ready
   const readyCount = ARMOR_PIECES.filter((pieceDef) => {
     const entry = profile.pieces.find((p) => p.pieceId === pieceDef.id)
     return entry && (entry.generatedImageUrls as Record<string, string | undefined>)[toTier]
@@ -77,7 +68,7 @@ export default function TierUpgradeCelebration({
 
   return (
     <Box
-      onClick={() => { setShow(false); setTimeout(onDismiss, 300) }}
+      onClick={() => setTimeout(onDismiss, 300)}
       sx={{
         position: 'fixed',
         inset: 0,
@@ -97,7 +88,7 @@ export default function TierUpgradeCelebration({
     >
       {/* Particle burst */}
       <Box sx={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
-        {particles.map((p, i) => (
+        {PARTICLES.map((p, i) => (
           <Box
             key={i}
             sx={{
@@ -123,7 +114,6 @@ export default function TierUpgradeCelebration({
 
       {/* Content */}
       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2.5, px: 3, zIndex: 1 }}>
-        {/* Upgrade banner */}
         <Typography
           sx={{
             fontFamily: titleFont,
@@ -196,7 +186,6 @@ export default function TierUpgradeCelebration({
           })}
         </Box>
 
-        {/* Progress bar while images generate */}
         {readyCount < ARMOR_PIECES.length && (
           <Box sx={{ width: '100%', maxWidth: 280 }}>
             <Typography

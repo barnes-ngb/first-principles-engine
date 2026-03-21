@@ -196,7 +196,7 @@ export default function AvatarAdminTab() {
       const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
 
       // Make sure all 6 pieces exist with the stone/basic tier
-      let updatedPieces = [...profile.pieces]
+      const updatedPieces = [...profile.pieces]
       const themeStyle = profile.themeStyle
       for (const pieceDef of ARMOR_PIECES) {
         const existing = updatedPieces.find((p) => p.pieceId === pieceDef.id)

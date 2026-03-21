@@ -11,7 +11,7 @@ import type {
   DailyArmorSession,
   PlatformerTier,
 } from '../../../core/types/domain'
-import { PIECE_OVERLAY_POSITIONS } from '../CharacterDisplay'
+import { PIECE_OVERLAY_POSITIONS } from '../armorUtils'
 import { getTodayDateString } from '../../../core/avatar/getDailyArmorSession'
 
 // ── ARMOR_PIECES data integrity ──────────────────────────────────

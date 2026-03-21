@@ -5,7 +5,7 @@ import LockIcon from '@mui/icons-material/Lock'
 
 import type { ArmorPiece, AvatarProfile } from '../../core/types/domain'
 import { ARMOR_PIECES } from '../../core/types/domain'
-import { isPieceEarned } from './CharacterDisplay'
+import { isPieceEarned } from './armorUtils'
 
 interface ArmorPieceButtonProps {
   pieceId: ArmorPiece
