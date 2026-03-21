@@ -79,6 +79,8 @@ export default function AvatarAdminTab() {
   const [xpAmount, setXpAmount] = useState(10)
   const [feedback, setFeedback] = useState<{ severity: 'success' | 'error'; message: string } | null>(null)
   const [upgrading, setUpgrading] = useState(false)
+  const [regenBaseChar, setRegenBaseChar] = useState(false)
+  const [regenPieces, setRegenPieces] = useState(false)
 
   // Confirmation dialogs
   const [deletePiece, setDeletePiece] = useState<ArmorPiece | null>(null)
@@ -344,6 +346,48 @@ export default function AvatarAdminTab() {
     }
   }, [profile, familyId, activeChildId])
 
+  // ── Regenerate base character ─────────────────────────────────
+  const handleRegenBaseChar = useCallback(async () => {
+    if (!profile || !familyId || !activeChildId) return
+    setRegenBaseChar(true)
+    try {
+      const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
+      await setDoc(profileRef, stripUndefined({
+        ...profile,
+        baseCharacterUrl: undefined,
+        photoTransformUrl: undefined,
+        updatedAt: new Date().toISOString(),
+      }))
+      setFeedback({ severity: 'success', message: 'Base character cleared — will regenerate on next visit to My Armor.' })
+    } catch (err) {
+      console.error('Regen base char failed:', err)
+      setFeedback({ severity: 'error', message: 'Failed to clear base character.' })
+    } finally {
+      setRegenBaseChar(false)
+    }
+  }, [profile, familyId, activeChildId])
+
+  // ── Regenerate piece images ────────────────────────────────────
+  const handleRegenPieceImages = useCallback(async () => {
+    if (!profile || !familyId || !activeChildId) return
+    setRegenPieces(true)
+    try {
+      const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
+      const updatedPieces = profile.pieces.map((p) => ({ ...p, generatedImageUrls: {} }))
+      await setDoc(profileRef, stripUndefined({
+        ...profile,
+        pieces: updatedPieces,
+        updatedAt: new Date().toISOString(),
+      }))
+      setFeedback({ severity: 'success', message: 'Piece image URLs cleared — will regenerate next time each piece is viewed.' })
+    } catch (err) {
+      console.error('Regen piece images failed:', err)
+      setFeedback({ severity: 'error', message: 'Failed to clear piece images.' })
+    } finally {
+      setRegenPieces(false)
+    }
+  }, [profile, familyId, activeChildId])
+
   const uniqueChildren = children.filter(
     (child, index, self) => index === self.findIndex((c) => c.id === child.id),
   )
@@ -405,6 +449,26 @@ export default function AvatarAdminTab() {
                 All 6 pieces earned at {profile.currentTier} tier!
               </Typography>
             )}
+          </Stack>
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => void handleRegenBaseChar()}
+              disabled={regenBaseChar}
+              startIcon={regenBaseChar ? <CircularProgress size={14} /> : undefined}
+            >
+              Regenerate Base Character
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => void handleRegenPieceImages()}
+              disabled={regenPieces || earnedCount === 0}
+              startIcon={regenPieces ? <CircularProgress size={14} /> : undefined}
+            >
+              Regenerate Piece Images
+            </Button>
           </Stack>
         </Paper>
       )}
