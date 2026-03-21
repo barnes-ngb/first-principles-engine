@@ -960,6 +960,41 @@ export interface XpLedger {
 
 // ── Book Builder ──────────────────────────────────────────────
 
+export type BookTheme =
+  | 'adventure'
+  | 'animals'
+  | 'family'
+  | 'fantasy'
+  | 'minecraft'
+  | 'science'
+  | 'sight_words'
+  | 'faith'
+  | 'other'
+
+export const BOOK_THEMES: { id: BookTheme; label: string; emoji: string }[] = [
+  { id: 'adventure',   label: 'Adventure',   emoji: '⚔️' },
+  { id: 'animals',     label: 'Animals',     emoji: '🐾' },
+  { id: 'family',      label: 'Family',      emoji: '👨‍👩‍👦' },
+  { id: 'fantasy',     label: 'Fantasy',     emoji: '✨' },
+  { id: 'minecraft',   label: 'Minecraft',   emoji: '⛏️' },
+  { id: 'science',     label: 'Science',     emoji: '🔬' },
+  { id: 'sight_words', label: 'Sight Words', emoji: '📖' },
+  { id: 'faith',       label: 'Faith',       emoji: '✝️' },
+  { id: 'other',       label: 'Other',       emoji: '📚' },
+]
+
+export type StickerTag =
+  | 'animal'
+  | 'nature'
+  | 'minecraft'
+  | 'fantasy'
+  | 'character'
+  | 'object'
+  | 'vehicle'
+  | 'food'
+  | 'faith'
+  | 'other'
+
 export interface Book {
   id?: string
   childId: string
@@ -984,13 +1019,14 @@ export interface Book {
   source?: 'manual' | 'ai-generated'
   /** Target sight words for this book (sight-word type only) */
   sightWords?: string[]
-  /** Theme used for AI generation */
-  theme?: string
+  /** Theme tag for this book */
+  theme?: BookTheme
   /** The prompt/parameters used to generate this story */
   generationConfig?: {
     storyIdea?: string
     words: string[]
     style?: string
+    /** Freeform theme/style prompt used during generation */
     theme?: string
     difficulty?: 'simple' | 'moderate'
     pageCount: number
@@ -1046,6 +1082,10 @@ export interface Sticker {
   childId?: string | null
   prompt?: string
   createdAt: string
+  /** Tag classification for filtering */
+  tags?: StickerTag[]
+  /** Which child this sticker is relevant for */
+  childProfile?: 'lincoln' | 'london' | 'both'
 }
 
 // ── Avatar + Armor of God ─────────────────────────────────────────

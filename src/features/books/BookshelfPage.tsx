@@ -37,7 +37,8 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
-import type { Book } from '../../core/types/domain'
+import type { Book, BookTheme } from '../../core/types/domain'
+import { BOOK_THEMES } from '../../core/types/domain'
 import { COVER_STYLES, GENERATION_STYLES } from './bookTypes'
 import { useBookshelf } from './useBook'
 import { useBookGenerator } from './useBookGenerator'
@@ -63,6 +64,7 @@ export default function BookshelfPage() {
   const { generateBook, progress, generating, resetProgress } = useBookGenerator()
 
   const [bookFilter, setBookFilter] = useState<BookFilter>('all')
+  const [themeFilter, setThemeFilter] = useState<BookTheme | 'all'>('all')
   const [showNewDialog, setShowNewDialog] = useState(false)
   const [dialogTab, setDialogTab] = useState(0) // 0 = Blank, 1 = Generate
 
@@ -185,6 +187,19 @@ export default function BookshelfPage() {
     setDeleteTarget(null)
   }, [deleteTarget, deleteBook])
 
+  // Themes that have at least one book, ordered by child preference
+  const availableThemes = useMemo(() => {
+    const themesInBooks = new Set(books.map((b) => b.theme).filter(Boolean) as BookTheme[])
+    const preferredFirst = isLincoln
+      ? ['minecraft', 'adventure'] as BookTheme[]
+      : ['animals', 'fantasy'] as BookTheme[]
+    const ordered = [
+      ...preferredFirst.filter((t) => themesInBooks.has(t)),
+      ...BOOK_THEMES.filter((t) => themesInBooks.has(t.id) && !preferredFirst.includes(t.id)).map((t) => t.id),
+    ]
+    return ordered
+  }, [books, isLincoln])
+
   // Sort: drafts first (most recently edited), then completed
   const sortedBooks = useMemo(() => {
     let filtered = books
@@ -195,12 +210,15 @@ export default function BookshelfPage() {
     } else if (bookFilter === 'sight-word') {
       filtered = books.filter((b) => b.bookType === 'sight-word')
     }
+    if (themeFilter !== 'all') {
+      filtered = filtered.filter((b) => b.theme === themeFilter)
+    }
     return [...filtered].sort((a, b) => {
       if (a.status === 'draft' && b.status !== 'draft') return -1
       if (a.status !== 'draft' && b.status === 'draft') return 1
       return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
     })
-  }, [books, bookFilter])
+  }, [books, bookFilter, themeFilter])
 
   if (loading) {
     return (
@@ -312,6 +330,39 @@ export default function BookshelfPage() {
           </>
         )}
       </Stack>
+
+      {/* Theme filter chips — only show when there are themed books */}
+      {availableThemes.length > 0 && (
+        <Box
+          sx={{
+            display: 'flex',
+            gap: 0.75,
+            overflowX: 'auto',
+            pb: 0.5,
+            '&::-webkit-scrollbar': { display: 'none' },
+          }}
+        >
+          <Chip
+            label="All Themes"
+            size="small"
+            variant={themeFilter === 'all' ? 'filled' : 'outlined'}
+            onClick={() => setThemeFilter('all')}
+          />
+          {availableThemes.map((themeId) => {
+            const meta = BOOK_THEMES.find((t) => t.id === themeId)
+            if (!meta) return null
+            return (
+              <Chip
+                key={themeId}
+                label={`${meta.emoji} ${meta.label}`}
+                size="small"
+                variant={themeFilter === themeId ? 'filled' : 'outlined'}
+                onClick={() => setThemeFilter(themeId)}
+              />
+            )
+          })}
+        </Box>
+      )}
 
       {books.length === 0 ? (
         /* Empty state */

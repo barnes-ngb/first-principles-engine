@@ -14,7 +14,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useAI } from '../../core/ai/useAI'
 import type { TaskType } from '../../core/ai/useAI'
-import { useBookGenerator } from './useBookGenerator'
+import { useBookGenerator, inferBookTheme } from './useBookGenerator'
 import { useSightWordProgress } from './useSightWordProgress'
 import StoryGuideQuestion from './StoryGuideQuestion'
 import GenerationProgress from './GenerationProgress'
@@ -124,8 +124,13 @@ export default function StoryGuidePage() {
     const brief = guide.assembleBrief(childId, childAge, sightWords)
     const storyIdea = assembleStoryPrompt(brief, pageCount)
     const words = brief.sightWords ?? []
+    const bookTheme = inferBookTheme(
+      [brief.hero, brief.setting, brief.problem, brief.solution, brief.ending].filter(Boolean).join(' '),
+      words,
+      genStyle,
+    )
 
-    const bookId = await generateBook(familyId, childId, storyIdea, words, genStyle, pageCount)
+    const bookId = await generateBook(familyId, childId, storyIdea, words, genStyle, pageCount, bookTheme)
 
     if (bookId) {
       setTimeout(() => {

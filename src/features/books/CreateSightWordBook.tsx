@@ -21,6 +21,7 @@ import type { Book, BookPage } from '../../core/types/domain'
 import { booksCollection } from '../../core/firebase/firestore'
 import { addDoc } from 'firebase/firestore'
 import { generatePageId } from './bookTypes'
+import { inferBookTheme } from './useBookGenerator'
 import { useStoryGenerator } from './useStoryGenerator'
 import type { GeneratedStory } from './useStoryGenerator'
 import { useSightWordProgress } from './useSightWordProgress'
@@ -103,7 +104,7 @@ export default function CreateSightWordBook() {
         bookType: 'sight-word',
         source: 'ai-generated',
         sightWords: [...new Set(wordList)],
-        theme: theme || 'A Minecraft adventure',
+        theme: inferBookTheme('', wordList, 'storybook'),
         generationConfig: {
           words: wordList,
           theme: theme || 'A Minecraft adventure',
@@ -146,7 +147,7 @@ export default function CreateSightWordBook() {
         bookType: 'sight-word',
         source: 'ai-generated',
         sightWords: [...new Set(wordList)],
-        theme: theme || 'A Minecraft adventure',
+        theme: inferBookTheme('', wordList, 'storybook'),
         generationConfig: {
           words: wordList,
           theme: theme || 'A Minecraft adventure',
