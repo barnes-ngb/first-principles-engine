@@ -1,5 +1,11 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 
+function stripUndefined<T extends object>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined),
+  ) as Partial<T>
+}
+
 import {
   avatarProfilesCollection,
   xpEventLogCollection,
@@ -47,7 +53,7 @@ export async function addXpEvent(
     type,
     amount,
     dedupKey,
-    ...(meta ? { meta } : {}),
+    meta: meta ?? {},
     awardedAt: new Date().toISOString(),
   })
 
@@ -78,7 +84,7 @@ export async function addXpEvent(
   const profileSnap = await getDoc(profileRef)
   if (profileSnap.exists()) {
     const profile = profileSnap.data()
-    await setDoc(profileRef, { ...profile, totalXp: newTotal, updatedAt: new Date().toISOString() })
+    await setDoc(profileRef, stripUndefined({ ...profile, totalXp: newTotal, updatedAt: new Date().toISOString() }))
   }
 
   // ── Check for armor unlocks ──────────────────────────────────
