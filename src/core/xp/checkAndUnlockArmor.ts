@@ -76,7 +76,7 @@ function getPromptForTier(
 }
 
 /** Migrate a profile from the old unlockedPieces/generatedImageUrls shape if needed. */
-function ensureNewProfileStructure(raw: Record<string, unknown>): AvatarProfile {
+export function ensureNewProfileStructure(raw: Record<string, unknown>): AvatarProfile {
   if (Array.isArray(raw.pieces)) return raw as unknown as AvatarProfile
 
   // Legacy migration: convert unlockedPieces + generatedImageUrls → pieces

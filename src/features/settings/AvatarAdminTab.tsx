@@ -33,6 +33,7 @@ import {
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
+import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
 import { ARMOR_PIECES } from '../../core/types/domain'
 import type {
   ArmorPiece,
@@ -84,7 +85,7 @@ export default function AvatarAdminTab() {
     if (!familyId || !activeChildId) return
     const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
     const unsub = onSnapshot(profileRef, (snap) => {
-      setProfile(snap.exists() ? snap.data() : null)
+      setProfile(snap.exists() ? ensureNewProfileStructure(snap.data() as unknown as Record<string, unknown>) : null)
     })
     return unsub
   }, [familyId, activeChildId])

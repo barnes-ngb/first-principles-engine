@@ -13,6 +13,7 @@ import { avatarProfilesCollection, dailyArmorSessionsCollection, dailyArmorSessi
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
 import { ARMOR_PIECES } from '../../core/types/domain'
 import type { ArmorPiece, AvatarProfile, DailyArmorSession } from '../../core/types/domain'
@@ -96,7 +97,7 @@ export default function MyAvatarPage() {
       profileRef,
       (snap) => {
         if (snap.exists()) {
-          const data = snap.data() as AvatarProfile
+          const data = ensureNewProfileStructure(snap.data() as unknown as Record<string, unknown>)
           setProfile(data)
 
           // Detect new stone unlock
