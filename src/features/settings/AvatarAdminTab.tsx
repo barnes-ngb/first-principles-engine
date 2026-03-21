@@ -47,6 +47,12 @@ import type {
 
 // ── Helpers ──────────────────────────────────────────────────────
 
+function stripUndefined<T extends object>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined),
+  ) as Partial<T>
+}
+
 function isPieceEarned(profile: AvatarProfile, pieceId: ArmorPiece): boolean {
   const entry = profile.pieces.find((p) => p.pieceId === pieceId)
   if (!entry) return false
@@ -142,7 +148,7 @@ export default function AvatarAdminTab() {
             updatedPieces.push({
               pieceId: pieceDef.id,
               unlockedTiers: profile.themeStyle === 'minecraft' ? ['stone'] : [],
-              unlockedTiersPlatformer: profile.themeStyle === 'platformer' ? ['basic'] : undefined,
+              ...(profile.themeStyle === 'platformer' ? { unlockedTiersPlatformer: ['basic'] as PlatformerTier[] } : {}),
               generatedImageUrls: {},
             })
           }
@@ -151,12 +157,12 @@ export default function AvatarAdminTab() {
 
       const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
       try {
-        await setDoc(profileRef, {
+        await setDoc(profileRef, stripUndefined({
           ...profile,
           totalXp: newXp,
           pieces: updatedPieces,
           updatedAt: new Date().toISOString(),
-        })
+        }))
 
         const eventRef = doc(xpEventLogCollection(familyId), `${activeChildId}_admin_${Date.now()}`)
         await setDoc(eventRef, {
@@ -219,12 +225,12 @@ export default function AvatarAdminTab() {
       }
 
       // Update tier
-      await setDoc(profileRef, {
+      await setDoc(profileRef, stripUndefined({
         ...profile,
         pieces: updatedPieces,
         currentTier: nextTier,
         updatedAt: new Date().toISOString(),
-      })
+      }))
 
       // Generate images for the new tier in parallel
       const TIER_PROMPTS: Record<string, Record<string, string>> = {
@@ -269,7 +275,7 @@ export default function AvatarAdminTab() {
                     }
                   : p,
               )
-              await setDoc(profileRef, { ...current, pieces: newPieces, updatedAt: new Date().toISOString() })
+              await setDoc(profileRef, stripUndefined({ ...current, pieces: newPieces, updatedAt: new Date().toISOString() }))
             } catch (err) {
               console.warn(`Force upgrade image gen failed for ${pieceDef.id}:`, err)
             }
@@ -292,11 +298,11 @@ export default function AvatarAdminTab() {
     const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
 
     try {
-      await setDoc(profileRef, {
+      await setDoc(profileRef, stripUndefined({
         ...profile,
         pieces: profile.pieces.filter((p) => p.pieceId !== deletePiece),
         updatedAt: new Date().toISOString(),
-      })
+      }))
       setFeedback({ severity: 'success', message: `Removed ${ARMOR_PIECES.find((p) => p.id === deletePiece)?.name ?? deletePiece}` })
     } catch (err) {
       console.error('Delete piece failed:', err)
@@ -324,8 +330,7 @@ export default function AvatarAdminTab() {
         themeStyle: profile.themeStyle,
         pieces: [],
         currentTier: profile.themeStyle === 'minecraft' ? 'stone' : 'basic',
-        baseCharacterUrl: profile.baseCharacterUrl, // keep base character
-        photoTransformUrl: undefined,
+        ...(profile.baseCharacterUrl ? { baseCharacterUrl: profile.baseCharacterUrl } : {}),
         totalXp: 0,
         updatedAt: new Date().toISOString(),
       } satisfies AvatarProfile)

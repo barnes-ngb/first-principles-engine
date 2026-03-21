@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ChangeEvent } from 'react'
 import { doc, onSnapshot, setDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
 import LinearProgress from '@mui/material/LinearProgress'
 import Typography from '@mui/material/Typography'
@@ -26,6 +29,12 @@ import UnlockCelebration from './UnlockCelebration'
 import VerseCard from './VerseCard'
 
 // ── Helpers ───────────────────────────────────────────────────────
+
+function stripUndefined<T extends object>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined),
+  ) as Partial<T>
+}
 
 function getEarnedPieces(profile: AvatarProfile): ArmorPiece[] {
   return ARMOR_PIECES.filter((p) => isPieceEarned(profile, p.id)).map((p) => p.id)
@@ -54,6 +63,12 @@ export default function MyAvatarPage() {
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
   const [baseCharGenerating, setBaseCharGenerating] = useState(false)
+
+  // Photo transform
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null)
+  const [photoTransforming, setPhotoTransforming] = useState(false)
+  const [photoTransformError, setPhotoTransformError] = useState<string | null>(null)
+  const photoInputRef = useRef<HTMLInputElement>(null)
 
   // Track previous state to detect changes
   const prevPiecesCountRef = useRef(0)
@@ -179,6 +194,78 @@ export default function MyAvatarPage() {
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.childId, profile?.baseCharacterUrl])
+
+  // ── Photo select (crop + resize via canvas) ────────────────────
+  const handlePhotoSelect = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    // Reset input so same file can be re-selected after cancel
+    e.target.value = ''
+
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const img = new Image()
+      img.onload = () => {
+        const size = Math.min(img.width, img.height)
+        const x = (img.width - size) / 2
+        const y = (img.height - size) / 2
+        const targetSize = Math.min(size, 1024)
+        const canvas = document.createElement('canvas')
+        canvas.width = targetSize
+        canvas.height = targetSize
+        const ctx = canvas.getContext('2d')!
+        ctx.drawImage(img, x, y, size, size, 0, 0, targetSize, targetSize)
+        setPhotoPreviewUrl(canvas.toDataURL('image/jpeg', 0.92))
+        setPhotoTransformError(null)
+      }
+      img.src = ev.target?.result as string
+    }
+    reader.readAsDataURL(file)
+  }, [])
+
+  // ── Photo transform ────────────────────────────────────────────
+  const handlePhotoTransform = useCallback(async () => {
+    if (!familyId || !childId || !photoPreviewUrl || !profile) return
+    setPhotoTransforming(true)
+    setPhotoTransformError(null)
+
+    try {
+      const fns = getFunctions(app)
+      const transformFn = httpsCallable<
+        { familyId: string; childId: string; themeStyle: string; photoBase64: string; photoMimeType: string },
+        { url: string }
+      >(fns, 'transformAvatarPhoto')
+
+      // Extract base64 and mimeType from data URL
+      const [header, base64] = photoPreviewUrl.split(',')
+      const mimeType = header.split(':')[1].split(';')[0]
+
+      const result = await transformFn({
+        familyId,
+        childId,
+        themeStyle: profile.themeStyle,
+        photoBase64: base64,
+        photoMimeType: mimeType,
+      })
+
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      const { getDoc } = await import('firebase/firestore')
+      const snap = await getDoc(profileRef)
+      const current = snap.exists() ? snap.data() as AvatarProfile : profile
+      await setDoc(profileRef, stripUndefined({
+        ...current,
+        photoTransformUrl: result.data.url,
+        updatedAt: new Date().toISOString(),
+      }))
+
+      setPhotoPreviewUrl(null)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Transform failed — try a different photo.'
+      setPhotoTransformError(msg)
+    } finally {
+      setPhotoTransforming(false)
+    }
+  }, [familyId, childId, photoPreviewUrl, profile])
 
   // ── Apply a piece ──────────────────────────────────────────────
   const handleApplyPiece = useCallback(
@@ -372,33 +459,120 @@ export default function MyAvatarPage() {
           ))}
         </Box>
 
-        {/* ── Phase 2 Photo Transform Scaffold ──────────────────── */}
+        {/* ── Photo Transform ────────────────────────────────────── */}
         <Box
           sx={{
             mt: 3,
             p: 2,
             borderRadius: isLincoln ? 0 : 3,
-            border: `2px dashed ${isLincoln ? '#333' : '#ddd'}`,
-            bgcolor: isLincoln ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
-            opacity: 0.6,
+            border: `2px solid ${isLincoln ? '#333' : '#e0d0f0'}`,
+            bgcolor: isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(232,160,191,0.06)',
           }}
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <CameraAltIcon sx={{ color: isLincoln ? '#555' : '#bbb', fontSize: 20 }} />
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={handlePhotoSelect}
+          />
+
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+            <CameraAltIcon sx={{ color: accentColor, fontSize: 18 }} />
             <Typography
               sx={{
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
                 fontSize: isLincoln ? '0.4rem' : '0.85rem',
-                color: isLincoln ? '#555' : '#bbb',
+                fontWeight: 600,
+                color: accentColor,
               }}
             >
-              Transform YOUR Photo — Coming Soon
+              Transform YOUR Photo
             </Typography>
           </Box>
-          {/* Phase 2: Upload photo → gpt-image-1 image-to-image
-            * Transform into themeStyle character (pixel art blocky or platformer cute)
-            * Save to avatarProfile.photoTransformUrl
-            * Display as base character layer instead of generated baseCharacterUrl */}
+
+          {!photoPreviewUrl ? (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<CameraAltIcon />}
+              onClick={() => photoInputRef.current?.click()}
+              sx={{
+                borderColor: accentColor,
+                color: accentColor,
+                borderRadius: isLincoln ? 0 : 2,
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                fontSize: isLincoln ? '0.35rem' : '0.8rem',
+              }}
+            >
+              {profile.photoTransformUrl ? 'Change Photo' : 'Upload a Photo'}
+            </Button>
+          ) : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Box
+                component="img"
+                src={photoPreviewUrl}
+                alt="Preview"
+                sx={{
+                  width: 120,
+                  height: 120,
+                  objectFit: 'cover',
+                  borderRadius: isLincoln ? 0 : 2,
+                  border: `2px solid ${accentColor}`,
+                  imageRendering: isLincoln ? 'pixelated' : 'auto',
+                }}
+              />
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={() => void handlePhotoTransform()}
+                  disabled={photoTransforming}
+                  sx={{
+                    bgcolor: accentColor,
+                    color: isLincoln ? '#000' : '#fff',
+                    borderRadius: isLincoln ? 0 : 2,
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                    fontSize: isLincoln ? '0.32rem' : '0.8rem',
+                    '&:hover': { bgcolor: accentColor, opacity: 0.85 },
+                  }}
+                >
+                  {photoTransforming ? 'Transforming… ~20s' : 'Transform!'}
+                </Button>
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => { setPhotoPreviewUrl(null); setPhotoTransformError(null) }}
+                  disabled={photoTransforming}
+                  sx={{
+                    color: isLincoln ? '#666' : '#aaa',
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                    fontSize: isLincoln ? '0.32rem' : '0.8rem',
+                  }}
+                >
+                  Cancel
+                </Button>
+              </Box>
+              {photoTransforming && (
+                <CircularProgress size={16} sx={{ color: accentColor, mt: 0.5 }} />
+              )}
+            </Box>
+          )}
+
+          {photoTransformError && (
+            <Alert severity="error" sx={{ mt: 1, fontSize: '0.75rem' }}>
+              {photoTransformError}
+            </Alert>
+          )}
+
+          {profile.photoTransformUrl && !photoPreviewUrl && (
+            <Typography
+              variant="caption"
+              sx={{ display: 'block', mt: 0.5, color: isLincoln ? '#555' : '#aaa' }}
+            >
+              Photo transform active — armor overlays still apply on top
+            </Typography>
+          )}
         </Box>
       </Page>
 
