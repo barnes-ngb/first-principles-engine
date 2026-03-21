@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
+import CancelIcon from '@mui/icons-material/Cancel'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import LockIcon from '@mui/icons-material/Lock'
 
@@ -116,11 +117,16 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
           </Box>
         )}
 
-        {/* Applied checkmark */}
+        {/* Applied checkmark + remove hint */}
         {appliedToday && (
-          <CheckCircleIcon
-            sx={{ position: 'absolute', top: 4, right: 4, fontSize: 18, color: accentColor }}
-          />
+          <>
+            <CheckCircleIcon
+              sx={{ position: 'absolute', top: 4, right: 4, fontSize: 18, color: accentColor }}
+            />
+            <CancelIcon
+              sx={{ position: 'absolute', top: 4, left: 4, fontSize: 14, color: 'rgba(255,255,255,0.4)', opacity: 0.7 }}
+            />
+          </>
         )}
 
         {/* Piece name */}

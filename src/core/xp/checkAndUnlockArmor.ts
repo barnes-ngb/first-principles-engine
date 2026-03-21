@@ -2,7 +2,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 
 import { app } from '../firebase/firebase'
-import { avatarProfilesCollection } from '../firebase/firestore'
+import { avatarProfilesCollection, xpLedgerCollection } from '../firebase/firestore'
 import { ARMOR_PIECES } from '../types/domain'
 import type {
   ArmorPiece,
@@ -141,7 +141,14 @@ export async function checkAndUnlockArmor(
   const profile = ensureNewProfileStructure(
     profileSnap.data() as unknown as Record<string, unknown>,
   )
-  const xp = totalXp ?? profile.totalXp ?? 0
+
+  // Read XP from xpLedger (source of truth) when not passed explicitly
+  let xp = totalXp ?? 0
+  if (totalXp === undefined) {
+    const ledgerRef = doc(xpLedgerCollection(familyId), childId)
+    const ledgerSnap = await getDoc(ledgerRef)
+    xp = ledgerSnap.exists() ? (ledgerSnap.data().totalXp as number) ?? 0 : profile.totalXp ?? 0
+  }
   const { themeStyle } = profile
   const pieces = [...profile.pieces]
 
