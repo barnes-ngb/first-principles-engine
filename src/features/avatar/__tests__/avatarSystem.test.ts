@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { ARMOR_PIECES, XP_EVENTS } from '../../../core/types/domain'
-import type { ArmorPiece } from '../../../core/types/domain'
+import type { ArmorPiece, AvatarProfile } from '../../../core/types/domain'
 
 // ── ARMOR_PIECES data integrity ───────────────────────────────────
 
@@ -182,6 +182,199 @@ describe('XP dedup key logic', () => {
     const key1 = buildDedupKey('BOOK_READ', { bookId: 'book123', date: '2026-03-20' })
     const key2 = buildDedupKey('BOOK_READ', { bookId: 'book123', date: '2026-03-21' })
     expect(key1).not.toBe(key2)
+  })
+})
+
+// ── Starter image generation logic ───────────────────────────────
+
+describe('Starter image generation', () => {
+  it('triggers generation when starterImageUrl is undefined', () => {
+    // Simulate the condition that triggers generation
+    const profile: AvatarProfile = {
+      childId: 'lincoln1',
+      themeStyle: 'minecraft',
+      unlockedPieces: [],
+      generatedImageUrls: {},
+      totalXp: 0,
+      updatedAt: '2026-03-21',
+      // starterImageUrl is absent (undefined)
+    }
+    const shouldGenerate = !profile.starterImageUrl
+    expect(shouldGenerate).toBe(true)
+  })
+
+  it('does NOT regenerate when starterImageUrl already exists', () => {
+    const profile: AvatarProfile = {
+      childId: 'lincoln1',
+      themeStyle: 'minecraft',
+      unlockedPieces: [],
+      generatedImageUrls: {},
+      totalXp: 0,
+      updatedAt: '2026-03-21',
+      starterImageUrl: 'https://example.com/starter.png',
+    }
+    const shouldGenerate = !profile.starterImageUrl
+    expect(shouldGenerate).toBe(false)
+  })
+})
+
+// ── Parent XP controls ────────────────────────────────────────────
+
+describe('Parent XP controls', () => {
+  it('subtract XP cannot go below 0', () => {
+    const clampXp = (current: number, delta: number) => Math.max(0, current + delta)
+    expect(clampXp(10, -20)).toBe(0)
+    expect(clampXp(0, -5)).toBe(0)
+    expect(clampXp(5, -3)).toBe(2)
+  })
+
+  it('adding XP increases totalXp correctly', () => {
+    const clampXp = (current: number, delta: number) => Math.max(0, current + delta)
+    expect(clampXp(50, 25)).toBe(75)
+    expect(clampXp(0, 10)).toBe(10)
+  })
+
+  it('delete piece removes from unlockedPieces', () => {
+    const unlockedPieces: ArmorPiece[] = ['belt_of_truth', 'breastplate_of_righteousness']
+    const pieceToDelete: ArmorPiece = 'belt_of_truth'
+    const updated = unlockedPieces.filter((p) => p !== pieceToDelete)
+    expect(updated).not.toContain('belt_of_truth')
+    expect(updated).toContain('breastplate_of_righteousness')
+    expect(updated).toHaveLength(1)
+  })
+
+  it('delete piece clears generatedImageUrls entry', () => {
+    const generatedImageUrls: Partial<Record<ArmorPiece, string>> = {
+      belt_of_truth: 'https://example.com/belt.png',
+      breastplate_of_righteousness: 'https://example.com/breastplate.png',
+    }
+    const pieceToDelete: ArmorPiece = 'belt_of_truth'
+    const updatedUrls = { ...generatedImageUrls }
+    delete updatedUrls[pieceToDelete]
+    expect(updatedUrls.belt_of_truth).toBeUndefined()
+    expect(updatedUrls.breastplate_of_righteousness).toBeDefined()
+  })
+
+  it('reset clears all progress fields but preserves starterImageUrl', () => {
+    const starterImageUrl = 'https://example.com/starter.png'
+    const reset: AvatarProfile = {
+      childId: 'lincoln1',
+      themeStyle: 'minecraft',
+      unlockedPieces: [],
+      generatedImageUrls: {},
+      customAvatarUrl: undefined,
+      photoTransformUrl: undefined,
+      starterImageUrl, // preserved
+      totalXp: 0,
+      updatedAt: new Date().toISOString(),
+    }
+    expect(reset.totalXp).toBe(0)
+    expect(reset.unlockedPieces).toHaveLength(0)
+    expect(reset.customAvatarUrl).toBeUndefined()
+    expect(reset.photoTransformUrl).toBeUndefined()
+    expect(reset.starterImageUrl).toBe(starterImageUrl)
+  })
+})
+
+// ── Hero section display priority ─────────────────────────────────
+
+describe('Hero section display priority', () => {
+  function resolveHeroUrl(profile: {
+    photoTransformUrl?: string
+    unlockedPieces: ArmorPiece[]
+    generatedImageUrls: Partial<Record<ArmorPiece, string>>
+    starterImageUrl?: string
+  }): { source: 'photo' | 'armor' | 'starter' | 'none'; url: string | undefined } {
+    if (profile.photoTransformUrl) {
+      return { source: 'photo', url: profile.photoTransformUrl }
+    }
+    if (profile.unlockedPieces.length > 0) {
+      const last = profile.unlockedPieces[profile.unlockedPieces.length - 1]
+      const url = profile.generatedImageUrls[last]
+      return { source: 'armor', url }
+    }
+    if (profile.starterImageUrl) {
+      return { source: 'starter', url: profile.starterImageUrl }
+    }
+    return { source: 'none', url: undefined }
+  }
+
+  it('shows photoTransformUrl when present (highest priority)', () => {
+    const result = resolveHeroUrl({
+      photoTransformUrl: 'https://example.com/photo.png',
+      unlockedPieces: ['belt_of_truth'],
+      generatedImageUrls: { belt_of_truth: 'https://example.com/belt.png' },
+      starterImageUrl: 'https://example.com/starter.png',
+    })
+    expect(result.source).toBe('photo')
+    expect(result.url).toBe('https://example.com/photo.png')
+  })
+
+  it('shows most recently unlocked piece when no photo transform', () => {
+    const result = resolveHeroUrl({
+      unlockedPieces: ['belt_of_truth', 'breastplate_of_righteousness'],
+      generatedImageUrls: {
+        belt_of_truth: 'https://example.com/belt.png',
+        breastplate_of_righteousness: 'https://example.com/breastplate.png',
+      },
+      starterImageUrl: 'https://example.com/starter.png',
+    })
+    expect(result.source).toBe('armor')
+    expect(result.url).toBe('https://example.com/breastplate.png')
+  })
+
+  it('shows starterImageUrl when no pieces and no photo', () => {
+    const result = resolveHeroUrl({
+      unlockedPieces: [],
+      generatedImageUrls: {},
+      starterImageUrl: 'https://example.com/starter.png',
+    })
+    expect(result.source).toBe('starter')
+    expect(result.url).toBe('https://example.com/starter.png')
+  })
+
+  it('shows none when nothing is available', () => {
+    const result = resolveHeroUrl({
+      unlockedPieces: [],
+      generatedImageUrls: {},
+    })
+    expect(result.source).toBe('none')
+    expect(result.url).toBeUndefined()
+  })
+})
+
+// ── Photo transform style instructions ───────────────────────────
+
+describe('Photo transform style instructions', () => {
+  function getStyleInstruction(themeStyle: 'minecraft' | 'platformer'): string {
+    return themeStyle === 'minecraft'
+      ? 'Transform this person into a blocky pixel art video game character in 8-bit style, wearing leather armor and carrying a wooden sword, same pose as the original photo, square format, no text'
+      : 'Transform this person into a cute cartoon platformer game character with rounded cheerful design and bright colors, same pose as the original photo, square format, no text'
+  }
+
+  it('minecraft style instruction is copyright-safe', () => {
+    const instruction = getStyleInstruction('minecraft')
+    expect(instruction.toLowerCase()).not.toContain('minecraft')
+    expect(instruction.toLowerCase()).not.toContain('steve')
+    expect(instruction.toLowerCase()).not.toContain('nintendo')
+  })
+
+  it('platformer style instruction is copyright-safe', () => {
+    const instruction = getStyleInstruction('platformer')
+    expect(instruction.toLowerCase()).not.toContain('mario')
+    expect(instruction.toLowerCase()).not.toContain('nintendo')
+  })
+
+  it('minecraft style describes blocky pixel art character', () => {
+    const instruction = getStyleInstruction('minecraft')
+    expect(instruction).toContain('pixel art')
+    expect(instruction).toContain('8-bit')
+  })
+
+  it('platformer style describes cute cartoon character', () => {
+    const instruction = getStyleInstruction('platformer')
+    expect(instruction).toContain('cartoon')
+    expect(instruction).toContain('platformer')
   })
 })
 

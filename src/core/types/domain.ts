@@ -1135,7 +1135,8 @@ export interface AvatarProfile {
   /** Firebase Storage download URLs keyed by piece ID */
   generatedImageUrls: Partial<Record<ArmorPiece, string>>
   customAvatarUrl?: string    // post-all-6 custom generation
-  photoTransformUrl?: string  // Phase 2
+  photoTransformUrl?: string  // gpt-image-1 photo transform result
+  starterImageUrl?: string    // DALL-E generated once, shown at 0 XP
   totalXp: number             // cached from xpLedger for quick reads
   updatedAt: string
 }
