@@ -25,7 +25,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type {
   LadderCardDefinition,
   LadderProgress,
-} from '../../core/types/domain'
+} from '../../core/types'
 import { SessionSymbol } from '../../core/types/enums'
 import { getLaddersForChild } from './laddersCatalog'
 import {

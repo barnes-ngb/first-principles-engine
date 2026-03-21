@@ -9,7 +9,7 @@ import { getDocs, query, where } from 'firebase/firestore'
 
 import SectionCard from '../../components/SectionCard'
 import { ladderProgressCollection } from '../../core/firebase/firestore'
-import type { LadderCardDefinition, LadderProgress } from '../../core/types/domain'
+import type { LadderCardDefinition, LadderProgress } from '../../core/types'
 
 interface LadderQuickLogProps {
   familyId: string

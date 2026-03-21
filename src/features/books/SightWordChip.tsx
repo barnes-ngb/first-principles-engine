@@ -3,7 +3,7 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Popover from '@mui/material/Popover'
 import Stack from '@mui/material/Stack'
-import type { SightWordProgress } from '../../core/types/domain'
+import type { SightWordProgress } from '../../core/types'
 
 const MASTERY_COLORS: Record<SightWordProgress['masteryLevel'], { bg: string; fontWeight: number }> = {
   new: { bg: 'rgba(33, 150, 243, 0.25)', fontWeight: 700 },

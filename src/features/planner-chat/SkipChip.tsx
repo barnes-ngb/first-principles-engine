@@ -1,7 +1,7 @@
 import Chip from '@mui/material/Chip'
 import Tooltip from '@mui/material/Tooltip'
 
-import type { SkipAdvisorResult } from '../../core/types/domain'
+import type { SkipAdvisorResult } from '../../core/types'
 
 interface SkipChipProps {
   result: SkipAdvisorResult

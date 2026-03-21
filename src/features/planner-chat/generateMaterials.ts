@@ -1,4 +1,4 @@
-import type { DraftDayPlan, SkillSnapshot } from '../../core/types/domain'
+import type { DraftDayPlan, SkillSnapshot } from '../../core/types'
 
 export interface GeneratedMaterial {
   dayName: string

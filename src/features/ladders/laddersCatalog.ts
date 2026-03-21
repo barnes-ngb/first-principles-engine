@@ -1,4 +1,4 @@
-import type { LadderCardDefinition } from '../../core/types/domain'
+import type { LadderCardDefinition } from '../../core/types'
 import { LINCOLN_LADDERS } from './lincolnLadders'
 import { LONDON_LADDERS } from './londonLadders'
 

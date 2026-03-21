@@ -17,7 +17,7 @@ import {
   milestoneProgressCollection,
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { Artifact, MilestoneProgress } from '../../core/types/domain'
+import type { Artifact, MilestoneProgress } from '../../core/types'
 import { EngineStage } from '../../core/types/enums'
 import {
   computeLoopStatus,

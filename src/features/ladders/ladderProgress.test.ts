@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { LadderCardDefinition, LadderProgress } from '../../core/types/domain'
+import type { LadderCardDefinition, LadderProgress } from '../../core/types'
 import { SessionSymbol, SupportLevel } from '../../core/types/enums'
 import {
   applySession,

@@ -7,8 +7,8 @@ import IconButton from '@mui/material/IconButton'
 import Typography from '@mui/material/Typography'
 import CloseIcon from '@mui/icons-material/Close'
 
-import type { ArmorPiece, AvatarProfile } from '../../core/types/domain'
-import { ARMOR_PIECES } from '../../core/types/domain'
+import type { ArmorPiece, AvatarProfile } from '../../core/types'
+import { ARMOR_PIECES } from '../../core/types'
 
 interface VerseCardProps {
   pieceId: ArmorPiece | null

@@ -23,7 +23,7 @@ import {
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useDebounce } from '../../core/hooks/useDebounce'
 import { useSaveState } from '../../core/hooks/useSaveState'
-import type { Child, WeekPlan } from '../../core/types/domain'
+import type { Child, WeekPlan } from '../../core/types'
 import { parseDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../../core/utils/time'
 import { navTo } from '../../core/utils/dateKey'

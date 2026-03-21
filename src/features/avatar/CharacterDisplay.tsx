@@ -3,8 +3,8 @@ import Box from '@mui/material/Box'
 import CircularProgress from '@mui/material/CircularProgress'
 import Typography from '@mui/material/Typography'
 
-import type { ArmorPiece, AvatarProfile } from '../../core/types/domain'
-import { ARMOR_PIECES } from '../../core/types/domain'
+import type { ArmorPiece, AvatarProfile } from '../../core/types'
+import { ARMOR_PIECES } from '../../core/types'
 import { isPieceEarned, PIECE_OVERLAY_POSITIONS } from './armorUtils'
 
 // ── Helpers ───────────────────────────────────────────────────────

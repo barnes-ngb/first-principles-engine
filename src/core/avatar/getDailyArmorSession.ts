@@ -4,7 +4,7 @@ import {
   dailyArmorSessionsCollection,
   dailyArmorSessionDocId,
 } from '../firebase/firestore'
-import type { DailyArmorSession } from '../types/domain'
+import type { DailyArmorSession } from '../types'
 
 /** Get today's date as YYYY-MM-DD using local time. */
 export function getTodayDateString(): string {

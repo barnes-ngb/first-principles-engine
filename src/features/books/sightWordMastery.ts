@@ -1,4 +1,4 @@
-import type { SightWordProgress } from '../../core/types/domain'
+import type { SightWordProgress } from '../../core/types'
 
 /** Compute mastery level from encounter/help data. */
 export function computeMasteryLevel(progress: SightWordProgress): SightWordProgress['masteryLevel'] {

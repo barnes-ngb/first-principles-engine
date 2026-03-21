@@ -8,7 +8,7 @@ import { addDoc, doc, updateDoc } from 'firebase/firestore'
 
 import { artifactsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
-import type { Artifact } from '../../core/types/domain'
+import type { Artifact } from '../../core/types'
 import {
   EngineStage,
   EvidenceType,

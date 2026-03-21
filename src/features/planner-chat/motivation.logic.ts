@@ -10,7 +10,7 @@ import type {
   SkillSnapshot,
   StartAnywayScript,
   StopRule,
-} from '../../core/types/domain'
+} from '../../core/types'
 import { RegulationTags } from '../../core/types/skillTags'
 
 /**

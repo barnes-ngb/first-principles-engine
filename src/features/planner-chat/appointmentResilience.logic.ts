@@ -13,7 +13,7 @@ import type {
   DraftWeeklyPlan,
   LightDayItem,
   LightDayTemplate,
-} from '../../core/types/domain'
+} from '../../core/types'
 import { DayType, SubjectBucket } from '../../core/types/enums'
 import { generateItemId, type WeekDay, WEEK_DAYS } from './chatPlanner.logic'
 

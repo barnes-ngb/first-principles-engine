@@ -9,7 +9,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 
 import PhotoCapture from '../../components/PhotoCapture'
-import type { PhotoLabel, WorkbookConfig } from '../../core/types/domain'
+import type { PhotoLabel, WorkbookConfig } from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
 
 interface PhotoLabelFormProps {

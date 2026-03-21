@@ -4,7 +4,7 @@ import { addDoc, doc, getDoc, setDoc } from 'firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
 import type { TaskType } from '../../core/ai/useAI'
 import { booksCollection } from '../../core/firebase/firestore'
-import type { Book, BookPage, BookTheme, PageImage } from '../../core/types/domain'
+import type { Book, BookPage, BookTheme, PageImage } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
 import { generateImageId, generatePageId } from './bookTypes'
 

@@ -6,7 +6,7 @@ import type {
   Evaluation,
   HoursAdjustment,
   HoursEntry,
-} from '../../core/types/domain'
+} from '../../core/types'
 import { LearningLocation, SubjectBucket } from '../../core/types/enums'
 import { formatDateForCsv, toCsvValue } from '../../core/utils/format'
 import { deriveChildIdFromDocId } from '../../core/utils/docId'

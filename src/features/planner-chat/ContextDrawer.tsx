@@ -7,7 +7,7 @@ import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
-import type { AppBlock, Child, SkillSnapshot } from '../../core/types/domain'
+import type { AppBlock, Child, SkillSnapshot } from '../../core/types'
 
 interface ContextDrawerProps {
   open: boolean

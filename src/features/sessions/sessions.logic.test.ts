@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { SessionResult, StreamId } from '../../core/types/enums'
-import type { Session } from '../../core/types/domain'
+import type { Session } from '../../core/types'
 import {
   checkLevelUp,
   calculateStreak,

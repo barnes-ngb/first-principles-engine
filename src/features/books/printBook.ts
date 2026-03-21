@@ -1,7 +1,7 @@
 import { ref, getBlob } from 'firebase/storage'
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
-import type { Book, BookPage } from '../../core/types/domain'
+import type { Book, BookPage } from '../../core/types'
 import { storage } from '../../core/firebase/storage'
 import type { PrintSettings } from './PrintSettingsDialog'
 import { TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'

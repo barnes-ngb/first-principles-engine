@@ -9,7 +9,7 @@ import { getDocs, query, where } from 'firebase/firestore'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { evaluationSessionsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { EvaluationSession } from '../../core/types/domain'
+import type { EvaluationSession } from '../../core/types'
 import type { InteractiveSessionData, SessionQuestion } from '../quest/questTypes'
 
 /** Merged type for sessions that may be interactive quests. */

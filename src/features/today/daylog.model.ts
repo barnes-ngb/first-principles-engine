@@ -7,7 +7,7 @@ import type {
   MathRoutine,
   ReadingRoutine,
   SpeechRoutine,
-} from '../../core/types/domain'
+} from '../../core/types'
 
 export { parseDateFromDocId } from '../../core/utils/docId'
 

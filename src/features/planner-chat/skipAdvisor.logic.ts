@@ -10,7 +10,7 @@ import type {
   PrioritySkill,
   SkillSnapshot,
   SkipAdvisorResult,
-} from '../../core/types/domain'
+} from '../../core/types'
 import { MasteryGate, MasteryGateLabel } from '../../core/types/enums'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 

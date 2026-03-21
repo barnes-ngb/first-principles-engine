@@ -14,7 +14,7 @@ import { getDocs, query, where } from 'firebase/firestore'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { aiUsageCollection } from '../../core/firebase/firestore'
-import type { AIUsageEntry } from '../../core/types/domain'
+import type { AIUsageEntry } from '../../core/types'
 
 // ── Display helpers ──────────────────────────────────────────────
 

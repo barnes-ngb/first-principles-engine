@@ -16,7 +16,7 @@ import { deleteDoc, doc, getDocs, orderBy, query, setDoc } from 'firebase/firest
 
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useFamilyId } from '../../core/auth/useAuth'
-import type { Sticker, StickerTag } from '../../core/types/domain'
+import type { Sticker, StickerTag } from '../../core/types'
 
 const STICKER_TAG_LABELS: Record<StickerTag, string> = {
   animal: 'Animal',

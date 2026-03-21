@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { DayLog } from '../../core/types/domain'
+import type { DayLog } from '../../core/types'
 import { RoutineItemKey } from '../../core/types/enums'
 import { calculateXp, countLoggedCategories } from './xp'
 

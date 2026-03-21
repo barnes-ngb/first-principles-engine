@@ -3,8 +3,8 @@ import Box from '@mui/material/Box'
 import LinearProgress from '@mui/material/LinearProgress'
 import Typography from '@mui/material/Typography'
 
-import type { AvatarProfile } from '../../core/types/domain'
-import { ARMOR_PIECES } from '../../core/types/domain'
+import type { AvatarProfile } from '../../core/types'
+import { ARMOR_PIECES } from '../../core/types'
 
 export interface TierUpgrade {
   from: string

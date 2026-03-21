@@ -1,4 +1,4 @@
-import type { LadderCardDefinition } from '../../core/types/domain'
+import type { LadderCardDefinition } from '../../core/types'
 
 const GLOBAL_RULE = 'Level up on 3 ✔ in a row with same or less support.'
 

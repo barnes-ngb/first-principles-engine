@@ -6,7 +6,7 @@ import type {
   DraftWeeklyPlan,
   SkillSnapshot,
   SkipSuggestion,
-} from '../../core/types/domain'
+} from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, SubjectBucket } from '../../core/types/enums'
 import { autoSuggestTags } from '../../core/types/skillTags'

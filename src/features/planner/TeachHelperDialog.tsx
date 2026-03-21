@@ -20,7 +20,7 @@ import { addDoc, doc, getDoc, getDocs, query, where } from 'firebase/firestore'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useGenerateActivity } from '../../core/ai/useAI'
 import { lessonCardsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
-import type { ChecklistItem, LadderCardDefinition, LessonCard, SkillSnapshot } from '../../core/types/domain'
+import type { ChecklistItem, LadderCardDefinition, LessonCard, SkillSnapshot } from '../../core/types'
 import { fixUnicodeEscapes } from '../../core/utils/format'
 import { openPrintWindow } from '../planner-chat/generateMaterials'
 

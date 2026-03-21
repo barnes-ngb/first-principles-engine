@@ -40,7 +40,7 @@ import type {
   WorkbookConfig,
   XpEventLogEntry,
   XpLedger,
-} from '../types/domain'
+} from '../types'
 import { app } from './firebase'
 
 export const db = getFirestore(app)

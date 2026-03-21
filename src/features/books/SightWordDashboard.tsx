@@ -17,7 +17,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { SightWordProgress } from '../../core/types/domain'
+import type { SightWordProgress } from '../../core/types'
 import { useSightWordProgress } from './useSightWordProgress'
 import { summarizeMastery } from './sightWordMastery'
 

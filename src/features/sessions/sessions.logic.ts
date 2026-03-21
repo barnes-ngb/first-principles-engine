@@ -1,4 +1,4 @@
-import type { Session } from '../../core/types/domain'
+import type { Session } from '../../core/types'
 import { SessionResult } from '../../core/types/enums'
 import type { StreamId } from '../../core/types/enums'
 

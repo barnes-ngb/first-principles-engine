@@ -5,7 +5,7 @@
  * based on current position, target finish date, and planned pace.
  */
 
-import type { PaceGaugeResult, WorkbookConfig } from '../../core/types/domain'
+import type { PaceGaugeResult, WorkbookConfig } from '../../core/types'
 import { PaceStatus } from '../../core/types/enums'
 
 /**

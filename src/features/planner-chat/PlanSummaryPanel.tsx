@@ -3,7 +3,7 @@ import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
-import type { AppBlock, DraftWeeklyPlan, PrioritySkill } from '../../core/types/domain'
+import type { AppBlock, DraftWeeklyPlan, PrioritySkill } from '../../core/types'
 import { buildCoverageSummary } from './coverageSummary'
 import type { CoverageEntry } from './coverageSummary'
 

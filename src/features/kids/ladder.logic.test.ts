@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { Rung } from '../../core/types/domain'
+import type { Rung } from '../../core/types'
 import { EvidenceType } from '../../core/types/enums'
 import {
   canMarkAchieved,

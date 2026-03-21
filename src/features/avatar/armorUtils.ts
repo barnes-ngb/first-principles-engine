@@ -1,4 +1,4 @@
-import type { ArmorPiece, AvatarProfile } from '../../core/types/domain'
+import type { ArmorPiece, AvatarProfile } from '../../core/types'
 
 // ── Overlay positions ─────────────────────────────────────────────
 // Approximate % positions of each piece over the full-body character image.

@@ -1,4 +1,4 @@
-import type { Ladder, Rung } from '../../core/types/domain'
+import type { Ladder, Rung } from '../../core/types'
 
 type LadderWithId = Omit<Ladder, 'id'> & { id: string }
 
