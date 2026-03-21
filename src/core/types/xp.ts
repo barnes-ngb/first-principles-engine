@@ -175,10 +175,14 @@ export interface AvatarProfile {
   currentTier: ArmorTier | PlatformerTier
   /** DALL-E base character (full body, no armor), generated once */
   baseCharacterUrl?: string
-  /** Phase 2: photo → character transform result */
+  /** Phase 2: photo → character transform result (bare pixel character from photo) */
   photoTransformUrl?: string
   /** Cohesive set sheets: tier → sheet URL (3×2 grid, all 6 pieces) */
   armorSheetUrls?: Partial<Record<string, string>>
+  /** Armor reference images: tier → full armed character image URL */
+  armorReferenceUrls?: Partial<Record<string, string>>
+  /** Cached client-side crops from armor reference (optional — can re-crop) */
+  croppedRegionUrls?: Partial<Record<ArmorPiece, string>>
   totalXp: number   // cached from xpLedger for quick reads
   updatedAt: string
 }

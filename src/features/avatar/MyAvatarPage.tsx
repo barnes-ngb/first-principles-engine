@@ -23,16 +23,16 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
-import { ARMOR_PIECES, ARMOR_PIECE_SHEET_INDEX } from '../../core/types'
+import { ARMOR_PIECES } from '../../core/types'
 import type { ArmorPiece, AvatarProfile, DailyArmorSession } from '../../core/types'
-import { cropArmorPiece } from '../../core/avatar/cropArmorSheet'
+import { cropAllArmorRegions, ARMOR_REGIONS } from '../../core/avatar/cropArmorRegions'
 
 import ArmorPieceButton from './ArmorPieceButton'
 import AttachAnimation from './AttachAnimation'
 import type { AttachAnimState } from './AttachAnimation'
 import CharacterDisplay from './CharacterDisplay'
 import Particles from './Particles'
-import { isPieceEarned, PIECE_OVERLAY_POSITIONS } from './armorUtils'
+import { isPieceEarned } from './armorUtils'
 import type { ArmorTierColor } from './icons/ArmorIcons'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
 import UnlockCelebration from './UnlockCelebration'
@@ -62,41 +62,34 @@ function toTierColor(tier: string): ArmorTierColor {
   return valid.includes(tier as ArmorTierColor) ? (tier as ArmorTierColor) : 'stone'
 }
 
-/** Parse a CSS dimension string (e.g. '40%', '4px') relative to a container size */
-function parseDim(value: string, containerSize: number): number {
-  if (value.endsWith('%')) return (parseFloat(value) / 100) * containerSize
-  return parseFloat(value)
-}
-
 /**
- * Compute the center point (viewport coords) of a piece overlay
- * within the character display container element.
+ * Get the bounding rect and center of a piece's region overlay
+ * using data-piece-id attribute or falling back to ARMOR_REGIONS percentages.
  */
-function getLandingCenter(
+function getRegionRect(
   containerEl: HTMLElement,
   pieceId: ArmorPiece,
-): { x: number; y: number } {
+): { rect: DOMRect; center: { x: number; y: number } } {
+  // Try finding the actual overlay element
+  const overlayEl = containerEl.querySelector(`[data-piece-id="${pieceId}"]`)
+  if (overlayEl) {
+    const rect = overlayEl.getBoundingClientRect()
+    return { rect, center: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } }
+  }
+  // Fallback: compute from ARMOR_REGIONS percentages
+  const region = ARMOR_REGIONS.find((r) => r.pieceId === pieceId)
   const r = containerEl.getBoundingClientRect()
-  const pos = PIECE_OVERLAY_POSITIONS[pieceId]
-  const w = parseDim(pos.width, r.width)
-  const h = w // overlays are roughly square
-  const top = parseDim(pos.top, r.height)
-
-  let left: number
-  if (pos.left) {
-    const lv = parseDim(pos.left, r.width)
-    // translateX(-50%) means center it
-    left = pos.transform?.includes('translateX(-50%)') ? lv - w / 2 : lv
-  } else if (pos.right) {
-    left = r.width - parseDim(pos.right, r.width) - w
-  } else {
-    left = 0
+  if (region) {
+    const x = r.left + (region.leftPct / 100) * r.width
+    const y = r.top + (region.topPct / 100) * r.height
+    const w = (region.widthPct / 100) * r.width
+    const h = (region.heightPct / 100) * r.height
+    const rect = new DOMRect(x, y, w, h)
+    return { rect, center: { x: x + w / 2, y: y + h / 2 } }
   }
-
-  return {
-    x: r.left + left + w / 2,
-    y: r.top + top + h / 2,
-  }
+  // Ultimate fallback: center of container
+  const rect = containerEl.getBoundingClientRect()
+  return { rect, center: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } }
 }
 
 // ── Fanfare (Web Audio API) ────────────────────────────────────────
@@ -141,10 +134,13 @@ export default function MyAvatarPage() {
   const [baseCharGenerating, setBaseCharGenerating] = useState(false)
   const [croppedImages, setCroppedImages] = useState<Partial<Record<ArmorPiece, string>>>({})
 
-  // Photo transform
+  // Photo transform — multi-step pipeline
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null)
   const [photoTransforming, setPhotoTransforming] = useState(false)
   const [photoTransformError, setPhotoTransformError] = useState<string | null>(null)
+  const [pipelineStep, setPipelineStep] = useState<'idle' | 'bare' | 'approve' | 'armor' | 'done'>('idle')
+  const [bareCharacterUrl, setBareCharacterUrl] = useState<string | null>(null)
+  const [armorRefGenerating, setArmorRefGenerating] = useState(false)
   const photoInputRef = useRef<HTMLInputElement>(null)
 
   // Animation state
@@ -247,34 +243,27 @@ export default function MyAvatarPage() {
     return unsub
   }, [familyId, childId, today])
 
-  // ── Crop armor pieces from sheet ───────────────────────────────
+  // ── Crop armor regions from armor reference image ──────────────
   useEffect(() => {
     if (!profile) return
-    const sheetUrl = profile.armorSheetUrls?.[profile.currentTier]
-    if (!sheetUrl) return
+    const armorRefUrl = profile.armorReferenceUrls?.[profile.currentTier]
+    if (!armorRefUrl) return
 
     setCroppedImages({})
 
     let cancelled = false
     const cropAll = async () => {
-      const results: Partial<Record<ArmorPiece, string>> = {}
-      await Promise.all(
-        ARMOR_PIECES.map(async (pieceDef) => {
-          const pieceIndex = ARMOR_PIECE_SHEET_INDEX[pieceDef.id]
-          try {
-            const dataUrl = await cropArmorPiece(sheetUrl, pieceIndex, 256)
-            if (!cancelled) results[pieceDef.id] = dataUrl
-          } catch {
-            // Fall back to legacy per-piece URL
-          }
-        }),
-      )
-      if (!cancelled) setCroppedImages(results)
+      try {
+        const results = await cropAllArmorRegions(armorRefUrl)
+        if (!cancelled) setCroppedImages(results)
+      } catch {
+        // Fall back — no cropped images available
+      }
     }
     void cropAll()
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.armorSheetUrls, profile?.currentTier])
+  }, [profile?.armorReferenceUrls, profile?.currentTier])
 
   // ── Generate base character on first visit ─────────────────────
   useEffect(() => {
@@ -337,11 +326,12 @@ export default function MyAvatarPage() {
     reader.readAsDataURL(file)
   }, [])
 
-  // ── Photo transform ────────────────────────────────────────────
+  // ── Photo transform — Step 1: Generate bare pixel character ────
   const handlePhotoTransform = useCallback(async () => {
     if (!familyId || !childId || !photoPreviewUrl || !profile) return
     setPhotoTransforming(true)
     setPhotoTransformError(null)
+    setPipelineStep('bare')
 
     try {
       const fns = getFunctions(app)
@@ -361,24 +351,69 @@ export default function MyAvatarPage() {
         photoMimeType: mimeType,
       })
 
+      // Save bare character as base + photo transform
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
       const { getDoc } = await import('firebase/firestore')
       const snap = await getDoc(profileRef)
       const current = snap.exists() ? snap.data() as AvatarProfile : profile
       await setDoc(profileRef, stripUndefined({
         ...current,
+        baseCharacterUrl: result.data.url,
         photoTransformUrl: result.data.url,
         updatedAt: new Date().toISOString(),
       }))
 
-      setPhotoPreviewUrl(null)
+      setBareCharacterUrl(result.data.url)
+      setPipelineStep('approve')
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Transform failed — try a different photo.'
       setPhotoTransformError(msg)
+      setPipelineStep('idle')
     } finally {
       setPhotoTransforming(false)
     }
   }, [familyId, childId, photoPreviewUrl, profile])
+
+  // ── Photo transform — Step 2: Generate armor reference ─────────
+  const handleApproveAndGenerateArmor = useCallback(async () => {
+    if (!familyId || !childId || !bareCharacterUrl || !profile) return
+    setArmorRefGenerating(true)
+    setPipelineStep('armor')
+    setPhotoTransformError(null)
+
+    try {
+      const fns = getFunctions(app)
+      const armorRefFn = httpsCallable<
+        { familyId: string; childId: string; baseCharacterUrl: string; tier: string; themeStyle: string },
+        { url: string }
+      >(fns, 'generateArmorReference')
+
+      const result = await armorRefFn({
+        familyId,
+        childId,
+        baseCharacterUrl: bareCharacterUrl,
+        tier: profile.currentTier,
+        themeStyle: profile.themeStyle,
+      })
+
+      // Crop regions client-side
+      const regions = await cropAllArmorRegions(result.data.url)
+      setCroppedImages(regions)
+
+      setPipelineStep('done')
+      setPhotoPreviewUrl(null)
+      setBareCharacterUrl(null)
+
+      // Auto-dismiss after 2s
+      setTimeout(() => setPipelineStep('idle'), 2000)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Armor generation failed — try again.'
+      setPhotoTransformError(msg)
+      setPipelineStep('approve') // Go back to approve step
+    } finally {
+      setArmorRefGenerating(false)
+    }
+  }, [familyId, childId, bareCharacterUrl, profile])
 
   // ── Apply a piece ──────────────────────────────────────────────
   const handleApplyPiece = useCallback(
@@ -397,20 +432,18 @@ export default function MyAvatarPage() {
         playArmorFanfare(1.5)
       }
 
-      // Start fly animation (skip if reduced motion)
+      // Start materialize-inward animation (skip if reduced motion)
       if (!reducedMotion) {
-        const buttonEl = buttonRefsMap.current[pieceId]
         const charEl = charDisplayRef.current
 
-        if (buttonEl && charEl) {
-          const launchRect = buttonEl.getBoundingClientRect()
-          const landingCenter = getLandingCenter(charEl, pieceId)
+        if (charEl) {
+          const { rect, center } = getRegionRect(charEl, pieceId)
 
           setAttachAnim({
             pieceId,
             tier: toTierColor(profile.currentTier),
-            launchRect,
-            landingCenter,
+            regionRect: rect,
+            landingCenter: center,
           })
         }
       }
@@ -512,7 +545,7 @@ export default function MyAvatarPage() {
             sx={{
               mt: 0.5,
               fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-              fontSize: isLincoln ? '0.42rem' : '13px',
+              fontSize: isLincoln ? '0.45rem' : '16px',
               color: isLincoln ? '#666' : '#999',
             }}
           >
@@ -528,6 +561,7 @@ export default function MyAvatarPage() {
             appliedPieces={appliedPieces}
             height="55vw"
             lastAppliedPiece={lastAppliedPiece}
+            croppedRegions={croppedImages}
           />
         </Box>
 
@@ -548,7 +582,7 @@ export default function MyAvatarPage() {
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.6rem' : '1.1rem',
+                fontSize: isLincoln ? '0.65rem' : '22px',
                 fontWeight: 700,
                 color: isLincoln ? '#FFD700' : '#9C27B0',
                 animation: !reducedMotion ? 'fullArmorPulse 2s ease-in-out infinite' : undefined,
@@ -573,7 +607,7 @@ export default function MyAvatarPage() {
                     mb: 0.75,
                     color: isLincoln ? '#aaa' : 'text.primary',
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.35rem' : '14px',
+                    fontSize: isLincoln ? '0.38rem' : '15px',
                     fontWeight: 500,
                   }}
                 >
@@ -638,7 +672,7 @@ export default function MyAvatarPage() {
           ))}
         </Box>
 
-        {/* ── Photo Transform ────────────────────────────────────── */}
+        {/* ── Photo Transform — Multi-Step Pipeline ─────────────── */}
         <Box
           sx={{
             mt: 3,
@@ -656,12 +690,12 @@ export default function MyAvatarPage() {
             onChange={handlePhotoSelect}
           />
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-            <CameraAltIcon sx={{ color: accentColor, fontSize: 18 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+            <CameraAltIcon sx={{ color: accentColor, fontSize: 20 }} />
             <Typography
               sx={{
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                fontSize: isLincoln ? '0.4rem' : '0.85rem',
+                fontSize: isLincoln ? '0.42rem' : '0.95rem',
                 fontWeight: 600,
                 color: accentColor,
               }}
@@ -670,7 +704,45 @@ export default function MyAvatarPage() {
             </Typography>
           </Box>
 
-          {!photoPreviewUrl ? (
+          {/* Pipeline progress steps */}
+          {pipelineStep !== 'idle' && (
+            <Box sx={{ mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+              {['Upload', 'Pixel Character', 'Approve', 'Generate Armor', 'Done'].map((label, i) => {
+                const stepMap = ['idle', 'bare', 'approve', 'armor', 'done']
+                const currentIdx = stepMap.indexOf(pipelineStep)
+                const isActive = i === currentIdx
+                const isDone = i < currentIdx
+                return (
+                  <Box key={label} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Box
+                      sx={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: '50%',
+                        bgcolor: isDone ? accentColor : isActive ? accentColor : (isLincoln ? '#333' : '#ddd'),
+                        opacity: isDone ? 0.6 : isActive ? 1 : 0.3,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '10px',
+                        color: isLincoln ? '#000' : '#fff',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {isDone ? '✓' : i + 1}
+                    </Box>
+                    <Typography sx={{ fontSize: '11px', color: isActive ? accentColor : (isLincoln ? '#666' : '#999') }}>
+                      {label}
+                    </Typography>
+                    {i < 4 && <Typography sx={{ color: isLincoln ? '#333' : '#ccc', mx: 0.5 }}>→</Typography>}
+                  </Box>
+                )
+              })}
+            </Box>
+          )}
+
+          {/* Step: Idle — upload button */}
+          {pipelineStep === 'idle' && !photoPreviewUrl && (
             <Button
               variant="outlined"
               size="small"
@@ -681,12 +753,15 @@ export default function MyAvatarPage() {
                 color: accentColor,
                 borderRadius: isLincoln ? 0 : 2,
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                fontSize: isLincoln ? '0.35rem' : '0.8rem',
+                fontSize: isLincoln ? '0.38rem' : '0.85rem',
               }}
             >
               {profile.photoTransformUrl ? 'Change Photo' : 'Upload a Photo'}
             </Button>
-          ) : (
+          )}
+
+          {/* Step: Photo selected — preview + transform */}
+          {pipelineStep === 'idle' && photoPreviewUrl && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Box
                 component="img"
@@ -712,44 +787,122 @@ export default function MyAvatarPage() {
                     color: isLincoln ? '#000' : '#fff',
                     borderRadius: isLincoln ? 0 : 2,
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.32rem' : '0.8rem',
+                    fontSize: isLincoln ? '0.35rem' : '0.85rem',
                     '&:hover': { bgcolor: accentColor, opacity: 0.85 },
                   }}
                 >
-                  {photoTransforming ? 'Transforming… ~20s' : 'Transform!'}
+                  Transform!
                 </Button>
                 <Button
                   variant="text"
                   size="small"
                   onClick={() => { setPhotoPreviewUrl(null); setPhotoTransformError(null) }}
-                  disabled={photoTransforming}
                   sx={{
                     color: isLincoln ? '#666' : '#aaa',
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.32rem' : '0.8rem',
+                    fontSize: isLincoln ? '0.35rem' : '0.85rem',
                   }}
                 >
                   Cancel
                 </Button>
               </Box>
-              {photoTransforming && (
-                <CircularProgress size={16} sx={{ color: accentColor, mt: 0.5 }} />
-              )}
             </Box>
           )}
 
+          {/* Step: Generating bare character */}
+          {pipelineStep === 'bare' && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <CircularProgress size={20} sx={{ color: accentColor }} />
+              <Typography sx={{ fontSize: '14px', color: isLincoln ? '#aaa' : '#666' }}>
+                Creating pixel character from photo... ~20s
+              </Typography>
+            </Box>
+          )}
+
+          {/* Step: Approve bare character */}
+          {pipelineStep === 'approve' && bareCharacterUrl && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, alignItems: 'center' }}>
+              <Typography sx={{ fontSize: '15px', fontWeight: 600, color: accentColor }}>
+                Here&apos;s {activeChild?.name} in pixel art!
+              </Typography>
+              <Box
+                component="img"
+                src={bareCharacterUrl}
+                alt="Bare pixel character"
+                sx={{
+                  width: 180,
+                  height: 180,
+                  objectFit: 'cover',
+                  borderRadius: isLincoln ? 0 : 2,
+                  border: `2px solid ${accentColor}`,
+                  imageRendering: isLincoln ? 'pixelated' : 'auto',
+                }}
+              />
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={() => void handleApproveAndGenerateArmor()}
+                  disabled={armorRefGenerating}
+                  sx={{
+                    bgcolor: accentColor,
+                    color: isLincoln ? '#000' : '#fff',
+                    borderRadius: isLincoln ? 0 : 2,
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                    fontSize: isLincoln ? '0.35rem' : '0.85rem',
+                    '&:hover': { bgcolor: accentColor, opacity: 0.85 },
+                  }}
+                >
+                  Looks good — Continue
+                </Button>
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => {
+                    setPipelineStep('idle')
+                    setBareCharacterUrl(null)
+                  }}
+                  sx={{
+                    color: isLincoln ? '#666' : '#aaa',
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                    fontSize: isLincoln ? '0.35rem' : '0.85rem',
+                  }}
+                >
+                  Try Again
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {/* Step: Generating armor reference */}
+          {pipelineStep === 'armor' && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <CircularProgress size={20} sx={{ color: accentColor }} />
+              <Typography sx={{ fontSize: '14px', color: isLincoln ? '#aaa' : '#666' }}>
+                Now generating armor... ~20s
+              </Typography>
+            </Box>
+          )}
+
+          {/* Step: Done */}
+          {pipelineStep === 'done' && (
+            <Typography sx={{ fontSize: '15px', fontWeight: 600, color: accentColor }}>
+              Armor pieces ready! Check the cards below.
+            </Typography>
+          )}
+
           {photoTransformError && (
-            <Alert severity="error" sx={{ mt: 1, fontSize: '0.75rem' }}>
+            <Alert severity="error" sx={{ mt: 1, fontSize: '0.8rem' }}>
               {photoTransformError}
             </Alert>
           )}
 
-          {profile.photoTransformUrl && !photoPreviewUrl && (
+          {profile.photoTransformUrl && pipelineStep === 'idle' && !photoPreviewUrl && (
             <Typography
               variant="caption"
-              sx={{ display: 'block', mt: 0.5, color: isLincoln ? '#555' : '#aaa' }}
+              sx={{ display: 'block', mt: 0.5, color: isLincoln ? '#555' : '#aaa', fontSize: '12px' }}
             >
-              Photo transform active — armor overlays still apply on top
+              Photo transform active — armor overlays apply on top
             </Typography>
           )}
         </Box>
@@ -787,13 +940,14 @@ export default function MyAvatarPage() {
         />
       )}
 
-      {/* ── Particle burst ─────────────────────────────────────── */}
+      {/* ── Particle burst (converging inward) ─────────────────── */}
       {particles && profile && (
         <Particles
           x={particles.x}
           y={particles.y}
           themeStyle={profile.themeStyle}
           tier={profile.currentTier}
+          converge
           onDone={() => setParticles(null)}
         />
       )}

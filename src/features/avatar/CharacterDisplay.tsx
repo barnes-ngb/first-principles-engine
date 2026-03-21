@@ -5,7 +5,8 @@ import Typography from '@mui/material/Typography'
 
 import type { ArmorPiece, AvatarProfile } from '../../core/types'
 import { ARMOR_PIECES } from '../../core/types'
-import { isPieceEarned, PIECE_OVERLAY_POSITIONS } from './armorUtils'
+import { ARMOR_REGIONS } from '../../core/avatar/cropArmorRegions'
+import { isPieceEarned } from './armorUtils'
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -64,11 +65,13 @@ interface CharacterDisplayProps {
   height?: string | number
   /** When set, triggers landing bounce + pose shift for this piece */
   lastAppliedPiece?: ArmorPiece | null
+  /** Cropped body region images from armor reference */
+  croppedRegions?: Partial<Record<ArmorPiece, string>>
 }
 
 const CharacterDisplay = forwardRef<HTMLDivElement, CharacterDisplayProps>(
   function CharacterDisplay(
-    { profile, appliedPieces, height = '55vw', lastAppliedPiece },
+    { profile, appliedPieces, height = '55vw', lastAppliedPiece, croppedRegions = {} },
     ref,
   ) {
     const isLincoln = profile.themeStyle === 'minecraft'
@@ -121,7 +124,7 @@ const CharacterDisplay = forwardRef<HTMLDivElement, CharacterDisplayProps>(
         sx={{
           position: 'relative',
           width: '100%',
-          maxWidth: 320,
+          maxWidth: 340,
           mx: 'auto',
           height,
           maxHeight: 380,
@@ -251,51 +254,45 @@ const CharacterDisplay = forwardRef<HTMLDivElement, CharacterDisplayProps>(
           </Box>
         )}
 
-        {/* Piece overlay layers */}
-        {ARMOR_PIECES.map((pieceDef) => {
-          const pos = PIECE_OVERLAY_POSITIONS[pieceDef.id]
-          const earned = isPieceEarned(profile, pieceDef.id)
-          const applied = appliedPieces.includes(pieceDef.id)
-          const imageUrl = getPieceImageUrl(profile, pieceDef.id)
-          const isBouncing = bouncingPiece === pieceDef.id
+        {/* Piece overlay layers — region-based from armor reference crops */}
+        {ARMOR_REGIONS.map((region) => {
+          const earned = isPieceEarned(profile, region.pieceId)
+          const applied = appliedPieces.includes(region.pieceId)
+          const croppedUrl = croppedRegions[region.pieceId]
+          const legacyUrl = getPieceImageUrl(profile, region.pieceId)
+          const imageUrl = croppedUrl ?? legacyUrl
+          const isBouncing = bouncingPiece === region.pieceId
 
-          if (!earned) return null
-
-          const baseTransform = pos.transform ?? 'none'
+          if (!imageUrl || !earned) return null
 
           return (
             <Box
-              key={pieceDef.id}
-              component={imageUrl ? 'img' : 'div'}
-              {...(imageUrl ? { src: imageUrl, alt: pieceDef.name } : {})}
+              key={region.pieceId}
+              component="img"
+              src={imageUrl}
+              alt={ARMOR_PIECES.find((p) => p.id === region.pieceId)?.name ?? region.pieceId}
+              data-piece-id={region.pieceId}
               sx={{
                 position: 'absolute',
-                width: pos.width,
-                top: pos.top,
-                ...(pos.left ? { left: pos.left } : {}),
-                ...(pos.right ? { right: pos.right } : {}),
-                ...(pos.transform ? { transform: pos.transform } : {}),
-                opacity: applied ? 1 : 0.18,
+                top: `${region.topPct}%`,
+                left: `${region.leftPct}%`,
+                width: `${region.widthPct}%`,
+                height: `${region.heightPct}%`,
+                objectFit: 'contain',
                 imageRendering: isLincoln ? 'pixelated' : 'auto',
+                // Applied: fully visible, earned but not applied: hidden (reveal on equip)
+                opacity: applied ? 1 : 0,
+                transition: 'opacity 0s',
+                pointerEvents: 'none',
                 // Landing bounce animation
                 ...(isBouncing && applied && !reducedMotion
                   ? {
-                      animation: `pieceAttach_${pieceDef.id} 0.4s ease-out`,
-                      [`@keyframes pieceAttach_${pieceDef.id}`]: {
-                        '0%':   { transform: `${baseTransform} scale(0)`, opacity: 0 },
-                        '60%':  { transform: `${baseTransform} scale(1.25)`, opacity: 1 },
-                        '80%':  { transform: `${baseTransform} scale(0.9)` },
-                        '100%': { transform: baseTransform },
-                      },
-                    }
-                  : {}),
-                // Initial slide-in when first applied (no fly animation)
-                ...(!isBouncing && applied && imageUrl && !reducedMotion
-                  ? {
-                      animation: `pieceSlideIn_${pieceDef.id} 0.4s ease-out`,
-                      [`@keyframes pieceSlideIn_${pieceDef.id}`]: {
-                        from: { opacity: 0, transform: `${baseTransform} scale(0.5)` },
-                        to:   { opacity: 1, transform: baseTransform },
+                      animation: `pieceAttach_${region.pieceId} 0.4s ease-out`,
+                      [`@keyframes pieceAttach_${region.pieceId}`]: {
+                        '0%':   { transform: 'scale(0)', opacity: 0 },
+                        '60%':  { transform: 'scale(1.25)', opacity: 1 },
+                        '80%':  { transform: 'scale(0.9)' },
+                        '100%': { transform: 'scale(1)' },
                       },
                     }
                   : {}),

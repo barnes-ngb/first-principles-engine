@@ -17,17 +17,19 @@ interface ParticlesProps {
   y: number
   themeStyle: 'minecraft' | 'platformer'
   tier: string
+  /** When true, particles converge inward instead of bursting outward */
+  converge?: boolean
   onDone?: () => void
 }
 
-function generateParticles(themeStyle: 'minecraft' | 'platformer', tier: string): ParticleDef[] {
-  const count = 7
+function generateParticles(themeStyle: 'minecraft' | 'platformer', tier: string, converge?: boolean): ParticleDef[] {
+  const count = converge ? 24 : 7
   const particles: ParticleDef[] = []
 
   for (let i = 0; i < count; i++) {
     const angle = (i / count) * Math.PI * 2
-    const distance = 24 + (i % 3) * 10
-    const delay = (i % 4) * 20
+    const distance = converge ? (40 + (i % 3) * 15) : (24 + (i % 3) * 10)
+    const delay = converge ? ((i % 6) * 15) : ((i % 4) * 20)
 
     let shape: ParticleDef['shape']
     let color: string
@@ -77,9 +79,9 @@ function getShapePath(shape: ParticleDef['shape'], size: number): string {
   }
 }
 
-export default function Particles({ x, y, themeStyle, tier, onDone }: ParticlesProps) {
+export default function Particles({ x, y, themeStyle, tier, converge, onDone }: ParticlesProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const particles = generateParticles(themeStyle, tier)
+  const particles = generateParticles(themeStyle, tier, converge)
 
   useEffect(() => {
     const container = containerRef.current
@@ -93,15 +95,22 @@ export default function Particles({ x, y, themeStyle, tier, onDone }: ParticlesP
       const dx = Math.cos(p.angle) * p.distance
       const dy = Math.sin(p.angle) * p.distance
 
+      const keyframes = converge
+        ? [
+            { transform: `translate(${dx}px,${dy}px)`, opacity: '1' },
+            { transform: `translate(${(Math.random() - 0.5) * 6}px,${(Math.random() - 0.5) * 6}px)`, opacity: '0' },
+          ]
+        : [
+            { transform: 'translate(0,0)', opacity: '1' },
+            { transform: `translate(${dx}px,${dy}px)`, opacity: '0' },
+          ]
+
       const anim = el.animate(
-        [
-          { transform: 'translate(0,0)', opacity: '1' },
-          { transform: `translate(${dx}px,${dy}px)`, opacity: '0' },
-        ],
+        keyframes,
         {
-          duration: 420,
+          duration: converge ? 600 : 420,
           delay: p.delay,
-          easing: 'ease-out',
+          easing: converge ? 'ease-in' : 'ease-out',
           fill: 'forwards',
         },
       )

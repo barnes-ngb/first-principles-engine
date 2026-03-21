@@ -37,8 +37,22 @@ export const transformAvatarPhoto = onCall(
 
     const rawStyleInstruction =
       themeStyle === "minecraft"
-        ? "Transform this person into a blocky pixel art video game character in 8-bit style, wearing leather armor and carrying a wooden sword, same pose as the original photo, square format, no text"
-        : "Transform this person into a cute cartoon platformer game character with rounded cheerful design and bright colors, same pose as the original photo, square format, no text";
+        ? "Transform this photo into a pixel art video game character in blocky 8-bit style. " +
+          "The character should: " +
+          "Face directly forward, full body visible from head to toe. " +
+          "Stand in a neutral pose with arms slightly away from body, both feet flat on ground, facing camera directly, feet shoulder-width apart. " +
+          "Wear ONLY a plain white t-shirt and plain grey shorts, flat simple shoes. " +
+          "Have NO armor, NO weapons, NO accessories of any kind. " +
+          "Match the hair color, skin tone, and approximate body proportions of the person in the photo. " +
+          "Be centered in the frame with a small amount of space above the head and below the feet. " +
+          "Use a plain solid dark grey background (#1a1a2e). " +
+          "Square format, 1024x1024. No text, no watermarks, no UI elements."
+        : "Transform this person into a cute cartoon platformer game character with rounded cheerful design and bright colors, " +
+          "facing forward, full body visible, arms slightly away from body, both feet flat on ground. " +
+          "Wear ONLY a simple plain colorful dress, flat simple shoes. " +
+          "NO armor, NO weapons, NO accessories. " +
+          "Match hair color and body proportions. Centered in frame. " +
+          "Light blue background. Square format, 1024x1024. No text, no watermarks.";
 
     // ── Rewrite for copyright safety ────────────────────────────
     let safeInstruction = rawStyleInstruction;
@@ -103,7 +117,7 @@ RULES:
 
     // ── Save to Storage ──────────────────────────────────────────
     const resultBuffer = Buffer.from(resultBase64, "base64");
-    const storagePath = `families/${familyId}/avatars/${childId}/photo-transform.png`;
+    const storagePath = `families/${familyId}/avatars/${childId}/bare-character-from-photo.png`;
     const bucket = getStorage().bucket();
     const file = bucket.file(storagePath);
     const { randomUUID } = await import("crypto");
