@@ -5,6 +5,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Card from '@mui/material/Card'
 import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
@@ -14,82 +15,55 @@ import DialogTitle from '@mui/material/DialogTitle'
 import LinearProgress from '@mui/material/LinearProgress'
 import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
+import LockIcon from '@mui/icons-material/Lock'
 
 import Page from '../../components/Page'
 import { app } from '../../core/firebase/firebase'
-import { avatarProfilesCollection, dailyArmorSessionsCollection, dailyArmorSessionDocId } from '../../core/firebase/firestore'
+import {
+  avatarProfilesCollection,
+  dailyArmorSessionsCollection,
+  dailyArmorSessionDocId,
+} from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
-import { ARMOR_PIECES } from '../../core/types'
-import type { ArmorPiece, AvatarProfile, DailyArmorSession } from '../../core/types'
-import { cropAllArmorRegions, ARMOR_REGIONS } from '../../core/avatar/cropArmorRegions'
+import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, DEFAULT_CHARACTER_FEATURES } from '../../core/types'
+import type {
+  ArmorPiece,
+  AvatarProfile,
+  CharacterFeatures,
+  DailyArmorSession,
+  VoxelArmorPieceId,
+} from '../../core/types'
 
-import ArmorPieceButton from './ArmorPieceButton'
-import AttachAnimation from './AttachAnimation'
-import type { AttachAnimState } from './AttachAnimation'
-import CharacterDisplay from './CharacterDisplay'
+import VoxelCharacter from './VoxelCharacter'
+import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
+import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import Particles from './Particles'
-import { isPieceEarned } from './armorUtils'
-import type { ArmorTierColor } from './icons/ArmorIcons'
-import TierUpgradeCelebration from './TierUpgradeCelebration'
 import UnlockCelebration from './UnlockCelebration'
-import VerseCard from './VerseCard'
+import TierUpgradeCelebration from './TierUpgradeCelebration'
 
 // ── Helpers ───────────────────────────────────────────────────────
 
-function stripUndefined<T extends object>(obj: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([, v]) => v !== undefined),
-  ) as Partial<T>
+function getUnlockedVoxelPieces(profile: AvatarProfile): VoxelArmorPieceId[] {
+  const xp = profile.totalXp
+  return VOXEL_ARMOR_PIECES
+    .filter((p) => xp >= XP_THRESHOLDS[p.id])
+    .map((p) => p.id)
 }
 
-function getEarnedPieces(profile: AvatarProfile): ArmorPiece[] {
-  return ARMOR_PIECES.filter((p) => isPieceEarned(profile, p.id)).map((p) => p.id)
-}
-
-function getNextUnlockPiece(profile: AvatarProfile): { id: ArmorPiece; xpNeeded: number } | null {
-  const allEarned = new Set(getEarnedPieces(profile))
-  const next = ARMOR_PIECES.find((p) => !allEarned.has(p.id))
+function getNextUnlock(profile: AvatarProfile): { piece: ArmorPieceMeta; xpNeeded: number } | null {
+  const unlocked = new Set(getUnlockedVoxelPieces(profile))
+  const next = VOXEL_ARMOR_PIECES.find((p) => !unlocked.has(p.id))
   if (!next) return null
-  return { id: next.id, xpNeeded: Math.max(next.xpToUnlockStone - profile.totalXp, 0) }
+  return { piece: next, xpNeeded: Math.max(XP_THRESHOLDS[next.id] - profile.totalXp, 0) }
 }
 
-function toTierColor(tier: string): ArmorTierColor {
-  const valid: ArmorTierColor[] = ['stone', 'diamond', 'netherite', 'basic', 'powerup', 'champion']
-  return valid.includes(tier as ArmorTierColor) ? (tier as ArmorTierColor) : 'stone'
-}
-
-/**
- * Get the bounding rect and center of a piece's region overlay
- * using data-piece-id attribute or falling back to ARMOR_REGIONS percentages.
- */
-function getRegionRect(
-  containerEl: HTMLElement,
-  pieceId: ArmorPiece,
-): { rect: DOMRect; center: { x: number; y: number } } {
-  // Try finding the actual overlay element
-  const overlayEl = containerEl.querySelector(`[data-piece-id="${pieceId}"]`)
-  if (overlayEl) {
-    const rect = overlayEl.getBoundingClientRect()
-    return { rect, center: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } }
-  }
-  // Fallback: compute from ARMOR_REGIONS percentages
-  const region = ARMOR_REGIONS.find((r) => r.pieceId === pieceId)
-  const r = containerEl.getBoundingClientRect()
-  if (region) {
-    const x = r.left + (region.leftPct / 100) * r.width
-    const y = r.top + (region.topPct / 100) * r.height
-    const w = (region.widthPct / 100) * r.width
-    const h = (region.heightPct / 100) * r.height
-    const rect = new DOMRect(x, y, w, h)
-    return { rect, center: { x: x + w / 2, y: y + h / 2 } }
-  }
-  // Ultimate fallback: center of container
-  const rect = containerEl.getBoundingClientRect()
-  return { rect, center: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } }
+/** Map ArmorPiece IDs from daily session to VoxelArmorPieceId */
+function sessionToVoxelPieces(appliedPieces: ArmorPiece[]): string[] {
+  return appliedPieces.map((p) => ARMOR_PIECE_TO_VOXEL[p])
 }
 
 // ── Fanfare (Web Audio API) ────────────────────────────────────────
@@ -116,6 +90,40 @@ function playArmorFanfare(delaySeconds = 0) {
   }
 }
 
+// ── Verse Card ─────────────────────────────────────────────────────
+
+function VerseCardInline({ piece }: { piece: ArmorPieceMeta }) {
+  return (
+    <Card
+      sx={{
+        backgroundColor: '#1a1a2e',
+        border: '1px solid rgba(76,175,80,0.3)',
+        p: 2,
+        mx: 1,
+      }}
+    >
+      <Typography
+        variant="caption"
+        sx={{ color: '#4caf50', fontFamily: 'monospace' }}
+      >
+        {piece.verse}
+      </Typography>
+      <Typography
+        variant="body1"
+        sx={{
+          color: '#fff',
+          fontFamily: 'monospace',
+          mt: 1,
+          fontSize: '18px',
+          fontStyle: 'italic',
+        }}
+      >
+        &ldquo;{piece.verseText}&rdquo;
+      </Typography>
+    </Card>
+  )
+}
+
 // ── Component ─────────────────────────────────────────────────────
 
 export default function MyAvatarPage() {
@@ -127,37 +135,21 @@ export default function MyAvatarPage() {
   const [profile, setProfile] = useState<AvatarProfile | null>(null)
   const [session, setSession] = useState<DailyArmorSession | null>(null)
   const [loading, setLoading] = useState(true)
-  const [selectedPiece, setSelectedPiece] = useState<ArmorPiece | null>(null)
-  const [unequipPiece, setUnequipPiece] = useState<ArmorPiece | null>(null)
+  const [selectedPiece, setSelectedPiece] = useState<ArmorPieceMeta | null>(null)
+  const [unequipPiece, setUnequipPiece] = useState<VoxelArmorPieceId | null>(null)
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
-  const [baseCharGenerating, setBaseCharGenerating] = useState(false)
-  const [croppedImages, setCroppedImages] = useState<Partial<Record<ArmorPiece, string>>>({})
 
-  // Photo transform — multi-step pipeline
+  // Photo feature extraction
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null)
-  const [photoTransforming, setPhotoTransforming] = useState(false)
-  const [photoTransformError, setPhotoTransformError] = useState<string | null>(null)
-  const [pipelineStep, setPipelineStep] = useState<'idle' | 'bare' | 'approve' | 'armor' | 'done'>('idle')
-  const [bareCharacterUrl, setBareCharacterUrl] = useState<string | null>(null)
-  const [armorRefGenerating, setArmorRefGenerating] = useState(false)
+  const [photoExtracting, setPhotoExtracting] = useState(false)
+  const [photoError, setPhotoError] = useState<string | null>(null)
   const photoInputRef = useRef<HTMLInputElement>(null)
 
   // Animation state
-  const [attachAnim, setAttachAnim] = useState<AttachAnimState | null>(null)
-  const [lastAppliedPiece, setLastAppliedPiece] = useState<ArmorPiece | null>(null)
+  const [animateEquipId, setAnimateEquipId] = useState<string | null>(null)
+  const [animateUnequipId, setAnimateUnequipId] = useState<string | null>(null)
   const [particles, setParticles] = useState<{ x: number; y: number } | null>(null)
-  const charDisplayRef = useRef<HTMLDivElement | null>(null)
-  const buttonRefsMap = useRef<Partial<Record<ArmorPiece, HTMLDivElement>>>({})
-
-  // Reduced motion
-  const reducedMotion = useRef(
-    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-  ).current
-
-  // Dev overlay state
-  const [showArmoredRef, setShowArmoredRef] = useState(false)
-  const [reCropping, setReCropping] = useState(false)
 
   // Track previous state for celebrations
   const prevPiecesCountRef = useRef(0)
@@ -165,9 +157,9 @@ export default function MyAvatarPage() {
   const today = getTodayDateString()
 
   // Theme
+  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
   const bgColor = isLincoln ? '#0d1117' : '#faf5ef'
   const textColor = isLincoln ? '#e0e0e0' : '#3d3d3d'
-  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
   // ── Ensure avatar profile exists ──────────────────────────────
@@ -178,11 +170,16 @@ export default function MyAvatarPage() {
       const { getDoc } = await import('firebase/firestore')
       const snap = await getDoc(profileRef)
       if (!snap.exists()) {
+        const ageGroup = isLincoln ? 'older' : 'younger'
         const newProfile: AvatarProfile = {
           childId,
           themeStyle: isLincoln ? 'minecraft' : 'platformer',
           pieces: [],
           currentTier: isLincoln ? 'stone' : 'basic',
+          characterFeatures: DEFAULT_CHARACTER_FEATURES,
+          ageGroup,
+          equippedPieces: [],
+          unlockedPieces: [],
           totalXp: 0,
           updatedAt: new Date().toISOString(),
         }
@@ -204,13 +201,18 @@ export default function MyAvatarPage() {
           const data = ensureNewProfileStructure(snap.data() as unknown as Record<string, unknown>)
           setProfile(data)
 
-          const earnedCount = getEarnedPieces(data).length
-          if (earnedCount > prevPiecesCountRef.current && prevPiecesCountRef.current > 0) {
-            const earned = getEarnedPieces(data)
-            const newPiece = earned[earned.length - 1]
-            setCelebrationPiece(newPiece)
+          const unlockedCount = getUnlockedVoxelPieces(data).length
+          if (unlockedCount > prevPiecesCountRef.current && prevPiecesCountRef.current > 0) {
+            // A new piece was unlocked
+            const unlocked = getUnlockedVoxelPieces(data)
+            const newPieceVoxel = unlocked[unlocked.length - 1]
+            // Map back to ArmorPiece for celebration component compatibility
+            const armorPieceId = ARMOR_PIECES.find(
+              (p) => ARMOR_PIECE_TO_VOXEL[p.id] === newPieceVoxel,
+            )?.id
+            if (armorPieceId) setCelebrationPiece(armorPieceId)
           }
-          prevPiecesCountRef.current = earnedCount
+          prevPiecesCountRef.current = unlockedCount
 
           if (prevTierRef.current && data.currentTier !== prevTierRef.current) {
             setTierCelebration({ from: prevTierRef.current, to: data.currentTier })
@@ -247,62 +249,6 @@ export default function MyAvatarPage() {
     return unsub
   }, [familyId, childId, today])
 
-  // ── Crop armor regions from armor reference image ──────────────
-  useEffect(() => {
-    if (!profile) return
-    const armorRefUrl = profile.armorReferenceUrls?.[profile.currentTier]
-    if (!armorRefUrl) return
-
-    setCroppedImages({})
-
-    let cancelled = false
-    const cropAll = async () => {
-      try {
-        const results = await cropAllArmorRegions(armorRefUrl)
-        if (!cancelled) setCroppedImages(results)
-      } catch {
-        // Fall back — no cropped images available
-      }
-    }
-    void cropAll()
-    return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.armorReferenceUrls, profile?.currentTier])
-
-  // ── Generate base character on first visit ─────────────────────
-  useEffect(() => {
-    if (!profile || !familyId || !childId) return
-    if (profile.baseCharacterUrl) return
-    if (baseCharGenerating) return
-
-    setBaseCharGenerating(true)
-    const fns = getFunctions(app)
-    const generateBaseCharacterFn = httpsCallable<
-      { familyId: string; childId: string; themeStyle: string },
-      { url: string }
-    >(fns, 'generateBaseCharacter')
-
-    generateBaseCharacterFn({ familyId, childId, themeStyle: profile.themeStyle })
-      .then(async (result) => {
-        const profileRef = doc(avatarProfilesCollection(familyId), childId)
-        const { getDoc } = await import('firebase/firestore')
-        const snap = await getDoc(profileRef)
-        const current = snap.exists() ? snap.data() as AvatarProfile : profile
-        await setDoc(profileRef, {
-          ...current,
-          baseCharacterUrl: result.data.url,
-          updatedAt: new Date().toISOString(),
-        })
-      })
-      .catch((err: unknown) => {
-        console.error('Base character generation failed:', err)
-      })
-      .finally(() => {
-        setBaseCharGenerating(false)
-      })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.childId, profile?.baseCharacterUrl])
-
   // ── Photo select ───────────────────────────────────────────────
   const handlePhotoSelect = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -323,200 +269,169 @@ export default function MyAvatarPage() {
         const ctx = canvas.getContext('2d')!
         ctx.drawImage(img, x, y, size, size, 0, 0, targetSize, targetSize)
         setPhotoPreviewUrl(canvas.toDataURL('image/jpeg', 0.92))
-        setPhotoTransformError(null)
+        setPhotoError(null)
       }
       img.src = ev.target?.result as string
     }
     reader.readAsDataURL(file)
   }, [])
 
-  // ── Photo transform — Step 1: Generate bare pixel character ────
+  // ── Photo transform → feature extraction ────────────────────────
   const handlePhotoTransform = useCallback(async () => {
     if (!familyId || !childId || !photoPreviewUrl || !profile) return
-    setPhotoTransforming(true)
-    setPhotoTransformError(null)
-    setPipelineStep('bare')
+    setPhotoExtracting(true)
+    setPhotoError(null)
 
     try {
       const fns = getFunctions(app)
-      const transformFn = httpsCallable<
-        { familyId: string; childId: string; themeStyle: string; photoBase64: string; photoMimeType: string },
-        { url: string }
-      >(fns, 'transformAvatarPhoto')
+      const extractFn = httpsCallable<
+        { familyId: string; childId: string; photoBase64: string; photoMimeType: string },
+        { features: CharacterFeatures }
+      >(fns, 'extractFeatures')
 
       const [header, base64] = photoPreviewUrl.split(',')
       const mimeType = header.split(':')[1].split(';')[0]
 
-      const result = await transformFn({
+      const result = await extractFn({
         familyId,
         childId,
-        themeStyle: profile.themeStyle,
         photoBase64: base64,
         photoMimeType: mimeType,
       })
 
-      // Save bare character as base + photo transform
+      // Save features to profile
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
       const { getDoc } = await import('firebase/firestore')
       const snap = await getDoc(profileRef)
-      const current = snap.exists() ? snap.data() as AvatarProfile : profile
-      await setDoc(profileRef, stripUndefined({
+      const current = snap.exists() ? (snap.data() as AvatarProfile) : profile
+      await setDoc(profileRef, {
         ...current,
-        baseCharacterUrl: result.data.url,
-        photoTransformUrl: result.data.url,
+        characterFeatures: result.data.features,
+        photoUrl: photoPreviewUrl,
         updatedAt: new Date().toISOString(),
-      }))
+      })
 
-      setBareCharacterUrl(result.data.url)
-      setPipelineStep('approve')
+      setPhotoPreviewUrl(null)
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Transform failed — try a different photo.'
-      setPhotoTransformError(msg)
-      setPipelineStep('idle')
+      const msg = err instanceof Error ? err.message : 'Feature extraction failed — try a different photo.'
+      setPhotoError(msg)
     } finally {
-      setPhotoTransforming(false)
+      setPhotoExtracting(false)
     }
   }, [familyId, childId, photoPreviewUrl, profile])
 
-  // ── Photo transform — Step 2: Generate armor reference ─────────
-  const handleApproveAndGenerateArmor = useCallback(async () => {
-    if (!familyId || !childId || !bareCharacterUrl || !profile) return
-    setArmorRefGenerating(true)
-    setPipelineStep('armor')
-    setPhotoTransformError(null)
+  // ── Apply a piece (equip) ───────────────────────────────────────
+  const handleApplyPiece = useCallback(
+    async (voxelPieceId: VoxelArmorPieceId) => {
+      if (!profile || !familyId || !childId || !session) return
+      // Map voxel ID back to ArmorPiece ID for the daily session
+      const armorPieceId = ARMOR_PIECES.find(
+        (p) => ARMOR_PIECE_TO_VOXEL[p.id] === voxelPieceId,
+      )?.id
+      if (!armorPieceId) return
+      if (session.appliedPieces.includes(armorPieceId)) return
 
-    try {
-      const fns = getFunctions(app)
-      const armorRefFn = httpsCallable<
-        { familyId: string; childId: string; baseCharacterUrl: string; tier: string; themeStyle: string },
-        { url: string }
-      >(fns, 'generateArmorReference')
+      // Trigger equip animation
+      setAnimateEquipId(voxelPieceId)
 
-      const result = await armorRefFn({
-        familyId,
-        childId,
-        baseCharacterUrl: bareCharacterUrl,
-        tier: profile.currentTier,
-        themeStyle: profile.themeStyle,
+      const updatedApplied = [...session.appliedPieces, armorPieceId]
+      const unlockedVoxel = getUnlockedVoxelPieces(profile)
+      const allApplied = unlockedVoxel.every((vid) => {
+        const aid = ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id
+        return aid && updatedApplied.includes(aid)
       })
 
-      // Crop regions client-side
-      const regions = await cropAllArmorRegions(result.data.url)
-      setCroppedImages(regions)
-
-      setPipelineStep('done')
-      setPhotoPreviewUrl(null)
-      setBareCharacterUrl(null)
-
-      // Auto-dismiss after 2s
-      setTimeout(() => setPipelineStep('idle'), 2000)
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Armor generation failed — try again.'
-      setPhotoTransformError(msg)
-      setPipelineStep('approve') // Go back to approve step
-    } finally {
-      setArmorRefGenerating(false)
-    }
-  }, [familyId, childId, bareCharacterUrl, profile])
-
-  // ── Apply a piece ──────────────────────────────────────────────
-  const handleApplyPiece = useCallback(
-    async (pieceId: ArmorPiece) => {
-      if (!profile || !familyId || !childId || !session) return
-      if (session.appliedPieces.includes(pieceId)) return
-
-      setSelectedPiece(null)
-
-      const updatedApplied = [...session.appliedPieces, pieceId]
-      const earnedPieces = getEarnedPieces(profile)
-      const allApplied = earnedPieces.every((p) => updatedApplied.includes(p))
-
-      // Fanfare must be triggered in user-gesture context — schedule notes ~1.5s out
       if (allApplied && isLincoln) {
         playArmorFanfare(1.5)
       }
 
-      // Start materialize-inward animation (skip if reduced motion)
-      if (!reducedMotion) {
-        const charEl = charDisplayRef.current
-
-        if (charEl) {
-          const { rect, center } = getRegionRect(charEl, pieceId)
-
-          setAttachAnim({
-            pieceId,
-            tier: toTierColor(profile.currentTier),
-            regionRect: rect,
-            landingCenter: center,
-          })
-        }
-      }
-
-      // Write to Firestore in parallel with animation
+      // Write to Firestore
       const docId = dailyArmorSessionDocId(childId, today)
       const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
-
       await setDoc(sessionRef, {
         ...session,
         appliedPieces: updatedApplied,
         ...(allApplied ? { completedAt: new Date().toISOString() } : {}),
       })
 
-      if (allApplied && familyId && childId) {
+      // Also update equippedPieces on avatar profile
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      const equippedVoxel = [...sessionToVoxelPieces(updatedApplied)]
+      await updateDoc(profileRef, {
+        equippedPieces: equippedVoxel,
+        lastEquipAnimation: voxelPieceId,
+        updatedAt: new Date().toISOString(),
+      })
+
+      if (allApplied) {
         void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
       }
     },
-    [profile, familyId, childId, session, today, isLincoln, reducedMotion],
+    [profile, familyId, childId, session, today, isLincoln],
   )
 
-  // ── Piece tap handler (open verse card or unequip dialog) ─────
+  // ── Piece tap handler ──────────────────────────────────────────
   const handlePieceTap = useCallback(
-    (pieceId: ArmorPiece) => {
+    (piece: ArmorPieceMeta) => {
       if (!profile || !session) return
-      if (session.appliedPieces.includes(pieceId)) {
-        setUnequipPiece(pieceId)
-      } else if (isPieceEarned(profile, pieceId)) {
-        setSelectedPiece(pieceId)
+      const armorPieceId = ARMOR_PIECES.find(
+        (p) => ARMOR_PIECE_TO_VOXEL[p.id] === piece.id,
+      )?.id
+
+      const isUnlocked = profile.totalXp >= XP_THRESHOLDS[piece.id]
+      const isApplied = armorPieceId && session.appliedPieces.includes(armorPieceId)
+
+      if (isApplied) {
+        setUnequipPiece(piece.id)
+      } else if (isUnlocked) {
+        setSelectedPiece(piece)
       }
-      // Locked pieces: do nothing
+      // Locked pieces: show verse but not apply
     },
     [profile, session],
   )
 
-  // ── Unequip a piece for today ──────────────────────────────────
+  // ── Unequip a piece ────────────────────────────────────────────
   const handleUnequip = useCallback(async () => {
     if (!unequipPiece || !familyId || !childId) return
+    const armorPieceId = ARMOR_PIECES.find(
+      (p) => ARMOR_PIECE_TO_VOXEL[p.id] === unequipPiece,
+    )?.id
+    if (!armorPieceId) return
+
+    setAnimateUnequipId(unequipPiece)
+
     const docId = dailyArmorSessionDocId(childId, today)
     const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
     await updateDoc(sessionRef, {
-      appliedPieces: arrayRemove(unequipPiece),
+      appliedPieces: arrayRemove(armorPieceId),
       completedAt: deleteField(),
     })
     setUnequipPiece(null)
   }, [unequipPiece, familyId, childId, today])
 
-  // ── Animation complete handler ─────────────────────────────────
-  const handleAnimComplete = useCallback(() => {
-    if (!attachAnim) return
-    const { pieceId, landingCenter } = attachAnim
-    setAttachAnim(null)
-    setLastAppliedPiece(pieceId)
-    setParticles({ x: landingCenter.x, y: landingCenter.y })
-    setTimeout(() => {
-      setParticles(null)
-      setLastAppliedPiece(null)
-    }, 600)
-  }, [attachAnim])
+  // ── Animation complete handlers ─────────────────────────────────
+  const handleEquipAnimDone = useCallback(() => {
+    setAnimateEquipId(null)
+    // Particles at center
+    setParticles({ x: window.innerWidth / 2, y: window.innerHeight / 3 })
+    setTimeout(() => setParticles(null), 600)
+  }, [])
+
+  const handleUnequipAnimDone = useCallback(() => {
+    setAnimateUnequipId(null)
+  }, [])
 
   // ── Computed values ────────────────────────────────────────────
   const appliedPieces = session?.appliedPieces ?? []
-  const earnedPieces = profile ? getEarnedPieces(profile) : []
-  const allEarnedApplied = earnedPieces.length > 0 && earnedPieces.every((p) => appliedPieces.includes(p))
-  const nextUnlock = profile ? getNextUnlockPiece(profile) : null
-  const allSixEarned = earnedPieces.length === ARMOR_PIECES.length
+  const appliedVoxel = sessionToVoxelPieces(appliedPieces)
+  const unlockedVoxel = profile ? getUnlockedVoxelPieces(profile) : []
+  const allEarnedApplied = unlockedVoxel.length > 0 && unlockedVoxel.every((v) => appliedVoxel.includes(v))
+  const nextUnlock = profile ? getNextUnlock(profile) : null
+  const allSixUnlocked = unlockedVoxel.length === 6
 
   const xpProgress = nextUnlock && profile
-    ? Math.min((profile.totalXp / ARMOR_PIECES.find((p) => p.id === nextUnlock.id)!.xpToUnlockStone) * 100, 100)
+    ? Math.min((profile.totalXp / XP_THRESHOLDS[nextUnlock.piece.id]) * 100, 100)
     : 100
 
   if (loading) {
@@ -528,6 +443,9 @@ export default function MyAvatarPage() {
   }
 
   if (!profile) return null
+
+  const ageGroup = profile.ageGroup ?? (isLincoln ? 'older' : 'younger')
+  const features = profile.characterFeatures ?? DEFAULT_CHARACTER_FEATURES
 
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 8 }}>
@@ -543,7 +461,7 @@ export default function MyAvatarPage() {
               color: accentColor,
             }}
           >
-            {isLincoln ? '⚔️ My Armor' : '✨ My Armor of God'}
+            My Armor
           </Typography>
           <Typography
             sx={{
@@ -553,61 +471,43 @@ export default function MyAvatarPage() {
               color: isLincoln ? '#666' : '#999',
             }}
           >
-            {activeChild?.name} — {profile.totalXp} XP • {profile.currentTier.toUpperCase()} tier
+            {activeChild?.name} — {profile.totalXp} XP
           </Typography>
         </Box>
 
-        {/* ── Character Display ──────────────────────────────────── */}
+        {/* ── 3D Character Display ─────────────────────────────── */}
         <Box sx={{ mb: 1.5 }}>
-          <CharacterDisplay
-            ref={charDisplayRef}
-            profile={profile}
-            appliedPieces={appliedPieces}
+          <VoxelCharacter
+            features={features}
+            ageGroup={ageGroup}
+            equippedPieces={appliedVoxel}
+            animateEquipPiece={animateEquipId}
+            animateUnequipPiece={animateUnequipId}
+            onEquipAnimDone={handleEquipAnimDone}
+            onUnequipAnimDone={handleUnequipAnimDone}
             height="55vw"
-            lastAppliedPiece={lastAppliedPiece}
-            croppedRegions={croppedImages}
           />
         </Box>
 
-        {/* ── Armor status text ──────────────────────────────────── */}
-        {allEarnedApplied ? (
-          <Box
-            sx={{
-              textAlign: 'center',
-              py: 1,
-              mb: 1,
-              animation: !reducedMotion ? 'fullArmorFadeIn 0.5s ease-out' : undefined,
-              '@keyframes fullArmorFadeIn': {
-                from: { opacity: 0, transform: 'scale(0.9)' },
-                to:   { opacity: 1, transform: 'scale(1)' },
-              },
-            }}
-          >
+        {/* ── Armor status text ────────────────────────────────── */}
+        {allEarnedApplied && unlockedVoxel.length > 0 ? (
+          <Box sx={{ textAlign: 'center', py: 1, mb: 1 }}>
             <Typography
               sx={{
                 fontFamily: titleFont,
                 fontSize: isLincoln ? '0.65rem' : '22px',
                 fontWeight: 700,
                 color: isLincoln ? '#FFD700' : '#9C27B0',
-                ...(allSixEarned && !reducedMotion ? {
-                  animation: 'fullArmorPulse 2s ease-in-out infinite',
-                  '@keyframes fullArmorPulse': {
-                    '0%':   { opacity: 1 },
-                    '50%':  { opacity: 0.82 },
-                    '100%': { opacity: 1 },
-                  },
-                } : {}),
               }}
             >
-              {allSixEarned
-                ? (isLincoln ? '⚔️ Full armor on! Ready for today.' : '✨ Full armor on! You\'re ready!')
-                : `${earnedPieces.length} of ${ARMOR_PIECES.length} pieces equipped — keep going!`}
+              {allSixUnlocked
+                ? 'Full armor on! Ready for today.'
+                : `${unlockedVoxel.length} of 6 pieces equipped — keep going!`}
             </Typography>
           </Box>
         ) : (
-          /* ── XP Progress ────────────────────────────────────────── */
           <Box sx={{ mb: 2, px: 1 }}>
-            {!allSixEarned && nextUnlock ? (
+            {!allSixUnlocked && nextUnlock ? (
               <>
                 <Typography
                   sx={{
@@ -619,7 +519,7 @@ export default function MyAvatarPage() {
                     fontWeight: 500,
                   }}
                 >
-                  Next: {ARMOR_PIECES.find((p) => p.id === nextUnlock.id)?.name} — {nextUnlock.xpNeeded} XP away
+                  Next: {nextUnlock.piece.name} — {nextUnlock.xpNeeded} XP away
                 </Typography>
                 <LinearProgress
                   variant="determinate"
@@ -635,25 +535,23 @@ export default function MyAvatarPage() {
                   }}
                 />
               </>
-            ) : allSixEarned ? (
+            ) : allSixUnlocked ? (
               <Typography
                 sx={{
                   textAlign: 'center',
-                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                  fontFamily: titleFont,
                   fontSize: isLincoln ? '0.4rem' : '0.85rem',
                   color: accentColor,
                   fontWeight: 700,
                 }}
               >
-                Full set! {profile.currentTier !== 'netherite' && profile.currentTier !== 'champion'
-                  ? 'Tier upgrade coming soon ⬆️'
-                  : 'Max tier reached! ⚔️'}
+                Full set unlocked!
               </Typography>
             ) : null}
           </Box>
         )}
 
-        {/* ── Piece Selector Row ─────────────────────────────────── */}
+        {/* ── Armor Piece Cards (horizontal scroll) ────────────── */}
         <Box
           sx={{
             overflowX: 'auto',
@@ -667,20 +565,116 @@ export default function MyAvatarPage() {
             '&::-webkit-scrollbar-thumb': { bgcolor: isLincoln ? '#333' : '#ddd', borderRadius: 2 },
           }}
         >
-          {ARMOR_PIECES.map((pieceDef) => (
-            <ArmorPieceButton
-              key={pieceDef.id}
-              ref={(el) => { if (el) buttonRefsMap.current[pieceDef.id] = el }}
-              pieceId={pieceDef.id}
-              profile={profile}
-              appliedToday={appliedPieces.includes(pieceDef.id)}
-              croppedImageUrl={croppedImages[pieceDef.id]}
-              onTap={handlePieceTap}
-            />
-          ))}
+          {VOXEL_ARMOR_PIECES.map((piece) => {
+            const isUnlocked = profile.totalXp >= XP_THRESHOLDS[piece.id]
+            const armorPieceId = ARMOR_PIECES.find(
+              (p) => ARMOR_PIECE_TO_VOXEL[p.id] === piece.id,
+            )?.id
+            const isApplied = armorPieceId ? appliedPieces.includes(armorPieceId) : false
+
+            return (
+              <Box
+                key={piece.id}
+                onClick={() => handlePieceTap(piece)}
+                sx={{
+                  minWidth: 120,
+                  maxWidth: 120,
+                  scrollSnapAlign: 'start',
+                  p: 1.5,
+                  borderRadius: isLincoln ? 0 : 2,
+                  border: `2px solid ${
+                    isApplied ? accentColor
+                    : isUnlocked ? (isLincoln ? '#555' : '#ccc')
+                    : (isLincoln ? '#222' : '#e0e0e0')
+                  }`,
+                  bgcolor: isApplied
+                    ? (isLincoln ? 'rgba(126,252,32,0.1)' : 'rgba(232,160,191,0.1)')
+                    : (isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'),
+                  cursor: isUnlocked ? 'pointer' : 'default',
+                  opacity: isUnlocked ? 1 : 0.5,
+                  transition: 'border-color 200ms, background-color 200ms',
+                  textAlign: 'center',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 0.5,
+                }}
+              >
+                {isUnlocked ? (
+                  <Typography sx={{ fontSize: '28px' }}>
+                    {isApplied ? '✅' : '⚔️'}
+                  </Typography>
+                ) : (
+                  <LockIcon sx={{ fontSize: 28, color: isLincoln ? '#444' : '#bbb' }} />
+                )}
+                <Typography
+                  sx={{
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                    fontSize: isLincoln ? '0.3rem' : '0.75rem',
+                    fontWeight: 600,
+                    color: isApplied ? accentColor : textColor,
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {piece.name.split(' ')[0]}
+                </Typography>
+                {!isUnlocked && (
+                  <Typography
+                    sx={{
+                      fontSize: isLincoln ? '0.25rem' : '0.65rem',
+                      color: isLincoln ? '#555' : '#aaa',
+                      fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                    }}
+                  >
+                    {XP_THRESHOLDS[piece.id]} XP
+                  </Typography>
+                )}
+              </Box>
+            )
+          })}
         </Box>
 
-        {/* ── Photo Transform — Multi-Step Pipeline ─────────────── */}
+        {/* ── Verse Card (for selected piece) ──────────────────── */}
+        {selectedPiece && (
+          <Box sx={{ mt: 2, px: 1 }}>
+            <VerseCardInline piece={selectedPiece} />
+            <Box sx={{ display: 'flex', gap: 1, mt: 1.5, px: 1 }}>
+              <Button
+                variant="contained"
+                fullWidth
+                onClick={() => {
+                  void handleApplyPiece(selectedPiece.id)
+                  setSelectedPiece(null)
+                }}
+                sx={{
+                  bgcolor: accentColor,
+                  color: isLincoln ? '#000' : '#fff',
+                  fontFamily: titleFont,
+                  fontSize: isLincoln ? '0.5rem' : '18px',
+                  fontWeight: 700,
+                  py: 1.5,
+                  borderRadius: isLincoln ? 0 : 3,
+                  '&:hover': { bgcolor: accentColor, opacity: 0.85 },
+                }}
+              >
+                Put it on!
+              </Button>
+              <Button
+                variant="text"
+                onClick={() => setSelectedPiece(null)}
+                sx={{
+                  color: isLincoln ? '#666' : '#aaa',
+                  fontFamily: titleFont,
+                  fontSize: isLincoln ? '0.35rem' : '14px',
+                }}
+              >
+                Close
+              </Button>
+            </Box>
+          </Box>
+        )}
+
+        {/* ── Photo Upload Section ──────────────────────────────── */}
         <Box
           sx={{
             mt: 3,
@@ -702,7 +696,7 @@ export default function MyAvatarPage() {
             <CameraAltIcon sx={{ color: accentColor, fontSize: 20 }} />
             <Typography
               sx={{
-                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                fontFamily: titleFont,
                 fontSize: isLincoln ? '0.42rem' : '0.95rem',
                 fontWeight: 600,
                 color: accentColor,
@@ -712,45 +706,7 @@ export default function MyAvatarPage() {
             </Typography>
           </Box>
 
-          {/* Pipeline progress steps */}
-          {pipelineStep !== 'idle' && (
-            <Box sx={{ mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-              {['Upload', 'Pixel Character', 'Approve', 'Generate Armor', 'Done'].map((label, i) => {
-                const stepMap = ['idle', 'bare', 'approve', 'armor', 'done']
-                const currentIdx = stepMap.indexOf(pipelineStep)
-                const isActive = i === currentIdx
-                const isDone = i < currentIdx
-                return (
-                  <Box key={label} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Box
-                      sx={{
-                        width: 20,
-                        height: 20,
-                        borderRadius: '50%',
-                        bgcolor: isDone ? accentColor : isActive ? accentColor : (isLincoln ? '#333' : '#ddd'),
-                        opacity: isDone ? 0.6 : isActive ? 1 : 0.3,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '10px',
-                        color: isLincoln ? '#000' : '#fff',
-                        fontWeight: 700,
-                      }}
-                    >
-                      {isDone ? '✓' : i + 1}
-                    </Box>
-                    <Typography sx={{ fontSize: '11px', color: isActive ? accentColor : (isLincoln ? '#666' : '#999') }}>
-                      {label}
-                    </Typography>
-                    {i < 4 && <Typography sx={{ color: isLincoln ? '#333' : '#ccc', mx: 0.5 }}>→</Typography>}
-                  </Box>
-                )
-              })}
-            </Box>
-          )}
-
-          {/* Step: Idle — upload button */}
-          {pipelineStep === 'idle' && !photoPreviewUrl && (
+          {!photoPreviewUrl ? (
             <Button
               variant="outlined"
               size="small"
@@ -764,12 +720,9 @@ export default function MyAvatarPage() {
                 fontSize: isLincoln ? '0.38rem' : '0.85rem',
               }}
             >
-              {profile.photoTransformUrl ? 'Change Photo' : 'Upload a Photo'}
+              {profile.photoUrl ? 'Change Photo' : 'Upload a Photo'}
             </Button>
-          )}
-
-          {/* Step: Photo selected — preview + transform */}
-          {pipelineStep === 'idle' && photoPreviewUrl && (
+          ) : (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Box
                 component="img"
@@ -781,7 +734,6 @@ export default function MyAvatarPage() {
                   objectFit: 'cover',
                   borderRadius: isLincoln ? 0 : 2,
                   border: `2px solid ${accentColor}`,
-                  imageRendering: isLincoln ? 'pixelated' : 'auto',
                 }}
               />
               <Box sx={{ display: 'flex', gap: 1 }}>
@@ -789,7 +741,7 @@ export default function MyAvatarPage() {
                   variant="contained"
                   size="small"
                   onClick={() => void handlePhotoTransform()}
-                  disabled={photoTransforming}
+                  disabled={photoExtracting}
                   sx={{
                     bgcolor: accentColor,
                     color: isLincoln ? '#000' : '#fff',
@@ -799,12 +751,12 @@ export default function MyAvatarPage() {
                     '&:hover': { bgcolor: accentColor, opacity: 0.85 },
                   }}
                 >
-                  Transform!
+                  {photoExtracting ? 'Extracting...' : 'Transform!'}
                 </Button>
                 <Button
                   variant="text"
                   size="small"
-                  onClick={() => { setPhotoPreviewUrl(null); setPhotoTransformError(null) }}
+                  onClick={() => { setPhotoPreviewUrl(null); setPhotoError(null) }}
                   sx={{
                     color: isLincoln ? '#666' : '#aaa',
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
@@ -817,233 +769,30 @@ export default function MyAvatarPage() {
             </Box>
           )}
 
-          {/* Step: Generating bare character */}
-          {pipelineStep === 'bare' && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <CircularProgress size={20} sx={{ color: accentColor }} />
-              <Typography sx={{ fontSize: '14px', color: isLincoln ? '#aaa' : '#666' }}>
-                Creating pixel character from photo... ~20s
-              </Typography>
-            </Box>
-          )}
-
-          {/* Step: Approve bare character */}
-          {pipelineStep === 'approve' && bareCharacterUrl && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, alignItems: 'center' }}>
-              <Typography sx={{ fontSize: '15px', fontWeight: 600, color: accentColor }}>
-                Here&apos;s {activeChild?.name} in pixel art!
-              </Typography>
-              <Box
-                component="img"
-                src={bareCharacterUrl}
-                alt="Bare pixel character"
-                sx={{
-                  width: 180,
-                  height: 180,
-                  objectFit: 'cover',
-                  borderRadius: isLincoln ? 0 : 2,
-                  border: `2px solid ${accentColor}`,
-                  imageRendering: isLincoln ? 'pixelated' : 'auto',
-                }}
-              />
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button
-                  variant="contained"
-                  size="small"
-                  onClick={() => void handleApproveAndGenerateArmor()}
-                  disabled={armorRefGenerating}
-                  sx={{
-                    bgcolor: accentColor,
-                    color: isLincoln ? '#000' : '#fff',
-                    borderRadius: isLincoln ? 0 : 2,
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.35rem' : '0.85rem',
-                    '&:hover': { bgcolor: accentColor, opacity: 0.85 },
-                  }}
-                >
-                  Looks good — Continue
-                </Button>
-                <Button
-                  variant="text"
-                  size="small"
-                  onClick={() => {
-                    setPipelineStep('idle')
-                    setBareCharacterUrl(null)
-                  }}
-                  sx={{
-                    color: isLincoln ? '#666' : '#aaa',
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.35rem' : '0.85rem',
-                  }}
-                >
-                  Try Again
-                </Button>
-              </Box>
-            </Box>
-          )}
-
-          {/* Step: Generating armor reference */}
-          {pipelineStep === 'armor' && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <CircularProgress size={20} sx={{ color: accentColor }} />
-              <Typography sx={{ fontSize: '14px', color: isLincoln ? '#aaa' : '#666' }}>
-                Now generating armor... ~20s
-              </Typography>
-            </Box>
-          )}
-
-          {/* Step: Done */}
-          {pipelineStep === 'done' && (
-            <Typography sx={{ fontSize: '15px', fontWeight: 600, color: accentColor }}>
-              Armor pieces ready! Check the cards below.
-            </Typography>
-          )}
-
-          {photoTransformError && (
+          {photoError && (
             <Alert severity="error" sx={{ mt: 1, fontSize: '0.8rem' }}>
-              {photoTransformError}
+              {photoError}
             </Alert>
           )}
 
-          {profile.photoTransformUrl && pipelineStep === 'idle' && !photoPreviewUrl && (
+          {profile.characterFeatures && !photoPreviewUrl && (
             <Typography
               variant="caption"
               sx={{ display: 'block', mt: 0.5, color: isLincoln ? '#555' : '#aaa', fontSize: '12px' }}
             >
-              Photo transform active — armor overlays apply on top
+              Character features extracted from photo — 3D character reflects your look
             </Typography>
           )}
         </Box>
-
-        {/* ── Dev overlay: armor reference with crop regions ────── */}
-        {typeof window !== 'undefined' &&
-          new URLSearchParams(window.location.search).get('dev') === 'true' &&
-          profile.armorReferenceUrls?.[profile.currentTier] && (
-          <Box sx={{ mt: 3, p: 2, border: '2px dashed #f44336', borderRadius: 2 }}>
-            <Typography sx={{ fontSize: '14px', fontWeight: 700, color: '#f44336', mb: 1 }}>
-              DEV: Armor Reference + Crop Regions ({profile.currentTier})
-            </Typography>
-
-            {/* Dev action buttons */}
-            <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
-              <Button
-                variant="outlined"
-                size="small"
-                disabled={reCropping}
-                onClick={async () => {
-                  const armorRefUrl = profile.armorReferenceUrls?.[profile.currentTier]
-                  if (!armorRefUrl) return
-                  setReCropping(true)
-                  try {
-                    const results = await cropAllArmorRegions(armorRefUrl)
-                    setCroppedImages(results)
-                    // Log crop dimensions to console for debugging
-                    for (const region of ARMOR_REGIONS) {
-                      const srcW = Math.round((region.widthPct / 100) * 1024)
-                      const srcH = Math.round((region.heightPct / 100) * 1024)
-                      console.log(`[DEV] ${region.pieceId}: ${srcW}×${srcH}px (from 1024×1024)`)
-                    }
-                  } catch (err) {
-                    console.error('Re-crop failed:', err)
-                  } finally {
-                    setReCropping(false)
-                  }
-                }}
-                sx={{ borderColor: '#f44336', color: '#f44336', fontSize: '11px' }}
-              >
-                {reCropping ? 'Re-cropping...' : 'Re-crop Armor'}
-              </Button>
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => setShowArmoredRef((v) => !v)}
-                sx={{ borderColor: '#f44336', color: '#f44336', fontSize: '11px' }}
-              >
-                {showArmoredRef ? 'Hide Armored Reference' : 'Show Armored Reference'}
-              </Button>
-            </Box>
-
-            {/* Side-by-side: base vs armored reference */}
-            {showArmoredRef && (
-              <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', justifyContent: 'center' }}>
-                <Box sx={{ flex: '1 1 140px', maxWidth: 200, textAlign: 'center' }}>
-                  <Typography sx={{ fontSize: '10px', color: '#999', mb: 0.5 }}>Base Character</Typography>
-                  {(profile.photoTransformUrl ?? profile.baseCharacterUrl) && (
-                    <Box
-                      component="img"
-                      src={profile.photoTransformUrl ?? profile.baseCharacterUrl}
-                      alt="Base (dev)"
-                      sx={{ width: '100%', imageRendering: 'pixelated', border: '1px solid #333' }}
-                    />
-                  )}
-                </Box>
-                <Box sx={{ flex: '1 1 140px', maxWidth: 200, textAlign: 'center' }}>
-                  <Typography sx={{ fontSize: '10px', color: '#999', mb: 0.5 }}>Armored Reference</Typography>
-                  <Box
-                    component="img"
-                    src={profile.armorReferenceUrls[profile.currentTier]}
-                    alt="Armored ref (dev)"
-                    sx={{ width: '100%', imageRendering: 'pixelated', border: '1px solid #333' }}
-                  />
-                </Box>
-              </Box>
-            )}
-
-            {/* Armor reference with region overlays */}
-            <Box sx={{ position: 'relative', width: '100%', maxWidth: 340, mx: 'auto' }}>
-              <Box
-                component="img"
-                src={profile.armorReferenceUrls[profile.currentTier]}
-                alt="Armor reference (dev)"
-                sx={{ width: '100%', display: 'block', imageRendering: isLincoln ? 'pixelated' : 'auto' }}
-              />
-              {ARMOR_REGIONS.map((region) => {
-                const colors: Record<string, string> = {
-                  helmet_of_salvation: 'rgba(255,0,0,0.3)',
-                  breastplate_of_righteousness: 'rgba(0,255,0,0.3)',
-                  belt_of_truth: 'rgba(0,0,255,0.3)',
-                  shoes_of_peace: 'rgba(255,255,0,0.3)',
-                  shield_of_faith: 'rgba(255,0,255,0.3)',
-                  sword_of_the_spirit: 'rgba(0,255,255,0.3)',
-                }
-                return (
-                  <Box
-                    key={region.pieceId}
-                    sx={{
-                      position: 'absolute',
-                      top: `${region.topPct}%`,
-                      left: `${region.leftPct}%`,
-                      width: `${region.widthPct}%`,
-                      height: `${region.heightPct}%`,
-                      bgcolor: colors[region.pieceId] ?? 'rgba(255,255,255,0.3)',
-                      border: '1px solid #fff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      pointerEvents: 'none',
-                    }}
-                  >
-                    <Typography sx={{ fontSize: '7px', color: '#fff', fontWeight: 700, textShadow: '0 0 3px #000', textAlign: 'center' }}>
-                      {region.pieceId.replace(/_/g, ' ')}
-                    </Typography>
-                  </Box>
-                )
-              })}
-            </Box>
-            <Typography sx={{ fontSize: '11px', color: '#999', mt: 1 }}>
-              Base: {profile.photoTransformUrl ? 'photo transform' : profile.baseCharacterUrl ? 'generated' : 'none'}
-            </Typography>
-          </Box>
-        )}
       </Page>
 
       {/* ── Unequip confirmation dialog ────────────────────────── */}
       <Dialog open={!!unequipPiece} onClose={() => setUnequipPiece(null)}>
-        <DialogTitle>{ARMOR_PIECES.find((p) => p.id === unequipPiece)?.name} is on</DialogTitle>
+        <DialogTitle>
+          {VOXEL_ARMOR_PIECES.find((p) => p.id === unequipPiece)?.name} is on
+        </DialogTitle>
         <DialogContent>
-          <DialogContentText>
-            Take it off for today?
-          </DialogContentText>
+          <DialogContentText>Take it off for today?</DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setUnequipPiece(null)}>Keep it on</Button>
@@ -1051,25 +800,7 @@ export default function MyAvatarPage() {
         </DialogActions>
       </Dialog>
 
-      {/* ── Verse Card modal ──────────────────────────────────── */}
-      <VerseCard
-        pieceId={selectedPiece}
-        profile={profile}
-        alreadyApplied={selectedPiece ? appliedPieces.includes(selectedPiece) : false}
-        croppedImageUrl={selectedPiece ? croppedImages[selectedPiece] : undefined}
-        onApply={handleApplyPiece}
-        onClose={() => setSelectedPiece(null)}
-      />
-
-      {/* ── Fly animation ──────────────────────────────────────── */}
-      {attachAnim && (
-        <AttachAnimation
-          {...attachAnim}
-          onComplete={handleAnimComplete}
-        />
-      )}
-
-      {/* ── Particle burst (converging inward) ─────────────────── */}
+      {/* ── Particle burst ──────────────────────────────────────── */}
       {particles && profile && (
         <Particles
           x={particles.x}
@@ -1081,14 +812,14 @@ export default function MyAvatarPage() {
         />
       )}
 
-      {/* ── Unlock celebration ─────────────────────────────────── */}
+      {/* ── Unlock celebration ──────────────────────────────────── */}
       <UnlockCelebration
         newPiece={celebrationPiece}
         profile={profile}
         onDismiss={() => setCelebrationPiece(null)}
       />
 
-      {/* ── Tier upgrade celebration ───────────────────────────── */}
+      {/* ── Tier upgrade celebration ────────────────────────────── */}
       <TierUpgradeCelebration
         upgrade={tierCelebration}
         profile={profile}

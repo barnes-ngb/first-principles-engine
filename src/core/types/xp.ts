@@ -33,8 +33,48 @@ export type ArmorPiece =
   | 'helmet_of_salvation'
   | 'sword_of_the_spirit'
 
+/** Simplified armor piece ID used by the 3D voxel system */
+export type VoxelArmorPieceId = 'belt' | 'breastplate' | 'shoes' | 'shield' | 'helmet' | 'sword'
+
 export type ArmorTier = 'stone' | 'diamond' | 'netherite'       // Lincoln
 export type PlatformerTier = 'basic' | 'powerup' | 'champion'  // London
+
+/** Character features extracted from a photo by AI vision */
+export interface CharacterFeatures {
+  skinTone: string       // Hex color extracted from photo
+  hairColor: string      // Hex color extracted from photo
+  hairStyle: 'short' | 'medium' | 'long' | 'curly'
+  hairLength: 'above_ear' | 'ear_length' | 'shoulder' | 'below_shoulder'
+  eyeColor?: string
+  distinguishingFeatures?: string
+}
+
+export const DEFAULT_CHARACTER_FEATURES: CharacterFeatures = {
+  skinTone: '#D2A272',
+  hairColor: '#4A3728',
+  hairStyle: 'short',
+  hairLength: 'above_ear',
+}
+
+/** Maps full ArmorPiece IDs to simplified voxel piece IDs */
+export const ARMOR_PIECE_TO_VOXEL: Record<ArmorPiece, VoxelArmorPieceId> = {
+  belt_of_truth: 'belt',
+  breastplate_of_righteousness: 'breastplate',
+  shoes_of_peace: 'shoes',
+  shield_of_faith: 'shield',
+  helmet_of_salvation: 'helmet',
+  sword_of_the_spirit: 'sword',
+}
+
+/** Maps simplified voxel piece IDs back to full ArmorPiece IDs */
+export const VOXEL_TO_ARMOR_PIECE: Record<VoxelArmorPieceId, ArmorPiece> = {
+  belt: 'belt_of_truth',
+  breastplate: 'breastplate_of_righteousness',
+  shoes: 'shoes_of_peace',
+  shield: 'shield_of_faith',
+  helmet: 'helmet_of_salvation',
+  sword: 'sword_of_the_spirit',
+}
 
 export const ARMOR_PIECES: {
   id: ArmorPiece
@@ -173,16 +213,34 @@ export interface AvatarProfile {
   /** One entry per piece, grows as pieces are unlocked */
   pieces: ArmorPieceProgress[]
   currentTier: ArmorTier | PlatformerTier
-  /** DALL-E base character (full body, no armor), generated once */
+
+  // ── 3D Voxel system fields ────────────────────────────────────
+  /** Character features extracted from photo by AI vision */
+  characterFeatures?: CharacterFeatures
+  /** Body proportions template: older (Lincoln, 10) or younger (London, 6) */
+  ageGroup?: 'older' | 'younger'
+  /** Original uploaded photo URL (kept for re-extraction) */
+  photoUrl?: string
+  /** Which armor pieces are currently shown on the 3D character */
+  equippedPieces?: string[]
+  /** Last piece animated (to not re-animate on page load) */
+  lastEquipAnimation?: string
+
+  // ── Legacy 2D fields (kept for migration, may be undefined) ───
+  /** @deprecated Use characterFeatures + 3D voxel renderer instead */
   baseCharacterUrl?: string
-  /** Phase 2: photo → character transform result (bare pixel character from photo) */
+  /** @deprecated Use characterFeatures + 3D voxel renderer instead */
   photoTransformUrl?: string
-  /** Cohesive set sheets: tier → sheet URL (3×2 grid, all 6 pieces) */
+  /** @deprecated No longer used — armor is 3D geometry */
   armorSheetUrls?: Partial<Record<string, string>>
-  /** Armor reference images: tier → full armed character image URL */
+  /** @deprecated No longer used — armor is 3D geometry */
   armorReferenceUrls?: Partial<Record<string, string>>
-  /** Cached client-side crops from armor reference (optional — can re-crop) */
+  /** @deprecated No longer used — armor is 3D geometry */
   croppedRegionUrls?: Partial<Record<ArmorPiece, string>>
+
+  /** Armor pieces unlocked by XP (voxel piece IDs) */
+  unlockedPieces?: string[]
+
   totalXp: number   // cached from xpLedger for quick reads
   updatedAt: string
 }

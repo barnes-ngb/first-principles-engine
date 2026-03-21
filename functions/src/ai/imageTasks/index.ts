@@ -18,3 +18,6 @@ export type { BaseCharacterRequest, BaseCharacterResponse } from "./baseCharacte
 
 export { generateArmorSheet } from "./armorSheet.js";
 export type { ArmorSheetRequest, ArmorSheetResponse } from "./armorSheet.js";
+
+export { extractFeatures } from "./extractFeatures.js";
+export type { ExtractFeaturesRequest, ExtractFeaturesResponse } from "./extractFeatures.js";
