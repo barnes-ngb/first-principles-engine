@@ -1,50 +1,25 @@
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
-import { callClaude, logAiUsage, loadRecentEvalContext } from "../chatTypes.js";
-import {
-  buildSystemPrompt,
-  loadEnrichedContext,
-  loadSightWordSummary,
-  modelForTask,
-} from "../chat.js";
+import { callClaude, logAiUsage } from "../chatTypes.js";
+import { modelForTask } from "../chat.js";
+import { buildContextForTask } from "../contextSlices.js";
+
+// Import plan-specific prompt pieces from chat.ts
+import { buildPlanOutputInstructions } from "../chat.js";
 
 export const handlePlan = async (
   ctx: ChatTaskContext,
 ): Promise<ChatTaskResult> => {
-  const { db, familyId, childId, childData, snapshotData, messages, domain, apiKey } = ctx;
+  const { db, familyId, childId, childData, snapshotData, messages, apiKey } = ctx;
 
-  // Load enriched context
-  let enriched;
-  try {
-    enriched = await loadEnrichedContext(db, familyId, childId);
-  } catch (err) {
-    console.warn("Failed to load enriched context, proceeding without it:", err);
-  }
+  // Build only the context slices needed for plan task
+  const sections = await buildContextForTask("plan", {
+    db, familyId, childId, childData, snapshotData,
+  });
 
-  // Load sight word summary
-  let sightWordContext = "";
-  try {
-    sightWordContext = await loadSightWordSummary(db, familyId, childId);
-  } catch (err) {
-    console.warn("Failed to load sight word summary:", err);
-  }
+  // Append plan-specific output format instructions
+  sections.push(buildPlanOutputInstructions());
 
-  // Load recent evaluation
-  const recentEvalContext = await loadRecentEvalContext(db, familyId, childId);
-
-  const systemPrompt =
-    buildSystemPrompt(
-      {
-        name: childData.name,
-        grade: childData.grade,
-        prioritySkills: snapshotData?.prioritySkills,
-        supports: snapshotData?.supports,
-        stopRules: snapshotData?.stopRules,
-      },
-      "plan",
-      enriched,
-      domain,
-    ) + recentEvalContext + (sightWordContext ? `\n\n${sightWordContext}` : "");
-
+  const systemPrompt = sections.join("\n\n");
   const model = modelForTask("plan");
 
   const result = await callClaude({
@@ -58,6 +33,8 @@ export const handlePlan = async (
   if (!result.text) {
     console.warn("Claude returned empty response", { model, taskType: "plan" });
   }
+
+  console.log(`[AI] taskType=plan inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`);
 
   await logAiUsage(db, familyId, {
     childId,

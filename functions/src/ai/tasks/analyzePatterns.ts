@@ -220,6 +220,8 @@ Please identify any conceptual blocks in the pattern above.`;
     const responseText =
       firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
 
+    console.log(`[AI] taskType=analyzePatterns inputTokens≈${completion.usage.input_tokens} outputTokens≈${completion.usage.output_tokens}`);
+
     // Log usage
     try {
       await db.collection(`families/${familyId}/aiUsage`).add({

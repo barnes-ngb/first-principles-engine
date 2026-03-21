@@ -1,50 +1,25 @@
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
-import { callClaude, logAiUsage, loadRecentEvalContext } from "../chatTypes.js";
-import {
-  buildSystemPrompt,
-  loadEnrichedContext,
-  loadSightWordSummary,
-  modelForTask,
-} from "../chat.js";
+import { callClaude, logAiUsage } from "../chatTypes.js";
+import { modelForTask } from "../chat.js";
+import { buildContextForTask } from "../contextSlices.js";
+
+// Import quest-specific prompt builder from chat.ts
+import { buildQuestPrompt } from "../chat.js";
 
 export const handleQuest = async (
   ctx: ChatTaskContext,
 ): Promise<ChatTaskResult> => {
   const { db, familyId, childId, childData, snapshotData, messages, domain, apiKey } = ctx;
 
-  // Load enriched context
-  let enriched;
-  try {
-    enriched = await loadEnrichedContext(db, familyId, childId);
-  } catch (err) {
-    console.warn("Failed to load enriched context, proceeding without it:", err);
-  }
+  // Quest only needs childProfile + sightWords + recentEval (no charter, no enriched)
+  const sections = await buildContextForTask("quest", {
+    db, familyId, childId, childData, snapshotData,
+  });
 
-  // Load sight word summary
-  let sightWordContext = "";
-  try {
-    sightWordContext = await loadSightWordSummary(db, familyId, childId);
-  } catch (err) {
-    console.warn("Failed to load sight word summary:", err);
-  }
+  // Append quest-specific interactive prompt
+  sections.push(buildQuestPrompt(domain || "reading"));
 
-  // Load recent evaluation
-  const recentEvalContext = await loadRecentEvalContext(db, familyId, childId);
-
-  const systemPrompt =
-    buildSystemPrompt(
-      {
-        name: childData.name,
-        grade: childData.grade,
-        prioritySkills: snapshotData?.prioritySkills,
-        supports: snapshotData?.supports,
-        stopRules: snapshotData?.stopRules,
-      },
-      "quest",
-      enriched,
-      domain,
-    ) + recentEvalContext + (sightWordContext ? `\n\n${sightWordContext}` : "");
-
+  const systemPrompt = sections.join("\n\n");
   const model = modelForTask("quest");
 
   const result = await callClaude({
@@ -58,6 +33,8 @@ export const handleQuest = async (
   if (!result.text) {
     console.warn("Claude returned empty response", { model, taskType: "quest" });
   }
+
+  console.log(`[AI] taskType=quest inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`);
 
   await logAiUsage(db, familyId, {
     childId,

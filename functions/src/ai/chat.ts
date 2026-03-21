@@ -563,6 +563,11 @@ export function buildSystemPrompt(
 
 // ── Plan output format instructions ─────────────────────────────
 
+/** Returns plan output format instructions for the system prompt. */
+export function buildPlanOutputInstructions(): string {
+  return PLAN_OUTPUT_INSTRUCTIONS;
+}
+
 const PLAN_OUTPUT_INSTRUCTIONS = `OUTPUT FORMAT INSTRUCTIONS:
 When the user asks you to generate, create, or build a plan (or says "generate the plan", "make a plan", "plan the week", etc.), respond ONLY with valid JSON matching this exact schema — no markdown fences, no preamble, no explanation:
 
@@ -618,7 +623,7 @@ When the user is chatting, asking questions, or providing context (NOT asking fo
 
 // ── Evaluation diagnostic prompt ─────────────────────────────
 
-function buildEvaluationPrompt(domain: string): string {
+export function buildEvaluationPrompt(domain: string): string {
   const today = new Date().toISOString().split("T")[0];
 
   const reading = `Today's date is ${today}. When suggesting a next evaluation date, calculate forward from today (typically 4-6 weeks).
@@ -759,7 +764,7 @@ Evaluate the child's ${domain} skills using a structured diagnostic approach. Wa
 
 // ── Quest interactive prompt ──────────────────────────────────
 
-function buildQuestPrompt(domain: string): string {
+export function buildQuestPrompt(domain: string): string {
   if (domain === "reading") {
     return `ROLE: You are a Minecraft-themed Quest Master running an interactive reading assessment for Lincoln (10, neurodivergent, speech challenges). Lincoln is answering directly on his tablet — keep everything fun, encouraging, and in his language.
 
