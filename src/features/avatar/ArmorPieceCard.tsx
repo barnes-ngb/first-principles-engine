@@ -9,6 +9,7 @@ import { isPieceEarned } from './armorUtils'
 interface ArmorPieceCardProps {
   pieceId: ArmorPiece
   profile: AvatarProfile | null
+  croppedImageUrl?: string
   onTap: (pieceId: ArmorPiece) => void
 }
 
@@ -19,13 +20,14 @@ function getPieceImageUrl(profile: AvatarProfile, pieceId: ArmorPiece): string |
   return (entry.generatedImageUrls as Record<string, string | undefined>)[tier]
 }
 
-export default function ArmorPieceCard({ pieceId, profile, onTap }: ArmorPieceCardProps) {
+export default function ArmorPieceCard({ pieceId, profile, croppedImageUrl, onTap }: ArmorPieceCardProps) {
   const pieceDef = ARMOR_PIECES.find((p) => p.id === pieceId)
   if (!pieceDef) return null
 
   const isLincoln = profile?.themeStyle === 'minecraft'
   const isUnlocked = profile ? isPieceEarned(profile, pieceId) : false
-  const imageUrl = profile ? getPieceImageUrl(profile, pieceId) : undefined
+  const legacyUrl = profile ? getPieceImageUrl(profile, pieceId) : undefined
+  const imageUrl = croppedImageUrl ?? legacyUrl
 
   const bgColor = isLincoln
     ? (isUnlocked ? 'rgba(78,160,78,0.15)' : 'rgba(0,0,0,0.5)')
@@ -50,6 +52,7 @@ export default function ArmorPieceCard({ pieceId, profile, onTap }: ArmorPieceCa
         '&:hover': isUnlocked ? { transform: 'scale(1.03)', boxShadow: 4 } : {},
         overflow: 'hidden',
         aspectRatio: '1',
+        minHeight: 160,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -67,7 +70,7 @@ export default function ArmorPieceCard({ pieceId, profile, onTap }: ArmorPieceCa
             aspectRatio: '1',
             objectFit: 'contain',
             borderRadius: isLincoln ? 0 : 2,
-            imageRendering: isLincoln ? 'pixelated' : 'auto',
+            imageRendering: 'pixelated',
           }}
         />
       ) : isUnlocked ? (
@@ -86,13 +89,34 @@ export default function ArmorPieceCard({ pieceId, profile, onTap }: ArmorPieceCa
       ) : (
         <Box
           sx={{
+            position: 'relative',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
+            justifyContent: 'center',
+            width: '100%',
+            aspectRatio: '1',
             gap: 0.5,
           }}
         >
-          <LockIcon sx={{ fontSize: 36, color: isLincoln ? '#555' : '#aaa' }} />
+          {/* Locked silhouette — dimmed crop if available */}
+          {imageUrl && (
+            <Box
+              component="img"
+              src={imageUrl}
+              alt={pieceDef.name}
+              sx={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                filter: 'brightness(0.3) grayscale(1)',
+                imageRendering: 'pixelated',
+              }}
+            />
+          )}
+          <LockIcon sx={{ fontSize: 36, color: isLincoln ? '#555' : '#aaa', zIndex: 1 }} />
           <Typography
             variant="caption"
             sx={{
@@ -100,6 +124,7 @@ export default function ArmorPieceCard({ pieceId, profile, onTap }: ArmorPieceCa
               fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
               fontSize: isLincoln ? '0.4rem' : '0.65rem',
               textAlign: 'center',
+              zIndex: 1,
             }}
           >
             {pieceDef.xpToUnlockStone} XP
