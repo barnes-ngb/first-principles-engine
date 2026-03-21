@@ -11,6 +11,8 @@ import {
   Snackbar,
   Stack,
   Switch,
+  Tab,
+  Tabs,
   Typography,
 } from '@mui/material'
 import type { SelectChangeEvent } from '@mui/material'
@@ -19,7 +21,7 @@ import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useProfile } from '../../core/profile/useProfile'
-import { ThemeMode } from '../../core/types/enums'
+import { ThemeMode, UserProfile } from '../../core/types/enums'
 import { seedDemoFamily } from '../../core/data/seed'
 import {
   AIFeatureFlag,
@@ -29,6 +31,7 @@ import {
 } from '../../core/ai/featureFlags'
 import AccountSection from './AccountSection'
 import AIUsagePanel from './AIUsagePanel'
+import AvatarAdminTab from './AvatarAdminTab'
 
 type SnackbarState = {
   open: boolean
@@ -50,9 +53,12 @@ const themeModeLabels: Record<ThemeMode, string> = {
 
 export default function SettingsPage() {
   const familyId = useFamilyId()
-  const { themeMode, setThemeMode } = useProfile()
+  const { themeMode, setThemeMode, profile } = useProfile()
   const { isEnabled, setEnabled } = useAIFeatureFlags()
   const [snackbar, setSnackbar] = useState<SnackbarState>(defaultSnackbarState)
+  const [activeTab, setActiveTab] = useState(0)
+
+  const isParent = profile === UserProfile.Parents
 
   const handleSeedDemoData = async () => {
     try {
@@ -90,70 +96,86 @@ export default function SettingsPage() {
   return (
     <Page>
       <SectionCard title="Settings">
-        <Stack spacing={3}>
-          <Stack spacing={2}>
-            <Typography variant="h6">Appearance</Typography>
-            <FormControl size="small" sx={{ maxWidth: 240 }}>
-              <InputLabel id="theme-mode-label">Theme</InputLabel>
-              <Select
-                labelId="theme-mode-label"
-                value={themeMode}
-                label="Theme"
-                onChange={handleThemeModeChange}
-              >
-                {Object.values(ThemeMode).map((mode) => (
-                  <MenuItem key={mode} value={mode}>
-                    {themeModeLabels[mode]}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+        {isParent && (
+          <Tabs
+            value={activeTab}
+            onChange={(_, v: number) => setActiveTab(v)}
+            sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
+          >
+            <Tab label="General" />
+            <Tab label="Avatar & XP" />
+          </Tabs>
+        )}
+
+        {/* ── General tab ─────────────────────────────────────── */}
+        {(!isParent || activeTab === 0) && (
+          <Stack spacing={3}>
+            <Stack spacing={2}>
+              <Typography variant="h6">Appearance</Typography>
+              <FormControl size="small" sx={{ maxWidth: 240 }}>
+                <InputLabel id="theme-mode-label">Theme</InputLabel>
+                <Select
+                  labelId="theme-mode-label"
+                  value={themeMode}
+                  label="Theme"
+                  onChange={handleThemeModeChange}
+                >
+                  {Object.values(ThemeMode).map((mode) => (
+                    <MenuItem key={mode} value={mode}>
+                      {themeModeLabels[mode]}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
+
+            <Divider />
+
+            <Stack spacing={2}>
+              <Typography variant="h6">AI Features</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Toggle AI-powered features on or off. When off, the app uses local
+                logic as a fallback.
+              </Typography>
+              {Object.values(AIFeatureFlag).map((flag) => (
+                <FormControlLabel
+                  key={flag}
+                  control={
+                    <Switch
+                      checked={isEnabled(flag)}
+                      onChange={(_, checked) => setEnabled(flag, checked)}
+                    />
+                  }
+                  label={AIFeatureFlagLabel[flag]}
+                  slotProps={{
+                    typography: { variant: 'body2' },
+                  }}
+                />
+              ))}
+              <Typography variant="caption" color="text.secondary">
+                {AIFeatureFlagDescription[AIFeatureFlag.AiPlanning]}
+              </Typography>
+            </Stack>
+
+            <Divider />
+
+            <AccountSection />
+
+            <Divider />
+
+            <Stack spacing={1}>
+              <Typography color="text.secondary">
+                Use the button below to seed demo data for your family.
+              </Typography>
+              <Button variant="contained" onClick={handleSeedDemoData}>
+                Seed Demo Data
+              </Button>
+            </Stack>
           </Stack>
+        )}
 
-          <Divider />
-
-          <Stack spacing={2}>
-            <Typography variant="h6">AI Features</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Toggle AI-powered features on or off. When off, the app uses local
-              logic as a fallback.
-            </Typography>
-            {Object.values(AIFeatureFlag).map((flag) => (
-              <FormControlLabel
-                key={flag}
-                control={
-                  <Switch
-                    checked={isEnabled(flag)}
-                    onChange={(_, checked) => setEnabled(flag, checked)}
-                  />
-                }
-                label={AIFeatureFlagLabel[flag]}
-                slotProps={{
-                  typography: { variant: 'body2' },
-                }}
-              />
-            ))}
-            <Typography variant="caption" color="text.secondary">
-              {AIFeatureFlagDescription[AIFeatureFlag.AiPlanning]}
-            </Typography>
-          </Stack>
-
-          <Divider />
-
-          <AccountSection />
-
-          <Divider />
-
-          <Stack spacing={1}>
-            <Typography color="text.secondary">
-              Use the button below to seed demo data for your family.
-            </Typography>
-            <Button variant="contained" onClick={handleSeedDemoData}>
-              Seed Demo Data
-            </Button>
-          </Stack>
-
-        </Stack>
+        {/* ── Avatar & XP tab (parent only) ───────────────────── */}
+        {isParent && activeTab === 1 && <AvatarAdminTab />}
       </SectionCard>
 
       <AIUsagePanel />
