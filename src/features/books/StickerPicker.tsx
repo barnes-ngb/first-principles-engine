@@ -15,7 +15,7 @@ import { addDoc, getDocs, orderBy, query, doc, setDoc } from 'firebase/firestore
 
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
-import type { Sticker, StickerTag } from '../../core/types/domain'
+import type { Sticker, StickerTag } from '../../core/types'
 import { StickerCategory } from '../../core/types/enums'
 
 interface StickerPickerProps {

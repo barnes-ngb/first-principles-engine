@@ -19,7 +19,7 @@ import {
   laddersCollection,
   sessionsCollection,
 } from '../../core/firebase/firestore'
-import type { DailyPlan, Ladder, Rung, Session } from '../../core/types/domain'
+import type { DailyPlan, Ladder, Rung, Session } from '../../core/types'
 import { SessionResult, SupportTag } from '../../core/types/enums'
 import type {
   SessionResult as SessionResultType,

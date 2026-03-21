@@ -34,7 +34,7 @@ import type {
   StopRule,
   SupportDefault,
   WorkbookConfig,
-} from '../../core/types/domain'
+} from '../../core/types'
 import { MasteryGate, SkillLevel, SubjectBucket, UserProfile } from '../../core/types/enums'
 import {
   defaultEvidenceDefinitions,

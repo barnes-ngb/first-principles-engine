@@ -25,7 +25,7 @@ import {
   weeksCollection,
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { DayLog, Ladder, MilestoneProgress, Session, WeekPlan } from '../../core/types/domain'
+import type { DayLog, Ladder, MilestoneProgress, Session, WeekPlan } from '../../core/types'
 import { StreamId } from '../../core/types/enums'
 import type { ProgressByRungId } from '../kids/ladder.logic'
 import { getActiveRungId, rungIdFor } from '../kids/ladder.logic'

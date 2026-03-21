@@ -11,7 +11,7 @@ import MicIcon from '@mui/icons-material/Mic'
 import { doc, getDoc } from 'firebase/firestore'
 
 import { artifactsCollection } from '../core/firebase/firestore'
-import type { Artifact } from '../core/types/domain'
+import type { Artifact } from '../core/types'
 import { EvidenceType } from '../core/types/enums'
 
 interface ArtifactGalleryProps {

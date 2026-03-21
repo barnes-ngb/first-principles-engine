@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
-import type { ArmorPiece, AvatarProfile } from '../../core/types/domain'
-import { ARMOR_PIECES } from '../../core/types/domain'
+import type { ArmorPiece, AvatarProfile } from '../../core/types'
+import { ARMOR_PIECES } from '../../core/types'
 
 interface UnlockCelebrationProps {
   newPiece: ArmorPiece | null

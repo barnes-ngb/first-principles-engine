@@ -15,7 +15,7 @@ import {
 import { useFamilyId } from '../../core/auth/useAuth'
 import { dadLabReportsCollection, hoursCollection } from '../../core/firebase/firestore'
 import { useChildren } from '../../core/hooks/useChildren'
-import type { DadLabReport } from '../../core/types/domain'
+import type { DadLabReport } from '../../core/types'
 import type { DadLabStatus } from '../../core/types/enums'
 
 export function useDadLabReports() {

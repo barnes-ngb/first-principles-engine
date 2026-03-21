@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest'
-import type { AssignmentCandidate, SkillSnapshot } from '../../core/types/domain'
+import type { AssignmentCandidate, SkillSnapshot } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, SkillLevel, SubjectBucket } from '../../core/types/enums'
 import {

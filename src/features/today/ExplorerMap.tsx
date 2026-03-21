@@ -6,7 +6,7 @@ import { getDocs, query, where } from 'firebase/firestore'
 
 import SectionCard from '../../components/SectionCard'
 import { daysCollection } from '../../core/firebase/firestore'
-import type { DayLog } from '../../core/types/domain'
+import type { DayLog } from '../../core/types'
 
 interface ExplorerMapProps {
   familyId: string

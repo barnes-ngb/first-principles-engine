@@ -3,7 +3,7 @@ import { getDocs, orderBy, query, where } from 'firebase/firestore'
 
 import { useFamilyId } from '../../core/auth/useAuth'
 import { labSessionsCollection } from '../../core/firebase/firestore'
-import type { LabSession } from '../../core/types/domain'
+import type { LabSession } from '../../core/types'
 
 export interface UseWeekSessionsResult {
   /** All lab sessions for this child + week (across all projects). */

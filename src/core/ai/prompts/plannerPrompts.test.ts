@@ -4,7 +4,7 @@ import type {
   SkillSnapshot,
   StopRule,
   SupportDefault,
-} from '../../types/domain'
+} from '../../types'
 import { AssignmentAction, EnergyLevel, PaceStatus, SkillLevel, SubjectBucket } from '../../types/enums'
 import {
   buildAssignmentsSection,

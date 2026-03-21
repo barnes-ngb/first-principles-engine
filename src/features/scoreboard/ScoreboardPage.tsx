@@ -32,7 +32,7 @@ import type {
   LadderProgress,
   ScoreMetric,
   WeeklyScore,
-} from '../../core/types/domain'
+} from '../../core/types'
 import type { SessionResult as SessionResultType, StreamKey } from '../../core/types/enums'
 import { getWeekRange } from '../engine/engine.logic'
 import { resultEmoji } from '../sessions/sessions.logic'

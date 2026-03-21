@@ -1,4 +1,4 @@
-import type { Child, DayLog, WeekPlan } from '../../core/types/domain'
+import type { Child, DayLog, WeekPlan } from '../../core/types'
 import { DayBlockLabel, DayBlockType } from '../../core/types/enums'
 import type { DayBlockType as DayBlockTypeValue } from '../../core/types/enums'
 import { ALL_DAY_BLOCKS } from '../today/daylog.model'

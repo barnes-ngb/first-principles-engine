@@ -1,4 +1,4 @@
-import type { Artifact, MilestoneProgress } from '../../core/types/domain'
+import type { Artifact, MilestoneProgress } from '../../core/types'
 import { EngineStage } from '../../core/types/enums'
 import { formatDateYmd } from '../../core/utils/format'
 import type { WeekRange } from '../../core/utils/time'

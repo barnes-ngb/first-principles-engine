@@ -5,7 +5,7 @@ import {
   sightWordProgressCollection,
   sightWordProgressDocId,
 } from '../../core/firebase/firestore'
-import type { SightWordProgress } from '../../core/types/domain'
+import type { SightWordProgress } from '../../core/types'
 import { recordEncounter } from './sightWordMastery'
 
 export function useSightWordProgress(familyId: string, childId: string) {

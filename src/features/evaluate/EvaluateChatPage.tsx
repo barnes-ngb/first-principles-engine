@@ -42,7 +42,7 @@ import type {
   EvaluationRecommendation,
   EvaluationSession,
   SkillSnapshot,
-} from '../../core/types/domain'
+} from '../../core/types'
 import FoundationsSection from './FoundationsSection'
 import { ChatMessageRole, EvaluationDomain, MasteryGate, SkillLevel } from '../../core/types/enums'
 

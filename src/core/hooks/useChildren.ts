@@ -4,7 +4,7 @@ import { addDoc, getDocs } from 'firebase/firestore'
 import { useFamilyId } from '../auth/useAuth'
 import { useProfile } from '../profile/useProfile'
 import { childrenCollection } from '../firebase/firestore'
-import type { Child } from '../types/domain'
+import type { Child } from '../types'
 import { UserProfile } from '../types/enums'
 
 const ACTIVE_CHILD_KEY = 'fpe_active_child_id'

@@ -60,7 +60,7 @@ import type {
   SkillSnapshot,
   WeekPlan,
   WorkbookConfig,
-} from '../../core/types/domain'
+} from '../../core/types'
 import {
   AssignmentAction,
   ChatMessageRole,

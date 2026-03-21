@@ -9,7 +9,7 @@ import Typography from '@mui/material/Typography'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 
-import type { BookPage } from '../../core/types/domain'
+import type { BookPage } from '../../core/types'
 import { PAGE_LAYOUTS, TEXT_SIZES, TEXT_FONTS, TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
 import DraggableImage from './DraggableImage'
 import type { ImagePosition } from './DraggableImage'

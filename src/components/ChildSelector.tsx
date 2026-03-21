@@ -4,7 +4,7 @@ import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import PersonAddIcon from '@mui/icons-material/PersonAdd'
-import type { Child } from '../core/types/domain'
+import type { Child } from '../core/types'
 import AddChildDialog from './AddChildDialog'
 
 interface ChildSelectorProps {

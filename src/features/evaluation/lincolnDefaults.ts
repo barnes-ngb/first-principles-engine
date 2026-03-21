@@ -1,4 +1,4 @@
-import type { EvidenceDefinition, PrioritySkill, StopRule, SupportDefault } from '../../core/types/domain'
+import type { EvidenceDefinition, PrioritySkill, StopRule, SupportDefault } from '../../core/types'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
 
 /** Default priority skills for Lincoln based on current assessment. */

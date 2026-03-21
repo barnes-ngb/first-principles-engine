@@ -1,4 +1,4 @@
-import type { DayBlock } from '../types/domain'
+import type { DayBlock } from '../types'
 import type { DayBlockType, SubjectBucket } from '../types/enums'
 
 // ─── MO Required Subjects ────────────────────────────────────────────────────

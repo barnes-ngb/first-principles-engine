@@ -1,4 +1,4 @@
-import type { DraftWeeklyPlan, PrioritySkill } from '../../core/types/domain'
+import type { DraftWeeklyPlan, PrioritySkill } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 

@@ -3,14 +3,14 @@ import { getFunctions, httpsCallable } from 'firebase/functions'
 
 import { app } from '../firebase/firebase'
 import { avatarProfilesCollection, xpLedgerCollection } from '../firebase/firestore'
-import { ARMOR_PIECES } from '../types/domain'
+import { ARMOR_PIECES } from '../types'
 import type {
   ArmorPiece,
   ArmorPieceProgress,
   ArmorTier,
   AvatarProfile,
   PlatformerTier,
-} from '../types/domain'
+} from '../types'
 
 // ── Cloud Function types ─────────────────────────────────────────
 

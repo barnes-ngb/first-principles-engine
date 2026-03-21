@@ -9,7 +9,7 @@ import type {
   ReadingRoutine,
   RoutineItem,
   SpeechRoutine,
-} from '../../core/types/domain'
+} from '../../core/types'
 import { RoutineItemKey } from '../../core/types/enums'
 import { ALL_ROUTINE_ITEMS } from './daylog.model'
 import { calculateXp, XP_VALUES } from './xp'

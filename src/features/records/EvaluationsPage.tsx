@@ -31,7 +31,7 @@ import {
   evaluationsCollection,
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { Artifact, Evaluation } from '../../core/types/domain'
+import type { Artifact, Evaluation } from '../../core/types'
 import { getMonthLabel, getMonthRange } from './records.logic'
 
 const currentDate = new Date()

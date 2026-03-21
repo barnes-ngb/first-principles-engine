@@ -1,4 +1,4 @@
-import type { DraftWeeklyPlan } from '../../core/types/domain'
+import type { DraftWeeklyPlan } from '../../core/types'
 import { generateItemId } from './chatPlanner.logic'
 
 /**

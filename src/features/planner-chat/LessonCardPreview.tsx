@@ -16,7 +16,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import type { GeneratedActivity } from '../../core/ai/useAI'
-import type { DraftPlanItem } from '../../core/types/domain'
+import type { DraftPlanItem } from '../../core/types'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { fixUnicodeEscapes } from '../../core/utils/format'
 

@@ -1,4 +1,4 @@
-import type { DayLog } from '../../core/types/domain'
+import type { DayLog } from '../../core/types'
 import type { RoutineItemKey } from '../../core/types/enums'
 
 /** XP mapping per routine item */

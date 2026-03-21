@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { inferBookTheme } from '../useBookGenerator'
-import { BOOK_THEMES } from '../../../core/types/domain'
-import type { BookTheme } from '../../../core/types/domain'
+import { BOOK_THEMES } from '../../../core/types'
+import type { BookTheme } from '../../../core/types'
 
 // ── inferBookTheme ────────────────────────────────────────────────
 

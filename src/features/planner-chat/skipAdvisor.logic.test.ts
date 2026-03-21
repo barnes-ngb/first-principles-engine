@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { DraftPlanItem, SkillSnapshot } from '../../core/types/domain'
+import type { DraftPlanItem, SkillSnapshot } from '../../core/types'
 import { MasteryGate, SkillLevel, SubjectBucket } from '../../core/types/enums'
 import {
   batchEvaluateSkip,

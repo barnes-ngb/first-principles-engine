@@ -1,8 +1,9 @@
 import { ref, getBlob } from 'firebase/storage'
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
-import type { Book, BookPage } from '../../core/types/domain'
+import type { Book, BookPage } from '../../core/types'
 import { storage } from '../../core/firebase/storage'
+import { startStep } from '../../core/utils/perf'
 import type { PrintSettings } from './PrintSettingsDialog'
 import { TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
 
@@ -121,6 +122,7 @@ async function prefetchBookImages(book: Book): Promise<Map<string, string>> {
 /* ───────────────────── main entry ───────────────────── */
 
 export async function printBook(book: Book, opts: PrintBookOptions): Promise<void> {
+  const endTotal = startStep('printBook')
   const { childName, isLincoln, sightWords } = opts
   const settings = opts.settings ?? DEFAULT_SETTINGS
   const colors = BG_COLORS[settings.background]
@@ -131,7 +133,9 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
   const sightWordSet = new Set((sightWords ?? []).map((w) => w.toLowerCase()))
 
   // Pre-fetch all images as base64 to avoid CORS issues
+  const endPrefetch = startStep('printBook.prefetchImages')
   const imageMap = await prefetchBookImages(book)
+  endPrefetch()
   const resolveUrl = (url: string) => imageMap.get(url) ?? url
 
   const isBooklet = settings.pageSize === 'booklet'
@@ -142,6 +146,7 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
     format: [size.widthMM, size.heightMM],
   })
 
+  const endRenderPages = startStep('printBook.renderPages')
   if (isBooklet) {
     await renderBooklet(pdf, book, childName, isLincoln, colors, titleFont, sightWordSet, settings.sightWordStyle, size, resolveUrl)
   } else {
@@ -171,11 +176,13 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
     await renderDivToPage(backDiv, pdf, size)
     document.body.removeChild(backDiv)
   }
+  endRenderPages()
 
   // Download
   const slug = (book.title || 'Book').replace(/[^a-zA-Z0-9]+/g, '-')
   const date = new Date().toISOString().split('T')[0]
   pdf.save(`${slug}-${date}.pdf`)
+  endTotal()
 }
 
 /* ───────────────────── booklet rendering ───────────────────── */

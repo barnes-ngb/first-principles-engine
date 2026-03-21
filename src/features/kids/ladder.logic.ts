@@ -1,4 +1,4 @@
-import type { Artifact, MilestoneProgress, Rung } from '../../core/types/domain'
+import type { Artifact, MilestoneProgress, Rung } from '../../core/types'
 
 export type RungStatus = 'locked' | 'active' | 'achieved'
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { DraftWeeklyPlan, PrioritySkill } from '../../core/types/domain'
+import type { DraftWeeklyPlan, PrioritySkill } from '../../core/types'
 import { SkillLevel, SubjectBucket } from '../../core/types/enums'
 import { MathTags, ReadingTags } from '../../core/types/skillTags'
 import { buildCoverageSummary, formatCoverageSummaryText } from './coverageSummary'
