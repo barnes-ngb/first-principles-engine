@@ -109,7 +109,7 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
                 width: 90,
                 height: 90,
                 objectFit: 'contain',
-                imageRendering: isLincoln ? 'pixelated' : 'auto',
+                imageRendering: 'pixelated',
                 opacity: appliedToday ? 1 : 0.9,
                 flexShrink: 0,
               }}
@@ -120,8 +120,25 @@ const ArmorPieceButton = forwardRef<HTMLDivElement, ArmorPieceButtonProps>(
             </Box>
           )
         ) : (
-          <Box sx={{ width: 90, height: 90, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0, gap: 0.5 }}>
-            <LockIcon sx={{ fontSize: 40, color: isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)' }} />
+          <Box sx={{ position: 'relative', width: 90, height: 90, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0, gap: 0.5 }}>
+            {/* Locked silhouette — show dimmed armor crop if available */}
+            {imageUrl && (
+              <Box
+                component="img"
+                src={imageUrl}
+                alt={pieceDef.name}
+                sx={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  filter: 'brightness(0.3) grayscale(1)',
+                  imageRendering: 'pixelated',
+                }}
+              />
+            )}
+            <LockIcon sx={{ fontSize: 40, color: isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.3)', zIndex: 1 }} />
           </Box>
         )}
 
