@@ -12,6 +12,7 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import type { BookPage } from '../../core/types/domain'
 import { PAGE_LAYOUTS, TEXT_SIZES, TEXT_FONTS, TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
 import DraggableImage from './DraggableImage'
+import type { ImagePosition } from './DraggableImage'
 
 interface PageEditorProps {
   page: BookPage
@@ -19,7 +20,7 @@ interface PageEditorProps {
   onAddImage: (file: File) => void
   onRemoveImage?: (imageId: string) => void
   onReRecord?: () => void
-  onImagePositionChange?: (imageId: string, position: { x: number; y: number; width: number; height: number }) => void
+  onImagePositionChange?: (imageId: string, position: ImagePosition) => void
   childName: string
 }
 
@@ -104,7 +105,19 @@ export default function PageEditor({
             onSelect={() => setSelectedImageId(img.id)}
             onPositionChange={(pos) => onImagePositionChange?.(img.id, pos)}
             onRemove={onRemoveImage ? () => onRemoveImage(img.id) : undefined}
-            style={{ zIndex: idx + 1 }}
+            onZIndexChange={(delta) => {
+              const currentZ = img.position?.zIndex ?? idx
+              const newZ = Math.max(0, Math.min(page.images.length - 1, currentZ + delta))
+              onImagePositionChange?.(img.id, {
+                x: img.position?.x ?? 0,
+                y: img.position?.y ?? 0,
+                width: img.position?.width ?? 100,
+                height: img.position?.height ?? 100,
+                rotation: img.position?.rotation ?? 0,
+                zIndex: newZ,
+              })
+            }}
+            style={{ zIndex: img.position?.zIndex ?? idx + 1 }}
           />
         ))
       ) : (

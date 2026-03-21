@@ -37,10 +37,12 @@ import SaveIndicator from '../../components/SaveIndicator'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useAI } from '../../core/ai/useAI'
-import type { BookPage, Sticker } from '../../core/types/domain'
+import type { BookPage, BookTheme, Sticker } from '../../core/types/domain'
+import { BOOK_THEMES } from '../../core/types/domain'
 import type { ImageGenRequest } from '../../core/ai/useAI'
 import PageEditor from './PageEditor'
 import StickerPicker from './StickerPicker'
+import type { ImagePosition } from './DraggableImage'
 import { useBook } from './useBook'
 import { printBook } from './printBook'
 import PrintSettingsDialog from './PrintSettingsDialog'
@@ -156,6 +158,7 @@ export default function BookEditorPage() {
   // Finish flow state
   const [showFinishDialog, setShowFinishDialog] = useState(false)
   const [selectedCoverUrl, setSelectedCoverUrl] = useState<string | null>(null)
+  const [selectedTheme, setSelectedTheme] = useState<BookTheme | undefined>(undefined)
   const [showCelebration, setShowCelebration] = useState(false)
 
   // Print state
@@ -204,7 +207,7 @@ export default function BookEditorPage() {
   )
 
   const handleImagePositionChange = useCallback(
-    (imageId: string, position: { x: number; y: number; width: number; height: number }) => {
+    (imageId: string, position: ImagePosition) => {
       if (!activePage) return
       updateImagePosition(activePage.id, imageId, position)
     },
@@ -333,14 +336,16 @@ export default function BookEditorPage() {
 
   const handleOpenFinishDialog = useCallback(() => {
     setSelectedCoverUrl(coverCandidates[0] ?? null)
+    setSelectedTheme(book?.theme)
     setShowFinishDialog(true)
-  }, [coverCandidates])
+  }, [coverCandidates, book?.theme])
 
   const handleFinishBook = useCallback(() => {
     if (!book) return
     updateBookMeta({
       status: 'complete',
       ...(selectedCoverUrl ? { coverImageUrl: selectedCoverUrl } : {}),
+      ...(selectedTheme ? { theme: selectedTheme } : {}),
     })
     setShowFinishDialog(false)
     setShowCelebration(true)
@@ -348,7 +353,7 @@ export default function BookEditorPage() {
       setShowCelebration(false)
       navigate(`/books/${bookId}/read`)
     }, 2000)
-  }, [book, selectedCoverUrl, updateBookMeta, navigate, bookId])
+  }, [book, selectedCoverUrl, selectedTheme, updateBookMeta, navigate, bookId])
 
   if (loading) {
     return (
@@ -997,6 +1002,8 @@ export default function BookEditorPage() {
         open={showStickerPicker}
         onClose={() => setShowStickerPicker(false)}
         familyId={familyId}
+        childName={childName}
+        childProfile={isLincoln ? 'lincoln' : 'london'}
         onSelectSticker={handleSelectSticker}
       />
 
@@ -1050,6 +1057,23 @@ export default function BookEditorPage() {
                 </Stack>
               </>
             )}
+            {/* Theme picker */}
+            <Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
+                Pick a theme (optional):
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+                {BOOK_THEMES.map((t) => (
+                  <Chip
+                    key={t.id}
+                    label={`${t.emoji} ${t.label}`}
+                    size="small"
+                    variant={selectedTheme === t.id ? 'filled' : 'outlined'}
+                    onClick={() => setSelectedTheme(selectedTheme === t.id ? undefined : t.id)}
+                  />
+                ))}
+              </Box>
+            </Box>
             <Typography variant="body2" color="text.secondary">
               You can always come back and edit!
             </Typography>

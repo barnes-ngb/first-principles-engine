@@ -32,6 +32,7 @@ import {
 import AccountSection from './AccountSection'
 import AIUsagePanel from './AIUsagePanel'
 import AvatarAdminTab from './AvatarAdminTab'
+import StickerLibraryTab from './StickerLibraryTab'
 
 type SnackbarState = {
   open: boolean
@@ -104,6 +105,7 @@ export default function SettingsPage() {
           >
             <Tab label="General" />
             <Tab label="Avatar & XP" />
+            <Tab label="Sticker Library" />
           </Tabs>
         )}
 
@@ -176,6 +178,9 @@ export default function SettingsPage() {
 
         {/* ── Avatar & XP tab (parent only) ───────────────────── */}
         {isParent && activeTab === 1 && <AvatarAdminTab />}
+
+        {/* ── Sticker Library tab (parent only) ───────────────── */}
+        {isParent && activeTab === 2 && <StickerLibraryTab />}
       </SectionCard>
 
       <AIUsagePanel />

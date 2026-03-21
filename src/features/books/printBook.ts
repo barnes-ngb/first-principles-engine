@@ -396,9 +396,12 @@ function buildImagesHtml(
       .map((img) => {
         const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
         const fit = img.type === 'sticker' ? 'contain' : 'cover'
+        const rotation = pos.rotation ?? 0
+        const zIndex = pos.zIndex ?? 1
+        const transformStyle = rotation ? `transform:rotate(${rotation}deg);transform-origin:center center;` : ''
         return `<img src="${escapeHtml(resolveUrl(img.url))}"
           style="position:absolute;left:${pos.x}%;top:${pos.y}%;width:${pos.width}%;height:${pos.height}%;
-                 object-fit:${fit};border-radius:4px;" />`
+                 object-fit:${fit};border-radius:4px;z-index:${zIndex};${transformStyle}" />`
       })
       .join('')}
   </div>`

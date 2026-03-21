@@ -37,11 +37,13 @@ import { addXpEvent } from '../../core/xp/addXpEvent'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type {
   ChatMessage,
+  ConceptualBlock,
   EvaluationFinding,
   EvaluationRecommendation,
   EvaluationSession,
   SkillSnapshot,
 } from '../../core/types/domain'
+import FoundationsSection from './FoundationsSection'
 import { ChatMessageRole, EvaluationDomain, MasteryGate, SkillLevel } from '../../core/types/enums'
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -156,7 +158,7 @@ export default function EvaluateChatPage() {
   const familyId = useFamilyId()
   const navigate = useNavigate()
   const { activeChildId, activeChild, children, setActiveChildId } = useActiveChild()
-  const { chat, loading: aiLoading, error: aiError } = useAI()
+  const { chat, analyzePatterns, loading: aiLoading, error: aiError } = useAI()
 
   const [domain, setDomain] = useState<EvaluationDomain>(EvaluationDomain.Reading)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -172,6 +174,9 @@ export default function EvaluateChatPage() {
   const [inputText, setInputText] = useState('')
   const [initializing, setInitializing] = useState(true)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
+  const [patternAnalysisState, setPatternAnalysisState] = useState<'idle' | 'loading' | 'done'>('idle')
+  const [conceptualBlocks, setConceptualBlocks] = useState<ConceptualBlock[]>([])
+  const [blocksSummary, setBlocksSummary] = useState<string | undefined>(undefined)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll on new messages
@@ -277,6 +282,38 @@ export default function EvaluateChatPage() {
     [activeChildId, domain, familyId, sessionDocId, recommendations, completeSummary, nextEvalDate],
   )
 
+  // ── Trigger pattern analysis after <complete> ────────────────
+
+  const triggerPatternAnalysis = useCallback(
+    async (sessionId: string, allFindings: EvaluationFinding[]) => {
+      if (!activeChildId) return
+      setPatternAnalysisState('loading')
+      try {
+        const result = await analyzePatterns({
+          familyId,
+          childId: activeChildId,
+          evaluationSessionId: sessionId,
+          currentFindings: allFindings.map((f) => ({
+            skill: f.skill,
+            status: f.status,
+            evidence: f.evidence,
+            notes: f.notes,
+          })),
+        })
+        if (result) {
+          setConceptualBlocks(result.blocks as ConceptualBlock[])
+          setBlocksSummary(result.summary)
+        }
+        setPatternAnalysisState('done')
+      } catch (err) {
+        console.warn('Pattern analysis failed:', err)
+        setPatternAnalysisState('done')
+        setBlocksSummary(undefined)
+      }
+    },
+    [activeChildId, familyId, analyzePatterns],
+  )
+
   // ── Start evaluation (first AI message) ─────────────────────
 
   const startEvaluation = useCallback(async () => {
@@ -332,7 +369,13 @@ export default function EvaluateChatPage() {
     }
 
     await persistSession(newMessages, allFindings, complete)
-  }, [activeChildId, activeChild, familyId, domain, chat, persistSession])
+
+    if (complete) {
+      // Determine the session doc ID (may have been set by persistSession)
+      const sid = sessionDocId ?? `${activeChildId}_${domain}_${new Date().toISOString().slice(0, 10)}`
+      void triggerPatternAnalysis(sid, allFindings)
+    }
+  }, [activeChildId, activeChild, familyId, domain, chat, persistSession, sessionDocId, triggerPatternAnalysis])
 
   // ── Send message ────────────────────────────────────────────
 
@@ -393,7 +436,12 @@ export default function EvaluateChatPage() {
     }
 
     await persistSession(finalMessages, allFindings, complete)
-  }, [inputText, activeChildId, aiLoading, messages, findings, familyId, domain, chat, persistSession])
+
+    if (complete) {
+      const sid = sessionDocId ?? `${activeChildId}_${domain}_${new Date().toISOString().slice(0, 10)}`
+      void triggerPatternAnalysis(sid, allFindings)
+    }
+  }, [inputText, activeChildId, aiLoading, messages, findings, familyId, domain, chat, persistSession, sessionDocId, triggerPatternAnalysis])
 
   // ── Save & Apply (update skill snapshot) ────────────────────
 
@@ -469,13 +517,19 @@ export default function EvaluateChatPage() {
         (s) => !newPrioritySkills.some((n) => n.tag === s.tag),
       )
 
+      const now = new Date().toISOString()
       const updated: Omit<SkillSnapshot, 'id'> = {
         childId: activeChildId,
         prioritySkills: [...existingSkills, ...newPrioritySkills],
         supports: newSupports.length > 0 ? newSupports : existing.supports || [],
         stopRules: newStopRules.length > 0 ? newStopRules : existing.stopRules || [],
         evidenceDefinitions: newEvidenceDefs.length > 0 ? newEvidenceDefs : existing.evidenceDefinitions || [],
-        updatedAt: new Date().toISOString(),
+        updatedAt: now,
+        // Overwrite conceptual blocks with most recent evaluation's findings
+        ...(conceptualBlocks.length > 0 ? {
+          conceptualBlocks,
+          blocksUpdatedAt: now,
+        } : {}),
       }
 
       await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)))
@@ -494,7 +548,7 @@ export default function EvaluateChatPage() {
     } catch (err) {
       console.error('Failed to apply findings to skill snapshot', err)
     }
-  }, [activeChildId, familyId, findings, recommendations, completeData, sessionDocId])
+  }, [activeChildId, familyId, findings, recommendations, completeData, sessionDocId, conceptualBlocks])
 
   // ── Clear & Restart ───────────────────────────────────────
 
@@ -509,6 +563,9 @@ export default function EvaluateChatPage() {
     setSessionStatus('in-progress')
     setClearDialogOpen(false)
     setSnackText(null)
+    setPatternAnalysisState('idle')
+    setConceptualBlocks([])
+    setBlocksSummary(undefined)
   }, [])
 
   // ── Download Report ─────────────────────────────────────────
@@ -912,6 +969,17 @@ export default function EvaluateChatPage() {
                     </Box>
                   ))}
                 </>
+              )}
+
+              {/* Conceptual Foundations */}
+              {(patternAnalysisState === 'loading' || patternAnalysisState === 'done') && (
+                <Box sx={{ mt: 2 }}>
+                  <FoundationsSection
+                    blocks={conceptualBlocks}
+                    summary={blocksSummary}
+                    loading={patternAnalysisState === 'loading'}
+                  />
+                </Box>
               )}
 
               {/* Snack feedback */}
