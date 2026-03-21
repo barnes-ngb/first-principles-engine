@@ -24,6 +24,7 @@ import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
+import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver'
 import BarChartIcon from '@mui/icons-material/BarChart'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/Edit'
@@ -241,6 +242,28 @@ export default function BookshelfPage() {
       >
         My Books
       </Typography>
+
+      {/* Tell a Story — primary CTA (kids) / secondary for parents */}
+      <Button
+        variant={isParent ? 'outlined' : 'contained'}
+        size="large"
+        startIcon={<RecordVoiceOverIcon />}
+        onClick={() => navigate('/books/story-guide')}
+        sx={{
+          minHeight: isParent ? 44 : 56,
+          textTransform: 'none',
+          fontWeight: 700,
+          ...(isParent
+            ? {}
+            : {
+                fontSize: '1.05rem',
+                bgcolor: isLincoln ? '#4caf50' : '#f06292',
+                '&:hover': { bgcolor: isLincoln ? '#388e3c' : '#e91e8c' },
+              }),
+        }}
+      >
+        {isLincoln ? 'Tell a Story 🎮' : 'Tell a Story ✨'}
+      </Button>
 
       {/* Filter tabs + parent actions */}
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
@@ -693,6 +716,18 @@ export default function BookshelfPage() {
           {/* Tab 1: Generate a Book */}
           {dialogTab === 1 && (
             <Stack spacing={3} sx={{ pt: 1 }}>
+              {/* Story Guide shortcut */}
+              <Button
+                variant="outlined"
+                startIcon={<RecordVoiceOverIcon />}
+                onClick={() => {
+                  handleCloseNewDialog()
+                  navigate('/books/story-guide')
+                }}
+                sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
+              >
+                Use Story Guide (guided questions)
+              </Button>
               <TextField
                 label="What's your story about?"
                 placeholder={

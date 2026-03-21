@@ -26,6 +26,7 @@ import BookEditorPage from '../features/books/BookEditorPage'
 import BookReaderPage from '../features/books/BookReaderPage'
 import CreateSightWordBook from '../features/books/CreateSightWordBook'
 import SightWordDashboard from '../features/books/SightWordDashboard'
+import StoryGuidePage from '../features/books/StoryGuidePage'
 import MyAvatarPage from '../features/avatar/MyAvatarPage'
 
 const routes = [
@@ -58,6 +59,7 @@ const routes = [
       { path: '/planner/legacy', element: <PlannerPage /> },
       { path: '/evaluate', element: <EvaluateChatPage /> },
       { path: '/books', element: <BookshelfPage /> },
+      { path: '/books/story-guide', element: <StoryGuidePage /> },
       { path: '/books/create-story', element: <CreateSightWordBook /> },
       { path: '/books/sight-words', element: <SightWordDashboard /> },
       { path: '/books/:bookId', element: <BookEditorPage /> },
