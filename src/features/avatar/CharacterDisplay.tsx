@@ -51,11 +51,11 @@ export default function CharacterDisplay({
         bgcolor: isLincoln ? '#0d1117' : '#f0f7ff',
       }}
     >
-      {/* Base character layer */}
-      {profile.baseCharacterUrl ? (
+      {/* Base character layer — photo transform takes priority over generated base */}
+      {(profile.photoTransformUrl ?? profile.baseCharacterUrl) ? (
         <Box
           component="img"
-          src={profile.baseCharacterUrl}
+          src={profile.photoTransformUrl ?? profile.baseCharacterUrl}
           alt="Your character"
           sx={{
             position: 'absolute',
