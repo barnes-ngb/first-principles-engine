@@ -9,6 +9,7 @@ import {
   loadGradeResults,
   loadDraftBookCount,
   loadSightWordSummary,
+  loadWordMasterySummary,
 } from "./chat.js";
 import { loadRecentEvalContext } from "./chatTypes.js";
 
@@ -26,6 +27,7 @@ export const ContextSlice = {
   BookStatus: "bookStatus",
   SightWords: "sightWords",
   RecentEval: "recentEval",
+  WordMastery: "wordMastery",
 } as const;
 export type ContextSlice = (typeof ContextSlice)[keyof typeof ContextSlice];
 
@@ -35,13 +37,13 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   plan: [
     "charter", "childProfile", "recentSessions", "workbookPaces",
     "weekFocus", "hoursProgress", "engagement", "gradeResults",
-    "bookStatus", "sightWords", "recentEval",
+    "bookStatus", "sightWords", "recentEval", "wordMastery",
   ],
   chat: ["charter", "childProfile"],
   generate: ["charter", "childProfile"],
-  evaluate: ["charter", "childProfile", "sightWords"],
-  quest: ["childProfile", "sightWords", "recentEval"],
-  generateStory: ["childProfile"],
+  evaluate: ["charter", "childProfile", "sightWords", "wordMastery"],
+  quest: ["childProfile", "sightWords", "recentEval", "wordMastery"],
+  generateStory: ["childProfile", "wordMastery"],
   analyzePatterns: ["childProfile"],
 };
 
@@ -240,6 +242,9 @@ export async function buildContextForTask(
   if (slices.includes("recentEval")) {
     fetches.push({ slice: "recentEval", promise: loadRecentEvalContext(db, familyId, childId) });
   }
+  if (slices.includes("wordMastery")) {
+    fetches.push({ slice: "wordMastery", promise: loadWordMasterySummary(db, familyId, childId) });
+  }
 
   // Await all in parallel
   const results = await Promise.allSettled(fetches.map((f) => f.promise));
@@ -356,6 +361,12 @@ export async function buildContextForTask(
   if (sliceData.has("recentEval")) {
     const evalContext = sliceData.get("recentEval") as string;
     if (evalContext) sections.push(evalContext);
+  }
+
+  // Word mastery (quest word progress)
+  if (sliceData.has("wordMastery")) {
+    const wordMasteryContext = sliceData.get("wordMastery") as string;
+    if (wordMasteryContext) sections.push(wordMasteryContext);
   }
 
   return sections;

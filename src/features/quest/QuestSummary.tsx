@@ -55,6 +55,8 @@ interface QuestSummaryProps {
   previousTotalXp?: number
   skippedCount?: number
   flaggedErrorCount?: number
+  /** Words the child got wrong or skipped during this quest */
+  strugglingWords?: string[]
   onDone: () => void
   onTryAgain: () => void
 }
@@ -67,6 +69,7 @@ export default function QuestSummary({
   findings,
   previousTotalXp = 0,
   flaggedErrorCount = 0,
+  strugglingWords = [],
   onDone,
   onTryAgain,
 }: QuestSummaryProps) {
@@ -332,6 +335,67 @@ export default function QuestSummary({
               </Stack>
             ))}
           </Stack>
+        </Box>
+      )}
+
+      {/* Struggling words — story suggestion */}
+      {strugglingWords.length > 0 && (
+        <Box
+          sx={{
+            bgcolor: MC.darkStone,
+            borderRadius: 2,
+            p: 2,
+            mb: 2,
+            border: `1px solid ${MC.diamond}`,
+          }}
+        >
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.45rem',
+              color: MC.diamond,
+              mb: 1,
+              lineHeight: 1.8,
+            }}
+          >
+            {strugglingWords.length} word{strugglingWords.length !== 1 ? 's' : ''} need practice:
+          </Typography>
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.4rem',
+              color: MC.white,
+              mb: 1.5,
+              lineHeight: 1.8,
+              wordBreak: 'break-word',
+            }}
+          >
+            {strugglingWords.join(', ')}
+          </Typography>
+          <Button
+            size="small"
+            fullWidth
+            onClick={() => {
+              onDone()
+              navigate('/books/create-story', {
+                state: {
+                  prefillWords: strugglingWords,
+                  source: 'quest-summary',
+                },
+              })
+            }}
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.4rem',
+              color: MC.diamond,
+              borderColor: MC.diamond,
+              border: '1px solid',
+              minHeight: 40,
+              '&:hover': { bgcolor: 'rgba(91,252,238,0.1)' },
+            }}
+          >
+            Generate a practice story
+          </Button>
         </Box>
       )}
 

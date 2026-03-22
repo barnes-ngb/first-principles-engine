@@ -376,6 +376,70 @@ export async function loadDraftBookCount(
   return snap.size;
 }
 
+/** Load word mastery summary from quest wordProgress collection. */
+export async function loadWordMasterySummary(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<string> {
+  const snap = await db
+    .collection(`families/${familyId}/children/${childId}/wordProgress`)
+    .get();
+
+  if (snap.empty) return "";
+
+  const words = snap.docs.map(
+    (d) =>
+      d.data() as {
+        word: string;
+        pattern: string;
+        masteryLevel: string;
+        correctCount: number;
+        wrongCount: number;
+        skippedCount: number;
+      },
+  );
+
+  const counts = { known: 0, emerging: 0, struggling: 0, "not-yet": 0 };
+  for (const w of words) {
+    if (w.masteryLevel in counts) {
+      counts[w.masteryLevel as keyof typeof counts]++;
+    }
+  }
+
+  const lines = [
+    `WORD MASTERY: ${words.length} words tracked. ${counts.known} mastered, ${counts.emerging} emerging, ${counts.struggling} struggling, ${counts["not-yet"]} not-yet.`,
+  ];
+
+  // Group struggling words by pattern
+  const struggling = words.filter(
+    (w) => w.masteryLevel === "struggling" || w.masteryLevel === "not-yet",
+  );
+
+  if (struggling.length > 0) {
+    const byPattern = new Map<string, string[]>();
+    for (const w of struggling) {
+      const key = w.pattern || "unknown";
+      if (!byPattern.has(key)) byPattern.set(key, []);
+      byPattern.get(key)!.push(w.word);
+    }
+
+    const patternSummaries = [...byPattern.entries()]
+      .map(([pattern, wordList]) => `${pattern} (${wordList.join(", ")})`)
+      .join("; ");
+
+    lines.push(`STRUGGLING PATTERNS: ${patternSummaries}`);
+    lines.push(
+      `STRUGGLING WORDS: ${struggling.map((w) => w.word).join(", ")}`,
+    );
+    lines.push(
+      "SUGGESTION: Generate or assign a sight word story targeting these struggling words.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
 /** Load all enriched context in parallel. Only called for plan/evaluate. */
 export async function loadEnrichedContext(
   db: Firestore,

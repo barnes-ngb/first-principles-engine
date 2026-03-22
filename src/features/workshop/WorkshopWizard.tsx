@@ -13,6 +13,7 @@ import GoalStep from './steps/GoalStep'
 import ChallengesStep from './steps/ChallengesStep'
 import BoardStyleStep from './steps/BoardStyleStep'
 import { useEffect, useRef } from 'react'
+import type { TapToHearRef } from './workshopTypes'
 
 const STEP_LABELS = ['Theme', 'Characters', 'Goal', 'Challenges', 'Board']
 
@@ -34,6 +35,14 @@ export default function WorkshopWizard({ onComplete, onCancel }: WorkshopWizardP
   const tts = useTTS()
   const lastSpokenStep = useRef(-1)
 
+  // Refs for steps that use tap-to-hear (to auto-confirm on Next)
+  const themeRef = useRef<TapToHearRef>(null)
+  const goalRef = useRef<TapToHearRef>(null)
+  const challengesRef = useRef<TapToHearRef>(null)
+  const boardRef = useRef<TapToHearRef>(null)
+
+  const stepRefs = [themeRef, null, goalRef, challengesRef, boardRef]
+
   // Speak the prompt when the step changes
   useEffect(() => {
     if (wizard.state.step !== lastSpokenStep.current) {
@@ -43,6 +52,12 @@ export default function WorkshopWizard({ onComplete, onCancel }: WorkshopWizardP
   }, [wizard.state.step, tts])
 
   const handleNext = () => {
+    // Auto-confirm any highlighted-but-unconfirmed tile before advancing
+    const ref = stepRefs[wizard.state.step]
+    if (ref?.current) {
+      ref.current.confirmHighlighted()
+    }
+
     if (wizard.state.step === 4) {
       // Final step — complete the wizard
       tts.cancel()
@@ -76,16 +91,20 @@ export default function WorkshopWizard({ onComplete, onCancel }: WorkshopWizardP
       {/* Step content */}
       <Box sx={{ minHeight: 300, mb: 3 }}>
         {wizard.state.step === 0 && (
-          <ThemeStep value={wizard.state.theme} onChange={wizard.setTheme} />
+          <ThemeStep value={wizard.state.theme} onChange={wizard.setTheme} stepRef={themeRef} />
         )}
         {wizard.state.step === 1 && (
           <CharactersStep value={wizard.state.characters} onChange={wizard.setCharacters} />
         )}
         {wizard.state.step === 2 && (
-          <GoalStep value={wizard.state.goal} onChange={wizard.setGoal} />
+          <GoalStep value={wizard.state.goal} onChange={wizard.setGoal} stepRef={goalRef} />
         )}
         {wizard.state.step === 3 && (
-          <ChallengesStep value={wizard.state.challenges} onChange={wizard.setChallenges} />
+          <ChallengesStep
+            value={wizard.state.challenges}
+            onChange={wizard.setChallenges}
+            stepRef={challengesRef}
+          />
         )}
         {wizard.state.step === 4 && (
           <BoardStyleStep
@@ -93,6 +112,7 @@ export default function WorkshopWizard({ onComplete, onCancel }: WorkshopWizardP
             boardLength={wizard.state.boardLength}
             onStyleChange={wizard.setBoardStyle}
             onLengthChange={wizard.setBoardLength}
+            stepRef={boardRef}
           />
         )}
       </Box>

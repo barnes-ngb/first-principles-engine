@@ -1,6 +1,11 @@
+import { useImperativeHandle } from 'react'
 import Box from '@mui/material/Box'
+import IconButton from '@mui/material/IconButton'
 import Typography from '@mui/material/Typography'
+import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import { BoardStyle, BoardLength } from '../../../core/types/workshop'
+import { useTapToHear } from '../useTapToHear'
+import type { TapToHearRef } from '../workshopTypes'
 
 const STYLE_OPTIONS = [
   { value: BoardStyle.Winding, label: 'Winding Path', emoji: '\uD83D\uDC0D', description: 'Like Candy Land' },
@@ -19,6 +24,7 @@ interface BoardStyleStepProps {
   boardLength: BoardLength | ''
   onStyleChange: (style: BoardStyle) => void
   onLengthChange: (length: BoardLength) => void
+  stepRef?: React.Ref<TapToHearRef>
 }
 
 export default function BoardStyleStep({
@@ -26,7 +32,18 @@ export default function BoardStyleStep({
   boardLength,
   onStyleChange,
   onLengthChange,
+  stepRef,
 }: BoardStyleStepProps) {
+  const styleTap = useTapToHear<BoardStyle>(boardStyle || ('' as BoardStyle), onStyleChange)
+  const lengthTap = useTapToHear<BoardLength>(boardLength || ('' as BoardLength), onLengthChange)
+
+  useImperativeHandle(stepRef, () => ({
+    confirmHighlighted: () => {
+      styleTap.confirmHighlighted()
+      lengthTap.confirmHighlighted()
+    },
+  }))
+
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
@@ -45,36 +62,71 @@ export default function BoardStyleStep({
           mb: 3,
         }}
       >
-        {STYLE_OPTIONS.map((option) => (
-          <Box
-            key={option.value}
-            onClick={() => onStyleChange(option.value)}
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              p: 2,
-              borderRadius: 2,
-              border: '2px solid',
-              borderColor: boardStyle === option.value ? 'primary.main' : 'divider',
-              bgcolor: boardStyle === option.value ? 'primary.light' : 'background.paper',
-              cursor: 'pointer',
-              minHeight: 90,
-              transition: 'all 0.15s',
-              '&:hover': { borderColor: 'primary.main' },
-              '&:active': { transform: 'scale(0.97)' },
-            }}
-          >
-            <Typography sx={{ fontSize: '2rem' }}>{option.emoji}</Typography>
-            <Typography variant="body2" sx={{ fontWeight: boardStyle === option.value ? 700 : 400 }}>
-              {option.label}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {option.description}
-            </Typography>
-          </Box>
-        ))}
+        {STYLE_OPTIONS.map((option) => {
+          const state = styleTap.getTileState(option.value)
+          const isActive = state !== 'idle'
+          return (
+            <Box
+              key={option.value}
+              onClick={() => styleTap.handleTileTap(option.value, option.label)}
+              sx={{
+                position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                p: 2,
+                borderRadius: 2,
+                border: '3px solid',
+                borderColor:
+                  state === 'confirmed'
+                    ? 'primary.main'
+                    : state === 'highlighted'
+                      ? 'secondary.main'
+                      : 'divider',
+                bgcolor:
+                  state === 'confirmed'
+                    ? 'primary.light'
+                    : state === 'highlighted'
+                      ? 'secondary.light'
+                      : 'background.paper',
+                cursor: 'pointer',
+                minHeight: 90,
+                transition: 'all 0.2s',
+                transform: state === 'highlighted' ? 'scale(1.05)' : 'scale(1)',
+                boxShadow: state === 'highlighted' ? '0 0 12px rgba(156,39,176,0.3)' : 'none',
+                '&:hover': { borderColor: 'primary.main' },
+                '&:active': { transform: 'scale(0.97)' },
+              }}
+            >
+              <Typography sx={{ fontSize: '2rem' }}>{option.emoji}</Typography>
+              <Typography variant="body2" sx={{ fontWeight: isActive ? 700 : 400 }}>
+                {option.label}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {option.description}
+              </Typography>
+              {isActive && (
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    styleTap.replayTTS(option.label)
+                  }}
+                  sx={{
+                    position: 'absolute',
+                    top: 2,
+                    right: 2,
+                    color: 'primary.main',
+                    p: 0.5,
+                  }}
+                >
+                  <VolumeUpIcon fontSize="small" />
+                </IconButton>
+              )}
+            </Box>
+          )
+        })}
       </Box>
 
       {/* Board length */}
@@ -88,38 +140,73 @@ export default function BoardStyleStep({
           gap: 1.5,
         }}
       >
-        {LENGTH_OPTIONS.map((option) => (
-          <Box
-            key={option.value}
-            onClick={() => onLengthChange(option.value)}
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              p: 2,
-              borderRadius: 2,
-              border: '2px solid',
-              borderColor: boardLength === option.value ? 'primary.main' : 'divider',
-              bgcolor: boardLength === option.value ? 'primary.light' : 'background.paper',
-              cursor: 'pointer',
-              minHeight: 80,
-              transition: 'all 0.15s',
-              '&:hover': { borderColor: 'primary.main' },
-              '&:active': { transform: 'scale(0.97)' },
-            }}
-          >
-            <Typography variant="body2" sx={{ fontWeight: boardLength === option.value ? 700 : 400 }}>
-              {option.label}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {option.description}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              ~{option.spaces} spaces
-            </Typography>
-          </Box>
-        ))}
+        {LENGTH_OPTIONS.map((option) => {
+          const state = lengthTap.getTileState(option.value)
+          const isActive = state !== 'idle'
+          return (
+            <Box
+              key={option.value}
+              onClick={() => lengthTap.handleTileTap(option.value, option.label)}
+              sx={{
+                position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                p: 2,
+                borderRadius: 2,
+                border: '3px solid',
+                borderColor:
+                  state === 'confirmed'
+                    ? 'primary.main'
+                    : state === 'highlighted'
+                      ? 'secondary.main'
+                      : 'divider',
+                bgcolor:
+                  state === 'confirmed'
+                    ? 'primary.light'
+                    : state === 'highlighted'
+                      ? 'secondary.light'
+                      : 'background.paper',
+                cursor: 'pointer',
+                minHeight: 80,
+                transition: 'all 0.2s',
+                transform: state === 'highlighted' ? 'scale(1.05)' : 'scale(1)',
+                boxShadow: state === 'highlighted' ? '0 0 12px rgba(156,39,176,0.3)' : 'none',
+                '&:hover': { borderColor: 'primary.main' },
+                '&:active': { transform: 'scale(0.97)' },
+              }}
+            >
+              <Typography variant="body2" sx={{ fontWeight: isActive ? 700 : 400 }}>
+                {option.label}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {option.description}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                ~{option.spaces} spaces
+              </Typography>
+              {isActive && (
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    lengthTap.replayTTS(option.label)
+                  }}
+                  sx={{
+                    position: 'absolute',
+                    top: 2,
+                    right: 2,
+                    color: 'primary.main',
+                    p: 0.5,
+                  }}
+                >
+                  <VolumeUpIcon fontSize="small" />
+                </IconButton>
+              )}
+            </Box>
+          )
+        })}
       </Box>
     </Box>
   )
