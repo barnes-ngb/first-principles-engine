@@ -34,6 +34,7 @@ import type {
   SightWordProgress,
   SkillSnapshot,
   Sticker,
+  StoryGame,
   WeekPlan,
   WeeklyReview,
   WeeklyScore,
@@ -414,3 +415,23 @@ export const evaluationSessionsCollection = (
   collection(db, `families/${familyId}/evaluationSessions`).withConverter(
     evaluationSessionConverter,
   ) as CollectionReference<EvaluationSession>
+
+// ── Story Games (Game Workshop) ─────────────────────────────────
+
+const storyGameConverter: FirestoreDataConverter<StoryGame> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as StoryGame
+    return {
+      ...data,
+      id: snapshot.id,
+    }
+  },
+}
+
+export const storyGamesCollection = (
+  familyId: string,
+): CollectionReference<StoryGame> =>
+  collection(db, `families/${familyId}/storyGames`).withConverter(
+    storyGameConverter,
+  ) as CollectionReference<StoryGame>

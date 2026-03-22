@@ -10,6 +10,7 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 
 import type { ArmorPiece, AvatarProfile } from '../../core/types'
 import { ARMOR_PIECES } from '../../core/types'
+import { useTTS } from '../../core/hooks/useTTS'
 
 interface VerseCardProps {
   pieceId: ArmorPiece | null
@@ -30,66 +31,23 @@ function getPieceImageUrl(
   return (entry.generatedImageUrls as Record<string, string | undefined>)[tier]
 }
 
-// ── TTS helper ─────────────────────────────────────────────────────
-
-function startReading(
-  verseText: string,
+/**
+ * Map a charIndex from a substring (starting at startWordIdx) back to
+ * the corresponding word index in the full word array.
+ */
+function charIndexToWordIndex(
+  words: string[],
   startWordIdx: number,
-  onWordIndex: (idx: number) => void,
-  onEnd: () => void,
-): SpeechSynthesisUtterance {
-  const words = verseText.split(/\s+/)
-  const substring = words.slice(startWordIdx).join(' ')
-
-  const utterance = new SpeechSynthesisUtterance(substring)
-  utterance.rate = 0.75
-  utterance.pitch = 1.0
-
-  // Select a warm voice if available
-  const voices = window.speechSynthesis.getVoices()
-  const preferred = voices.find((v) =>
-    v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Moira'),
-  )
-  if (preferred) utterance.voice = preferred
-
-  let boundaryFired = false
-
-  utterance.addEventListener('boundary', (event) => {
-    if (event.name !== 'word') return
-    boundaryFired = true
-    // Map charIndex in substring to word index in full verse
-    let charCount = 0
-    for (let i = 0; i < words.length - startWordIdx; i++) {
-      if (charCount + words[startWordIdx + i].length > event.charIndex) {
-        onWordIndex(startWordIdx + i)
-        return
-      }
-      charCount += words[startWordIdx + i].length + 1
+  charIndex: number,
+): number {
+  let charCount = 0
+  for (let i = 0; i < words.length - startWordIdx; i++) {
+    if (charCount + words[startWordIdx + i].length > charIndex) {
+      return startWordIdx + i
     }
-  })
-
-  utterance.addEventListener('start', () => {
-    // Fallback timer if boundary events never fire
-    let idx = startWordIdx
-    const interval = setInterval(() => {
-      if (boundaryFired) {
-        clearInterval(interval)
-        return
-      }
-      onWordIndex(idx)
-      idx++
-      if (idx >= words.length) clearInterval(interval)
-    }, (verseText.length / Math.max(words.length, 1)) * (1000 / 0.75) / words.length)
-
-    utterance.addEventListener('end', () => clearInterval(interval), { once: true })
-  })
-
-  utterance.addEventListener('end', () => {
-    onEnd()
-  })
-
-  window.speechSynthesis.speak(utterance)
-  return utterance
+    charCount += words[startWordIdx + i].length + 1
+  }
+  return startWordIdx
 }
 
 // ── Component ─────────────────────────────────────────────────────
@@ -103,10 +61,9 @@ export default function VerseCard({
   onClose,
 }: VerseCardProps) {
   const [currentWordIndex, setCurrentWordIndex] = useState<number>(-1)
-  const [isReading, setIsReading] = useState(false)
   const [hasRead, setHasRead] = useState(false)
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
   const autoStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const startWordRef = useRef(0)
 
   const pieceDef = pieceId ? ARMOR_PIECES.find((p) => p.id === pieceId) : null
   const isLincoln = profile?.themeStyle === 'minecraft'
@@ -120,51 +77,61 @@ export default function VerseCard({
 
   const words = pieceDef ? pieceDef.verseText.split(/\s+/) : []
 
+  const tts = useTTS({
+    rate: 0.75,
+    pitch: 1.0,
+    onWordBoundary: useCallback(
+      (charIndex: number) => {
+        if (words.length === 0) return
+        const wordIdx = charIndexToWordIndex(words, startWordRef.current, charIndex)
+        setCurrentWordIndex(wordIdx)
+      },
+      // words changes on each render, but only its content matters
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [pieceDef?.verseText],
+    ),
+  })
+
+  const isReading = tts.isSpeaking
+
   // ── Stop reading ────────────────────────────────────────────────
   const stopReading = useCallback(() => {
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel()
+    tts.cancel()
     if (autoStartTimerRef.current) clearTimeout(autoStartTimerRef.current)
-    utteranceRef.current = null
-    setIsReading(false)
     setCurrentWordIndex(-1)
-  }, [])
+  }, [tts])
 
   // ── Start reading from word index ───────────────────────────────
   const beginReading = useCallback(
     (fromWord = 0) => {
-      if (!pieceDef || !('speechSynthesis' in window)) return
-      window.speechSynthesis.cancel()
-
-      setIsReading(true)
+      if (!pieceDef) return
+      startWordRef.current = fromWord
       setCurrentWordIndex(fromWord)
-
-      const utterance = startReading(
-        pieceDef.verseText,
-        fromWord,
-        (idx) => setCurrentWordIndex(idx),
-        () => {
-          setIsReading(false)
-          setCurrentWordIndex(-1)
-          setHasRead(true)
-        },
-      )
-      utteranceRef.current = utterance
+      const substring = pieceDef.verseText.split(/\s+/).slice(fromWord).join(' ')
+      tts.speak(substring)
     },
-    [pieceDef],
+    [pieceDef, tts],
   )
+
+  // Track when reading finishes to show "Read again"
+  const prevIsSpeaking = useRef(false)
+  useEffect(() => {
+    if (prevIsSpeaking.current && !tts.isSpeaking) {
+      setCurrentWordIndex(-1)
+      setHasRead(true)
+    }
+    prevIsSpeaking.current = tts.isSpeaking
+  }, [tts.isSpeaking])
 
   // ── Auto-start on open ──────────────────────────────────────────
   useEffect(() => {
     if (!pieceId || !pieceDef) return
     setCurrentWordIndex(-1)
-    setIsReading(false)
     setHasRead(false)
 
     // Delay to let card-open animation complete
     autoStartTimerRef.current = setTimeout(() => {
-      // Trigger voices load then begin
       if ('speechSynthesis' in window) {
-        // Ensure voices are loaded (async on some browsers)
         const voices = window.speechSynthesis.getVoices()
         if (voices.length === 0) {
           window.speechSynthesis.onvoiceschanged = () => beginReading(0)
@@ -176,8 +143,7 @@ export default function VerseCard({
 
     return () => {
       if (autoStartTimerRef.current) clearTimeout(autoStartTimerRef.current)
-      if ('speechSynthesis' in window) window.speechSynthesis.cancel()
-      setIsReading(false)
+      tts.cancel()
       setCurrentWordIndex(-1)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -186,7 +152,6 @@ export default function VerseCard({
   // ── Tap a word → restart from that word ────────────────────────
   const handleWordTap = useCallback(
     (wordIdx: number) => {
-      if (!('speechSynthesis' in window)) return
       beginReading(wordIdx)
     },
     [beginReading],
