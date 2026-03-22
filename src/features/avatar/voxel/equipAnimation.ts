@@ -59,8 +59,11 @@ export function animateEquip(
 
   // Store original colors for emissive reset
   pieceGroup.traverse((child) => {
-    if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
-      child.userData.originalColor = child.material.color.clone()
+    if (child instanceof THREE.Mesh) {
+      const mats = Array.isArray(child.material) ? child.material : [child.material]
+      if (mats[0] instanceof THREE.MeshLambertMaterial) {
+        child.userData.originalColor = mats[0].color.clone()
+      }
     }
   })
 
@@ -73,10 +76,15 @@ export function animateEquip(
 
   // Particle burst
   if (pieceGroup.parent) {
-    const pieceColor = pieceGroup.children[0] instanceof THREE.Mesh
-      && pieceGroup.children[0].material instanceof THREE.MeshLambertMaterial
-      ? pieceGroup.children[0].material.color.getHex()
-      : 0xffffff
+    let pieceColor = 0xffffff
+    if (pieceGroup.children[0] instanceof THREE.Mesh) {
+      const mat = Array.isArray(pieceGroup.children[0].material)
+        ? pieceGroup.children[0].material[0]
+        : pieceGroup.children[0].material
+      if (mat instanceof THREE.MeshLambertMaterial) {
+        pieceColor = mat.color.getHex()
+      }
+    }
     createEquipParticles(pieceGroup.parent, center, pieceColor)
   }
 
@@ -103,10 +111,16 @@ export function animateEquip(
     // Flash the materials bright then settle
     const brightness = Math.max(0, 1 - t * 1.5)
     pieceGroup.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
+      if (child instanceof THREE.Mesh) {
         const origColor = child.userData.originalColor as THREE.Color | undefined
         if (origColor) {
-          child.material.emissive = origColor.clone().multiplyScalar(brightness * 0.6)
+          const emissive = origColor.clone().multiplyScalar(brightness * 0.6)
+          const mats = Array.isArray(child.material) ? child.material : [child.material]
+          for (const m of mats) {
+            if (m instanceof THREE.MeshLambertMaterial) {
+              m.emissive = emissive.clone()
+            }
+          }
         }
       }
     })
@@ -118,8 +132,13 @@ export function animateEquip(
       pieceGroup.parent?.remove(glow)
       pieceGroup.scale.set(1, 1, 1)
       pieceGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
-          child.material.emissive = new THREE.Color(0x000000)
+        if (child instanceof THREE.Mesh) {
+          const mats = Array.isArray(child.material) ? child.material : [child.material]
+          for (const m of mats) {
+            if (m instanceof THREE.MeshLambertMaterial) {
+              m.emissive = new THREE.Color(0x000000)
+            }
+          }
         }
       })
       onComplete?.()

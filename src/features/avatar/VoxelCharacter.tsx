@@ -26,6 +26,86 @@ interface VoxelCharacterProps {
   height?: string | number
 }
 
+/** Build a Minecraft-block-style platform at the character's feet */
+function buildPlatform(ageGroup: 'older' | 'younger'): THREE.Group {
+  const scale = ageGroup === 'younger' ? 0.88 : 1.0
+  const U = 0.125 * scale
+  const blockSize = U * 8 // One Minecraft block = 8 pixels
+  const platform = new THREE.Group()
+  platform.name = 'platform'
+
+  for (let x = -1; x <= 1; x++) {
+    for (let z = -1; z <= 0; z++) {
+      const block = new THREE.Group()
+
+      // Main block body (slightly darker)
+      const sideColor = new THREE.Color(0x555555).multiplyScalar(0.7 + Math.random() * 0.15)
+      const mainGeo = new THREE.BoxGeometry(
+        blockSize * 0.98,
+        blockSize * 0.98,
+        blockSize * 0.98,
+      )
+      const mainMats: THREE.MeshLambertMaterial[] = []
+      for (let i = 0; i < 6; i++) {
+        const variation = 0.9 + Math.random() * 0.2
+        mainMats.push(
+          new THREE.MeshLambertMaterial({
+            color: sideColor.clone().multiplyScalar(variation),
+          }),
+        )
+      }
+      const main = new THREE.Mesh(mainGeo, mainMats)
+      block.add(main)
+
+      // Slightly lighter top face
+      const topGeo = new THREE.BoxGeometry(
+        blockSize * 0.98,
+        blockSize * 0.1,
+        blockSize * 0.98,
+      )
+      const topMat = new THREE.MeshLambertMaterial({
+        color: sideColor.clone().multiplyScalar(1.3),
+      })
+      const top = new THREE.Mesh(topGeo, topMat)
+      top.position.y = blockSize * 0.45
+      block.add(top)
+
+      block.position.set(
+        x * blockSize,
+        -blockSize * 0.5, // Below Y=0 (character feet)
+        z * blockSize + blockSize * 0.3,
+      )
+      platform.add(block)
+    }
+  }
+
+  return platform
+}
+
+/** Add subtle background star particles */
+function addBackgroundParticles(scene: THREE.Scene): THREE.Points {
+  const particleCount = 30
+  const geo = new THREE.BufferGeometry()
+  const positions = new Float32Array(particleCount * 3)
+
+  for (let i = 0; i < particleCount; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * 15
+    positions[i * 3 + 1] = Math.random() * 8 - 1
+    positions[i * 3 + 2] = -3 - Math.random() * 5
+  }
+
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  const mat = new THREE.PointsMaterial({
+    color: 0x88aaff,
+    size: 0.04,
+    transparent: true,
+    opacity: 0.4,
+  })
+  const points = new THREE.Points(geo, mat)
+  scene.add(points)
+  return points
+}
+
 export default function VoxelCharacter({
   features,
   ageGroup,
@@ -65,32 +145,44 @@ export default function VoxelCharacter({
     const width = container.clientWidth
     const height = container.clientHeight
 
-    // Scene
+    // Scene — dark with slight blue tint
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0x0d1117) // Dark background
+    scene.background = new THREE.Color(0x111122)
     sceneRef.current = scene
 
-    // Camera — pulled back so full character + helmet visible with padding
+    // Background particles (stars)
+    addBackgroundParticles(scene)
+
+    // Camera — framing the taller Steve-proportioned character
+    // Character is ~4U tall = 4 * 0.125 = 0.5 units at scale 1.0
+    // But it's built in pixel units, total height ~32U * 0.125 = 4.0
     const camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 100)
-    camera.position.set(0, 1.6, 10.5)
-    camera.lookAt(0, 1.0, 0)
+    camera.position.set(0, 2.2, 10.5)
+    camera.lookAt(0, 1.8, 0)
     cameraRef.current = camera
 
-    // Lighting
-    const ambient = new THREE.AmbientLight(0xffffff, 0.6)
-    scene.add(ambient)
+    // ── Three-point lighting ──────────────────────────────────────
+    // Key light — warm, from upper right
+    const keyLight = new THREE.DirectionalLight(0xfff5e6, 0.9)
+    keyLight.position.set(4, 6, 5)
+    scene.add(keyLight)
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8)
-    dirLight.position.set(3, 5, 4)
-    scene.add(dirLight)
-
-    const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3)
-    fillLight.position.set(-3, 2, -2)
+    // Fill light — cool, from left (prevents harsh shadows)
+    const fillLight = new THREE.DirectionalLight(0xe6f0ff, 0.4)
+    fillLight.position.set(-3, 3, 2)
     scene.add(fillLight)
 
-    // Build character — shift down so there's headroom for helmet
+    // Rim light — from behind for edge definition
+    const rimLight = new THREE.DirectionalLight(0x8888ff, 0.3)
+    rimLight.position.set(0, 4, -4)
+    scene.add(rimLight)
+
+    // Ambient — low so directional lights create depth
+    const ambient = new THREE.AmbientLight(0xffffff, 0.35)
+    scene.add(ambient)
+
+    // Build character
     const character = buildCharacter(resolvedFeatures, ageGroup)
-    character.position.y = -1.0
     characterRef.current = character
     scene.add(character)
 
@@ -114,10 +206,15 @@ export default function VoxelCharacter({
       } else if (isUnlocked) {
         group.scale.set(1, 1, 1)
         group.traverse((child) => {
-          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
-            child.material.transparent = true
-            child.material.opacity = 0.3
-            child.material.depthWrite = false
+          if (child instanceof THREE.Mesh) {
+            const mat = Array.isArray(child.material) ? child.material : [child.material]
+            for (const m of mat) {
+              if (m instanceof THREE.MeshLambertMaterial) {
+                m.transparent = true
+                m.opacity = 0.3
+                m.depthWrite = false
+              }
+            }
           }
         })
       } else {
@@ -125,14 +222,14 @@ export default function VoxelCharacter({
         group.scale.set(1, 1, 1)
         group.traverse((child) => {
           if (child instanceof THREE.Mesh) {
-            const baseColor = child.material instanceof THREE.MeshLambertMaterial
-              ? child.material.color?.getHex() ?? 0x888888
+            const materials = Array.isArray(child.material) ? child.material : [child.material]
+            const baseHex = materials[0] instanceof THREE.MeshLambertMaterial
+              ? materials[0].color?.getHex() ?? 0x888888
               : 0x888888
-            // Blend base color toward light blue-gray for ethereal ghost effect
-            const base = new THREE.Color(baseColor)
+            const base = new THREE.Color(baseHex)
             const ghost = new THREE.Color(0x8888cc)
             base.lerp(ghost, 0.5)
-            child.material = new THREE.MeshLambertMaterial({
+            const ghostMat = new THREE.MeshLambertMaterial({
               color: base,
               transparent: true,
               opacity: 0.25,
@@ -140,6 +237,7 @@ export default function VoxelCharacter({
               emissive: new THREE.Color(0x334466),
               emissiveIntensity: 0.3,
             })
+            child.material = ghostMat
           }
         })
       }
@@ -149,27 +247,9 @@ export default function VoxelCharacter({
     prevEquippedRef.current = new Set(equippedPieces)
     prevTierRef.current = currentTier
 
-    // Ground platform
-    const platform = new THREE.Group()
-    platform.name = 'platform'
-    const slab = new THREE.Mesh(
-      new THREE.BoxGeometry(2.2, 0.2, 1.6),
-      new THREE.MeshLambertMaterial({ color: 0x555555 }),
-    )
-    slab.position.set(0, -0.1, 0)
-    platform.add(slab)
-    const topSurface = new THREE.Mesh(
-      new THREE.BoxGeometry(2.0, 0.05, 1.4),
-      new THREE.MeshLambertMaterial({ color: 0x666666 }),
-    )
-    topSurface.position.set(0, 0.02, 0)
-    platform.add(topSurface)
-    const rimFront = new THREE.Mesh(
-      new THREE.BoxGeometry(2.2, 0.2, 0.05),
-      new THREE.MeshLambertMaterial({ color: 0x444444 }),
-    )
-    rimFront.position.set(0, -0.1, 0.8)
-    platform.add(rimFront)
+    // Platform — at character feet level (Y=0), added to scene (not character)
+    const platform = buildPlatform(ageGroup)
+    platform.position.y = character.position.y
     scene.add(platform)
 
     // Renderer
@@ -196,11 +276,20 @@ export default function VoxelCharacter({
       // Idle animation — gentle bob + subtle arm sway
       if (characterRef.current) {
         const time = clock.getElapsedTime()
-        characterRef.current.position.y = baseY + Math.sin(time * 1.5) * 0.04
+        // Gentle bob
+        characterRef.current.position.y = baseY + Math.sin(time * 1.2) * 0.03
+
+        // Arms sway
         const armL = characterRef.current.getObjectByName('armL')
         const armR = characterRef.current.getObjectByName('armR')
-        if (armL) armL.rotation.z = Math.sin(time * 0.8) * 0.03
-        if (armR) armR.rotation.z = -Math.sin(time * 0.8 + 0.5) * 0.03
+        const sleeveL = characterRef.current.getObjectByName('sleeveL')
+        const sleeveR = characterRef.current.getObjectByName('sleeveR')
+
+        const armSwing = Math.sin(time * 0.8) * 0.05
+        if (armL) armL.rotation.x = armSwing
+        if (armR) armR.rotation.x = -armSwing
+        if (sleeveL) sleeveL.rotation.x = armSwing
+        if (sleeveR) sleeveR.rotation.x = -armSwing
       }
 
       renderer.render(scene, camera)
@@ -310,7 +399,7 @@ export default function VoxelCharacter({
         borderRadius: '12px',
         border: '1px solid rgba(76, 175, 80, 0.15)',
         overflow: 'hidden',
-        bgcolor: '#0d1117',
+        bgcolor: '#111122',
         cursor: 'grab',
         '&:active': { cursor: 'grabbing' },
         // Prevent text selection during drag

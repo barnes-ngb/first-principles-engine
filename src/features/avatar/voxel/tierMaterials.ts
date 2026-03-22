@@ -113,18 +113,25 @@ export function applyTierToArmor(
 
       const role: string = (child.userData.materialRole as string) ?? 'primary'
 
-      let color: number
+      let baseColor: number
       switch (role) {
-        case 'accent': color = materials.accent; break
-        case 'detail': color = materials.detail; break
-        default: color = materials.primary
+        case 'accent': baseColor = materials.accent; break
+        case 'detail': baseColor = materials.detail; break
+        default: baseColor = materials.primary
       }
 
-      child.material = new THREE.MeshLambertMaterial({
-        color,
-        emissive: new THREE.Color(materials.emissive),
-        emissiveIntensity: materials.emissiveIntensity,
-      })
+      // Create per-face textured materials for visual depth
+      const color = new THREE.Color(baseColor)
+      const faceMats: THREE.MeshLambertMaterial[] = []
+      for (let i = 0; i < 6; i++) {
+        const variation = 0.95 + Math.random() * 0.1
+        faceMats.push(new THREE.MeshLambertMaterial({
+          color: color.clone().multiplyScalar(variation),
+          emissive: new THREE.Color(materials.emissive),
+          emissiveIntensity: materials.emissiveIntensity,
+        }))
+      }
+      child.material = faceMats
     })
   }
 }
@@ -172,9 +179,14 @@ export function animateTierUpgrade(
 
     // Phase 1: Flash bright white (0-400ms)
     mesh.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
-        child.material.emissive = new THREE.Color(0xffffff)
-        child.material.emissiveIntensity = 1.0
+      if (child instanceof THREE.Mesh) {
+        const mats = Array.isArray(child.material) ? child.material : [child.material]
+        for (const m of mats) {
+          if (m instanceof THREE.MeshLambertMaterial) {
+            m.emissive = new THREE.Color(0xffffff)
+            m.emissiveIntensity = 1.0
+          }
+        }
       }
     })
 
@@ -187,9 +199,14 @@ export function animateTierUpgrade(
       function fade(now: number) {
         const t = Math.min((now - startTime) / 600, 1)
         mesh.traverse((child) => {
-          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
-            child.material.emissiveIntensity =
-              materials.emissiveIntensity + (1 - t) * (0.8 - materials.emissiveIntensity)
+          if (child instanceof THREE.Mesh) {
+            const mats = Array.isArray(child.material) ? child.material : [child.material]
+            for (const m of mats) {
+              if (m instanceof THREE.MeshLambertMaterial) {
+                m.emissiveIntensity =
+                  materials.emissiveIntensity + (1 - t) * (0.8 - materials.emissiveIntensity)
+              }
+            }
           }
         })
         if (t < 1) requestAnimationFrame(fade)

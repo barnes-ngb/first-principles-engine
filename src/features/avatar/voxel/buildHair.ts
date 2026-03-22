@@ -9,14 +9,93 @@ function box(
   return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material)
 }
 
+/**
+ * Build hair geometry.
+ * @param headY  – Y position of the head center
+ * @param U      – pixel unit (0.125 * scale). If omitted, uses legacy absolute sizes.
+ */
 export function buildHair(
   style: string,
   length: string,
   material: THREE.Material,
   headY: number,
+  U?: number,
 ): THREE.Group {
   const hair = new THREE.Group()
   hair.name = 'hairGroup'
+
+  // If U is provided, use pixel-unit based sizing (new Steve proportions)
+  // Head is 8U×8U×8U, centered at headY
+  if (U) {
+    // Top cap — sits on top of head (slightly bigger for overhang)
+    const top = box(U * 8.4, U * 2, U * 8.4, material)
+    top.position.y = headY + U * 3.5
+    hair.add(top)
+
+    // Back panel
+    const back = box(U * 8.4, U * 4, U * 1, material)
+    back.position.set(0, headY + U * 1, -U * 3.8)
+    hair.add(back)
+
+    // Side panels
+    const sideL = box(U * 1, U * 3, U * 8.4, material)
+    sideL.position.set(-U * 4.2, headY + U * 1.5, 0)
+    hair.add(sideL)
+
+    const sideR = box(U * 1, U * 3, U * 8.4, material)
+    sideR.position.set(U * 4.2, headY + U * 1.5, 0)
+    hair.add(sideR)
+
+    // Length-dependent back extensions
+    if (length === 'ear_length') {
+      const backExt = box(U * 8.4, U * 3, U * 1.2, material)
+      backExt.position.set(0, headY - U * 2, -U * 3.8)
+      hair.add(backExt)
+    } else if (length === 'shoulder') {
+      const backExt = box(U * 8.4, U * 7, U * 1.2, material)
+      backExt.position.set(0, headY - U * 3, -U * 3.8)
+      hair.add(backExt)
+    } else if (length === 'below_shoulder') {
+      const backExt = box(U * 8.4, U * 11, U * 1.2, material)
+      backExt.position.set(0, headY - U * 5, -U * 3.8)
+      hair.add(backExt)
+    }
+
+    // Curly: add extra small cubes for texture
+    if (style === 'curly') {
+      for (let i = 0; i < 8; i++) {
+        const curl = box(U * 1.5, U * 1.5, U * 1.5, material)
+        const angle = (i / 8) * Math.PI * 2
+        curl.position.set(
+          Math.cos(angle) * U * 4.5,
+          headY + U * 2 + Math.sin(angle) * U * 1.5,
+          Math.sin(angle) * U * 4.5,
+        )
+        hair.add(curl)
+      }
+    }
+
+    // Medium style: slightly thicker sides
+    if (style === 'medium') {
+      const extraL = box(U * 1.2, U * 4, U * 8.4, material)
+      extraL.position.set(-U * 4.6, headY + U * 1, 0)
+      hair.add(extraL)
+      const extraR = box(U * 1.2, U * 4, U * 8.4, material)
+      extraR.position.set(U * 4.6, headY + U * 1, 0)
+      hair.add(extraR)
+    }
+
+    // Long style: front bangs
+    if (style === 'long') {
+      const bangs = box(U * 7, U * 1.2, U * 1.2, material)
+      bangs.position.set(0, headY + U * 2.5, U * 3.8)
+      hair.add(bangs)
+    }
+
+    return hair
+  }
+
+  // ── Legacy fallback (absolute sizes) ──────────────────────────────
 
   // Top cap (always present)
   const top = box(1.05, 0.3, 1.05, material)
