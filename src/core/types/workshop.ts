@@ -24,8 +24,26 @@ export interface StoryGame {
   /** In-progress game session (saved after each turn for resume) */
   activeSession?: ActiveSession | null
 
+  /** Voice recordings keyed by card/space ID */
+  voiceRecordings?: VoiceRecordingMap
+
   /** Tracks wizard step for draft resume (removed when wizard completes) */
   currentWizardStep?: number
+}
+
+export interface VoiceRecording {
+  /** Firebase Storage download URL */
+  url: string
+  /** Child ID of the recorder */
+  recordedBy: string
+  /** Recording duration in milliseconds */
+  durationMs: number
+  /** ISO timestamp of when the recording was made */
+  recordedAt: string
+}
+
+export type VoiceRecordingMap = {
+  [cardOrSpaceId: string]: VoiceRecording
 }
 
 export interface ActiveSession {
@@ -190,6 +208,7 @@ export const GamePhase = {
   Idle: 'idle',
   Wizard: 'wizard',
   Generating: 'generating',
+  Recording: 'recording',
   Ready: 'ready',
   Playing: 'playing',
   Finished: 'finished',
