@@ -25,24 +25,35 @@ export interface ExtractFeaturesResponse {
 }
 
 const DEFAULT_FEATURES: CharacterFeatures = {
-  skinTone: "#D2A272",
-  hairColor: "#4A3728",
-  hairStyle: "short",
-  hairLength: "above_ear",
+  skinTone: "#F0D0B0",
+  hairColor: "#7B5B3A",
+  hairStyle: "medium",
+  hairLength: "ear_length",
 };
 
-const EXTRACTION_PROMPT = `Analyze this photo of a child and extract these visual features for building a 3D avatar. Respond ONLY in JSON format with no other text:
+const EXTRACTION_PROMPT = `Look at this photo of a child carefully. Extract visual features for building a 3D Minecraft-style avatar.
 
+IMPORTANT: Be very precise with colors. Sample DIRECTLY from the photo.
+- For skin tone: sample from the cheek or forehead (avoid shadows)
+- For hair color: sample from the most prominent, well-lit section of hair
+
+Respond ONLY in JSON format with no other text:
 {
-  "skinTone": "<hex color of skin>",
-  "hairColor": "<hex color of hair>",
+  "skinTone": "#hex",
+  "hairColor": "#hex",
   "hairStyle": "short|medium|long|curly",
   "hairLength": "above_ear|ear_length|shoulder|below_shoulder",
-  "eyeColor": "<hex color, optional>",
-  "distinguishingFeatures": "<brief note, e.g. 'glasses', 'freckles', optional>"
+  "eyeColor": "#hex",
+  "distinguishingFeatures": "brief note"
 }
 
-Use accurate hex colors sampled from the actual photo. For skin tone, sample from the forehead or cheek. For hair, sample from the most prominent area.`;
+Rules:
+- skinTone: Use the actual skin color. Light/fair skin might be #F0D0B0, medium #D2A272, dark #8B6838.
+- hairColor: Match the actual hair. Light brown is #8B6914, medium brown #7B5B3A, dark brown #4A3728, blonde #C4A35A, black #2A2A2A, red #8B3A1A.
+- hairLength: "above_ear" = short, "ear_length" = covers ears, "shoulder" = to shoulders, "below_shoulder" = past shoulders.
+- hairStyle: "short" = close to head, "medium" = some length with movement, "long" = falls straight, "curly" = visible curls/waves.
+
+Respond with ONLY the JSON object, nothing else.`;
 
 /**
  * Extract character features from a child's photo using Claude's vision.

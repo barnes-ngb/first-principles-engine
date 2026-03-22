@@ -14,5 +14,6 @@ export {
 } from './voxel/tierMaterials'
 export type { TierDefinition, TierMaterials } from './voxel/tierMaterials'
 export { animateEquip, animateUnequip } from './voxel/equipAnimation'
+export { frameCameraToCharacter } from './voxel/cameraUtils'
 export { default as AvatarThumbnail } from './AvatarThumbnail'
 export { default as VoxelCharacter } from './VoxelCharacter'

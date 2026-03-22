@@ -177,9 +177,13 @@ export default function VoxelCharacter({
   const prevEquippedRef = useRef<Set<string>>(new Set())
   const prevTierRef = useRef<string | null>(null)
   const poseRef = useRef<((pieces: string[]) => void) | null>(null)
+  const equippedRef = useRef<string[]>([])
 
   const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
   const currentTier = calculateTier(totalXp)
+
+  // Keep ref in sync so animation loop always has current equipped list
+  equippedRef.current = equippedPieces
 
   // ── Initialize scene ────────────────────────────────────────────
   const initScene = useCallback(() => {
@@ -237,22 +241,34 @@ export default function VoxelCharacter({
     characterRef.current = character
     scene.add(character)
 
-    // Build armor pieces — sword attaches to right arm, shield to left arm
+    // Build armor pieces — sword/shield attach to arms, breastplate arm covers attach to arms
     armorGroupsRef.current.clear()
+    const armL = character.getObjectByName('armL')
+    const armR = character.getObjectByName('armR')
+
     for (const pieceMeta of VOXEL_ARMOR_PIECES) {
       const pieceGroup = buildArmorPiece(pieceMeta.id, ageGroup)
       armorGroupsRef.current.set(pieceMeta.id, pieceGroup)
 
       const attachTo = pieceGroup.userData.attachToArm as string | undefined
       if (attachTo === 'R') {
-        const armR = character.getObjectByName('armR')
         if (armR) armR.add(pieceGroup)
         else character.add(pieceGroup)
       } else if (attachTo === 'L') {
-        const armL = character.getObjectByName('armL')
         if (armL) armL.add(pieceGroup)
         else character.add(pieceGroup)
       } else {
+        // For breastplate, move arm-cover children to their respective arms
+        const armChildren: THREE.Object3D[] = []
+        pieceGroup.traverse((child) => {
+          if (child.userData.attachToArm) armChildren.push(child)
+        })
+        for (const child of armChildren) {
+          pieceGroup.remove(child)
+          const targetArm = child.userData.attachToArm === 'L' ? armL : armR
+          if (targetArm) targetArm.add(child)
+          else character.add(child)
+        }
         character.add(pieceGroup)
       }
     }
@@ -345,8 +361,8 @@ export default function VoxelCharacter({
         updateRotation(characterRef.current, controlsRef.current)
       }
 
-      // Enforce solid opacity on equipped armor every frame
-      enforceArmorOpacity(armorGroupsRef.current, equippedPieces)
+      // Enforce solid opacity on equipped armor every frame (use ref for current value)
+      enforceArmorOpacity(armorGroupsRef.current, equippedRef.current)
 
       // Idle animation — gentle bob + pose-aware arm movement
       if (characterRef.current) {
@@ -429,14 +445,17 @@ export default function VoxelCharacter({
     const prev = prevEquippedRef.current
     const current = new Set(equippedPieces)
 
-    // Show newly equipped pieces + play equip ceremonies
+    // Show newly equipped pieces as SOLID with tier materials + play equip ceremonies
     for (const pieceId of current) {
       if (!prev.has(pieceId)) {
         const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
-        if (group && !group.visible) {
+        if (group) {
           group.visible = true
           group.scale.set(1, 1, 1)
         }
+        // Apply tier materials so piece becomes solid (not ghost)
+        applyTierToArmor(armorGroupsRef.current, currentTier, [pieceId])
+
         // Play equip ceremony based on piece type
         if (characterRef.current) {
           const character = characterRef.current
@@ -469,21 +488,47 @@ export default function VoxelCharacter({
       }
     }
 
-    // Hide unequipped pieces
+    // Unequipped pieces → show as translucent ghost (not hidden)
     for (const pieceId of prev) {
       if (!current.has(pieceId)) {
         const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
         if (group) {
-          group.visible = false
+          const isUnlocked = totalXp >= XP_THRESHOLDS[pieceId as VoxelArmorPieceId]
+          group.visible = true
+          group.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              const mats = Array.isArray(child.material) ? child.material : [child.material]
+              const baseHex = mats[0] instanceof THREE.MeshLambertMaterial
+                ? mats[0].color?.getHex() ?? 0x888888
+                : 0x888888
+              const ghostOpacity = isUnlocked ? 0.3 : 0.25
+              const base = new THREE.Color(baseHex)
+              if (!isUnlocked) base.lerp(new THREE.Color(0x8888cc), 0.5)
+              child.material = new THREE.MeshLambertMaterial({
+                color: base,
+                transparent: true,
+                opacity: ghostOpacity,
+                depthWrite: false,
+                ...(isUnlocked ? {} : { emissive: new THREE.Color(0x334466), emissiveIntensity: 0.3 }),
+              })
+            }
+          })
         }
       }
+    }
+
+    // Also ensure ALL currently equipped pieces have solid tier materials
+    // (handles page-load case where pieces load from profile)
+    if (current.size > 0) {
+      applyTierToArmor(armorGroupsRef.current, currentTier, equippedPieces)
+      enforceArmorOpacity(armorGroupsRef.current, equippedPieces)
     }
 
     // Update pose for new equipped set
     poseRef.current?.(equippedPieces)
 
     prevEquippedRef.current = current
-  }, [equippedPieces])
+  }, [equippedPieces, currentTier, totalXp])
 
   // ── Handle equip animation trigger ──────────────────────────────
   useEffect(() => {
