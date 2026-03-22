@@ -4,6 +4,7 @@ import Box from '@mui/material/Box'
 
 import type { CharacterFeatures, VoxelArmorPieceId } from '../../core/types'
 import { DEFAULT_CHARACTER_FEATURES } from '../../core/types'
+import { XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import { buildCharacter } from './voxel/buildCharacter'
 import { buildArmorPiece, VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import { animateEquip, animateUnequip } from './voxel/equipAnimation'
@@ -14,6 +15,7 @@ interface VoxelCharacterProps {
   features: CharacterFeatures | undefined
   ageGroup: 'older' | 'younger'
   equippedPieces: string[]
+  totalXp?: number
   /** Piece to animate equipping (triggers scale-in animation) */
   animateEquipPiece?: string | null
   /** Piece to animate unequipping */
@@ -27,6 +29,7 @@ export default function VoxelCharacter({
   features,
   ageGroup,
   equippedPieces,
+  totalXp = 0,
   animateEquipPiece,
   animateUnequipPiece,
   onEquipAnimDone,
@@ -95,14 +98,71 @@ export default function VoxelCharacter({
       character.add(pieceGroup)
     }
 
-    // Set initial visibility
+    // Set initial visibility — equipped solid, unlocked translucent, locked ghost
     for (const [pieceId, group] of armorGroupsRef.current) {
-      group.visible = equippedPieces.includes(pieceId)
-      if (group.visible) {
+      const isEquipped = equippedPieces.includes(pieceId)
+      const isUnlocked = totalXp >= XP_THRESHOLDS[pieceId]
+
+      group.visible = true
+      if (isEquipped) {
         group.scale.set(1, 1, 1)
+        group.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
+            child.material.transparent = false
+            child.material.opacity = 1
+          }
+        })
+      } else if (isUnlocked) {
+        group.scale.set(1, 1, 1)
+        group.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
+            child.material.transparent = true
+            child.material.opacity = 0.3
+            child.material.depthWrite = false
+          }
+        })
+      } else {
+        // Locked — ghost silhouette
+        group.scale.set(1, 1, 1)
+        group.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            const baseColor = child.material instanceof THREE.MeshLambertMaterial
+              ? child.material.color?.getHex() ?? 0x888888
+              : 0x888888
+            child.material = new THREE.MeshLambertMaterial({
+              color: baseColor,
+              transparent: true,
+              opacity: 0.12,
+              depthWrite: false,
+            })
+          }
+        })
       }
     }
     prevEquippedRef.current = new Set(equippedPieces)
+
+    // Ground platform
+    const platform = new THREE.Group()
+    platform.name = 'platform'
+    const slab = new THREE.Mesh(
+      new THREE.BoxGeometry(2.2, 0.2, 1.6),
+      new THREE.MeshLambertMaterial({ color: 0x555555 }),
+    )
+    slab.position.set(0, -0.1, 0)
+    platform.add(slab)
+    const topSurface = new THREE.Mesh(
+      new THREE.BoxGeometry(2.0, 0.05, 1.4),
+      new THREE.MeshLambertMaterial({ color: 0x666666 }),
+    )
+    topSurface.position.set(0, 0.02, 0)
+    platform.add(topSurface)
+    const rimFront = new THREE.Mesh(
+      new THREE.BoxGeometry(2.2, 0.2, 0.05),
+      new THREE.MeshLambertMaterial({ color: 0x444444 }),
+    )
+    rimFront.position.set(0, -0.1, 0.8)
+    platform.add(rimFront)
+    scene.add(platform)
 
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true })
@@ -138,7 +198,7 @@ export default function VoxelCharacter({
       renderer.render(scene, camera)
     }
     animate()
-  }, [resolvedFeatures, ageGroup, equippedPieces])
+  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
@@ -228,7 +288,7 @@ export default function VoxelCharacter({
         aspectRatio: '3 / 4',
         maxHeight: '55vh',
         borderRadius: '12px',
-        border: '2px solid #7EFC20',
+        border: '1px solid rgba(76, 175, 80, 0.15)',
         overflow: 'hidden',
         bgcolor: '#0d1117',
         cursor: 'grab',

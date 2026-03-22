@@ -1,5 +1,54 @@
 import * as THREE from 'three'
 
+/** Spawn a burst of cube particles from a position, then clean up */
+function createEquipParticles(scene: THREE.Scene, position: THREE.Vector3, color: number) {
+  const particles: THREE.Mesh[] = []
+  const particleCount = 12
+
+  for (let i = 0; i < particleCount; i++) {
+    const size = 0.06 + Math.random() * 0.06
+    const particle = new THREE.Mesh(
+      new THREE.BoxGeometry(size, size, size),
+      new THREE.MeshBasicMaterial({
+        color: i % 2 === 0 ? color : 0x4caf50,
+        transparent: true,
+        opacity: 1,
+      }),
+    )
+    particle.position.copy(position)
+    particle.userData.velocity = new THREE.Vector3(
+      (Math.random() - 0.5) * 0.15,
+      Math.random() * 0.1 + 0.05,
+      (Math.random() - 0.5) * 0.15,
+    )
+    scene.add(particle)
+    particles.push(particle)
+  }
+
+  const startTime = performance.now()
+  const duration = 800
+
+  function step(now: number) {
+    const t = (now - startTime) / duration
+    if (t >= 1) {
+      particles.forEach((p) => {
+        scene.remove(p)
+        p.geometry.dispose()
+        ;(p.material as THREE.MeshBasicMaterial).dispose()
+      })
+      return
+    }
+    particles.forEach((p) => {
+      p.position.add(p.userData.velocity as THREE.Vector3)
+      ;(p.userData.velocity as THREE.Vector3).y -= 0.003
+      ;(p.material as THREE.MeshBasicMaterial).opacity = 1 - t
+      p.scale.setScalar(1 - t * 0.5)
+    })
+    requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}
+
 /** Animate a piece scaling in with glow light + elastic overshoot */
 export function animateEquip(
   pieceGroup: THREE.Group,
@@ -21,6 +70,15 @@ export function animateEquip(
   const glow = new THREE.PointLight(0x4caf50, 2, 3)
   glow.position.copy(center)
   pieceGroup.parent?.add(glow)
+
+  // Particle burst
+  if (pieceGroup.parent) {
+    const pieceColor = pieceGroup.children[0] instanceof THREE.Mesh
+      && pieceGroup.children[0].material instanceof THREE.MeshLambertMaterial
+      ? pieceGroup.children[0].material.color.getHex()
+      : 0xffffff
+    createEquipParticles(pieceGroup.parent, center, pieceColor)
+  }
 
   const duration = 700
   const startTime = performance.now()

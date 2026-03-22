@@ -28,6 +28,7 @@ export const ARMOR_PIECE_COLORS: Record<VoxelArmorPieceId, { color: number; acce
 export interface ArmorPieceMeta {
   id: VoxelArmorPieceId
   name: string
+  shortName: string
   verse: string
   verseText: string
   xpRequired: number
@@ -38,7 +39,8 @@ export const VOXEL_ARMOR_PIECES: ArmorPieceMeta[] = [
   {
     id: 'belt',
     name: 'Belt of Truth',
-    verse: 'Ephesians 6:14',
+    shortName: 'Belt of Truth',
+    verse: 'Ephesians 6:14a',
     verseText: 'Stand firm then, with the belt of truth buckled around your waist.',
     xpRequired: 0,
     order: 1,
@@ -46,7 +48,8 @@ export const VOXEL_ARMOR_PIECES: ArmorPieceMeta[] = [
   {
     id: 'breastplate',
     name: 'Breastplate of Righteousness',
-    verse: 'Ephesians 6:14',
+    shortName: 'Breastplate',
+    verse: 'Ephesians 6:14b',
     verseText: 'With the breastplate of righteousness in place.',
     xpRequired: 150,
     order: 2,
@@ -54,6 +57,7 @@ export const VOXEL_ARMOR_PIECES: ArmorPieceMeta[] = [
   {
     id: 'shoes',
     name: 'Shoes of Peace',
+    shortName: 'Shoes of Peace',
     verse: 'Ephesians 6:15',
     verseText: 'And with your feet fitted with the readiness that comes from the gospel of peace.',
     xpRequired: 300,
@@ -62,15 +66,17 @@ export const VOXEL_ARMOR_PIECES: ArmorPieceMeta[] = [
   {
     id: 'shield',
     name: 'Shield of Faith',
+    shortName: 'Shield of Faith',
     verse: 'Ephesians 6:16',
-    verseText: 'Take up the shield of faith, with which you can extinguish all the flaming arrows of the evil one.',
+    verseText: 'In addition to all this, take up the shield of faith, with which you can extinguish all the flaming arrows of the evil one.',
     xpRequired: 500,
     order: 4,
   },
   {
     id: 'helmet',
     name: 'Helmet of Salvation',
-    verse: 'Ephesians 6:17',
+    shortName: 'Helmet',
+    verse: 'Ephesians 6:17a',
     verseText: 'Take the helmet of salvation.',
     xpRequired: 750,
     order: 5,
@@ -78,7 +84,8 @@ export const VOXEL_ARMOR_PIECES: ArmorPieceMeta[] = [
   {
     id: 'sword',
     name: 'Sword of the Spirit',
-    verse: 'Ephesians 6:17',
+    shortName: 'Sword',
+    verse: 'Ephesians 6:17b',
     verseText: 'And the sword of the Spirit, which is the word of God.',
     xpRequired: 1000,
     order: 6,
