@@ -177,9 +177,13 @@ export default function VoxelCharacter({
   const prevEquippedRef = useRef<Set<string>>(new Set())
   const prevTierRef = useRef<string | null>(null)
   const poseRef = useRef<((pieces: string[]) => void) | null>(null)
+  const equippedRef = useRef<string[]>([])
 
   const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
   const currentTier = calculateTier(totalXp)
+
+  // Keep ref in sync so animation loop always has current equipped list
+  equippedRef.current = equippedPieces
 
   // ── Initialize scene ────────────────────────────────────────────
   const initScene = useCallback(() => {
@@ -237,22 +241,34 @@ export default function VoxelCharacter({
     characterRef.current = character
     scene.add(character)
 
-    // Build armor pieces — sword attaches to right arm, shield to left arm
+    // Build armor pieces — sword/shield attach to arms, breastplate arm covers attach to arms
     armorGroupsRef.current.clear()
+    const armL = character.getObjectByName('armL')
+    const armR = character.getObjectByName('armR')
+
     for (const pieceMeta of VOXEL_ARMOR_PIECES) {
       const pieceGroup = buildArmorPiece(pieceMeta.id, ageGroup)
       armorGroupsRef.current.set(pieceMeta.id, pieceGroup)
 
       const attachTo = pieceGroup.userData.attachToArm as string | undefined
       if (attachTo === 'R') {
-        const armR = character.getObjectByName('armR')
         if (armR) armR.add(pieceGroup)
         else character.add(pieceGroup)
       } else if (attachTo === 'L') {
-        const armL = character.getObjectByName('armL')
         if (armL) armL.add(pieceGroup)
         else character.add(pieceGroup)
       } else {
+        // For breastplate, move arm-cover children to their respective arms
+        const armChildren: THREE.Object3D[] = []
+        pieceGroup.traverse((child) => {
+          if (child.userData.attachToArm) armChildren.push(child)
+        })
+        for (const child of armChildren) {
+          pieceGroup.remove(child)
+          const targetArm = child.userData.attachToArm === 'L' ? armL : armR
+          if (targetArm) targetArm.add(child)
+          else character.add(child)
+        }
         character.add(pieceGroup)
       }
     }
@@ -345,8 +361,8 @@ export default function VoxelCharacter({
         updateRotation(characterRef.current, controlsRef.current)
       }
 
-      // Enforce solid opacity on equipped armor every frame
-      enforceArmorOpacity(armorGroupsRef.current, equippedPieces)
+      // Enforce solid opacity on equipped armor every frame (use ref for current value)
+      enforceArmorOpacity(armorGroupsRef.current, equippedRef.current)
 
       // Idle animation — gentle bob + pose-aware arm movement
       if (characterRef.current) {

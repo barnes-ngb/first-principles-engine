@@ -36,6 +36,7 @@ import type {
   VoxelArmorPieceId,
 } from '../../core/types'
 
+import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import { ArmorIcon } from './icons/ArmorIcons'
 import type { ArmorTierColor } from './icons/ArmorIcons'
 import VoxelCharacter from './VoxelCharacter'
@@ -91,6 +92,27 @@ function playArmorFanfare(delaySeconds = 0) {
   }
 }
 
+// ── TTS for inline verse card ────────────────────────────────────
+
+function speakVerse(pieceName: string, verseText: string) {
+  if (!('speechSynthesis' in window)) return
+  window.speechSynthesis.cancel()
+
+  const text = `${pieceName}. ${verseText}`
+  const utterance = new SpeechSynthesisUtterance(text)
+  utterance.rate = 0.85
+  utterance.pitch = 1.0
+  utterance.volume = 1.0
+
+  const voices = window.speechSynthesis.getVoices()
+  const preferred = voices.find((v) =>
+    v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Moira'),
+  ) || voices.find((v) => v.lang.startsWith('en-US')) || voices[0]
+  if (preferred) utterance.voice = preferred
+
+  window.speechSynthesis.speak(utterance)
+}
+
 // ── Component ─────────────────────────────────────────────────────
 
 export default function MyAvatarPage() {
@@ -121,6 +143,18 @@ export default function MyAvatarPage() {
   // Track previous state for celebrations
   const prevPiecesCountRef = useRef(0)
   const prevTierRef = useRef<string | null>(null)
+
+  // Pre-load TTS voices (Chrome loads async)
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return
+    const loadVoices = () => window.speechSynthesis.getVoices()
+    loadVoices()
+    window.speechSynthesis.addEventListener('voiceschanged', loadVoices)
+    return () => {
+      window.speechSynthesis.removeEventListener('voiceschanged', loadVoices)
+      window.speechSynthesis.cancel()
+    }
+  }, [])
   const today = getTodayDateString()
 
   // Theme
@@ -352,11 +386,16 @@ export default function MyAvatarPage() {
         // Tap equipped piece → unequip dialog
         setUnequipPiece(piece.id)
       } else if (isUnlocked) {
-        // Tap unlocked piece → equip immediately (single tap!)
+        // Tap unlocked piece → equip immediately + read verse aloud
+        speakVerse(piece.name, piece.verseText)
         void handleApplyPiece(piece.id)
       } else {
-        // Locked pieces: show verse card (info only)
-        setSelectedPiece((prev) => prev?.id === piece.id ? null : piece)
+        // Locked pieces: show verse card (info only), read aloud
+        setSelectedPiece((prev) => {
+          if (prev?.id === piece.id) return null
+          speakVerse(piece.name, piece.verseText)
+          return piece
+        })
       }
     },
     [profile, session, handleApplyPiece],
@@ -715,6 +754,27 @@ export default function MyAvatarPage() {
               },
             }}
           >
+            {/* Speaker button */}
+            <Box
+              component="button"
+              onClick={(e: React.MouseEvent) => {
+                e.stopPropagation()
+                speakVerse(selectedPiece.name, selectedPiece.verseText)
+              }}
+              sx={{
+                position: 'absolute', top: 8, left: 12,
+                background: isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.15)',
+                border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(232,160,191,0.3)'}`,
+                borderRadius: '50%',
+                width: 32, height: 32,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', p: 0, color: accentColor,
+              }}
+              aria-label="Read verse aloud"
+            >
+              <VolumeUpIcon sx={{ fontSize: 18 }} />
+            </Box>
+
             {/* Close button */}
             <Box
               component="button"
