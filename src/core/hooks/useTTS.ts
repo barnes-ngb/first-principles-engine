@@ -53,10 +53,14 @@ export function useTTS(options: TTSOptions = {}): TTSControls {
   const queueRef = useRef<string[]>([])
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
   const onWordBoundaryRef = useRef(onWordBoundary)
-  onWordBoundaryRef.current = onWordBoundary
+  useEffect(() => {
+    onWordBoundaryRef.current = onWordBoundary
+  }, [onWordBoundary])
 
   const isSupported =
     typeof window !== 'undefined' && 'speechSynthesis' in window
+
+  const speakNextRef = useRef<() => void>(() => {})
 
   const cancel = useCallback(() => {
     queueRef.current = []
@@ -91,7 +95,7 @@ export function useTTS(options: TTSOptions = {}): TTSControls {
     utterance.addEventListener('end', () => {
       // Speak next in queue, or finish
       if (queueRef.current.length > 0) {
-        speakNext()
+        speakNextRef.current()
       } else {
         setIsSpeaking(false)
         utteranceRef.current = null
@@ -101,7 +105,7 @@ export function useTTS(options: TTSOptions = {}): TTSControls {
     utterance.addEventListener('error', () => {
       // On error, try next in queue or finish
       if (queueRef.current.length > 0) {
-        speakNext()
+        speakNextRef.current()
       } else {
         setIsSpeaking(false)
         utteranceRef.current = null
@@ -111,6 +115,10 @@ export function useTTS(options: TTSOptions = {}): TTSControls {
     utteranceRef.current = utterance
     window.speechSynthesis.speak(utterance)
   }, [isSupported, rate, pitch, preferredVoices])
+
+  useEffect(() => {
+    speakNextRef.current = speakNext
+  }, [speakNext])
 
   const speak = useCallback(
     (text: string) => {
