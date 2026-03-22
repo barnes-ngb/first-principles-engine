@@ -16,6 +16,48 @@ export const handleQuest = async (
     db, familyId, childId, childData, snapshotData,
   });
 
+  // Load word progress for this child to inform question generation
+  try {
+    const wordProgressRef = db
+      .collection(`families/${familyId}/children/${childId}/wordProgress`);
+
+    // Load struggling words
+    const strugglingSnap = await wordProgressRef
+      .where("masteryLevel", "in", ["struggling", "not-yet"])
+      .orderBy("wrongCount", "desc")
+      .limit(15)
+      .get();
+
+    if (!strugglingSnap.empty) {
+      const strugglingWords = strugglingSnap.docs.map((d) => {
+        const data = d.data();
+        const total = (data.correctCount || 0) + (data.wrongCount || 0) + (data.skippedCount || 0);
+        return `${data.word} (${data.pattern}, ${data.correctCount || 0}/${total} correct)`;
+      });
+
+      sections.push(
+        `STRUGGLING WORDS: ${strugglingWords.join(", ")}\n` +
+        `Generate some questions that revisit these struggling words. Mix them with new words — don't ONLY test struggling words or it will feel punishing.`,
+      );
+    }
+
+    // Load known words to avoid over-testing
+    const knownSnap = await wordProgressRef
+      .where("masteryLevel", "==", "known")
+      .limit(30)
+      .get();
+
+    if (!knownSnap.empty) {
+      const knownWords = knownSnap.docs.map((d) => d.data().word);
+      sections.push(
+        `KNOWN WORDS (don't over-test): ${knownWords.join(", ")}`,
+      );
+    }
+  } catch (err) {
+    // Don't block quest if word progress loading fails
+    console.warn("Failed to load word progress for quest context", err);
+  }
+
   // Append quest-specific interactive prompt
   sections.push(buildQuestPrompt(domain || "reading"));
 

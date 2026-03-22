@@ -58,6 +58,14 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "evaluatedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "wordProgress",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "masteryLevel", "order": "ASCENDING" },
+        { "fieldPath": "wrongCount", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
