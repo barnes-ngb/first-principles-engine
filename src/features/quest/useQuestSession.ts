@@ -97,6 +97,68 @@ function getDateString(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+// ── Fallback recommendation generator ────────────────────────────
+
+function generateFallbackRecommendations(
+  sessionFindings: EvaluationFinding[],
+  finalLevel: number,
+): Array<{ priority: number; skill: string; action: string; duration: string; frequency: string }> {
+  const recs: Array<{ priority: number; skill: string; action: string; duration: string; frequency: string }> = []
+  let priority = 1
+
+  const notYet = sessionFindings.filter((f) => f.status === 'not-yet')
+  const emerging = sessionFindings.filter((f) => f.status === 'emerging')
+
+  for (const f of notYet) {
+    recs.push({
+      priority: priority++,
+      skill: f.skill,
+      action: `Focus: ${formatSkillLabel(f.skill)} — needs direct instruction before practice`,
+      duration: '2 weeks',
+      frequency: 'Daily, 5-10 minutes',
+    })
+  }
+
+  for (const f of emerging) {
+    recs.push({
+      priority: priority++,
+      skill: f.skill,
+      action: `Practice: ${formatSkillLabel(f.skill)} — emerging, needs short daily practice`,
+      duration: '2 weeks',
+      frequency: 'Daily, 5-10 minutes',
+    })
+  }
+
+  // Level-based general recommendation
+  if (finalLevel <= 2) {
+    recs.push({
+      priority: priority++,
+      skill: 'phonics.basics',
+      action: 'Continue phonics basics — letter sounds and simple CVC words',
+      duration: '2 weeks',
+      frequency: 'Daily, 8-10 minutes',
+    })
+  } else if (finalLevel <= 4) {
+    recs.push({
+      priority: priority++,
+      skill: 'phonics.blends',
+      action: 'Ready for blends and digraphs — introduce sh, ch, th, bl, cr patterns',
+      duration: '2 weeks',
+      frequency: 'Daily, 8-10 minutes',
+    })
+  } else {
+    recs.push({
+      priority: priority++,
+      skill: 'phonics.cvce',
+      action: 'Ready for long vowels and CVCe — focus on silent-e patterns',
+      duration: '2 weeks',
+      frequency: 'Daily, 8-10 minutes',
+    })
+  }
+
+  return recs
+}
+
 // ── Hook ────────────────────────────────────────────────────────
 
 export function useQuestSession() {
@@ -324,6 +386,16 @@ export function useQuestSession() {
         console.warn('Failed to generate AI quest summary, using fallback', err)
       } finally {
         setSummarizing(false)
+      }
+
+      // Fallback: generate client-side recommendations if AI didn't produce any
+      if (sessionRecommendations.length === 0 && findings.length > 0) {
+        sessionRecommendations = generateFallbackRecommendations(findings, finalState.currentLevel)
+      }
+
+      // Fallback: generate level-based recommendation even with no findings
+      if (sessionRecommendations.length === 0) {
+        sessionRecommendations = generateFallbackRecommendations([], finalState.currentLevel)
       }
 
       // Save to Firestore
