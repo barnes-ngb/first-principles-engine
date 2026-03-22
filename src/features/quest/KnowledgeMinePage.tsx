@@ -282,6 +282,8 @@ export default function KnowledgeMinePage() {
           streak={quest.streak}
           findings={quest.findings}
           previousTotalXp={Math.max(0, xpLedger.totalXp - quest.questState.totalCorrect * 2)}
+          skippedCount={quest.answeredQuestions.filter((q) => q.skipped).length}
+          flaggedErrorCount={quest.answeredQuestions.filter((q) => q.flaggedAsError).length}
           onDone={quest.resetToIntro}
           onTryAgain={() => {
             quest.resetToIntro()

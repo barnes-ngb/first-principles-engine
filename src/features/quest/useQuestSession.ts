@@ -11,7 +11,7 @@ import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot
 import type { EvaluationDomain } from '../../core/types/enums'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
 import { calculateStreak, computeNextState, formatSkillLabel, shouldEndSession } from './questAdaptive'
-import { checkAnswer } from './questHelpers'
+import { checkAnswer, shouldFlagAsError } from './questHelpers'
 import type {
   InteractiveSessionData,
   QuestQuestion,
@@ -407,6 +407,9 @@ export function useQuestSession() {
       const timestamp = Date.now()
       const docId = `interactive_${activeChildId}_${timestamp}`
 
+      const skippedCount = questions.filter((q) => q.skipped).length
+      const flaggedErrorCount = questions.filter((q) => q.flaggedAsError).length
+
       const session: EvaluationSession & InteractiveSessionData = {
         childId: activeChildId,
         domain: 'reading',
@@ -424,6 +427,8 @@ export function useQuestSession() {
         diamondsMined: finalState.totalCorrect,
         streakDays: newStreak.currentStreak,
         timedOut,
+        skippedCount: skippedCount || undefined,
+        flaggedErrorCount: flaggedErrorCount || undefined,
       }
 
       try {
@@ -652,6 +657,7 @@ export function useQuestSession() {
       const responseTimeMs = Date.now() - questionStartRef.current
 
       // Record skipped question — does NOT count toward adaptive state
+      const flagged = shouldFlagAsError(currentQuestion)
       const sessionQ: SessionQuestion = {
         id: currentQuestion.id,
         type: 'multiple-choice',
@@ -664,6 +670,7 @@ export function useQuestSession() {
         childAnswer: '',
         correct: false,
         skipped: true,
+        flaggedAsError: flagged || undefined,
         responseTimeMs,
         timestamp: new Date().toISOString(),
       }
