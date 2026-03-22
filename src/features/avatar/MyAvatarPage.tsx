@@ -120,7 +120,8 @@ export default function MyAvatarPage() {
   const [session, setSession] = useState<DailyArmorSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedPiece, setSelectedPiece] = useState<ArmorPieceMeta | null>(null)
-  const [unequipPiece, setUnequipPiece] = useState<VoxelArmorPieceId | null>(null)
+  const [, setUnequipPiece] = useState<VoxelArmorPieceId | null>(null)
+
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
 
