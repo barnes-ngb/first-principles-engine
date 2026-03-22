@@ -8,6 +8,7 @@ import LaddersPage from '../ladders/LaddersPage'
 import EnginePage from '../engine/EnginePage'
 import SkillSnapshotPage from '../evaluation/SkillSnapshotPage'
 import KidsPage from '../kids/KidsPage'
+import WordWall from './WordWall'
 
 export default function ProgressPage() {
   const [tab, setTab] = useState(0)
@@ -20,11 +21,17 @@ export default function ProgressPage() {
     <>
       <Container maxWidth="lg" sx={{ pt: { xs: 2, md: 3 } }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs value={tab} onChange={handleChange}>
+          <Tabs
+            value={tab}
+            onChange={handleChange}
+            variant="scrollable"
+            scrollButtons="auto"
+          >
             <Tab label="Ladders" />
             <Tab label="Engine" />
             <Tab label="Skill Snapshot" />
             <Tab label="Milestones" />
+            <Tab label="Word Wall" />
           </Tabs>
         </Box>
       </Container>
@@ -32,6 +39,7 @@ export default function ProgressPage() {
       {tab === 1 && <EnginePage />}
       {tab === 2 && <SkillSnapshotPage />}
       {tab === 3 && <KidsPage />}
+      {tab === 4 && <WordWall />}
     </>
   )
 }

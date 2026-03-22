@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -28,8 +28,15 @@ import { useSightWordProgress } from './useSightWordProgress'
 import { DOLCH_PRE_PRIMER, DOLCH_PRIMER } from './sightWordMastery'
 import { SAMPLE_STORY } from './sampleStory'
 
+interface LocationState {
+  prefillWords?: string[]
+  source?: string
+  childId?: string
+}
+
 export default function CreateSightWordBook() {
   const navigate = useNavigate()
+  const location = useLocation()
   const familyId = useFamilyId()
   const { activeChild } = useActiveChild()
   const childId = activeChild?.id ?? ''
@@ -42,6 +49,15 @@ export default function CreateSightWordBook() {
   const [pageCount, setPageCount] = useState(10)
   const [preview, setPreview] = useState<GeneratedStory | null>(null)
   const [publishing, setPublishing] = useState(false)
+
+  // Pre-fill words from navigation state (e.g., from Word Wall)
+  useEffect(() => {
+    const state = location.state as LocationState | null
+    if (state?.prefillWords && state.prefillWords.length > 0) {
+      setWordsInput(state.prefillWords.join(', '))
+      if (!theme) setTheme('Minecraft adventure')
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const wordList = wordsInput
     .split(/[,\n]+/)
@@ -178,6 +194,13 @@ export default function CreateSightWordBook() {
       <Typography variant="h5" fontWeight={700}>
         Create a Sight Word Story
       </Typography>
+
+      {/* Prefill banner from Word Wall */}
+      {(location.state as LocationState | null)?.source === 'word-wall' && (
+        <Alert severity="info" sx={{ mb: 0 }}>
+          These words come from {activeChild?.name ?? 'your child'}&apos;s quest data. They&apos;re struggling with these patterns.
+        </Alert>
+      )}
 
       {/* Word input */}
       <Box>
