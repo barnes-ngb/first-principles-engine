@@ -64,10 +64,10 @@ export default function VoxelCharacter({
     scene.background = new THREE.Color(0x0d1117) // Dark background
     sceneRef.current = scene
 
-    // Camera — closer + lower FOV for heroic framing
+    // Camera — pulled back to frame full character head-to-toe
     const camera = new THREE.PerspectiveCamera(30, width / height, 0.1, 100)
-    camera.position.set(0, 1.8, 6.5)
-    camera.lookAt(0, 1.2, 0)
+    camera.position.set(0, 1.5, 9)
+    camera.lookAt(0, 1.3, 0)
     cameraRef.current = camera
 
     // Lighting
@@ -226,7 +226,8 @@ export default function VoxelCharacter({
         maxWidth: 400,
         mx: 'auto',
         aspectRatio: '3 / 4',
-        maxHeight: '55vh',
+        maxHeight: '50vh',
+        minHeight: 300,
         borderRadius: '12px',
         border: '2px solid #7EFC20',
         overflow: 'hidden',
