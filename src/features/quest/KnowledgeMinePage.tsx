@@ -284,6 +284,11 @@ export default function KnowledgeMinePage() {
           previousTotalXp={Math.max(0, xpLedger.totalXp - quest.questState.totalCorrect * 2)}
           skippedCount={quest.answeredQuestions.filter((q) => q.skipped).length}
           flaggedErrorCount={quest.answeredQuestions.filter((q) => q.flaggedAsError).length}
+          strugglingWords={[...new Set(
+            quest.answeredQuestions
+              .filter((q) => (!q.correct || q.skipped) && q.stimulus)
+              .map((q) => q.stimulus!),
+          )]}
           onDone={quest.resetToIntro}
           onTryAgain={() => {
             quest.resetToIntro()
