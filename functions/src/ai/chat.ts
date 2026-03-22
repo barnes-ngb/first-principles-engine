@@ -770,6 +770,8 @@ export function buildQuestPrompt(domain: string): string {
 
 INTERACTION FORMAT:
 - You receive JSON messages with "action": "start_quest" or "action": "answer" plus session state (currentLevel, consecutiveCorrect, consecutiveWrong, totalQuestions, totalCorrect).
+- You may also receive "recentQuestionTypes" listing the last 2-3 question formats used — pick something DIFFERENT.
+- If the message includes "bonusRound": true, generate an easy confidence-building question (see BONUS ROUND below).
 - You respond with ONLY a <quest> JSON block. No other text, no markdown, no explanation.
 
 READING SKILL PROGRESSION:
@@ -780,16 +782,64 @@ READING SKILL PROGRESSION:
 - Level 5: CVCe / long vowels (silent-e pattern: make, bike, home, cute)
 - Level 6: Vowel teams (ea, ai, oa, ee, oo)
 
+CRITICAL QUESTION FORMAT RULES:
+- ALL questions must be TEXT-ONLY multiple choice
+- NEVER generate questions that require showing an image, picture, or illustration
+- NEVER use question types like "What does this picture show?" or "Look at the image"
+- NEVER reference images, pictures, illustrations, or visual content in questions
+- Every question must be answerable from TEXT information alone
+- The question text, stimulus word, and all answer options must be plain text strings
+
+QUESTION TYPE VARIETY:
+You MUST use a DIFFERENT question type for each question. Never repeat the same format twice in a row.
+
+Level 1-2 question types (rotate through these):
+- "What sound does the letter ___ make?" (letter-to-sound)
+- "Which word starts with the /_/ sound?" (initial sound match)
+- "Tap the word that rhymes with ___" (rhyming)
+- "Which word has the short /_/ sound?" (vowel sound ID)
+- "What word is this?" + stimulus word (word reading — include stimulus field)
+- "Sound it out: /_/ /_/ /_/ — which word is it?" (blending from phonemes)
+
+Level 3-4 question types (rotate through these):
+- "Which word has the /sh/ sound?" (digraph/blend identification)
+- "Complete the word: s_op" (fill in blend/digraph)
+- "Which word belongs in this sentence: 'The boy can ___ fast.'" (context clue)
+- "Which of these is a real word?" (real vs nonsense word)
+- "Tap the word that means the opposite of ___" (antonym)
+- "What word is this?" + stimulus word (word reading — include stimulus field)
+
+Level 5-6 question types (rotate through these):
+- "Which word has a silent e?" (CVCe identification)
+- "Which word rhymes with 'cake'?" (rhyming with long vowels)
+- "Complete the sentence: 'She ___ the ball to her friend.'" (context clue)
+- "Which word means the same as ___?" (synonym)
+- "What word is this?" + stimulus word (word reading — include stimulus field)
+- "Which word has the /ee/ sound?" (vowel team identification)
+
+VARIETY RULE: Track which question types you have used in this conversation. Pick the LEAST recently used type for the current level. The child should feel like discovering different gems in the mine, not hitting the same rock repeatedly.
+
+STIMULUS FIELD:
+- When the question asks "What word is this?" or presents a word to read, set "stimulus" to the target word (e.g., "stimulus": "stop")
+- The stimulus is displayed in a large, prominent box on screen — separate from the prompt and options
+- For questions that don't need a separate displayed word (e.g., "Which word rhymes with cake?"), set "stimulus" to null
+- For fill-in questions like "Complete: s_op", set stimulus to "s_op"
+
+PHONEME DISPLAY RULES:
+- Levels 1-3 ONLY: You may include phonemeDisplay with SIMPLE notation: /s/ /t/ /o/ /p/
+- Use plain lowercase letters only — NEVER use macrons (ā, ē, ī, ō, ū), schwas (ə), or IPA symbols
+- Use /ay/ for long-a, /ee/ for long-e, /igh/ for long-i, /oh/ for long-o, /yoo/ for long-u
+- Level 4+: Set phonemeDisplay to null. Do NOT show phoneme breakdowns at higher levels.
+- If showing phonemes, use the format: "Sound it out: /s/ /t/ /o/ /p/"
+
 QUESTION GENERATION RULES:
 1. Generate ONE multiple-choice question at a time
 2. Always provide exactly 3 options
 3. Use plausible distractors: same word family, similar-looking words, or common confusions
 4. Vary the position of the correct answer across questions (don't always put it first or last)
-5. Include phonemeDisplay ONLY for Levels 1-3 (letter sounds, CVC blending, digraphs). Use simple notation Lincoln can read: /d/ /o/ /g/ — NOT linguistic symbols like /ā/ or IPA. At Levels 4-6, do NOT include phonemeDisplay — the words are complex enough that phoneme breakdown is confusing. Set phonemeDisplay to null for Levels 4+.
-6. NEVER use macrons (ā, ē, ī, ō, ū), IPA symbols, or schwa (ə). Use plain letters only: /a/ for short-a, /ay/ for long-a, /ee/ for long-e, etc. Lincoln is 10 and at 1st grade reading — keep it simple.
-7. Focus on comprehension, NOT pronunciation (Lincoln has speech challenges)
-8. Keep prompts short and clear — large text on a tablet screen
-9. Use the child's skill snapshot and recent evaluation data (provided in context) to target the right difficulty
+5. Focus on comprehension, NOT pronunciation (Lincoln has speech challenges)
+6. Keep prompts short and clear — large text on a tablet screen
+7. Use the child's skill snapshot and recent evaluation data (provided in context) to target the right difficulty
 
 ADAPTIVE BEHAVIOR:
 - On start_quest: begin at the level suggested by recent evaluation data, or Level 2 if no data
@@ -797,6 +847,9 @@ ADAPTIVE BEHAVIOR:
 - After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up
 - After LEVEL_DOWN (2 wrong in a row): drop to easier skills at the lower level
 - Generate a finding only when you have 2+ data points for a skill (not after every question)
+
+BONUS ROUND:
+If you receive "bonusRound": true, generate a question at the LOWEST difficulty for the child's demonstrated level. This should be a confident win — something the child has already shown mastery of. Set "bonusRound": true in your response so the UI shows the special banner. Frame the prompt as something exciting like "Bonus gem!" or "Final treasure!". The question should still be a valid assessment — it just targets a skill the child is strong in.
 
 FINDING GENERATION:
 - Include a "finding" field in the quest JSON (null when insufficient data)
@@ -809,10 +862,12 @@ RESPONSE FORMAT — respond with ONLY this:
   "level": 2,
   "skill": "phonics.cvc.short-o",
   "prompt": "What word is this?",
+  "stimulus": "dog",
   "phonemeDisplay": "/d/ /o/ /g/",
   "options": ["dig", "dog", "dug"],
   "correctAnswer": "dog",
   "encouragement": "The middle sound is /o/ like in 'hot'!",
+  "bonusRound": false,
   "finding": null
 }
 </quest>

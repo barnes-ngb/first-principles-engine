@@ -227,6 +227,35 @@ export default function QuestQuestionScreen({
         💎 {questState.totalCorrect}
       </Typography>
 
+      {/* Bonus round banner */}
+      {question.isBonusRound && (
+        <Box
+          sx={{
+            bgcolor: MC.gold,
+            borderRadius: 2,
+            p: 1.5,
+            textAlign: 'center',
+            mb: 2,
+            animation: 'bonus-pulse 1.2s ease-in-out infinite',
+            '@keyframes bonus-pulse': {
+              '0%, 100%': { transform: 'scale(1)' },
+              '50%': { transform: 'scale(1.03)' },
+            },
+          }}
+        >
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.6rem',
+              color: '#000',
+              letterSpacing: 2,
+            }}
+          >
+            BONUS ROUND!
+          </Typography>
+        </Box>
+      )}
+
       {/* Prompt */}
       <Typography
         sx={{
@@ -241,7 +270,33 @@ export default function QuestQuestionScreen({
         🧱 {question.prompt}
       </Typography>
 
-      {/* Phoneme display */}
+      {/* Stimulus word — large, centered, Minecraft-style */}
+      {question.stimulus && (
+        <Box
+          sx={{
+            bgcolor: MC.darkStone,
+            border: `2px solid ${MC.diamond}`,
+            borderRadius: 2,
+            p: 2.5,
+            textAlign: 'center',
+            mb: 3,
+          }}
+        >
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '1.4rem',
+              color: MC.diamond,
+              letterSpacing: 6,
+              textTransform: 'lowercase',
+            }}
+          >
+            {question.stimulus}
+          </Typography>
+        </Box>
+      )}
+
+      {/* Phoneme display (Levels 1-3 only) */}
       {question.phonemeDisplay && (
         <Typography
           sx={{
