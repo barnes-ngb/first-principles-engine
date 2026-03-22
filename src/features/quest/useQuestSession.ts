@@ -18,6 +18,7 @@ import type {
   SessionQuestion,
 } from './questTypes'
 import {
+  FRUSTRATION_LIMIT,
   QuestScreen,
 } from './questTypes'
 
@@ -180,6 +181,7 @@ export function useQuestSession() {
   const conversationRef = useRef<AIChatMessage[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const questionStartRef = useRef<number>(0)
+  const bonusRoundUsedRef = useRef(false)
 
   // ── Load previous sessions + streak ───────────────────────────
 
@@ -250,6 +252,7 @@ export function useQuestSession() {
       setSessionSaved(false)
       setScreen(QuestScreen.Loading)
       conversationRef.current = []
+      bonusRoundUsedRef.current = false
 
       // Start timer
       if (timerRef.current) clearInterval(timerRef.current)
@@ -586,26 +589,39 @@ export function useQuestSession() {
       // Check end conditions
       const { end: shouldEnd, timedOut } = shouldEndSession(newState)
 
-      if (shouldEnd) {
+      // End-on-a-win: if session would end and last answer was wrong, add bonus round
+      const needsBonusRound =
+        shouldEnd &&
+        !timedOut &&
+        !correct &&
+        !bonusRoundUsedRef.current &&
+        newState.levelDownsInARow < FRUSTRATION_LIMIT // don't force bonus if frustrated
+
+      if (shouldEnd && !needsBonusRound) {
         await endSession(updatedQuestions, newState, timedOut)
         return
       }
 
-      // Request next question
+      // Request next question (or bonus round)
       setScreen(QuestScreen.Loading)
+
+      if (needsBonusRound) {
+        bonusRoundUsedRef.current = true
+      }
 
       // Send recent question types so AI can vary format
       const recentQuestionTypes = updatedQuestions
         .slice(-3)
         .map((q) => q.prompt.slice(0, 50))
 
+      const bonusLevel = Math.max(1, newState.currentLevel - 2)
       const userMessage: AIChatMessage = {
         role: 'user',
         content: JSON.stringify({
           action: 'answer',
           childAnswer,
           correct,
-          currentLevel: newState.currentLevel,
+          currentLevel: needsBonusRound ? bonusLevel : newState.currentLevel,
           consecutiveCorrect: newState.consecutiveCorrect,
           consecutiveWrong: newState.consecutiveWrong,
           totalQuestions: newState.totalQuestions,
@@ -613,6 +629,7 @@ export function useQuestSession() {
           questionsThisLevel: newState.questionsThisLevel,
           levelDownsInARow: newState.levelDownsInARow,
           recentQuestionTypes,
+          ...(needsBonusRound ? { bonusRound: true } : {}),
         }),
       }
 
@@ -669,6 +686,7 @@ export function useQuestSession() {
     setSessionSaved(false)
     setSummarizing(false)
     conversationRef.current = []
+    bonusRoundUsedRef.current = false
   }, [])
 
   return {
