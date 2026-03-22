@@ -1,11 +1,15 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useImperativeHandle, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import IconButton from '@mui/material/IconButton'
+import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import VoiceInput from '../../../components/VoiceInput'
+import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import type { StoryChallenge } from '../../../core/types'
 import { ChallengeCardType } from '../../../core/types/workshop'
+import { useTapToHearMulti } from '../useTapToHear'
+import type { TapToHearRef } from '../workshopTypes'
 
 const CHALLENGE_TYPE_OPTIONS = [
   {
@@ -37,10 +41,16 @@ const CHALLENGE_TYPE_OPTIONS = [
 interface ChallengesStepProps {
   value: StoryChallenge[]
   onChange: (challenges: StoryChallenge[]) => void
+  stepRef?: React.Ref<TapToHearRef>
 }
 
-export default function ChallengesStep({ value, onChange }: ChallengesStepProps) {
+export default function ChallengesStep({ value, onChange, stepRef }: ChallengesStepProps) {
   const [customIdea, setCustomIdea] = useState('')
+
+  // Extract typed challenge types for the multi-select hook
+  const selectedTypes = value
+    .filter((c) => c.type !== 'custom')
+    .map((c) => c.type as ChallengeCardType)
 
   const toggleChallengeType = useCallback(
     (type: ChallengeCardType) => {
@@ -53,6 +63,12 @@ export default function ChallengesStep({ value, onChange }: ChallengesStepProps)
     },
     [value, onChange],
   )
+
+  const tap = useTapToHearMulti(selectedTypes, toggleChallengeType)
+
+  useImperativeHandle(stepRef, () => ({
+    confirmHighlighted: tap.confirmHighlighted,
+  }))
 
   const addCustomChallenge = useCallback(() => {
     const idea = customIdea.trim()
@@ -74,7 +90,7 @@ export default function ChallengesStep({ value, onChange }: ChallengesStepProps)
         What tricky things happen?
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Pick challenge types for your game!
+        Tap to hear, tap again to pick!
       </Typography>
 
       {/* Challenge type cards */}
@@ -87,33 +103,69 @@ export default function ChallengesStep({ value, onChange }: ChallengesStepProps)
         }}
       >
         {CHALLENGE_TYPE_OPTIONS.map((option) => {
-          const isSelected = value.some((c) => c.type === option.type)
+          const state = tap.getTileState(option.type)
+          const isActive = state !== 'idle'
           return (
             <Box
               key={option.type}
-              onClick={() => toggleChallengeType(option.type)}
+              onClick={() => tap.handleTileTap(option.type, option.label)}
               sx={{
+                position: 'relative',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 p: 2,
                 borderRadius: 2,
-                border: '2px solid',
-                borderColor: isSelected ? 'primary.main' : 'divider',
-                bgcolor: isSelected ? 'primary.light' : 'background.paper',
+                border: '3px solid',
+                borderColor:
+                  state === 'selected'
+                    ? 'primary.main'
+                    : state === 'highlighted'
+                      ? 'secondary.main'
+                      : 'divider',
+                bgcolor:
+                  state === 'selected'
+                    ? 'primary.light'
+                    : state === 'highlighted'
+                      ? 'secondary.light'
+                      : 'background.paper',
                 cursor: 'pointer',
-                transition: 'all 0.15s',
+                transition: 'all 0.2s',
+                transform: state === 'highlighted' ? 'scale(1.05)' : 'scale(1)',
+                boxShadow: state === 'highlighted' ? '0 0 12px rgba(156,39,176,0.3)' : 'none',
                 '&:hover': { borderColor: 'primary.main' },
                 '&:active': { transform: 'scale(0.97)' },
               }}
             >
               <Typography sx={{ fontSize: '2rem' }}>{option.emoji}</Typography>
-              <Typography variant="body2" sx={{ fontWeight: isSelected ? 700 : 400 }}>
+              <Typography variant="body2" sx={{ fontWeight: isActive ? 700 : 400 }}>
                 {option.label}
               </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', mt: 0.5 }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ textAlign: 'center', mt: 0.5 }}
+              >
                 {option.description}
               </Typography>
+              {isActive && (
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    tap.replayTTS(option.label)
+                  }}
+                  sx={{
+                    position: 'absolute',
+                    top: 2,
+                    right: 2,
+                    color: 'primary.main',
+                    p: 0.5,
+                  }}
+                >
+                  <VolumeUpIcon fontSize="small" />
+                </IconButton>
+              )}
             </Box>
           )
         })}
@@ -125,10 +177,16 @@ export default function ChallengesStep({ value, onChange }: ChallengesStepProps)
       </Typography>
       <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'flex-start' }}>
         <Box sx={{ flex: 1 }}>
-          <VoiceInput
+          <TextField
+            fullWidth
             value={customIdea}
-            onChange={setCustomIdea}
-            placeholder="Say a custom challenge idea..."
+            onChange={(e) => setCustomIdea(e.target.value)}
+            placeholder="Type a custom challenge idea..."
+            inputMode="text"
+            slotProps={{
+              input: { sx: { fontSize: '1.1rem' } },
+              htmlInput: { style: { minHeight: 48 } },
+            }}
           />
         </Box>
         <Button
