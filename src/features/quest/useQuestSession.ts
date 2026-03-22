@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
 
 import { useAI, TaskType } from '../../core/ai/useAI'
+import { addXpEvent } from '../../core/xp/addXpEvent'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { evaluationSessionsCollection, skillSnapshotsCollection, xpLedgerCollection } from '../../core/firebase/firestore'
+import { evaluationSessionsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot } from '../../core/types'
 import type { EvaluationDomain } from '../../core/types/enums'
@@ -432,59 +433,26 @@ export function useQuestSession() {
         console.error('Failed to save quest session', err)
       }
 
-      // Add diamond XP to ledger (with dedup protection)
+      // Award XP via addXpEvent (handles dedup, avatar profile update, armor unlocks)
       const XP_PER_DIAMOND = 2
       const questXp = finalState.totalCorrect * XP_PER_DIAMOND
 
       if (questXp > 0) {
-        try {
-          const dedupKey = `quest_${docId}`
-
-          // Check for existing event doc to prevent double-award on retry
-          const eventRef = doc(xpLedgerCollection(familyId), `${activeChildId}_${dedupKey}`)
-          const eventSnap = await getDoc(eventRef)
-          if (eventSnap.exists()) {
-            console.log('XP already awarded for this quest session, skipping')
-          } else {
-            // Write per-event doc for audit trail
-            await setDoc(eventRef, {
-              childId: activeChildId,
-              totalXp: questXp,
-              sources: { routines: 0, quests: questXp, books: 0 },
-              lastUpdatedAt: new Date().toISOString(),
-              dedupKey,
-              type: 'quest',
-              amount: questXp,
-              meta: {
-                domain: 'reading',
-                questionsCorrect: String(finalState.totalCorrect),
-                questionsTotal: String(finalState.totalQuestions),
-                finalLevel: String(finalState.currentLevel),
-              },
-              awardedAt: new Date().toISOString(),
-            })
-
-            // Update cumulative doc
-            const ledgerRef = doc(xpLedgerCollection(familyId), activeChildId)
-            const ledgerSnap = await getDoc(ledgerRef)
-            const existing = ledgerSnap.exists()
-              ? ledgerSnap.data()
-              : { totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }
-
-            await setDoc(ledgerRef, {
-              childId: activeChildId,
-              totalXp: (existing.totalXp || 0) + questXp,
-              sources: {
-                routines: existing.sources?.routines || 0,
-                quests: (existing.sources?.quests || 0) + questXp,
-                books: existing.sources?.books || 0,
-              },
-              lastUpdatedAt: new Date().toISOString(),
-            }, { merge: true })
-          }
-        } catch (err) {
-          console.warn('Failed to update XP ledger', err)
-        }
+        const dedupKey = `quest_${docId}`
+        // Fire-and-forget: session is already saved, don't block on XP write
+        addXpEvent(
+          familyId,
+          activeChildId,
+          'QUEST_DIAMOND',
+          questXp,
+          dedupKey,
+          {
+            domain: 'reading',
+            questionsCorrect: String(finalState.totalCorrect),
+            questionsTotal: String(finalState.totalQuestions),
+            finalLevel: String(finalState.currentLevel),
+          },
+        ).catch((err) => console.warn('Failed to award quest XP', err))
       }
 
       // Auto-apply findings to skill snapshot
