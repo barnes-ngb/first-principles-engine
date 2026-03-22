@@ -59,11 +59,11 @@ export const DEFAULT_CHARACTER_FEATURES: CharacterFeatures = {
 
 /** Lincoln-specific features (fair skin, medium brown hair past ears) */
 export const LINCOLN_FEATURES: CharacterFeatures = {
-  skinTone: '#F0D0B0',
-  hairColor: '#7B5B3A',
+  skinTone: '#F5D6B8',    // Fair/peachy — light warm beige
+  hairColor: '#6B4C32',   // Medium warm brown
   hairStyle: 'medium',
   hairLength: 'ear_length',
-  eyeColor: '#5B7B8A',
+  eyeColor: '#4A6B7A',    // Blue-gray
 }
 
 /** London-specific features */

@@ -76,10 +76,10 @@ export function buildCharacter(
   const U = 0.125 * scale // 1 Minecraft pixel
 
   // Colors from features (with fallbacks) — skin & hair from photo, clothes are fixed defaults
-  const skinColor = new THREE.Color(features.skinTone ?? '#F0D0B0')
-  const hairColor = new THREE.Color(features.hairColor ?? '#7B5B3A')
-  const shirtColor = new THREE.Color('#A0A0A0') // Gray (like Lincoln's Minecraft tee)
-  const pantsColor = new THREE.Color('#2E3A50') // Dark navy (like his actual shorts)
+  const skinColor = new THREE.Color(features.skinTone ?? '#F5D6B8')
+  const hairColor = new THREE.Color(features.hairColor ?? '#6B4C32')
+  const shirtColor = new THREE.Color('#B0B0B0') // Light heather gray (Lincoln's Minecraft tee)
+  const pantsColor = new THREE.Color('#2A3A52') // Dark navy blue (his actual shorts)
   const shoeColor = new THREE.Color('#3D3D3D')
 
   // --- HEAD (8×8×8 = 1×1×1) ---
@@ -92,21 +92,35 @@ export function buildCharacter(
   const eyeWhiteL = box(U * 2, U * 1, U * 0.5, 0xffffff, 'eyeWhiteL')
   eyeWhiteL.position.set(-U * 1.5, U * 28.5, U * 4.1)
   character.add(eyeWhiteL)
-  const eyeColor = features.eyeColor ? new THREE.Color(features.eyeColor) : new THREE.Color(0x3d2b1f)
+  const eyeColor = features.eyeColor ? new THREE.Color(features.eyeColor) : new THREE.Color(0x4a6b7a)
   const pupilL = box(U * 1, U * 1, U * 0.3, eyeColor, 'pupilL')
-  pupilL.position.set(-U * 1, U * 28.5, U * 4.3)
+  pupilL.position.set(-U * 1.2, U * 28.5, U * 4.3) // Slightly offset for personality
   character.add(pupilL)
 
   const eyeWhiteR = box(U * 2, U * 1, U * 0.5, 0xffffff, 'eyeWhiteR')
   eyeWhiteR.position.set(U * 1.5, U * 28.5, U * 4.1)
   character.add(eyeWhiteR)
   const pupilR = box(U * 1, U * 1, U * 0.3, eyeColor, 'pupilR')
-  pupilR.position.set(U * 2, U * 28.5, U * 4.3)
+  pupilR.position.set(U * 1.8, U * 28.5, U * 4.3) // Slightly offset for personality
   character.add(pupilR)
 
-  // Mouth — small line
-  const mouth = box(U * 2, U * 0.5, U * 0.3, 0x553333, 'mouth')
-  mouth.position.set(0, U * 26, U * 4.2)
+  // Eyebrows — gives expression
+  const eyebrowColor = 0x5A3E28
+  const eyebrowL = box(U * 1.8, U * 0.4, U * 0.3, eyebrowColor, 'eyebrowL')
+  eyebrowL.position.set(-U * 1.5, U * 29.4, U * 4.15)
+  character.add(eyebrowL)
+  const eyebrowR = box(U * 1.8, U * 0.4, U * 0.3, eyebrowColor, 'eyebrowR')
+  eyebrowR.position.set(U * 1.5, U * 29.4, U * 4.15)
+  character.add(eyebrowR)
+
+  // Nose — tiny bump
+  const nose = box(U * 0.8, U * 0.8, U * 0.3, 0xe8c8a8, 'nose')
+  nose.position.set(0, U * 27.5, U * 4.15)
+  character.add(nose)
+
+  // Mouth — subtle, slightly darker skin tone (not black)
+  const mouth = box(U * 2, U * 0.5, U * 0.3, 0xD4A088, 'mouth')
+  mouth.position.set(0, U * 26.2, U * 4.2)
   character.add(mouth)
 
   // Hair — built from the hair module
@@ -119,8 +133,8 @@ export function buildCharacter(
   torso.position.y = U * 18 // Center of body
   character.add(torso)
 
-  // Creeper face on gray shirt — green pixel art detail
-  const creeperGreen = 0x4CAF50
+  // Creeper face on gray shirt — darker green to contrast against gray
+  const creeperGreen = 0x3D8C35
   const cEyeL = box(U * 1.2, U * 1.2, U * 0.3, creeperGreen, 'creeperEyeL')
   cEyeL.position.set(-U * 1.5, U * 20, U * 2.15)
   character.add(cEyeL)

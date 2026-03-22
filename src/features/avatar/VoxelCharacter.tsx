@@ -10,7 +10,7 @@ import { buildArmorPiece, VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import { animateEquip, animateUnequip, animateJump, animateNod, animateSwordFlourish, animateHipTurn, animateTorsoPuff } from './voxel/equipAnimation'
 import { createTouchControls, updateRotation } from './voxel/touchControls'
 import type { TouchControlState } from './voxel/touchControls'
-import { applyTierToArmor, calculateTier, animateTierUpgrade } from './voxel/tierMaterials'
+import { applyTierToArmor, calculateTier, animateTierUpgrade, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
 
 interface VoxelCharacterProps {
   features: CharacterFeatures | undefined
@@ -40,12 +40,12 @@ const POSE_DEFAULT: CharacterPose = { armLRotZ: 0, armRRotZ: 0, armLRotX: 0, arm
 function calculatePose(equipped: string[]): CharacterPose {
   const pose = { ...POSE_DEFAULT }
   if (equipped.includes('sword')) {
-    pose.armRRotZ = -0.4   // Max ~23° outward — prevents clipping
-    pose.armRRotX = -0.15  // Slight forward
+    pose.armRRotZ = -0.55  // ~32° outward — enough to clear breastplate
+    pose.armRRotX = -0.15  // Slight forward tilt
   }
   if (equipped.includes('shield')) {
-    pose.armLRotZ = 0.35   // Outward
-    pose.armLRotX = 0.25   // Forward (shield faces front)
+    pose.armLRotZ = 0.5    // ~29° outward
+    pose.armLRotX = 0.35   // More forward — shield presents to front
   }
   return pose
 }
@@ -216,25 +216,30 @@ export default function VoxelCharacter({
     camera.lookAt(0, 1.8, 0)
     cameraRef.current = camera
 
-    // ── Three-point lighting ──────────────────────────────────────
-    // Key light — warm, from upper right
-    const keyLight = new THREE.DirectionalLight(0xfff5e6, 0.9)
-    keyLight.position.set(4, 6, 5)
+    // ── Dramatic lighting for depth ──────────────────────────────
+    // Key light — warm, from upper right front (main light source)
+    const keyLight = new THREE.DirectionalLight(0xFFF5E6, 1.0)
+    keyLight.position.set(5, 8, 6)
     scene.add(keyLight)
 
-    // Fill light — cool, from left (prevents harsh shadows)
-    const fillLight = new THREE.DirectionalLight(0xe6f0ff, 0.4)
-    fillLight.position.set(-3, 3, 2)
+    // Fill light — cool, from left (prevents pure black shadows)
+    const fillLight = new THREE.DirectionalLight(0xC8D8E8, 0.3)
+    fillLight.position.set(-5, 3, 3)
     scene.add(fillLight)
 
-    // Rim light — from behind for edge definition
-    const rimLight = new THREE.DirectionalLight(0x8888ff, 0.3)
-    rimLight.position.set(0, 4, -4)
+    // Rim light — from behind, creates silhouette edge
+    const rimLight = new THREE.DirectionalLight(0xFFFFFF, 0.5)
+    rimLight.position.set(0, 3, -6)
     scene.add(rimLight)
 
-    // Ambient — low so directional lights create depth
-    const ambient = new THREE.AmbientLight(0xffffff, 0.35)
+    // Ambient — just enough to see into shadows
+    const ambient = new THREE.AmbientLight(0xFFFFFF, 0.25)
     scene.add(ambient)
+
+    // Ground bounce — subtle warmth from below
+    const bounceLight = new THREE.DirectionalLight(0xFFE8D6, 0.1)
+    bounceLight.position.set(0, -4, 2)
+    scene.add(bounceLight)
 
     // Build character
     const character = buildCharacter(resolvedFeatures, ageGroup)
@@ -297,24 +302,21 @@ export default function VoxelCharacter({
           }
         })
       } else {
-        // Locked — ghost with blue tint + glow so kids can see what they're working toward
+        // Locked — very faint ghost using tier color (not white), barely visible
+        const tierTint = getTierTint(currentTier)
+        const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
         group.scale.set(1, 1, 1)
+        // Scale down ghost shield so it's less intrusive
+        if (pieceId === 'shield') {
+          group.scale.set(0.85, 0.85, 0.85)
+        }
         group.traverse((child) => {
           if (child instanceof THREE.Mesh) {
-            const materials = Array.isArray(child.material) ? child.material : [child.material]
-            const baseHex = materials[0] instanceof THREE.MeshLambertMaterial
-              ? materials[0].color?.getHex() ?? 0x888888
-              : 0x888888
-            const base = new THREE.Color(baseHex)
-            const ghost = new THREE.Color(0x8888cc)
-            base.lerp(ghost, 0.5)
             const ghostMat = new THREE.MeshLambertMaterial({
-              color: base,
+              color: tierMat.primary,    // Tier-colored, not white
               transparent: true,
-              opacity: 0.25,
+              opacity: 0.08,             // Barely visible — a hint, not distraction
               depthWrite: false,
-              emissive: new THREE.Color(0x334466),
-              emissiveIntensity: 0.3,
             })
             child.material = ghostMat
           }
@@ -524,22 +526,20 @@ export default function VoxelCharacter({
         const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
         if (group) {
           const isUnlocked = totalXp >= XP_THRESHOLDS[pieceId as VoxelArmorPieceId]
+          const tierTint = getTierTint(currentTier)
+          const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
           group.visible = true
+          // Scale down ghost shield
+          if (pieceId === 'shield' && !isUnlocked) {
+            group.scale.set(0.85, 0.85, 0.85)
+          }
           group.traverse((child) => {
             if (child instanceof THREE.Mesh) {
-              const mats = Array.isArray(child.material) ? child.material : [child.material]
-              const baseHex = mats[0] instanceof THREE.MeshLambertMaterial
-                ? mats[0].color?.getHex() ?? 0x888888
-                : 0x888888
-              const ghostOpacity = isUnlocked ? 0.3 : 0.25
-              const base = new THREE.Color(baseHex)
-              if (!isUnlocked) base.lerp(new THREE.Color(0x8888cc), 0.5)
               child.material = new THREE.MeshLambertMaterial({
-                color: base,
+                color: tierMat.primary,     // Tier-colored ghost
                 transparent: true,
-                opacity: ghostOpacity,
+                opacity: isUnlocked ? 0.3 : 0.08,  // Unlocked translucent, locked barely visible
                 depthWrite: false,
-                ...(isUnlocked ? {} : { emissive: new THREE.Color(0x334466), emissiveIntensity: 0.3 }),
               })
             }
           })
