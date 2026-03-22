@@ -235,6 +235,36 @@ Quest uses Claude Sonnet (same tier as plan/evaluate) for higher-quality questio
 
 ---
 
+## Implementation Status (as of March 22, 2026)
+
+### Phase 1 — SHIPPED
+- Multiple choice reading quest with live AI question generation
+- Adaptive difficulty (3 correct → level up, 2 wrong → level down)
+- Session limits (10 questions, 8 minutes, frustration detection)
+- Diamond mining feedback + quest streak tracking
+- Word stimulus display (target word shown clearly)
+- Text-only questions (no image types)
+- Question type variety (rotation per level)
+- Quest → XP pipeline (diamonds → XP ledger → avatar)
+- Quest → Skill Snapshot pipeline (auto-apply findings)
+- Quest → Planner pipeline (recommendations feed into Plan My Week)
+- Phoneme hints (Levels 1-3, simple notation only)
+- End-on-a-win bonus round
+
+### Phase 2 — NOT STARTED
+- Voice input (Web Speech API)
+- Type-to-answer questions
+- Math Quest domain
+- Speech Quest domain
+
+### Phase 3 — NOT STARTED
+- Pre-generated question bank (zero latency)
+
+### Phase 4 — NOT STARTED
+- Avatar integration (quest diamonds → armor resources)
+
+---
+
 ## What's Next
 
 ### Phase 2: Input Expansion
@@ -244,7 +274,6 @@ Quest uses Claude Sonnet (same tier as plan/evaluate) for higher-quality questio
 
 ### Phase 3: Performance + Polish
 - Pre-generated question bank (reduce AI latency between questions)
-- Avatar integration (Minecraft character progression)
 - Session review for parents (detailed question-by-question breakdown)
 - Quest data in weekly review summary
 
