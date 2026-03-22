@@ -18,6 +18,7 @@ import type {
   SessionQuestion,
 } from './questTypes'
 import {
+  FRUSTRATION_LIMIT,
   QuestScreen,
 } from './questTypes'
 
@@ -37,10 +38,12 @@ function parseQuestBlock(text: string): QuestQuestion | null {
       level: parsed.level ?? 2,
       skill: parsed.skill ?? '',
       prompt: parsed.prompt ?? '',
+      stimulus: parsed.stimulus ?? undefined,
       phonemeDisplay: parsed.phonemeDisplay,
       options: parsed.options ?? [],
       correctAnswer: parsed.correctAnswer ?? '',
       encouragement: parsed.encouragement,
+      isBonusRound: parsed.bonusRound ?? undefined,
     }
   } catch {
     return null
@@ -95,6 +98,68 @@ function getDateString(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+// ── Fallback recommendation generator ────────────────────────────
+
+function generateFallbackRecommendations(
+  sessionFindings: EvaluationFinding[],
+  finalLevel: number,
+): Array<{ priority: number; skill: string; action: string; duration: string; frequency: string }> {
+  const recs: Array<{ priority: number; skill: string; action: string; duration: string; frequency: string }> = []
+  let priority = 1
+
+  const notYet = sessionFindings.filter((f) => f.status === 'not-yet')
+  const emerging = sessionFindings.filter((f) => f.status === 'emerging')
+
+  for (const f of notYet) {
+    recs.push({
+      priority: priority++,
+      skill: f.skill,
+      action: `Focus: ${formatSkillLabel(f.skill)} — needs direct instruction before practice`,
+      duration: '2 weeks',
+      frequency: 'Daily, 5-10 minutes',
+    })
+  }
+
+  for (const f of emerging) {
+    recs.push({
+      priority: priority++,
+      skill: f.skill,
+      action: `Practice: ${formatSkillLabel(f.skill)} — emerging, needs short daily practice`,
+      duration: '2 weeks',
+      frequency: 'Daily, 5-10 minutes',
+    })
+  }
+
+  // Level-based general recommendation
+  if (finalLevel <= 2) {
+    recs.push({
+      priority: priority++,
+      skill: 'phonics.basics',
+      action: 'Continue phonics basics — letter sounds and simple CVC words',
+      duration: '2 weeks',
+      frequency: 'Daily, 8-10 minutes',
+    })
+  } else if (finalLevel <= 4) {
+    recs.push({
+      priority: priority++,
+      skill: 'phonics.blends',
+      action: 'Ready for blends and digraphs — introduce sh, ch, th, bl, cr patterns',
+      duration: '2 weeks',
+      frequency: 'Daily, 8-10 minutes',
+    })
+  } else {
+    recs.push({
+      priority: priority++,
+      skill: 'phonics.cvce',
+      action: 'Ready for long vowels and CVCe — focus on silent-e patterns',
+      duration: '2 weeks',
+      frequency: 'Daily, 8-10 minutes',
+    })
+  }
+
+  return recs
+}
+
 // ── Hook ────────────────────────────────────────────────────────
 
 export function useQuestSession() {
@@ -116,6 +181,7 @@ export function useQuestSession() {
   const conversationRef = useRef<AIChatMessage[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const questionStartRef = useRef<number>(0)
+  const bonusRoundUsedRef = useRef(false)
 
   // ── Load previous sessions + streak ───────────────────────────
 
@@ -186,6 +252,7 @@ export function useQuestSession() {
       setSessionSaved(false)
       setScreen(QuestScreen.Loading)
       conversationRef.current = []
+      bonusRoundUsedRef.current = false
 
       // Start timer
       if (timerRef.current) clearInterval(timerRef.current)
@@ -324,6 +391,16 @@ export function useQuestSession() {
         setSummarizing(false)
       }
 
+      // Fallback: generate client-side recommendations if AI didn't produce any
+      if (sessionRecommendations.length === 0 && findings.length > 0) {
+        sessionRecommendations = generateFallbackRecommendations(findings, finalState.currentLevel)
+      }
+
+      // Fallback: generate level-based recommendation even with no findings
+      if (sessionRecommendations.length === 0) {
+        sessionRecommendations = generateFallbackRecommendations([], finalState.currentLevel)
+      }
+
       // Save to Firestore
       const timestamp = Date.now()
       const docId = `interactive_${activeChildId}_${timestamp}`
@@ -355,28 +432,56 @@ export function useQuestSession() {
         console.error('Failed to save quest session', err)
       }
 
-      // Add diamond XP to ledger
+      // Add diamond XP to ledger (with dedup protection)
       const XP_PER_DIAMOND = 2
       const questXp = finalState.totalCorrect * XP_PER_DIAMOND
 
       if (questXp > 0) {
         try {
-          const ledgerRef = doc(xpLedgerCollection(familyId), activeChildId)
-          const ledgerSnap = await getDoc(ledgerRef)
-          const existing = ledgerSnap.exists()
-            ? ledgerSnap.data()
-            : { totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }
+          const dedupKey = `quest_${docId}`
 
-          await setDoc(ledgerRef, {
-            childId: activeChildId,
-            totalXp: (existing.totalXp || 0) + questXp,
-            sources: {
-              routines: existing.sources?.routines || 0,
-              quests: (existing.sources?.quests || 0) + questXp,
-              books: existing.sources?.books || 0,
-            },
-            lastUpdatedAt: new Date().toISOString(),
-          })
+          // Check for existing event doc to prevent double-award on retry
+          const eventRef = doc(xpLedgerCollection(familyId), `${activeChildId}_${dedupKey}`)
+          const eventSnap = await getDoc(eventRef)
+          if (eventSnap.exists()) {
+            console.log('XP already awarded for this quest session, skipping')
+          } else {
+            // Write per-event doc for audit trail
+            await setDoc(eventRef, {
+              childId: activeChildId,
+              totalXp: questXp,
+              sources: { routines: 0, quests: questXp, books: 0 },
+              lastUpdatedAt: new Date().toISOString(),
+              dedupKey,
+              type: 'quest',
+              amount: questXp,
+              meta: {
+                domain: 'reading',
+                questionsCorrect: String(finalState.totalCorrect),
+                questionsTotal: String(finalState.totalQuestions),
+                finalLevel: String(finalState.currentLevel),
+              },
+              awardedAt: new Date().toISOString(),
+            })
+
+            // Update cumulative doc
+            const ledgerRef = doc(xpLedgerCollection(familyId), activeChildId)
+            const ledgerSnap = await getDoc(ledgerRef)
+            const existing = ledgerSnap.exists()
+              ? ledgerSnap.data()
+              : { totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }
+
+            await setDoc(ledgerRef, {
+              childId: activeChildId,
+              totalXp: (existing.totalXp || 0) + questXp,
+              sources: {
+                routines: existing.sources?.routines || 0,
+                quests: (existing.sources?.quests || 0) + questXp,
+                books: existing.sources?.books || 0,
+              },
+              lastUpdatedAt: new Date().toISOString(),
+            }, { merge: true })
+          }
         } catch (err) {
           console.warn('Failed to update XP ledger', err)
         }
@@ -487,27 +592,47 @@ export function useQuestSession() {
       // Check end conditions
       const { end: shouldEnd, timedOut } = shouldEndSession(newState)
 
-      if (shouldEnd) {
+      // End-on-a-win: if session would end and last answer was wrong, add bonus round
+      const needsBonusRound =
+        shouldEnd &&
+        !timedOut &&
+        !correct &&
+        !bonusRoundUsedRef.current &&
+        newState.levelDownsInARow < FRUSTRATION_LIMIT // don't force bonus if frustrated
+
+      if (shouldEnd && !needsBonusRound) {
         await endSession(updatedQuestions, newState, timedOut)
         return
       }
 
-      // Request next question
+      // Request next question (or bonus round)
       setScreen(QuestScreen.Loading)
 
+      if (needsBonusRound) {
+        bonusRoundUsedRef.current = true
+      }
+
+      // Send recent question types so AI can vary format
+      const recentQuestionTypes = updatedQuestions
+        .slice(-3)
+        .map((q) => q.prompt.slice(0, 50))
+
+      const bonusLevel = Math.max(1, newState.currentLevel - 2)
       const userMessage: AIChatMessage = {
         role: 'user',
         content: JSON.stringify({
           action: 'answer',
           childAnswer,
           correct,
-          currentLevel: newState.currentLevel,
+          currentLevel: needsBonusRound ? bonusLevel : newState.currentLevel,
           consecutiveCorrect: newState.consecutiveCorrect,
           consecutiveWrong: newState.consecutiveWrong,
           totalQuestions: newState.totalQuestions,
           totalCorrect: newState.totalCorrect,
           questionsThisLevel: newState.questionsThisLevel,
           levelDownsInARow: newState.levelDownsInARow,
+          recentQuestionTypes,
+          ...(needsBonusRound ? { bonusRound: true } : {}),
         }),
       }
 
@@ -564,6 +689,7 @@ export function useQuestSession() {
     setSessionSaved(false)
     setSummarizing(false)
     conversationRef.current = []
+    bonusRoundUsedRef.current = false
   }, [])
 
   return {

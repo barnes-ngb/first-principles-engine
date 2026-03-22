@@ -85,7 +85,9 @@ export async function logAiUsage(
   }
 }
 
-/** Load recent evaluation context string for plan/quest tasks. */
+/** Load recent evaluation context string for plan/quest tasks.
+ * Reads the most recent complete evaluation session (guided or interactive).
+ */
 export async function loadRecentEvalContext(
   db: Firestore,
   familyId: string,
@@ -105,6 +107,10 @@ export async function loadRecentEvalContext(
         domain?: string;
         evaluatedAt?: string;
         summary?: string;
+        sessionType?: string;
+        finalLevel?: number;
+        totalCorrect?: number;
+        totalQuestions?: number;
         recommendations?: Array<{
           priority: number;
           skill: string;
@@ -112,14 +118,31 @@ export async function loadRecentEvalContext(
           frequency: string;
           duration: string;
         }>;
+        findings?: Array<{
+          skill: string;
+          status: string;
+          evidence: string;
+        }>;
       };
 
       if (evalData.summary) {
         const evalLines: string[] = [];
-        evalLines.push("", "RECENT EVALUATION:");
+        const sessionLabel = evalData.sessionType === "interactive"
+          ? "RECENT INTERACTIVE EVALUATION (Knowledge Mine Quest)"
+          : "RECENT EVALUATION";
+        evalLines.push("", `${sessionLabel}:`);
         evalLines.push(`Domain: ${evalData.domain || "unknown"}`);
         evalLines.push(`Date: ${evalData.evaluatedAt || "unknown"}`);
+        if (evalData.sessionType === "interactive" && evalData.finalLevel) {
+          evalLines.push(`Final Level: ${evalData.finalLevel}, Score: ${evalData.totalCorrect}/${evalData.totalQuestions}`);
+        }
         evalLines.push(`Summary: ${evalData.summary}`);
+        if (evalData.findings?.length) {
+          evalLines.push("Findings:");
+          for (const f of evalData.findings) {
+            evalLines.push(`- ${f.skill}: ${f.status} — ${f.evidence}`);
+          }
+        }
         if (evalData.recommendations?.length) {
           evalLines.push("Recommendations:");
           for (const rec of evalData.recommendations) {
