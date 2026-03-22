@@ -134,18 +134,21 @@ export function buildCharacter(
   // --- ARMS (4×12×4 each) ---
   // Geometry is shifted so pivot point is at the SHOULDER (top of arm),
   // enabling natural rotation from the shoulder joint.
+  // Arms are positioned slightly outward (6.6U instead of 6U) to prevent
+  // clipping into the torso when rotated for sword/shield poses.
+  const armGap = U * 0.6 // Small gap between arm and torso edge
   const armGeoL = new THREE.BoxGeometry(U * 4, U * 12, U * 4)
   armGeoL.translate(0, -U * 6, 0) // Shift so top of arm (shoulder) is at local Y=0
   const armL = new THREE.Mesh(armGeoL, createTexturedMaterials(skinColor))
   armL.name = 'armL'
-  armL.position.set(-U * 6, U * 24, 0) // Shoulder height = torso top
+  armL.position.set(-U * 6 - armGap, U * 24, 0) // Shoulder height, slightly further out
   character.add(armL)
 
   const armGeoR = new THREE.BoxGeometry(U * 4, U * 12, U * 4)
   armGeoR.translate(0, -U * 6, 0)
   const armR = new THREE.Mesh(armGeoR, createTexturedMaterials(skinColor))
   armR.name = 'armR'
-  armR.position.set(U * 6, U * 24, 0)
+  armR.position.set(U * 6 + armGap, U * 24, 0)
   character.add(armR)
 
   // Shirt sleeves — children of arms so they rotate together

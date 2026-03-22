@@ -113,6 +113,9 @@ export function applyTierToArmor(
 
       const role: string = (child.userData.materialRole as string) ?? 'primary'
 
+      // Skip sword blade meshes — they keep their blue glow color
+      if (role === 'sword_blade') return
+
       let baseColor: number
       switch (role) {
         case 'accent': baseColor = materials.accent; break

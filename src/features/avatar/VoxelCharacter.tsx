@@ -40,12 +40,12 @@ const POSE_DEFAULT: CharacterPose = { armLRotZ: 0, armRRotZ: 0, armLRotX: 0, arm
 function calculatePose(equipped: string[]): CharacterPose {
   const pose = { ...POSE_DEFAULT }
   if (equipped.includes('sword')) {
-    pose.armRRotZ = -0.5   // Angled outward ~30°
-    pose.armRRotX = -0.2   // Slightly forward
+    pose.armRRotZ = -0.4   // Max ~23° outward — prevents clipping
+    pose.armRRotX = -0.15  // Slight forward
   }
   if (equipped.includes('shield')) {
-    pose.armLRotZ = 0.4    // Angled outward
-    pose.armLRotX = 0.3    // Forward (shield faces front)
+    pose.armLRotZ = 0.35   // Outward
+    pose.armLRotX = 0.25   // Forward (shield faces front)
   }
   return pose
 }
@@ -331,6 +331,19 @@ export default function VoxelCharacter({
     platform.position.y = character.position.y
     scene.add(platform)
 
+    // Shadow on platform surface
+    const scale = ageGroup === 'younger' ? 0.88 : 1.0
+    const shadowGeo = new THREE.PlaneGeometry(2.5 * scale, 1.5 * scale)
+    const shadowMat = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.15,
+    })
+    const shadow = new THREE.Mesh(shadowGeo, shadowMat)
+    shadow.rotation.x = -Math.PI / 2
+    shadow.position.y = 0.01 // Just above platform surface
+    scene.add(shadow)
+
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true })
     renderer.setSize(width, height)
@@ -391,6 +404,23 @@ export default function VoxelCharacter({
           armR.rotation.z = currentPose.armRRotZ - idleSway
           armR.rotation.x = currentPose.armRRotX - Math.sin(time * 0.8) * 0.05
         }
+      }
+
+      // Pulse sword blade glow when sword is equipped
+      const swordGroup = armorGroupsRef.current.get('sword')
+      if (swordGroup?.visible) {
+        const time2 = clock.getElapsedTime()
+        swordGroup.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.userData.materialRole === 'sword_blade') {
+            const mat = child.material
+            if (mat instanceof THREE.MeshLambertMaterial) {
+              mat.emissiveIntensity = 0.2 + Math.sin(time2 * 2.5) * 0.15
+            }
+          }
+          if (child instanceof THREE.PointLight) {
+            child.intensity = 0.5 + Math.sin(time2 * 2.5) * 0.3
+          }
+        })
       }
 
       renderer.render(scene, camera)

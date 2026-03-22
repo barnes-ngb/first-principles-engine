@@ -129,6 +129,9 @@ export default function MyAvatarPage() {
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
 
+  // Card scroll ref — reset to start on load
+  const cardScrollRef = useRef<HTMLDivElement>(null)
+
   // Photo feature extraction
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null)
   const [photoExtracting, setPhotoExtracting] = useState(false)
@@ -143,6 +146,11 @@ export default function MyAvatarPage() {
   // Track previous state for celebrations
   const prevPiecesCountRef = useRef(0)
   const prevTierRef = useRef<string | null>(null)
+
+  // Reset card scroll to start (Belt first) on load
+  useEffect(() => {
+    if (cardScrollRef.current) cardScrollRef.current.scrollLeft = 0
+  }, [profile])
 
   // Pre-load TTS voices (Chrome loads async)
   useEffect(() => {
@@ -610,6 +618,7 @@ export default function MyAvatarPage() {
 
         {/* ── Armor Piece Cards (horizontal scroll) ────────────── */}
         <Box
+          ref={cardScrollRef}
           sx={{
             overflowX: 'auto',
             display: 'flex',
