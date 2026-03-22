@@ -449,6 +449,9 @@ export function useQuestSession() {
             // Write per-event doc for audit trail
             await setDoc(eventRef, {
               childId: activeChildId,
+              totalXp: questXp,
+              sources: { routines: 0, quests: questXp, books: 0 },
+              lastUpdatedAt: new Date().toISOString(),
               dedupKey,
               type: 'quest',
               amount: questXp,
