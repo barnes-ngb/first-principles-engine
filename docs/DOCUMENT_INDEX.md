@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-03-15.
+> Where everything lives. Updated 2026-03-22.
 
 ---
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | `MASTER_OUTLINE.md` | **CURRENT** | Single source of truth for project status, feature inventory, sprint history |
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
-| `KNOWLEDGE_MINE_BRIEF.md` | **NEW** | Interactive evaluation design doc (Knowledge Mine Phase 1) |
+| `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped, implementation status added Mar 22 |
 | `00_MASTER_SCOPE.md` | HISTORICAL | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `01_MVP_V0_1.md` | HISTORICAL | Phase 1 — MVP (Today, artifacts, engine, records) |
 | `02_ENGINE_LADDERS.md` | HISTORICAL | Phase 2 — Engine + Ladders |
