@@ -27,7 +27,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
-import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, VOXEL_TO_ARMOR_PIECE, DEFAULT_CHARACTER_FEATURES, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
+import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, VOXEL_TO_ARMOR_PIECE, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
 import type {
   ArmorPiece,
   AvatarProfile,
