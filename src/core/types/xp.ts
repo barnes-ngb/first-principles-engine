@@ -50,10 +50,29 @@ export interface CharacterFeatures {
 }
 
 export const DEFAULT_CHARACTER_FEATURES: CharacterFeatures = {
-  skinTone: '#D2A272',
-  hairColor: '#4A3728',
+  skinTone: '#F0D0B0',
+  hairColor: '#7B5B3A',
+  hairStyle: 'medium',
+  hairLength: 'ear_length',
+  eyeColor: '#5B7B8A',
+}
+
+/** Lincoln-specific features (fair skin, medium brown hair past ears) */
+export const LINCOLN_FEATURES: CharacterFeatures = {
+  skinTone: '#F0D0B0',
+  hairColor: '#7B5B3A',
+  hairStyle: 'medium',
+  hairLength: 'ear_length',
+  eyeColor: '#5B7B8A',
+}
+
+/** London-specific features */
+export const LONDON_FEATURES: CharacterFeatures = {
+  skinTone: '#F0D0B0',
+  hairColor: '#8B6914',
   hairStyle: 'short',
   hairLength: 'above_ear',
+  eyeColor: '#5B7B8A',
 }
 
 /** Maps full ArmorPiece IDs to simplified voxel piece IDs */
