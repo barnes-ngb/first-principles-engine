@@ -57,10 +57,13 @@ export interface SessionQuestion {
   level: number
   skill: string
   prompt: string
+  stimulus?: string
   options: string[]
   correctAnswer: string
   childAnswer: string
   correct: boolean
+  skipped?: boolean
+  flaggedAsError?: boolean
   responseTimeMs: number
   timestamp: string
 }
@@ -76,6 +79,8 @@ export interface InteractiveSessionData {
   diamondsMined: number // = totalCorrect
   streakDays: number
   timedOut?: boolean
+  skippedCount?: number
+  flaggedErrorCount?: number
 }
 
 // ── Quest streak ──────────────────────────────────────────────

@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
 import CircularProgress from '@mui/material/CircularProgress'
 import LinearProgress from '@mui/material/LinearProgress'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import { sanitizeStimulus } from './questHelpers'
 import type { QuestQuestion, QuestState } from './questTypes'
 import { MAX_QUESTIONS } from './questTypes'
 
@@ -164,20 +166,54 @@ export function QuestFeedback({
 interface QuestQuestionScreenProps {
   question: QuestQuestion
   questState: QuestState
+  consecutiveWrong: number
   onAnswer: (answer: string) => void
+  onSkip: () => void
 }
 
 export default function QuestQuestionScreen({
   question,
   questState,
+  consecutiveWrong,
   onAnswer,
+  onSkip,
 }: QuestQuestionScreenProps) {
   const progress = (questState.totalQuestions / MAX_QUESTIONS) * 100
 
+  const [showSkip, setShowSkip] = useState(false)
+  const [revealingAnswer, setRevealingAnswer] = useState(false)
+
+  // Show skip button after 8 seconds on current question
+  useEffect(() => {
+    setShowSkip(false)
+    setRevealingAnswer(false)
+    const timer = setTimeout(() => setShowSkip(true), 8000)
+    return () => clearTimeout(timer)
+  }, [question.id])
+
+  // Also show immediately if 2+ consecutive wrong
+  useEffect(() => {
+    if (consecutiveWrong >= 2) setShowSkip(true)
+  }, [consecutiveWrong])
+
+  const handleSkip = () => {
+    setRevealingAnswer(true)
+
+    // Show correct answer for 2 seconds, then notify parent
+    setTimeout(() => {
+      setRevealingAnswer(false)
+      setShowSkip(false)
+      onSkip()
+    }, 2000)
+  }
+
+  // Sanitize stimulus (strips leaked answers in fill-in-blank)
   // Defensive fallback: if prompt asks "What word is this?" but AI omitted stimulus,
   // use the correct answer as the display word so Lincoln isn't guessing blind
-  const displayStimulus = question.stimulus
+  const displayStimulus = sanitizeStimulus(question)
     || (/what word/i.test(question.prompt) ? question.correctAnswer : undefined)
+
+  const correctLower = question.correctAnswer.trim().toLowerCase()
 
   return (
     <Box sx={{ bgcolor: MC.bg, borderRadius: 2, p: 3 }}>
@@ -319,51 +355,122 @@ export default function QuestQuestionScreen({
 
       {/* Answer cards */}
       <Stack spacing={1.5}>
-        {question.options.map((option, i) => (
-          <Box
-            key={i}
-            role="button"
-            tabIndex={0}
-            onClick={() => onAnswer(option)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                onAnswer(option)
-              }
-            }}
-            sx={{
-              bgcolor: MC.darkStone,
-              border: `2px solid transparent`,
-              borderRadius: 2,
-              p: 2,
-              minHeight: 56,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              transition: 'border-color 0.15s',
-              '&:hover': {
-                borderColor: MC.gold,
-              },
-              '&:focus-visible': {
-                borderColor: MC.gold,
-                outline: 'none',
-              },
-            }}
-          >
-            <Typography
+        {question.options.map((option, i) => {
+          const isCorrectOption = option.trim().toLowerCase() === correctLower
+          const revealCorrect = revealingAnswer && isCorrectOption
+          const revealFade = revealingAnswer && !isCorrectOption
+
+          return (
+            <Box
+              key={i}
+              role="button"
+              tabIndex={revealingAnswer ? -1 : 0}
+              onClick={() => {
+                if (!revealingAnswer) onAnswer(option)
+              }}
+              onKeyDown={(e) => {
+                if (!revealingAnswer && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault()
+                  onAnswer(option)
+                }
+              }}
               sx={{
-                fontFamily: MC.font,
-                fontSize: '0.7rem',
-                color: MC.white,
-                textAlign: 'center',
+                bgcolor: revealCorrect ? 'rgba(126, 252, 32, 0.15)' : MC.darkStone,
+                border: `2px solid ${revealCorrect ? MC.green : 'transparent'}`,
+                borderRadius: 2,
+                p: 2,
+                minHeight: 56,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: revealingAnswer ? 'default' : 'pointer',
+                opacity: revealFade ? 0.3 : 1,
+                transition: 'border-color 0.15s, opacity 0.3s, background-color 0.3s',
+                '&:hover': revealingAnswer ? {} : {
+                  borderColor: MC.gold,
+                },
+                '&:focus-visible': revealingAnswer ? {} : {
+                  borderColor: MC.gold,
+                  outline: 'none',
+                },
               }}
             >
-              {option}
-            </Typography>
-          </Box>
-        ))}
+              <Typography
+                sx={{
+                  fontFamily: MC.font,
+                  fontSize: '0.7rem',
+                  color: revealCorrect ? MC.green : MC.white,
+                  textAlign: 'center',
+                }}
+              >
+                {revealCorrect ? `✅ ${option}` : option}
+              </Typography>
+            </Box>
+          )
+        })}
       </Stack>
+
+      {/* Skip button */}
+      {showSkip && !revealingAnswer && (
+        <Box
+          role="button"
+          tabIndex={0}
+          onClick={handleSkip}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              handleSkip()
+            }
+          }}
+          sx={{
+            mt: 2,
+            bgcolor: MC.darkStone,
+            border: `2px solid ${MC.stone}`,
+            borderRadius: 2,
+            p: 2,
+            minHeight: 56,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'border-color 0.15s',
+            '&:hover': {
+              borderColor: MC.white,
+            },
+            '&:focus-visible': {
+              borderColor: MC.white,
+              outline: 'none',
+            },
+          }}
+        >
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.6rem',
+              color: MC.stone,
+              textAlign: 'center',
+            }}
+          >
+            Skip ⛏️
+          </Typography>
+        </Box>
+      )}
+
+      {/* Answer reveal label */}
+      {revealingAnswer && (
+        <Typography
+          sx={{
+            fontFamily: MC.font,
+            fontSize: '0.5rem',
+            color: MC.green,
+            textAlign: 'center',
+            mt: 2,
+            lineHeight: 1.8,
+          }}
+        >
+          The answer was: {question.correctAnswer}
+        </Typography>
+      )}
     </Box>
   )
 }
