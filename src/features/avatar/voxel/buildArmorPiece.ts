@@ -172,41 +172,46 @@ const W = 0xffffff
 function buildHelmet(U: number): THREE.Group {
   const group = new THREE.Group()
 
-  // Head is 8U × 8U × 8U centered at Y = U*28.
-  // Helmet is a slightly-larger shell (9.2U wide/deep, 8.4U tall) that wraps around.
-  const shell = taggedBox(U * 9.2, U * 8.4, U * 9.2, W, 'primary', 'helmet_dome')
-  shell.position.y = U * 28.2
-  group.add(shell)
+  // Head is 8U × 8U × 8U centered at Y = U*28 (spans Y=24 to Y=32).
+  // Open-face helmet: covers top + sides + back, face fully exposed.
 
-  // Face opening — dark inset on front creates the illusion of depth
-  const faceOpening = taggedFlatBox(U * 5.6, U * 4.0, U * 0.4, 0x111111, 'detail', 'helmet_visor')
-  faceOpening.position.set(0, U * 27.4, U * 4.65)
-  group.add(faceOpening)
+  // Main shell — covers only the top half of the head (forehead/crown)
+  const shellTop = taggedBox(U * 9.2, U * 4.8, U * 9.2, W, 'primary', 'helmet_dome')
+  shellTop.position.set(0, U * 31.0, 0)
+  group.add(shellTop)
 
-  // Brow ridge — horizontal bar above the face opening
-  const brow = taggedBox(U * 6.4, U * 1.0, U * 1.4, W, 'accent', 'helmet_brow')
-  brow.position.set(0, U * 29.8, U * 4.2)
+  // Side guards — extend down past ears but pulled back so they don't block the front face
+  const guardL = taggedBox(U * 1.2, U * 7.2, U * 7.2, W, 'primary', 'helmet_guardL')
+  guardL.position.set(-U * 4.4, U * 28.0, -U * 0.8)
+  group.add(guardL)
+  const guardR = taggedBox(U * 1.2, U * 7.2, U * 7.2, W, 'primary', 'helmet_guardR')
+  guardR.position.set(U * 4.4, U * 28.0, -U * 0.8)
+  group.add(guardR)
+
+  // Back plate — covers back of head down to neck
+  const backPlate = taggedBox(U * 9.2, U * 8.0, U * 1.2, W, 'primary', 'helmet_back')
+  backPlate.position.set(0, U * 28.0, -U * 4.4)
+  group.add(backPlate)
+
+  // Brow ridge — sits ABOVE the eyes (eyes are at ~Y=27.4, brow at Y=29.6+)
+  const brow = taggedBox(U * 8.0, U * 0.8, U * 1.6, W, 'accent', 'helmet_brow')
+  brow.position.set(0, U * 29.6, U * 4.0)
   group.add(brow)
 
-  // Nose guard — thin vertical bar down the center of the face
-  const noseGuard = taggedFlatBox(U * 0.5, U * 3.2, U * 0.6, W, 'accent', 'helmet_noseguard')
-  noseGuard.position.set(0, U * 27.6, U * 4.75)
-  group.add(noseGuard)
+  // NO nose guard — open face design, like a Viking helm
 
-  // Top crest — raised ridge running front to back
-  const crest = taggedBox(U * 1.0, U * 1.2, U * 8.0, W, 'accent', 'helmet_crest')
-  crest.position.set(0, U * 33.0, 0)
+  // Top crest — accent ridge running front to back
+  const crest = taggedBox(U * 1.0, U * 1.4, U * 8.0, W, 'accent', 'helmet_crest')
+  crest.userData.isAccent = true
+  crest.position.set(0, U * 33.8, 0)
   group.add(crest)
 
-  // Cheek guards — frame the face on each side
-  const cheekL = taggedBox(U * 0.6, U * 2.4, U * 3.2, W, 'primary', 'helmet_cheekL')
-  cheekL.position.set(-U * 4.4, U * 26.0, U * 1.6)
-  group.add(cheekL)
-  const cheekR = taggedBox(U * 0.6, U * 2.4, U * 3.2, W, 'primary', 'helmet_cheekR')
-  cheekR.position.set(U * 4.4, U * 26.0, U * 1.6)
-  group.add(cheekR)
+  // Chin strap — thin bar under the chin connecting the side guards, frames face from below
+  const chinStrap = taggedFlatBox(U * 6.4, U * 0.5, U * 0.6, W, 'accent', 'helmet_chinstrap')
+  chinStrap.position.set(0, U * 24.2, U * 3.2)
+  group.add(chinStrap)
 
-  // Neck guard — extends slightly below head at the back
+  // Neck guard — extends below head at the back
   const neckGuard = taggedBox(U * 8.0, U * 2.0, U * 1.2, W, 'primary', 'helmet_neckguard')
   neckGuard.position.set(0, U * 24.4, -U * 4.2)
   group.add(neckGuard)

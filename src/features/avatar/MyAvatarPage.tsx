@@ -6,11 +6,6 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
-import Dialog from '@mui/material/Dialog'
-import DialogActions from '@mui/material/DialogActions'
-import DialogContent from '@mui/material/DialogContent'
-import DialogContentText from '@mui/material/DialogContentText'
-import DialogTitle from '@mui/material/DialogTitle'
 import LinearProgress from '@mui/material/LinearProgress'
 import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
@@ -125,7 +120,8 @@ export default function MyAvatarPage() {
   const [session, setSession] = useState<DailyArmorSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedPiece, setSelectedPiece] = useState<ArmorPieceMeta | null>(null)
-  const [unequipPiece, setUnequipPiece] = useState<VoxelArmorPieceId | null>(null)
+  const [, setUnequipPiece] = useState<VoxelArmorPieceId | null>(null)
+
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
 
@@ -259,15 +255,22 @@ export default function MyAvatarPage() {
   }, [familyId, childId, today])
 
   // ── Auto-equip unlocked pieces on page load ────────────────────
+  // Only runs once on initial load — does NOT re-fire on every session change.
+  const autoEquipRanRef = useRef(false)
   useEffect(() => {
     if (!profile || !session || !familyId || !childId) return
+    if (autoEquipRanRef.current) return
+    autoEquipRanRef.current = true
 
     const unlockedVoxel = getUnlockedVoxelPieces(profile)
     const currentApplied = session.appliedPieces ?? []
     const currentAppliedVoxel = sessionToVoxelPieces(currentApplied)
+    const manuallyRemoved = new Set(session.manuallyUnequipped ?? [])
 
-    // Find pieces that are unlocked but not in today's session
-    const missingVoxel = unlockedVoxel.filter((vid) => !currentAppliedVoxel.includes(vid))
+    // Find pieces that are unlocked but not in today's session and not manually removed
+    const missingVoxel = unlockedVoxel.filter(
+      (vid) => !currentAppliedVoxel.includes(vid) && !manuallyRemoved.has(vid),
+    )
     if (missingVoxel.length === 0) return
 
     // Map voxel IDs back to ArmorPiece IDs for the session
@@ -385,12 +388,17 @@ export default function MyAvatarPage() {
         playArmorFanfare(1.5)
       }
 
+      // Remove from manuallyUnequipped if re-equipping
+      const currentManual = session.manuallyUnequipped ?? []
+      const updatedManual = currentManual.filter((id) => id !== voxelPieceId)
+
       // Write to Firestore
       const docId = dailyArmorSessionDocId(childId, today)
       const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
       await setDoc(sessionRef, {
         ...session,
         appliedPieces: updatedApplied,
+        manuallyUnequipped: updatedManual,
         ...(allApplied ? { completedAt: new Date().toISOString() } : {}),
       })
 
@@ -410,6 +418,43 @@ export default function MyAvatarPage() {
     [profile, familyId, childId, session, today, isLincoln],
   )
 
+  // ── Unequip a piece (direct — no dialog) ──────────────────────
+  const handleUnequipDirect = useCallback(async (voxelPieceId: VoxelArmorPieceId) => {
+    if (!familyId || !childId || !session) return
+    const armorPieceId = ARMOR_PIECES.find(
+      (p) => ARMOR_PIECE_TO_VOXEL[p.id] === voxelPieceId,
+    )?.id
+    if (!armorPieceId) return
+
+    setAnimateUnequipId(voxelPieceId)
+
+    // Track as manually unequipped so auto-equip doesn't override
+    const currentManual = session.manuallyUnequipped ?? []
+    const updatedManual = currentManual.includes(voxelPieceId)
+      ? currentManual
+      : [...currentManual, voxelPieceId]
+
+    const docId = dailyArmorSessionDocId(childId, today)
+    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+    await updateDoc(sessionRef, {
+      appliedPieces: arrayRemove(armorPieceId),
+      manuallyUnequipped: updatedManual,
+      completedAt: deleteField(),
+    })
+
+    // Also update equippedPieces on avatar profile
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    const remainingVoxel = sessionToVoxelPieces(
+      (session.appliedPieces ?? []).filter((p) => p !== armorPieceId),
+    )
+    await updateDoc(profileRef, {
+      equippedPieces: remainingVoxel,
+      updatedAt: new Date().toISOString(),
+    })
+
+    setUnequipPiece(null)
+  }, [familyId, childId, session, today])
+
   // ── Piece tap handler — single tap to equip/unequip ────────────
   const handlePieceTap = useCallback(
     (piece: ArmorPieceMeta) => {
@@ -422,8 +467,10 @@ export default function MyAvatarPage() {
       const isApplied = armorPieceId && session.appliedPieces.includes(armorPieceId)
 
       if (isApplied) {
-        // Tap equipped piece → unequip dialog
+        // Tap equipped piece → directly unequip (toggle off)
         setUnequipPiece(piece.id)
+        // Immediately trigger unequip without dialog
+        void handleUnequipDirect(piece.id)
       } else if (isUnlocked) {
         // Tap unlocked piece → equip immediately + read verse aloud
         speakVerse(piece.name, piece.verseText)
@@ -437,27 +484,8 @@ export default function MyAvatarPage() {
         })
       }
     },
-    [profile, session, handleApplyPiece],
+    [profile, session, handleApplyPiece, handleUnequipDirect],
   )
-
-  // ── Unequip a piece ────────────────────────────────────────────
-  const handleUnequip = useCallback(async () => {
-    if (!unequipPiece || !familyId || !childId) return
-    const armorPieceId = ARMOR_PIECES.find(
-      (p) => ARMOR_PIECE_TO_VOXEL[p.id] === unequipPiece,
-    )?.id
-    if (!armorPieceId) return
-
-    setAnimateUnequipId(unequipPiece)
-
-    const docId = dailyArmorSessionDocId(childId, today)
-    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
-    await updateDoc(sessionRef, {
-      appliedPieces: arrayRemove(armorPieceId),
-      completedAt: deleteField(),
-    })
-    setUnequipPiece(null)
-  }, [unequipPiece, familyId, childId, today])
 
   // ── Screen flash on equip ──────────────────────────────────────
   const flashContainerRef = useRef<HTMLDivElement>(null)
@@ -1000,19 +1028,7 @@ export default function MyAvatarPage() {
         </Box>
       </Page>
 
-      {/* ── Unequip confirmation dialog ────────────────────────── */}
-      <Dialog open={!!unequipPiece} onClose={() => setUnequipPiece(null)}>
-        <DialogTitle>
-          {VOXEL_ARMOR_PIECES.find((p) => p.id === unequipPiece)?.name} is on
-        </DialogTitle>
-        <DialogContent>
-          <DialogContentText>Take it off for today?</DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setUnequipPiece(null)}>Keep it on</Button>
-          <Button color="warning" onClick={() => void handleUnequip()}>Take it off</Button>
-        </DialogActions>
-      </Dialog>
+      {/* Unequip dialog removed — tap toggles directly */}
 
       {/* ── Particle burst ──────────────────────────────────────── */}
       {particles && profile && (

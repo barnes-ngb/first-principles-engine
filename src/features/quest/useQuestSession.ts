@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
 
 import { useAI, TaskType } from '../../core/ai/useAI'
+import { addXpEvent } from '../../core/xp/addXpEvent'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { evaluationSessionsCollection, skillSnapshotsCollection, xpLedgerCollection } from '../../core/firebase/firestore'
+import { db, evaluationSessionsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot } from '../../core/types'
+import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'
 import type { EvaluationDomain } from '../../core/types/enums'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
 import { calculateStreak, computeNextState, formatSkillLabel, shouldEndSession } from './questAdaptive'
+import { checkAnswer, extractPattern, extractTargetWord, shouldFlagAsError } from './questHelpers'
 import type {
   InteractiveSessionData,
   QuestQuestion,
@@ -405,6 +407,9 @@ export function useQuestSession() {
       const timestamp = Date.now()
       const docId = `interactive_${activeChildId}_${timestamp}`
 
+      const skippedCount = questions.filter((q) => q.skipped).length
+      const flaggedErrorCount = questions.filter((q) => q.flaggedAsError).length
+
       const session: EvaluationSession & InteractiveSessionData = {
         childId: activeChildId,
         domain: 'reading',
@@ -422,6 +427,8 @@ export function useQuestSession() {
         diamondsMined: finalState.totalCorrect,
         streakDays: newStreak.currentStreak,
         timedOut,
+        skippedCount: skippedCount || undefined,
+        flaggedErrorCount: flaggedErrorCount || undefined,
       }
 
       try {
@@ -432,59 +439,26 @@ export function useQuestSession() {
         console.error('Failed to save quest session', err)
       }
 
-      // Add diamond XP to ledger (with dedup protection)
+      // Award XP via addXpEvent (handles dedup, avatar profile update, armor unlocks)
       const XP_PER_DIAMOND = 2
       const questXp = finalState.totalCorrect * XP_PER_DIAMOND
 
       if (questXp > 0) {
-        try {
-          const dedupKey = `quest_${docId}`
-
-          // Check for existing event doc to prevent double-award on retry
-          const eventRef = doc(xpLedgerCollection(familyId), `${activeChildId}_${dedupKey}`)
-          const eventSnap = await getDoc(eventRef)
-          if (eventSnap.exists()) {
-            console.log('XP already awarded for this quest session, skipping')
-          } else {
-            // Write per-event doc for audit trail
-            await setDoc(eventRef, {
-              childId: activeChildId,
-              totalXp: questXp,
-              sources: { routines: 0, quests: questXp, books: 0 },
-              lastUpdatedAt: new Date().toISOString(),
-              dedupKey,
-              type: 'quest',
-              amount: questXp,
-              meta: {
-                domain: 'reading',
-                questionsCorrect: String(finalState.totalCorrect),
-                questionsTotal: String(finalState.totalQuestions),
-                finalLevel: String(finalState.currentLevel),
-              },
-              awardedAt: new Date().toISOString(),
-            })
-
-            // Update cumulative doc
-            const ledgerRef = doc(xpLedgerCollection(familyId), activeChildId)
-            const ledgerSnap = await getDoc(ledgerRef)
-            const existing = ledgerSnap.exists()
-              ? ledgerSnap.data()
-              : { totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }
-
-            await setDoc(ledgerRef, {
-              childId: activeChildId,
-              totalXp: (existing.totalXp || 0) + questXp,
-              sources: {
-                routines: existing.sources?.routines || 0,
-                quests: (existing.sources?.quests || 0) + questXp,
-                books: existing.sources?.books || 0,
-              },
-              lastUpdatedAt: new Date().toISOString(),
-            }, { merge: true })
-          }
-        } catch (err) {
-          console.warn('Failed to update XP ledger', err)
-        }
+        const dedupKey = `quest_${docId}`
+        // Fire-and-forget: session is already saved, don't block on XP write
+        addXpEvent(
+          familyId,
+          activeChildId,
+          'QUEST_DIAMOND',
+          questXp,
+          dedupKey,
+          {
+            domain: 'reading',
+            questionsCorrect: String(finalState.totalCorrect),
+            questionsTotal: String(finalState.totalQuestions),
+            finalLevel: String(finalState.currentLevel),
+          },
+        ).catch((err) => console.warn('Failed to award quest XP', err))
       }
 
       // Auto-apply findings to skill snapshot
@@ -543,6 +517,59 @@ export function useQuestSession() {
           console.warn('Failed to auto-apply quest findings to skill snapshot', err)
         }
       }
+
+      // Track per-word progress (fire-and-forget)
+      const sessionDocId = docId
+      void (async () => {
+        for (const q of questions) {
+          if (q.flaggedAsError) continue
+
+          const word = extractTargetWord(q)
+          if (!word) continue
+
+          const wordDocId = word.toLowerCase().replace(/[^a-z]/g, '')
+          if (!wordDocId) continue
+
+          try {
+            const wordRef = doc(
+              collection(db, `families/${familyId}/children/${activeChildId}/wordProgress`),
+              wordDocId,
+            )
+            const existingSnap = await getDoc(wordRef)
+            const prev = existingSnap.exists() ? (existingSnap.data() as WordProgress) : null
+
+            const isWrong = !q.correct && !q.skipped
+            const updated: WordProgress = {
+              word: word.toLowerCase(),
+              pattern: extractPattern(q),
+              skill: q.skill || 'unknown',
+              wrongCount: (prev?.wrongCount || 0) + (isWrong ? 1 : 0),
+              skippedCount: (prev?.skippedCount || 0) + (q.skipped ? 1 : 0),
+              correctCount: (prev?.correctCount || 0) + (q.correct ? 1 : 0),
+              lastSeen: new Date().toISOString(),
+              firstSeen: prev?.firstSeen || new Date().toISOString(),
+              masteryLevel: 'not-yet',
+              questSessions: [...new Set([...(prev?.questSessions || []), sessionDocId])],
+            }
+
+            // Calculate mastery
+            const total = updated.correctCount + updated.wrongCount + updated.skippedCount
+            const correctRate = total > 0 ? updated.correctCount / total : 0
+
+            if (correctRate >= 0.8 && updated.correctCount >= 3) {
+              updated.masteryLevel = 'known'
+            } else if (correctRate >= 0.5 && total >= 2) {
+              updated.masteryLevel = 'emerging'
+            } else if (total >= 2) {
+              updated.masteryLevel = 'struggling'
+            }
+
+            await setDoc(wordRef, JSON.parse(JSON.stringify(updated)))
+          } catch (err) {
+            console.warn(`Failed to update word progress for "${word}":`, err)
+          }
+        }
+      })()
     },
     [activeChildId, familyId, findings, previousSessions, chat],
   )
@@ -554,7 +581,7 @@ export function useQuestSession() {
       if (!currentQuestion || !questState || !activeChildId) return
 
       const responseTimeMs = Date.now() - questionStartRef.current
-      const correct = childAnswer.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase()
+      const correct = checkAnswer(childAnswer, currentQuestion)
 
       const sessionQ: SessionQuestion = {
         id: currentQuestion.id,
@@ -562,6 +589,7 @@ export function useQuestSession() {
         level: currentQuestion.level,
         skill: currentQuestion.skill,
         prompt: currentQuestion.prompt,
+        stimulus: currentQuestion.stimulus,
         options: currentQuestion.options,
         correctAnswer: currentQuestion.correctAnswer,
         childAnswer,
@@ -673,6 +701,105 @@ export function useQuestSession() {
     [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
   )
 
+  // ── Skip question ───────────────────────────────────────────
+
+  const handleSkip = useCallback(
+    async () => {
+      if (!currentQuestion || !questState || !activeChildId) return
+
+      const responseTimeMs = Date.now() - questionStartRef.current
+
+      // Record skipped question — does NOT count toward adaptive state
+      const flagged = shouldFlagAsError(currentQuestion)
+      const sessionQ: SessionQuestion = {
+        id: currentQuestion.id,
+        type: 'multiple-choice',
+        level: currentQuestion.level,
+        skill: currentQuestion.skill,
+        prompt: currentQuestion.prompt,
+        stimulus: currentQuestion.stimulus,
+        options: currentQuestion.options,
+        correctAnswer: currentQuestion.correctAnswer,
+        childAnswer: '',
+        correct: false,
+        skipped: true,
+        flaggedAsError: flagged || undefined,
+        responseTimeMs,
+        timestamp: new Date().toISOString(),
+      }
+
+      const updatedQuestions = [...answeredQuestions, sessionQ]
+      setAnsweredQuestions(updatedQuestions)
+
+      // DO NOT call computeNextState — skip doesn't affect adaptive state
+      // DO NOT increment totalQuestions — question counter stays the same
+
+      // Request replacement question at same level
+      setScreen(QuestScreen.Loading)
+
+      const recentQuestionTypes = updatedQuestions
+        .slice(-3)
+        .map((q) => q.prompt.slice(0, 50))
+
+      const userMessage: AIChatMessage = {
+        role: 'user',
+        content: JSON.stringify({
+          action: 'answer',
+          childAnswer: null,
+          correct: false,
+          skippedQuestion: {
+            text: currentQuestion.prompt,
+            type: currentQuestion.type,
+            skill: currentQuestion.skill,
+          },
+          instruction: 'The child skipped the previous question. Generate a DIFFERENT question at the same level testing a DIFFERENT skill or word. Do not repeat the skipped question.',
+          currentLevel: questState.currentLevel,
+          consecutiveCorrect: questState.consecutiveCorrect,
+          consecutiveWrong: questState.consecutiveWrong,
+          totalQuestions: questState.totalQuestions,
+          totalCorrect: questState.totalCorrect,
+          questionsThisLevel: questState.questionsThisLevel,
+          levelDownsInARow: questState.levelDownsInARow,
+          recentQuestionTypes,
+        }),
+      }
+
+      conversationRef.current.push(userMessage)
+
+      const response = await chat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.Quest,
+        messages: [...conversationRef.current],
+        domain: 'reading',
+      })
+
+      if (!response) {
+        // AI failed — end session gracefully
+        await endSession(updatedQuestions, questState, false)
+        return
+      }
+
+      conversationRef.current.push({ role: 'assistant', content: response.message })
+
+      const finding = extractQuestFinding(response.message)
+      if (finding) {
+        setFindings((prev) => [...prev, finding])
+      }
+
+      const question = parseQuestBlock(response.message)
+      if (!question) {
+        await endSession(updatedQuestions, questState, false)
+        return
+      }
+
+      setCurrentQuestion(question)
+      questionStartRef.current = Date.now()
+      setScreen(QuestScreen.Question)
+    },
+    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
+  )
+
   // ── Reset to intro ────────────────────────────────────────────
 
   const resetToIntro = useCallback(() => {
@@ -706,6 +833,7 @@ export function useQuestSession() {
     aiError,
     startQuest,
     submitAnswer,
+    handleSkip,
     resetToIntro,
   }
 }

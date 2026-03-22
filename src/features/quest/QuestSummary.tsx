@@ -53,6 +53,8 @@ interface QuestSummaryProps {
   findings: EvaluationFinding[]
   /** Total XP before this quest (for tier-up detection) */
   previousTotalXp?: number
+  skippedCount?: number
+  flaggedErrorCount?: number
   onDone: () => void
   onTryAgain: () => void
 }
@@ -64,6 +66,7 @@ export default function QuestSummary({
   streak,
   findings,
   previousTotalXp = 0,
+  flaggedErrorCount = 0,
   onDone,
   onTryAgain,
 }: QuestSummaryProps) {
@@ -139,6 +142,22 @@ export default function QuestSummary({
           {totalCorrect}/{totalQuestions} correct · Level {finalLevel}
         </Typography>
       </Box>
+
+      {/* Flagged errors notice */}
+      {flaggedErrorCount > 0 && (
+        <Typography
+          sx={{
+            fontFamily: MC.font,
+            fontSize: '0.4rem',
+            color: MC.stone,
+            textAlign: 'center',
+            mb: 2,
+            lineHeight: 1.8,
+          }}
+        >
+          ⚠️ {flaggedErrorCount} question{flaggedErrorCount !== 1 ? 's' : ''} skipped (possible question errors)
+        </Typography>
+      )}
 
       {/* Tier-up celebration */}
       {tierUp && (

@@ -22,6 +22,7 @@ export const TaskType = {
   Chat: "chat",
   Quest: "quest",
   GenerateStory: "generateStory",
+  Workshop: "workshop",
 } as const;
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
 
@@ -48,6 +49,7 @@ export function modelForTask(taskType: TaskType): string {
     case TaskType.Evaluate:
     case TaskType.Quest:
     case TaskType.GenerateStory:
+    case TaskType.Workshop:
       return "claude-sonnet-4-5-20250929";
     case TaskType.Generate:
     case TaskType.Chat:
@@ -831,6 +833,12 @@ PHONEME DISPLAY RULES:
 - Use /ay/ for long-a, /ee/ for long-e, /igh/ for long-i, /oh/ for long-o, /yoo/ for long-u
 - Level 4+: Set phonemeDisplay to null. Do NOT show phoneme breakdowns at higher levels.
 - If showing phonemes, use the format: "Sound it out: /s/ /t/ /o/ /p/"
+
+CRITICAL ANSWER MATCHING RULE:
+- The "correctAnswer" field MUST exactly match one of the strings in the "options" array.
+- For fill-in-the-blank: if options are ["sh", "th", "ch"], then correctAnswer MUST be "th" — NOT "then".
+- For word identification: if options are ["stop", "step", "top"], then correctAnswer MUST be one of those exact strings.
+- ALWAYS: correctAnswer === options[correctIndex] must be true. No exceptions.
 
 QUESTION GENERATION RULES:
 1. Generate ONE multiple-choice question at a time

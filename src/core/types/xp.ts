@@ -282,6 +282,7 @@ export interface DailyArmorSession {
   childId: string
   date: string          // YYYY-MM-DD
   appliedPieces: ArmorPiece[]
+  manuallyUnequipped?: string[]  // Voxel piece IDs the user intentionally removed today
   completedAt?: string  // ISO string — set when all earned pieces applied
 }
 

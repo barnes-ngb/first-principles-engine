@@ -28,6 +28,7 @@ import CreateSightWordBook from '../features/books/CreateSightWordBook'
 import SightWordDashboard from '../features/books/SightWordDashboard'
 import StoryGuidePage from '../features/books/StoryGuidePage'
 import MyAvatarPage from '../features/avatar/MyAvatarPage'
+import WorkshopPage from '../features/workshop/WorkshopPage'
 
 const routes = [
   {
@@ -66,6 +67,7 @@ const routes = [
       { path: '/books/:bookId/read', element: <BookReaderPage /> },
       { path: '/quest', element: <KnowledgeMinePage /> },
       { path: '/avatar', element: <MyAvatarPage /> },
+      { path: '/workshop', element: <WorkshopPage /> },
       { path: '/evaluation', element: <Navigate to="/progress" replace /> },
       { path: '/ladders', element: <LaddersPage /> },
       { path: '/kids', element: <KidsPage /> },
