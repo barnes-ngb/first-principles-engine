@@ -6,20 +6,21 @@ import Stepper from '@mui/material/Stepper'
 import Typography from '@mui/material/Typography'
 import type { StoryInputs } from '../../core/types'
 import { useTTS } from '../../core/hooks/useTTS'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useWorkshopWizard } from './useWorkshopWizard'
 import ThemeStep from './steps/ThemeStep'
-import CharactersStep from './steps/CharactersStep'
+import PlayersStep from './steps/PlayersStep'
 import GoalStep from './steps/GoalStep'
 import ChallengesStep from './steps/ChallengesStep'
 import BoardStyleStep from './steps/BoardStyleStep'
 import { useEffect, useRef } from 'react'
 import type { TapToHearRef } from './workshopTypes'
 
-const STEP_LABELS = ['Theme', 'Characters', 'Goal', 'Challenges', 'Board']
+const STEP_LABELS = ['Theme', 'Players', 'Goal', 'Challenges', 'Board']
 
 const STEP_PROMPTS = [
   "Hey Story Keeper! What's your new game about?",
-  "Who's in your story? Tell me their names!",
+  "Who's going to play your game? Pick your players!",
   'What are they trying to do?',
   'Every good game has tricky parts! What kinds of challenges should players face?',
   "Almost done! What shape should your game board be?",
@@ -34,6 +35,7 @@ export default function WorkshopWizard({ onComplete, onCancel }: WorkshopWizardP
   const wizard = useWorkshopWizard()
   const tts = useTTS()
   const lastSpokenStep = useRef(-1)
+  const { activeChildId } = useActiveChild()
 
   // Refs for steps that use tap-to-hear (to auto-confirm on Next)
   const themeRef = useRef<TapToHearRef>(null)
@@ -94,7 +96,11 @@ export default function WorkshopWizard({ onComplete, onCancel }: WorkshopWizardP
           <ThemeStep value={wizard.state.theme} onChange={wizard.setTheme} stepRef={themeRef} />
         )}
         {wizard.state.step === 1 && (
-          <CharactersStep value={wizard.state.characters} onChange={wizard.setCharacters} />
+          <PlayersStep
+            value={wizard.state.players}
+            onChange={wizard.setPlayers}
+            creatorChildId={activeChildId}
+          />
         )}
         {wizard.state.step === 2 && (
           <GoalStep value={wizard.state.goal} onChange={wizard.setGoal} stepRef={goalRef} />

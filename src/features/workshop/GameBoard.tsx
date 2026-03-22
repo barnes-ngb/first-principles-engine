@@ -9,6 +9,7 @@ interface PlayerToken {
   name: string
   color: string
   position: number
+  avatarUrl?: string
 }
 
 interface GameBoardProps {

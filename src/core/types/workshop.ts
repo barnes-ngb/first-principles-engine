@@ -21,7 +21,7 @@ export interface StoryGame {
 
 export interface StoryInputs {
   theme: string
-  characters: StoryCharacter[]
+  players: StoryPlayer[]
   goal: string
   challenges: StoryChallenge[]
   boardStyle: BoardStyle
@@ -30,10 +30,11 @@ export interface StoryInputs {
   voiceTranscripts?: string[]
 }
 
-export interface StoryCharacter {
+export interface StoryPlayer {
+  id: string
   name: string
-  trait: string
-  customArt?: string
+  avatarUrl?: string
+  isCreator: boolean
 }
 
 export interface StoryChallenge {
