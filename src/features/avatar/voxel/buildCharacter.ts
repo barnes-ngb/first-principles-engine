@@ -43,6 +43,17 @@ function box(
   return mesh
 }
 
+/** Create an array of 6 slightly-varied materials for per-face texturing */
+function createTexturedMaterials(baseColor: THREE.Color | number): THREE.MeshLambertMaterial[] {
+  const color = baseColor instanceof THREE.Color ? baseColor : new THREE.Color(baseColor)
+  const materials: THREE.MeshLambertMaterial[] = []
+  for (let i = 0; i < 6; i++) {
+    const variation = 0.95 + Math.random() * 0.1
+    materials.push(new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(variation) }))
+  }
+  return materials
+}
+
 // ── Build character (Minecraft Steve proportions) ───────────────────
 //
 // Steve proportions:
@@ -109,22 +120,34 @@ export function buildCharacter(
   character.add(torso)
 
   // --- ARMS (4×12×4 each) ---
-  const armL = texturedBox(U * 4, U * 12, U * 4, skinColor, 'armL')
-  armL.position.set(-U * 6, U * 18, 0) // Flush with body sides
+  // Geometry is shifted so pivot point is at the SHOULDER (top of arm),
+  // enabling natural rotation from the shoulder joint.
+  const armGeoL = new THREE.BoxGeometry(U * 4, U * 12, U * 4)
+  armGeoL.translate(0, -U * 6, 0) // Shift so top of arm (shoulder) is at local Y=0
+  const armL = new THREE.Mesh(armGeoL, createTexturedMaterials(skinColor))
+  armL.name = 'armL'
+  armL.position.set(-U * 6, U * 24, 0) // Shoulder height = torso top
   character.add(armL)
 
-  const armR = texturedBox(U * 4, U * 12, U * 4, skinColor, 'armR')
-  armR.position.set(U * 6, U * 18, 0)
+  const armGeoR = new THREE.BoxGeometry(U * 4, U * 12, U * 4)
+  armGeoR.translate(0, -U * 6, 0)
+  const armR = new THREE.Mesh(armGeoR, createTexturedMaterials(skinColor))
+  armR.name = 'armR'
+  armR.position.set(U * 6, U * 24, 0)
   character.add(armR)
 
-  // Shirt sleeves (top portion of arms)
-  const sleeveL = texturedBox(U * 4.2, U * 5, U * 4.2, shirtColor, 'sleeveL')
-  sleeveL.position.set(-U * 6, U * 21.5, 0)
-  character.add(sleeveL)
+  // Shirt sleeves — children of arms so they rotate together
+  const sleeveGeoL = new THREE.BoxGeometry(U * 4.2, U * 5, U * 4.2)
+  sleeveGeoL.translate(0, -U * 2.5, 0) // Upper portion of arm relative to shoulder pivot
+  const sleeveL = new THREE.Mesh(sleeveGeoL, createTexturedMaterials(shirtColor))
+  sleeveL.name = 'sleeveL'
+  armL.add(sleeveL) // Child of arm — rotates with it
 
-  const sleeveR = texturedBox(U * 4.2, U * 5, U * 4.2, shirtColor, 'sleeveR')
-  sleeveR.position.set(U * 6, U * 21.5, 0)
-  character.add(sleeveR)
+  const sleeveGeoR = new THREE.BoxGeometry(U * 4.2, U * 5, U * 4.2)
+  sleeveGeoR.translate(0, -U * 2.5, 0)
+  const sleeveR = new THREE.Mesh(sleeveGeoR, createTexturedMaterials(shirtColor))
+  sleeveR.name = 'sleeveR'
+  armR.add(sleeveR) // Child of arm — rotates with it
 
   // --- LEGS (4×12×4 each) ---
   const legL = texturedBox(U * 4, U * 12, U * 4, pantsColor, 'legL')

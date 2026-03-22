@@ -147,6 +147,71 @@ export function animateEquip(
   requestAnimationFrame(step)
 }
 
+// ── Equip ceremony animations ────────────────────────────────────────
+
+/** Character does a small jump (shoes equip) */
+export function animateJump(group: THREE.Object3D, height: number, duration: number) {
+  const baseY = group.position.y
+  const start = performance.now()
+  function step(now: number) {
+    const t = Math.min((now - start) / duration, 1)
+    group.position.y = baseY + height * Math.sin(t * Math.PI)
+    if (t < 1) requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}
+
+/** Character nods head (helmet equip) */
+export function animateNod(head: THREE.Object3D, duration: number) {
+  const start = performance.now()
+  function step(now: number) {
+    const t = Math.min((now - start) / duration, 1)
+    head.rotation.x = Math.sin(t * Math.PI * 2) * 0.15
+    if (t < 1) requestAnimationFrame(step)
+    else head.rotation.x = 0
+  }
+  requestAnimationFrame(step)
+}
+
+/** Sword does a quick flourish rotation (sword equip) */
+export function animateSwordFlourish(swordGroup: THREE.Object3D, duration: number) {
+  const start = performance.now()
+  function step(now: number) {
+    const t = Math.min((now - start) / duration, 1)
+    swordGroup.rotation.z = Math.sin(t * Math.PI * 2) * 0.3
+    if (t < 1) requestAnimationFrame(step)
+    else swordGroup.rotation.z = 0
+  }
+  requestAnimationFrame(step)
+}
+
+/** Character does a small hip turn (belt equip) */
+export function animateHipTurn(character: THREE.Object3D, duration: number) {
+  const start = performance.now()
+  const baseRotY = character.rotation.y
+  function step(now: number) {
+    const t = Math.min((now - start) / duration, 1)
+    // Quick left-right-center
+    character.rotation.y = baseRotY + Math.sin(t * Math.PI * 3) * 0.15 * (1 - t)
+    if (t < 1) requestAnimationFrame(step)
+    else character.rotation.y = baseRotY
+  }
+  requestAnimationFrame(step)
+}
+
+/** Torso puffs up briefly (breastplate equip) */
+export function animateTorsoPuff(torso: THREE.Object3D, duration: number) {
+  const start = performance.now()
+  function step(now: number) {
+    const t = Math.min((now - start) / duration, 1)
+    const puff = 1 + Math.sin(t * Math.PI) * 0.1
+    torso.scale.set(puff, puff, puff)
+    if (t < 1) requestAnimationFrame(step)
+    else torso.scale.set(1, 1, 1)
+  }
+  requestAnimationFrame(step)
+}
+
 /** Animate a piece scaling out */
 export function animateUnequip(
   pieceGroup: THREE.Group,

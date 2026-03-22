@@ -290,77 +290,85 @@ function buildShoes(U: number): THREE.Group {
 }
 
 function buildShield(U: number): THREE.Group {
+  // Shield positions are relative to the LEFT ARM's local space.
+  // The arm pivots at the shoulder (local Y=0 = shoulder, Y=-12U = hand).
+  // Shield is held on the outer side of the forearm.
   const group = new THREE.Group()
+  group.userData.attachToArm = 'L'
 
-  // Main shield face — tall rectangle, held on left arm
+  // Main shield face — tall rectangle
   const face = taggedBox(U * 1.5, U * 10, U * 8, W, 'primary', 'shield_body')
-  face.position.set(-U * 9.5, U * 18, 0)
+  face.position.set(-U * 3.5, -U * 7, U * 0.3)
   group.add(face)
 
   // Shield boss (center bump)
   const boss = taggedFlatBox(U * 1, U * 3, U * 3, W, 'accent', 'shield_boss')
-  boss.position.set(-U * 10.5, U * 18, 0)
+  boss.position.set(-U * 4.5, -U * 7, U * 0.3)
   group.add(boss)
 
   // Shield rim (top and bottom)
   const rimTop = taggedBox(U * 1.6, U * 0.8, U * 8.4, W, 'accent', 'shield_rim_top')
-  rimTop.position.set(-U * 9.5, U * 23, 0)
+  rimTop.position.set(-U * 3.5, -U * 2, U * 0.3)
   group.add(rimTop)
   const rimBot = taggedBox(U * 1.6, U * 0.8, U * 8.4, W, 'accent', 'shield_rim_bot')
-  rimBot.position.set(-U * 9.5, U * 13, 0)
+  rimBot.position.set(-U * 3.5, -U * 12, U * 0.3)
   group.add(rimBot)
 
   // Cross on shield front
   const sCrossV = taggedFlatBox(U * 0.3, U * 6, U * 1, W, 'accent', 'shield_cross_v')
-  sCrossV.position.set(-U * 10.3, U * 18, 0)
+  sCrossV.position.set(-U * 4.3, -U * 7, U * 0.3)
   group.add(sCrossV)
   const sCrossH = taggedFlatBox(U * 0.3, U * 1, U * 4, W, 'accent', 'shield_cross_h')
-  sCrossH.position.set(-U * 10.3, U * 19, 0)
+  sCrossH.position.set(-U * 4.3, -U * 6, U * 0.3)
   group.add(sCrossH)
 
   return group
 }
 
 function buildSword(U: number): THREE.Group {
+  // Sword positions are relative to the RIGHT ARM's local space.
+  // Arm pivots at shoulder (local Y=0 = shoulder, Y=-12U = hand).
+  // Sword is held in the hand, blade extends upward from grip.
   const group = new THREE.Group()
+  group.userData.attachToArm = 'R'
 
-  // Blade — always light blue (Word of God) regardless of tier
+  // Grip — near the hand at bottom of arm
+  const grip = box(U * 1.2, U * 4, U * 1.5, 0x4a3728)
+  grip.userData.materialRole = 'detail'
+  grip.name = 'sword_grip'
+  grip.position.set(U * 3, -U * 11, 0)
+  group.add(grip)
+
+  // Crossguard — just above grip
+  const guard = taggedFlatBox(U * 1, U * 1.5, U * 5, W, 'accent', 'sword_crossguard')
+  guard.position.set(U * 3, -U * 8.5, 0)
+  group.add(guard)
+
+  // Blade — extends upward from crossguard (always light blue = Word of God)
   const blade = taggedBox(U * 1, U * 16, U * 2, 0x87ceeb, 'primary', 'sword_blade')
-  blade.position.set(U * 9, U * 24, 0)
+  blade.position.set(U * 3, U * 0.5, 0)
   group.add(blade)
 
   // Blade edge highlight
   const edge = box(U * 0.3, U * 14, U * 0.5, 0xb0e0e6)
   edge.userData.materialRole = 'detail'
   edge.name = 'sword_edge'
-  edge.position.set(U * 9, U * 25, U * 1)
+  edge.position.set(U * 3, U * 1.5, U * 1)
   group.add(edge)
 
   // Blade tip
   const tip = taggedBox(U * 0.8, U * 2, U * 1.5, 0xadd8e6, 'primary', 'sword_tip')
-  tip.position.set(U * 9, U * 33, 0)
+  tip.position.set(U * 3, U * 9, 0)
   group.add(tip)
 
-  // Crossguard
-  const guard = taggedFlatBox(U * 1, U * 1.5, U * 5, W, 'accent', 'sword_crossguard')
-  guard.position.set(U * 9, U * 16, 0)
-  group.add(guard)
-
-  // Grip
-  const grip = box(U * 1.2, U * 4, U * 1.5, 0x4a3728)
-  grip.userData.materialRole = 'detail'
-  grip.name = 'sword_grip'
-  grip.position.set(U * 9, U * 13, 0)
-  group.add(grip)
-
-  // Pommel
+  // Pommel — below grip
   const pommel = taggedFlatBox(U * 1.5, U * 1.5, U * 1.5, W, 'accent', 'sword_pommel')
-  pommel.position.set(U * 9, U * 10.5, 0)
+  pommel.position.set(U * 3, -U * 13.5, 0)
   group.add(pommel)
 
   // Glow effect on blade
   const glowLight = new THREE.PointLight(0x87ceeb, 0.4, 3)
-  glowLight.position.set(U * 9, U * 26, U * 2)
+  glowLight.position.set(U * 3, U * 2, U * 2)
   group.add(glowLight)
 
   return group

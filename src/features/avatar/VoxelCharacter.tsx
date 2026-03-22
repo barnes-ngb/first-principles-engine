@@ -7,7 +7,7 @@ import { DEFAULT_CHARACTER_FEATURES } from '../../core/types'
 import { XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import { buildCharacter } from './voxel/buildCharacter'
 import { buildArmorPiece, VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
-import { animateEquip, animateUnequip } from './voxel/equipAnimation'
+import { animateEquip, animateUnequip, animateJump, animateNod, animateSwordFlourish, animateHipTurn, animateTorsoPuff } from './voxel/equipAnimation'
 import { createTouchControls, updateRotation } from './voxel/touchControls'
 import type { TouchControlState } from './voxel/touchControls'
 import { applyTierToArmor, calculateTier, animateTierUpgrade } from './voxel/tierMaterials'
@@ -24,6 +24,56 @@ interface VoxelCharacterProps {
   onEquipAnimDone?: () => void
   onUnequipAnimDone?: () => void
   height?: string | number
+}
+
+// ── Pose system ──────────────────────────────────────────────────────
+
+interface CharacterPose {
+  armLRotZ: number
+  armRRotZ: number
+  armLRotX: number
+  armRRotX: number
+}
+
+const POSE_DEFAULT: CharacterPose = { armLRotZ: 0, armRRotZ: 0, armLRotX: 0, armRRotX: 0 }
+
+function calculatePose(equipped: string[]): CharacterPose {
+  const pose = { ...POSE_DEFAULT }
+  if (equipped.includes('sword')) {
+    pose.armRRotZ = -0.5   // Angled outward ~30°
+    pose.armRRotX = -0.2   // Slightly forward
+  }
+  if (equipped.includes('shield')) {
+    pose.armLRotZ = 0.4    // Angled outward
+    pose.armLRotX = 0.3    // Forward (shield faces front)
+  }
+  return pose
+}
+
+// ── Enforce solid opacity on equipped armor ──────────────────────────
+
+function enforceArmorOpacity(
+  armorMeshes: Map<VoxelArmorPieceId, THREE.Group>,
+  equipped: string[],
+) {
+  for (const pieceId of equipped) {
+    const mesh = armorMeshes.get(pieceId as VoxelArmorPieceId)
+    if (!mesh) continue
+    mesh.visible = true
+    mesh.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        const mats = Array.isArray(child.material) ? child.material : [child.material]
+        for (const mat of mats) {
+          if (mat instanceof THREE.MeshLambertMaterial && (mat.transparent || mat.opacity < 1)) {
+            mat.transparent = false
+            mat.opacity = 1.0
+            mat.depthWrite = true
+            mat.needsUpdate = true
+          }
+        }
+      }
+    })
+  }
 }
 
 /** Build a Minecraft-block-style platform at the character's feet */
@@ -126,6 +176,7 @@ export default function VoxelCharacter({
   const rafRef = useRef<number>(0)
   const prevEquippedRef = useRef<Set<string>>(new Set())
   const prevTierRef = useRef<string | null>(null)
+  const poseRef = useRef<((pieces: string[]) => void) | null>(null)
 
   const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
   const currentTier = calculateTier(totalXp)
@@ -186,12 +237,24 @@ export default function VoxelCharacter({
     characterRef.current = character
     scene.add(character)
 
-    // Build armor pieces
+    // Build armor pieces — sword attaches to right arm, shield to left arm
     armorGroupsRef.current.clear()
     for (const pieceMeta of VOXEL_ARMOR_PIECES) {
       const pieceGroup = buildArmorPiece(pieceMeta.id, ageGroup)
       armorGroupsRef.current.set(pieceMeta.id, pieceGroup)
-      character.add(pieceGroup)
+
+      const attachTo = pieceGroup.userData.attachToArm as string | undefined
+      if (attachTo === 'R') {
+        const armR = character.getObjectByName('armR')
+        if (armR) armR.add(pieceGroup)
+        else character.add(pieceGroup)
+      } else if (attachTo === 'L') {
+        const armL = character.getObjectByName('armL')
+        if (armL) armL.add(pieceGroup)
+        else character.add(pieceGroup)
+      } else {
+        character.add(pieceGroup)
+      }
     }
 
     // Set initial visibility — equipped solid, unlocked translucent, locked ghost
@@ -266,6 +329,15 @@ export default function VoxelCharacter({
     const clock = new THREE.Clock()
     const baseY = character.position.y
 
+    // Pose state for smooth transitions
+    const currentPose: CharacterPose = { ...POSE_DEFAULT }
+    let targetPose = calculatePose(equippedPieces)
+
+    // Store targetPose updater on a ref so equip effects can change it
+    poseRef.current = (pieces: string[]) => { targetPose = calculatePose(pieces) }
+    // Initialize pose immediately
+    poseRef.current(equippedPieces)
+
     function animate() {
       rafRef.current = requestAnimationFrame(animate)
 
@@ -273,23 +345,36 @@ export default function VoxelCharacter({
         updateRotation(characterRef.current, controlsRef.current)
       }
 
-      // Idle animation — gentle bob + subtle arm sway
+      // Enforce solid opacity on equipped armor every frame
+      enforceArmorOpacity(armorGroupsRef.current, equippedPieces)
+
+      // Idle animation — gentle bob + pose-aware arm movement
       if (characterRef.current) {
+        const dt = clock.getDelta()
         const time = clock.getElapsedTime()
         // Gentle bob
         characterRef.current.position.y = baseY + Math.sin(time * 1.2) * 0.03
 
-        // Arms sway
+        // Lerp toward target pose
+        const lerpSpeed = Math.min(3.0 * dt, 1)
+        currentPose.armLRotZ += (targetPose.armLRotZ - currentPose.armLRotZ) * lerpSpeed
+        currentPose.armRRotZ += (targetPose.armRRotZ - currentPose.armRRotZ) * lerpSpeed
+        currentPose.armLRotX += (targetPose.armLRotX - currentPose.armLRotX) * lerpSpeed
+        currentPose.armRRotX += (targetPose.armRRotX - currentPose.armRRotX) * lerpSpeed
+
+        // Apply pose + idle sway to arms (sleeves are children, move automatically)
         const armL = characterRef.current.getObjectByName('armL')
         const armR = characterRef.current.getObjectByName('armR')
-        const sleeveL = characterRef.current.getObjectByName('sleeveL')
-        const sleeveR = characterRef.current.getObjectByName('sleeveR')
+        const idleSway = Math.sin(time * 0.7) * 0.03
 
-        const armSwing = Math.sin(time * 0.8) * 0.05
-        if (armL) armL.rotation.x = armSwing
-        if (armR) armR.rotation.x = -armSwing
-        if (sleeveL) sleeveL.rotation.x = armSwing
-        if (sleeveR) sleeveR.rotation.x = -armSwing
+        if (armL) {
+          armL.rotation.z = currentPose.armLRotZ + idleSway
+          armL.rotation.x = currentPose.armLRotX + Math.sin(time * 0.8) * 0.05
+        }
+        if (armR) {
+          armR.rotation.z = currentPose.armRRotZ - idleSway
+          armR.rotation.x = currentPose.armRRotX - Math.sin(time * 0.8) * 0.05
+        }
       }
 
       renderer.render(scene, camera)
@@ -344,13 +429,42 @@ export default function VoxelCharacter({
     const prev = prevEquippedRef.current
     const current = new Set(equippedPieces)
 
-    // Show newly equipped pieces (without animation — animation is handled separately)
+    // Show newly equipped pieces + play equip ceremonies
     for (const pieceId of current) {
       if (!prev.has(pieceId)) {
         const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
         if (group && !group.visible) {
           group.visible = true
           group.scale.set(1, 1, 1)
+        }
+        // Play equip ceremony based on piece type
+        if (characterRef.current) {
+          const character = characterRef.current
+          switch (pieceId) {
+            case 'shoes':
+              animateJump(character, 0.5, 400)
+              break
+            case 'helmet': {
+              const head = character.getObjectByName('head')
+              if (head) animateNod(head, 300)
+              break
+            }
+            case 'breastplate': {
+              const torso = character.getObjectByName('torso')
+              if (torso) animateTorsoPuff(torso, 300)
+              break
+            }
+            case 'belt':
+              animateHipTurn(character, 400)
+              break
+            case 'sword': {
+              const swordGroup = armorGroupsRef.current.get('sword')
+              if (swordGroup) setTimeout(() => animateSwordFlourish(swordGroup, 500), 300)
+              break
+            }
+            default:
+              break
+          }
         }
       }
     }
@@ -364,6 +478,9 @@ export default function VoxelCharacter({
         }
       }
     }
+
+    // Update pose for new equipped set
+    poseRef.current?.(equippedPieces)
 
     prevEquippedRef.current = current
   }, [equippedPieces])
