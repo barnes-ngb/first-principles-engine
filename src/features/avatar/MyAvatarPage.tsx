@@ -436,30 +436,18 @@ export default function MyAvatarPage() {
   const features = profile.characterFeatures ?? DEFAULT_CHARACTER_FEATURES
 
   return (
-    <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 8 }}>
+    <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3 }}>
       <Page>
-        {/* ── Header ────────────────────────────────────────────── */}
-        <Box sx={{ textAlign: 'center', pt: 2, pb: 1 }}>
-          <Typography
-            variant="h5"
-            sx={{
-              fontFamily: titleFont,
-              fontSize: isLincoln ? '0.7rem' : '1.8rem',
-              fontWeight: 700,
-              color: accentColor,
-            }}
-          >
-            My Armor
-          </Typography>
+        {/* ── XP Subtitle ────────────────────────────────────────── */}
+        <Box sx={{ textAlign: 'center', py: 1 }}>
           <Typography
             sx={{
-              mt: 0.5,
               fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-              fontSize: isLincoln ? '0.45rem' : '16px',
-              color: isLincoln ? '#666' : '#999',
+              fontSize: isLincoln ? '0.45rem' : '14px',
+              color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)',
             }}
           >
-            {activeChild?.name} — {profile.totalXp} XP
+            {activeChild?.name} — {profile.totalXp} XP • {profile.currentTier}
           </Typography>
         </Box>
 
@@ -479,6 +467,7 @@ export default function MyAvatarPage() {
             features={features}
             ageGroup={ageGroup}
             equippedPieces={appliedVoxel}
+            totalXp={profile.totalXp}
             animateEquipPiece={animateEquipId}
             animateUnequipPiece={animateUnequipId}
             onEquipAnimDone={handleEquipAnimDone}
@@ -635,7 +624,6 @@ export default function MyAvatarPage() {
                     size={48}
                     tier={(profile.currentTier ?? 'stone') as ArmorTierColor}
                     locked={!isUnlocked}
-                    applied={isApplied}
                   />
                 </Box>
 
@@ -650,7 +638,7 @@ export default function MyAvatarPage() {
                     textAlign: 'center',
                   }}
                 >
-                  {piece.name.split(' ').slice(0, 2).join(' ')}
+                  {piece.shortName}
                 </Typography>
 
                 {/* Status text */}
@@ -665,7 +653,7 @@ export default function MyAvatarPage() {
                         : (isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'),
                   }}
                 >
-                  {isApplied ? 'Equipped' : isUnlocked ? 'Tap to equip' : `${XP_THRESHOLDS[piece.id]} XP`}
+                  {isApplied ? 'Equipped' : isUnlocked ? 'Tap to equip' : `${XP_THRESHOLDS[piece.id] - profile.totalXp > 0 ? `${XP_THRESHOLDS[piece.id] - profile.totalXp} XP away` : `${XP_THRESHOLDS[piece.id]} XP`}`}
                 </Typography>
               </Box>
             )
