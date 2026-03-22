@@ -27,7 +27,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
-import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, VOXEL_TO_ARMOR_PIECE, DEFAULT_CHARACTER_FEATURES } from '../../core/types'
+import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, VOXEL_TO_ARMOR_PIECE, DEFAULT_CHARACTER_FEATURES, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
 import type {
   ArmorPiece,
   AvatarProfile,
@@ -143,7 +143,7 @@ export default function MyAvatarPage() {
           themeStyle: isLincoln ? 'minecraft' : 'platformer',
           pieces: [],
           currentTier: isLincoln ? 'stone' : 'basic',
-          characterFeatures: DEFAULT_CHARACTER_FEATURES,
+          characterFeatures: isLincoln ? LINCOLN_FEATURES : LONDON_FEATURES,
           ageGroup,
           equippedPieces: [],
           unlockedPieces: [],
@@ -337,7 +337,7 @@ export default function MyAvatarPage() {
     [profile, familyId, childId, session, today, isLincoln],
   )
 
-  // ── Piece tap handler ──────────────────────────────────────────
+  // ── Piece tap handler — single tap to equip/unequip ────────────
   const handlePieceTap = useCallback(
     (piece: ArmorPieceMeta) => {
       if (!profile || !session) return
@@ -349,16 +349,17 @@ export default function MyAvatarPage() {
       const isApplied = armorPieceId && session.appliedPieces.includes(armorPieceId)
 
       if (isApplied) {
+        // Tap equipped piece → unequip dialog
         setUnequipPiece(piece.id)
       } else if (isUnlocked) {
-        // Toggle verse card: tap same piece to close, different to switch
-        setSelectedPiece((prev) => prev?.id === piece.id ? null : piece)
+        // Tap unlocked piece → equip immediately (single tap!)
+        void handleApplyPiece(piece.id)
       } else {
-        // Locked pieces: show verse card (but no equip button)
+        // Locked pieces: show verse card (info only)
         setSelectedPiece((prev) => prev?.id === piece.id ? null : piece)
       }
     },
-    [profile, session],
+    [profile, session, handleApplyPiece],
   )
 
   // ── Unequip a piece ────────────────────────────────────────────
@@ -434,7 +435,8 @@ export default function MyAvatarPage() {
   if (!profile) return null
 
   const ageGroup = profile.ageGroup ?? (isLincoln ? 'older' : 'younger')
-  const features = profile.characterFeatures ?? DEFAULT_CHARACTER_FEATURES
+  const childDefaults = isLincoln ? LINCOLN_FEATURES : LONDON_FEATURES
+  const features = profile.characterFeatures ?? childDefaults
 
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3 }}>
@@ -676,14 +678,19 @@ export default function MyAvatarPage() {
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
                     fontSize: isLincoln ? '0.22rem' : '11px',
+                    fontWeight: isApplied ? 600 : 400,
                     color: isApplied
-                      ? accentColor
+                      ? '#4caf50'
                       : isUnlocked
-                        ? (isLincoln ? 'rgba(126,252,32,0.7)' : 'rgba(232,160,191,0.8)')
+                        ? '#FFA726'
                         : (isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'),
                   }}
                 >
-                  {isApplied ? 'Equipped' : isUnlocked ? 'Tap to equip' : `${XP_THRESHOLDS[piece.id] - profile.totalXp > 0 ? `${XP_THRESHOLDS[piece.id] - profile.totalXp} XP away` : `${XP_THRESHOLDS[piece.id]} XP`}`}
+                  {isApplied
+                    ? '✓ Equipped'
+                    : isUnlocked
+                      ? 'Tap to equip'
+                      : `${XP_THRESHOLDS[piece.id] - profile.totalXp > 0 ? `${XP_THRESHOLDS[piece.id] - profile.totalXp} XP away` : `${XP_THRESHOLDS[piece.id]} XP`}`}
                 </Typography>
               </Box>
             )

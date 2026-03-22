@@ -46,11 +46,25 @@ export function buildHair(
     sideR.position.set(U * 4.2, headY + U * 1.5, 0)
     hair.add(sideR)
 
-    // Length-dependent back extensions
+    // Length-dependent back extensions + side panels
     if (length === 'ear_length') {
-      const backExt = box(U * 8.4, U * 3, U * 1.2, material)
-      backExt.position.set(0, headY - U * 2, -U * 3.8)
+      // Back hair — extends below head to neck
+      const backExt = box(U * 8.4, U * 6, U * 1.2, material)
+      backExt.position.set(0, headY - U * 3, -U * 3.8)
       hair.add(backExt)
+
+      // Side panels — extend past the ears (below head bottom at headY - U*4)
+      const sideExtL = box(U * 1.2, U * 6, U * 6, material)
+      sideExtL.position.set(-U * 4.2, headY - U * 1.5, U * 0.5)
+      hair.add(sideExtL)
+      const sideExtR = box(U * 1.2, U * 6, U * 6, material)
+      sideExtR.position.set(U * 4.2, headY - U * 1.5, U * 0.5)
+      hair.add(sideExtR)
+
+      // Bangs — across forehead
+      const bangs = box(U * 6.5, U * 1.5, U * 1.2, material)
+      bangs.position.set(0, headY + U * 2.5, U * 3.8)
+      hair.add(bangs)
     } else if (length === 'shoulder') {
       const backExt = box(U * 8.4, U * 7, U * 1.2, material)
       backExt.position.set(0, headY - U * 3, -U * 3.8)
@@ -75,13 +89,13 @@ export function buildHair(
       }
     }
 
-    // Medium style: slightly thicker sides
+    // Medium style: thicker sides with more volume, extending below head
     if (style === 'medium') {
-      const extraL = box(U * 1.2, U * 4, U * 8.4, material)
-      extraL.position.set(-U * 4.6, headY + U * 1, 0)
+      const extraL = box(U * 1.4, U * 6, U * 8.4, material)
+      extraL.position.set(-U * 4.7, headY - U * 0.5, 0)
       hair.add(extraL)
-      const extraR = box(U * 1.2, U * 4, U * 8.4, material)
-      extraR.position.set(U * 4.6, headY + U * 1, 0)
+      const extraR = box(U * 1.4, U * 6, U * 8.4, material)
+      extraR.position.set(U * 4.7, headY - U * 0.5, 0)
       hair.add(extraR)
     }
 

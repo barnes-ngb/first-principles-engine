@@ -429,14 +429,17 @@ export default function VoxelCharacter({
     const prev = prevEquippedRef.current
     const current = new Set(equippedPieces)
 
-    // Show newly equipped pieces + play equip ceremonies
+    // Show newly equipped pieces as SOLID with tier materials + play equip ceremonies
     for (const pieceId of current) {
       if (!prev.has(pieceId)) {
         const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
-        if (group && !group.visible) {
+        if (group) {
           group.visible = true
           group.scale.set(1, 1, 1)
         }
+        // Apply tier materials so piece becomes solid (not ghost)
+        applyTierToArmor(armorGroupsRef.current, currentTier, [pieceId])
+
         // Play equip ceremony based on piece type
         if (characterRef.current) {
           const character = characterRef.current
@@ -469,21 +472,47 @@ export default function VoxelCharacter({
       }
     }
 
-    // Hide unequipped pieces
+    // Unequipped pieces → show as translucent ghost (not hidden)
     for (const pieceId of prev) {
       if (!current.has(pieceId)) {
         const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
         if (group) {
-          group.visible = false
+          const isUnlocked = totalXp >= XP_THRESHOLDS[pieceId as VoxelArmorPieceId]
+          group.visible = true
+          group.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              const mats = Array.isArray(child.material) ? child.material : [child.material]
+              const baseHex = mats[0] instanceof THREE.MeshLambertMaterial
+                ? mats[0].color?.getHex() ?? 0x888888
+                : 0x888888
+              const ghostOpacity = isUnlocked ? 0.3 : 0.25
+              const base = new THREE.Color(baseHex)
+              if (!isUnlocked) base.lerp(new THREE.Color(0x8888cc), 0.5)
+              child.material = new THREE.MeshLambertMaterial({
+                color: base,
+                transparent: true,
+                opacity: ghostOpacity,
+                depthWrite: false,
+                ...(isUnlocked ? {} : { emissive: new THREE.Color(0x334466), emissiveIntensity: 0.3 }),
+              })
+            }
+          })
         }
       }
+    }
+
+    // Also ensure ALL currently equipped pieces have solid tier materials
+    // (handles page-load case where pieces load from profile)
+    if (current.size > 0) {
+      applyTierToArmor(armorGroupsRef.current, currentTier, equippedPieces)
+      enforceArmorOpacity(armorGroupsRef.current, equippedPieces)
     }
 
     // Update pose for new equipped set
     poseRef.current?.(equippedPieces)
 
     prevEquippedRef.current = current
-  }, [equippedPieces])
+  }, [equippedPieces, currentTier, totalXp])
 
   // ── Handle equip animation trigger ──────────────────────────────
   useEffect(() => {
