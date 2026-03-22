@@ -8,6 +8,8 @@ export interface TouchControlState {
   velocityY: number
   autoRotate: boolean
   lastInteractionTime: number
+  /** Set externally to receive swipe callbacks */
+  onSwipe?: (direction: 'left' | 'right') => void
 }
 
 const AUTO_ROTATE_DELAY = 4000
@@ -15,6 +17,9 @@ const AUTO_ROTATE_SPEED = 0.003
 const DRAG_SENSITIVITY = 0.006
 const LERP_FACTOR = 0.08
 const FRICTION = 0.95
+
+const SWIPE_THRESHOLD = 50 // Minimum px for a swipe
+const SWIPE_TIME_LIMIT = 300 // Max ms for a swipe gesture
 
 export function createTouchControls(canvas: HTMLCanvasElement): TouchControlState {
   const state: TouchControlState = {
@@ -27,26 +32,43 @@ export function createTouchControls(canvas: HTMLCanvasElement): TouchControlStat
     lastInteractionTime: 0,
   }
 
+  // Swipe tracking
+  let touchStartX = 0
+  let touchStartTime = 0
+  let totalDragDistance = 0
+
   function onPointerDown(x: number) {
     state.isDragging = true
     state.prevX = x
     state.velocityY = 0
     state.autoRotate = false
     state.lastInteractionTime = performance.now()
+    touchStartX = x
+    touchStartTime = performance.now()
+    totalDragDistance = 0
   }
 
   function onPointerMove(x: number) {
     if (!state.isDragging) return
     const dx = x - state.prevX
+    totalDragDistance += Math.abs(dx)
     state.velocityY = dx * DRAG_SENSITIVITY
     state.targetRotY += state.velocityY
     state.prevX = x
   }
 
-  function onPointerUp() {
+  function onPointerUp(endX?: number) {
     state.isDragging = false
     state.lastInteractionTime = performance.now()
-    // Momentum: velocity carries forward, decayed by friction in the loop
+
+    // Detect swipe — fast horizontal motion with minimal overall drag
+    if (endX !== undefined && state.onSwipe) {
+      const dx = endX - touchStartX
+      const elapsed = performance.now() - touchStartTime
+      if (Math.abs(dx) > SWIPE_THRESHOLD && elapsed < SWIPE_TIME_LIMIT) {
+        state.onSwipe(dx > 0 ? 'right' : 'left')
+      }
+    }
   }
 
   // ── Touch events ────────────────────────────────────────────────
@@ -58,7 +80,9 @@ export function createTouchControls(canvas: HTMLCanvasElement): TouchControlStat
     if (e.touches.length === 1) onPointerMove(e.touches[0].clientX)
   }, { passive: true })
 
-  canvas.addEventListener('touchend', () => onPointerUp(), { passive: true })
+  canvas.addEventListener('touchend', (e: TouchEvent) => {
+    onPointerUp(e.changedTouches[0]?.clientX)
+  }, { passive: true })
 
   // ── Mouse events (desktop/dev testing) ──────────────────────────
   canvas.addEventListener('mousedown', (e: MouseEvent) => onPointerDown(e.clientX))
