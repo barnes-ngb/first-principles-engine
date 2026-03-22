@@ -44,6 +44,7 @@ import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
+import { calculateTier, getTierBadgeColor, getTierTextColor } from './voxel/tierMaterials'
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -438,17 +439,46 @@ export default function MyAvatarPage() {
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3 }}>
       <Page>
-        {/* ── XP Subtitle ────────────────────────────────────────── */}
+        {/* ── XP Subtitle with Tier Badge ─────────────────────── */}
         <Box sx={{ textAlign: 'center', py: 1 }}>
-          <Typography
-            sx={{
-              fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-              fontSize: isLincoln ? '0.45rem' : '14px',
-              color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)',
-            }}
-          >
-            {activeChild?.name} — {profile.totalXp} XP • {profile.currentTier}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', mb: '4px' }}>
+            <Typography
+              sx={{
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                fontSize: isLincoln ? '0.45rem' : '14px',
+                color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)',
+              }}
+            >
+              {activeChild?.name}
+            </Typography>
+            <Box
+              component="span"
+              sx={{
+                fontFamily: 'monospace',
+                fontSize: '12px',
+                px: '8px',
+                py: '2px',
+                borderRadius: '4px',
+                background: getTierBadgeColor(calculateTier(profile.totalXp)),
+                color: getTierTextColor(calculateTier(profile.totalXp)),
+                fontWeight: 500,
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+              }}
+            >
+              {calculateTier(profile.totalXp)}
+            </Box>
+            <Typography
+              component="span"
+              sx={{
+                fontFamily: 'monospace',
+                fontSize: '13px',
+                color: '#4caf50',
+              }}
+            >
+              {profile.totalXp} XP
+            </Typography>
+          </Box>
         </Box>
 
         {/* ── 3D Character Display ─────────────────────────────── */}

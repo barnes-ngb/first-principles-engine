@@ -62,7 +62,7 @@ export function buildCharacter(
   const eyeMat = new THREE.MeshLambertMaterial({
     color: features.eyeColor ?? '#2c1810',
   })
-  const mouthMat = new THREE.MeshLambertMaterial({ color: 0x2c1810 })
+  // mouthMat removed — mouth now uses inline material with smile color
 
   // Calculate Y positions (bottom-up)
   const footY = tmpl.foot.h / 2
@@ -76,16 +76,25 @@ export function buildCharacter(
   head.position.y = headY
   character.add(head)
 
-  // Eyes
-  const eyeL = box(0.15, 0.1, 0.05, eyeMat, 'eyeL')
-  eyeL.position.set(-0.2, headY + 0.05, tmpl.head.d / 2 + 0.01)
-  character.add(eyeL)
-  const eyeR = box(0.15, 0.1, 0.05, eyeMat, 'eyeR')
-  eyeR.position.set(0.2, headY + 0.05, tmpl.head.d / 2 + 0.01)
-  character.add(eyeR)
+  // Eyes — white sclera with colored pupils
+  const whiteEyeMat = new THREE.MeshLambertMaterial({ color: 0xffffff })
 
-  // Mouth
-  const mouth = box(0.25, 0.06, 0.05, mouthMat, 'mouth')
+  const eyeWhiteL = box(0.18, 0.16, 0.06, whiteEyeMat, 'eyeWhiteL')
+  eyeWhiteL.position.set(-0.22, headY + 0.05, tmpl.head.d / 2 + 0.01)
+  character.add(eyeWhiteL)
+  const pupilL = box(0.08, 0.10, 0.02, eyeMat, 'pupilL')
+  pupilL.position.set(-0.20, headY + 0.04, tmpl.head.d / 2 + 0.04)
+  character.add(pupilL)
+
+  const eyeWhiteR = box(0.18, 0.16, 0.06, whiteEyeMat, 'eyeWhiteR')
+  eyeWhiteR.position.set(0.22, headY + 0.05, tmpl.head.d / 2 + 0.01)
+  character.add(eyeWhiteR)
+  const pupilR = box(0.08, 0.10, 0.02, eyeMat, 'pupilR')
+  pupilR.position.set(0.24, headY + 0.04, tmpl.head.d / 2 + 0.04)
+  character.add(pupilR)
+
+  // Slight smile
+  const mouth = box(0.3, 0.05, 0.06, new THREE.MeshLambertMaterial({ color: 0x553333 }), 'mouth')
   mouth.position.set(0, headY - 0.2, tmpl.head.d / 2 + 0.01)
   character.add(mouth)
 
@@ -93,6 +102,21 @@ export function buildCharacter(
   const torso = box(tmpl.torso.w, tmpl.torso.h, tmpl.torso.d, shirtMat, 'torso')
   torso.position.y = torsoY
   character.add(torso)
+
+  // Collar/neckline
+  const collarMat = new THREE.MeshLambertMaterial({ color: 0xdddddd })
+  const collar = box(0.5, 0.08, 0.08, collarMat, 'collar')
+  collar.position.set(0, torsoY + tmpl.torso.h / 2 - 0.02, tmpl.torso.d / 2 - 0.02)
+  character.add(collar)
+
+  // Shirt sleeve edges (slightly different shade)
+  const sleeveMat = new THREE.MeshLambertMaterial({ color: 0xe8e8e8 })
+  const sleeveL = box(tmpl.arm.w + 0.02, 0.15, tmpl.arm.d + 0.02, sleeveMat, 'sleeveL')
+  sleeveL.position.set(-(tmpl.torso.w / 2 + tmpl.arm.w / 2), armY + tmpl.arm.h / 2 - 0.08, 0)
+  character.add(sleeveL)
+  const sleeveR = box(tmpl.arm.w + 0.02, 0.15, tmpl.arm.d + 0.02, sleeveMat, 'sleeveR')
+  sleeveR.position.set(tmpl.torso.w / 2 + tmpl.arm.w / 2, armY + tmpl.arm.h / 2 - 0.08, 0)
+  character.add(sleeveR)
 
   // Arms
   const armL = box(tmpl.arm.w, tmpl.arm.h, tmpl.arm.d, skinMat, 'armL')
@@ -102,6 +126,15 @@ export function buildCharacter(
   const armR = box(tmpl.arm.w, tmpl.arm.h, tmpl.arm.d, skinMat, 'armR')
   armR.position.set(tmpl.torso.w / 2 + tmpl.arm.w / 2, armY, 0)
   character.add(armR)
+
+  // Hands (slightly different skin shade at bottom of arms)
+  const handMat = new THREE.MeshLambertMaterial({ color: features.skinTone })
+  const handL = box(tmpl.arm.w * 0.75, 0.2, tmpl.arm.d * 0.7, handMat, 'handL')
+  handL.position.set(-(tmpl.torso.w / 2 + tmpl.arm.w / 2), armY - tmpl.arm.h / 2 - 0.05, 0)
+  character.add(handL)
+  const handR = box(tmpl.arm.w * 0.75, 0.2, tmpl.arm.d * 0.7, handMat, 'handR')
+  handR.position.set(tmpl.torso.w / 2 + tmpl.arm.w / 2, armY - tmpl.arm.h / 2 - 0.05, 0)
+  character.add(handR)
 
   // Legs (shorts)
   const legL = box(tmpl.leg.w, tmpl.leg.h, tmpl.leg.d, shortsMat, 'legL')
