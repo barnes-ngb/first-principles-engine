@@ -1,53 +1,74 @@
 import * as THREE from 'three'
+import type { CharacterFeatures } from '../../../core/types'
 
-// ── Client-side pixel face from photo ────────────────────────────────
+// ── Face mesh names (3D features on the head) ────────────────────────
+
+const FACE_MESH_NAMES = [
+  'eyeWhiteL', 'eyeWhiteR', 'pupilL', 'pupilR',
+  'mouth', 'nose', 'eyebrowL', 'eyebrowR',
+  'cheekL', 'cheekR',
+]
+
+// ── Build a clean 8x8 Minecraft-style face from features ────────────
 
 /**
- * Crop and pixelate a photo to an 8x8 Minecraft-style face texture.
+ * Build a clean Minecraft-style 8x8 pixel face from extracted character features.
+ * No photo pixelation — hand-painted grid using skin/hair/eye colors.
  * Returns a 64x64 canvas with nearest-neighbor upscaling (crisp pixels).
  */
-export async function generatePixelFace(photoUrl: string): Promise<HTMLCanvasElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onerror = () => reject(new Error('Failed to load photo'))
-    img.onload = () => {
-      // Crop to face region — center-top area of photo
-      const srcW = img.width
-      const srcH = img.height
-      const faceSize = Math.min(srcW, srcH) * 0.5
-      const cropX = (srcW - faceSize) / 2
-      const cropY = srcH * 0.08
+export function buildPaintedFace(features: Partial<CharacterFeatures>): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  canvas.width = 8
+  canvas.height = 8
+  const ctx = canvas.getContext('2d')!
 
-      // Pixelate to 8x8 — Minecraft face resolution
-      const pixelCanvas = document.createElement('canvas')
-      pixelCanvas.width = 8
-      pixelCanvas.height = 8
-      const pCtx = pixelCanvas.getContext('2d')!
-      pCtx.imageSmoothingEnabled = false
-      pCtx.drawImage(img, cropX, cropY, faceSize, faceSize, 0, 0, 8, 8)
+  const skin = features.skinTone || '#F5D6B8'
+  const hair = features.hairColor || '#6B4C32'
+  const eyeColor = features.eyeColor || '#3D5A6B'
 
-      // Color quantize — reduce to Minecraft palette feel
-      const imageData = pCtx.getImageData(0, 0, 8, 8)
-      for (let i = 0; i < imageData.data.length; i += 4) {
-        imageData.data[i] = Math.round(imageData.data[i] / 20) * 20
-        imageData.data[i + 1] = Math.round(imageData.data[i + 1] / 20) * 20
-        imageData.data[i + 2] = Math.round(imageData.data[i + 2] / 20) * 20
-      }
-      pCtx.putImageData(imageData, 0, 0)
+  // Cheek color: skin blended slightly pink
+  const skinC = new THREE.Color(skin)
+  const cheek = '#' + skinC.clone().lerp(new THREE.Color('#FFB0B0'), 0.2).getHexString()
 
-      // Upscale to 64x64 with nearest-neighbor (crisp pixels)
-      const finalCanvas = document.createElement('canvas')
-      finalCanvas.width = 64
-      finalCanvas.height = 64
-      const fCtx = finalCanvas.getContext('2d')!
-      fCtx.imageSmoothingEnabled = false
-      fCtx.drawImage(pixelCanvas, 0, 0, 64, 64)
+  // Mouth: skin darkened 15%
+  const mouth = '#' + skinC.clone().multiplyScalar(0.85).getHexString()
 
-      resolve(finalCanvas)
-    }
-    img.src = photoUrl
+  // Build the face pixel by pixel — clean Minecraft style
+  const grid = [
+    // Row 1: hair
+    [hair, hair, hair, hair, hair, hair, hair, hair],
+    // Row 2: hair
+    [hair, hair, hair, hair, hair, hair, hair, hair],
+    // Row 3: hair + forehead
+    [hair, hair, skin, skin, skin, skin, hair, hair],
+    // Row 4: eyes
+    [hair, '#FFFFFF', eyeColor, skin, skin, '#FFFFFF', eyeColor, hair],
+    // Row 5: cheeks + nose
+    [skin, cheek, skin, skin, skin, skin, cheek, skin],
+    // Row 6: mouth
+    [skin, skin, skin, mouth, mouth, skin, skin, skin],
+    // Row 7: chin
+    [skin, skin, skin, skin, skin, skin, skin, skin],
+    // Row 8: chin/neck
+    [skin, skin, skin, skin, skin, skin, skin, skin],
+  ]
+
+  grid.forEach((row, y) => {
+    row.forEach((color, x) => {
+      ctx.fillStyle = color
+      ctx.fillRect(x, y, 1, 1)
+    })
   })
+
+  // Upscale to 64x64 crisp
+  const upscaled = document.createElement('canvas')
+  upscaled.width = 64
+  upscaled.height = 64
+  const uctx = upscaled.getContext('2d')!
+  uctx.imageSmoothingEnabled = false
+  uctx.drawImage(canvas, 0, 0, 64, 64)
+
+  return upscaled
 }
 
 // ── AI-generated face from color array ──────────────────────────────
@@ -114,24 +135,43 @@ export function applyCanvasToHead(
   ]
 }
 
-// ── Three-tier face generation strategy ─────────────────────────────
+// ── Hide 3D face meshes when texture is applied ─────────────────────
 
 /**
- * Try to generate and apply a pixel face to the head mesh.
- * Strategy: client-side pixelation from photo URL (fast, no API cost).
- * AI generation would be called separately via Cloud Function.
+ * Hide 3D face feature meshes (eyes, mouth, nose, eyebrows) to prevent
+ * Z-fighting with the applied face texture.
  */
-export async function applyPixelFaceFromPhoto(
+export function hideFaceMeshes(character: THREE.Group) {
+  FACE_MESH_NAMES.forEach(name => {
+    const mesh = character.getObjectByName(name)
+    if (mesh) mesh.visible = false
+  })
+}
+
+/**
+ * Show 3D face feature meshes (for when no texture is applied).
+ */
+export function showFaceMeshes(character: THREE.Group) {
+  FACE_MESH_NAMES.forEach(name => {
+    const mesh = character.getObjectByName(name)
+    if (mesh) mesh.visible = true
+  })
+}
+
+// ── Face generation strategy ────────────────────────────────────────
+
+/**
+ * Generate and apply a pixel face to the head mesh.
+ * Strategy: painted face from extracted character features (clean, no API cost).
+ * Falls back to default features if none provided.
+ */
+export function applyPaintedFace(
   headMesh: THREE.Mesh,
-  photoUrl: string,
+  character: THREE.Group,
+  features: Partial<CharacterFeatures>,
   skinColor: number,
-): Promise<boolean> {
-  try {
-    const pixelCanvas = await generatePixelFace(photoUrl)
-    applyCanvasToHead(headMesh, pixelCanvas, skinColor)
-    return true
-  } catch (err) {
-    console.warn('Pixelation failed, using solid color:', err)
-    return false
-  }
+): void {
+  const faceCanvas = buildPaintedFace(features)
+  applyCanvasToHead(headMesh, faceCanvas, skinColor)
+  hideFaceMeshes(character)
 }
