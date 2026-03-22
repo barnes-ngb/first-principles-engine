@@ -302,6 +302,7 @@ Extend the existing `chat` function:
 - London can revise the game based on feedback
 - Revision history visible ("Version 1 → Version 2, Lincoln helped fix the dragon rule")
 - **London records his own voice** for select cards during creation — replaces TTS with his voice during play
+- **Multi-device play** — Firestore real-time listeners sync game state across tablets (each player on their own device)
 
 ### Phase 3 — Print & Draw
 - Generate printable board PDF + cut-out challenge cards
@@ -366,6 +367,7 @@ Extend the existing `chat` function:
 - **Voice recognition accuracy for a 6-year-old.** Web Speech API may struggle with London's pronunciation. Need a fallback UX: "I didn't catch that — want to try again or tap to type?" Test early.
 - **Board game art generation.** Phase 1 boards are SVG/procedural. When does DALL-E get involved for richer theme art? Phase 3 currently, but could be useful earlier if boards feel too plain.
 - **Maximum games before cleanup.** Should old games archive automatically? Or does London's gallery just grow? Probably not an issue for months.
+- **Multi-device play architecture.** Pass-and-play works for Phase 1. When ready for multi-device, game state syncs through Firestore listeners on `storyGames/{gameId}/activeSession`. Need to handle turn locking, disconnect recovery, and latency. Existing Firebase real-time patterns from Dad Lab (Lincoln's contributions visible to Nathan) are the starting point.
 
 ---
 
