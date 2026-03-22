@@ -53,6 +53,18 @@ const mockGame: GeneratedGame = {
   },
 }
 
+/** Helper: roll and complete movement in one step */
+function rollAndMove(result: { current: ReturnType<typeof useGameSession> }, value: number) {
+  act(() => {
+    result.current.roll(value)
+  })
+  // ROLL goes to Move phase; moveComplete transitions to Card/Resolve
+  expect(result.current.state.turnPhase).toBe(TurnPhase.Move)
+  act(() => {
+    result.current.moveComplete()
+  })
+}
+
 describe('useGameSession', () => {
   it('initializes with default players', () => {
     const { result } = renderHook(() => useGameSession(mockGame))
@@ -71,7 +83,7 @@ describe('useGameSession', () => {
     expect(result.current.state.startedAt).not.toBeNull()
   })
 
-  it('rolls and moves the current player', () => {
+  it('goes through Move phase on roll before resolving', () => {
     const { result } = renderHook(() => useGameSession(mockGame))
 
     act(() => {
@@ -79,8 +91,24 @@ describe('useGameSession', () => {
     })
 
     act(() => {
-      result.current.roll(3) // Move to position 3 (bonus space)
+      result.current.roll(3)
     })
+
+    // Should be in Move phase with position info
+    expect(result.current.state.turnPhase).toBe(TurnPhase.Move)
+    expect(result.current.state.previousPosition).toBe(0)
+    expect(result.current.state.targetPosition).toBe(3)
+    expect(result.current.state.players[0].position).toBe(3)
+  })
+
+  it('rolls and moves the current player', () => {
+    const { result } = renderHook(() => useGameSession(mockGame))
+
+    act(() => {
+      result.current.startGame()
+    })
+
+    rollAndMove(result, 3) // Move to position 3 (bonus space)
 
     expect(result.current.state.players[0].position).toBe(3)
     expect(result.current.state.lastRoll).toBe(3)
@@ -95,9 +123,7 @@ describe('useGameSession', () => {
       result.current.startGame()
     })
 
-    act(() => {
-      result.current.roll(2) // Move to position 2 (challenge space with card-1)
-    })
+    rollAndMove(result, 2) // Move to position 2 (challenge space with card-1)
 
     expect(result.current.state.turnPhase).toBe(TurnPhase.Card)
     expect(result.current.state.currentCard?.id).toBe('card-1')
@@ -111,9 +137,7 @@ describe('useGameSession', () => {
       result.current.startGame()
     })
 
-    act(() => {
-      result.current.roll(2) // Challenge space
-    })
+    rollAndMove(result, 2) // Challenge space
 
     act(() => {
       result.current.dismissCard()
@@ -130,9 +154,7 @@ describe('useGameSession', () => {
       result.current.startGame()
     })
 
-    act(() => {
-      result.current.roll(1) // Normal space
-    })
+    rollAndMove(result, 1) // Normal space
 
     act(() => {
       result.current.nextTurn()
@@ -151,9 +173,7 @@ describe('useGameSession', () => {
 
     // Cycle through all players
     for (let i = 0; i < DEFAULT_PLAYERS.length; i++) {
-      act(() => {
-        result.current.roll(1)
-      })
+      rollAndMove(result, 1)
       act(() => {
         result.current.nextTurn()
       })
@@ -169,29 +189,21 @@ describe('useGameSession', () => {
       result.current.startGame()
     })
 
-    // Roll a 6, then another roll to get to end (position >= 9)
-    act(() => {
-      result.current.roll(5)
-    })
+    // Roll a 5 for player 0
+    rollAndMove(result, 5)
 
     act(() => {
       result.current.nextTurn()
     })
-    act(() => {
-      result.current.roll(1) // player 2 moves
-    })
+    rollAndMove(result, 1) // player 2 moves
     act(() => {
       result.current.nextTurn()
     })
-    act(() => {
-      result.current.roll(1)
-    })
+    rollAndMove(result, 1)
     act(() => {
       result.current.nextTurn()
     })
-    act(() => {
-      result.current.roll(1)
-    })
+    rollAndMove(result, 1)
     act(() => {
       result.current.nextTurn()
     })
@@ -204,9 +216,7 @@ describe('useGameSession', () => {
       })
     }
 
-    act(() => {
-      result.current.roll(6) // Should cap at position 9
-    })
+    rollAndMove(result, 6) // Should cap at position 9
 
     expect(result.current.state.winner).toBe('London')
     expect(result.current.isGameOver).toBe(true)
@@ -219,12 +229,27 @@ describe('useGameSession', () => {
       result.current.startGame()
     })
 
-    act(() => {
-      result.current.roll(6) // Would be position 6 (challenge), not past end
-    })
+    rollAndMove(result, 6) // Would be position 6 (challenge), not past end
 
     // Position 6 is a challenge space
     expect(result.current.state.players[0].position).toBe(6)
     expect(result.current.state.turnPhase).toBe(TurnPhase.Card)
+  })
+
+  it('tracks multiple finishers', () => {
+    const { result } = renderHook(() => useGameSession(mockGame))
+
+    act(() => {
+      result.current.startGame([
+        { id: 'p1', name: 'Alice', color: '#f00', position: 0 },
+        { id: 'p2', name: 'Bob', color: '#0f0', position: 0 },
+      ])
+    })
+
+    // Alice reaches the end
+    rollAndMove(result, 9)
+    expect(result.current.state.winner).toBe('Alice')
+    expect(result.current.state.finishers).toEqual(['Alice'])
+    expect(result.current.allFinished).toBe(false)
   })
 })
