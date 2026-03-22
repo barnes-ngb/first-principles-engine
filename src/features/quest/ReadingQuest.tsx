@@ -174,6 +174,11 @@ export default function QuestQuestionScreen({
 }: QuestQuestionScreenProps) {
   const progress = (questState.totalQuestions / MAX_QUESTIONS) * 100
 
+  // Defensive fallback: if prompt asks "What word is this?" but AI omitted stimulus,
+  // use the correct answer as the display word so Lincoln isn't guessing blind
+  const displayStimulus = question.stimulus
+    || (/what word/i.test(question.prompt) ? question.correctAnswer : undefined)
+
   return (
     <Box sx={{ bgcolor: MC.bg, borderRadius: 2, p: 3 }}>
       {/* Header */}
@@ -271,7 +276,7 @@ export default function QuestQuestionScreen({
       </Typography>
 
       {/* Stimulus word — large, centered, Minecraft-style */}
-      {question.stimulus && (
+      {displayStimulus && (
         <Box
           sx={{
             bgcolor: MC.darkStone,
@@ -291,7 +296,7 @@ export default function QuestQuestionScreen({
               textTransform: 'lowercase',
             }}
           >
-            {question.stimulus}
+            {displayStimulus}
           </Typography>
         </Box>
       )}
