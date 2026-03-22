@@ -1,5 +1,5 @@
 import { useReducer, useCallback } from 'react'
-import type { StoryInputs, StoryCharacter, StoryChallenge } from '../../core/types'
+import type { StoryInputs, StoryPlayer, StoryChallenge } from '../../core/types'
 import type { BoardStyle, BoardLength } from '../../core/types/workshop'
 
 // ── State ─────────────────────────────────────────────────────────
@@ -7,7 +7,7 @@ import type { BoardStyle, BoardLength } from '../../core/types/workshop'
 export interface WizardState {
   step: number
   theme: string
-  characters: StoryCharacter[]
+  players: StoryPlayer[]
   goal: string
   challenges: StoryChallenge[]
   boardStyle: BoardStyle | ''
@@ -17,7 +17,7 @@ export interface WizardState {
 const initialState: WizardState = {
   step: 0,
   theme: '',
-  characters: [],
+  players: [],
   goal: '',
   challenges: [],
   boardStyle: '',
@@ -28,7 +28,7 @@ const initialState: WizardState = {
 
 type WizardAction =
   | { type: 'SET_THEME'; theme: string }
-  | { type: 'SET_CHARACTERS'; characters: StoryCharacter[] }
+  | { type: 'SET_PLAYERS'; players: StoryPlayer[] }
   | { type: 'SET_GOAL'; goal: string }
   | { type: 'SET_CHALLENGES'; challenges: StoryChallenge[] }
   | { type: 'SET_BOARD_STYLE'; boardStyle: BoardStyle }
@@ -41,8 +41,8 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
   switch (action.type) {
     case 'SET_THEME':
       return { ...state, theme: action.theme }
-    case 'SET_CHARACTERS':
-      return { ...state, characters: action.characters }
+    case 'SET_PLAYERS':
+      return { ...state, players: action.players }
     case 'SET_GOAL':
       return { ...state, goal: action.goal }
     case 'SET_CHALLENGES':
@@ -68,8 +68,8 @@ export function useWorkshopWizard() {
   const [state, dispatch] = useReducer(wizardReducer, initialState)
 
   const setTheme = useCallback((theme: string) => dispatch({ type: 'SET_THEME', theme }), [])
-  const setCharacters = useCallback(
-    (characters: StoryCharacter[]) => dispatch({ type: 'SET_CHARACTERS', characters }),
+  const setPlayers = useCallback(
+    (players: StoryPlayer[]) => dispatch({ type: 'SET_PLAYERS', players }),
     [],
   )
   const setGoal = useCallback((goal: string) => dispatch({ type: 'SET_GOAL', goal }), [])
@@ -95,7 +95,7 @@ export function useWorkshopWizard() {
       case 0:
         return state.theme.trim().length > 0
       case 1:
-        return state.characters.length > 0 && state.characters.every((c) => c.name.trim().length > 0)
+        return state.players.length >= 2
       case 2:
         return state.goal.trim().length > 0
       case 3:
@@ -110,7 +110,7 @@ export function useWorkshopWizard() {
   /** Build the final StoryInputs from wizard state */
   const buildStoryInputs = (): StoryInputs => ({
     theme: state.theme,
-    characters: state.characters,
+    players: state.players,
     goal: state.goal,
     challenges: state.challenges,
     boardStyle: state.boardStyle as BoardStyle,
@@ -120,7 +120,7 @@ export function useWorkshopWizard() {
   return {
     state,
     setTheme,
-    setCharacters,
+    setPlayers,
     setGoal,
     setChallenges,
     setBoardStyle,

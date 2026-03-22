@@ -22,8 +22,8 @@ interface BoardSpaceProps {
   type: BoardSpaceType
   label?: string
   color?: string
-  /** Player tokens on this space (player names/colors) */
-  players?: Array<{ name: string; color: string }>
+  /** Player tokens on this space */
+  players?: Array<{ name: string; color: string; avatarUrl?: string }>
   isFirst?: boolean
   isLast?: boolean
   isActive?: boolean
@@ -112,13 +112,30 @@ export default function BoardSpace({
             <Box
               key={player.name}
               sx={{
-                width: 10,
-                height: 10,
+                width: 14,
+                height: 14,
                 borderRadius: '50%',
-                bgcolor: player.color,
+                bgcolor: player.avatarUrl ? 'transparent' : player.color,
                 border: '1px solid white',
+                overflow: 'hidden',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.45rem',
+                fontWeight: 700,
+                color: 'white',
               }}
-            />
+            >
+              {player.avatarUrl ? (
+                <img
+                  src={player.avatarUrl}
+                  alt={player.name}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : (
+                player.name.charAt(0)
+              )}
+            </Box>
           ))}
         </Box>
       )}

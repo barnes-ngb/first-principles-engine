@@ -7,7 +7,7 @@ import { modelForTask } from "../chat.js";
 
 interface WorkshopInput {
   theme: string;
-  characters: Array<{ name: string; trait: string }>;
+  players: Array<{ id: string; name: string; avatarUrl?: string; isCreator: boolean }>;
   goal: string;
   challenges: Array<{ type: string; idea?: string }>;
   boardStyle: string;
@@ -29,9 +29,7 @@ function buildWorkshopPrompt(
       : inputs.boardLength === "long" ? 35
         : 25;
 
-  const characterList = inputs.characters
-    .map((c) => `${c.name} (${c.trait})`)
-    .join(", ");
+  const playerNames = inputs.players.map((p) => p.name).join(", ");
 
   const challengeTypes = inputs.challenges
     .map((c) => (c.type === "custom" ? `custom: "${c.idea}"` : c.type))
@@ -56,11 +54,13 @@ GAME DESIGN CONSTRAINTS:
 
 STORY INPUTS FROM ${childName.toUpperCase()}:
 - Theme: ${inputs.theme}
-- Characters: ${characterList}
+- Players: ${playerNames}
 - Goal: ${inputs.goal}
 - Challenge types requested: ${challengeTypes}
 - Board style: ${inputs.boardStyle}
 - Board length: ${inputs.boardLength} (~${spaceCount} spaces)
+
+The players are real family members playing together. Use their real names in the story intro and narrative flavor text. Story NPCs (villains, creatures, bosses) come from the theme — they are not players.
 
 Generate a complete board game definition. Return your response as JSON wrapped in <game> tags.
 
@@ -68,7 +68,7 @@ The JSON must follow this exact schema:
 <game>
 {
   "title": "string — creative game title",
-  "storyIntro": "string — 2-3 sentences read aloud before the game starts, setting the scene",
+  "storyIntro": "string — 2-3 sentences read aloud before the game starts, setting the scene using the real player names",
   "board": {
     "spaces": [
       {
@@ -145,7 +145,7 @@ export const handleWorkshop = async (
   } catch {
     throw new HttpsError(
       "invalid-argument",
-      "workshop requires JSON with story inputs (theme, characters, goal, challenges, boardStyle, boardLength).",
+      "workshop requires JSON with story inputs (theme, players, goal, challenges, boardStyle, boardLength).",
     );
   }
 

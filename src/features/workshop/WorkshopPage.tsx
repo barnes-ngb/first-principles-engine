@@ -250,6 +250,7 @@ export default function WorkshopPage() {
         <GamePlayView
           game={currentGame.generatedGame}
           gameId={currentGame.id}
+          storyPlayers={currentGame.storyInputs.players}
           onFinished={handleGameFinished}
         />
       )}
