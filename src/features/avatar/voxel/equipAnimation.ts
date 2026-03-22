@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 /** Spawn a burst of cube particles from a position, then clean up */
-function createEquipParticles(scene: THREE.Scene, position: THREE.Vector3, color: number) {
+function createEquipParticles(scene: THREE.Object3D, position: THREE.Vector3, color: number) {
   const particles: THREE.Mesh[] = []
   const particleCount = 12
 
