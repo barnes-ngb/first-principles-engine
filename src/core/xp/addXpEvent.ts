@@ -13,6 +13,7 @@ import {
 } from '../firebase/firestore'
 import type { XP_EVENTS } from '../types'
 import { checkAndUnlockArmor } from './checkAndUnlockArmor'
+import { calculateTier } from '../../features/avatar/voxel/tierMaterials'
 
 /** Map XP event types to XpLedger source buckets. */
 function mapTypeToSource(type: keyof typeof XP_EVENTS): 'routines' | 'quests' | 'books' {
@@ -40,6 +41,7 @@ export async function addXpEvent(
   meta?: Record<string, string>,
 ): Promise<void> {
   if (!familyId || !childId || amount <= 0) return
+  console.log(`[XP] Awarding ${amount} XP to ${childId} for ${type}`)
 
   // ── Dedup check (per-event doc in xpLedger) ────────────────
   const eventDocId = xpLedgerDocId(childId, dedupKey)
@@ -99,7 +101,23 @@ export async function addXpEvent(
   const profileSnap = await getDoc(profileRef)
   if (profileSnap.exists()) {
     const profile = profileSnap.data()
-    await setDoc(profileRef, stripUndefined({ ...profile, totalXp: realTotal, updatedAt: new Date().toISOString() }))
+    const oldTier = calculateTier(profile.totalXp ?? 0)
+    const newTier = calculateTier(realTotal)
+    console.log(`[XP] New total: ${realTotal}, tier: ${newTier}`)
+
+    const tierUpdate: Record<string, unknown> = {}
+    if (newTier !== oldTier) {
+      console.log(`[XP] TIER UPGRADE: ${oldTier} → ${newTier}`)
+      tierUpdate.currentTier = newTier.toLowerCase()
+      tierUpdate.pendingTierUpgrade = newTier
+    }
+
+    await setDoc(profileRef, stripUndefined({
+      ...profile,
+      totalXp: realTotal,
+      ...tierUpdate,
+      updatedAt: new Date().toISOString(),
+    }))
   }
 
   // ── Check for armor unlocks ────────────────────────────────

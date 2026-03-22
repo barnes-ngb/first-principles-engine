@@ -10,6 +10,7 @@ import { buildArmorPiece, VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import { animateEquip, animateUnequip } from './voxel/equipAnimation'
 import { createTouchControls, updateRotation } from './voxel/touchControls'
 import type { TouchControlState } from './voxel/touchControls'
+import { applyTierToArmor, calculateTier, animateTierUpgrade } from './voxel/tierMaterials'
 
 interface VoxelCharacterProps {
   features: CharacterFeatures | undefined
@@ -44,8 +45,10 @@ export default function VoxelCharacter({
   const controlsRef = useRef<TouchControlState | null>(null)
   const rafRef = useRef<number>(0)
   const prevEquippedRef = useRef<Set<string>>(new Set())
+  const prevTierRef = useRef<string | null>(null)
 
   const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
+  const currentTier = calculateTier(totalXp)
 
   // ── Initialize scene ────────────────────────────────────────────
   const initScene = useCallback(() => {
@@ -67,10 +70,10 @@ export default function VoxelCharacter({
     scene.background = new THREE.Color(0x0d1117) // Dark background
     sceneRef.current = scene
 
-    // Camera — closer + lower FOV for heroic framing
-    const camera = new THREE.PerspectiveCamera(30, width / height, 0.1, 100)
-    camera.position.set(0, 1.8, 6.5)
-    camera.lookAt(0, 1.2, 0)
+    // Camera — pulled back so full character + helmet visible with padding
+    const camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 100)
+    camera.position.set(0, 1.6, 10.5)
+    camera.lookAt(0, 1.0, 0)
     cameraRef.current = camera
 
     // Lighting
@@ -85,8 +88,9 @@ export default function VoxelCharacter({
     fillLight.position.set(-3, 2, -2)
     scene.add(fillLight)
 
-    // Build character
+    // Build character — shift down so there's headroom for helmet
     const character = buildCharacter(resolvedFeatures, ageGroup)
+    character.position.y = -1.0
     characterRef.current = character
     scene.add(character)
 
@@ -106,12 +110,7 @@ export default function VoxelCharacter({
       group.visible = true
       if (isEquipped) {
         group.scale.set(1, 1, 1)
-        group.traverse((child) => {
-          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
-            child.material.transparent = false
-            child.material.opacity = 1
-          }
-        })
+        // Tier materials will be applied below after all pieces are processed
       } else if (isUnlocked) {
         group.scale.set(1, 1, 1)
         group.traverse((child) => {
@@ -122,24 +121,33 @@ export default function VoxelCharacter({
           }
         })
       } else {
-        // Locked — ghost silhouette
+        // Locked — ghost with blue tint + glow so kids can see what they're working toward
         group.scale.set(1, 1, 1)
         group.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             const baseColor = child.material instanceof THREE.MeshLambertMaterial
               ? child.material.color?.getHex() ?? 0x888888
               : 0x888888
+            // Blend base color toward light blue-gray for ethereal ghost effect
+            const base = new THREE.Color(baseColor)
+            const ghost = new THREE.Color(0x8888cc)
+            base.lerp(ghost, 0.5)
             child.material = new THREE.MeshLambertMaterial({
-              color: baseColor,
+              color: base,
               transparent: true,
-              opacity: 0.12,
+              opacity: 0.25,
               depthWrite: false,
+              emissive: new THREE.Color(0x334466),
+              emissiveIntensity: 0.3,
             })
           }
         })
       }
     }
+    // Apply tier-based materials to all equipped pieces
+    applyTierToArmor(armorGroupsRef.current, currentTier, equippedPieces)
     prevEquippedRef.current = new Set(equippedPieces)
+    prevTierRef.current = currentTier
 
     // Ground platform
     const platform = new THREE.Group()
@@ -198,7 +206,7 @@ export default function VoxelCharacter({
       renderer.render(scene, camera)
     }
     animate()
-  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp])
+  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
@@ -230,6 +238,17 @@ export default function VoxelCharacter({
     observer.observe(container)
     return () => observer.disconnect()
   }, [])
+
+  // ── Tier upgrade animation when XP changes tier ────────────────
+  useEffect(() => {
+    if (!prevTierRef.current || prevTierRef.current === currentTier) {
+      prevTierRef.current = currentTier
+      return
+    }
+    // Tier changed — animate upgrade
+    animateTierUpgrade(armorGroupsRef.current, equippedPieces, currentTier)
+    prevTierRef.current = currentTier
+  }, [currentTier, equippedPieces])
 
   // ── Sync equipped pieces (without full rebuild) ─────────────────
   useEffect(() => {
@@ -286,7 +305,8 @@ export default function VoxelCharacter({
         maxWidth: 400,
         mx: 'auto',
         aspectRatio: '3 / 4',
-        maxHeight: '55vh',
+        maxHeight: '48vh',
+        minHeight: '280px',
         borderRadius: '12px',
         border: '1px solid rgba(76, 175, 80, 0.15)',
         overflow: 'hidden',
