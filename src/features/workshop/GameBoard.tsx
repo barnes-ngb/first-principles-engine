@@ -16,9 +16,11 @@ interface GameBoardProps {
   game: GeneratedGame
   players?: PlayerToken[]
   activeSpaceIndex?: number
+  /** DALL-E generated board background URL */
+  boardBackground?: string
 }
 
-export default function GameBoard({ game, players = [], activeSpaceIndex }: GameBoardProps) {
+export default function GameBoard({ game, players = [], activeSpaceIndex, boardBackground }: GameBoardProps) {
   const spaces = game.board.spaces
 
   // Build a snaking grid: row 0 left→right, row 1 right→left, etc.
@@ -31,35 +33,66 @@ export default function GameBoard({ game, players = [], activeSpaceIndex }: Game
   }
 
   return (
-    <Box sx={{ width: '100%', maxWidth: 400, mx: 'auto' }}>
-      {rows.map((row, rowIndex) => (
+    <Box
+      sx={{
+        position: 'relative',
+        width: '100%',
+        maxWidth: 400,
+        mx: 'auto',
+        borderRadius: 2,
+        overflow: 'hidden',
+        ...(boardBackground
+          ? {
+              backgroundImage: `url(${boardBackground})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              p: '4px',
+            }
+          : {}),
+      }}
+    >
+      {/* Semi-transparent overlay so spaces remain readable */}
+      {boardBackground && (
         <Box
-          key={rowIndex}
           sx={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(${COLUMNS}, 1fr)`,
-            gap: '3px',
-            mb: '3px',
+            position: 'absolute',
+            inset: 0,
+            bgcolor: 'rgba(255,255,255,0.35)',
+            zIndex: 0,
+            pointerEvents: 'none',
           }}
-        >
-          {row.map((space) => {
-            const playersOnSpace = players.filter((p) => p.position === space.index)
-            return (
-              <BoardSpace
-                key={space.index}
-                index={space.index}
-                type={space.type as BoardSpaceType}
-                label={space.label}
-                color={space.color}
-                players={playersOnSpace}
-                isFirst={space.index === 0}
-                isLast={space.index === spaces.length - 1}
-                isActive={activeSpaceIndex === space.index}
-              />
-            )
-          })}
-        </Box>
-      ))}
+        />
+      )}
+      <Box sx={{ position: 'relative', zIndex: 1 }}>
+        {rows.map((row, rowIndex) => (
+          <Box
+            key={rowIndex}
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${COLUMNS}, 1fr)`,
+              gap: '3px',
+              mb: '3px',
+            }}
+          >
+            {row.map((space) => {
+              const playersOnSpace = players.filter((p) => p.position === space.index)
+              return (
+                <BoardSpace
+                  key={space.index}
+                  index={space.index}
+                  type={space.type as BoardSpaceType}
+                  label={space.label}
+                  color={space.color}
+                  players={playersOnSpace}
+                  isFirst={space.index === 0}
+                  isLast={space.index === spaces.length - 1}
+                  isActive={activeSpaceIndex === space.index}
+                />
+              )
+            })}
+          </Box>
+        ))}
+      </Box>
     </Box>
   )
 }
