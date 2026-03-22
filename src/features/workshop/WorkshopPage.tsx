@@ -7,7 +7,7 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import Typography from '@mui/material/Typography'
 import { addDoc, deleteField, doc, updateDoc } from 'firebase/firestore'
-import type { GeneratedArt, GeneratedGame, StoryGame, StoryInputs } from '../../core/types'
+import type { GeneratedArt, GeneratedGame, StoryGame, StoryInputs, VoiceRecordingMap } from '../../core/types'
 import { GamePhase, WorkshopStatus } from '../../core/types/workshop'
 import type { WizardState } from './useWorkshopWizard'
 import { useAI, TaskType } from '../../core/ai/useAI'
@@ -20,6 +20,7 @@ import type { GamePlayResult } from './GamePlayView'
 import { logWorkshopHours, createGameArtifact, recordPlaySession } from './workshopUtils'
 import MyGamesGallery from './MyGamesGallery'
 import GameCreationScreen from './GameCreationScreen'
+import VoiceRecordingStep from './VoiceRecordingStep'
 import { generateAllArt } from './workshopArt'
 
 /** Extract JSON from <game> tags in AI response */
@@ -224,10 +225,25 @@ export default function WorkshopPage() {
       }
 
       setDraftDocId(null)
-      setPhase(GamePhase.Ready)
+      // Go to recording step (optional — user can skip)
+      setPhase(GamePhase.Recording)
     },
     [chat, generateImage, familyId, activeChildId, draftDocId],
   )
+
+  const handleRecordingDone = useCallback(
+    (voiceRecordings: VoiceRecordingMap) => {
+      if (currentGame) {
+        setCurrentGame({ ...currentGame, voiceRecordings })
+      }
+      setPhase(GamePhase.Ready)
+    },
+    [currentGame],
+  )
+
+  const handleRecordingSkip = useCallback(() => {
+    setPhase(GamePhase.Ready)
+  }, [])
 
   const handleWizardCancel = useCallback(() => {
     // Draft stays in Firestore for later resume — just exit wizard
@@ -431,6 +447,19 @@ export default function WorkshopPage() {
 
       {phase === GamePhase.Generating && <GameCreationScreen />}
 
+      {phase === GamePhase.Recording && currentGame?.generatedGame && currentGame.id && activeChildId && familyId && (
+        <VoiceRecordingStep
+          game={currentGame.generatedGame}
+          gameId={currentGame.id}
+          familyId={familyId}
+          childId={activeChildId}
+          childName={children.find((c) => c.id === activeChildId)?.name ?? 'You'}
+          existingRecordings={currentGame.voiceRecordings}
+          onDone={handleRecordingDone}
+          onSkip={handleRecordingSkip}
+        />
+      )}
+
       {phase === GamePhase.Ready && currentGame?.generatedGame && (
         <Box sx={{ textAlign: 'center', py: 4 }}>
           {/* Title screen hero image */}
@@ -507,7 +536,7 @@ export default function WorkshopPage() {
             </Typography>
           )}
 
-          <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+          <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
             <Button
               variant="contained"
               size="large"
@@ -516,6 +545,14 @@ export default function WorkshopPage() {
             >
               Play Now!
             </Button>
+            {currentGame.id && familyId && activeChildId && (
+              <Button
+                variant="outlined"
+                onClick={() => setPhase(GamePhase.Recording)}
+              >
+                Record Voices
+              </Button>
+            )}
             <Button variant="outlined" onClick={handleBackToWorkshop}>
               Back
             </Button>
@@ -531,6 +568,7 @@ export default function WorkshopPage() {
           storyPlayers={currentGame.storyInputs.players}
           generatedArt={currentGame.generatedArt}
           activeSession={currentGame.activeSession}
+          voiceRecordings={currentGame.voiceRecordings}
           onFinished={handleGameFinished}
         />
       )}

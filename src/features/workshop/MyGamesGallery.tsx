@@ -5,6 +5,7 @@ import Chip from '@mui/material/Chip'
 import IconButton from '@mui/material/IconButton'
 import Typography from '@mui/material/Typography'
 import DeleteIcon from '@mui/icons-material/Delete'
+import MicIcon from '@mui/icons-material/Mic'
 import { deleteDoc, doc, getDocs, orderBy, query } from 'firebase/firestore'
 import { db, storyGamesCollection } from '../../core/firebase/firestore'
 import type { Child, StoryGame } from '../../core/types'
@@ -218,6 +219,15 @@ export default function MyGamesGallery({
                       label={statusBadge.label}
                       size="small"
                       color={statusBadge.color}
+                      variant="outlined"
+                    />
+                  )}
+                  {game.voiceRecordings && Object.keys(game.voiceRecordings).length > 0 && (
+                    <Chip
+                      icon={<MicIcon sx={{ fontSize: 14 }} />}
+                      label="Voice"
+                      size="small"
+                      color="secondary"
                       variant="outlined"
                     />
                   )}
