@@ -258,6 +258,37 @@ export default function MyAvatarPage() {
     return unsub
   }, [familyId, childId, today])
 
+  // ── Auto-equip unlocked pieces on page load ────────────────────
+  useEffect(() => {
+    if (!profile || !session || !familyId || !childId) return
+
+    const unlockedVoxel = getUnlockedVoxelPieces(profile)
+    const currentApplied = session.appliedPieces ?? []
+    const currentAppliedVoxel = sessionToVoxelPieces(currentApplied)
+
+    // Find pieces that are unlocked but not in today's session
+    const missingVoxel = unlockedVoxel.filter((vid) => !currentAppliedVoxel.includes(vid))
+    if (missingVoxel.length === 0) return
+
+    // Map voxel IDs back to ArmorPiece IDs for the session
+    const missingArmor = missingVoxel
+      .map((vid) => ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id)
+      .filter((id): id is ArmorPiece => !!id)
+
+    if (missingArmor.length === 0) return
+
+    const updatedApplied = [...currentApplied, ...missingArmor]
+    const docId = dailyArmorSessionDocId(childId, today)
+    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+    void setDoc(sessionRef, { ...session, appliedPieces: updatedApplied })
+    // Also update equippedPieces on avatar profile
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    void updateDoc(profileRef, {
+      equippedPieces: [...new Set([...sessionToVoxelPieces(updatedApplied)])],
+      updatedAt: new Date().toISOString(),
+    })
+  }, [profile, session, familyId, childId, today])
+
   // ── Photo select ───────────────────────────────────────────────
   const handlePhotoSelect = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

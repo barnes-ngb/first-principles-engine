@@ -26,6 +26,8 @@ export interface TierMaterials {
   emissive: number
   emissiveIntensity: number
   roughnessHint: string
+  rust?: number
+  weathering?: number
 }
 
 export const TIER_MATERIALS: Record<string, TierMaterials> = {
@@ -36,6 +38,7 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     emissive: 0x000000,
     emissiveIntensity: 0,
     roughnessHint: 'rough, natural wood planks',
+    weathering: 0.05,
   },
   stone: {
     primary: 0x808080,
@@ -44,14 +47,17 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     emissive: 0x000000,
     emissiveIntensity: 0,
     roughnessHint: 'rough cobblestone',
+    weathering: 0.1,
   },
   iron: {
-    primary: 0xB0B0B0,
-    accent: 0xD4D4D4,
-    detail: 0x888888,
+    primary: 0x6E6E6E,      // Medium-dark iron gray — NOT bright/white
+    accent: 0x4E4E4E,       // Dark iron — shadows, edges
+    detail: 0x8A8A8A,       // Lighter spots — highlights, buckles
     emissive: 0x000000,
     emissiveIntensity: 0,
     roughnessHint: 'smooth metal',
+    rust: 0x7A5C3C,         // Warm brown-gray for weathering spots
+    weathering: 0.2,        // Moderate weathering
   },
   gold: {
     primary: 0xDAA520,
@@ -60,6 +66,7 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     emissive: 0x332200,
     emissiveIntensity: 0.15,
     roughnessHint: 'polished, gleaming',
+    weathering: 0.1,
   },
   diamond: {
     primary: 0x4DD6E8,
@@ -68,6 +75,7 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     emissive: 0x114455,
     emissiveIntensity: 0.25,
     roughnessHint: 'crystalline, translucent edges',
+    weathering: 0.0,     // Pristine, no weathering
   },
   netherite: {
     primary: 0x3D3535,
@@ -76,6 +84,8 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     emissive: 0x331111,
     emissiveIntensity: 0.2,
     roughnessHint: 'ancient, dark, with ember glow',
+    rust: 0x4A2020,
+    weathering: 0.3,     // Heavy ancient wear
   },
 }
 
@@ -97,6 +107,14 @@ export function getTierTint(tierName: string): string {
 
 // ── Apply tier materials to armor meshes ─────────────────────────
 
+/** Linearly interpolate between two hex colors */
+function lerpColor(a: number, b: number, t: number): number {
+  const ca = new THREE.Color(a)
+  const cb = new THREE.Color(b)
+  ca.lerp(cb, t)
+  return ca.getHex()
+}
+
 export function applyTierToArmor(
   armorMeshes: Map<string, THREE.Group>,
   tier: string,
@@ -104,10 +122,12 @@ export function applyTierToArmor(
 ): void {
   const tint = getTierTint(tier)
   const materials = TIER_MATERIALS[tint] ?? TIER_MATERIALS.wood
+  const weathering = materials.weathering ?? 0
 
   for (const [pieceId, mesh] of armorMeshes) {
     if (!equippedPieces.includes(pieceId)) continue
 
+    let meshIndex = 0
     mesh.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return
 
@@ -116,11 +136,26 @@ export function applyTierToArmor(
       // Skip sword blade meshes — they keep their blue glow color
       if (role === 'sword_blade') return
 
+      meshIndex++
       let baseColor: number
       switch (role) {
         case 'accent': baseColor = materials.accent; break
         case 'detail': baseColor = materials.detail; break
         default: baseColor = materials.primary
+      }
+
+      // Apply weathering — alternate between base, darker, and rust-tinted variations
+      if (weathering > 0 && role === 'primary' && !child.userData.isAccent) {
+        const rustTarget = materials.rust ?? materials.accent
+        const variations = [
+          baseColor,
+          lerpColor(baseColor, materials.accent, weathering),
+          baseColor,
+          lerpColor(baseColor, rustTarget, weathering),
+          baseColor,
+          lerpColor(baseColor, materials.accent, weathering * 1.5),
+        ]
+        baseColor = variations[meshIndex % variations.length]
       }
 
       // Create per-face textured materials for visual depth
@@ -145,7 +180,7 @@ export function getTierBadgeColor(tier: string): string {
   switch (tier.toUpperCase()) {
     case 'WOOD':      return 'rgba(139, 105, 20, 0.3)'
     case 'STONE':     return 'rgba(128, 128, 128, 0.3)'
-    case 'IRON':      return 'rgba(176, 176, 176, 0.3)'
+    case 'IRON':      return 'rgba(110, 110, 110, 0.3)'
     case 'GOLD':      return 'rgba(218, 165, 32, 0.3)'
     case 'DIAMOND':   return 'rgba(77, 214, 232, 0.2)'
     case 'NETHERITE': return 'rgba(61, 53, 53, 0.5)'
@@ -157,7 +192,7 @@ export function getTierTextColor(tier: string): string {
   switch (tier.toUpperCase()) {
     case 'WOOD':      return '#B8922E'
     case 'STONE':     return '#AAAAAA'
-    case 'IRON':      return '#D4D4D4'
+    case 'IRON':      return '#8A8A8A'
     case 'GOLD':      return '#FFD700'
     case 'DIAMOND':   return '#7DF9FF'
     case 'NETHERITE': return '#8B7777'
