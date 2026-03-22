@@ -18,9 +18,23 @@ interface GameBoardProps {
   activeSpaceIndex?: number
   /** DALL-E generated board background URL */
   boardBackground?: string
+  /** Index of space that just had a token land on it */
+  landingSpaceIndex?: number | null
+  /** Special animation for a space */
+  spaceAnimation?: { index: number; type: 'bonus' | 'setback' | 'shortcut' } | null
+  /** Game theme for themed space animations */
+  theme?: string
 }
 
-export default function GameBoard({ game, players = [], activeSpaceIndex, boardBackground }: GameBoardProps) {
+export default function GameBoard({
+  game,
+  players = [],
+  activeSpaceIndex,
+  boardBackground,
+  landingSpaceIndex,
+  spaceAnimation,
+  theme,
+}: GameBoardProps) {
   const spaces = game.board.spaces
 
   // Build a snaking grid: row 0 left→right, row 1 right→left, etc.
@@ -87,6 +101,9 @@ export default function GameBoard({ game, players = [], activeSpaceIndex, boardB
                   isFirst={space.index === 0}
                   isLast={space.index === spaces.length - 1}
                   isActive={activeSpaceIndex === space.index}
+                  isLanding={landingSpaceIndex === space.index}
+                  spaceAnimation={spaceAnimation?.index === space.index ? spaceAnimation.type : null}
+                  theme={theme}
                 />
               )
             })}

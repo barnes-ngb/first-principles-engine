@@ -20,7 +20,13 @@ export interface GameSessionState {
   currentCard: ChallengeCard | null
   cardsEncountered: string[]
   winner: string | null
+  /** All players who have reached the finish, in order */
+  finishers: string[]
   startedAt: string | null
+  /** Position before the current roll (used for step-by-step animation) */
+  previousPosition: number | null
+  /** The target position after the current roll */
+  targetPosition: number | null
 }
 
 const PLAYER_COLORS = ['#1976d2', '#d32f2f', '#388e3c', '#f57c00']
@@ -38,6 +44,7 @@ type GameAction =
   | { type: 'START_GAME'; players?: Player[] }
   | { type: 'RESTORE'; players: Player[]; currentPlayerIndex: number; usedCardIds: string[] }
   | { type: 'ROLL'; value: number; game: GeneratedGame }
+  | { type: 'MOVE_COMPLETE'; game: GeneratedGame }
   | { type: 'DISMISS_CARD' }
   | { type: 'NEXT_TURN' }
   | { type: 'RESET' }
@@ -54,7 +61,10 @@ function gameReducer(state: GameSessionState, action: GameAction): GameSessionSt
         currentCard: null,
         cardsEncountered: [],
         winner: null,
+        finishers: [],
         startedAt: new Date().toISOString(),
+        previousPosition: null,
+        targetPosition: null,
       }
 
     case 'RESTORE':
@@ -76,44 +86,63 @@ function gameReducer(state: GameSessionState, action: GameAction): GameSessionSt
       const maxPosition = game.board.totalSpaces - 1
       const newPosition = Math.min(player.position + value, maxPosition)
 
-      // Update player position
-      const updatedPlayers = state.players.map((p, i) =>
-        i === state.currentPlayerIndex ? { ...p, position: newPosition } : p,
-      )
+      // Don't move player yet — go to Move phase for animation
+      return {
+        ...state,
+        lastRoll: value,
+        turnPhase: TurnPhase.Move,
+        previousPosition: player.position,
+        targetPosition: newPosition,
+        // Update position immediately so the board can animate
+        players: state.players.map((p, i) =>
+          i === state.currentPlayerIndex ? { ...p, position: newPosition } : p,
+        ),
+      }
+    }
 
-      // Check if player won
-      if (newPosition >= maxPosition) {
+    case 'MOVE_COMPLETE': {
+      const { game } = action
+      const player = state.players[state.currentPlayerIndex]
+      const maxPosition = game.board.totalSpaces - 1
+
+      // Check if player finished
+      if (player.position >= maxPosition) {
+        const isFirstWinner = !state.winner
+        const alreadyFinished = state.finishers.includes(player.name)
         return {
           ...state,
-          players: updatedPlayers,
-          lastRoll: value,
           turnPhase: TurnPhase.Resolve,
-          winner: player.name,
+          winner: state.winner ?? player.name,
+          finishers: alreadyFinished ? state.finishers : [...state.finishers, player.name],
+          previousPosition: null,
+          targetPosition: null,
+          // If everyone has finished, mark that too
+          ...(isFirstWinner ? {} : {}),
         }
       }
 
       // Check if the space has a challenge card
-      const space = game.board.spaces[newPosition]
+      const space = game.board.spaces[player.position]
       if (space?.challengeCardId) {
         const card = game.challengeCards.find((c) => c.id === space.challengeCardId) ?? null
         return {
           ...state,
-          players: updatedPlayers,
-          lastRoll: value,
           turnPhase: TurnPhase.Card,
           currentCard: card,
           cardsEncountered: card
             ? [...state.cardsEncountered, card.id]
             : state.cardsEncountered,
+          previousPosition: null,
+          targetPosition: null,
         }
       }
 
-      // Normal space — go to next turn
+      // Normal space — go to resolve
       return {
         ...state,
-        players: updatedPlayers,
-        lastRoll: value,
         turnPhase: TurnPhase.Resolve,
+        previousPosition: null,
+        targetPosition: null,
       }
     }
 
@@ -152,7 +181,10 @@ const initialState: GameSessionState = {
   currentCard: null,
   cardsEncountered: [],
   winner: null,
+  finishers: [],
   startedAt: null,
+  previousPosition: null,
+  targetPosition: null,
 }
 
 // ── Hook ──────────────────────────────────────────────────────────
@@ -176,6 +208,11 @@ export function useGameSession(game: GeneratedGame) {
     [game],
   )
 
+  const moveComplete = useCallback(
+    () => dispatch({ type: 'MOVE_COMPLETE', game }),
+    [game],
+  )
+
   const dismissCard = useCallback(() => dispatch({ type: 'DISMISS_CARD' }), [])
   const nextTurn = useCallback(() => dispatch({ type: 'NEXT_TURN' }), [])
   const reset = useCallback(() => dispatch({ type: 'RESET' }), [])
@@ -183,13 +220,17 @@ export function useGameSession(game: GeneratedGame) {
   const currentPlayer = state.players[state.currentPlayerIndex] ?? null
   const isGameOver = state.winner !== null
 
+  const allFinished = state.players.length > 0 && state.finishers.length >= state.players.length
+
   return {
     state,
     currentPlayer,
     isGameOver,
+    allFinished,
     startGame,
     restore,
     roll,
+    moveComplete,
     dismissCard,
     nextTurn,
     reset,

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Dialog from '@mui/material/Dialog'
@@ -26,19 +26,55 @@ interface ChallengeCardProps {
   onClose: () => void
   /** DALL-E generated card art keyed by card type */
   cardArt?: { reading?: string; math?: string; story?: string; action?: string }
+  /** Called when card flip animation starts (for sound sync) */
+  onFlipStart?: () => void
+  /** Called when boss challenge is revealed (for sound sync) */
+  onBossReveal?: () => void
 }
 
-export default function ChallengeCard({ card, open, onClose, cardArt }: ChallengeCardProps) {
+export default function ChallengeCard({ card, open, onClose, cardArt, onFlipStart, onBossReveal }: ChallengeCardProps) {
   const tts = useTTS()
+  const [flipped, setFlipped] = useState(false)
+  const [contentVisible, setContentVisible] = useState(false)
 
-  // Read the card aloud when it opens
+  // Animate card flip when it opens
   useEffect(() => {
     if (open && card) {
-      const prefix = DIFFICULTY_LABEL[card.difficulty] || ''
-      tts.speak(prefix + card.readAloudText)
-    }
-    return () => {
-      tts.cancel()
+      setFlipped(false)
+      setContentVisible(false)
+      onFlipStart?.()
+
+      const isStretch = card.difficulty === 'stretch'
+      const flipDelay = isStretch ? 600 : 300
+
+      // Start flip
+      const flipTimer = setTimeout(() => {
+        setFlipped(true)
+        if (isStretch) {
+          onBossReveal?.()
+        }
+      }, 100)
+
+      // Show content after flip completes
+      const contentTimer = setTimeout(() => {
+        setContentVisible(true)
+      }, flipDelay + 200)
+
+      // Read aloud after visual settles
+      const ttsTimer = setTimeout(() => {
+        const prefix = DIFFICULTY_LABEL[card.difficulty] || ''
+        tts.speak(prefix + card.readAloudText)
+      }, flipDelay + 500)
+
+      return () => {
+        clearTimeout(flipTimer)
+        clearTimeout(contentTimer)
+        clearTimeout(ttsTimer)
+        tts.cancel()
+      }
+    } else {
+      setFlipped(false)
+      setContentVisible(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, card?.id])
@@ -50,72 +86,156 @@ export default function ChallengeCard({ card, open, onClose, cardArt }: Challeng
   const artUrl = cardArt?.[card.type as keyof typeof cardArt]
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogContent
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="xs"
+      fullWidth
+      slotProps={{
+        paper: {
+          sx: {
+            overflow: 'visible',
+            bgcolor: 'transparent',
+            boxShadow: 'none',
+          },
+        },
+      }}
+    >
+      <Box
         sx={{
-          p: 3,
-          textAlign: 'center',
-          bgcolor: isStretch ? '#fff8e1' : 'background.paper',
-          border: isStretch ? '3px solid #ff9800' : undefined,
+          perspective: '1000px',
+          '@media (prefers-reduced-motion: reduce)': {
+            '& *': { animation: 'none !important', transition: 'none !important' },
+          },
         }}
       >
-        {/* Generated card art header */}
-        {artUrl ? (
-          <Box
-            component="img"
-            src={artUrl}
-            alt={`${card.type} challenge`}
-            sx={{
-              width: '100%',
-              maxHeight: 200,
-              objectFit: 'contain',
-              borderRadius: 2,
-              mb: 1.5,
-            }}
-          />
-        ) : (
-          <Typography sx={{ fontSize: '3rem', mb: 1 }}>{emoji}</Typography>
-        )}
+        <DialogContent
+          sx={{
+            p: 3,
+            textAlign: 'center',
+            bgcolor: isStretch ? '#fff8e1' : 'background.paper',
+            border: isStretch ? '3px solid #ff9800' : undefined,
+            borderRadius: 2,
+            transform: flipped ? 'rotateY(0deg)' : 'rotateY(90deg)',
+            transition: isStretch
+              ? 'transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
+              : 'transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
+            transformStyle: 'preserve-3d',
+            ...(isStretch && flipped
+              ? {
+                  animation: 'bossGlow 1.5s ease-in-out infinite alternate',
+                  '@keyframes bossGlow': {
+                    '0%': { boxShadow: '0 0 10px rgba(255,152,0,0.3)' },
+                    '100%': { boxShadow: '0 0 25px rgba(255,152,0,0.6)' },
+                  },
+                }
+              : {}),
+          }}
+        >
+          {/* Generated card art header */}
+          {artUrl ? (
+            <Box
+              component="img"
+              src={artUrl}
+              alt={`${card.type} challenge`}
+              sx={{
+                width: '100%',
+                maxHeight: 200,
+                objectFit: 'contain',
+                borderRadius: 2,
+                mb: 1.5,
+                opacity: contentVisible ? 1 : 0,
+                transition: 'opacity 0.4s ease-in',
+              }}
+            />
+          ) : (
+            <Typography
+              sx={{
+                fontSize: '3rem',
+                mb: 1,
+                opacity: contentVisible ? 1 : 0,
+                transition: 'opacity 0.3s ease-in',
+              }}
+            >
+              {emoji}
+            </Typography>
+          )}
 
-        {isStretch && (
+          {isStretch && (
+            <Typography
+              variant="caption"
+              sx={{
+                color: '#e65100',
+                fontWeight: 700,
+                display: 'block',
+                mb: 1,
+                opacity: contentVisible ? 1 : 0,
+                transform: contentVisible ? 'scale(1)' : 'scale(0.5)',
+                transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                fontSize: '0.85rem',
+              }}
+            >
+              BOSS CHALLENGE!
+            </Typography>
+          )}
+
           <Typography
-            variant="caption"
-            sx={{ color: '#e65100', fontWeight: 700, display: 'block', mb: 1 }}
-          >
-            BOSS CHALLENGE!
-          </Typography>
-        )}
-
-        <Typography variant="h6" gutterBottom>
-          {card.content}
-        </Typography>
-
-        {card.options && card.options.length > 0 && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, my: 2 }}>
-            {card.options.map((option, i) => (
-              <Button key={i} variant="outlined" fullWidth>
-                {option}
-              </Button>
-            ))}
-          </Box>
-        )}
-
-        <Box sx={{ display: 'flex', gap: 1, mt: 3, justifyContent: 'center' }}>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={() => {
-              const prefix = DIFFICULTY_LABEL[card.difficulty] || ''
-              tts.speak(prefix + card.readAloudText)
+            variant="h6"
+            gutterBottom
+            sx={{
+              opacity: contentVisible ? 1 : 0,
+              transform: contentVisible ? 'translateY(0)' : 'translateY(10px)',
+              transition: 'all 0.4s ease-out 0.1s',
             }}
           >
-            Read Again
-          </Button>
-          <Button variant="contained" onClick={onClose}>
-            Done!
-          </Button>
-        </Box>
-      </DialogContent>
+            {card.content}
+          </Typography>
+
+          {card.options && card.options.length > 0 && (
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 1,
+                my: 2,
+                opacity: contentVisible ? 1 : 0,
+                transition: 'opacity 0.4s ease-in 0.2s',
+              }}
+            >
+              {card.options.map((option, i) => (
+                <Button key={i} variant="outlined" fullWidth>
+                  {option}
+                </Button>
+              ))}
+            </Box>
+          )}
+
+          <Box
+            sx={{
+              display: 'flex',
+              gap: 1,
+              mt: 3,
+              justifyContent: 'center',
+              opacity: contentVisible ? 1 : 0,
+              transition: 'opacity 0.3s ease-in 0.3s',
+            }}
+          >
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => {
+                const prefix = DIFFICULTY_LABEL[card.difficulty] || ''
+                tts.speak(prefix + card.readAloudText)
+              }}
+            >
+              Read Again
+            </Button>
+            <Button variant="contained" onClick={onClose}>
+              Done!
+            </Button>
+          </Box>
+        </DialogContent>
+      </Box>
     </Dialog>
   )
 }
