@@ -36,6 +36,7 @@ const DEFAULT_PLAYERS: Player[] = [
 
 type GameAction =
   | { type: 'START_GAME'; players?: Player[] }
+  | { type: 'RESTORE'; players: Player[]; currentPlayerIndex: number; usedCardIds: string[] }
   | { type: 'ROLL'; value: number; game: GeneratedGame }
   | { type: 'DISMISS_CARD' }
   | { type: 'NEXT_TURN' }
@@ -54,6 +55,19 @@ function gameReducer(state: GameSessionState, action: GameAction): GameSessionSt
         cardsEncountered: [],
         winner: null,
         startedAt: new Date().toISOString(),
+      }
+
+    case 'RESTORE':
+      return {
+        ...state,
+        players: action.players,
+        currentPlayerIndex: action.currentPlayerIndex,
+        turnPhase: TurnPhase.Roll,
+        lastRoll: null,
+        currentCard: null,
+        cardsEncountered: action.usedCardIds,
+        winner: null,
+        startedAt: state.startedAt ?? new Date().toISOString(),
       }
 
     case 'ROLL': {
@@ -151,6 +165,12 @@ export function useGameSession(game: GeneratedGame) {
     [],
   )
 
+  const restore = useCallback(
+    (players: Player[], currentPlayerIndex: number, usedCardIds: string[]) =>
+      dispatch({ type: 'RESTORE', players, currentPlayerIndex, usedCardIds }),
+    [],
+  )
+
   const roll = useCallback(
     (value: number) => dispatch({ type: 'ROLL', value, game }),
     [game],
@@ -168,6 +188,7 @@ export function useGameSession(game: GeneratedGame) {
     currentPlayer,
     isGameOver,
     startGame,
+    restore,
     roll,
     dismissCard,
     nextTurn,

@@ -20,6 +20,28 @@ export interface StoryGame {
 
   /** DALL-E generated art assets */
   generatedArt?: GeneratedArt
+
+  /** In-progress game session (saved after each turn for resume) */
+  activeSession?: ActiveSession | null
+
+  /** Tracks wizard step for draft resume (removed when wizard completes) */
+  currentWizardStep?: number
+}
+
+export interface ActiveSession {
+  players: ActiveSessionPlayer[]
+  currentTurnIndex: number
+  usedCardIds: string[]
+  status: 'playing' | 'finished'
+  startedAt: string
+  updatedAt: string
+}
+
+export interface ActiveSessionPlayer {
+  id: string
+  name: string
+  avatarUrl?: string
+  position: number
 }
 
 export interface GeneratedArt {

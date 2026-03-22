@@ -1,14 +1,18 @@
 import { useCallback, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import Typography from '@mui/material/Typography'
-import { updateDoc, doc } from 'firebase/firestore'
+import { addDoc, deleteField, doc, updateDoc } from 'firebase/firestore'
 import type { GeneratedArt, GeneratedGame, StoryGame, StoryInputs } from '../../core/types'
 import { GamePhase, WorkshopStatus } from '../../core/types/workshop'
+import type { WizardState } from './useWorkshopWizard'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { addDoc } from 'firebase/firestore'
 import { db, storyGamesCollection } from '../../core/firebase/firestore'
 import WorkshopWizard from './WorkshopWizard'
 import GamePlayView from './GamePlayView'
@@ -31,22 +35,89 @@ function extractGameJson(text: string): GeneratedGame | null {
 
 export default function WorkshopPage() {
   const [phase, setPhase] = useState<GamePhase>(GamePhase.Idle)
-  const [, setStoryInputs] = useState<StoryInputs | null>(null)
   const [currentGame, setCurrentGame] = useState<StoryGame | null>(null)
   const [generateError, setGenerateError] = useState<string | null>(null)
+  // Draft doc ID for auto-save during wizard
+  const [draftDocId, setDraftDocId] = useState<string | null>(null)
+  // Resume dialog state
+  const [resumeDialogOpen, setResumeDialogOpen] = useState(false)
+  const [confirmRestartOpen, setConfirmRestartOpen] = useState(false)
 
   const { chat, generateImage } = useAI()
   const familyId = useFamilyId()
-  const { activeChildId } = useActiveChild()
+  const { activeChildId, children } = useActiveChild()
+
+  // ── Draft auto-save helpers ──────────────────────────────────────
+
+  const saveDraftStep = useCallback(
+    async (wizardState: WizardState, step: number) => {
+      if (!familyId || !activeChildId) return null
+      const now = new Date().toISOString()
+
+      const partialInputs = {
+        theme: wizardState.theme || '',
+        players: wizardState.players,
+        goal: wizardState.goal || '',
+        challenges: wizardState.challenges,
+        boardStyle: wizardState.boardStyle || '',
+        boardLength: wizardState.boardLength || '',
+      } as StoryInputs
+
+      if (draftDocId) {
+        // Update existing draft
+        try {
+          await updateDoc(
+            doc(db, `families/${familyId}/storyGames/${draftDocId}`),
+            {
+              storyInputs: partialInputs,
+              currentWizardStep: step,
+              updatedAt: now,
+            },
+          )
+        } catch (err) {
+          console.warn('Failed to update draft:', err)
+        }
+        return draftDocId
+      } else {
+        // Create new draft
+        try {
+          const draftDoc: Omit<StoryGame, 'id'> = {
+            childId: activeChildId,
+            createdAt: now,
+            updatedAt: now,
+            status: WorkshopStatus.Draft,
+            storyInputs: partialInputs,
+            currentWizardStep: step,
+          }
+          const docRef = await addDoc(storyGamesCollection(familyId), draftDoc)
+          setDraftDocId(docRef.id)
+          return docRef.id
+        } catch (err) {
+          console.warn('Failed to create draft:', err)
+          return null
+        }
+      }
+    },
+    [familyId, activeChildId, draftDocId],
+  )
+
+  // ── Wizard flow ──────────────────────────────────────────────────
 
   const handleStartWizard = useCallback(() => {
+    setPhase(GamePhase.Wizard)
+    setGenerateError(null)
+    setDraftDocId(null)
+  }, [])
+
+  const handleResumeDraft = useCallback((game: StoryGame) => {
+    setCurrentGame(game)
+    setDraftDocId(game.id ?? null)
     setPhase(GamePhase.Wizard)
     setGenerateError(null)
   }, [])
 
   const handleWizardComplete = useCallback(
     async (inputs: StoryInputs) => {
-      setStoryInputs(inputs)
       setPhase(GamePhase.Generating)
       setGenerateError(null)
 
@@ -90,8 +161,7 @@ export default function WorkshopPage() {
         generatedArt = artResult.art
       }
 
-      // Now generate the title screen with the actual game title (slight delay is fine)
-      // This runs after game data is available so we can include the real title
+      // Now generate the title screen with the actual game title
       try {
         const titleResult = await generateImage({
           familyId,
@@ -106,31 +176,111 @@ export default function WorkshopPage() {
         console.warn('Title screen generation failed:', err)
       }
 
-      // Save to Firestore
       const now = new Date().toISOString()
-      const gameDoc: Omit<StoryGame, 'id'> = {
-        childId: activeChildId,
-        createdAt: now,
-        updatedAt: now,
-        status: WorkshopStatus.Ready,
-        storyInputs: inputs,
-        generatedGame,
-        playSessions: [],
-        generatedArt,
+
+      if (draftDocId) {
+        // Upgrade existing draft to ready
+        try {
+          await updateDoc(
+            doc(db, `families/${familyId}/storyGames/${draftDocId}`),
+            {
+              status: WorkshopStatus.Ready,
+              storyInputs: inputs,
+              generatedGame,
+              generatedArt: generatedArt ?? null,
+              playSessions: [],
+              updatedAt: now,
+              currentWizardStep: deleteField(),
+            },
+          )
+          setCurrentGame({
+            id: draftDocId,
+            childId: activeChildId,
+            createdAt: now,
+            updatedAt: now,
+            status: WorkshopStatus.Ready,
+            storyInputs: inputs,
+            generatedGame,
+            playSessions: [],
+            generatedArt,
+          })
+        } catch (err) {
+          console.warn('Failed to upgrade draft:', err)
+        }
+      } else {
+        // Save as new doc
+        const gameDoc: Omit<StoryGame, 'id'> = {
+          childId: activeChildId,
+          createdAt: now,
+          updatedAt: now,
+          status: WorkshopStatus.Ready,
+          storyInputs: inputs,
+          generatedGame,
+          playSessions: [],
+          generatedArt,
+        }
+        const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
+        setCurrentGame({ ...gameDoc, id: docRef.id })
       }
 
-      const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
-      setCurrentGame({ ...gameDoc, id: docRef.id })
+      setDraftDocId(null)
       setPhase(GamePhase.Ready)
     },
-    [chat, generateImage, familyId, activeChildId],
+    [chat, generateImage, familyId, activeChildId, draftDocId],
   )
 
   const handleWizardCancel = useCallback(() => {
+    // Draft stays in Firestore for later resume — just exit wizard
     setPhase(GamePhase.Idle)
-    setStoryInputs(null)
+    setCurrentGame(null)
+    setDraftDocId(null)
     setGenerateError(null)
   }, [])
+
+  // ── Game selection & resume ──────────────────────────────────────
+
+  const handleSelectExistingGame = useCallback((game: StoryGame) => {
+    setCurrentGame(game)
+    if (game.activeSession?.status === 'playing') {
+      // Show resume dialog
+      setResumeDialogOpen(true)
+    } else {
+      setPhase(GamePhase.Ready)
+    }
+  }, [])
+
+  const handleContinueGame = useCallback(() => {
+    setResumeDialogOpen(false)
+    setPhase(GamePhase.Playing)
+  }, [])
+
+  const handleStartOver = useCallback(() => {
+    setResumeDialogOpen(false)
+    setConfirmRestartOpen(true)
+  }, [])
+
+  const handleConfirmRestart = useCallback(async () => {
+    setConfirmRestartOpen(false)
+    if (currentGame?.id && familyId) {
+      try {
+        await updateDoc(
+          doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
+          { activeSession: null, updatedAt: new Date().toISOString() },
+        )
+        setCurrentGame({ ...currentGame, activeSession: null })
+      } catch (err) {
+        console.warn('Failed to clear active session:', err)
+      }
+    }
+    setPhase(GamePhase.Ready)
+  }, [currentGame, familyId])
+
+  const handleCancelRestart = useCallback(() => {
+    setConfirmRestartOpen(false)
+    setResumeDialogOpen(true)
+  }, [])
+
+  // ── Play ─────────────────────────────────────────────────────────
 
   const handlePlay = useCallback(() => {
     setPhase(GamePhase.Playing)
@@ -142,9 +292,13 @@ export default function WorkshopPage() {
 
       if (!familyId || !activeChildId || !currentGame?.generatedGame || !currentGame.id) return
 
-      // Fire-and-forget: log hours, create artifact, record play session
+      // Clear activeSession and log results
       try {
         await Promise.all([
+          updateDoc(
+            doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
+            { activeSession: null, updatedAt: new Date().toISOString() },
+          ),
           logWorkshopHours(
             familyId,
             activeChildId,
@@ -162,6 +316,7 @@ export default function WorkshopPage() {
             result.cardsEncountered,
           ),
         ])
+        setCurrentGame({ ...currentGame, activeSession: null })
       } catch (err) {
         console.warn('Failed to log workshop results:', err)
       }
@@ -169,15 +324,10 @@ export default function WorkshopPage() {
     [familyId, activeChildId, currentGame],
   )
 
-  const handleSelectExistingGame = useCallback((game: StoryGame) => {
-    setCurrentGame(game)
-    setPhase(GamePhase.Ready)
-  }, [])
-
   const handleBackToWorkshop = useCallback(() => {
     setPhase(GamePhase.Idle)
     setCurrentGame(null)
-    setStoryInputs(null)
+    setDraftDocId(null)
   }, [])
 
   const handleRegenerateArt = useCallback(
@@ -196,7 +346,6 @@ export default function WorkshopPage() {
             doc(db, `families/${familyId}/storyGames/${game.id}`),
             { generatedArt: merged, updatedAt: new Date().toISOString() },
           )
-          // Update local state if this is the current game
           if (currentGame?.id === game.id) {
             setCurrentGame({ ...currentGame, generatedArt: merged })
           }
@@ -209,6 +358,12 @@ export default function WorkshopPage() {
   )
 
   const titleArt = currentGame?.generatedArt?.titleScreen
+
+  // Build current player name for resume dialog
+  const resumePlayerName = currentGame?.activeSession
+    ? currentGame.activeSession.players[currentGame.activeSession.currentTurnIndex]?.name ?? 'someone'
+    : ''
+  const resumePlayerNames = currentGame?.activeSession?.players.map((p) => p.name).join(', ') ?? ''
 
   return (
     <Box sx={{ p: 2, maxWidth: 700, mx: 'auto' }}>
@@ -241,7 +396,9 @@ export default function WorkshopPage() {
             <MyGamesGallery
               familyId={familyId}
               childId={activeChildId}
+              children={children}
               onSelectGame={handleSelectExistingGame}
+              onResumeDraft={handleResumeDraft}
               onRegenerateArt={handleRegenerateArt}
             />
           )}
@@ -255,7 +412,20 @@ export default function WorkshopPage() {
               {generateError}
             </Typography>
           )}
-          <WorkshopWizard onComplete={handleWizardComplete} onCancel={handleWizardCancel} />
+          <WorkshopWizard
+            onComplete={handleWizardComplete}
+            onCancel={handleWizardCancel}
+            onStepSave={saveDraftStep}
+            initialState={currentGame?.status === WorkshopStatus.Draft ? {
+              step: currentGame.currentWizardStep ?? 0,
+              theme: currentGame.storyInputs.theme ?? '',
+              players: currentGame.storyInputs.players ?? [],
+              goal: currentGame.storyInputs.goal ?? '',
+              challenges: currentGame.storyInputs.challenges ?? [],
+              boardStyle: currentGame.storyInputs.boardStyle ?? '',
+              boardLength: currentGame.storyInputs.boardLength ?? '',
+            } : undefined}
+          />
         </>
       )}
 
@@ -357,8 +527,10 @@ export default function WorkshopPage() {
         <GamePlayView
           game={currentGame.generatedGame}
           gameId={currentGame.id}
+          familyId={familyId ?? ''}
           storyPlayers={currentGame.storyInputs.players}
           generatedArt={currentGame.generatedArt}
+          activeSession={currentGame.activeSession}
           onFinished={handleGameFinished}
         />
       )}
@@ -381,6 +553,39 @@ export default function WorkshopPage() {
           </Box>
         </Box>
       )}
+
+      {/* Resume dialog */}
+      <Dialog open={resumeDialogOpen} onClose={() => setResumeDialogOpen(false)}>
+        <DialogTitle>Pick up where you left off?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            You were playing <strong>{currentGame?.generatedGame?.title}</strong> with{' '}
+            {resumePlayerNames}. It&apos;s {resumePlayerName}&apos;s turn!
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleStartOver}>Start Over</Button>
+          <Button variant="contained" onClick={handleContinueGame}>
+            Continue Game
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirm restart dialog */}
+      <Dialog open={confirmRestartOpen} onClose={handleCancelRestart}>
+        <DialogTitle>Start Over?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Start a brand new game? The old one won&apos;t be saved.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelRestart}>Cancel</Button>
+          <Button variant="contained" color="warning" onClick={handleConfirmRestart}>
+            Start Over
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }
