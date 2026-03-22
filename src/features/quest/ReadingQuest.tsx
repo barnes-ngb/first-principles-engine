@@ -180,21 +180,25 @@ export default function QuestQuestionScreen({
 }: QuestQuestionScreenProps) {
   const progress = (questState.totalQuestions / MAX_QUESTIONS) * 100
 
-  const [showSkip, setShowSkip] = useState(false)
+  const [timerElapsed, setTimerElapsed] = useState(false)
   const [revealingAnswer, setRevealingAnswer] = useState(false)
+  const [prevQuestionId, setPrevQuestionId] = useState(question.id)
+
+  // Reset state when question changes (React-recommended pattern for derived state)
+  if (prevQuestionId !== question.id) {
+    setPrevQuestionId(question.id)
+    setTimerElapsed(false)
+    setRevealingAnswer(false)
+  }
 
   // Show skip button after 8 seconds on current question
   useEffect(() => {
-    setShowSkip(false)
-    setRevealingAnswer(false)
-    const timer = setTimeout(() => setShowSkip(true), 8000)
+    const timer = setTimeout(() => setTimerElapsed(true), 8000)
     return () => clearTimeout(timer)
   }, [question.id])
 
-  // Also show immediately if 2+ consecutive wrong
-  useEffect(() => {
-    if (consecutiveWrong >= 2) setShowSkip(true)
-  }, [consecutiveWrong])
+  // Show skip if timer elapsed or 2+ consecutive wrong
+  const showSkip = timerElapsed || consecutiveWrong >= 2
 
   const handleSkip = () => {
     setRevealingAnswer(true)
@@ -202,7 +206,7 @@ export default function QuestQuestionScreen({
     // Show correct answer for 2 seconds, then notify parent
     setTimeout(() => {
       setRevealingAnswer(false)
-      setShowSkip(false)
+      setTimerElapsed(false)
       onSkip()
     }, 2000)
   }
