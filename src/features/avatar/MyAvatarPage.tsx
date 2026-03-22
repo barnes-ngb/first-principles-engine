@@ -35,6 +35,7 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import { ArmorIcon } from './icons/ArmorIcons'
 import type { ArmorTierColor } from './icons/ArmorIcons'
 import VoxelCharacter from './VoxelCharacter'
+import PoseButtons from './PoseButtons'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import Particles from './Particles'
@@ -138,6 +139,9 @@ export default function MyAvatarPage() {
   const [animateEquipId, setAnimateEquipId] = useState<string | null>(null)
   const [animateUnequipId, setAnimateUnequipId] = useState<string | null>(null)
   const [particles, setParticles] = useState<{ x: number; y: number } | null>(null)
+
+  // Pose state
+  const [activePoseId, setActivePoseId] = useState<string | null>(null)
 
   // Track previous state for celebrations
   const prevPiecesCountRef = useRef(0)
@@ -610,7 +614,17 @@ export default function MyAvatarPage() {
             animateUnequipPiece={animateUnequipId}
             onEquipAnimDone={handleEquipAnimDone}
             onUnequipAnimDone={handleUnequipAnimDone}
+            photoUrl={profile.photoUrl}
+            activePoseId={activePoseId}
+            onPoseComplete={() => setActivePoseId(null)}
+            onSwipePose={(poseId) => setActivePoseId(poseId)}
           />
+          {isLincoln && (
+            <PoseButtons
+              onPose={(poseId) => setActivePoseId(poseId)}
+              currentPose={activePoseId}
+            />
+          )}
         </Box>
 
         {/* ── Armor status text ────────────────────────────────── */}
