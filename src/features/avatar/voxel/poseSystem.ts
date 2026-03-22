@@ -73,8 +73,8 @@ export const POSES: Pose[] = [
     duration: 1800,
     requiresPiece: 'shield',
     armL: {
-      rotZ: [0, 0.8, 0.8, 0.5],
-      rotX: [0, 0.6, 0.6, 0.35],
+      rotZ: [0, 0.2, 0.2, 0.2],          // Very slight outward
+      rotX: [0, -1.0, -1.0, -0.8],        // FORWARD — shield presents in front of body
       times: [0, 0.3, 0.7, 1],
     },
     armR: {
@@ -96,13 +96,13 @@ export const POSES: Pose[] = [
     icon: '\u{1F64F}',
     duration: 3000,
     armL: {
-      rotZ: [0, 0.1, 0.1, 0],
-      rotX: [0, -0.7, -0.7, 0],
+      rotZ: [0, 0, 0, 0],                // NO side rotation — arms stay at sides
+      rotX: [0, -1.2, -1.2, 0],           // Swing FORWARD (negative X = forward)
       times: [0, 0.3, 0.85, 1],
     },
     armR: {
-      rotZ: [0, -0.1, -0.1, 0],
-      rotX: [0, -0.7, -0.7, 0],
+      rotZ: [0, 0, 0, 0],
+      rotX: [0, -1.2, -1.2, 0],           // Same — both arms forward
       times: [0, 0.3, 0.85, 1],
     },
     head: {
@@ -230,9 +230,18 @@ export class PoseAnimator {
   }
 
   private applyKeyframes(obj: THREE.Object3D, kf: PoseKeyframes, t: number) {
-    if (kf.rotX) obj.rotation.x = this.interpolate(kf.rotX, kf.times, t)
+    const isArm = obj.name === 'armL' || obj.name === 'armR'
+    if (kf.rotX) {
+      let val = this.interpolate(kf.rotX, kf.times, t)
+      if (isArm) val = Math.max(-1.3, Math.min(1.3, val))
+      obj.rotation.x = val
+    }
     if (kf.rotY) obj.rotation.y = this.interpolate(kf.rotY, kf.times, t)
-    if (kf.rotZ) obj.rotation.z = this.interpolate(kf.rotZ, kf.times, t)
+    if (kf.rotZ) {
+      let val = this.interpolate(kf.rotZ, kf.times, t)
+      if (isArm) val = Math.max(-2.8, Math.min(2.8, val))
+      obj.rotation.z = val
+    }
   }
 
   private applyBodyKeyframes(obj: THREE.Object3D, kf: PoseKeyframes, t: number) {
@@ -315,4 +324,29 @@ export function applyExpression(
   }
 
   void skinColor // reserved for future eyelid coloring
+}
+
+// ── Equipment-based idle pose for smooth return ─────────────────────
+
+/**
+ * Build a Pose object that represents the equipment-based idle position.
+ * Used for smooth return to idle after a pose animation completes.
+ */
+export function getEquipmentIdlePose(equipped: string[]): Pose {
+  return {
+    id: 'equipIdle',
+    name: 'Idle',
+    icon: '',
+    duration: 500,
+    armL: {
+      rotZ: [equipped.includes('shield') ? 0.2 : 0],
+      rotX: [equipped.includes('shield') ? -0.3 : 0],
+    },
+    armR: {
+      rotZ: [equipped.includes('sword') ? -0.3 : 0],
+      rotX: [equipped.includes('sword') ? -0.1 : 0],
+    },
+    head: { rotX: [0], rotY: [0] },
+    body: { posY: [0] },
+  }
 }
