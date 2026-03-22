@@ -6,6 +6,7 @@ import DialogContent from '@mui/material/DialogContent'
 import IconButton from '@mui/material/IconButton'
 import Typography from '@mui/material/Typography'
 import CloseIcon from '@mui/icons-material/Close'
+import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 
 import type { ArmorPiece, AvatarProfile } from '../../core/types'
 import { ARMOR_PIECES } from '../../core/types'
@@ -221,6 +222,27 @@ export default function VerseCard({
       }}
     >
       <DialogContent sx={{ p: 3, position: 'relative' }}>
+        {/* Speaker button */}
+        <IconButton
+          onClick={(e) => { e.stopPropagation(); beginReading(0) }}
+          sx={{
+            position: 'absolute',
+            top: 8,
+            left: 12,
+            color: accentColor,
+            bgcolor: isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.15)',
+            border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(232,160,191,0.3)'}`,
+            width: 32,
+            height: 32,
+            zIndex: 1,
+            '&:hover': { bgcolor: isLincoln ? 'rgba(126,252,32,0.25)' : 'rgba(232,160,191,0.25)' },
+          }}
+          size="small"
+          aria-label="Read verse aloud"
+        >
+          <VolumeUpIcon sx={{ fontSize: 18 }} />
+        </IconButton>
+
         {/* Close button */}
         <IconButton
           onClick={handleClose}
