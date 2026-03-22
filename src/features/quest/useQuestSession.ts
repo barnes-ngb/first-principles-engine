@@ -497,6 +497,11 @@ export function useQuestSession() {
       // Request next question
       setScreen(QuestScreen.Loading)
 
+      // Send recent question types so AI can vary format
+      const recentQuestionTypes = updatedQuestions
+        .slice(-3)
+        .map((q) => q.prompt.slice(0, 50))
+
       const userMessage: AIChatMessage = {
         role: 'user',
         content: JSON.stringify({
@@ -510,6 +515,7 @@ export function useQuestSession() {
           totalCorrect: newState.totalCorrect,
           questionsThisLevel: newState.questionsThisLevel,
           levelDownsInARow: newState.levelDownsInARow,
+          recentQuestionTypes,
         }),
       }
 
