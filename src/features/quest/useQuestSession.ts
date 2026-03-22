@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
 
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { evaluationSessionsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { db, evaluationSessionsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot } from '../../core/types'
+import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'
 import type { EvaluationDomain } from '../../core/types/enums'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
 import { calculateStreak, computeNextState, formatSkillLabel, shouldEndSession } from './questAdaptive'
-import { checkAnswer, shouldFlagAsError } from './questHelpers'
+import { checkAnswer, extractPattern, extractTargetWord, shouldFlagAsError } from './questHelpers'
 import type {
   InteractiveSessionData,
   QuestQuestion,
@@ -517,6 +517,59 @@ export function useQuestSession() {
           console.warn('Failed to auto-apply quest findings to skill snapshot', err)
         }
       }
+
+      // Track per-word progress (fire-and-forget)
+      const sessionDocId = docId
+      void (async () => {
+        for (const q of questions) {
+          if (q.flaggedAsError) continue
+
+          const word = extractTargetWord(q)
+          if (!word) continue
+
+          const wordDocId = word.toLowerCase().replace(/[^a-z]/g, '')
+          if (!wordDocId) continue
+
+          try {
+            const wordRef = doc(
+              collection(db, `families/${familyId}/children/${activeChildId}/wordProgress`),
+              wordDocId,
+            )
+            const existingSnap = await getDoc(wordRef)
+            const prev = existingSnap.exists() ? (existingSnap.data() as WordProgress) : null
+
+            const isWrong = !q.correct && !q.skipped
+            const updated: WordProgress = {
+              word: word.toLowerCase(),
+              pattern: extractPattern(q),
+              skill: q.skill || 'unknown',
+              wrongCount: (prev?.wrongCount || 0) + (isWrong ? 1 : 0),
+              skippedCount: (prev?.skippedCount || 0) + (q.skipped ? 1 : 0),
+              correctCount: (prev?.correctCount || 0) + (q.correct ? 1 : 0),
+              lastSeen: new Date().toISOString(),
+              firstSeen: prev?.firstSeen || new Date().toISOString(),
+              masteryLevel: 'not-yet',
+              questSessions: [...new Set([...(prev?.questSessions || []), sessionDocId])],
+            }
+
+            // Calculate mastery
+            const total = updated.correctCount + updated.wrongCount + updated.skippedCount
+            const correctRate = total > 0 ? updated.correctCount / total : 0
+
+            if (correctRate >= 0.8 && updated.correctCount >= 3) {
+              updated.masteryLevel = 'known'
+            } else if (correctRate >= 0.5 && total >= 2) {
+              updated.masteryLevel = 'emerging'
+            } else if (total >= 2) {
+              updated.masteryLevel = 'struggling'
+            }
+
+            await setDoc(wordRef, JSON.parse(JSON.stringify(updated)))
+          } catch (err) {
+            console.warn(`Failed to update word progress for "${word}":`, err)
+          }
+        }
+      })()
     },
     [activeChildId, familyId, findings, previousSessions, chat],
   )

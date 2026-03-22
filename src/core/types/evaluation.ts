@@ -102,3 +102,24 @@ export interface EvaluationRecommendation {
   materials?: string[]
   frequency: string
 }
+
+export const WordMasteryLevel = {
+  NotYet: 'not-yet',
+  Struggling: 'struggling',
+  Emerging: 'emerging',
+  Known: 'known',
+} as const
+export type WordMasteryLevel = (typeof WordMasteryLevel)[keyof typeof WordMasteryLevel]
+
+export interface WordProgress {
+  word: string
+  pattern: string
+  skill: string
+  wrongCount: number
+  skippedCount: number
+  correctCount: number
+  lastSeen: string
+  firstSeen: string
+  masteryLevel: WordMasteryLevel
+  questSessions: string[]
+}
