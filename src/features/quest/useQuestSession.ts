@@ -357,28 +357,53 @@ export function useQuestSession() {
         console.error('Failed to save quest session', err)
       }
 
-      // Add diamond XP to ledger
+      // Add diamond XP to ledger (with dedup protection)
       const XP_PER_DIAMOND = 2
       const questXp = finalState.totalCorrect * XP_PER_DIAMOND
 
       if (questXp > 0) {
         try {
-          const ledgerRef = doc(xpLedgerCollection(familyId), activeChildId)
-          const ledgerSnap = await getDoc(ledgerRef)
-          const existing = ledgerSnap.exists()
-            ? ledgerSnap.data()
-            : { totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }
+          const dedupKey = `quest_${docId}`
 
-          await setDoc(ledgerRef, {
-            childId: activeChildId,
-            totalXp: (existing.totalXp || 0) + questXp,
-            sources: {
-              routines: existing.sources?.routines || 0,
-              quests: (existing.sources?.quests || 0) + questXp,
-              books: existing.sources?.books || 0,
-            },
-            lastUpdatedAt: new Date().toISOString(),
-          })
+          // Check for existing event doc to prevent double-award on retry
+          const eventRef = doc(xpLedgerCollection(familyId), `${activeChildId}_${dedupKey}`)
+          const eventSnap = await getDoc(eventRef)
+          if (eventSnap.exists()) {
+            console.log('XP already awarded for this quest session, skipping')
+          } else {
+            // Write per-event doc for audit trail
+            await setDoc(eventRef, {
+              childId: activeChildId,
+              dedupKey,
+              type: 'quest',
+              amount: questXp,
+              meta: {
+                domain: 'reading',
+                questionsCorrect: String(finalState.totalCorrect),
+                questionsTotal: String(finalState.totalQuestions),
+                finalLevel: String(finalState.currentLevel),
+              },
+              awardedAt: new Date().toISOString(),
+            })
+
+            // Update cumulative doc
+            const ledgerRef = doc(xpLedgerCollection(familyId), activeChildId)
+            const ledgerSnap = await getDoc(ledgerRef)
+            const existing = ledgerSnap.exists()
+              ? ledgerSnap.data()
+              : { totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }
+
+            await setDoc(ledgerRef, {
+              childId: activeChildId,
+              totalXp: (existing.totalXp || 0) + questXp,
+              sources: {
+                routines: existing.sources?.routines || 0,
+                quests: (existing.sources?.quests || 0) + questXp,
+                books: existing.sources?.books || 0,
+              },
+              lastUpdatedAt: new Date().toISOString(),
+            }, { merge: true })
+          }
         } catch (err) {
           console.warn('Failed to update XP ledger', err)
         }
