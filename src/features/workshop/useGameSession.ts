@@ -9,6 +9,7 @@ export interface Player {
   name: string
   color: string
   position: number
+  avatarUrl?: string
 }
 
 export interface GameSessionState {

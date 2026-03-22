@@ -17,11 +17,28 @@ export interface StoryGame {
 
   /** Play session records */
   playSessions?: GamePlaySession[]
+
+  /** DALL-E generated art assets */
+  generatedArt?: GeneratedArt
+}
+
+export interface GeneratedArt {
+  boardBackground?: string
+  titleScreen?: string
+  cardArt?: {
+    reading?: string
+    math?: string
+    story?: string
+    action?: string
+  }
+  parentTokens?: {
+    [parentId: string]: string
+  }
 }
 
 export interface StoryInputs {
   theme: string
-  characters: StoryCharacter[]
+  players: StoryPlayer[]
   goal: string
   challenges: StoryChallenge[]
   boardStyle: BoardStyle
@@ -30,10 +47,11 @@ export interface StoryInputs {
   voiceTranscripts?: string[]
 }
 
-export interface StoryCharacter {
+export interface StoryPlayer {
+  id: string
   name: string
-  trait: string
-  customArt?: string
+  avatarUrl?: string
+  isCreator: boolean
 }
 
 export interface StoryChallenge {

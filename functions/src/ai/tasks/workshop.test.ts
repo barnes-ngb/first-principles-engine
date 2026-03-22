@@ -4,9 +4,10 @@ import type { WorkshopInput } from "./workshop.js";
 
 const sampleInput: WorkshopInput = {
   theme: "dragons",
-  characters: [
-    { name: "Captain Finn", trait: "brave" },
-    { name: "Princess Luna", trait: "clever" },
+  players: [
+    { id: "child-london", name: "London", isCreator: true },
+    { id: "child-lincoln", name: "Lincoln", isCreator: false },
+    { id: "parent-shelly", name: "Mom", isCreator: false },
   ],
   goal: "find_treasure",
   challenges: [
@@ -26,10 +27,11 @@ describe("buildWorkshopPrompt", () => {
     expect(prompt).toContain("dragons");
   });
 
-  it("includes character names", () => {
+  it("includes player names", () => {
     const prompt = buildWorkshopPrompt("London", "kindergarten", undefined, sampleInput);
-    expect(prompt).toContain("Captain Finn");
-    expect(prompt).toContain("Princess Luna");
+    expect(prompt).toContain("London");
+    expect(prompt).toContain("Lincoln");
+    expect(prompt).toContain("Mom");
   });
 
   it("includes skill snapshot when available", () => {
@@ -64,6 +66,12 @@ describe("buildWorkshopPrompt", () => {
     expect(prompt).toContain("<game>");
     expect(prompt).toContain("challengeCards");
     expect(prompt).toContain("readAloudText");
+  });
+
+  it("instructs AI to use real player names in narrative", () => {
+    const prompt = buildWorkshopPrompt("London", "kindergarten", undefined, sampleInput);
+    expect(prompt).toContain("real family members");
+    expect(prompt).toContain("real player names");
   });
 });
 

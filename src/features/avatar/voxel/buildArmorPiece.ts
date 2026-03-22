@@ -235,12 +235,12 @@ function buildBreastplate(U: number): THREE.Group {
   crossH.position.set(0, U * 21, U * 3.3)
   group.add(crossH)
 
-  // Shoulder pads — extend beyond arms
-  const shoulderL = taggedBox(U * 5, U * 3, U * 6, W, 'primary', 'shoulder_l')
-  shoulderL.position.set(-U * 6.5, U * 24, 0)
+  // Shoulder pads — must not extend past arm pivots (arms at ±U*7.2)
+  const shoulderL = taggedBox(U * 4, U * 3, U * 5.5, W, 'primary', 'shoulder_l')
+  shoulderL.position.set(-U * 5.4, U * 24, 0) // Inner edge at ~-U*3.4, outer at ~-U*7.4
   group.add(shoulderL)
-  const shoulderR = taggedBox(U * 5, U * 3, U * 6, W, 'primary', 'shoulder_r')
-  shoulderR.position.set(U * 6.5, U * 24, 0)
+  const shoulderR = taggedBox(U * 4, U * 3, U * 5.5, W, 'primary', 'shoulder_r')
+  shoulderR.position.set(U * 5.4, U * 24, 0)
   group.add(shoulderR)
 
   // Arm covers (armor sleeves) — stored in userData for attachment to arms later

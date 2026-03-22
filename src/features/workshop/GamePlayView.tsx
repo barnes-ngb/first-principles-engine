@@ -3,13 +3,15 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Typography from '@mui/material/Typography'
-import type { GeneratedGame } from '../../core/types'
+import type { GeneratedArt, GeneratedGame } from '../../core/types'
 import { useTTS } from '../../core/hooks/useTTS'
 import { TurnPhase } from '../../core/types/workshop'
 import GameBoard from './GameBoard'
 import ChallengeCard from './ChallengeCard'
 import DiceRoller from './DiceRoller'
+import type { StoryPlayer } from '../../core/types'
 import { useGameSession } from './useGameSession'
+import type { Player } from './useGameSession'
 
 export interface GamePlayResult {
   winner: string | null
@@ -18,22 +20,34 @@ export interface GamePlayResult {
   playerIds: string[]
 }
 
+const PLAYER_COLORS = ['#1976d2', '#d32f2f', '#388e3c', '#f57c00']
+
 interface GamePlayViewProps {
   game: GeneratedGame
   gameId?: string
+  storyPlayers?: StoryPlayer[]
+  generatedArt?: GeneratedArt
   onFinished: (result: GamePlayResult) => void
 }
 
-export default function GamePlayView({ game, onFinished }: GamePlayViewProps) {
+export default function GamePlayView({ game, storyPlayers, generatedArt, onFinished }: GamePlayViewProps) {
   const session = useGameSession(game)
   const tts = useTTS()
   const [hasStarted, setHasStarted] = useState(false)
   const gameStartTime = useRef<number>(Date.now())
 
-  // Start game on mount
+  // Start game on mount — use selected players from wizard if available
   useEffect(() => {
     if (!hasStarted) {
-      session.startGame()
+      const gamePlayers: Player[] | undefined = storyPlayers?.map((sp, i) => ({
+        id: sp.id,
+        name: sp.name,
+        color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+        position: 0,
+        // Use existing avatar, or generated parent token as fallback
+        avatarUrl: sp.avatarUrl || generatedArt?.parentTokens?.[sp.id],
+      }))
+      session.startGame(gamePlayers)
       setHasStarted(true)
       gameStartTime.current = Date.now()
 
@@ -134,8 +148,10 @@ export default function GamePlayView({ game, onFinished }: GamePlayViewProps) {
           name: p.name,
           color: p.color,
           position: p.position,
+          avatarUrl: p.avatarUrl,
         }))}
         activeSpaceIndex={currentPlayer?.position}
+        boardBackground={generatedArt?.boardBackground}
       />
 
       {/* Controls */}
@@ -179,6 +195,7 @@ export default function GamePlayView({ game, onFinished }: GamePlayViewProps) {
         card={state.currentCard}
         open={state.turnPhase === TurnPhase.Card && state.currentCard !== null}
         onClose={handleDismissCard}
+        cardArt={generatedArt?.cardArt}
       />
     </Box>
   )

@@ -11,9 +11,10 @@ import { animateEquip, animateUnequip, animateJump, animateNod, animateSwordFlou
 import { createTouchControls, updateRotation } from './voxel/touchControls'
 import type { TouchControlState } from './voxel/touchControls'
 import { applyTierToArmor, calculateTier, animateTierUpgrade, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
-import { PoseAnimator, POSES, POSE_EXPRESSIONS, applyExpression } from './voxel/poseSystem'
+import { PoseAnimator, POSES, POSE_EXPRESSIONS, applyExpression, getEquipmentIdlePose } from './voxel/poseSystem'
 import type { Pose } from './voxel/poseSystem'
-import { applyPixelFaceFromPhoto } from './voxel/pixelFace'
+import { applyPaintedFace } from './voxel/pixelFace'
+import { buildHelmHair } from './voxel/buildHair'
 
 interface VoxelCharacterProps {
   features: CharacterFeatures | undefined
@@ -35,6 +36,38 @@ interface VoxelCharacterProps {
   onPoseComplete?: () => void
   /** Callback when swipe cycles to a new pose */
   onSwipePose?: (poseId: string) => void
+}
+
+// ── Helmet hair management ────────────────────────────────────────────
+
+function applyHelmHairStyle(
+  character: THREE.Group,
+  isHelmetEquipped: boolean,
+  features: CharacterFeatures,
+) {
+  const fullHair = character.getObjectByName('hairGroup')
+  let helmHair = character.getObjectByName('helmHairGroup')
+  const head = character.getObjectByName('head') as THREE.Mesh | undefined
+
+  if (isHelmetEquipped) {
+    // Hide full hair
+    if (fullHair) fullHair.visible = false
+
+    // Show helmet-compatible hair — only parts that peek from under helmet
+    if (!helmHair && head) {
+      const headGeo = head.geometry as THREE.BoxGeometry
+      const headWidth = headGeo.parameters.width
+      const U = headWidth / 8
+      const hairMat = new THREE.MeshLambertMaterial({ color: features.hairColor ?? '#6B4C32' })
+      helmHair = buildHelmHair(hairMat, head.position.y, U)
+      character.add(helmHair)
+    }
+    if (helmHair) helmHair.visible = true
+  } else {
+    // Show full hair, hide helm hair
+    if (fullHair) fullHair.visible = true
+    if (helmHair) helmHair.visible = false
+  }
 }
 
 // ── Equipment-based idle pose ────────────────────────────────────────
@@ -339,6 +372,11 @@ export default function VoxelCharacter({
     prevEquippedRef.current = new Set(equippedPieces)
     prevTierRef.current = currentTier
 
+    // Apply helmet hair if helmet is initially equipped
+    if (equippedPieces.includes('helmet')) {
+      applyHelmHairStyle(character, true, resolvedFeatures)
+    }
+
     // Platform
     const platform = buildPlatform(ageGroup)
     platform.position.y = character.position.y
@@ -378,11 +416,14 @@ export default function VoxelCharacter({
       }
       const pose = actionablePoses[swipePoseIndexRef.current]
       poseAnimatorRef.current.play(pose, () => {
-        // Apply idle expression back
+        // Smooth return to equipment idle pose
         if (characterRef.current) {
           applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {})
         }
-        onPoseCompleteRef.current?.()
+        const idlePose = getEquipmentIdlePose(equippedRef.current)
+        poseAnimatorRef.current.play(idlePose, () => {
+          onPoseCompleteRef.current?.()
+        })
       })
       // Apply facial expression for this pose
       if (characterRef.current) {
@@ -473,13 +514,11 @@ export default function VoxelCharacter({
     }
     animate()
 
-    // Apply pixel face from photo (async, non-blocking)
-    if (photoUrl) {
-      const headMesh = character.getObjectByName('head') as THREE.Mesh | undefined
-      if (headMesh) {
-        const skinHex = new THREE.Color(resolvedFeatures.skinTone ?? '#F5D6B8').getHex()
-        void applyPixelFaceFromPhoto(headMesh, photoUrl, skinHex)
-      }
+    // Apply painted pixel face from extracted features (clean Minecraft style)
+    const headMesh = character.getObjectByName('head') as THREE.Mesh | undefined
+    if (headMesh) {
+      const skinHex = new THREE.Color(resolvedFeatures.skinTone ?? '#F5D6B8').getHex()
+      applyPaintedFace(headMesh, character, resolvedFeatures, skinHex)
     }
   }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, photoUrl])
 
@@ -492,7 +531,7 @@ export default function VoxelCharacter({
       rendererRef.current?.dispose()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedFeatures.skinTone, resolvedFeatures.hairColor, resolvedFeatures.hairStyle, resolvedFeatures.hairLength, ageGroup, photoUrl])
+  }, [resolvedFeatures.skinTone, resolvedFeatures.hairColor, resolvedFeatures.hairStyle, resolvedFeatures.hairLength, resolvedFeatures.eyeColor, ageGroup])
 
   // ── Handle resize ───────────────────────────────────────────────
   useEffect(() => {
@@ -549,6 +588,8 @@ export default function VoxelCharacter({
             case 'helmet': {
               const head = character.getObjectByName('head')
               if (head) animateNod(head, 300)
+              // Swap to helmet-compatible hair
+              applyHelmHairStyle(character, true, resolvedFeatures)
               break
             }
             case 'breastplate': {
@@ -576,7 +617,10 @@ export default function VoxelCharacter({
               if (expr && characterRef.current) applyExpression(characterRef.current, expr)
               poseAnimatorRef.current.play(autoPose, () => {
                 if (characterRef.current) applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {})
-                onPoseComplete?.()
+                const idlePose = getEquipmentIdlePose(equippedRef.current)
+                poseAnimatorRef.current.play(idlePose, () => {
+                  onPoseComplete?.()
+                })
               })
             }, 500) // Delay so equip ceremony plays first
           }
@@ -587,6 +631,10 @@ export default function VoxelCharacter({
     // Unequipped pieces -> show as translucent ghost
     for (const pieceId of prev) {
       if (!current.has(pieceId)) {
+        // If helmet was unequipped, restore full hair
+        if (pieceId === 'helmet' && characterRef.current) {
+          applyHelmHairStyle(characterRef.current, false, resolvedFeatures)
+        }
         const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
         if (group) {
           const isUnlocked = totalXp >= XP_THRESHOLDS[pieceId as VoxelArmorPieceId]
@@ -638,7 +686,11 @@ export default function VoxelCharacter({
       if (characterRef.current) {
         applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {})
       }
-      onPoseComplete?.()
+      // Smooth return to equipment idle
+      const idlePose = getEquipmentIdlePose(equippedRef.current)
+      poseAnimatorRef.current.play(idlePose, () => {
+        onPoseComplete?.()
+      })
     })
   }, [activePoseId, onPoseComplete])
 

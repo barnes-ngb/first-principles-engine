@@ -24,9 +24,11 @@ interface ChallengeCardProps {
   card: ChallengeCardType | null
   open: boolean
   onClose: () => void
+  /** DALL-E generated card art keyed by card type */
+  cardArt?: { reading?: string; math?: string; story?: string; action?: string }
 }
 
-export default function ChallengeCard({ card, open, onClose }: ChallengeCardProps) {
+export default function ChallengeCard({ card, open, onClose, cardArt }: ChallengeCardProps) {
   const tts = useTTS()
 
   // Read the card aloud when it opens
@@ -45,6 +47,7 @@ export default function ChallengeCard({ card, open, onClose }: ChallengeCardProp
 
   const emoji = TYPE_EMOJI[card.type] || '?'
   const isStretch = card.difficulty === 'stretch'
+  const artUrl = cardArt?.[card.type as keyof typeof cardArt]
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
@@ -56,7 +59,23 @@ export default function ChallengeCard({ card, open, onClose }: ChallengeCardProp
           border: isStretch ? '3px solid #ff9800' : undefined,
         }}
       >
-        <Typography sx={{ fontSize: '3rem', mb: 1 }}>{emoji}</Typography>
+        {/* Generated card art header */}
+        {artUrl ? (
+          <Box
+            component="img"
+            src={artUrl}
+            alt={`${card.type} challenge`}
+            sx={{
+              width: '100%',
+              maxHeight: 200,
+              objectFit: 'contain',
+              borderRadius: 2,
+              mb: 1.5,
+            }}
+          />
+        ) : (
+          <Typography sx={{ fontSize: '3rem', mb: 1 }}>{emoji}</Typography>
+        )}
 
         {isStretch && (
           <Typography

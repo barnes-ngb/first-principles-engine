@@ -184,3 +184,44 @@ export function buildHair(
 
   return hair
 }
+
+// ── Helmet-compatible hair ──────────────────────────────────────────
+
+/**
+ * Build trimmed hair strands that peek from under a helmet.
+ * Only shows hair at the edges where it would naturally stick out.
+ * @param headY  – Y position of the head center
+ * @param U      – pixel unit (0.125 * scale)
+ */
+export function buildHelmHair(
+  material: THREE.Material,
+  headY: number,
+  U: number,
+): THREE.Group {
+  const g = new THREE.Group()
+  g.name = 'helmHairGroup'
+
+  // Helmet side guards at ±U*4.4, bottom at ~headY-U*3.6
+  // Hair peeks from UNDER the helmet edges
+
+  // Side strands peeking below the helmet side guards
+  const strandL = box(U * 1.2, U * 2.8, U * 4.0, material)
+  strandL.position.set(-U * 4.4, headY - U * 3.8, U * 0.5)
+  g.add(strandL)
+
+  const strandR = box(U * 1.3, U * 3.0, U * 4.2, material)
+  strandR.position.set(U * 4.4, headY - U * 3.9, U * 0.5)
+  g.add(strandR)
+
+  // Back hair peeking below helmet back plate
+  const backStrand = box(U * 7.0, U * 3.0, U * 1.4, material)
+  backStrand.position.set(0, headY - U * 3.8, -U * 4.0)
+  g.add(backStrand)
+
+  // Wisp of bangs peeking from under the brow ridge
+  const bangWisp = box(U * 4.0, U * 0.8, U * 0.6, material)
+  bangWisp.position.set(U * 0.4, headY + U * 1.2, U * 4.5)
+  g.add(bangWisp)
+
+  return g
+}

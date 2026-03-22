@@ -1,20 +1,22 @@
 import { useCallback, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import CircularProgress from '@mui/material/CircularProgress'
 import Typography from '@mui/material/Typography'
-import type { GeneratedGame, StoryGame, StoryInputs } from '../../core/types'
+import { updateDoc, doc } from 'firebase/firestore'
+import type { GeneratedArt, GeneratedGame, StoryGame, StoryInputs } from '../../core/types'
 import { GamePhase, WorkshopStatus } from '../../core/types/workshop'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { addDoc } from 'firebase/firestore'
-import { storyGamesCollection } from '../../core/firebase/firestore'
+import { db, storyGamesCollection } from '../../core/firebase/firestore'
 import WorkshopWizard from './WorkshopWizard'
 import GamePlayView from './GamePlayView'
 import type { GamePlayResult } from './GamePlayView'
 import { logWorkshopHours, createGameArtifact, recordPlaySession } from './workshopUtils'
 import MyGamesGallery from './MyGamesGallery'
+import GameCreationScreen from './GameCreationScreen'
+import { generateAllArt } from './workshopArt'
 
 /** Extract JSON from <game> tags in AI response */
 function extractGameJson(text: string): GeneratedGame | null {
@@ -33,7 +35,7 @@ export default function WorkshopPage() {
   const [currentGame, setCurrentGame] = useState<StoryGame | null>(null)
   const [generateError, setGenerateError] = useState<string | null>(null)
 
-  const { chat } = useAI()
+  const { chat, generateImage } = useAI()
   const familyId = useFamilyId()
   const { activeChildId } = useActiveChild()
 
@@ -54,12 +56,20 @@ export default function WorkshopPage() {
         return
       }
 
-      const response = await chat({
-        familyId,
-        childId: activeChildId,
-        taskType: TaskType.Workshop,
-        messages: [{ role: 'user', content: JSON.stringify(inputs) }],
-      })
+      // Fire game generation and initial art generation in parallel
+      const [response, artResult] = await Promise.all([
+        chat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.Workshop,
+          messages: [{ role: 'user', content: JSON.stringify(inputs) }],
+        }),
+        // Start art generation without title (we don't have it yet)
+        generateAllArt(generateImage, familyId, inputs).catch((err) => {
+          console.warn('Art generation batch failed:', err)
+          return null
+        }),
+      ])
 
       if (!response) {
         setGenerateError('Failed to generate game. Please try again.')
@@ -74,6 +84,28 @@ export default function WorkshopPage() {
         return
       }
 
+      // Build generatedArt from the parallel result
+      let generatedArt: GeneratedArt | undefined
+      if (artResult) {
+        generatedArt = artResult.art
+      }
+
+      // Now generate the title screen with the actual game title (slight delay is fine)
+      // This runs after game data is available so we can include the real title
+      try {
+        const titleResult = await generateImage({
+          familyId,
+          prompt: `A title card illustration for a children's board game called '${generatedGame.title}', ${inputs.theme} themed, exciting, colorful, storybook illustration style, centered composition, no text`,
+          style: 'general',
+          size: '1024x1024',
+        })
+        if (titleResult?.url) {
+          generatedArt = { ...generatedArt, titleScreen: titleResult.url }
+        }
+      } catch (err) {
+        console.warn('Title screen generation failed:', err)
+      }
+
       // Save to Firestore
       const now = new Date().toISOString()
       const gameDoc: Omit<StoryGame, 'id'> = {
@@ -84,13 +116,14 @@ export default function WorkshopPage() {
         storyInputs: inputs,
         generatedGame,
         playSessions: [],
+        generatedArt,
       }
 
       const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
       setCurrentGame({ ...gameDoc, id: docRef.id })
       setPhase(GamePhase.Ready)
     },
-    [chat, familyId, activeChildId],
+    [chat, generateImage, familyId, activeChildId],
   )
 
   const handleWizardCancel = useCallback(() => {
@@ -147,6 +180,36 @@ export default function WorkshopPage() {
     setStoryInputs(null)
   }, [])
 
+  const handleRegenerateArt = useCallback(
+    async (game: StoryGame) => {
+      if (!familyId || !game.id) return
+      try {
+        const result = await generateAllArt(
+          generateImage,
+          familyId,
+          game.storyInputs,
+          game.generatedGame?.title,
+        )
+        if (result.art) {
+          const merged: GeneratedArt = { ...game.generatedArt, ...result.art }
+          await updateDoc(
+            doc(db, `families/${familyId}/storyGames/${game.id}`),
+            { generatedArt: merged, updatedAt: new Date().toISOString() },
+          )
+          // Update local state if this is the current game
+          if (currentGame?.id === game.id) {
+            setCurrentGame({ ...currentGame, generatedArt: merged })
+          }
+        }
+      } catch (err) {
+        console.warn('Art regeneration failed:', err)
+      }
+    },
+    [familyId, generateImage, currentGame],
+  )
+
+  const titleArt = currentGame?.generatedArt?.titleScreen
+
   return (
     <Box sx={{ p: 2, maxWidth: 700, mx: 'auto' }}>
       {phase === GamePhase.Idle && (
@@ -179,6 +242,7 @@ export default function WorkshopPage() {
               familyId={familyId}
               childId={activeChildId}
               onSelectGame={handleSelectExistingGame}
+              onRegenerateArt={handleRegenerateArt}
             />
           )}
         </Box>
@@ -195,41 +259,84 @@ export default function WorkshopPage() {
         </>
       )}
 
-      {phase === GamePhase.Generating && (
-        <Box sx={{ textAlign: 'center', py: 6 }}>
-          <CircularProgress size={48} sx={{ mb: 2 }} />
-          <Typography variant="h5" gutterBottom>
-            Creating your game...
-          </Typography>
-          <Typography color="text.secondary">
-            The Story Wizard is building your board game!
-          </Typography>
-        </Box>
-      )}
+      {phase === GamePhase.Generating && <GameCreationScreen />}
 
       {phase === GamePhase.Ready && currentGame?.generatedGame && (
         <Box sx={{ textAlign: 'center', py: 4 }}>
-          <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
-            {currentGame.generatedGame.title}
-          </Typography>
+          {/* Title screen hero image */}
+          {titleArt ? (
+            <Box
+              sx={{
+                position: 'relative',
+                width: '100%',
+                maxWidth: 500,
+                mx: 'auto',
+                mb: 3,
+                borderRadius: 3,
+                overflow: 'hidden',
+              }}
+            >
+              <Box
+                component="img"
+                src={titleArt}
+                alt={currentGame.generatedGame.title}
+                sx={{
+                  width: '100%',
+                  height: 'auto',
+                  display: 'block',
+                }}
+              />
+              {/* Overlay with game info */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
+                  p: 2,
+                  color: 'white',
+                }}
+              >
+                <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                  {currentGame.generatedGame.title}
+                </Typography>
+                <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                  {currentGame.generatedGame.board.totalSpaces} spaces
+                  {' \u2022 '}
+                  {currentGame.generatedGame.challengeCards.length} cards
+                  {' \u2022 '}
+                  {currentGame.generatedGame.metadata.estimatedMinutes} min
+                </Typography>
+              </Box>
+            </Box>
+          ) : (
+            <>
+              <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
+                {currentGame.generatedGame.title}
+              </Typography>
+              <Typography color="text.secondary" sx={{ mb: 1 }}>
+                {currentGame.generatedGame.board.totalSpaces} spaces
+                {' \u2022 '}
+                {currentGame.generatedGame.challengeCards.length} challenge cards
+                {' \u2022 '}
+                {currentGame.generatedGame.rules.length} rules
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                {currentGame.generatedGame.metadata.estimatedMinutes} min
+                {' \u2022 '}
+                {currentGame.generatedGame.metadata.playerCount.min}-
+                {currentGame.generatedGame.metadata.playerCount.max} players
+              </Typography>
+            </>
+          )}
+
           {currentGame.generatedGame.storyIntro && (
             <Typography color="text.secondary" sx={{ mb: 2, fontStyle: 'italic' }}>
               {currentGame.generatedGame.storyIntro}
             </Typography>
           )}
-          <Typography color="text.secondary" sx={{ mb: 1 }}>
-            {currentGame.generatedGame.board.totalSpaces} spaces
-            {' \u2022 '}
-            {currentGame.generatedGame.challengeCards.length} challenge cards
-            {' \u2022 '}
-            {currentGame.generatedGame.rules.length} rules
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            {currentGame.generatedGame.metadata.estimatedMinutes} min
-            {' \u2022 '}
-            {currentGame.generatedGame.metadata.playerCount.min}-
-            {currentGame.generatedGame.metadata.playerCount.max} players
-          </Typography>
+
           <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
             <Button
               variant="contained"
@@ -250,6 +357,8 @@ export default function WorkshopPage() {
         <GamePlayView
           game={currentGame.generatedGame}
           gameId={currentGame.id}
+          storyPlayers={currentGame.storyInputs.players}
+          generatedArt={currentGame.generatedArt}
           onFinished={handleGameFinished}
         />
       )}
