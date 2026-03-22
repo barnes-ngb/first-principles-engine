@@ -8,6 +8,7 @@ import type { StoryInputs } from '../../core/types'
 import { useTTS } from '../../core/hooks/useTTS'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useWorkshopWizard } from './useWorkshopWizard'
+import type { WizardState } from './useWorkshopWizard'
 import ThemeStep from './steps/ThemeStep'
 import PlayersStep from './steps/PlayersStep'
 import GoalStep from './steps/GoalStep'
@@ -29,10 +30,14 @@ const STEP_PROMPTS = [
 interface WorkshopWizardProps {
   onComplete: (inputs: StoryInputs) => void
   onCancel: () => void
+  /** Called after each step "Next" — saves draft to Firestore */
+  onStepSave?: (state: WizardState, step: number) => Promise<string | null>
+  /** Initial state for resuming a draft */
+  initialState?: Partial<WizardState>
 }
 
-export default function WorkshopWizard({ onComplete, onCancel }: WorkshopWizardProps) {
-  const wizard = useWorkshopWizard()
+export default function WorkshopWizard({ onComplete, onCancel, onStepSave, initialState }: WorkshopWizardProps) {
+  const wizard = useWorkshopWizard(initialState)
   const tts = useTTS()
   const lastSpokenStep = useRef(-1)
   const { activeChildId } = useActiveChild()
@@ -65,7 +70,10 @@ export default function WorkshopWizard({ onComplete, onCancel }: WorkshopWizardP
       tts.cancel()
       onComplete(wizard.buildStoryInputs())
     } else {
+      // Save draft after each step
+      const nextStep = wizard.state.step + 1
       wizard.nextStep()
+      onStepSave?.(wizard.state, nextStep)
     }
   }
 
@@ -74,6 +82,8 @@ export default function WorkshopWizard({ onComplete, onCancel }: WorkshopWizardP
   }
 
   const handleCancel = () => {
+    // Save current progress before cancelling (draft persists)
+    onStepSave?.(wizard.state, wizard.state.step)
     tts.cancel()
     wizard.reset()
     onCancel()

@@ -64,8 +64,8 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
 
 // ── Hook ──────────────────────────────────────────────────────────
 
-export function useWorkshopWizard() {
-  const [state, dispatch] = useReducer(wizardReducer, initialState)
+export function useWorkshopWizard(initial?: Partial<WizardState>) {
+  const [state, dispatch] = useReducer(wizardReducer, { ...initialState, ...initial })
 
   const setTheme = useCallback((theme: string) => dispatch({ type: 'SET_THEME', theme }), [])
   const setPlayers = useCallback(
