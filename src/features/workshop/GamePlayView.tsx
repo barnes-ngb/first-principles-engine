@@ -3,7 +3,9 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Typography from '@mui/material/Typography'
-import type { GeneratedArt, GeneratedGame } from '../../core/types'
+import { doc, updateDoc } from 'firebase/firestore'
+import type { ActiveSession, GeneratedArt, GeneratedGame } from '../../core/types'
+import { db } from '../../core/firebase/firestore'
 import { useTTS } from '../../core/hooks/useTTS'
 import { TurnPhase } from '../../core/types/workshop'
 import GameBoard from './GameBoard'
@@ -25,41 +27,98 @@ const PLAYER_COLORS = ['#1976d2', '#d32f2f', '#388e3c', '#f57c00']
 interface GamePlayViewProps {
   game: GeneratedGame
   gameId?: string
+  familyId: string
   storyPlayers?: StoryPlayer[]
   generatedArt?: GeneratedArt
+  activeSession?: ActiveSession | null
   onFinished: (result: GamePlayResult) => void
 }
 
-export default function GamePlayView({ game, storyPlayers, generatedArt, onFinished }: GamePlayViewProps) {
+export default function GamePlayView({
+  game,
+  gameId,
+  familyId,
+  storyPlayers,
+  generatedArt,
+  activeSession,
+  onFinished,
+}: GamePlayViewProps) {
   const session = useGameSession(game)
   const tts = useTTS()
   const [hasStarted, setHasStarted] = useState(false)
   const gameStartTime = useRef<number>(Date.now())
 
-  // Start game on mount — use selected players from wizard if available
+  // Save activeSession to Firestore after each turn
+  const saveActiveSession = useCallback(
+    async (sessionData: ActiveSession) => {
+      if (!gameId || !familyId) return
+      try {
+        await updateDoc(
+          doc(db, `families/${familyId}/storyGames/${gameId}`),
+          { activeSession: sessionData, updatedAt: new Date().toISOString() },
+        )
+      } catch (err) {
+        console.warn('Failed to save active session:', err)
+      }
+    },
+    [gameId, familyId],
+  )
+
+  const buildActiveSessionData = useCallback((): ActiveSession => ({
+    players: session.state.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      avatarUrl: p.avatarUrl,
+      position: p.position,
+    })),
+    currentTurnIndex: session.state.currentPlayerIndex,
+    usedCardIds: session.state.cardsEncountered,
+    status: session.state.winner ? 'finished' : 'playing',
+    startedAt: session.state.startedAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }), [session.state])
+
+  // Start game on mount — restore from activeSession if available, otherwise use wizard players
   useEffect(() => {
     if (!hasStarted) {
-      const gamePlayers: Player[] | undefined = storyPlayers?.map((sp, i) => ({
-        id: sp.id,
-        name: sp.name,
-        color: PLAYER_COLORS[i % PLAYER_COLORS.length],
-        position: 0,
-        // Use existing avatar, or generated parent token as fallback
-        avatarUrl: sp.avatarUrl || generatedArt?.parentTokens?.[sp.id],
-      }))
-      session.startGame(gamePlayers)
-      setHasStarted(true)
-      gameStartTime.current = Date.now()
+      if (activeSession?.status === 'playing') {
+        // Restore from saved session
+        const restoredPlayers: Player[] = activeSession.players.map((sp, i) => ({
+          id: sp.id,
+          name: sp.name,
+          color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+          position: sp.position,
+          avatarUrl: sp.avatarUrl,
+        }))
+        session.restore(
+          restoredPlayers,
+          activeSession.currentTurnIndex,
+          activeSession.usedCardIds,
+        )
+        gameStartTime.current = new Date(activeSession.startedAt).getTime()
+      } else {
+        // Fresh game — use selected players from wizard
+        const gamePlayers: Player[] | undefined = storyPlayers?.map((sp, i) => ({
+          id: sp.id,
+          name: sp.name,
+          color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+          position: 0,
+          avatarUrl: sp.avatarUrl || generatedArt?.parentTokens?.[sp.id],
+        }))
+        session.startGame(gamePlayers)
+        gameStartTime.current = Date.now()
 
-      // Read rules and intro
-      const texts: string[] = []
-      if (game.storyIntro) texts.push(game.storyIntro)
-      for (const rule of game.rules) {
-        texts.push(rule.readAloudText)
+        // Read rules and intro
+        const texts: string[] = []
+        if (game.storyIntro) texts.push(game.storyIntro)
+        for (const rule of game.rules) {
+          texts.push(rule.readAloudText)
+        }
+        if (texts.length > 0) {
+          tts.speakQueue(texts)
+        }
       }
-      if (texts.length > 0) {
-        tts.speakQueue(texts)
-      }
+      setHasStarted(true)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -91,6 +150,23 @@ export default function GamePlayView({ game, storyPlayers, generatedArt, onFinis
     }
     session.nextTurn()
   }, [session, tts, onFinished])
+
+  // Save session to Firestore after each turn completes (when turnPhase transitions to Roll for next player)
+  useEffect(() => {
+    if (!hasStarted) return
+    if (session.state.turnPhase === TurnPhase.Roll && session.state.currentPlayerIndex >= 0) {
+      saveActiveSession(buildActiveSessionData())
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.state.currentPlayerIndex, session.state.turnPhase])
+
+  // Also save when game starts (initial playing state)
+  useEffect(() => {
+    if (hasStarted && !activeSession && session.state.startedAt) {
+      saveActiveSession(buildActiveSessionData())
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasStarted])
 
   // Announce current player's turn
   useEffect(() => {

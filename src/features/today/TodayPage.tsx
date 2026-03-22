@@ -94,6 +94,7 @@ import RoutineSection from './RoutineSection'
 import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
+import WorkshopGameCards from './WorkshopGameCards'
 import { calculateXp } from './xp'
 
 const subjectBucketColor: Record<string, string> = {
@@ -865,6 +866,11 @@ export default function TodayPage() {
             </Typography>
           )}
         </Box>
+      )}
+
+      {/* --- Workshop Game Cards --- */}
+      {familyId && children.length > 0 && (
+        <WorkshopGameCards familyId={familyId} children={children} />
       )}
 
       {/* --- Today's Plan checklist (PRIMARY) --- */}

@@ -28,7 +28,9 @@ import MinecraftAvatar from '../minecraft/MinecraftAvatar'
 import MinecraftXpBar from '../minecraft/MinecraftXpBar'
 import { useXpLedger } from '../minecraft/useXpLedger'
 import { useDraftBook } from '../books/useBook'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import ExplorerMap from './ExplorerMap'
+import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
 import { calculateXp } from './xp'
 
@@ -137,6 +139,7 @@ export default function KidTodayView({
 
   // Draft book for "Continue your book" card
   const { draftBook } = useDraftBook(familyId, child.id)
+  const { children: allChildren } = useActiveChild()
 
   const checklist = useMemo(() => dayLog.checklist ?? [], [dayLog.checklist])
   const { mustDo, choose } = useMemo(() => categorizeItems(checklist), [checklist])
@@ -342,6 +345,11 @@ export default function KidTodayView({
             📖 {weekFocus.scriptureRef}
           </Typography>
         </Box>
+      )}
+
+      {/* Workshop game cards */}
+      {familyId && allChildren.length > 0 && (
+        <WorkshopGameCards familyId={familyId} childId={child.id} children={allChildren} />
       )}
 
       {/* MVD warm message */}
