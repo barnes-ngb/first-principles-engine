@@ -834,6 +834,12 @@ PHONEME DISPLAY RULES:
 - Level 4+: Set phonemeDisplay to null. Do NOT show phoneme breakdowns at higher levels.
 - If showing phonemes, use the format: "Sound it out: /s/ /t/ /o/ /p/"
 
+CRITICAL ANSWER MATCHING RULE:
+- The "correctAnswer" field MUST exactly match one of the strings in the "options" array.
+- For fill-in-the-blank: if options are ["sh", "th", "ch"], then correctAnswer MUST be "th" — NOT "then".
+- For word identification: if options are ["stop", "step", "top"], then correctAnswer MUST be one of those exact strings.
+- ALWAYS: correctAnswer === options[correctIndex] must be true. No exceptions.
+
 QUESTION GENERATION RULES:
 1. Generate ONE multiple-choice question at a time
 2. Always provide exactly 3 options

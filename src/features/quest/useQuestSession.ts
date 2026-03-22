@@ -11,6 +11,7 @@ import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot
 import type { EvaluationDomain } from '../../core/types/enums'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
 import { calculateStreak, computeNextState, formatSkillLabel, shouldEndSession } from './questAdaptive'
+import { checkAnswer } from './questHelpers'
 import type {
   InteractiveSessionData,
   QuestQuestion,
@@ -522,7 +523,7 @@ export function useQuestSession() {
       if (!currentQuestion || !questState || !activeChildId) return
 
       const responseTimeMs = Date.now() - questionStartRef.current
-      const correct = childAnswer.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase()
+      const correct = checkAnswer(childAnswer, currentQuestion)
 
       const sessionQ: SessionQuestion = {
         id: currentQuestion.id,

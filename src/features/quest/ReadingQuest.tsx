@@ -3,6 +3,7 @@ import CircularProgress from '@mui/material/CircularProgress'
 import LinearProgress from '@mui/material/LinearProgress'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import { sanitizeStimulus } from './questHelpers'
 import type { QuestQuestion, QuestState } from './questTypes'
 import { MAX_QUESTIONS } from './questTypes'
 
@@ -174,9 +175,10 @@ export default function QuestQuestionScreen({
 }: QuestQuestionScreenProps) {
   const progress = (questState.totalQuestions / MAX_QUESTIONS) * 100
 
+  // Sanitize stimulus (strips leaked answers in fill-in-blank)
   // Defensive fallback: if prompt asks "What word is this?" but AI omitted stimulus,
   // use the correct answer as the display word so Lincoln isn't guessing blind
-  const displayStimulus = question.stimulus
+  const displayStimulus = sanitizeStimulus(question)
     || (/what word/i.test(question.prompt) ? question.correctAnswer : undefined)
 
   return (
