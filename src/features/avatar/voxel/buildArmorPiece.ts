@@ -172,28 +172,44 @@ const W = 0xffffff
 function buildHelmet(U: number): THREE.Group {
   const group = new THREE.Group()
 
-  // Outer shell — head (8U) but ~1px bigger all around = 10U
-  const shell = taggedBox(U * 10, U * 9, U * 10, W, 'primary', 'helmet_dome')
+  // Head is 8U × 8U × 8U centered at Y = U*28.
+  // Helmet is a slightly-larger shell (9.2U wide/deep, 8.4U tall) that wraps around.
+  const shell = taggedBox(U * 9.2, U * 8.4, U * 9.2, W, 'primary', 'helmet_dome')
   shell.position.y = U * 28.2
   group.add(shell)
 
-  // Visor opening (dark inset on front)
-  const visor = taggedFlatBox(U * 6, U * 3, U * 0.8, 0x111111, 'detail', 'helmet_visor')
-  visor.position.set(0, U * 28, U * 5.2)
-  group.add(visor)
+  // Face opening — dark inset on front creates the illusion of depth
+  const faceOpening = taggedFlatBox(U * 5.6, U * 4.0, U * 0.4, 0x111111, 'detail', 'helmet_visor')
+  faceOpening.position.set(0, U * 27.4, U * 4.65)
+  group.add(faceOpening)
 
-  // Top ridge / crest
-  const crest = taggedBox(U * 2, U * 2, U * 10, W, 'accent', 'helmet_crest')
-  crest.position.set(0, U * 33, 0)
+  // Brow ridge — horizontal bar above the face opening
+  const brow = taggedBox(U * 6.4, U * 1.0, U * 1.4, W, 'accent', 'helmet_brow')
+  brow.position.set(0, U * 29.8, U * 4.2)
+  group.add(brow)
+
+  // Nose guard — thin vertical bar down the center of the face
+  const noseGuard = taggedFlatBox(U * 0.5, U * 3.2, U * 0.6, W, 'accent', 'helmet_noseguard')
+  noseGuard.position.set(0, U * 27.6, U * 4.75)
+  group.add(noseGuard)
+
+  // Top crest — raised ridge running front to back
+  const crest = taggedBox(U * 1.0, U * 1.2, U * 8.0, W, 'accent', 'helmet_crest')
+  crest.position.set(0, U * 33.0, 0)
   group.add(crest)
 
-  // Cheek guards
-  const cheekL = taggedBox(U * 1, U * 3, U * 2, W, 'primary', 'helmet_cheekL')
-  cheekL.position.set(-U * 5, U * 27, U * 3)
+  // Cheek guards — frame the face on each side
+  const cheekL = taggedBox(U * 0.6, U * 2.4, U * 3.2, W, 'primary', 'helmet_cheekL')
+  cheekL.position.set(-U * 4.4, U * 26.0, U * 1.6)
   group.add(cheekL)
-  const cheekR = taggedBox(U * 1, U * 3, U * 2, W, 'primary', 'helmet_cheekR')
-  cheekR.position.set(U * 5, U * 27, U * 3)
+  const cheekR = taggedBox(U * 0.6, U * 2.4, U * 3.2, W, 'primary', 'helmet_cheekR')
+  cheekR.position.set(U * 4.4, U * 26.0, U * 1.6)
   group.add(cheekR)
+
+  // Neck guard — extends slightly below head at the back
+  const neckGuard = taggedBox(U * 8.0, U * 2.0, U * 1.2, W, 'primary', 'helmet_neckguard')
+  neckGuard.position.set(0, U * 24.4, -U * 4.2)
+  group.add(neckGuard)
 
   return group
 }
@@ -300,31 +316,50 @@ function buildShield(U: number): THREE.Group {
   const group = new THREE.Group()
   group.userData.attachToArm = 'L'
 
-  // Main shield face — tall rectangle
-  const face = taggedBox(U * 1.5, U * 10, U * 8, W, 'primary', 'shield_body')
-  face.position.set(-U * 3.5, -U * 7, U * 0.3)
+  // Main shield body — thicker, more substantial
+  const body = taggedBox(U * 1.4, U * 11.2, U * 8, W, 'primary', 'shield_body')
+  body.position.set(-U * 3.5, -U * 7, U * 0.3)
+  group.add(body)
+
+  // Front face panel — slightly lighter accent
+  const face = taggedFlatBox(U * 0.3, U * 10.4, U * 7.2, W, 'accent', 'shield_face')
+  face.position.set(-U * 4.3, -U * 7, U * 0.3)
   group.add(face)
 
-  // Shield boss (center bump)
-  const boss = taggedFlatBox(U * 1, U * 3, U * 3, W, 'accent', 'shield_boss')
-  boss.position.set(-U * 4.5, -U * 7, U * 0.3)
-  group.add(boss)
+  // Cross emblem on shield front — vertical bar
+  const crossV = taggedFlatBox(U * 0.2, U * 8.0, U * 1.0, W, 'accent', 'shield_cross_v')
+  crossV.userData.isAccent = true
+  crossV.position.set(-U * 4.5, -U * 7, U * 0.3)
+  group.add(crossV)
 
-  // Shield rim (top and bottom)
-  const rimTop = taggedBox(U * 1.6, U * 0.8, U * 8.4, W, 'accent', 'shield_rim_top')
-  rimTop.position.set(-U * 3.5, -U * 2, U * 0.3)
+  // Cross emblem — horizontal bar
+  const crossH = taggedFlatBox(U * 0.2, U * 1.0, U * 5.6, W, 'accent', 'shield_cross_h')
+  crossH.userData.isAccent = true
+  crossH.position.set(-U * 4.5, -U * 5.6, U * 0.3)
+  group.add(crossH)
+
+  // Rim — top
+  const rimTop = taggedBox(U * 1.5, U * 0.5, U * 8.2, W, 'accent', 'shield_rim_top')
+  rimTop.position.set(-U * 3.5, -U * 1.4, U * 0.3)
   group.add(rimTop)
-  const rimBot = taggedBox(U * 1.6, U * 0.8, U * 8.4, W, 'accent', 'shield_rim_bot')
-  rimBot.position.set(-U * 3.5, -U * 12, U * 0.3)
+  // Rim — bottom
+  const rimBot = taggedBox(U * 1.5, U * 0.5, U * 8.2, W, 'accent', 'shield_rim_bot')
+  rimBot.position.set(-U * 3.5, -U * 12.6, U * 0.3)
   group.add(rimBot)
+  // Rim — left side
+  const rimL = taggedBox(U * 1.5, U * 11.2, U * 0.5, W, 'accent', 'shield_rim_l')
+  rimL.position.set(-U * 3.5, -U * 7, U * 4.3)
+  group.add(rimL)
+  // Rim — right side
+  const rimR = taggedBox(U * 1.5, U * 11.2, U * 0.5, W, 'accent', 'shield_rim_r')
+  rimR.position.set(-U * 3.5, -U * 7, -U * 3.7)
+  group.add(rimR)
 
-  // Cross on shield front
-  const sCrossV = taggedFlatBox(U * 0.3, U * 6, U * 1, W, 'accent', 'shield_cross_v')
-  sCrossV.position.set(-U * 4.3, -U * 7, U * 0.3)
-  group.add(sCrossV)
-  const sCrossH = taggedFlatBox(U * 0.3, U * 1, U * 4, W, 'accent', 'shield_cross_h')
-  sCrossH.position.set(-U * 4.3, -U * 6, U * 0.3)
-  group.add(sCrossH)
+  // Center boss (raised square — Minecraft style)
+  const boss = taggedFlatBox(U * 0.4, U * 2.0, U * 2.0, W, 'accent', 'shield_boss')
+  boss.userData.isAccent = true
+  boss.position.set(-U * 4.6, -U * 7, U * 0.3)
+  group.add(boss)
 
   return group
 }
@@ -336,42 +371,72 @@ function buildSword(U: number): THREE.Group {
   const group = new THREE.Group()
   group.userData.attachToArm = 'R'
 
-  // Grip — near the hand at bottom of arm
+  // Grip — leather brown, near the hand at bottom of arm
   const grip = box(U * 1.2, U * 4, U * 1.5, 0x4a3728)
   grip.userData.materialRole = 'detail'
   grip.name = 'sword_grip'
   grip.position.set(U * 3, -U * 11, 0)
   group.add(grip)
 
-  // Crossguard — just above grip
+  // Crossguard — uses tier accent color
   const guard = taggedFlatBox(U * 1, U * 1.5, U * 5, W, 'accent', 'sword_crossguard')
+  guard.userData.isAccent = true
   guard.position.set(U * 3, -U * 8.5, 0)
   group.add(guard)
 
-  // Blade — extends upward from crossguard (always light blue = Word of God)
-  const blade = taggedBox(U * 1, U * 16, U * 2, 0x87ceeb, 'primary', 'sword_blade')
+  // Blade — glowing light blue (Sword of the Spirit = Word of God)
+  const bladeMat = new THREE.MeshLambertMaterial({
+    color: 0x87ceeb,
+    emissive: new THREE.Color(0x2196f3),
+    emissiveIntensity: 0.3,
+  })
+  const blade = new THREE.Mesh(
+    new THREE.BoxGeometry(U * 1, U * 16, U * 2),
+    bladeMat,
+  )
+  blade.name = 'sword_blade'
+  blade.userData.materialRole = 'sword_blade' // Skip tier override — keep blue glow
   blade.position.set(U * 3, U * 0.5, 0)
   group.add(blade)
 
-  // Blade edge highlight
-  const edge = box(U * 0.3, U * 14, U * 0.5, 0xb0e0e6)
-  edge.userData.materialRole = 'detail'
+  // Blade edge highlight — brighter strip
+  const edgeMat = new THREE.MeshLambertMaterial({
+    color: 0xb0e0e6,
+    emissive: new THREE.Color(0x4fc3f7),
+    emissiveIntensity: 0.4,
+  })
+  const edge = new THREE.Mesh(
+    new THREE.BoxGeometry(U * 0.3, U * 14, U * 0.5),
+    edgeMat,
+  )
   edge.name = 'sword_edge'
+  edge.userData.materialRole = 'sword_blade' // Skip tier override
   edge.position.set(U * 3, U * 1.5, U * 1)
   group.add(edge)
 
   // Blade tip
-  const tip = taggedBox(U * 0.8, U * 2, U * 1.5, 0xadd8e6, 'primary', 'sword_tip')
+  const tipMat = new THREE.MeshLambertMaterial({
+    color: 0xadd8e6,
+    emissive: new THREE.Color(0x2196f3),
+    emissiveIntensity: 0.25,
+  })
+  const tip = new THREE.Mesh(
+    new THREE.BoxGeometry(U * 0.8, U * 2, U * 1.5),
+    tipMat,
+  )
+  tip.name = 'sword_tip'
+  tip.userData.materialRole = 'sword_blade' // Skip tier override
   tip.position.set(U * 3, U * 9, 0)
   group.add(tip)
 
-  // Pommel — below grip
+  // Pommel — below grip, uses tier accent
   const pommel = taggedFlatBox(U * 1.5, U * 1.5, U * 1.5, W, 'accent', 'sword_pommel')
+  pommel.userData.isAccent = true
   pommel.position.set(U * 3, -U * 13.5, 0)
   group.add(pommel)
 
-  // Glow effect on blade
-  const glowLight = new THREE.PointLight(0x87ceeb, 0.4, 3)
+  // Point light for glow effect
+  const glowLight = new THREE.PointLight(0x87ceeb, 0.8, 3)
   glowLight.position.set(U * 3, U * 2, U * 2)
   group.add(glowLight)
 
