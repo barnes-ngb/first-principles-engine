@@ -37,10 +37,12 @@ function parseQuestBlock(text: string): QuestQuestion | null {
       level: parsed.level ?? 2,
       skill: parsed.skill ?? '',
       prompt: parsed.prompt ?? '',
+      stimulus: parsed.stimulus ?? undefined,
       phonemeDisplay: parsed.phonemeDisplay,
       options: parsed.options ?? [],
       correctAnswer: parsed.correctAnswer ?? '',
       encouragement: parsed.encouragement,
+      isBonusRound: parsed.bonusRound ?? undefined,
     }
   } catch {
     return null

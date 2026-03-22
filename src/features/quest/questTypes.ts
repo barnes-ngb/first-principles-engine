@@ -41,10 +41,12 @@ export interface QuestQuestion {
   level: number
   skill: string // e.g. "phonics.cvc.short-o"
   prompt: string // what Lincoln sees
-  phonemeDisplay?: string // e.g. "/d/ /o/ /g/" — shown above options
+  stimulus?: string // the word/content to display prominently (e.g. "stop")
+  phonemeDisplay?: string // e.g. "/d/ /o/ /g/" — shown above options (Levels 1-3 only)
   options: string[] // always 3 for multiple choice
   correctAnswer: string
   encouragement?: string // shown after wrong answer
+  isBonusRound?: boolean // true for end-on-a-win bonus question
 }
 
 // ── Answered question ─────────────────────────────────────────
