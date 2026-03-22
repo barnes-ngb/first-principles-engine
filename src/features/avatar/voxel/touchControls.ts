@@ -35,7 +35,6 @@ export function createTouchControls(canvas: HTMLCanvasElement): TouchControlStat
   // Swipe tracking
   let touchStartX = 0
   let touchStartTime = 0
-  let totalDragDistance = 0
 
   function onPointerDown(x: number) {
     state.isDragging = true
@@ -45,13 +44,11 @@ export function createTouchControls(canvas: HTMLCanvasElement): TouchControlStat
     state.lastInteractionTime = performance.now()
     touchStartX = x
     touchStartTime = performance.now()
-    totalDragDistance = 0
   }
 
   function onPointerMove(x: number) {
     if (!state.isDragging) return
     const dx = x - state.prevX
-    totalDragDistance += Math.abs(dx)
     state.velocityY = dx * DRAG_SENSITIVITY
     state.targetRotY += state.velocityY
     state.prevX = x
