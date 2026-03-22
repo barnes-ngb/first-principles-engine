@@ -3,7 +3,7 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Typography from '@mui/material/Typography'
-import type { GeneratedGame } from '../../core/types'
+import type { GeneratedArt, GeneratedGame } from '../../core/types'
 import { useTTS } from '../../core/hooks/useTTS'
 import { TurnPhase } from '../../core/types/workshop'
 import GameBoard from './GameBoard'
@@ -26,10 +26,11 @@ interface GamePlayViewProps {
   game: GeneratedGame
   gameId?: string
   storyPlayers?: StoryPlayer[]
+  generatedArt?: GeneratedArt
   onFinished: (result: GamePlayResult) => void
 }
 
-export default function GamePlayView({ game, storyPlayers, onFinished }: GamePlayViewProps) {
+export default function GamePlayView({ game, storyPlayers, generatedArt, onFinished }: GamePlayViewProps) {
   const session = useGameSession(game)
   const tts = useTTS()
   const [hasStarted, setHasStarted] = useState(false)
@@ -43,7 +44,8 @@ export default function GamePlayView({ game, storyPlayers, onFinished }: GamePla
         name: sp.name,
         color: PLAYER_COLORS[i % PLAYER_COLORS.length],
         position: 0,
-        avatarUrl: sp.avatarUrl,
+        // Use existing avatar, or generated parent token as fallback
+        avatarUrl: sp.avatarUrl || generatedArt?.parentTokens?.[sp.id],
       }))
       session.startGame(gamePlayers)
       setHasStarted(true)
@@ -149,6 +151,7 @@ export default function GamePlayView({ game, storyPlayers, onFinished }: GamePla
           avatarUrl: p.avatarUrl,
         }))}
         activeSpaceIndex={currentPlayer?.position}
+        boardBackground={generatedArt?.boardBackground}
       />
 
       {/* Controls */}
@@ -192,6 +195,7 @@ export default function GamePlayView({ game, storyPlayers, onFinished }: GamePla
         card={state.currentCard}
         open={state.turnPhase === TurnPhase.Card && state.currentCard !== null}
         onClose={handleDismissCard}
+        cardArt={generatedArt?.cardArt}
       />
     </Box>
   )

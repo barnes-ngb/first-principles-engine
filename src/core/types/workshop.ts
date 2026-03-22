@@ -17,6 +17,23 @@ export interface StoryGame {
 
   /** Play session records */
   playSessions?: GamePlaySession[]
+
+  /** DALL-E generated art assets */
+  generatedArt?: GeneratedArt
+}
+
+export interface GeneratedArt {
+  boardBackground?: string
+  titleScreen?: string
+  cardArt?: {
+    reading?: string
+    math?: string
+    story?: string
+    action?: string
+  }
+  parentTokens?: {
+    [parentId: string]: string
+  }
 }
 
 export interface StoryInputs {
