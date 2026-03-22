@@ -75,12 +75,12 @@ export function buildCharacter(
   const scale = ageGroup === 'younger' ? 0.88 : 1.0
   const U = 0.125 * scale // 1 Minecraft pixel
 
-  // Colors from features (with fallbacks)
-  const skinColor = new THREE.Color(features.skinTone ?? '#C4915E')
-  const hairColor = new THREE.Color(features.hairColor ?? '#4A3728')
-  const shirtColor = new THREE.Color('#4AA5C0') // Teal like Steve's shirt
-  const pantsColor = new THREE.Color('#3B3B6D') // Indigo like Steve's pants
-  const shoeColor = new THREE.Color('#555555')
+  // Colors from features (with fallbacks) — skin & hair from photo, clothes are fixed defaults
+  const skinColor = new THREE.Color(features.skinTone ?? '#F0D0B0')
+  const hairColor = new THREE.Color(features.hairColor ?? '#7B5B3A')
+  const shirtColor = new THREE.Color('#A0A0A0') // Gray (like Lincoln's Minecraft tee)
+  const pantsColor = new THREE.Color('#2E3A50') // Dark navy (like his actual shorts)
+  const shoeColor = new THREE.Color('#3D3D3D')
 
   // --- HEAD (8×8×8 = 1×1×1) ---
   const head = texturedBox(U * 8, U * 8, U * 8, skinColor, 'head')
@@ -118,6 +118,18 @@ export function buildCharacter(
   const torso = texturedBox(U * 8, U * 12, U * 4, shirtColor, 'torso')
   torso.position.y = U * 18 // Center of body
   character.add(torso)
+
+  // Creeper face on gray shirt — green pixel art detail
+  const creeperGreen = 0x4CAF50
+  const cEyeL = box(U * 1.2, U * 1.2, U * 0.3, creeperGreen, 'creeperEyeL')
+  cEyeL.position.set(-U * 1.5, U * 20, U * 2.15)
+  character.add(cEyeL)
+  const cEyeR = box(U * 1.2, U * 1.2, U * 0.3, creeperGreen, 'creeperEyeR')
+  cEyeR.position.set(U * 1.5, U * 20, U * 2.15)
+  character.add(cEyeR)
+  const cMouth = box(U * 2, U * 1, U * 0.3, creeperGreen, 'creeperMouth')
+  cMouth.position.set(0, U * 17.5, U * 2.15)
+  character.add(cMouth)
 
   // --- ARMS (4×12×4 each) ---
   // Geometry is shifted so pivot point is at the SHOULDER (top of arm),
