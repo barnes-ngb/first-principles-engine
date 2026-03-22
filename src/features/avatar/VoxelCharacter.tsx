@@ -8,13 +8,14 @@ import { XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import { buildCharacter } from './voxel/buildCharacter'
 import { buildArmorPiece, VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import { animateEquip, animateUnequip, animateJump, animateNod, animateSwordFlourish, animateHipTurn, animateTorsoPuff } from './voxel/equipAnimation'
-import { createTouchControls, updateRotation } from './voxel/touchControls'
+import { createTouchControls, updateRotation, destroyTouchControls } from './voxel/touchControls'
 import type { TouchControlState } from './voxel/touchControls'
 import { applyTierToArmor, calculateTier, animateTierUpgrade, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
 import { PoseAnimator, POSES, POSE_EXPRESSIONS, applyExpression, getEquipmentIdlePose } from './voxel/poseSystem'
 import type { Pose } from './voxel/poseSystem'
 import { applyPaintedFace } from './voxel/pixelFace'
 import { buildHelmHair } from './voxel/buildHair'
+import { frameCameraToCharacter } from './voxel/cameraUtils'
 
 interface VoxelCharacterProps {
   features: CharacterFeatures | undefined
@@ -121,7 +122,7 @@ function enforceArmorOpacity(
 }
 
 /** Build a Minecraft-block-style platform at the character's feet */
-function buildPlatform(ageGroup: 'older' | 'younger'): THREE.Group {
+function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): THREE.Group {
   const scale = ageGroup === 'younger' ? 0.88 : 1.0
   const U = 0.125 * scale
   const blockSize = U * 8 // One Minecraft block = 8 pixels
@@ -132,8 +133,9 @@ function buildPlatform(ageGroup: 'older' | 'younger'): THREE.Group {
     for (let z = -1; z <= 0; z++) {
       const block = new THREE.Group()
 
-      // Main block body (slightly darker)
-      const sideColor = new THREE.Color(0x555555).multiplyScalar(0.7 + Math.random() * 0.15)
+      // Main block body — tinted toward tier color
+      const baseHex = tierBaseColor ?? 0x555555
+      const sideColor = new THREE.Color(baseHex).multiplyScalar(0.7 + Math.random() * 0.15)
       const mainGeo = new THREE.BoxGeometry(
         blockSize * 0.98,
         blockSize * 0.98,
@@ -256,17 +258,19 @@ export default function VoxelCharacter({
 
     // Scene — dark with slight blue tint
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0x111122)
+    scene.background = new THREE.Color(0x1a1a2e)
     sceneRef.current = scene
 
     // Background particles (stars)
     addBackgroundParticles(scene)
 
-    // Camera — framing the taller Steve-proportioned character
+    // Camera — auto-framed to fit character
     const camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 100)
     camera.position.set(0, 2.2, 10.5)
     camera.lookAt(0, 1.8, 0)
     cameraRef.current = camera
+
+    // Will be re-framed after character + armor are built (below)
 
     // ── Dramatic lighting for depth ──────────────────────────────
     const keyLight = new THREE.DirectionalLight(0xFFF5E6, 1.0)
@@ -377,10 +381,15 @@ export default function VoxelCharacter({
       applyHelmHairStyle(character, true, resolvedFeatures)
     }
 
-    // Platform
-    const platform = buildPlatform(ageGroup)
+    // Platform — tinted to match tier
+    const tierTint = getTierTint(currentTier)
+    const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
+    const platform = buildPlatform(ageGroup, tierMat.primary)
     platform.position.y = character.position.y
     scene.add(platform)
+
+    // Auto-frame camera to fit the fully-built character with armor
+    frameCameraToCharacter(camera, character, 1.35)
 
     // Shadow on platform surface
     const scale = ageGroup === 'younger' ? 0.88 : 1.0
@@ -463,6 +472,19 @@ export default function VoxelCharacter({
         // Gentle bob
         characterRef.current.position.y = baseY + Math.sin(time * 1.2) * 0.03
 
+        // Idle blink — every 3-6 seconds, close eyes briefly
+        const blinkCycle = time % (3 + Math.sin(time * 0.37) * 1.5) // Varies between 1.5-4.5s
+        const isBlinking = blinkCycle < 0.12 // 120ms blink
+        const eyeNames = ['eyeWhiteL', 'eyeWhiteR', 'pupilL', 'pupilR']
+        if (!poseAnimator.playing) {
+          for (const eName of eyeNames) {
+            const eyeMesh = characterRef.current.getObjectByName(eName)
+            if (eyeMesh) {
+              eyeMesh.scale.y = isBlinking ? 0.1 : 1
+            }
+          }
+        }
+
         const armLObj = characterRef.current.getObjectByName('armL')
         const armRObj = characterRef.current.getObjectByName('armR')
         const headObj = characterRef.current.getObjectByName('head')
@@ -528,6 +550,32 @@ export default function VoxelCharacter({
 
     return () => {
       cancelAnimationFrame(rafRef.current)
+
+      // Clean up touch control window event listeners
+      if (controlsRef.current) {
+        destroyTouchControls(controlsRef.current)
+      }
+
+      // Dispose all Three.js geometries and materials to prevent memory leaks
+      if (sceneRef.current) {
+        sceneRef.current.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.geometry.dispose()
+            if (Array.isArray(obj.material)) {
+              obj.material.forEach((m) => m.dispose())
+            } else {
+              obj.material.dispose()
+            }
+          }
+          if (obj instanceof THREE.Points) {
+            obj.geometry.dispose()
+            if (obj.material instanceof THREE.PointsMaterial) {
+              obj.material.dispose()
+            }
+          }
+        })
+      }
+
       rendererRef.current?.dispose()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -725,7 +773,7 @@ export default function VoxelCharacter({
         borderRadius: '12px',
         border: '1px solid rgba(76, 175, 80, 0.15)',
         overflow: 'hidden',
-        bgcolor: '#111122',
+        bgcolor: '#1a1a2e',
         cursor: 'grab',
         '&:active': { cursor: 'grabbing' },
         userSelect: 'none',
