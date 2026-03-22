@@ -5,6 +5,7 @@ import type { CharacterFeatures } from '../../core/types'
 import { DEFAULT_CHARACTER_FEATURES } from '../../core/types'
 import { buildCharacter } from './voxel/buildCharacter'
 import { buildArmorPiece } from './voxel/buildArmorPiece'
+import { frameCameraToCharacter } from './voxel/cameraUtils'
 
 interface AvatarThumbnailProps {
   features?: CharacterFeatures
@@ -66,7 +67,7 @@ export default function AvatarThumbnail({
           }
         })
 
-        // Attach sword/shield to arms
+        // Attach sword/shield to arms; move breastplate arm covers to arms
         const attachTo = piece.userData.attachToArm as string | undefined
         if (attachTo === 'R') {
           const armR = character.getObjectByName('armR')
@@ -77,6 +78,19 @@ export default function AvatarThumbnail({
           if (armL) armL.add(piece)
           else character.add(piece)
         } else {
+          // Move arm-cover children to their respective arms
+          const armChildren: THREE.Object3D[] = []
+          piece.traverse((child) => {
+            if (child.userData.attachToArm) armChildren.push(child)
+          })
+          for (const child of armChildren) {
+            piece.remove(child)
+            const targetArm = child.userData.attachToArm === 'L'
+              ? character.getObjectByName('armL')
+              : character.getObjectByName('armR')
+            if (targetArm) targetArm.add(child)
+            else character.add(child)
+          }
           character.add(piece)
         }
       }
@@ -91,14 +105,7 @@ export default function AvatarThumbnail({
     scene.add(dir)
 
     // Frame camera to character
-    const box = new THREE.Box3().setFromObject(character)
-    const center = box.getCenter(new THREE.Vector3())
-    const bSize = box.getSize(new THREE.Vector3())
-    const maxDim = Math.max(bSize.x, bSize.y, bSize.z)
-    const fov = camera.fov * (Math.PI / 180)
-    const distance = (maxDim / (2 * Math.tan(fov / 2))) * 1.3
-    camera.position.set(center.x, center.y, center.z + distance)
-    camera.lookAt(center)
+    frameCameraToCharacter(camera, character, 1.3)
 
     // Slight angle for visual interest
     character.rotation.y = -0.3

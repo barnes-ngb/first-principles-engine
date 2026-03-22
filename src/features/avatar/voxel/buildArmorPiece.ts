@@ -222,12 +222,16 @@ function buildBreastplate(U: number): THREE.Group {
   shoulderR.position.set(U * 6.5, U * 24, 0)
   group.add(shoulderR)
 
-  // Arm covers (armor sleeves)
+  // Arm covers (armor sleeves) — stored in userData for attachment to arms later
+  // They need to be children of the arm meshes so they rotate with them.
+  // Positions are in arm-local space (shoulder pivot at Y=0, arm extends downward).
   const armArmorL = taggedBox(U * 5, U * 10, U * 5, W, 'primary', 'arm_armor_l')
-  armArmorL.position.set(-U * 6, U * 18, 0)
+  armArmorL.position.set(0, -U * 6, 0) // Centered on arm in local space
+  armArmorL.userData.attachToArm = 'L'
   group.add(armArmorL)
   const armArmorR = taggedBox(U * 5, U * 10, U * 5, W, 'primary', 'arm_armor_r')
-  armArmorR.position.set(U * 6, U * 18, 0)
+  armArmorR.position.set(0, -U * 6, 0)
+  armArmorR.userData.attachToArm = 'R'
   group.add(armArmorR)
 
   // Bottom trim
