@@ -10,6 +10,8 @@ export interface TouchControlState {
   lastInteractionTime: number
   /** Set externally to receive swipe callbacks */
   onSwipe?: (direction: 'left' | 'right') => void
+  /** Internal cleanup function — call on unmount */
+  _cleanup?: () => void
 }
 
 const AUTO_ROTATE_DELAY = 4000
@@ -92,9 +94,11 @@ export function createTouchControls(canvas: HTMLCanvasElement): TouchControlStat
   window.addEventListener('mousemove', handleMouseMove)
   window.addEventListener('mouseup', handleMouseUp)
 
-  canvas.addEventListener('mouseleave', () => {
-    // Don't stop drag on leave — mouseup on window handles it
-  })
+  // Store cleanup function for proper disposal
+  state._cleanup = () => {
+    window.removeEventListener('mousemove', handleMouseMove)
+    window.removeEventListener('mouseup', handleMouseUp)
+  }
 
   return state
 }
@@ -125,10 +129,6 @@ export function updateRotation(
 }
 
 /** Clean up event listeners (call on unmount) */
-export function destroyTouchControls(canvas: HTMLCanvasElement): void {
-  // Event listeners added with { passive: true } and named functions
-  // can't easily be removed without storing references.
-  // Since the canvas is destroyed on unmount, this is acceptable.
-  // The canvas element removal handles cleanup.
-  void canvas
+export function destroyTouchControls(state: TouchControlState): void {
+  state._cleanup?.()
 }

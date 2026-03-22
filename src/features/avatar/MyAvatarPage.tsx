@@ -41,7 +41,7 @@ import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
-import { calculateTier, getTierBadgeColor, getTierTextColor } from './voxel/tierMaterials'
+import { calculateTier, getTierBadgeColor, getTierTextColor, TIERS } from './voxel/tierMaterials'
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -530,9 +530,18 @@ export default function MyAvatarPage() {
   const nextUnlock = profile ? getNextUnlock(profile) : null
   const allSixUnlocked = unlockedVoxel.length === 6
 
-  const xpProgress = nextUnlock && profile
-    ? Math.min((profile.totalXp / XP_THRESHOLDS[nextUnlock.piece.id]) * 100, 100)
-    : 100
+  // Calculate XP progress within the current tier range
+  const currentTierName = profile ? calculateTier(profile.totalXp) : 'WOOD'
+  const tierEntries = Object.entries(TIERS)
+  const currentTierIdx = tierEntries.findIndex(([k]) => k === currentTierName)
+  const tierMinXp = TIERS[currentTierName]?.minXp ?? 0
+  const nextTierEntry = currentTierIdx < tierEntries.length - 1 ? tierEntries[currentTierIdx + 1] : null
+  const tierMaxXp = nextTierEntry ? nextTierEntry[1].minXp : tierMinXp + 1000
+  const tierRange = tierMaxXp - tierMinXp
+  const xpInTier = profile ? profile.totalXp - tierMinXp : 0
+  const tierProgress = tierRange > 0 ? Math.min((xpInTier / tierRange) * 100, 100) : 100
+
+
 
   if (loading) {
     return (
@@ -640,7 +649,7 @@ export default function MyAvatarPage() {
             >
               {allSixUnlocked
                 ? 'Full armor on! Ready for today.'
-                : `${unlockedVoxel.length} of 6 pieces equipped — keep going!`}
+                : `${unlockedVoxel.length} of 6 ${currentTierName.toLowerCase()} pieces equipped — keep going!`}
             </Typography>
           </Box>
         ) : (
@@ -661,13 +670,13 @@ export default function MyAvatarPage() {
                 </Typography>
                 <LinearProgress
                   variant="determinate"
-                  value={xpProgress}
+                  value={tierProgress}
                   sx={{
                     height: 10,
                     borderRadius: isLincoln ? 0 : 5,
                     bgcolor: isLincoln ? '#222' : '#eee',
                     '& .MuiLinearProgress-bar': {
-                      bgcolor: accentColor,
+                      bgcolor: getTierTextColor(currentTierName),
                       borderRadius: isLincoln ? 0 : 5,
                     },
                   }}
