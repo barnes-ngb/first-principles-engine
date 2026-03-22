@@ -531,6 +531,7 @@ export function useQuestSession() {
         level: currentQuestion.level,
         skill: currentQuestion.skill,
         prompt: currentQuestion.prompt,
+        stimulus: currentQuestion.stimulus,
         options: currentQuestion.options,
         correctAnswer: currentQuestion.correctAnswer,
         childAnswer,
@@ -642,6 +643,103 @@ export function useQuestSession() {
     [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
   )
 
+  // ── Skip question ───────────────────────────────────────────
+
+  const handleSkip = useCallback(
+    async () => {
+      if (!currentQuestion || !questState || !activeChildId) return
+
+      const responseTimeMs = Date.now() - questionStartRef.current
+
+      // Record skipped question — does NOT count toward adaptive state
+      const sessionQ: SessionQuestion = {
+        id: currentQuestion.id,
+        type: 'multiple-choice',
+        level: currentQuestion.level,
+        skill: currentQuestion.skill,
+        prompt: currentQuestion.prompt,
+        stimulus: currentQuestion.stimulus,
+        options: currentQuestion.options,
+        correctAnswer: currentQuestion.correctAnswer,
+        childAnswer: '',
+        correct: false,
+        skipped: true,
+        responseTimeMs,
+        timestamp: new Date().toISOString(),
+      }
+
+      const updatedQuestions = [...answeredQuestions, sessionQ]
+      setAnsweredQuestions(updatedQuestions)
+
+      // DO NOT call computeNextState — skip doesn't affect adaptive state
+      // DO NOT increment totalQuestions — question counter stays the same
+
+      // Request replacement question at same level
+      setScreen(QuestScreen.Loading)
+
+      const recentQuestionTypes = updatedQuestions
+        .slice(-3)
+        .map((q) => q.prompt.slice(0, 50))
+
+      const userMessage: AIChatMessage = {
+        role: 'user',
+        content: JSON.stringify({
+          action: 'answer',
+          childAnswer: null,
+          correct: false,
+          skippedQuestion: {
+            text: currentQuestion.prompt,
+            type: currentQuestion.type,
+            skill: currentQuestion.skill,
+          },
+          instruction: 'The child skipped the previous question. Generate a DIFFERENT question at the same level testing a DIFFERENT skill or word. Do not repeat the skipped question.',
+          currentLevel: questState.currentLevel,
+          consecutiveCorrect: questState.consecutiveCorrect,
+          consecutiveWrong: questState.consecutiveWrong,
+          totalQuestions: questState.totalQuestions,
+          totalCorrect: questState.totalCorrect,
+          questionsThisLevel: questState.questionsThisLevel,
+          levelDownsInARow: questState.levelDownsInARow,
+          recentQuestionTypes,
+        }),
+      }
+
+      conversationRef.current.push(userMessage)
+
+      const response = await chat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.Quest,
+        messages: [...conversationRef.current],
+        domain: 'reading',
+      })
+
+      if (!response) {
+        // AI failed — end session gracefully
+        await endSession(updatedQuestions, questState, false)
+        return
+      }
+
+      conversationRef.current.push({ role: 'assistant', content: response.message })
+
+      const finding = extractQuestFinding(response.message)
+      if (finding) {
+        setFindings((prev) => [...prev, finding])
+      }
+
+      const question = parseQuestBlock(response.message)
+      if (!question) {
+        await endSession(updatedQuestions, questState, false)
+        return
+      }
+
+      setCurrentQuestion(question)
+      questionStartRef.current = Date.now()
+      setScreen(QuestScreen.Question)
+    },
+    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
+  )
+
   // ── Reset to intro ────────────────────────────────────────────
 
   const resetToIntro = useCallback(() => {
@@ -675,6 +773,7 @@ export function useQuestSession() {
     aiError,
     startQuest,
     submitAnswer,
+    handleSkip,
     resetToIntro,
   }
 }

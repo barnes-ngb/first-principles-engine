@@ -256,7 +256,9 @@ export default function KnowledgeMinePage() {
         <QuestQuestionScreen
           question={quest.currentQuestion}
           questState={quest.questState}
+          consecutiveWrong={quest.questState.consecutiveWrong}
           onAnswer={quest.submitAnswer}
+          onSkip={quest.handleSkip}
         />
       )}
 
