@@ -4,46 +4,55 @@ import { buildHair } from './buildHair'
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-function box(
+/** Create a box with per-face color variation for a Minecraft texture feel */
+function texturedBox(
   w: number,
   h: number,
   d: number,
-  material: THREE.Material,
+  baseColor: THREE.Color | number,
   name?: string,
 ): THREE.Mesh {
   const geo = new THREE.BoxGeometry(w, h, d)
-  const mesh = new THREE.Mesh(geo, material)
+  const color = baseColor instanceof THREE.Color ? baseColor : new THREE.Color(baseColor)
+
+  // Create material with slight variations per face
+  const materials: THREE.MeshLambertMaterial[] = []
+  for (let i = 0; i < 6; i++) {
+    const variation = 0.95 + Math.random() * 0.1 // 95% to 105% brightness
+    const faceColor = color.clone().multiplyScalar(variation)
+    materials.push(new THREE.MeshLambertMaterial({ color: faceColor }))
+  }
+
+  const mesh = new THREE.Mesh(geo, materials)
   if (name) mesh.name = name
   return mesh
 }
 
-// ── Body templates ──────────────────────────────────────────────────
-
-interface BodyTemplate {
-  head: { w: number; h: number; d: number }
-  torso: { w: number; h: number; d: number }
-  arm: { w: number; h: number; d: number }
-  leg: { w: number; h: number; d: number }
-  foot: { w: number; h: number; d: number }
+/** Flat-colored box for small detail pieces (eyes, mouth, etc.) */
+function box(
+  w: number,
+  h: number,
+  d: number,
+  color: THREE.Color | number,
+  name?: string,
+): THREE.Mesh {
+  const c = color instanceof THREE.Color ? color : new THREE.Color(color)
+  const geo = new THREE.BoxGeometry(w, h, d)
+  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: c }))
+  if (name) mesh.name = name
+  return mesh
 }
 
-const OLDER_BODY: BodyTemplate = {
-  head: { w: 1.0, h: 1.0, d: 1.0 },
-  torso: { w: 1.0, h: 1.2, d: 0.6 },
-  arm: { w: 0.4, h: 1.1, d: 0.5 },
-  leg: { w: 0.45, h: 1.1, d: 0.55 },
-  foot: { w: 0.45, h: 0.25, d: 0.65 },
-}
-
-const YOUNGER_BODY: BodyTemplate = {
-  head: { w: 1.0, h: 1.0, d: 1.0 },
-  torso: { w: 0.85, h: 1.0, d: 0.55 },
-  arm: { w: 0.35, h: 0.9, d: 0.45 },
-  leg: { w: 0.4, h: 0.85, d: 0.5 },
-  foot: { w: 0.4, h: 0.22, d: 0.6 },
-}
-
-// ── Build character ─────────────────────────────────────────────────
+// ── Build character (Minecraft Steve proportions) ───────────────────
+//
+// Steve proportions:
+//   Head:  8×8×8 px  → 1×1×1 units
+//   Body:  8×12×4 px → 1×1.5×0.5 units
+//   Arms:  4×12×4 px → 0.5×1.5×0.5 units
+//   Legs:  4×12×4 px → 0.5×1.5×0.5 units
+//   Total height = 1 + 1.5 + 1.5 = 4 units
+//
+// 1 pixel = U = 0.125 units at scale 1.0
 
 export function buildCharacter(
   features: CharacterFeatures,
@@ -52,116 +61,90 @@ export function buildCharacter(
   const character = new THREE.Group()
   character.name = 'character'
 
-  const tmpl = ageGroup === 'older' ? OLDER_BODY : YOUNGER_BODY
+  const scale = ageGroup === 'younger' ? 0.88 : 1.0
+  const U = 0.125 * scale // 1 Minecraft pixel
 
-  // Materials
-  const skinMat = new THREE.MeshLambertMaterial({ color: features.skinTone })
-  const shirtMat = new THREE.MeshLambertMaterial({ color: 0xffffff })
-  const shortsMat = new THREE.MeshLambertMaterial({ color: 0x607080 })
-  const shoeMat = new THREE.MeshLambertMaterial({ color: 0x333333 })
-  const eyeMat = new THREE.MeshLambertMaterial({
-    color: features.eyeColor ?? '#2c1810',
-  })
-  // mouthMat removed — mouth now uses inline material with smile color
+  // Colors from features (with fallbacks)
+  const skinColor = new THREE.Color(features.skinTone ?? '#C4915E')
+  const hairColor = new THREE.Color(features.hairColor ?? '#4A3728')
+  const shirtColor = new THREE.Color('#4AA5C0') // Teal like Steve's shirt
+  const pantsColor = new THREE.Color('#3B3B6D') // Indigo like Steve's pants
+  const shoeColor = new THREE.Color('#555555')
 
-  // Calculate Y positions (bottom-up)
-  const footY = tmpl.foot.h / 2
-  const legY = tmpl.foot.h + tmpl.leg.h / 2
-  const torsoY = tmpl.foot.h + tmpl.leg.h + tmpl.torso.h / 2
-  const headY = tmpl.foot.h + tmpl.leg.h + tmpl.torso.h + tmpl.head.h / 2
-  const armY = tmpl.foot.h + tmpl.leg.h + tmpl.torso.h - tmpl.arm.h / 2
-
-  // Head
-  const head = box(tmpl.head.w, tmpl.head.h, tmpl.head.d, skinMat, 'head')
-  head.position.y = headY
+  // --- HEAD (8×8×8 = 1×1×1) ---
+  const head = texturedBox(U * 8, U * 8, U * 8, skinColor, 'head')
+  head.position.y = U * 28 // Top of body + half head
   character.add(head)
 
-  // Eyes — white sclera with colored pupils
-  const whiteEyeMat = new THREE.MeshLambertMaterial({ color: 0xffffff })
-
-  const eyeWhiteL = box(0.18, 0.16, 0.06, whiteEyeMat, 'eyeWhiteL')
-  eyeWhiteL.position.set(-0.22, headY + 0.05, tmpl.head.d / 2 + 0.01)
+  // Face details (on the front of the head)
+  // Eyes — white sclera with dark pupils
+  const eyeWhiteL = box(U * 2, U * 1, U * 0.5, 0xffffff, 'eyeWhiteL')
+  eyeWhiteL.position.set(-U * 1.5, U * 28.5, U * 4.1)
   character.add(eyeWhiteL)
-  const pupilL = box(0.08, 0.10, 0.02, eyeMat, 'pupilL')
-  pupilL.position.set(-0.20, headY + 0.04, tmpl.head.d / 2 + 0.04)
+  const eyeColor = features.eyeColor ? new THREE.Color(features.eyeColor) : new THREE.Color(0x3d2b1f)
+  const pupilL = box(U * 1, U * 1, U * 0.3, eyeColor, 'pupilL')
+  pupilL.position.set(-U * 1, U * 28.5, U * 4.3)
   character.add(pupilL)
 
-  const eyeWhiteR = box(0.18, 0.16, 0.06, whiteEyeMat, 'eyeWhiteR')
-  eyeWhiteR.position.set(0.22, headY + 0.05, tmpl.head.d / 2 + 0.01)
+  const eyeWhiteR = box(U * 2, U * 1, U * 0.5, 0xffffff, 'eyeWhiteR')
+  eyeWhiteR.position.set(U * 1.5, U * 28.5, U * 4.1)
   character.add(eyeWhiteR)
-  const pupilR = box(0.08, 0.10, 0.02, eyeMat, 'pupilR')
-  pupilR.position.set(0.24, headY + 0.04, tmpl.head.d / 2 + 0.04)
+  const pupilR = box(U * 1, U * 1, U * 0.3, eyeColor, 'pupilR')
+  pupilR.position.set(U * 2, U * 28.5, U * 4.3)
   character.add(pupilR)
 
-  // Slight smile
-  const mouth = box(0.3, 0.05, 0.06, new THREE.MeshLambertMaterial({ color: 0x553333 }), 'mouth')
-  mouth.position.set(0, headY - 0.2, tmpl.head.d / 2 + 0.01)
+  // Mouth — small line
+  const mouth = box(U * 2, U * 0.5, U * 0.3, 0x553333, 'mouth')
+  mouth.position.set(0, U * 26, U * 4.2)
   character.add(mouth)
 
-  // Torso (shirt)
-  const torso = box(tmpl.torso.w, tmpl.torso.h, tmpl.torso.d, shirtMat, 'torso')
-  torso.position.y = torsoY
-  character.add(torso)
-
-  // Collar/neckline
-  const collarMat = new THREE.MeshLambertMaterial({ color: 0xdddddd })
-  const collar = box(0.5, 0.08, 0.08, collarMat, 'collar')
-  collar.position.set(0, torsoY + tmpl.torso.h / 2 - 0.02, tmpl.torso.d / 2 - 0.02)
-  character.add(collar)
-
-  // Shirt sleeve edges (slightly different shade)
-  const sleeveMat = new THREE.MeshLambertMaterial({ color: 0xe8e8e8 })
-  const sleeveL = box(tmpl.arm.w + 0.02, 0.15, tmpl.arm.d + 0.02, sleeveMat, 'sleeveL')
-  sleeveL.position.set(-(tmpl.torso.w / 2 + tmpl.arm.w / 2), armY + tmpl.arm.h / 2 - 0.08, 0)
-  character.add(sleeveL)
-  const sleeveR = box(tmpl.arm.w + 0.02, 0.15, tmpl.arm.d + 0.02, sleeveMat, 'sleeveR')
-  sleeveR.position.set(tmpl.torso.w / 2 + tmpl.arm.w / 2, armY + tmpl.arm.h / 2 - 0.08, 0)
-  character.add(sleeveR)
-
-  // Arms
-  const armL = box(tmpl.arm.w, tmpl.arm.h, tmpl.arm.d, skinMat, 'armL')
-  armL.position.set(-(tmpl.torso.w / 2 + tmpl.arm.w / 2), armY, 0)
-  character.add(armL)
-
-  const armR = box(tmpl.arm.w, tmpl.arm.h, tmpl.arm.d, skinMat, 'armR')
-  armR.position.set(tmpl.torso.w / 2 + tmpl.arm.w / 2, armY, 0)
-  character.add(armR)
-
-  // Hands (slightly different skin shade at bottom of arms)
-  const handMat = new THREE.MeshLambertMaterial({ color: features.skinTone })
-  const handL = box(tmpl.arm.w * 0.75, 0.2, tmpl.arm.d * 0.7, handMat, 'handL')
-  handL.position.set(-(tmpl.torso.w / 2 + tmpl.arm.w / 2), armY - tmpl.arm.h / 2 - 0.05, 0)
-  character.add(handL)
-  const handR = box(tmpl.arm.w * 0.75, 0.2, tmpl.arm.d * 0.7, handMat, 'handR')
-  handR.position.set(tmpl.torso.w / 2 + tmpl.arm.w / 2, armY - tmpl.arm.h / 2 - 0.05, 0)
-  character.add(handR)
-
-  // Legs (shorts)
-  const legL = box(tmpl.leg.w, tmpl.leg.h, tmpl.leg.d, shortsMat, 'legL')
-  legL.position.set(-tmpl.leg.w / 2 - 0.02, legY, 0)
-  character.add(legL)
-
-  const legR = box(tmpl.leg.w, tmpl.leg.h, tmpl.leg.d, shortsMat, 'legR')
-  legR.position.set(tmpl.leg.w / 2 + 0.02, legY, 0)
-  character.add(legR)
-
-  // Feet (shoes)
-  const footL = box(tmpl.foot.w, tmpl.foot.h, tmpl.foot.d, shoeMat, 'footL')
-  footL.position.set(-tmpl.leg.w / 2 - 0.02, footY, 0.05)
-  character.add(footL)
-
-  const footR = box(tmpl.foot.w, tmpl.foot.h, tmpl.foot.d, shoeMat, 'footR')
-  footR.position.set(tmpl.leg.w / 2 + 0.02, footY, 0.05)
-  character.add(footR)
-
-  // Hair
-  const hairMat = new THREE.MeshLambertMaterial({ color: features.hairColor })
-  const hairGroup = buildHair(features.hairStyle, features.hairLength, hairMat, headY)
+  // Hair — built from the hair module
+  const hairMat = new THREE.MeshLambertMaterial({ color: hairColor })
+  const hairGroup = buildHair(features.hairStyle, features.hairLength, hairMat, U * 28, U)
   character.add(hairGroup)
 
-  // Center the character so it sits on y=0
-  // (feet bottom at y=0)
+  // --- BODY (8×12×4 = 1×1.5×0.5) ---
+  const torso = texturedBox(U * 8, U * 12, U * 4, shirtColor, 'torso')
+  torso.position.y = U * 18 // Center of body
+  character.add(torso)
 
+  // --- ARMS (4×12×4 each) ---
+  const armL = texturedBox(U * 4, U * 12, U * 4, skinColor, 'armL')
+  armL.position.set(-U * 6, U * 18, 0) // Flush with body sides
+  character.add(armL)
+
+  const armR = texturedBox(U * 4, U * 12, U * 4, skinColor, 'armR')
+  armR.position.set(U * 6, U * 18, 0)
+  character.add(armR)
+
+  // Shirt sleeves (top portion of arms)
+  const sleeveL = texturedBox(U * 4.2, U * 5, U * 4.2, shirtColor, 'sleeveL')
+  sleeveL.position.set(-U * 6, U * 21.5, 0)
+  character.add(sleeveL)
+
+  const sleeveR = texturedBox(U * 4.2, U * 5, U * 4.2, shirtColor, 'sleeveR')
+  sleeveR.position.set(U * 6, U * 21.5, 0)
+  character.add(sleeveR)
+
+  // --- LEGS (4×12×4 each) ---
+  const legL = texturedBox(U * 4, U * 12, U * 4, pantsColor, 'legL')
+  legL.position.set(-U * 2, U * 6, 0)
+  character.add(legL)
+
+  const legR = texturedBox(U * 4, U * 12, U * 4, pantsColor, 'legR')
+  legR.position.set(U * 2, U * 6, 0)
+  character.add(legR)
+
+  // Shoes (bottom 2px of legs)
+  const footL = texturedBox(U * 4.1, U * 2, U * 4.5, shoeColor, 'footL')
+  footL.position.set(-U * 2, U * 1, U * 0.2)
+  character.add(footL)
+
+  const footR = texturedBox(U * 4.1, U * 2, U * 4.5, shoeColor, 'footR')
+  footR.position.set(U * 2, U * 1, U * 0.2)
+  character.add(footR)
+
+  // Character feet sit at Y=0
   return character
 }
 
@@ -170,13 +153,22 @@ export function applyFeatures(
   character: THREE.Group,
   features: CharacterFeatures,
 ): void {
-  const skinMat = new THREE.MeshLambertMaterial({ color: features.skinTone })
+  const skinColor = new THREE.Color(features.skinTone)
 
   const skinParts = ['head', 'armL', 'armR']
   for (const name of skinParts) {
     const mesh = character.getObjectByName(name) as THREE.Mesh | undefined
     if (mesh) {
-      mesh.material = skinMat
+      // Handle both single material and material array (texturedBox creates arrays)
+      if (Array.isArray(mesh.material)) {
+        for (let i = 0; i < mesh.material.length; i++) {
+          const variation = 0.95 + Math.random() * 0.1
+          const faceColor = skinColor.clone().multiplyScalar(variation)
+          mesh.material[i] = new THREE.MeshLambertMaterial({ color: faceColor })
+        }
+      } else {
+        mesh.material = new THREE.MeshLambertMaterial({ color: skinColor })
+      }
     }
   }
 
@@ -187,14 +179,18 @@ export function applyFeatures(
   const head = character.getObjectByName('head') as THREE.Mesh | undefined
   if (head) {
     const hairMat = new THREE.MeshLambertMaterial({ color: features.hairColor })
-    const hairGroup = buildHair(features.hairStyle, features.hairLength, hairMat, head.position.y)
+    // Infer U from the head geometry width (head is 8U wide)
+    const headGeo = head.geometry as THREE.BoxGeometry
+    const headWidth = headGeo.parameters.width
+    const U = headWidth / 8
+    const hairGroup = buildHair(features.hairStyle, features.hairLength, hairMat, head.position.y, U)
     character.add(hairGroup)
   }
 
   // Update eye color
   if (features.eyeColor) {
     const eyeMat = new THREE.MeshLambertMaterial({ color: features.eyeColor })
-    for (const name of ['eyeL', 'eyeR']) {
+    for (const name of ['pupilL', 'pupilR']) {
       const mesh = character.getObjectByName(name) as THREE.Mesh | undefined
       if (mesh) mesh.material = eyeMat
     }
