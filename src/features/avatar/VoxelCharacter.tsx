@@ -11,6 +11,9 @@ import { animateEquip, animateUnequip, animateJump, animateNod, animateSwordFlou
 import { createTouchControls, updateRotation } from './voxel/touchControls'
 import type { TouchControlState } from './voxel/touchControls'
 import { applyTierToArmor, calculateTier, animateTierUpgrade, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
+import { PoseAnimator, POSES, POSE_EXPRESSIONS, applyExpression } from './voxel/poseSystem'
+import type { Pose } from './voxel/poseSystem'
+import { applyPixelFaceFromPhoto } from './voxel/pixelFace'
 
 interface VoxelCharacterProps {
   features: CharacterFeatures | undefined
@@ -24,20 +27,28 @@ interface VoxelCharacterProps {
   onEquipAnimDone?: () => void
   onUnequipAnimDone?: () => void
   height?: string | number
+  /** Photo URL for pixel face generation */
+  photoUrl?: string
+  /** Triggered pose ID (from PoseButtons or swipe) */
+  activePoseId?: string | null
+  /** Callback when a pose completes */
+  onPoseComplete?: () => void
+  /** Callback when swipe cycles to a new pose */
+  onSwipePose?: (poseId: string) => void
 }
 
-// ── Pose system ──────────────────────────────────────────────────────
+// ── Equipment-based idle pose ────────────────────────────────────────
 
-interface CharacterPose {
+interface EquipmentPose {
   armLRotZ: number
   armRRotZ: number
   armLRotX: number
   armRRotX: number
 }
 
-const POSE_DEFAULT: CharacterPose = { armLRotZ: 0, armRRotZ: 0, armLRotX: 0, armRRotX: 0 }
+const POSE_DEFAULT: EquipmentPose = { armLRotZ: 0, armRRotZ: 0, armLRotX: 0, armRRotX: 0 }
 
-function calculatePose(equipped: string[]): CharacterPose {
+function calculateEquipmentPose(equipped: string[]): EquipmentPose {
   const pose = { ...POSE_DEFAULT }
   if (equipped.includes('sword')) {
     pose.armRRotZ = -0.55  // ~32° outward — enough to clear breastplate
@@ -165,6 +176,10 @@ export default function VoxelCharacter({
   animateUnequipPiece,
   onEquipAnimDone,
   onUnequipAnimDone,
+  photoUrl,
+  activePoseId,
+  onPoseComplete,
+  onSwipePose,
 }: VoxelCharacterProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -176,14 +191,20 @@ export default function VoxelCharacter({
   const rafRef = useRef<number>(0)
   const prevEquippedRef = useRef<Set<string>>(new Set())
   const prevTierRef = useRef<string | null>(null)
-  const poseRef = useRef<((pieces: string[]) => void) | null>(null)
+  const equipPoseRef = useRef<((pieces: string[]) => void) | null>(null)
   const equippedRef = useRef<string[]>([])
+  const poseAnimatorRef = useRef<PoseAnimator>(new PoseAnimator())
+  const swipePoseIndexRef = useRef(0)
+  const onSwipePoseRef = useRef(onSwipePose)
+  const onPoseCompleteRef = useRef(onPoseComplete)
 
   const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
   const currentTier = calculateTier(totalXp)
 
-  // Keep ref in sync so animation loop always has current equipped list
+  // Keep refs in sync so animation loop always has current values
   equippedRef.current = equippedPieces
+  onSwipePoseRef.current = onSwipePose
+  onPoseCompleteRef.current = onPoseComplete
 
   // ── Initialize scene ────────────────────────────────────────────
   const initScene = useCallback(() => {
@@ -209,34 +230,27 @@ export default function VoxelCharacter({
     addBackgroundParticles(scene)
 
     // Camera — framing the taller Steve-proportioned character
-    // Character is ~4U tall = 4 * 0.125 = 0.5 units at scale 1.0
-    // But it's built in pixel units, total height ~32U * 0.125 = 4.0
     const camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 100)
     camera.position.set(0, 2.2, 10.5)
     camera.lookAt(0, 1.8, 0)
     cameraRef.current = camera
 
     // ── Dramatic lighting for depth ──────────────────────────────
-    // Key light — warm, from upper right front (main light source)
     const keyLight = new THREE.DirectionalLight(0xFFF5E6, 1.0)
     keyLight.position.set(5, 8, 6)
     scene.add(keyLight)
 
-    // Fill light — cool, from left (prevents pure black shadows)
     const fillLight = new THREE.DirectionalLight(0xC8D8E8, 0.3)
     fillLight.position.set(-5, 3, 3)
     scene.add(fillLight)
 
-    // Rim light — from behind, creates silhouette edge
     const rimLight = new THREE.DirectionalLight(0xFFFFFF, 0.5)
     rimLight.position.set(0, 3, -6)
     scene.add(rimLight)
 
-    // Ambient — just enough to see into shadows
     const ambient = new THREE.AmbientLight(0xFFFFFF, 0.25)
     scene.add(ambient)
 
-    // Ground bounce — subtle warmth from below
     const bounceLight = new THREE.DirectionalLight(0xFFE8D6, 0.1)
     bounceLight.position.set(0, -4, 2)
     scene.add(bounceLight)
@@ -286,7 +300,6 @@ export default function VoxelCharacter({
       group.visible = true
       if (isEquipped) {
         group.scale.set(1, 1, 1)
-        // Tier materials will be applied below after all pieces are processed
       } else if (isUnlocked) {
         group.scale.set(1, 1, 1)
         group.traverse((child) => {
@@ -302,20 +315,18 @@ export default function VoxelCharacter({
           }
         })
       } else {
-        // Locked — very faint ghost using tier color (not white), barely visible
         const tierTint = getTierTint(currentTier)
         const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
         group.scale.set(1, 1, 1)
-        // Scale down ghost shield so it's less intrusive
         if (pieceId === 'shield') {
           group.scale.set(0.85, 0.85, 0.85)
         }
         group.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             const ghostMat = new THREE.MeshLambertMaterial({
-              color: tierMat.primary,    // Tier-colored, not white
+              color: tierMat.primary,
               transparent: true,
-              opacity: 0.08,             // Barely visible — a hint, not distraction
+              opacity: 0.08,
               depthWrite: false,
             })
             child.material = ghostMat
@@ -328,7 +339,7 @@ export default function VoxelCharacter({
     prevEquippedRef.current = new Set(equippedPieces)
     prevTierRef.current = currentTier
 
-    // Platform — at character feet level (Y=0), added to scene (not character)
+    // Platform
     const platform = buildPlatform(ageGroup)
     platform.position.y = character.position.y
     scene.add(platform)
@@ -343,7 +354,7 @@ export default function VoxelCharacter({
     })
     const shadow = new THREE.Mesh(shadowGeo, shadowMat)
     shadow.rotation.x = -Math.PI / 2
-    shadow.position.y = 0.01 // Just above platform surface
+    shadow.position.y = 0.01
     scene.add(shadow)
 
     // Renderer
@@ -353,21 +364,46 @@ export default function VoxelCharacter({
     container.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
-    // Touch controls
-    controlsRef.current = createTouchControls(renderer.domElement)
+    // Touch controls with swipe detection
+    const controls = createTouchControls(renderer.domElement)
+    controlsRef.current = controls
+
+    // Wire up swipe-to-cycle-poses
+    const actionablePoses = POSES.filter((p) => p.id !== 'idle')
+    controls.onSwipe = (direction: 'left' | 'right') => {
+      if (direction === 'left') {
+        swipePoseIndexRef.current = (swipePoseIndexRef.current + 1) % actionablePoses.length
+      } else {
+        swipePoseIndexRef.current = (swipePoseIndexRef.current - 1 + actionablePoses.length) % actionablePoses.length
+      }
+      const pose = actionablePoses[swipePoseIndexRef.current]
+      poseAnimatorRef.current.play(pose, () => {
+        // Apply idle expression back
+        if (characterRef.current) {
+          applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {})
+        }
+        onPoseCompleteRef.current?.()
+      })
+      // Apply facial expression for this pose
+      if (characterRef.current) {
+        const expr = POSE_EXPRESSIONS[pose.id]
+        if (expr) applyExpression(characterRef.current, expr)
+      }
+      onSwipePoseRef.current?.(pose.id)
+    }
 
     // Animation loop
     const clock = new THREE.Clock()
     const baseY = character.position.y
 
-    // Pose state for smooth transitions
-    const currentPose: CharacterPose = { ...POSE_DEFAULT }
-    let targetPose = calculatePose(equippedPieces)
+    // Equipment-based idle pose state for smooth transitions
+    const currentEqPose: EquipmentPose = { ...POSE_DEFAULT }
+    let targetEqPose = calculateEquipmentPose(equippedPieces)
 
-    // Store targetPose updater on a ref so equip effects can change it
-    poseRef.current = (pieces: string[]) => { targetPose = calculatePose(pieces) }
-    // Initialize pose immediately
-    poseRef.current(equippedPieces)
+    equipPoseRef.current = (pieces: string[]) => { targetEqPose = calculateEquipmentPose(pieces) }
+    equipPoseRef.current(equippedPieces)
+
+    const poseAnimator = poseAnimatorRef.current
 
     function animate() {
       rafRef.current = requestAnimationFrame(animate)
@@ -376,35 +412,43 @@ export default function VoxelCharacter({
         updateRotation(characterRef.current, controlsRef.current)
       }
 
-      // Enforce solid opacity on equipped armor every frame (use ref for current value)
+      // Enforce solid opacity on equipped armor every frame
       enforceArmorOpacity(armorGroupsRef.current, equippedRef.current)
 
-      // Idle animation — gentle bob + pose-aware arm movement
       if (characterRef.current) {
         const dt = clock.getDelta()
         const time = clock.getElapsedTime()
+
         // Gentle bob
         characterRef.current.position.y = baseY + Math.sin(time * 1.2) * 0.03
 
-        // Lerp toward target pose
-        const lerpSpeed = Math.min(3.0 * dt, 1)
-        currentPose.armLRotZ += (targetPose.armLRotZ - currentPose.armLRotZ) * lerpSpeed
-        currentPose.armRRotZ += (targetPose.armRRotZ - currentPose.armRRotZ) * lerpSpeed
-        currentPose.armLRotX += (targetPose.armLRotX - currentPose.armLRotX) * lerpSpeed
-        currentPose.armRRotX += (targetPose.armRRotX - currentPose.armRRotX) * lerpSpeed
+        const armLObj = characterRef.current.getObjectByName('armL')
+        const armRObj = characterRef.current.getObjectByName('armR')
+        const headObj = characterRef.current.getObjectByName('head')
 
-        // Apply pose + idle sway to arms (sleeves are children, move automatically)
-        const armL = characterRef.current.getObjectByName('armL')
-        const armR = characterRef.current.getObjectByName('armR')
-        const idleSway = Math.sin(time * 0.7) * 0.03
+        // Check if pose animator is actively playing
+        const poseActive = armLObj && armRObj && headObj && poseAnimator.update(
+          armLObj, armRObj, headObj, characterRef.current, performance.now(),
+        )
 
-        if (armL) {
-          armL.rotation.z = currentPose.armLRotZ + idleSway
-          armL.rotation.x = currentPose.armLRotX + Math.sin(time * 0.8) * 0.05
-        }
-        if (armR) {
-          armR.rotation.z = currentPose.armRRotZ - idleSway
-          armR.rotation.x = currentPose.armRRotX - Math.sin(time * 0.8) * 0.05
+        if (!poseActive) {
+          // Lerp toward equipment-based idle pose + idle sway
+          const lerpSpeed = Math.min(3.0 * dt, 1)
+          currentEqPose.armLRotZ += (targetEqPose.armLRotZ - currentEqPose.armLRotZ) * lerpSpeed
+          currentEqPose.armRRotZ += (targetEqPose.armRRotZ - currentEqPose.armRRotZ) * lerpSpeed
+          currentEqPose.armLRotX += (targetEqPose.armLRotX - currentEqPose.armLRotX) * lerpSpeed
+          currentEqPose.armRRotX += (targetEqPose.armRRotX - currentEqPose.armRRotX) * lerpSpeed
+
+          const idleSway = Math.sin(time * 0.7) * 0.03
+
+          if (armLObj) {
+            armLObj.rotation.z = currentEqPose.armLRotZ + idleSway
+            armLObj.rotation.x = currentEqPose.armLRotX + Math.sin(time * 0.8) * 0.05
+          }
+          if (armRObj) {
+            armRObj.rotation.z = currentEqPose.armRRotZ - idleSway
+            armRObj.rotation.x = currentEqPose.armRRotX - Math.sin(time * 0.8) * 0.05
+          }
         }
       }
 
@@ -428,7 +472,16 @@ export default function VoxelCharacter({
       renderer.render(scene, camera)
     }
     animate()
-  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier])
+
+    // Apply pixel face from photo (async, non-blocking)
+    if (photoUrl) {
+      const headMesh = character.getObjectByName('head') as THREE.Mesh | undefined
+      if (headMesh) {
+        const skinHex = new THREE.Color(resolvedFeatures.skinTone ?? '#F5D6B8').getHex()
+        void applyPixelFaceFromPhoto(headMesh, photoUrl, skinHex)
+      }
+    }
+  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, photoUrl])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
@@ -439,7 +492,7 @@ export default function VoxelCharacter({
       rendererRef.current?.dispose()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedFeatures.skinTone, resolvedFeatures.hairColor, resolvedFeatures.hairStyle, resolvedFeatures.hairLength, ageGroup])
+  }, [resolvedFeatures.skinTone, resolvedFeatures.hairColor, resolvedFeatures.hairStyle, resolvedFeatures.hairLength, ageGroup, photoUrl])
 
   // ── Handle resize ───────────────────────────────────────────────
   useEffect(() => {
@@ -467,7 +520,6 @@ export default function VoxelCharacter({
       prevTierRef.current = currentTier
       return
     }
-    // Tier changed — animate upgrade
     animateTierUpgrade(armorGroupsRef.current, equippedPieces, currentTier)
     prevTierRef.current = currentTier
   }, [currentTier, equippedPieces])
@@ -485,10 +537,9 @@ export default function VoxelCharacter({
           group.visible = true
           group.scale.set(1, 1, 1)
         }
-        // Apply tier materials so piece becomes solid (not ghost)
         applyTierToArmor(armorGroupsRef.current, currentTier, [pieceId])
 
-        // Play equip ceremony based on piece type
+        // Play equip ceremony + auto-pose
         if (characterRef.current) {
           const character = characterRef.current
           switch (pieceId) {
@@ -516,11 +567,24 @@ export default function VoxelCharacter({
             default:
               break
           }
+
+          // Auto-pose: trigger the pose linked to this piece
+          const autoPose = POSES.find((p) => p.requiresPiece === pieceId)
+          if (autoPose) {
+            setTimeout(() => {
+              const expr = POSE_EXPRESSIONS[autoPose.id]
+              if (expr && characterRef.current) applyExpression(characterRef.current, expr)
+              poseAnimatorRef.current.play(autoPose, () => {
+                if (characterRef.current) applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {})
+                onPoseComplete?.()
+              })
+            }, 500) // Delay so equip ceremony plays first
+          }
         }
       }
     }
 
-    // Unequipped pieces → show as translucent ghost (not hidden)
+    // Unequipped pieces -> show as translucent ghost
     for (const pieceId of prev) {
       if (!current.has(pieceId)) {
         const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
@@ -529,16 +593,15 @@ export default function VoxelCharacter({
           const tierTint = getTierTint(currentTier)
           const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
           group.visible = true
-          // Scale down ghost shield
           if (pieceId === 'shield' && !isUnlocked) {
             group.scale.set(0.85, 0.85, 0.85)
           }
           group.traverse((child) => {
             if (child instanceof THREE.Mesh) {
               child.material = new THREE.MeshLambertMaterial({
-                color: tierMat.primary,     // Tier-colored ghost
+                color: tierMat.primary,
                 transparent: true,
-                opacity: isUnlocked ? 0.3 : 0.08,  // Unlocked translucent, locked barely visible
+                opacity: isUnlocked ? 0.3 : 0.08,
                 depthWrite: false,
               })
             }
@@ -547,18 +610,37 @@ export default function VoxelCharacter({
       }
     }
 
-    // Also ensure ALL currently equipped pieces have solid tier materials
-    // (handles page-load case where pieces load from profile)
+    // Ensure ALL currently equipped pieces have solid tier materials
     if (current.size > 0) {
       applyTierToArmor(armorGroupsRef.current, currentTier, equippedPieces)
       enforceArmorOpacity(armorGroupsRef.current, equippedPieces)
     }
 
-    // Update pose for new equipped set
-    poseRef.current?.(equippedPieces)
+    // Update equipment-based idle pose
+    equipPoseRef.current?.(equippedPieces)
 
     prevEquippedRef.current = current
-  }, [equippedPieces, currentTier, totalXp])
+  }, [equippedPieces, currentTier, totalXp, onPoseComplete])
+
+  // ── Handle explicit pose trigger (from PoseButtons) ────────────
+  useEffect(() => {
+    if (!activePoseId || activePoseId === 'idle') return
+    const pose = POSES.find((p) => p.id === activePoseId) as Pose | undefined
+    if (!pose) return
+
+    // Apply facial expression
+    if (characterRef.current) {
+      const expr = POSE_EXPRESSIONS[pose.id]
+      if (expr) applyExpression(characterRef.current, expr)
+    }
+
+    poseAnimatorRef.current.play(pose, () => {
+      if (characterRef.current) {
+        applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {})
+      }
+      onPoseComplete?.()
+    })
+  }, [activePoseId, onPoseComplete])
 
   // ── Handle equip animation trigger ──────────────────────────────
   useEffect(() => {
@@ -594,7 +676,6 @@ export default function VoxelCharacter({
         bgcolor: '#111122',
         cursor: 'grab',
         '&:active': { cursor: 'grabbing' },
-        // Prevent text selection during drag
         userSelect: 'none',
         WebkitUserSelect: 'none',
         touchAction: 'none',
