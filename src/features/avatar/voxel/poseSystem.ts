@@ -126,8 +126,10 @@ export const POSES: Pose[] = [
     body: { posY: [0] },
   },
 
-  // WAVE — right arm goes OUT then UP, hand waves via rotY (forward/back)
-  // Fixed: arm no longer sweeps through the head
+  // WAVE — right arm goes OUT then UP, waves via rotZ oscillation
+  // rotY doesn't work when arm is raised (local axes rotate with the arm)
+  // Instead: oscillate rotZ between -2.2 and -2.6 for visible side-to-side wave
+  // rotX: -0.3 keeps arm forward (away from head) throughout the wave
   {
     id: 'wave',
     name: 'Wave',
@@ -135,18 +137,37 @@ export const POSES: Pose[] = [
     duration: 2500,
     armL: { rotZ: [0.05], rotX: [0] },
     armR: {
-      // Phase 1 (0-0.1): arm goes OUT to side (clears body)
-      // Phase 2 (0.1-0.2): arm goes UP from side position
-      // Phase 3 (0.2-0.8): wave back and forth via rotY
-      // Phase 4 (0.8-1): return to rest
-      rotZ: [-0.05, -1.2, -2.5, -2.5, -2.5, -2.5, -2.5, -0.05],
-      rotX: [0, -0.15, -0.2, -0.2, -0.2, -0.2, -0.2, 0],
-      rotY: [0, 0, 0, -0.4, 0.4, -0.4, 0.4, 0],  // Wave motion (outward)!
-      times: [0, 0.1, 0.2, 0.35, 0.5, 0.65, 0.8, 1],
+      // Phase 1 (0-0.08): arm goes OUT to side (clears body)
+      // Phase 2 (0.08-0.18): arm goes UP from side position
+      // Phase 3 (0.18-0.78): wave = oscillate rotZ between -2.2 and -2.6
+      // Phase 4 (0.78-1): return to rest
+      rotZ: [
+        -0.05,  // rest
+        -1.2,   // out to side
+        -2.3,   // up
+        -2.6,   // wave tilt 1
+        -2.2,   // wave tilt 2
+        -2.6,   // wave tilt 3
+        -2.2,   // wave tilt 4
+        -2.6,   // wave tilt 5
+        -0.05,  // return to rest
+      ],
+      rotX: [
+        0,      // rest
+        -0.2,   // slight forward
+        -0.3,   // arm angled forward (away from head)
+        -0.3,   // hold forward throughout wave
+        -0.3,
+        -0.3,
+        -0.3,
+        -0.3,
+        0,      // return
+      ],
+      times: [0, 0.08, 0.18, 0.30, 0.42, 0.54, 0.66, 0.78, 1],
     },
     head: {
-      rotY: [0, 0, 0.15, 0.15, 0.15, 0.15, 0.15, 0],
-      times: [0, 0.1, 0.2, 0.35, 0.5, 0.65, 0.8, 1],
+      rotY: [0, 0, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0],
+      times: [0, 0.08, 0.18, 0.30, 0.42, 0.54, 0.66, 0.78, 1],
     },
     body: { posY: [0] },
   },
