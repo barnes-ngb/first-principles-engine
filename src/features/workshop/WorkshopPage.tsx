@@ -670,7 +670,7 @@ export default function WorkshopPage() {
         console.warn('Failed to save adventure session:', err)
       }
     },
-    [currentGame?.id, familyId],
+    [currentGame, familyId],
   )
 
   // ── Card game handlers ──────────────────────────────────────────
@@ -727,7 +727,7 @@ export default function WorkshopPage() {
         console.warn('Failed to save card game session:', err)
       }
     },
-    [currentGame?.id, familyId],
+    [currentGame, familyId],
   )
 
   // ── Playtest flow ───────────────────────────────────────────────
@@ -849,7 +849,7 @@ export default function WorkshopPage() {
         : null
 
       const updatedSessions = (currentGame.playtestSessions ?? []).map((s) =>
-        s.id === playtestId ? { ...s, status: PlaytestStatus.Reviewed as const } : s,
+        s.id === playtestId ? { ...s, status: PlaytestStatus.Reviewed } : s,
       )
 
       const updatedGame = {

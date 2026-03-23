@@ -226,7 +226,7 @@ export default function MatchingPlayView({
 
   return (
     <Box sx={{ maxWidth: 600, mx: 'auto' }}>
-      {gameOver && <Confetti />}
+      {gameOver && <Confetti active />}
 
       {/* Scoreboard */}
       <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>

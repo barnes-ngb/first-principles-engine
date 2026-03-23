@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -58,7 +58,10 @@ export default function CollectingPlayView({
   const [gameOver, setGameOver] = useState(false)
 
   // Get all unique categories (sets)
-  const categories = [...new Set(cardGame.cards.map((c) => c.category).filter(Boolean))] as string[]
+  const categories = useMemo(
+    () => [...new Set(cardGame.cards.map((c) => c.category).filter(Boolean))] as string[],
+    [cardGame.cards],
+  )
 
   const getCardById = useCallback(
     (id: string) => cardGame.cards.find((c) => c.id === id),
@@ -94,7 +97,7 @@ export default function CollectingPlayView({
   const currentPlayer = players[currentPlayerIndex]
 
   const checkForSets = useCallback(
-    (playerId: string, hand: string[]) => {
+    (_playerId: string, hand: string[]) => {
       const newSets: string[][] = []
       const remaining = [...hand]
 
@@ -255,7 +258,7 @@ export default function CollectingPlayView({
 
   return (
     <Box sx={{ maxWidth: 600, mx: 'auto' }}>
-      {gameOver && <Confetti />}
+      {gameOver && <Confetti active />}
 
       {/* Scoreboard */}
       <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>

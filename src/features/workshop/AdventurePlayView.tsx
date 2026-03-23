@@ -7,7 +7,6 @@ import VolumeOffIcon from '@mui/icons-material/VolumeOff'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import type {
   ActiveAdventureSession,
-  AdventureNode,
   AdventureTree,
   GeneratedArt,
   StoryPlayer,

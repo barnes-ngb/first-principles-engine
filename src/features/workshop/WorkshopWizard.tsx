@@ -8,7 +8,7 @@ import type { StoryInputs } from '../../core/types'
 import type { CardBackStyle, CardMechanic, GameType } from '../../core/types/workshop'
 import { useTTS } from '../../core/hooks/useTTS'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import { useWorkshopWizard, getTotalSteps } from './useWorkshopWizard'
+import { useWorkshopWizard } from './useWorkshopWizard'
 import type { WizardState } from './useWorkshopWizard'
 import GameTypeStep from './steps/GameTypeStep'
 import ThemeStep from './steps/ThemeStep'
@@ -120,8 +120,6 @@ export default function WorkshopWizard({ onComplete, onCancel, onStepSave, initi
 
   const stepLabels = getStepLabels(wizard.state.gameType)
   const stepPrompts = getStepPrompts(wizard.state.gameType)
-  const totalSteps = getTotalSteps(wizard.state.gameType)
-
   // Speak the prompt when the step changes
   useEffect(() => {
     if (wizard.state.step !== lastSpokenStep.current) {

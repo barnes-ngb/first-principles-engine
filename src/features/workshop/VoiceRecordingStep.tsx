@@ -16,7 +16,6 @@ import { useAudioRecorder } from '../../core/hooks/useAudioRecorder'
 import type {
   AdventureTree,
   BoardSpace,
-  ChallengeCard,
   GeneratedGame,
   VoiceRecording,
   VoiceRecordingMap,
@@ -143,7 +142,6 @@ export default function VoiceRecordingStep({
   gameId,
   familyId,
   childId,
-  childName,
   existingRecordings,
   onDone,
   onSkip,
