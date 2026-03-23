@@ -478,9 +478,19 @@ function extractJsonObject(text: string): string | null {
   const trimmed = text.trim()
   if (!trimmed) return null
 
-  // Strip markdown code fences anywhere in the text (greedy: match the last ```)
-  const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
-  const candidate = fenceMatch ? fenceMatch[1].trim() : trimmed
+  // Strip ALL markdown code fences (greedy match for large responses)
+  let candidate = trimmed
+  // Try greedy match first (handles complete fences)
+  const greedyFence = trimmed.match(/```(?:json)?\s*\n?([\s\S]*)\n?\s*```/)
+  if (greedyFence) {
+    candidate = greedyFence[1].trim()
+  } else {
+    // No closing fence? Strip opening fence and use everything after it
+    const openFence = trimmed.match(/^```(?:json)?\s*\n?/)
+    if (openFence) {
+      candidate = trimmed.slice(openFence[0].length).trim()
+    }
+  }
 
   // Find the outermost { ... } in the text
   const firstBrace = candidate.indexOf('{')
