@@ -46,6 +46,8 @@ import { printBook } from './printBook'
 import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
 import GenerationProgress from './GenerationProgress'
+import EvaluationBookBanner from './EvaluationBookBanner'
+import { useEvaluationBookSuggestions } from './useEvaluationBookSuggestions'
 
 type BookFilter = 'all' | 'creative' | 'generated' | 'sight-word'
 
@@ -62,6 +64,10 @@ export default function BookshelfPage() {
 
   const { books, loading, createBook, deleteBook } = useBookshelf(familyId, childId)
   const { generateBook, progress, generating, resetProgress } = useBookGenerator()
+  const { suggestions: evalSuggestions } = useEvaluationBookSuggestions(
+    isParent ? familyId : '',
+    isParent ? childId : '',
+  )
 
   const [bookFilter, setBookFilter] = useState<BookFilter>('all')
   const [themeFilter, setThemeFilter] = useState<BookTheme | 'all'>('all')
@@ -282,6 +288,11 @@ export default function BookshelfPage() {
       >
         {isLincoln ? 'Tell a Story 🎮' : 'Tell a Story ✨'}
       </Button>
+
+      {/* Evaluation-based book suggestions (parent view only) */}
+      {isParent && evalSuggestions.length > 0 && (
+        <EvaluationBookBanner suggestions={evalSuggestions} childName={childName} />
+      )}
 
       {/* Filter tabs + parent actions */}
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>

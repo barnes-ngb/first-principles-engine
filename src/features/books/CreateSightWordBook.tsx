@@ -25,13 +25,19 @@ import { inferBookTheme } from './useBookGenerator'
 import { useStoryGenerator } from './useStoryGenerator'
 import type { GeneratedStory } from './useStoryGenerator'
 import { useSightWordProgress } from './useSightWordProgress'
-import { DOLCH_PRE_PRIMER, DOLCH_PRIMER } from './sightWordMastery'
+import {
+  DOLCH_PRE_PRIMER,
+  DOLCH_PRIMER,
+  LONDON_STARTER_WORDS,
+  CHILD_BOOK_DEFAULTS,
+} from './sightWordMastery'
 import { SAMPLE_STORY } from './sampleStory'
 
 interface LocationState {
   prefillWords?: string[]
   source?: string
   childId?: string
+  theme?: string
 }
 
 export default function CreateSightWordBook() {
@@ -44,9 +50,12 @@ export default function CreateSightWordBook() {
   const { generateStory, loading: generating, error: genError } = useStoryGenerator()
   const { getWeakWords, loading: progressLoading } = useSightWordProgress(familyId, childId)
 
+  const isLincoln = (activeChild?.name ?? '').toLowerCase() === 'lincoln'
+  const childDefaults = isLincoln ? CHILD_BOOK_DEFAULTS.lincoln : CHILD_BOOK_DEFAULTS.london
+
   const [wordsInput, setWordsInput] = useState('')
   const [theme, setTheme] = useState('')
-  const [pageCount, setPageCount] = useState(10)
+  const [pageCount, setPageCount] = useState<number>(childDefaults.pageCount)
   const [preview, setPreview] = useState<GeneratedStory | null>(null)
   const [publishing, setPublishing] = useState(false)
 
@@ -55,7 +64,7 @@ export default function CreateSightWordBook() {
     const state = location.state as LocationState | null
     if (state?.prefillWords && state.prefillWords.length > 0) {
       setWordsInput(state.prefillWords.join(', '))
-      if (!theme) setTheme('Minecraft adventure')
+      if (!theme) setTheme(state.theme ?? childDefaults.defaultTheme)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -81,11 +90,11 @@ export default function CreateSightWordBook() {
       familyId,
       childId,
       wordList,
-      theme || 'A Minecraft adventure',
+      theme || childDefaults.defaultTheme,
       pageCount,
     )
     if (result) setPreview(result)
-  }, [familyId, childId, wordList, theme, pageCount, generateStory])
+  }, [familyId, childId, wordList, theme, pageCount, generateStory, childDefaults.defaultTheme])
 
   const handleUseSample = useCallback(() => {
     setPreview(SAMPLE_STORY)
@@ -123,8 +132,8 @@ export default function CreateSightWordBook() {
         theme: inferBookTheme('', wordList, 'storybook'),
         generationConfig: {
           words: wordList,
-          theme: theme || 'A Minecraft adventure',
-          difficulty: 'simple',
+          theme: theme || childDefaults.defaultTheme,
+          difficulty: childDefaults.difficulty,
           pageCount,
         },
       }
@@ -134,7 +143,7 @@ export default function CreateSightWordBook() {
     } finally {
       setPublishing(false)
     }
-  }, [preview, familyId, childId, wordList, theme, pageCount, navigate])
+  }, [preview, familyId, childId, wordList, theme, pageCount, navigate, childDefaults])
 
   const handleEditInEditor = useCallback(async () => {
     if (!preview || !familyId || !childId) return
@@ -166,8 +175,8 @@ export default function CreateSightWordBook() {
         theme: inferBookTheme('', wordList, 'storybook'),
         generationConfig: {
           words: wordList,
-          theme: theme || 'A Minecraft adventure',
-          difficulty: 'simple',
+          theme: theme || childDefaults.defaultTheme,
+          difficulty: childDefaults.difficulty,
           pageCount,
         },
       }
@@ -177,7 +186,7 @@ export default function CreateSightWordBook() {
     } finally {
       setPublishing(false)
     }
-  }, [preview, familyId, childId, wordList, theme, pageCount, navigate])
+  }, [preview, familyId, childId, wordList, theme, pageCount, navigate, childDefaults])
 
   return (
     <Page>
@@ -236,6 +245,15 @@ export default function CreateSightWordBook() {
             variant="outlined"
             sx={{ minHeight: 40 }}
           />
+          {!isLincoln && (
+            <Chip
+              label="London's Starter Words"
+              onClick={() => handlePresetList(LONDON_STARTER_WORDS)}
+              variant="outlined"
+              color="secondary"
+              sx={{ minHeight: 40 }}
+            />
+          )}
           <Chip
             label="Words needing work"
             onClick={handleWeakWords}

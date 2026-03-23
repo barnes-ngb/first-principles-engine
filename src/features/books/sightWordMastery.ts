@@ -92,3 +92,30 @@ export const DOLCH_PRIMER = [
   'soon', 'that', 'there', 'they', 'this', 'too', 'under', 'want',
   'was', 'well', 'went', 'what', 'white', 'who', 'will', 'with', 'yes',
 ] as const
+
+// ── London (age 6) word lists ────────────────────────────────
+
+/** Simple CVC words appropriate for kindergarten / beginning readers. */
+export const LONDON_STARTER_WORDS = [
+  'cat', 'dog', 'big', 'run', 'sun', 'hat', 'mom', 'dad',
+  'the', 'a', 'is', 'my', 'I', 'see', 'go', 'me',
+  'love', 'like', 'no', 'yes',
+] as const
+
+/** Age-appropriate generation defaults per child profile. */
+export const CHILD_BOOK_DEFAULTS = {
+  lincoln: {
+    pageCount: 10,
+    style: 'minecraft' as const,
+    defaultTheme: 'A Minecraft adventure',
+    difficulty: 'moderate' as const,
+    wordsPerPage: 30,
+  },
+  london: {
+    pageCount: 6,
+    style: 'storybook' as const,
+    defaultTheme: 'A magical story with animals',
+    difficulty: 'simple' as const,
+    wordsPerPage: 15,
+  },
+} as const
