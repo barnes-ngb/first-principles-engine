@@ -210,26 +210,49 @@ export function useWorkshopWizard(initial?: Partial<WizardState>) {
     return state.step === getMaxStepIndex(state.gameType)
   }
 
-  /** Build the final StoryInputs from wizard state */
-  const buildStoryInputs = (): StoryInputs => ({
-    theme: state.theme,
-    players: state.players,
-    goal: state.goal,
-    challenges: state.challenges,
-    boardStyle: state.boardStyle as BoardStyle,
-    boardLength: state.boardLength as BoardLength,
-    storySetup: state.storySetup || undefined,
-    choiceSeeds: state.choiceSeeds.filter((c) => c.trim()).length > 0
-      ? state.choiceSeeds.filter((c) => c.trim())
-      : undefined,
-    adventureLength: (state.adventureLength as AdventureLength) || undefined,
-    cardMechanic: (state.cardMechanic as 'matching' | 'collecting' | 'battle') || undefined,
-    cardDescriptions: state.cardDescriptions.filter((c) => c.trim()).length > 0
-      ? state.cardDescriptions.filter((c) => c.trim())
-      : undefined,
-    cardBackStyle: (state.cardBackStyle as 'classic' | 'decorated' | 'custom') || undefined,
-    cardBackCustom: state.cardBackCustom || undefined,
-  })
+  /** Build the final StoryInputs from wizard state, only including fields relevant to the game type */
+  const buildStoryInputs = (): StoryInputs => {
+    const base = {
+      theme: state.theme,
+      players: state.players,
+    }
+
+    if (state.gameType === 'adventure') {
+      return {
+        ...base,
+        goal: '',
+        challenges: [],
+        boardStyle: '' as BoardStyle,
+        boardLength: '' as BoardLength,
+        storySetup: state.storySetup,
+        choiceSeeds: state.choiceSeeds.filter((c) => c.trim()),
+        adventureLength: state.adventureLength as AdventureLength,
+      }
+    }
+
+    if (state.gameType === 'cards') {
+      return {
+        ...base,
+        goal: '',
+        challenges: [],
+        boardStyle: '' as BoardStyle,
+        boardLength: '' as BoardLength,
+        cardMechanic: state.cardMechanic as 'matching' | 'collecting' | 'battle',
+        cardDescriptions: state.cardDescriptions.filter((c) => c.trim()),
+        cardBackStyle: state.cardBackStyle as 'classic' | 'decorated' | 'custom',
+        cardBackCustom: state.cardBackCustom || undefined,
+      }
+    }
+
+    // Board game (default)
+    return {
+      ...base,
+      goal: state.goal,
+      challenges: state.challenges,
+      boardStyle: state.boardStyle as BoardStyle,
+      boardLength: state.boardLength as BoardLength,
+    }
+  }
 
   return {
     state,

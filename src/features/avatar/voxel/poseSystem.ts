@@ -126,10 +126,11 @@ export const POSES: Pose[] = [
     body: { posY: [0] },
   },
 
-  // WAVE — right arm goes OUT then UP, waves via rotZ oscillation
-  // rotY doesn't work when arm is raised (local axes rotate with the arm)
-  // Instead: oscillate rotZ between -2.2 and -2.6 for visible side-to-side wave
-  // rotX: -0.3 keeps arm forward (away from head) throughout the wave
+  // WAVE — arm extends OUT to the side, then waves forward/back via rotX
+  // Previous approach raised arm overhead (rotZ -2.5) and tried rotX to clear head,
+  // but local axes rotate with the arm — rotX no longer means "forward" when arm is vertical.
+  // Fix: keep arm at SIDE LEVEL (rotZ -1.3 ≈ 75° from body) and oscillate rotX for the wave.
+  // Hand stays far from head because it's extended to the RIGHT, not above.
   {
     id: 'wave',
     name: 'Wave',
@@ -137,37 +138,34 @@ export const POSES: Pose[] = [
     duration: 2500,
     armL: { rotZ: [0.05], rotX: [0] },
     armR: {
-      // Phase 1 (0-0.08): arm goes OUT to side (clears body)
-      // Phase 2 (0.08-0.18): arm goes UP from side position
-      // Phase 3 (0.18-0.78): wave = oscillate rotZ between -2.2 and -2.6
-      // Phase 4 (0.78-1): return to rest
+      // Phase 1 (0-0.12): arm extends OUT to side
+      // Phase 2 (0.12-0.77): hold at side, wave via rotX oscillation
+      // Phase 3 (0.77-1): return to rest
       rotZ: [
         -0.05,  // rest
-        -1.2,   // out to side
-        -2.3,   // up
-        -2.6,   // wave tilt 1
-        -2.2,   // wave tilt 2
-        -2.6,   // wave tilt 3
-        -2.2,   // wave tilt 4
-        -2.6,   // wave tilt 5
+        -1.3,   // extend OUT to side (~75° from body)
+        -1.3,   // hold at side — this is the wave position
+        -1.3,
+        -1.3,
+        -1.3,
+        -1.3,
         -0.05,  // return to rest
       ],
       rotX: [
         0,      // rest
-        -0.2,   // slight forward
-        -0.3,   // arm angled forward (away from head)
-        -0.3,   // hold forward throughout wave
-        -0.3,
-        -0.3,
-        -0.3,
-        -0.3,
-        0,      // return
+        -0.2,   // slight forward as arm extends
+        -0.5,   // wave forward (hand toward viewer)
+        0.0,    // wave back
+        -0.5,   // forward
+        0.0,    // back
+        -0.5,   // forward
+        0,      // return to rest
       ],
-      times: [0, 0.08, 0.18, 0.30, 0.42, 0.54, 0.66, 0.78, 1],
+      times: [0, 0.12, 0.25, 0.38, 0.51, 0.64, 0.77, 1],
     },
     head: {
-      rotY: [0, 0, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0],
-      times: [0, 0.08, 0.18, 0.30, 0.42, 0.54, 0.66, 0.78, 1],
+      rotY: [0, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0],
+      times: [0, 0.12, 0.25, 0.38, 0.51, 0.64, 0.77, 1],
     },
     body: { posY: [0] },
   },

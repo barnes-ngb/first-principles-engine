@@ -543,7 +543,7 @@ describe('parseAIResponse', () => {
     expect(result!.days[0].items[0].estimatedMinutes).toBe(15)
   })
 
-  it('skips items with negative estimatedMinutes but keeps good items', () => {
+  it('defaults items with negative estimatedMinutes to 15 and keeps all items', () => {
     const plan = {
       days: [{ day: 'Monday', items: [
         { title: 'Bad', estimatedMinutes: -5, subjectBucket: 'Math' },
@@ -553,8 +553,11 @@ describe('parseAIResponse', () => {
     }
     const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
     expect(result).not.toBeNull()
-    expect(result!.days[0].items).toHaveLength(1)
-    expect(result!.days[0].items[0].title).toBe('Good')
+    expect(result!.days[0].items).toHaveLength(2)
+    expect(result!.days[0].items[0].title).toBe('Bad')
+    expect(result!.days[0].items[0].estimatedMinutes).toBe(15)
+    expect(result!.days[0].items[1].title).toBe('Good')
+    expect(result!.days[0].items[1].estimatedMinutes).toBe(10)
   })
 
   it('coerces string estimatedMinutes to number', () => {
