@@ -19,10 +19,25 @@ export function buildMaterialsPrompt(
       ? `London (6): Kindergarten. Story-driven, creates own books. Knows most letter sounds. Motivators: Stories, drawing, book-making.`
       : `${childName}: elementary-level student`
 
+  // Build skill-level guidance for specific content generation
+  const skillGuidance = childName === 'Lincoln'
+    ? `LINCOLN'S CURRENT LEVELS (use these to calibrate difficulty):
+  - Math: ~3rd grade. Comfortable with addition/subtraction to 100. Working on regrouping. Multiplication introduced (2s, 5s, 10s).
+  - Reading: ~1st grade decoding, improving. CVC words solid, working on blends and digraphs. Sight words: Dolch 1st grade list.
+  - Writing: Short sentences. Needs lined paper with visual guides. Prefers copying to composing.
+  - Speech: Working on /r/, /l/, multi-syllable words. Keep sentences short (5-8 words).`
+    : childName === 'London'
+      ? `LONDON'S CURRENT LEVELS (use these to calibrate difficulty):
+  - Math: Counting to 100, number recognition, one-to-one correspondence, simple addition to 10.
+  - Reading: Most letter sounds known, beginning CVC words. Loves being read to. Prefers stories over drills.
+  - Writing: Letter formation, name writing, simple words. Needs large lines.`
+      : ''
+
   return `Generate printable Minecraft-themed worksheets for ${childName}'s ${day.day} activities.
 
 CHILD CONTEXT:
 ${childContext}
+${skillGuidance}
 ${snapshot?.prioritySkills?.length ? `Skill focus: ${snapshot.prioritySkills.map((s) => `${s.label} (${s.level})`).join(', ')}` : ''}
 ${theme ? `Week theme: ${theme}` : ''}
 
@@ -91,6 +106,15 @@ SPEECH: Generate a practice card with REAL target content.
   3-4 REAL sentences to practice reading aloud:
     "Steve stepped on a stone and stopped to look at the stars."
   "Say each word 3 times. Circle the ones you said clearly."
+
+SELF-CHECK BEFORE OUTPUTTING:
+  Before generating the final HTML, verify EVERY worksheet page:
+  ✓ Does every math problem have SPECIFIC numbers? (not "___" or "write a problem")
+  ✓ Does every phonics activity have REAL words listed? (not "fill in words")
+  ✓ Does every comprehension question reference SPECIFIC content? (not "what happened?")
+  ✓ Is there an answer key with ACTUAL answers?
+  ✓ Could the child sit down RIGHT NOW and do this with zero teacher prep?
+  If any check fails, regenerate that section with real content.
 
 DESIGN:
 <html><head><style>
