@@ -1,5 +1,5 @@
 import type { ImageGenRequest, ImageGenResponse } from '../../core/ai/useAI'
-import type { AdventureTree, GeneratedArt, StoryInputs } from '../../core/types'
+import type { AdventureTree, CardGameData, GeneratedArt, StoryInputs } from '../../core/types'
 
 // ── DALL-E Prompt Builders ───────────────────────────────────────
 
@@ -289,6 +289,133 @@ export async function generateAdventureArt(
     } else if (key.startsWith('card-')) {
       const cType = key.replace('card-', '') as 'reading' | 'math' | 'story' | 'action'
       art.cardArt = { ...art.cardArt, [cType]: response.url }
+    }
+  }
+
+  return { art, failures }
+}
+
+// ── Card Game Art Generation ─────────────────────────────────────
+
+interface CardGameArtResult {
+  art: GeneratedArt
+  failures: string[]
+}
+
+/**
+ * Generate art for a card game: title screen + card back + card face art.
+ * Cost management:
+ * - Matching: 1 image per pair (6-12 images)
+ * - Collecting: 1 image per set (4-6 images)
+ * - Battle: art for top 6-8 cards by power + 1 generic
+ * Maximum 15 DALL-E calls (title + back + up to 13 card faces)
+ */
+export async function generateCardGameArt(
+  generateImage: GenerateImageFn,
+  familyId: string,
+  inputs: StoryInputs,
+  cardGame: CardGameData,
+): Promise<CardGameArtResult> {
+  const theme = inputs.theme
+  const art: GeneratedArt = {}
+  const failures: string[] = []
+
+  const requests: Array<{ key: string; prompt: string }>  = []
+
+  // Title screen
+  requests.push({
+    key: 'title',
+    prompt: `A title card illustration for a children's card game, ${theme} themed, exciting, colorful, storybook illustration style, centered composition, no text`,
+  })
+
+  // Card back design
+  const cardBackDesc = inputs.cardBackStyle === 'custom' && inputs.cardBackCustom
+    ? inputs.cardBackCustom
+    : inputs.cardBackStyle === 'decorated'
+      ? `detailed ${theme} illustrations`
+      : `simple elegant pattern`
+  requests.push({
+    key: 'cardBack',
+    prompt: `A card back design for a children's card game, ${theme} themed, ${cardBackDesc}, repeating pattern, symmetrical, colorful, no text`,
+  })
+
+  // Card face art — varies by mechanic
+  if (cardGame.mechanic === 'matching') {
+    // 1 image per unique category (pair)
+    const categories = new Set(cardGame.cards.map((c) => c.category).filter(Boolean))
+    let count = 0
+    for (const category of categories) {
+      if (count >= 13) break // cap at 13 card faces
+      const card = cardGame.cards.find((c) => c.category === category)
+      requests.push({
+        key: `face-${category}`,
+        prompt: `A children's card game illustration of ${card?.artPrompt ?? category}, ${theme} themed, colorful, simple, card art style, no text`,
+      })
+      count++
+    }
+  } else if (cardGame.mechanic === 'collecting') {
+    // 1 image per set (category)
+    const categories = new Set(cardGame.cards.map((c) => c.category).filter(Boolean))
+    let count = 0
+    for (const category of categories) {
+      if (count >= 13) break
+      const card = cardGame.cards.find((c) => c.category === category)
+      requests.push({
+        key: `face-${category}`,
+        prompt: `A children's card game illustration of ${card?.artPrompt ?? category}, ${theme} themed, colorful, simple, card art style, no text`,
+      })
+      count++
+    }
+  } else {
+    // Battle: top cards by power value + 1 generic
+    const sorted = [...cardGame.cards].sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+    const topCards = sorted.slice(0, 8)
+    for (const card of topCards) {
+      requests.push({
+        key: `face-${card.id}`,
+        prompt: `A children's card game battle card illustration of ${card.artPrompt}, ${theme} themed, dynamic, powerful, colorful, no text`,
+      })
+    }
+    // Generic card for remaining
+    requests.push({
+      key: 'face-generic',
+      prompt: `A generic children's card game battle card illustration, ${theme} themed, simple warrior/creature, colorful, no text`,
+    })
+  }
+
+  // Cap total at 15
+  const capped = requests.slice(0, 15)
+
+  const results = await Promise.allSettled(
+    capped.map(async (req) => {
+      const response = await generateImage({
+        familyId,
+        prompt: req.prompt,
+        style: 'general',
+        size: '1024x1024',
+      })
+      return { key: req.key, response }
+    }),
+  )
+
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      failures.push('unknown')
+      continue
+    }
+    const { key, response } = result.value
+    if (!response?.url) {
+      failures.push(key)
+      continue
+    }
+
+    if (key === 'title') {
+      art.titleScreen = response.url
+    } else if (key === 'cardBack') {
+      art.cardBack = response.url
+    } else if (key.startsWith('face-')) {
+      const faceKey = key.replace('face-', '')
+      art.cardFaces = { ...art.cardFaces, [faceKey]: response.url }
     }
   }
 

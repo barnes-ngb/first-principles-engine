@@ -4,6 +4,8 @@ import Badge from '@mui/material/Badge'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import IconButton from '@mui/material/IconButton'
+import ToggleButton from '@mui/material/ToggleButton'
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import DeleteIcon from '@mui/icons-material/Delete'
 import MicIcon from '@mui/icons-material/Mic'
@@ -16,6 +18,9 @@ import { GameType, PlaytestStatus, WorkshopStatus } from '../../core/types/works
 function hasMissingArt(game: StoryGame): boolean {
   const art = game.generatedArt
   if (!art) return true
+  if (game.gameType === GameType.Cards) {
+    return !art.titleScreen || !art.cardBack
+  }
   if (!art.boardBackground || !art.titleScreen) return true
   if (!art.cardArt?.reading || !art.cardArt?.math || !art.cardArt?.story || !art.cardArt?.action)
     return true
@@ -23,7 +28,7 @@ function hasMissingArt(game: StoryGame): boolean {
 }
 
 function getStatusBadge(game: StoryGame): { label: string; color: 'success' | 'warning' | 'info' | 'default' } {
-  if (game.activeSession?.status === 'playing' || game.activeAdventureSession?.status === 'playing') {
+  if (game.activeSession?.status === 'playing' || game.activeAdventureSession?.status === 'playing' || game.activeCardGameSession?.status === 'playing') {
     return { label: 'In Progress', color: 'warning' }
   }
   const playCount = game.playSessions?.length ?? 0
@@ -87,6 +92,7 @@ export default function MyGamesGallery({
   const [games, setGames] = useState<StoryGame[]>([])
   const [loading, setLoading] = useState(true)
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
+  const [typeFilter, setTypeFilter] = useState<string>('all')
 
   useEffect(() => {
     let cancelled = false
@@ -153,15 +159,36 @@ export default function MyGamesGallery({
       return game.childId === childId
     }
     return true
+  }).filter((game) => {
+    if (typeFilter === 'all') return true
+    if (typeFilter === 'board') return game.gameType === GameType.Board || (!game.gameType && !game.adventureTree && !game.cardGame)
+    if (typeFilter === 'adventure') return game.gameType === GameType.Adventure
+    if (typeFilter === 'cards') return game.gameType === GameType.Cards
+    return true
   })
 
-  if (visibleGames.length === 0) return null
+  if (games.length === 0) return null
 
   return (
     <Box sx={{ mt: 4 }}>
       <Typography variant="h6" sx={{ mb: 2, textAlign: 'center' }}>
         Family Games
       </Typography>
+
+      {/* Filter tabs */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
+        <ToggleButtonGroup
+          value={typeFilter}
+          exclusive
+          onChange={(_, v) => { if (v !== null) setTypeFilter(v) }}
+          size="small"
+        >
+          <ToggleButton value="all">All</ToggleButton>
+          <ToggleButton value="board">{'\uD83C\uDFB2'} Board</ToggleButton>
+          <ToggleButton value="adventure">{'\uD83D\uDCD6'} Adventure</ToggleButton>
+          <ToggleButton value="cards">{'\uD83C\uDCC3'} Cards</ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
         {visibleGames.map((game) => {
           const titleArt = game.generatedArt?.titleScreen
@@ -171,11 +198,14 @@ export default function MyGamesGallery({
           const creatorName = getCreatorName(game, children)
           const statusBadge = isDraft ? null : getStatusBadge(game)
           const isAdventure = game.gameType === GameType.Adventure
-          const gameTypeIcon = isAdventure ? '\uD83D\uDCD6' : '\uD83C\uDFB2'
-          const gameTitle = isAdventure
-            ? `${game.storyInputs.theme} Adventure`
-            : (game.generatedGame?.title ?? game.storyInputs.theme)
-          const hasGame = isAdventure ? !!game.adventureTree : !!game.generatedGame
+          const isCardGame = game.gameType === GameType.Cards
+          const gameTypeIcon = isCardGame ? '\uD83C\uDCC3' : isAdventure ? '\uD83D\uDCD6' : '\uD83C\uDFB2'
+          const gameTitle = isCardGame
+            ? `${game.storyInputs.theme} Card Game`
+            : isAdventure
+              ? `${game.storyInputs.theme} Adventure`
+              : (game.generatedGame?.title ?? game.storyInputs.theme)
+          const hasGame = isCardGame ? !!game.cardGame : isAdventure ? !!game.adventureTree : !!game.generatedGame
           const totalSteps = 6
 
           return (
@@ -258,6 +288,13 @@ export default function MyGamesGallery({
                       variant="outlined"
                     />
                   )}
+                  {game.cardGame && (
+                    <Chip
+                      label={`${game.cardGame.metadata.deckSize} cards \u2022 ${game.cardGame.mechanic}`}
+                      size="small"
+                      variant="outlined"
+                    />
+                  )}
                   {statusBadge && (
                     <Chip
                       label={statusBadge.label}
@@ -323,7 +360,7 @@ export default function MyGamesGallery({
                       onClick={() => onSelectGame(game)}
                       disabled={!hasGame}
                     >
-                      {isAdventure ? 'Play Adventure' : 'Play'}
+                      {isCardGame ? 'Play Cards' : isAdventure ? 'Play Adventure' : 'Play'}
                     </Button>
                     {canPlaytest(game, childId, isParent) && onPlaytestGame && (
                       <Button

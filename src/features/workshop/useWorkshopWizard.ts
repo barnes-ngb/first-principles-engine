@@ -1,6 +1,6 @@
 import { useReducer, useCallback } from 'react'
 import type { StoryInputs, StoryPlayer, StoryChallenge } from '../../core/types'
-import type { AdventureLength, BoardLength, BoardStyle, GameType } from '../../core/types/workshop'
+import type { AdventureLength, BoardLength, BoardStyle, CardBackStyle, CardMechanic, GameType } from '../../core/types/workshop'
 
 // ── State ─────────────────────────────────────────────────────────
 
@@ -18,6 +18,11 @@ export interface WizardState {
   storySetup: string
   choiceSeeds: string[]
   adventureLength: AdventureLength | ''
+  // Card game fields
+  cardMechanic: CardMechanic | ''
+  cardDescriptions: string[]
+  cardBackStyle: CardBackStyle | ''
+  cardBackCustom: string
 }
 
 const initialState: WizardState = {
@@ -32,12 +37,17 @@ const initialState: WizardState = {
   storySetup: '',
   choiceSeeds: [],
   adventureLength: '',
+  cardMechanic: '',
+  cardDescriptions: [],
+  cardBackStyle: '',
+  cardBackCustom: '',
 }
 
 /** Total wizard steps by game type */
 export function getTotalSteps(gameType: GameType | ''): number {
   // Step 0: Game Type, then type-specific steps
   if (gameType === 'adventure') return 6 // GameType, Theme, Players, StorySetup, Choices, Length
+  if (gameType === 'cards') return 6 // GameType, Theme, Players, Mechanic, CardDesign, CardStyle
   return 6 // GameType, Theme, Players, Goal, Challenges, Board
 }
 
@@ -59,6 +69,10 @@ type WizardAction =
   | { type: 'SET_STORY_SETUP'; storySetup: string }
   | { type: 'SET_CHOICE_SEEDS'; choiceSeeds: string[] }
   | { type: 'SET_ADVENTURE_LENGTH'; adventureLength: AdventureLength }
+  | { type: 'SET_CARD_MECHANIC'; cardMechanic: CardMechanic }
+  | { type: 'SET_CARD_DESCRIPTIONS'; cardDescriptions: string[] }
+  | { type: 'SET_CARD_BACK_STYLE'; cardBackStyle: CardBackStyle }
+  | { type: 'SET_CARD_BACK_CUSTOM'; cardBackCustom: string }
   | { type: 'NEXT_STEP' }
   | { type: 'PREV_STEP' }
   | { type: 'RESET' }
@@ -85,6 +99,14 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
       return { ...state, choiceSeeds: action.choiceSeeds }
     case 'SET_ADVENTURE_LENGTH':
       return { ...state, adventureLength: action.adventureLength }
+    case 'SET_CARD_MECHANIC':
+      return { ...state, cardMechanic: action.cardMechanic }
+    case 'SET_CARD_DESCRIPTIONS':
+      return { ...state, cardDescriptions: action.cardDescriptions }
+    case 'SET_CARD_BACK_STYLE':
+      return { ...state, cardBackStyle: action.cardBackStyle }
+    case 'SET_CARD_BACK_CUSTOM':
+      return { ...state, cardBackCustom: action.cardBackCustom }
     case 'NEXT_STEP':
       return { ...state, step: Math.min(state.step + 1, getMaxStepIndex(state.gameType)) }
     case 'PREV_STEP':
@@ -132,6 +154,22 @@ export function useWorkshopWizard(initial?: Partial<WizardState>) {
     (adventureLength: AdventureLength) => dispatch({ type: 'SET_ADVENTURE_LENGTH', adventureLength }),
     [],
   )
+  const setCardMechanic = useCallback(
+    (cardMechanic: CardMechanic) => dispatch({ type: 'SET_CARD_MECHANIC', cardMechanic }),
+    [],
+  )
+  const setCardDescriptions = useCallback(
+    (cardDescriptions: string[]) => dispatch({ type: 'SET_CARD_DESCRIPTIONS', cardDescriptions }),
+    [],
+  )
+  const setCardBackStyle = useCallback(
+    (cardBackStyle: CardBackStyle) => dispatch({ type: 'SET_CARD_BACK_STYLE', cardBackStyle }),
+    [],
+  )
+  const setCardBackCustom = useCallback(
+    (cardBackCustom: string) => dispatch({ type: 'SET_CARD_BACK_CUSTOM', cardBackCustom }),
+    [],
+  )
   const nextStep = useCallback(() => dispatch({ type: 'NEXT_STEP' }), [])
   const prevStep = useCallback(() => dispatch({ type: 'PREV_STEP' }), [])
   const reset = useCallback(() => dispatch({ type: 'RESET' }), [])
@@ -139,6 +177,7 @@ export function useWorkshopWizard(initial?: Partial<WizardState>) {
   /** Check if the current step has enough input to proceed */
   const canProceed = (): boolean => {
     const isAdventure = state.gameType === 'adventure'
+    const isCards = state.gameType === 'cards'
 
     switch (state.step) {
       case 0: // Game Type
@@ -147,15 +186,18 @@ export function useWorkshopWizard(initial?: Partial<WizardState>) {
         return state.theme.trim().length > 0
       case 2: // Players (shared)
         return state.players.length >= 2
-      case 3: // Goal (board) or StorySetup (adventure)
+      case 3: // Goal (board) or StorySetup (adventure) or Mechanic (cards)
+        if (isCards) return state.cardMechanic !== ''
         return isAdventure
           ? state.storySetup.trim().length > 0
           : state.goal.trim().length > 0
-      case 4: // Challenges (board) or Choices (adventure)
+      case 4: // Challenges (board) or Choices (adventure) or CardDesign (cards)
+        if (isCards) return state.cardDescriptions.filter((c) => c.trim()).length > 0
         return isAdventure
           ? state.choiceSeeds.filter((c) => c.trim()).length > 0
           : state.challenges.length > 0
-      case 5: // Board (board) or Length (adventure)
+      case 5: // Board (board) or Length (adventure) or CardStyle (cards)
+        if (isCards) return state.cardBackStyle !== ''
         return isAdventure
           ? state.adventureLength !== ''
           : state.boardStyle !== '' && state.boardLength !== ''
@@ -181,6 +223,12 @@ export function useWorkshopWizard(initial?: Partial<WizardState>) {
       ? state.choiceSeeds.filter((c) => c.trim())
       : undefined,
     adventureLength: (state.adventureLength as AdventureLength) || undefined,
+    cardMechanic: (state.cardMechanic as 'matching' | 'collecting' | 'battle') || undefined,
+    cardDescriptions: state.cardDescriptions.filter((c) => c.trim()).length > 0
+      ? state.cardDescriptions.filter((c) => c.trim())
+      : undefined,
+    cardBackStyle: (state.cardBackStyle as 'classic' | 'decorated' | 'custom') || undefined,
+    cardBackCustom: state.cardBackCustom || undefined,
   })
 
   return {
@@ -195,6 +243,10 @@ export function useWorkshopWizard(initial?: Partial<WizardState>) {
     setStorySetup,
     setChoiceSeeds,
     setAdventureLength,
+    setCardMechanic,
+    setCardDescriptions,
+    setCardBackStyle,
+    setCardBackCustom,
     nextStep,
     prevStep,
     reset,

@@ -5,7 +5,7 @@ import StepLabel from '@mui/material/StepLabel'
 import Stepper from '@mui/material/Stepper'
 import Typography from '@mui/material/Typography'
 import type { StoryInputs } from '../../core/types'
-import type { GameType } from '../../core/types/workshop'
+import type { CardBackStyle, CardMechanic, GameType } from '../../core/types/workshop'
 import { useTTS } from '../../core/hooks/useTTS'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useWorkshopWizard, getTotalSteps } from './useWorkshopWizard'
@@ -19,12 +19,25 @@ import BoardStyleStep from './steps/BoardStyleStep'
 import StorySetupStep from './steps/StorySetupStep'
 import ChoicesStep from './steps/ChoicesStep'
 import AdventureLengthStep from './steps/AdventureLengthStep'
+import CardMechanicStep from './steps/CardMechanicStep'
+import CardDesignStep from './steps/CardDesignStep'
+import CardStyleStep from './steps/CardStyleStep'
 import { useEffect, useRef } from 'react'
 import type { TapToHearRef } from './workshopTypes'
+
+/** Estimate deck size from mechanic and descriptions count */
+function estimateDeckSize(mechanic: string, descriptionCount: number): number {
+  if (mechanic === 'matching') return Math.max(descriptionCount, 6) * 2
+  if (mechanic === 'collecting') return Math.max(descriptionCount, 4) * 4
+  return Math.max(descriptionCount, 16) // battle
+}
 
 function getStepLabels(gameType: GameType | ''): string[] {
   if (gameType === 'adventure') {
     return ['Game Type', 'Theme', 'Players', 'Story', 'Choices', 'Length']
+  }
+  if (gameType === 'cards') {
+    return ['Game Type', 'Theme', 'Players', 'How to Play', 'Cards', 'Style']
   }
   return ['Game Type', 'Theme', 'Players', 'Goal', 'Challenges', 'Board']
 }
@@ -32,7 +45,7 @@ function getStepLabels(gameType: GameType | ''): string[] {
 function getStepPrompts(gameType: GameType | ''): string[] {
   if (gameType === 'adventure') {
     return [
-      "What kind of game do you want to make? A board game where you race to the finish, or an adventure story where everyone picks what happens?",
+      "What kind of game do you want to make? A board game where you race to the finish, an adventure story where everyone picks what happens, or a card game where you make your own deck!",
       "Hey Story Keeper! What's your new adventure about?",
       "Who's going on this adventure? Pick your players!",
       "Tell me about your adventure! Who is it about and what happens to them?",
@@ -40,8 +53,18 @@ function getStepPrompts(gameType: GameType | ''): string[] {
       "How long should your adventure be?",
     ]
   }
+  if (gameType === 'cards') {
+    return [
+      "What kind of game do you want to make? A board game where you race to the finish, an adventure story where everyone picks what happens, or a card game where you make your own deck!",
+      "Hey Story Keeper! What's your new card game about?",
+      "Who's going to play your card game? Pick your players!",
+      "What kind of card game do you want to make? Pick one!",
+      "Now let's decide what's on your cards!",
+      "Pick a style for your cards! Almost done!",
+    ]
+  }
   return [
-    "What kind of game do you want to make? A board game where you race to the finish, or an adventure story where everyone picks what happens?",
+    "What kind of game do you want to make? A board game where you race to the finish, an adventure story where everyone picks what happens, or a card game where you make your own deck!",
     "Hey Story Keeper! What's your new game about?",
     "Who's going to play your game? Pick your players!",
     'What are they trying to do?',
@@ -72,8 +95,11 @@ export default function WorkshopWizard({ onComplete, onCancel, onStepSave, initi
   const challengesRef = useRef<TapToHearRef>(null)
   const boardRef = useRef<TapToHearRef>(null)
   const adventureLengthRef = useRef<TapToHearRef>(null)
+  const cardMechanicRef = useRef<TapToHearRef>(null)
+  const cardStyleRef = useRef<TapToHearRef>(null)
 
   const isAdventure = wizard.state.gameType === 'adventure'
+  const isCards = wizard.state.gameType === 'cards'
 
   // Map step index to ref — depends on game type
   const getStepRef = (step: number): React.RefObject<TapToHearRef | null> | null => {
@@ -81,9 +107,13 @@ export default function WorkshopWizard({ onComplete, onCancel, onStepSave, initi
       case 0: return gameTypeRef
       case 1: return themeRef
       case 2: return null // Players
-      case 3: return isAdventure ? null : goalRef // StorySetup has no tap-to-hear
-      case 4: return isAdventure ? null : challengesRef // Choices has no tap-to-hear
-      case 5: return isAdventure ? adventureLengthRef : boardRef
+      case 3:
+        if (isCards) return cardMechanicRef
+        return isAdventure ? null : goalRef
+      case 4: return isAdventure || isCards ? null : challengesRef
+      case 5:
+        if (isCards) return cardStyleRef
+        return isAdventure ? adventureLengthRef : boardRef
       default: return null
     }
   }
@@ -203,6 +233,32 @@ export default function WorkshopWizard({ onComplete, onCancel, onStepSave, initi
             stepRef={adventureLengthRef}
           />
         )}
+
+        {/* Card game steps 3-5 */}
+        {wizard.state.step === 3 && isCards && (
+          <CardMechanicStep
+            value={wizard.state.cardMechanic}
+            onChange={(v) => wizard.setCardMechanic(v as CardMechanic)}
+            stepRef={cardMechanicRef}
+          />
+        )}
+        {wizard.state.step === 4 && isCards && (
+          <CardDesignStep
+            mechanic={wizard.state.cardMechanic}
+            value={wizard.state.cardDescriptions}
+            onChange={wizard.setCardDescriptions}
+          />
+        )}
+        {wizard.state.step === 5 && isCards && (
+          <CardStyleStep
+            value={wizard.state.cardBackStyle}
+            customDescription={wizard.state.cardBackCustom}
+            deckSize={estimateDeckSize(wizard.state.cardMechanic, wizard.state.cardDescriptions.length)}
+            onChange={(v) => wizard.setCardBackStyle(v as CardBackStyle)}
+            onCustomChange={wizard.setCardBackCustom}
+            stepRef={cardStyleRef}
+          />
+        )}
       </Box>
 
       {/* Navigation buttons */}
@@ -225,7 +281,7 @@ export default function WorkshopWizard({ onComplete, onCancel, onStepSave, initi
           >
             {wizard.isFinalStep() ? (
               <Typography sx={{ fontWeight: 700 }}>
-                {isAdventure ? 'Create My Adventure!' : 'Create My Game!'}
+                {isAdventure ? 'Create My Adventure!' : isCards ? 'Create My Card Game!' : 'Create My Game!'}
               </Typography>
             ) : (
               'Next'

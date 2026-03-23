@@ -9,7 +9,9 @@ import Typography from '@mui/material/Typography'
 import { addDoc, deleteField, doc, updateDoc } from 'firebase/firestore'
 import type {
   ActiveAdventureSession,
+  ActiveCardGameSession,
   AdventureTree,
+  CardGameData,
   ChallengeCard,
   GeneratedArt,
   GeneratedGame,
@@ -31,20 +33,30 @@ import GamePlayView from './GamePlayView'
 import type { GamePlayResult } from './GamePlayView'
 import AdventurePlayView from './AdventurePlayView'
 import type { AdventurePlayResult } from './AdventurePlayView'
+import MatchingPlayView from './MatchingPlayView'
+import type { MatchingPlayResult } from './MatchingPlayView'
+import CollectingPlayView from './CollectingPlayView'
+import type { CollectingPlayResult } from './CollectingPlayView'
+import BattlePlayView from './BattlePlayView'
+import type { BattlePlayResult } from './BattlePlayView'
 import {
   logWorkshopHours,
   logAdventureHours,
   logPlaytestHours,
   logAdventurePlaytestHours,
+  logCardGameHours,
+  logCardGamePlaytestHours,
   createGameArtifact,
   createAdventureArtifact,
+  createCardGameArtifact,
   recordPlaySession,
   recordAdventurePlaySession,
+  recordCardGamePlaySession,
 } from './workshopUtils'
 import MyGamesGallery from './MyGamesGallery'
 import GameCreationScreen from './GameCreationScreen'
 import VoiceRecordingStep from './VoiceRecordingStep'
-import { generateAllArt, generateAdventureArt } from './workshopArt'
+import { generateAllArt, generateAdventureArt, generateCardGameArt } from './workshopArt'
 import PlaytestView from './PlaytestView'
 import AdventurePlaytestView from './AdventurePlaytestView'
 import PlaytestSummaryView from './PlaytestSummaryView'
@@ -73,6 +85,17 @@ function extractAdventureJson(text: string): AdventureTree | null {
   }
 }
 
+/** Extract JSON from <cardgame> tags in AI response */
+function extractCardGameJson(text: string): CardGameData | null {
+  const match = text.match(/<cardgame>\s*([\s\S]*?)\s*<\/cardgame>/)
+  if (!match) return null
+  try {
+    return JSON.parse(match[1].trim()) as CardGameData
+  } catch {
+    return null
+  }
+}
+
 export default function WorkshopPage() {
   const [phase, setPhase] = useState<GamePhase>(GamePhase.Idle)
   const [currentGame, setCurrentGame] = useState<StoryGame | null>(null)
@@ -92,6 +115,7 @@ export default function WorkshopPage() {
   const { activeChildId, children } = useActiveChild()
 
   const isAdventure = currentGame?.gameType === GameType.Adventure
+  const isCards = currentGame?.gameType === GameType.Cards
 
   // ── Draft auto-save helpers ──────────────────────────────────────
 
@@ -110,6 +134,10 @@ export default function WorkshopPage() {
         storySetup: wizardState.storySetup || '',
         choiceSeeds: wizardState.choiceSeeds,
         adventureLength: wizardState.adventureLength || '',
+        cardMechanic: wizardState.cardMechanic || undefined,
+        cardDescriptions: wizardState.cardDescriptions,
+        cardBackStyle: wizardState.cardBackStyle || undefined,
+        cardBackCustom: wizardState.cardBackCustom || undefined,
       } as StoryInputs
 
       if (draftDocId) {
@@ -178,7 +206,100 @@ export default function WorkshopPage() {
         return
       }
 
-      if (gameType === GameType.Adventure) {
+      if (gameType === GameType.Cards) {
+        // ── Card game generation ─────────────────────────────
+        const response = await chat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.Workshop,
+          messages: [
+            {
+              role: 'user',
+              content: JSON.stringify({ ...inputs, gameType: 'cards' }),
+            },
+          ],
+        })
+
+        if (!response) {
+          setGenerateError('Failed to generate card game. Please try again.')
+          setPhase(GamePhase.Wizard)
+          return
+        }
+
+        const cardGameData = extractCardGameJson(response.message)
+        if (!cardGameData) {
+          setGenerateError('The AI response could not be parsed. Please try again.')
+          setPhase(GamePhase.Wizard)
+          return
+        }
+
+        // Generate art for card game
+        let generatedArt: GeneratedArt | undefined
+        try {
+          const artResult = await generateCardGameArt(
+            generateImage,
+            familyId,
+            inputs,
+            cardGameData,
+          )
+          if (artResult) {
+            generatedArt = artResult.art
+          }
+        } catch (err) {
+          console.warn('Card game art generation failed:', err)
+        }
+
+        const now = new Date().toISOString()
+
+        if (draftDocId) {
+          try {
+            await updateDoc(
+              doc(db, `families/${familyId}/storyGames/${draftDocId}`),
+              {
+                status: WorkshopStatus.Ready,
+                gameType: GameType.Cards,
+                storyInputs: inputs,
+                cardGame: cardGameData,
+                generatedArt: generatedArt ?? null,
+                playSessions: [],
+                updatedAt: now,
+                currentWizardStep: deleteField(),
+              },
+            )
+            setCurrentGame({
+              id: draftDocId,
+              childId: activeChildId,
+              createdAt: now,
+              updatedAt: now,
+              status: WorkshopStatus.Ready,
+              gameType: GameType.Cards,
+              storyInputs: inputs,
+              cardGame: cardGameData,
+              playSessions: [],
+              generatedArt,
+            })
+          } catch (err) {
+            console.warn('Failed to upgrade draft:', err)
+          }
+        } else {
+          const gameDoc: Omit<StoryGame, 'id'> = {
+            childId: activeChildId,
+            createdAt: now,
+            updatedAt: now,
+            status: WorkshopStatus.Ready,
+            gameType: GameType.Cards,
+            storyInputs: inputs,
+            cardGame: cardGameData,
+            playSessions: [],
+            generatedArt,
+          }
+          const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
+          setCurrentGame({ ...gameDoc, id: docRef.id })
+        }
+
+        setDraftDocId(null)
+        setPhase(GamePhase.Recording)
+      } else if (gameType === GameType.Adventure) {
         // ── Adventure generation ───────────────────────────────
         const response = await chat({
           familyId,
@@ -400,9 +521,12 @@ export default function WorkshopPage() {
   const handleSelectExistingGame = useCallback((game: StoryGame) => {
     setCurrentGame(game)
     const isAdv = game.gameType === GameType.Adventure
+    const isCrd = game.gameType === GameType.Cards
     if (isAdv && game.activeAdventureSession?.status === 'playing') {
       setResumeDialogOpen(true)
-    } else if (!isAdv && game.activeSession?.status === 'playing') {
+    } else if (isCrd && game.activeCardGameSession?.status === 'playing') {
+      setResumeDialogOpen(true)
+    } else if (!isAdv && !isCrd && game.activeSession?.status === 'playing') {
       setResumeDialogOpen(true)
     } else {
       setPhase(GamePhase.Ready)
@@ -423,18 +547,18 @@ export default function WorkshopPage() {
     setConfirmRestartOpen(false)
     if (currentGame?.id && familyId) {
       const isAdv = currentGame.gameType === GameType.Adventure
+      const isCrd = currentGame.gameType === GameType.Cards
+      const clearField = isCrd
+        ? { activeCardGameSession: null }
+        : isAdv
+          ? { activeAdventureSession: null }
+          : { activeSession: null }
       try {
         await updateDoc(
           doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-          {
-            ...(isAdv ? { activeAdventureSession: null } : { activeSession: null }),
-            updatedAt: new Date().toISOString(),
-          },
+          { ...clearField, updatedAt: new Date().toISOString() },
         )
-        setCurrentGame({
-          ...currentGame,
-          ...(isAdv ? { activeAdventureSession: null } : { activeSession: null }),
-        })
+        setCurrentGame({ ...currentGame, ...clearField })
       } catch (err) {
         console.warn('Failed to clear active session:', err)
       }
@@ -549,6 +673,63 @@ export default function WorkshopPage() {
     [currentGame?.id, familyId],
   )
 
+  // ── Card game handlers ──────────────────────────────────────────
+
+  const handleCardGameFinished = useCallback(
+    async (result: MatchingPlayResult | CollectingPlayResult | BattlePlayResult) => {
+      setPhase(GamePhase.Finished)
+
+      if (!familyId || !activeChildId || !currentGame?.cardGame || !currentGame.id) return
+
+      try {
+        await Promise.all([
+          updateDoc(
+            doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
+            { activeCardGameSession: null, updatedAt: new Date().toISOString() },
+          ),
+          logCardGameHours(
+            familyId,
+            activeChildId,
+            currentGame.cardGame,
+            result.durationMinutes,
+          ),
+          createCardGameArtifact(
+            familyId,
+            activeChildId,
+            currentGame.cardGame,
+            currentGame.storyInputs.theme,
+          ),
+          recordCardGamePlaySession(
+            familyId,
+            currentGame.id,
+            result.playerIds,
+            result.winner ?? undefined,
+            result.durationMinutes,
+          ),
+        ])
+        setCurrentGame({ ...currentGame, activeCardGameSession: null })
+      } catch (err) {
+        console.warn('Failed to log card game results:', err)
+      }
+    },
+    [familyId, activeChildId, currentGame],
+  )
+
+  const handleSaveCardGameSession = useCallback(
+    async (session: ActiveCardGameSession) => {
+      if (!currentGame?.id || !familyId) return
+      try {
+        await updateDoc(
+          doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
+          { activeCardGameSession: session, updatedAt: new Date().toISOString() },
+        )
+      } catch (err) {
+        console.warn('Failed to save card game session:', err)
+      }
+    },
+    [currentGame?.id, familyId],
+  )
+
   // ── Playtest flow ───────────────────────────────────────────────
 
   const handleStartPlaytest = useCallback((game: StoryGame) => {
@@ -568,7 +749,7 @@ export default function WorkshopPage() {
 
   const handleSendPlaytest = useCallback(async () => {
     if (!familyId || !activeChildId || !currentGame?.id || !playtestFeedback) return
-    if (!currentGame.generatedGame && !currentGame.adventureTree) return
+    if (!currentGame.generatedGame && !currentGame.adventureTree && !currentGame.cardGame) return
 
     const childName = children.find((c) => c.id === activeChildId)?.name ?? 'Tester'
     const summary = computeSummary(playtestFeedback)
@@ -609,6 +790,14 @@ export default function WorkshopPage() {
           familyId,
           activeChildId,
           currentGame.adventureTree,
+          playtestDuration,
+          hasAudio,
+        )
+      } else if (currentGame.cardGame) {
+        await logCardGamePlaytestHours(
+          familyId,
+          activeChildId,
+          currentGame.cardGame,
           playtestDuration,
           hasAudio,
         )
@@ -748,14 +937,18 @@ export default function WorkshopPage() {
   const titleArt = currentGame?.generatedArt?.titleScreen
 
   // Build current player name for resume dialog
-  const resumePlayerNames = isAdventure
-    ? currentGame?.storyInputs.players.map((p) => p.name).join(', ') ?? ''
-    : currentGame?.activeSession?.players.map((p) => p.name).join(', ') ?? ''
+  const resumePlayerNames = isCards
+    ? currentGame?.activeCardGameSession?.players.map((p) => p.name).join(', ') ?? currentGame?.storyInputs.players.map((p) => p.name).join(', ') ?? ''
+    : isAdventure
+      ? currentGame?.storyInputs.players.map((p) => p.name).join(', ') ?? ''
+      : currentGame?.activeSession?.players.map((p) => p.name).join(', ') ?? ''
 
   // Get the game title for display
-  const gameTitle = isAdventure
-    ? (currentGame?.adventureTree ? `${currentGame.storyInputs.theme} Adventure` : currentGame?.storyInputs.theme)
-    : currentGame?.generatedGame?.title ?? currentGame?.storyInputs.theme
+  const gameTitle = isCards
+    ? `${currentGame?.storyInputs.theme ?? ''} Card Game`
+    : isAdventure
+      ? (currentGame?.adventureTree ? `${currentGame.storyInputs.theme} Adventure` : currentGame?.storyInputs.theme)
+      : currentGame?.generatedGame?.title ?? currentGame?.storyInputs.theme
 
   return (
     <Box sx={{ p: 2, maxWidth: 700, mx: 'auto' }}>
@@ -822,6 +1015,10 @@ export default function WorkshopPage() {
               storySetup: currentGame.storyInputs.storySetup ?? '',
               choiceSeeds: currentGame.storyInputs.choiceSeeds ?? [],
               adventureLength: currentGame.storyInputs.adventureLength ?? '',
+              cardMechanic: (currentGame.storyInputs.cardMechanic ?? '') as '' | 'matching' | 'collecting' | 'battle',
+              cardDescriptions: currentGame.storyInputs.cardDescriptions ?? [],
+              cardBackStyle: (currentGame.storyInputs.cardBackStyle ?? '') as '' | 'classic' | 'decorated' | 'custom',
+              cardBackCustom: currentGame.storyInputs.cardBackCustom ?? '',
             } : undefined}
           />
         </>
@@ -855,10 +1052,19 @@ export default function WorkshopPage() {
               onSkip={handleRecordingSkip}
             />
           )}
+          {currentGame.cardGame && !currentGame.generatedGame && !currentGame.adventureTree && (
+            // Card games skip voice recording step for now — go straight to ready
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Typography variant="h6" sx={{ mb: 2 }}>Your card game is ready!</Typography>
+              <Button variant="contained" onClick={handleRecordingSkip}>
+                Let&apos;s Play!
+              </Button>
+            </Box>
+          )}
         </>
       )}
 
-      {phase === GamePhase.Ready && (currentGame?.generatedGame || currentGame?.adventureTree) && (
+      {phase === GamePhase.Ready && (currentGame?.generatedGame || currentGame?.adventureTree || currentGame?.cardGame) && (
         <Box sx={{ textAlign: 'center', py: 4 }}>
           {/* Title screen hero image */}
           {titleArt ? (
@@ -898,9 +1104,11 @@ export default function WorkshopPage() {
                   {gameTitle}
                 </Typography>
                 <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                  {isAdventure
-                    ? `${currentGame.adventureTree!.totalNodes} scenes \u2022 ${currentGame.adventureTree!.totalEndings} endings`
-                    : `${currentGame.generatedGame!.board.totalSpaces} spaces \u2022 ${currentGame.generatedGame!.challengeCards.length} cards \u2022 ${currentGame.generatedGame!.metadata.estimatedMinutes} min`}
+                  {isCards && currentGame.cardGame
+                    ? `${currentGame.cardGame.metadata.deckSize} cards \u2022 ${currentGame.cardGame.mechanic} \u2022 ${currentGame.cardGame.metadata.estimatedMinutes} min`
+                    : isAdventure
+                      ? `${currentGame.adventureTree!.totalNodes} scenes \u2022 ${currentGame.adventureTree!.totalEndings} endings`
+                      : `${currentGame.generatedGame!.board.totalSpaces} spaces \u2022 ${currentGame.generatedGame!.challengeCards.length} cards \u2022 ${currentGame.generatedGame!.metadata.estimatedMinutes} min`}
                 </Typography>
               </Box>
             </Box>
@@ -909,7 +1117,17 @@ export default function WorkshopPage() {
               <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
                 {gameTitle}
               </Typography>
-              {isAdventure ? (
+              {isCards && currentGame.cardGame ? (
+                <Typography color="text.secondary" sx={{ mb: 3 }}>
+                  {currentGame.cardGame.metadata.deckSize} cards
+                  {' \u2022 '}
+                  {currentGame.cardGame.mechanic}
+                  {' \u2022 '}
+                  {currentGame.cardGame.metadata.estimatedMinutes} min
+                  {' \u2022 '}
+                  {currentGame.cardGame.rules.length} rules
+                </Typography>
+              ) : isAdventure ? (
                 <Typography color="text.secondary" sx={{ mb: 3 }}>
                   {currentGame.adventureTree!.totalNodes} scenes
                   {' \u2022 '}
@@ -951,7 +1169,7 @@ export default function WorkshopPage() {
               onClick={handlePlay}
               sx={{ py: 1.5, px: 4, fontSize: '1.1rem', fontWeight: 700, borderRadius: 3 }}
             >
-              {isAdventure ? 'Start Adventure!' : 'Play Now!'}
+              {isCards ? 'Play Card Game!' : isAdventure ? 'Start Adventure!' : 'Play Now!'}
             </Button>
             {currentGame.id && familyId && activeChildId && (
               <Button
@@ -996,6 +1214,48 @@ export default function WorkshopPage() {
         />
       )}
 
+      {phase === GamePhase.Playing && isCards && currentGame?.cardGame && currentGame.cardGame.mechanic === 'matching' && (
+        <MatchingPlayView
+          cardGame={currentGame.cardGame}
+          gameId={currentGame.id}
+          familyId={familyId ?? ''}
+          storyPlayers={currentGame.storyInputs.players}
+          generatedArt={currentGame.generatedArt}
+          activeSession={currentGame.activeCardGameSession}
+          voiceRecordings={currentGame.voiceRecordings}
+          onFinished={handleCardGameFinished}
+          onSaveSession={handleSaveCardGameSession}
+        />
+      )}
+
+      {phase === GamePhase.Playing && isCards && currentGame?.cardGame && currentGame.cardGame.mechanic === 'collecting' && (
+        <CollectingPlayView
+          cardGame={currentGame.cardGame}
+          gameId={currentGame.id}
+          familyId={familyId ?? ''}
+          storyPlayers={currentGame.storyInputs.players}
+          generatedArt={currentGame.generatedArt}
+          activeSession={currentGame.activeCardGameSession}
+          voiceRecordings={currentGame.voiceRecordings}
+          onFinished={handleCardGameFinished}
+          onSaveSession={handleSaveCardGameSession}
+        />
+      )}
+
+      {phase === GamePhase.Playing && isCards && currentGame?.cardGame && currentGame.cardGame.mechanic === 'battle' && (
+        <BattlePlayView
+          cardGame={currentGame.cardGame}
+          gameId={currentGame.id}
+          familyId={familyId ?? ''}
+          storyPlayers={currentGame.storyInputs.players}
+          generatedArt={currentGame.generatedArt}
+          activeSession={currentGame.activeCardGameSession}
+          voiceRecordings={currentGame.voiceRecordings}
+          onFinished={handleCardGameFinished}
+          onSaveSession={handleSaveCardGameSession}
+        />
+      )}
+
       {phase === GamePhase.Playtesting && !isAdventure && currentGame?.generatedGame && currentGame.id && familyId && activeChildId && !playtestFeedback && (
         <PlaytestView
           game={currentGame.generatedGame}
@@ -1024,7 +1284,7 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Playtesting && playtestFeedback && (currentGame?.generatedGame || currentGame?.adventureTree) && (
+      {phase === GamePhase.Playtesting && playtestFeedback && (currentGame?.generatedGame || currentGame?.adventureTree || currentGame?.cardGame) && (
         <PlaytestSummaryView
           feedback={playtestFeedback}
           cards={currentGame?.generatedGame?.challengeCards ?? []}
@@ -1049,10 +1309,10 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Finished && (currentGame?.generatedGame || currentGame?.adventureTree) && (
+      {phase === GamePhase.Finished && (currentGame?.generatedGame || currentGame?.adventureTree || currentGame?.cardGame) && (
         <Box sx={{ textAlign: 'center', py: 6 }}>
           <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
-            {isAdventure ? 'Adventure Complete!' : 'Game Over!'}
+            {isCards ? 'Card Game Complete!' : isAdventure ? 'Adventure Complete!' : 'Game Over!'}
           </Typography>
           <Typography variant="h6" color="text.secondary" sx={{ mb: 3 }}>
             {gameTitle} — Played by the Barnes Family!
@@ -1080,7 +1340,7 @@ export default function WorkshopPage() {
         <DialogActions>
           <Button onClick={handleStartOver}>Start Over</Button>
           <Button variant="contained" onClick={handleContinueGame}>
-            Continue {isAdventure ? 'Adventure' : 'Game'}
+            Continue {isCards ? 'Card Game' : isAdventure ? 'Adventure' : 'Game'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1090,7 +1350,7 @@ export default function WorkshopPage() {
         <DialogTitle>Start Over?</DialogTitle>
         <DialogContent>
           <Typography>
-            Start a brand new {isAdventure ? 'adventure' : 'game'}? The old one won&apos;t be saved.
+            Start a brand new {isCards ? 'card game' : isAdventure ? 'adventure' : 'game'}? The old one won&apos;t be saved.
           </Typography>
         </DialogContent>
         <DialogActions>
