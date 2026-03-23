@@ -1,19 +1,26 @@
 import { useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
+import Badge from '@mui/material/Badge'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import IconButton from '@mui/material/IconButton'
+import ToggleButton from '@mui/material/ToggleButton'
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import DeleteIcon from '@mui/icons-material/Delete'
+import MicIcon from '@mui/icons-material/Mic'
 import { deleteDoc, doc, getDocs, orderBy, query } from 'firebase/firestore'
 import { db, storyGamesCollection } from '../../core/firebase/firestore'
 import type { Child, StoryGame } from '../../core/types'
-import { WorkshopStatus } from '../../core/types/workshop'
+import { GameType, PlaytestStatus, WorkshopStatus } from '../../core/types/workshop'
 
 /** Check if a game is missing any expected art */
 function hasMissingArt(game: StoryGame): boolean {
   const art = game.generatedArt
   if (!art) return true
+  if (game.gameType === GameType.Cards) {
+    return !art.titleScreen || !art.cardBack
+  }
   if (!art.boardBackground || !art.titleScreen) return true
   if (!art.cardArt?.reading || !art.cardArt?.math || !art.cardArt?.story || !art.cardArt?.action)
     return true
@@ -21,7 +28,7 @@ function hasMissingArt(game: StoryGame): boolean {
 }
 
 function getStatusBadge(game: StoryGame): { label: string; color: 'success' | 'warning' | 'info' | 'default' } {
-  if (game.activeSession?.status === 'playing') {
+  if (game.activeSession?.status === 'playing' || game.activeAdventureSession?.status === 'playing' || game.activeCardGameSession?.status === 'playing') {
     return { label: 'In Progress', color: 'warning' }
   }
   const playCount = game.playSessions?.length ?? 0
@@ -36,11 +43,37 @@ function getCreatorName(game: StoryGame, children: Child[]): string {
   return child?.name ?? 'Unknown'
 }
 
+/** Check if game has unreviewed playtest sessions (for creator notification) */
+function hasUnreviewedPlaytest(game: StoryGame): boolean {
+  return (
+    game.playtestSessions?.some((s) => s.status === PlaytestStatus.Complete) ?? false
+  )
+}
+
+/** Get the latest complete (unreviewed) playtest tester name */
+function getPlaytestTesterName(game: StoryGame): string | null {
+  const session = game.playtestSessions?.find((s) => s.status === PlaytestStatus.Complete)
+  return session?.testerName ?? null
+}
+
+/** Whether this child can see the Playtest button for a given game */
+function canPlaytest(game: StoryGame, childId: string, isParent: boolean): boolean {
+  // Creator doesn't see Playtest on their own games
+  if (game.childId === childId) return false
+  // Parents can always playtest
+  if (isParent) return true
+  // Non-creator children can playtest (Lincoln on London's games)
+  return true
+}
+
 interface MyGamesGalleryProps {
   familyId: string
   childId: string
+  isParent?: boolean
   children: Child[]
   onSelectGame: (game: StoryGame) => void
+  onPlaytestGame?: (game: StoryGame) => void
+  onReviewPlaytest?: (game: StoryGame) => void
   onResumeDraft?: (game: StoryGame) => void
   onRegenerateArt?: (game: StoryGame) => Promise<void>
 }
@@ -48,14 +81,18 @@ interface MyGamesGalleryProps {
 export default function MyGamesGallery({
   familyId,
   childId,
+  isParent = false,
   children,
   onSelectGame,
+  onPlaytestGame,
+  onReviewPlaytest,
   onResumeDraft,
   onRegenerateArt,
 }: MyGamesGalleryProps) {
   const [games, setGames] = useState<StoryGame[]>([])
   const [loading, setLoading] = useState(true)
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
+  const [typeFilter, setTypeFilter] = useState<string>('all')
 
   useEffect(() => {
     let cancelled = false
@@ -122,15 +159,36 @@ export default function MyGamesGallery({
       return game.childId === childId
     }
     return true
+  }).filter((game) => {
+    if (typeFilter === 'all') return true
+    if (typeFilter === 'board') return game.gameType === GameType.Board || (!game.gameType && !game.adventureTree && !game.cardGame)
+    if (typeFilter === 'adventure') return game.gameType === GameType.Adventure
+    if (typeFilter === 'cards') return game.gameType === GameType.Cards
+    return true
   })
 
-  if (visibleGames.length === 0) return null
+  if (games.length === 0) return null
 
   return (
     <Box sx={{ mt: 4 }}>
       <Typography variant="h6" sx={{ mb: 2, textAlign: 'center' }}>
         Family Games
       </Typography>
+
+      {/* Filter tabs */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
+        <ToggleButtonGroup
+          value={typeFilter}
+          exclusive
+          onChange={(_, v) => { if (v !== null) setTypeFilter(v) }}
+          size="small"
+        >
+          <ToggleButton value="all">All</ToggleButton>
+          <ToggleButton value="board">{'\uD83C\uDFB2'} Board</ToggleButton>
+          <ToggleButton value="adventure">{'\uD83D\uDCD6'} Adventure</ToggleButton>
+          <ToggleButton value="cards">{'\uD83C\uDCC3'} Cards</ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
         {visibleGames.map((game) => {
           const titleArt = game.generatedArt?.titleScreen
@@ -139,6 +197,16 @@ export default function MyGamesGallery({
           const isCreator = game.childId === childId
           const creatorName = getCreatorName(game, children)
           const statusBadge = isDraft ? null : getStatusBadge(game)
+          const isAdventure = game.gameType === GameType.Adventure
+          const isCardGame = game.gameType === GameType.Cards
+          const gameTypeIcon = isCardGame ? '\uD83C\uDCC3' : isAdventure ? '\uD83D\uDCD6' : '\uD83C\uDFB2'
+          const gameTitle = isCardGame
+            ? `${game.storyInputs.theme} Card Game`
+            : isAdventure
+              ? `${game.storyInputs.theme} Adventure`
+              : (game.generatedGame?.title ?? game.storyInputs.theme)
+          const hasGame = isCardGame ? !!game.cardGame : isAdventure ? !!game.adventureTree : !!game.generatedGame
+          const totalSteps = 6
 
           return (
             <Box
@@ -161,7 +229,7 @@ export default function MyGamesGallery({
                 <Box
                   component="img"
                   src={titleArt}
-                  alt={game.generatedGame?.title ?? game.storyInputs.theme}
+                  alt={gameTitle}
                   sx={{
                     width: 64,
                     height: 64,
@@ -183,12 +251,12 @@ export default function MyGamesGallery({
                     flexShrink: 0,
                     color: isDraft ? 'warning.contrastText' : 'primary.contrastText',
                     fontWeight: 700,
-                    fontSize: '0.75rem',
+                    fontSize: isDraft ? '0.75rem' : '1.5rem',
                     textAlign: 'center',
                     p: 0.5,
                   }}
                 >
-                  {isDraft ? `Step ${(game.currentWizardStep ?? 0) + 1} of 5` : (game.generatedGame?.title ?? game.storyInputs.theme)}
+                  {isDraft ? `Step ${(game.currentWizardStep ?? 0) + 1} of ${totalSteps}` : gameTypeIcon}
                 </Box>
               )}
 
@@ -197,7 +265,7 @@ export default function MyGamesGallery({
                 <Typography variant="subtitle1" sx={{ fontWeight: 600 }} noWrap>
                   {isDraft
                     ? `${game.storyInputs.theme || 'New Game'} (Draft)`
-                    : (game.generatedGame?.title ?? game.storyInputs.theme)}
+                    : `${gameTypeIcon} ${gameTitle}`}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
                   By {creatorName}
@@ -213,6 +281,20 @@ export default function MyGamesGallery({
                       variant="outlined"
                     />
                   )}
+                  {game.adventureTree && (
+                    <Chip
+                      label={`${game.adventureTree.totalNodes} scenes`}
+                      size="small"
+                      variant="outlined"
+                    />
+                  )}
+                  {game.cardGame && (
+                    <Chip
+                      label={`${game.cardGame.metadata.deckSize} cards \u2022 ${game.cardGame.mechanic}`}
+                      size="small"
+                      variant="outlined"
+                    />
+                  )}
                   {statusBadge && (
                     <Chip
                       label={statusBadge.label}
@@ -221,9 +303,26 @@ export default function MyGamesGallery({
                       variant="outlined"
                     />
                   )}
+                  {game.version && game.version > 1 && (
+                    <Chip
+                      label={`v${game.version}`}
+                      size="small"
+                      color="secondary"
+                      variant="outlined"
+                    />
+                  )}
+                  {game.voiceRecordings && Object.keys(game.voiceRecordings).length > 0 && (
+                    <Chip
+                      icon={<MicIcon sx={{ fontSize: 14 }} />}
+                      label="Voice"
+                      size="small"
+                      color="secondary"
+                      variant="outlined"
+                    />
+                  )}
                   {isDraft && (
                     <Chip
-                      label={`Step ${(game.currentWizardStep ?? 0) + 1} of 5`}
+                      label={`Step ${(game.currentWizardStep ?? 0) + 1} of ${totalSteps}`}
                       size="small"
                       color="warning"
                       variant="outlined"
@@ -259,10 +358,38 @@ export default function MyGamesGallery({
                       variant="outlined"
                       size="small"
                       onClick={() => onSelectGame(game)}
-                      disabled={!game.generatedGame}
+                      disabled={!hasGame}
                     >
-                      Play
+                      {isCardGame ? 'Play Cards' : isAdventure ? 'Play Adventure' : 'Play'}
                     </Button>
+                    {canPlaytest(game, childId, isParent) && onPlaytestGame && (
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        color="secondary"
+                        onClick={() => onPlaytestGame(game)}
+                        disabled={!hasGame}
+                      >
+                        Playtest
+                      </Button>
+                    )}
+                    {isCreator && hasUnreviewedPlaytest(game) && onReviewPlaytest && (
+                      <Badge
+                        badgeContent="!"
+                        color="warning"
+                        sx={{ '& .MuiBadge-badge': { fontSize: '0.6rem', minWidth: 16, height: 16 } }}
+                      >
+                        <Button
+                          variant="contained"
+                          size="small"
+                          color="warning"
+                          onClick={() => onReviewPlaytest(game)}
+                          sx={{ fontSize: '0.7rem' }}
+                        >
+                          {getPlaytestTesterName(game)} tested!
+                        </Button>
+                      </Badge>
+                    )}
                     {isCreator && hasMissingArt(game) && onRegenerateArt && (
                       <Button
                         variant="text"

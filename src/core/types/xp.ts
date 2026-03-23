@@ -208,6 +208,7 @@ export const XP_EVENTS = {
   BOOK_READ: 15,                // reading session logged on book close
   EVALUATION_COMPLETE: 25,      // full evaluation chat completed
   ARMOR_DAILY_COMPLETE: 5,      // all earned pieces applied today
+  MANUAL_AWARD: 0,              // parent-awarded XP (amount varies)
 } as const
 
 export interface ArmorPieceProgress {

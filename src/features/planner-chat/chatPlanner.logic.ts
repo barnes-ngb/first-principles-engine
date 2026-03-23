@@ -489,13 +489,26 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
 
     const days: DraftDayPlan[] = []
     for (const rawDay of parsed.days as Array<Record<string, unknown>>) {
-      if (typeof rawDay.day !== 'string') return null
-      if (!Array.isArray(rawDay.items)) return null
+      const dayName = typeof rawDay.day === 'string' ? rawDay.day : String(rawDay.day ?? '')
+      if (!dayName) continue // skip bad days, don't fail
+      if (!Array.isArray(rawDay.items)) continue
 
       const items: DraftPlanItem[] = []
       for (const rawItem of rawDay.items as Array<Record<string, unknown>>) {
-        if (typeof rawItem.title !== 'string') return null
-        if (typeof rawItem.estimatedMinutes !== 'number' || rawItem.estimatedMinutes < 0) return null
+        const title = typeof rawItem.title === 'string' ? rawItem.title : String(rawItem.title ?? 'Activity')
+        if (!title) continue // skip empty items, don't fail
+
+        // Coerce estimatedMinutes from string to number
+        const estimatedMinutes = typeof rawItem.estimatedMinutes === 'number'
+          ? rawItem.estimatedMinutes
+          : typeof rawItem.estimatedMinutes === 'string'
+            ? parseInt(rawItem.estimatedMinutes, 10)
+            : 15 // default
+
+        if (isNaN(estimatedMinutes) || estimatedMinutes < 0) {
+          console.warn('[parseAIResponse] Bad estimatedMinutes:', rawItem.estimatedMinutes, 'for', title)
+          continue // skip this item, don't fail the entire plan
+        }
 
         const subjectBucket = VALID_SUBJECT_BUCKETS.has(rawItem.subjectBucket as string)
           ? (rawItem.subjectBucket as SubjectBucket)
@@ -503,9 +516,9 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
 
         items.push({
           id: generateItemId(),
-          title: rawItem.title,
+          title,
           subjectBucket,
-          estimatedMinutes: rawItem.estimatedMinutes,
+          estimatedMinutes,
           skillTags: Array.isArray(rawItem.skillTags) ? (rawItem.skillTags as string[]).filter(Boolean) : [],
           isAppBlock: rawItem.isAppBlock === true,
           accepted: rawItem.accepted !== false,
@@ -515,10 +528,15 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
       }
 
       days.push({
-        day: rawDay.day,
+        day: dayName,
         timeBudgetMinutes: typeof rawDay.timeBudgetMinutes === 'number' ? rawDay.timeBudgetMinutes : 150,
         items,
       })
+    }
+
+    if (days.length === 0) {
+      console.warn('[parseAIResponse] No valid days parsed')
+      return null
     }
 
     const validSkipActions = new Set(['skip', 'modify'])

@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import Typography from '@mui/material/Typography'
-import type { ChallengeCard as ChallengeCardType } from '../../core/types'
+import MicIcon from '@mui/icons-material/Mic'
+import type { ChallengeCard as ChallengeCardType, VoiceRecordingMap } from '../../core/types'
 import { useTTS } from '../../core/hooks/useTTS'
 
 const TYPE_EMOJI: Record<string, string> = {
@@ -26,16 +27,65 @@ interface ChallengeCardProps {
   onClose: () => void
   /** DALL-E generated card art keyed by card type */
   cardArt?: { reading?: string; math?: string; story?: string; action?: string }
+  /** Voice recordings map — if card ID has a recording, play it instead of TTS */
+  voiceRecordings?: VoiceRecordingMap
   /** Called when card flip animation starts (for sound sync) */
   onFlipStart?: () => void
   /** Called when boss challenge is revealed (for sound sync) */
   onBossReveal?: () => void
+  /** Whether game sounds are muted */
+  muted?: boolean
 }
 
-export default function ChallengeCard({ card, open, onClose, cardArt, onFlipStart, onBossReveal }: ChallengeCardProps) {
+export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecordings, onFlipStart, onBossReveal, muted }: ChallengeCardProps) {
   const tts = useTTS()
   const [flipped, setFlipped] = useState(false)
   const [contentVisible, setContentVisible] = useState(false)
+  const audioElRef = useRef<HTMLAudioElement | null>(null)
+
+  /** Play voice recording for a card, returns true if recording exists */
+  const playVoiceRecording = useCallback(
+    (cardId: string): boolean => {
+      const rec = voiceRecordings?.[cardId]
+      if (!rec?.url || muted) return false
+
+      // Stop any previous audio
+      if (audioElRef.current) {
+        audioElRef.current.pause()
+        audioElRef.current = null
+      }
+
+      const audio = new Audio(rec.url)
+      audioElRef.current = audio
+      audio.onended = () => { audioElRef.current = null }
+      audio.onerror = () => {
+        // Fall back to TTS silently
+        audioElRef.current = null
+        if (card) {
+          const prefix = DIFFICULTY_LABEL[card.difficulty] || ''
+          tts.speak(prefix + card.readAloudText)
+        }
+      }
+      audio.play().catch(() => {
+        // Fall back to TTS
+        audioElRef.current = null
+        if (card) {
+          const prefix = DIFFICULTY_LABEL[card.difficulty] || ''
+          tts.speak(prefix + card.readAloudText)
+        }
+      })
+      return true
+    },
+    [voiceRecordings, muted, tts, card],
+  )
+
+  /** Stop any playing voice recording */
+  const stopVoiceRecording = useCallback(() => {
+    if (audioElRef.current) {
+      audioElRef.current.pause()
+      audioElRef.current = null
+    }
+  }, [])
 
   // Animate card flip when it opens
   useEffect(() => {
@@ -60,10 +110,13 @@ export default function ChallengeCard({ card, open, onClose, cardArt, onFlipStar
         setContentVisible(true)
       }, flipDelay + 200)
 
-      // Read aloud after visual settles
+      // Read aloud after visual settles — use voice recording if available
       const ttsTimer = setTimeout(() => {
-        const prefix = DIFFICULTY_LABEL[card.difficulty] || ''
-        tts.speak(prefix + card.readAloudText)
+        const hasVoice = playVoiceRecording(card.id)
+        if (!hasVoice) {
+          const prefix = DIFFICULTY_LABEL[card.difficulty] || ''
+          tts.speak(prefix + card.readAloudText)
+        }
       }, flipDelay + 500)
 
       return () => {
@@ -71,6 +124,7 @@ export default function ChallengeCard({ card, open, onClose, cardArt, onFlipStar
         clearTimeout(contentTimer)
         clearTimeout(ttsTimer)
         tts.cancel()
+        stopVoiceRecording()
       }
     } else {
       setFlipped(false)
@@ -210,6 +264,26 @@ export default function ChallengeCard({ card, open, onClose, cardArt, onFlipStar
             </Box>
           )}
 
+          {/* Voice recording attribution */}
+          {voiceRecordings?.[card.id] && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 0.5,
+                mt: 1,
+                opacity: contentVisible ? 1 : 0,
+                transition: 'opacity 0.3s ease-in 0.2s',
+              }}
+            >
+              <MicIcon sx={{ fontSize: 14 }} />
+              Recorded by London
+            </Typography>
+          )}
+
           <Box
             sx={{
               display: 'flex',
@@ -224,8 +298,11 @@ export default function ChallengeCard({ card, open, onClose, cardArt, onFlipStar
               variant="outlined"
               size="small"
               onClick={() => {
-                const prefix = DIFFICULTY_LABEL[card.difficulty] || ''
-                tts.speak(prefix + card.readAloudText)
+                const hasVoice = playVoiceRecording(card.id)
+                if (!hasVoice) {
+                  const prefix = DIFFICULTY_LABEL[card.difficulty] || ''
+                  tts.speak(prefix + card.readAloudText)
+                }
               }}
             >
               Read Again

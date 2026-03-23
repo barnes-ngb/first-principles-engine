@@ -28,8 +28,10 @@ export default function PoseButtons({ onPose, currentPose }: PoseButtonsProps) {
             onClick={() => onPose(pose.id)}
             sx={{
               px: '14px',
-              py: '6px',
-              borderRadius: '20px',
+              py: '10px',
+              minHeight: '44px',
+              minWidth: '44px',
+              borderRadius: '22px',
               border: isActive
                 ? '1.5px solid #4caf50'
                 : '1px solid rgba(255,255,255,0.15)',

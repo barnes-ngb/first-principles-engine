@@ -9,6 +9,7 @@ import EnginePage from '../engine/EnginePage'
 import SkillSnapshotPage from '../evaluation/SkillSnapshotPage'
 import KidsPage from '../kids/KidsPage'
 import WordWall from './WordWall'
+import ArmorTab from './ArmorTab'
 
 export default function ProgressPage() {
   const [tab, setTab] = useState(0)
@@ -32,6 +33,7 @@ export default function ProgressPage() {
             <Tab label="Skill Snapshot" />
             <Tab label="Milestones" />
             <Tab label="Word Wall" />
+            <Tab label="Armor" />
           </Tabs>
         </Box>
       </Container>
@@ -40,6 +42,7 @@ export default function ProgressPage() {
       {tab === 2 && <SkillSnapshotPage />}
       {tab === 3 && <KidsPage />}
       {tab === 4 && <WordWall />}
+      {tab === 5 && <ArmorTab />}
     </>
   )
 }

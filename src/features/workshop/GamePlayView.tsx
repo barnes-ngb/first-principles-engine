@@ -8,7 +8,7 @@ import { doc, updateDoc } from 'firebase/firestore'
 import VolumeOffIcon from '@mui/icons-material/VolumeOff'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents'
-import type { ActiveSession, GeneratedArt, GeneratedGame } from '../../core/types'
+import type { ActiveSession, GeneratedArt, GeneratedGame, VoiceRecordingMap } from '../../core/types'
 import { db } from '../../core/firebase/firestore'
 import { useTTS } from '../../core/hooks/useTTS'
 import { TurnPhase } from '../../core/types/workshop'
@@ -40,6 +40,7 @@ interface GamePlayViewProps {
   storyPlayers?: StoryPlayer[]
   generatedArt?: GeneratedArt
   activeSession?: ActiveSession | null
+  voiceRecordings?: VoiceRecordingMap
   onFinished: (result: GamePlayResult) => void
 }
 
@@ -50,6 +51,7 @@ export default function GamePlayView({
   storyPlayers,
   generatedArt,
   activeSession,
+  voiceRecordings,
   onFinished,
 }: GamePlayViewProps) {
   const session = useGameSession(game)
@@ -294,16 +296,21 @@ export default function GamePlayView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.state.currentPlayerIndex, session.state.turnPhase])
 
-  // Announce board events on landing
+  // Announce board events on landing — use voice recording if available
   useEffect(() => {
     if (session.state.turnPhase === TurnPhase.Resolve && session.state.lastRoll && !session.isGameOver) {
       const player = session.currentPlayer
       if (!player) return
       const space = game.board.spaces[player.position]
-      if (space?.type === 'bonus' && space.label) {
-        tts.speak(space.label)
-      } else if (space?.type === 'setback' && space.label) {
-        tts.speak(space.label)
+      if ((space?.type === 'bonus' || space?.type === 'setback' || space?.type === 'special') && space.label) {
+        const spaceRecKey = `space-${space.index}`
+        const rec = voiceRecordings?.[spaceRecKey]
+        if (rec?.url && !sounds.muted) {
+          const audio = new Audio(rec.url)
+          audio.play().catch(() => tts.speak(space.label!))
+        } else {
+          tts.speak(space.label)
+        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -521,8 +528,10 @@ export default function GamePlayView({
         open={state.turnPhase === TurnPhase.Card && state.currentCard !== null}
         onClose={handleDismissCard}
         cardArt={generatedArt?.cardArt}
+        voiceRecordings={voiceRecordings}
         onFlipStart={sounds.playCardFlip}
         onBossReveal={sounds.playBossReveal}
+        muted={sounds.muted}
       />
     </Box>
   )
