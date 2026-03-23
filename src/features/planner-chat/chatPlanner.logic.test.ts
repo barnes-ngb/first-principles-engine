@@ -519,25 +519,57 @@ describe('parseAIResponse', () => {
     expect(result!.minimumWin).toBe('Complete the core items for each day.')
   })
 
-  it('returns null when item title is missing', () => {
+  it('skips items with missing title but keeps other items', () => {
     const plan = {
-      days: [{ day: 'Monday', items: [{ estimatedMinutes: 10, subjectBucket: 'Math' }] }],
+      days: [{ day: 'Monday', items: [
+        { estimatedMinutes: 10, subjectBucket: 'Math' },
+        { title: 'Good Item', estimatedMinutes: 15, subjectBucket: 'Reading' },
+      ] }],
       minimumWin: 'x',
     }
-    expect(parseAIResponse(makeResponse(JSON.stringify(plan)))).toBeNull()
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result).not.toBeNull()
+    // First item has no title → gets coerced to 'Activity', which is truthy, so it's kept
+    expect(result!.days[0].items.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('returns null when estimatedMinutes is missing', () => {
+  it('defaults estimatedMinutes to 15 when missing', () => {
     const plan = {
       days: [{ day: 'Monday', items: [{ title: 'X', subjectBucket: 'Math' }] }],
       minimumWin: 'x',
     }
-    expect(parseAIResponse(makeResponse(JSON.stringify(plan)))).toBeNull()
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result).not.toBeNull()
+    expect(result!.days[0].items[0].estimatedMinutes).toBe(15)
   })
 
-  it('returns null when estimatedMinutes is negative', () => {
+  it('skips items with negative estimatedMinutes but keeps good items', () => {
     const plan = {
-      days: [{ day: 'Monday', items: [{ title: 'X', estimatedMinutes: -5, subjectBucket: 'Math' }] }],
+      days: [{ day: 'Monday', items: [
+        { title: 'Bad', estimatedMinutes: -5, subjectBucket: 'Math' },
+        { title: 'Good', estimatedMinutes: 10, subjectBucket: 'Reading' },
+      ] }],
+      minimumWin: 'x',
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result).not.toBeNull()
+    expect(result!.days[0].items).toHaveLength(1)
+    expect(result!.days[0].items[0].title).toBe('Good')
+  })
+
+  it('coerces string estimatedMinutes to number', () => {
+    const plan = {
+      days: [{ day: 'Monday', items: [{ title: 'X', estimatedMinutes: '8', subjectBucket: 'Math' }] }],
+      minimumWin: 'x',
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result).not.toBeNull()
+    expect(result!.days[0].items[0].estimatedMinutes).toBe(8)
+  })
+
+  it('returns null when all days are invalid', () => {
+    const plan = {
+      days: [{ items: [{ title: 'X', estimatedMinutes: 10 }] }],
       minimumWin: 'x',
     }
     expect(parseAIResponse(makeResponse(JSON.stringify(plan)))).toBeNull()

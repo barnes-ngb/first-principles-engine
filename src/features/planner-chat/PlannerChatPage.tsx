@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import AddIcon from '@mui/icons-material/Add'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import DeleteIcon from '@mui/icons-material/Delete'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import PrintIcon from '@mui/icons-material/Print'
 import SendIcon from '@mui/icons-material/Send'
@@ -14,8 +16,12 @@ import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogContentText from '@mui/material/DialogContentText'
 import DialogTitle from '@mui/material/DialogTitle'
+import FormControl from '@mui/material/FormControl'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import IconButton from '@mui/material/IconButton'
+import InputLabel from '@mui/material/InputLabel'
+import MenuItem from '@mui/material/MenuItem'
+import Select from '@mui/material/Select'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
@@ -39,6 +45,7 @@ import {
   skillSnapshotsCollection,
   weeksCollection,
   workbookConfigsCollection,
+  db,
 } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -216,10 +223,46 @@ export default function PlannerChatPage() {
   const [weekNotes, setWeekNotes] = useState('')
   const [selectedWorkbookIds, setSelectedWorkbookIds] = useState<Set<string>>(new Set())
 
+  // Quick workbook add state (inline in setup wizard)
+  const [quickWorkbooks, setQuickWorkbooks] = useState<Array<{ name: string; subject: string }>>([
+    { name: '', subject: 'Reading' },
+  ])
+
+  // Daily routine state
+  const [dailyRoutine, setDailyRoutine] = useState('')
+
+  // Suggest focus state
+  const [suggestingFocus, setSuggestingFocus] = useState(false)
+
   const conversationDocId = useMemo(
     () => (activeChildId ? plannerConversationDocId(weekRange.start, activeChildId) : ''),
     [weekRange.start, activeChildId],
   )
+
+  // Quick workbook handlers
+  const updateQuickWorkbook = useCallback((i: number, field: string, value: string) => {
+    setQuickWorkbooks(prev => prev.map((qw, idx) => idx === i ? { ...qw, [field]: value } : qw))
+  }, [])
+  const removeQuickWorkbook = useCallback((i: number) => {
+    setQuickWorkbooks(prev => prev.filter((_, idx) => idx !== i))
+  }, [])
+  const addQuickWorkbook = useCallback(() => {
+    setQuickWorkbooks(prev => [...prev, { name: '', subject: 'Reading' }])
+  }, [])
+
+  // Load planner defaults (daily routine, hoursPerDay, readAloud)
+  useEffect(() => {
+    if (!familyId) return
+    const settingsRef = doc(db, `families/${familyId}/settings/plannerDefaults`)
+    void getDoc(settingsRef).then((snap) => {
+      if (snap.exists()) {
+        const data = snap.data()
+        if (data.dailyRoutine) setDailyRoutine(data.dailyRoutine)
+        if (data.hoursPerDay) setHoursPerDay(data.hoursPerDay)
+        if (data.readAloud) setReadAloud(data.readAloud)
+      }
+    })
+  }, [familyId])
 
   // Load existing conversation
   useEffect(() => {
@@ -799,8 +842,53 @@ Return as JSON:
     })
   }, [])
 
+  // Suggest weekly focus via AI
+  const handleSuggestFocus = useCallback(async () => {
+    if (!activeChildId) return
+    setSuggestingFocus(true)
+    try {
+      const response = await aiChat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.Chat,
+        messages: [{
+          role: 'user',
+          content: `Suggest a weekly focus for a Christian homeschool family. Return ONLY a JSON object:
+{
+  "theme": "a one-word or short phrase theme for the week",
+  "virtue": "a character virtue to focus on",
+  "scriptureRef": "a Bible verse reference (book chapter:verse)",
+  "heartQuestion": "a discussion question for the family related to the theme"
+}
+
+Make it age-appropriate for kids 6-10. Rotate through different virtues and themes — don't repeat common ones. Today's date is ${new Date().toLocaleDateString()}.
+Return ONLY valid JSON, no markdown.`,
+        }],
+      })
+
+      if (response?.message) {
+        try {
+          let json = response.message.trim()
+          const fenceMatch = json.match(/```(?:json)?\s*([\s\S]*?)```/)
+          if (fenceMatch) json = fenceMatch[1].trim()
+          const firstBrace = json.indexOf('{')
+          const lastBrace = json.lastIndexOf('}')
+          if (firstBrace >= 0 && lastBrace > firstBrace) json = json.slice(firstBrace, lastBrace + 1)
+
+          const parsed = JSON.parse(json)
+          if (parsed.theme) updateWeekField('theme', parsed.theme)
+          if (parsed.virtue) updateWeekField('virtue', parsed.virtue)
+          if (parsed.scriptureRef) updateWeekField('scriptureRef', parsed.scriptureRef)
+          if (parsed.heartQuestion) updateWeekField('heartQuestion', parsed.heartQuestion)
+        } catch { /* AI didn't return valid JSON, ignore */ }
+      }
+    } finally {
+      setSuggestingFocus(false)
+    }
+  }, [activeChildId, familyId, aiChat, updateWeekField])
+
   // Setup wizard completion handler
-  const handleSetupComplete = useCallback(() => {
+  const handleSetupComplete = useCallback(async () => {
     const energyLabel =
       weekEnergy === 'full'
         ? 'normal energy'
@@ -808,10 +896,42 @@ Return as JSON:
           ? 'lighter week, reduce load'
           : 'MVD week, minimum items only'
 
-    const selectedConfigs = workbookConfigs.filter((wb) => selectedWorkbookIds.has(wb.id ?? ''))
-    const workbookLines = selectedConfigs
-      .map((wb) => `- ${wb.name}: ${wb.unitLabel} ${wb.currentPosition + 1} (${wb.subjectBucket})`)
-      .join('\n')
+    // Save quick workbooks to Firestore if any are filled in
+    if (activeChildId) {
+      for (const qw of quickWorkbooks) {
+        if (!qw.name.trim()) continue
+        await addDoc(workbookConfigsCollection(familyId), {
+          childId: activeChildId,
+          name: qw.name.trim(),
+          subjectBucket: qw.subject as SubjectBucket,
+          totalUnits: 100,
+          currentPosition: 0,
+          unitLabel: 'lesson',
+          targetFinishDate: '2026-06-30',
+          schoolDaysPerWeek: 5,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+      }
+    }
+
+    // Build workbook lines including both existing selected and quick-added
+    const allWorkbookLines = [
+      ...workbookConfigs
+        .filter((wb) => selectedWorkbookIds.has(wb.id ?? ''))
+        .map((wb) => `- ${wb.name}: ${wb.unitLabel} ${wb.currentPosition + 1} (${wb.subjectBucket})`),
+      ...quickWorkbooks
+        .filter((qw) => qw.name.trim())
+        .map((qw) => `- ${qw.name} (${qw.subject})`),
+    ].join('\n')
+
+    // Save planner defaults so daily routine persists across weeks
+    void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
+      dailyRoutine,
+      hoursPerDay,
+      readAloud,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true })
 
     const contextMessage = `Plan ${activeChild?.name ?? 'my child'}'s week.
 
@@ -819,9 +939,10 @@ Energy: ${energyLabel}
 Hours/day: ${hoursPerDay}
 
 Workbooks:
-${workbookLines || '(none configured)'}
+${allWorkbookLines || '(none configured)'}
 ${readAloud ? `Read-aloud: ${readAloud}` : ''}
-${weekNotes ? `Notes: ${weekNotes}` : ''}
+${dailyRoutine ? `\nDaily routine (use this as the base template for each day — keep these activities and times, vary them across the week as appropriate):\n${dailyRoutine}` : ''}
+${weekNotes ? `\nNotes: ${weekNotes}` : ''}
 
 Generate a plan for Monday through Friday.`.trim()
 
@@ -830,7 +951,7 @@ Generate a plan for Monday through Friday.`.trim()
     setTimeout(() => {
       void handleSend(contextMessage)
     }, 100)
-  }, [weekEnergy, hoursPerDay, workbookConfigs, selectedWorkbookIds, readAloud, weekNotes, activeChild, handleSend])
+  }, [weekEnergy, hoursPerDay, workbookConfigs, selectedWorkbookIds, readAloud, weekNotes, activeChild, handleSend, quickWorkbooks, dailyRoutine, activeChildId, familyId])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -1379,9 +1500,20 @@ Generate a plan for Monday through Friday.`.trim()
                 bgcolor: 'background.paper',
               }}
             >
-              <Typography variant="subtitle2" gutterBottom>
-                Week Focus
-              </Typography>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                <Typography variant="subtitle2">
+                  Week Focus
+                </Typography>
+                <Button
+                  size="small"
+                  variant="text"
+                  startIcon={suggestingFocus ? <CircularProgress size={14} /> : <AutoAwesomeIcon />}
+                  onClick={handleSuggestFocus}
+                  disabled={suggestingFocus}
+                >
+                  {suggestingFocus ? 'Generating...' : 'Suggest'}
+                </Button>
+              </Stack>
               <Stack spacing={1.5}>
                 <TextField
                   label="Theme"
@@ -1454,9 +1586,49 @@ Generate a plan for Monday through Friday.`.trim()
                     />
                   ))
                 ) : (
-                  <Typography variant="body2" color="text.secondary">
-                    No workbooks configured yet. You can still generate a plan.
-                  </Typography>
+                  <Box>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      No workbooks yet. Add your curricula:
+                    </Typography>
+                    <Stack spacing={1}>
+                      {quickWorkbooks.map((qw, i) => (
+                        <Stack key={i} direction="row" spacing={1} alignItems="center">
+                          <TextField
+                            size="small"
+                            placeholder="Curriculum name (e.g., Good and the Beautiful)"
+                            value={qw.name}
+                            onChange={e => updateQuickWorkbook(i, 'name', e.target.value)}
+                            sx={{ flex: 2 }}
+                          />
+                          <FormControl size="small" sx={{ flex: 1, minWidth: 100 }}>
+                            <InputLabel>Subject</InputLabel>
+                            <Select
+                              value={qw.subject}
+                              label="Subject"
+                              onChange={e => updateQuickWorkbook(i, 'subject', e.target.value)}
+                            >
+                              <MenuItem value="Reading">Reading</MenuItem>
+                              <MenuItem value="Math">Math</MenuItem>
+                              <MenuItem value="LanguageArts">Language Arts</MenuItem>
+                              <MenuItem value="Science">Science</MenuItem>
+                              <MenuItem value="Other">Other</MenuItem>
+                            </Select>
+                          </FormControl>
+                          <IconButton size="small" onClick={() => removeQuickWorkbook(i)}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Stack>
+                      ))}
+                      <Button
+                        size="small"
+                        variant="text"
+                        onClick={addQuickWorkbook}
+                        startIcon={<AddIcon />}
+                      >
+                        Add curriculum
+                      </Button>
+                    </Stack>
+                  </Box>
                 )}
                 <TextField
                   size="small"
@@ -1465,6 +1637,25 @@ Generate a plan for Monday through Friday.`.trim()
                   onChange={(e) => setReadAloud(e.target.value)}
                   fullWidth
                   sx={{ mt: 1 }}
+                />
+              </Box>
+
+              {/* Step 2.5: Daily Routine */}
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  What does a typical school day look like?
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  List the activities and approximate times. The AI will use this as the starting template.
+                </Typography>
+                <TextField
+                  size="small"
+                  placeholder={`Example:\nHandwriting while I read aloud (20 min)\nBooster cards (15 min)\nGood and the Beautiful reading (30 min)\nSight word games (15 min)\nReading Eggs on tablet (45 min)\nMath workbook (30 min)`}
+                  value={dailyRoutine}
+                  onChange={e => setDailyRoutine(e.target.value)}
+                  fullWidth
+                  multiline
+                  rows={6}
                 />
               </Box>
 
