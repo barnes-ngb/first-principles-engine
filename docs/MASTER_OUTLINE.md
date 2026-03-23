@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v7 **Version:** v7 — March 21, 2026 **Status:** Living document — updated after architecture cleanup sprint Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: 52k+ lines TypeScript, 30+ test files, 600+ tests, 32+ Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v8 **Version:** v8 — March 22, 2026 **Status:** Living document — updated after architecture cleanup sprint Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: 52k+ lines TypeScript, 30+ test files, 600+ tests, 32+ Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -68,7 +68,53 @@ Barnes Family Homeschool — Master Project Outline v7 **Version:** v7 — March
 * XP system — xpLedger collection, cumulative event log; dedup guards per source; 5 XP for completing daily armor ritual (once/day)
 * Tier upgrade — all 6 pieces collected → full-set celebration, new tier sheet generates in parallel, before/after reveal
 * Parent controls — Settings → Avatar & XP tab: add/subtract XP, delete pieces, reset avatar, force tier upgrade (testing), activity log
-* Daily session — DailyArmorSession per child per date; resets at midnight; tracks applied pieces Progress
+* Daily session — DailyArmorSession per child per date; resets at midnight; tracks applied pieces
+
+### 3D Avatar — Armor of God System
+
+**Route:** `/armor` (kid nav: "My Armor")
+
+**3D Voxel Character (Three.js r128):**
+* Minecraft-proportioned character (2:3:3 head:torso:legs ratio)
+* Photo-based feature extraction → skin tone, hair color, hair style applied to character
+* Programmatic 8×8 pixel face texture from extracted features (painted face)
+* Lincoln: fair skin, medium brown tousled hair past ears, gray creeper shirt, navy shorts
+* London: younger proportions (0.85 scale, larger head ratio)
+* Idle animations: gentle bob, arm sway, blinking every 3-6 seconds
+* Edge outlines on all blocks (Minecraft aesthetic)
+* Dynamic lighting: warm key, cool fill, rim, bounce
+
+**Armor Pieces (Ephesians 6):**
+* 6 pieces: Belt of Truth, Breastplate of Righteousness, Shoes of Peace, Shield of Faith, Helmet of Salvation, Sword of the Spirit
+* Each piece is 3D geometry sitting ON TOP of body parts
+* Equip/unequip toggle via card tap
+* Three visual states: equipped (solid), unlocked (ghost 15%), locked (ghost 6%)
+* Equip animation: scale-in with glow + particle burst
+* Open-face helmet design with helmet-compatible hair variant
+* Sword blade always blue (Word of God) with emissive glow
+* Shield with cross emblem and rim detail
+* Arms pivot from shoulder — sword/shield are children of arm groups
+
+**Tier Progression:**
+* 7 tiers: Wood → Stone → Leather → Iron → Gold → Diamond → Netherite
+* Each tier resets piece collection (recollect all 6 in new material)
+* Tier thresholds: 0 / 100 / 250 / 500 / 1000 / 2500 / 5000 XP
+* Weathering system with color variation per tier
+* Platform color matches current tier
+
+**6 Interactive Poses:**
+* Victory, Shield Wall, Prayer, Wave, Battle Ready, Dab
+* Keyframe animation engine with smooth interpolation
+* Pose buttons + swipe to cycle + auto-pose on equip
+* Smooth return to idle after pose completes
+
+**TTS Scripture:** Web Speech API reads verse aloud on piece tap (0.85 rate)
+
+**Touch Controls:** Single-finger drag rotation with momentum + friction, auto-rotate after 4s
+
+**XP System:** xpLedger collection, separate tracks per child, checkAndUnlockArmor on XP change
+
+Progress
 * Ladders tab (skill progression), Engine tab, Milestones tab
 * Skill Snapshot — priority skills, supports, stop rules, evidence definitions, workbook configs
 * Conceptual Blocks — conceptualBlocks[] on Skill Snapshot from pattern detection; ADDRESS_NOW vs DEFER; plain language rationale + strategies
@@ -100,6 +146,9 @@ Barnes Family Homeschool — Master Project Outline v7 **Version:** v7 — March
 - Pattern analysis: child profile + skill snapshot + eval findings + conceptual blocks
 - Engagement data compressed to summary format (reduces tokens ~60%)
 - Token usage logged per task type to aiUsage collection Firestore Collections (31) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, sessions, projects, labSessions, weeklyScores, dadLabReports, books, bookPages, sightWordProgress, xpLedger, readingSessions, dailyArmorSessions, stickerLibrary, weeklyScores
+
+* `avatarProfiles` — per-child avatar data (features, XP, tier, equipped pieces, customization)
+* `xpLedger` — append-only XP event history per child
 
 **Note:** xpEventLog merged into xpLedger (dedup via dedupKey field on ledger entries). Interactive quest sessions stored in `evaluationSessions` with `sessionType: 'interactive'` field. What's Built but Untested with Real Users
 * Weekly Review (needs full week of data)
