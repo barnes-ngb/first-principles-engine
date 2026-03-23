@@ -69,6 +69,55 @@ export async function callClaude(opts: {
   };
 }
 
+/** Call Claude API with vision (image + text) and return response text and usage. */
+export async function callClaudeWithVision(opts: {
+  apiKey: string;
+  model: string;
+  maxTokens: number;
+  systemPrompt: string;
+  imageBase64: string;
+  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  textPrompt: string;
+}): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  const client = new Anthropic({ apiKey: opts.apiKey });
+
+  const completion = await client.messages.create({
+    model: opts.model,
+    max_tokens: opts.maxTokens,
+    system: opts.systemPrompt,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: opts.mediaType,
+              data: opts.imageBase64,
+            },
+          },
+          {
+            type: "text",
+            text: opts.textPrompt,
+          },
+        ],
+      },
+    ],
+  });
+
+  const firstBlock = completion.content[0];
+  const text =
+    firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
+
+  return {
+    text,
+    inputTokens: completion.usage.input_tokens,
+    outputTokens: completion.usage.output_tokens,
+  };
+}
+
 /** Log AI usage to Firestore (non-throwing). */
 export async function logAiUsage(
   db: Firestore,

@@ -5,6 +5,7 @@ import { handleEvaluate } from "./evaluate.js";
 import { handleQuest } from "./quest.js";
 import { handleGenerateStory } from "./generateStory.js";
 import { handleWorkshop } from "./workshop.js";
+import { handleAnalyzeWorkbook } from "./analyzeWorkbook.js";
 
 export { analyzeEvaluationPatterns } from "./analyzePatterns.js";
 
@@ -16,4 +17,5 @@ export const CHAT_TASKS: Record<string, ChatTaskHandler> = {
   quest: handleQuest,
   generateStory: handleGenerateStory,
   workshop: handleWorkshop,
+  analyzeWorkbook: handleAnalyzeWorkbook,
 };

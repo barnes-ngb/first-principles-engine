@@ -434,7 +434,10 @@ export default function PlannerChatPage() {
     [familyId, conversationDocId, activeChildId, weekRange.start, hoursPerDay, appBlocks],
   )
 
-  // Photo upload handler
+  // Cached base64 images for vision API (cleared after plan generation)
+  const photoBase64Cache = useRef<Map<string, { data: string; mediaType: string }>>(new Map())
+
+  // Photo upload handler — also caches base64 for vision analysis
   const handlePhotoCapture = useCallback(
     async (file: File): Promise<string | null> => {
       if (!activeChildId) return null
@@ -457,6 +460,30 @@ export default function PlannerChatPage() {
         const ext = file.name.split('.').pop() ?? 'jpg'
         const filename = generateFilename(ext)
         await uploadArtifactFile(familyId, docRef.id, file, filename)
+
+        // Cache base64 for vision API analysis (read file once)
+        try {
+          const reader = new FileReader()
+          const base64Promise = new Promise<string>((resolve) => {
+            reader.onload = () => {
+              const result = reader.result as string
+              // Strip data URL prefix to get raw base64
+              const base64 = result.split(',')[1] ?? ''
+              resolve(base64)
+            }
+          })
+          reader.readAsDataURL(file)
+          const base64Data = await base64Promise
+          if (base64Data) {
+            photoBase64Cache.current.set(docRef.id, {
+              data: base64Data,
+              mediaType: file.type || 'image/jpeg',
+            })
+          }
+        } catch {
+          // Non-fatal: vision analysis will fall back to text-only
+        }
+
         return docRef.id
       } catch (err) {
         console.error('Photo upload failed', err)
@@ -469,10 +496,12 @@ export default function PlannerChatPage() {
     [activeChildId, familyId],
   )
 
-  // Extract photo content using AI (MVP: uses label + workbook config, not image analysis)
+  // Extract photo content using AI vision (analyzes actual image) with text-only fallback
   const extractPhotoContent = useCallback(async (
     userLabel: string,
     subject: SubjectBucket,
+    imageBase64?: string,
+    imageMediaType?: string,
   ): Promise<PhotoContentExtraction | null> => {
     if (!activeChildId) return null
 
@@ -483,13 +512,34 @@ export default function PlannerChatPage() {
       : ''
 
     try {
-      const response = await aiChat({
-        familyId,
-        childId: activeChildId,
-        taskType: TaskType.Generate,
-        messages: [{
-          role: 'user',
-          content: `I'm uploading a photo of homeschool materials labeled "${userLabel}" (subject: ${subject}).${configContext}
+      let response: { message: string } | null = null
+
+      // Vision path: send actual image to Claude for analysis
+      if (imageBase64) {
+        response = await aiChat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.AnalyzeWorkbook,
+          messages: [{
+            role: 'user',
+            content: JSON.stringify({
+              imageBase64,
+              mediaType: imageMediaType || 'image/jpeg',
+              textLabel: `${userLabel} (subject: ${subject})${configContext}`,
+            }),
+          }],
+        })
+      }
+
+      // Text-only fallback when no image or vision call failed
+      if (!response?.message) {
+        response = await aiChat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.Generate,
+          messages: [{
+            role: 'user',
+            content: `I'm uploading a photo of homeschool materials labeled "${userLabel}" (subject: ${subject}).${configContext}
 
 Please extract:
 1. Subject (math, reading, phonics, science, etc.)
@@ -509,8 +559,9 @@ Return as JSON:
   "modifications": "...",
   "rawDescription": "..."
 }`,
-        }],
-      })
+          }],
+        })
+      }
 
       if (!response?.message) return null
 
@@ -542,16 +593,25 @@ Return as JSON:
     if (photoLabels.length === 0) return
 
     // Attempt AI-based content extraction for labels without existing extracted content
+    // Uses vision API when base64 image data is cached, otherwise falls back to text analysis
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       const enriched = await Promise.all(
         photoLabels.map(async (label) => {
           if (label.extractedContent || !label.lessonOrPages.trim()) return label
-          const extracted = await extractPhotoContent(label.lessonOrPages, label.subjectBucket)
+          const cached = photoBase64Cache.current.get(label.artifactId)
+          const extracted = await extractPhotoContent(
+            label.lessonOrPages,
+            label.subjectBucket,
+            cached?.data,
+            cached?.mediaType,
+          )
           if (extracted) return { ...label, extractedContent: extracted }
           return label
         }),
       )
       setPhotoLabels(enriched)
+      // Clear base64 cache after extraction to free memory
+      photoBase64Cache.current.clear()
     }
 
     const assignments = photoLabelsToAssignments(photoLabels)
