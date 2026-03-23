@@ -23,7 +23,7 @@ function hasMissingArt(game: StoryGame): boolean {
 }
 
 function getStatusBadge(game: StoryGame): { label: string; color: 'success' | 'warning' | 'info' | 'default' } {
-  if (game.activeSession?.status === 'playing') {
+  if (game.activeSession?.status === 'playing' || game.activeAdventureSession?.status === 'playing') {
     return { label: 'In Progress', color: 'warning' }
   }
   const playCount = game.playSessions?.length ?? 0
@@ -325,13 +325,13 @@ export default function MyGamesGallery({
                     >
                       {isAdventure ? 'Play Adventure' : 'Play'}
                     </Button>
-                    {!isAdventure && canPlaytest(game, childId, isParent) && onPlaytestGame && (
+                    {canPlaytest(game, childId, isParent) && onPlaytestGame && (
                       <Button
                         variant="outlined"
                         size="small"
                         color="secondary"
                         onClick={() => onPlaytestGame(game)}
-                        disabled={!game.generatedGame}
+                        disabled={!hasGame}
                       >
                         Playtest
                       </Button>
@@ -353,7 +353,7 @@ export default function MyGamesGallery({
                         </Button>
                       </Badge>
                     )}
-                    {isCreator && !isAdventure && hasMissingArt(game) && onRegenerateArt && (
+                    {isCreator && hasMissingArt(game) && onRegenerateArt && (
                       <Button
                         variant="text"
                         size="small"

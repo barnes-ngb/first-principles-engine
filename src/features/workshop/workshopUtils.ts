@@ -241,6 +241,112 @@ export async function logAdventureHours(
   await Promise.all(promises)
 }
 
+// ── Log hours for adventure playtest session ─────────────────────
+
+export async function logAdventurePlaytestHours(
+  familyId: string,
+  childId: string,
+  adventure: AdventureTree,
+  durationMinutes: number,
+  hasAudioFeedback: boolean,
+): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10)
+  const promises: Promise<unknown>[] = []
+
+  // Count challenge types for proportional split
+  const bucketCounts: Record<string, number> = {}
+  let totalChallenges = 0
+
+  for (const node of Object.values(adventure.nodes)) {
+    if (!node.challenge) continue
+    const bucket = CARD_TYPE_TO_BUCKET[node.challenge.type] ?? SubjectBucket.Other
+    bucketCounts[bucket] = (bucketCounts[bucket] ?? 0) + 1
+    totalChallenges++
+  }
+
+  // 60% reading/reviewing nodes, 40% giving feedback
+  const readingMinutes = Math.round(durationMinutes * 0.6)
+  const feedbackMinutes = durationMinutes - readingMinutes
+
+  if (totalChallenges === 0) {
+    // All time is Language Arts (reading/comprehension of adventure text)
+    if (readingMinutes > 0) {
+      promises.push(
+        addDoc(hoursCollection(familyId), {
+          childId,
+          date: today,
+          minutes: readingMinutes,
+          subjectBucket: SubjectBucket.LanguageArts,
+          notes: `Playtested adventure — read ${Object.keys(adventure.nodes).length} scenes aloud`,
+        }),
+      )
+    }
+  } else {
+    // Split reading time by challenge types
+    for (const [bucket, count] of Object.entries(bucketCounts)) {
+      const minutes = Math.round((count / totalChallenges) * readingMinutes)
+      if (minutes <= 0) continue
+      promises.push(
+        addDoc(hoursCollection(familyId), {
+          childId,
+          date: today,
+          minutes,
+          subjectBucket: bucket as SubjectBucket,
+          notes: `Playtested adventure — read ${count} ${bucket.toLowerCase()} challenges`,
+        }),
+      )
+    }
+
+    // Narrative nodes without challenges → Language Arts
+    const narrativeNodes = Object.values(adventure.nodes).filter((n) => !n.challenge).length
+    if (narrativeNodes > 0) {
+      const narrativeMinutes = Math.round(
+        (narrativeNodes / Object.keys(adventure.nodes).length) * readingMinutes,
+      )
+      if (narrativeMinutes > 0) {
+        promises.push(
+          addDoc(hoursCollection(familyId), {
+            childId,
+            date: today,
+            minutes: narrativeMinutes,
+            subjectBucket: SubjectBucket.LanguageArts,
+            notes: `Playtested adventure — read ${narrativeNodes} narrative scenes`,
+          }),
+        )
+      }
+    }
+  }
+
+  // Feedback time = Language Arts
+  if (feedbackMinutes > 0) {
+    promises.push(
+      addDoc(hoursCollection(familyId), {
+        childId,
+        date: today,
+        minutes: feedbackMinutes,
+        subjectBucket: SubjectBucket.LanguageArts,
+        notes: `Playtested adventure — feedback & critical thinking`,
+      }),
+    )
+  }
+
+  // Extra speech time for audio feedback
+  if (hasAudioFeedback) {
+    const speechMinutes = Math.max(Math.round(durationMinutes * 0.1), 1)
+    promises.push(
+      addDoc(hoursCollection(familyId), {
+        childId,
+        date: today,
+        minutes: speechMinutes,
+        subjectBucket: SubjectBucket.LanguageArts,
+        notes: `Playtested adventure — verbal feedback (speech practice)`,
+      }),
+    )
+  }
+
+  await Promise.all(promises)
+}
+
 // ── Create artifact for completed adventure ───────────────────────
 
 export async function createAdventureArtifact(

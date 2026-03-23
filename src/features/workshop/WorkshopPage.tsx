@@ -35,6 +35,7 @@ import {
   logWorkshopHours,
   logAdventureHours,
   logPlaytestHours,
+  logAdventurePlaytestHours,
   createGameArtifact,
   createAdventureArtifact,
   recordPlaySession,
@@ -45,6 +46,7 @@ import GameCreationScreen from './GameCreationScreen'
 import VoiceRecordingStep from './VoiceRecordingStep'
 import { generateAllArt, generateAdventureArt } from './workshopArt'
 import PlaytestView from './PlaytestView'
+import AdventurePlaytestView from './AdventurePlaytestView'
 import PlaytestSummaryView from './PlaytestSummaryView'
 import { computeSummary } from './playtestUtils'
 import PlaytestReviewView from './PlaytestReviewView'
@@ -593,12 +595,20 @@ export default function WorkshopPage() {
       )
 
       // Log hours for tester
+      const hasAudio = playtestFeedback.some((f) => !!f.audioUrl)
       if (currentGame.generatedGame) {
-        const hasAudio = playtestFeedback.some((f) => !!f.audioUrl)
         await logPlaytestHours(
           familyId,
           activeChildId,
           currentGame.generatedGame,
+          playtestDuration,
+          hasAudio,
+        )
+      } else if (currentGame.adventureTree) {
+        await logAdventurePlaytestHours(
+          familyId,
+          activeChildId,
+          currentGame.adventureTree,
           playtestDuration,
           hasAudio,
         )
@@ -986,7 +996,7 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Playtesting && currentGame?.generatedGame && currentGame.id && familyId && activeChildId && !playtestFeedback && (
+      {phase === GamePhase.Playtesting && !isAdventure && currentGame?.generatedGame && currentGame.id && familyId && activeChildId && !playtestFeedback && (
         <PlaytestView
           game={currentGame.generatedGame}
           gameId={currentGame.id}
@@ -1000,12 +1010,27 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Playtesting && playtestFeedback && currentGame?.generatedGame && (
+      {phase === GamePhase.Playtesting && isAdventure && currentGame?.adventureTree && currentGame.id && familyId && activeChildId && !playtestFeedback && (
+        <AdventurePlaytestView
+          adventure={currentGame.adventureTree}
+          gameId={currentGame.id}
+          familyId={familyId}
+          testerId={activeChildId}
+          testerName={children.find((c) => c.id === activeChildId)?.name ?? 'Tester'}
+          generatedArt={currentGame.generatedArt}
+          voiceRecordings={currentGame.voiceRecordings}
+          onComplete={handlePlaytestComplete}
+          onCancel={handleBackToWorkshop}
+        />
+      )}
+
+      {phase === GamePhase.Playtesting && playtestFeedback && (currentGame?.generatedGame || currentGame?.adventureTree) && (
         <PlaytestSummaryView
           feedback={playtestFeedback}
-          cards={currentGame.generatedGame.challengeCards}
+          cards={currentGame?.generatedGame?.challengeCards ?? []}
+          adventureTree={currentGame?.adventureTree}
           testerName={children.find((c) => c.id === activeChildId)?.name ?? 'Tester'}
-          gameTitle={currentGame.generatedGame.title}
+          gameTitle={gameTitle ?? 'Game'}
           onSendToCreator={handleSendPlaytest}
           onPlayAgain={handlePlaytestAgain}
           onBack={handleBackToWorkshop}
