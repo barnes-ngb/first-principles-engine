@@ -391,6 +391,8 @@ export interface DraftPlanItem {
   mvdEssential?: boolean
   /** Category for kid-facing view: must-do or choose. */
   category?: 'must-do' | 'choose'
+  /** Guidance from evaluation findings (e.g., "Priority 1 — 2 weeks") */
+  evalGuidance?: string
 }
 
 export interface PlannerConversation {

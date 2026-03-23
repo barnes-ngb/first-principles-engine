@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -69,6 +69,13 @@ export default function KnowledgeMinePage() {
   const quest = useQuestSession()
   const xpLedger = useXpLedger(familyId, activeChildId ?? '')
   const activeDomainRef = useRef<QuestDomainConfig | null>(null)
+
+  // Pre-load question bank for reading (most common domain)
+  useEffect(() => {
+    if (quest.bankRemaining === 0 && !quest.bankRefreshing && activeChildId) {
+      void quest.refreshBank('reading')
+    }
+  }, [activeChildId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const childName = activeChild?.name || 'Explorer'
 
@@ -203,6 +210,32 @@ export default function KnowledgeMinePage() {
               </Box>
             ))}
           </Stack>
+
+          {/* Question bank status */}
+          {quest.bankRemaining > 0 && (
+            <Typography
+              sx={{
+                fontFamily: MC.font,
+                fontSize: '0.35rem',
+                color: MC.green,
+                mb: 1,
+              }}
+            >
+              {quest.bankRemaining} questions ready (instant mode)
+            </Typography>
+          )}
+          {quest.bankRefreshing && (
+            <Typography
+              sx={{
+                fontFamily: MC.font,
+                fontSize: '0.35rem',
+                color: MC.diamond,
+                mb: 1,
+              }}
+            >
+              Generating new questions...
+            </Typography>
+          )}
 
           {/* Streak display */}
           <Box sx={{ mb: 2 }}>

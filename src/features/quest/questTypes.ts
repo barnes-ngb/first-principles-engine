@@ -109,6 +109,39 @@ export interface QuestDomainConfig {
   domain: EvaluationDomain
   label: string
   icon: string
-  enabled: boolean // only 'reading' for Phase 1
+  enabled: boolean
   description?: string
+}
+
+// ── Pre-generated question bank ──────────────────────────────
+
+export interface BankedQuestion {
+  /** Unique ID for dedup */
+  id: string
+  domain: string
+  level: number
+  skill: string
+  prompt: string
+  stimulus?: string
+  phonemeDisplay?: string
+  options: string[]
+  correctAnswer: string
+  encouragement?: string
+  allowOpenResponse?: boolean
+  /** Timestamp when generated */
+  generatedAt: string
+  /** Whether this question has been served (soft-delete after use) */
+  served?: boolean
+}
+
+export interface QuestionBank {
+  /** Doc ID: {childId}_{domain} */
+  childId: string
+  domain: string
+  /** Questions grouped by level (1-6) */
+  questions: BankedQuestion[]
+  /** When the bank was last refreshed */
+  generatedAt: string
+  /** How many questions remain unserved */
+  remainingCount: number
 }

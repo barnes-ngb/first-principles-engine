@@ -399,6 +399,18 @@ export const dailyArmorSessionsCollection = (
 export const dailyArmorSessionDocId = (childId: string, date: string): string =>
   `${childId}-${date}`
 
+// ── Question Banks (Pre-generated Quest Questions) ───────────
+
+/** Question bank per child per domain. Doc ID: {childId}_{domain} */
+export const questionBanksCollection = (
+  familyId: string,
+) =>
+  collection(db, `families/${familyId}/questionBanks`) as CollectionReference<Record<string, unknown>>
+
+/** Build doc ID for a question bank. */
+export const questionBankDocId = (childId: string, domain: string): string =>
+  `${childId}_${domain}`
+
 // ── Evaluation Sessions (Diagnostic Assessment Chat) ──────────
 
 const evaluationSessionConverter: FirestoreDataConverter<EvaluationSession> = {

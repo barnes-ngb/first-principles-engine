@@ -4,6 +4,7 @@ import type {
   DraftDayPlan,
   DraftPlanItem,
   DraftWeeklyPlan,
+  EvaluationRecommendation,
   SkillSnapshot,
   SkipSuggestion,
 } from '../../core/types'
@@ -32,6 +33,8 @@ export interface PlanGeneratorInputs {
   adjustments?: AdjustmentIntent[]
   /** Daily routine text from Shelly's setup (activities + times) */
   dailyRoutine?: string
+  /** Recent evaluation recommendations to inject as plan items */
+  evaluationRecommendations?: EvaluationRecommendation[]
 }
 
 // ── Adjustment Intents ─────────────────────────────────────────
@@ -138,7 +141,7 @@ export function applySnapshotSuggestions(
 // ── Core Draft Plan Generator ──────────────────────────────────
 
 export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftWeeklyPlan {
-  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [] } = inputs
+  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], evaluationRecommendations = [] } = inputs
   const minutesPerDay = hoursPerDay * 60
 
   // Apply snapshot suggestions
@@ -211,6 +214,57 @@ export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftW
           dayPlan.items.push(item)
           dayBudgets.set(day, dayBudgets.get(day)! - 15)
         }
+      }
+    }
+  }
+
+  // Inject evaluation recommendations as plan items with skip guidance
+  if (evaluationRecommendations.length > 0) {
+    // Sort by priority — lower number = higher priority
+    const sortedRecs = [...evaluationRecommendations].sort((a, b) => a.priority - b.priority)
+
+    for (const rec of sortedRecs) {
+      const subject = skillTagToSubject(rec.skill)
+      const freqLower = (rec.frequency || '').toLowerCase()
+
+      // Determine schedule from frequency string
+      const isDaily = freqLower.includes('daily') || freqLower.includes('every day')
+      const is3x = freqLower.includes('3x') || freqLower.includes('three')
+
+      // Parse estimated minutes from frequency (e.g., "Daily, 8-10 minutes" → 9)
+      const minuteMatch = /(\d+)\s*[-–]\s*(\d+)\s*min/i.exec(rec.frequency)
+        ?? /(\d+)\s*min/i.exec(rec.frequency)
+      const minutes = minuteMatch
+        ? minuteMatch[2]
+          ? Math.round((parseInt(minuteMatch[1], 10) + parseInt(minuteMatch[2], 10)) / 2)
+          : parseInt(minuteMatch[1], 10)
+        : 10
+
+      const targetDays: WeekDay[] = isDaily
+        ? [...WEEK_DAYS]
+        : is3x
+          ? ['Monday', 'Wednesday', 'Friday']
+          : ['Tuesday', 'Thursday']
+
+      for (const day of targetDays) {
+        const dayPlan = dayMap.get(day)!
+        const budget = dayBudgets.get(day)!
+        if (budget < minutes) continue // skip if no budget left
+
+        const item: DraftPlanItem = {
+          id: generateItemId(),
+          title: rec.action,
+          subjectBucket: subject,
+          estimatedMinutes: minutes,
+          skillTags: [rec.skill],
+          accepted: true,
+          mvdEssential: rec.priority <= 2 ? true : undefined,
+          category: rec.priority <= 2 ? 'must-do' : 'choose',
+          /** Evaluation-sourced: includes duration target for review */
+          evalGuidance: `Priority ${rec.priority} — ${rec.duration}`,
+        }
+        dayPlan.items.push(item)
+        dayBudgets.set(day, budget - minutes)
       }
     }
   }
@@ -379,7 +433,7 @@ function skillTagToSubject(tag: string): SubjectBucket {
 
 /** Build the user message content that describes assignments and context for the LLM. */
 export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
-  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], dailyRoutine } = inputs
+  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], dailyRoutine, evaluationRecommendations = [] } = inputs
   const lines: string[] = []
 
   lines.push(`Generate a weekly school plan (Monday–Friday) with ${hoursPerDay} hours/day budget.`)
@@ -422,6 +476,15 @@ export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
     for (const rule of snapshot.stopRules) {
       lines.push(`- ${rule.label}: when "${rule.trigger}" → ${rule.action}`)
     }
+    lines.push('')
+  }
+
+  if (evaluationRecommendations && evaluationRecommendations.length > 0) {
+    lines.push('EVALUATION RECOMMENDATIONS (from recent assessment — incorporate these as specific plan items):')
+    for (const rec of evaluationRecommendations) {
+      lines.push(`- Priority ${rec.priority}: ${rec.skill} — ${rec.action} (${rec.frequency}, ${rec.duration})`)
+    }
+    lines.push('These should be included as must-do items for the relevant days. Mark Priority 1-2 items as mvdEssential.')
     lines.push('')
   }
 

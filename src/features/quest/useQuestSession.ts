@@ -24,6 +24,7 @@ import {
   FRUSTRATION_LIMIT,
   QuestScreen,
 } from './questTypes'
+import { useQuestionBank } from './useQuestionBank'
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -199,6 +200,7 @@ export function useQuestSession() {
   const familyId = useFamilyId()
   const { activeChildId, activeChild } = useActiveChild()
   const { chat, loading: aiLoading, error: aiError } = useAI()
+  const questionBank = useQuestionBank(familyId, activeChildId ?? '')
 
   const [screen, setScreen] = useState<QuestScreen>(QuestScreen.Intro)
   const [questState, setQuestState] = useState<QuestState | null>(null)
@@ -259,6 +261,15 @@ export function useQuestSession() {
     }
   }, [])
 
+  // ── Try bank first, then AI fallback ─────────────────────────
+
+  const tryBankQuestion = useCallback(
+    (level: number, domain: string, recentSkills?: string[]): QuestQuestion | null => {
+      return questionBank.getQuestion(level, domain, recentSkills)
+    },
+    [questionBank],
+  )
+
   // ── Start quest ───────────────────────────────────────────────
 
   const startQuest = useCallback(
@@ -299,7 +310,16 @@ export function useQuestSession() {
         })
       }, 1000)
 
-      // Build first message
+      // Try question bank first (instant, no latency)
+      const bankedQuestion = tryBankQuestion(initialState.currentLevel, domain)
+      if (bankedQuestion) {
+        setCurrentQuestion(bankedQuestion)
+        questionStartRef.current = Date.now()
+        setScreen(QuestScreen.Question)
+        return
+      }
+
+      // Fallback: AI-generated question
       const userMessage: AIChatMessage = {
         role: 'user',
         content: JSON.stringify({
@@ -347,7 +367,7 @@ export function useQuestSession() {
       questionStartRef.current = Date.now()
       setScreen(QuestScreen.Question)
     },
-    [activeChildId, activeChild, familyId, chat],
+    [activeChildId, activeChild, familyId, chat, tryBankQuestion],
   )
 
   // ── End session ───────────────────────────────────────────────
@@ -669,25 +689,41 @@ export function useQuestSession() {
       }
 
       // Request next question (or bonus round)
-      setScreen(QuestScreen.Loading)
-
       if (needsBonusRound) {
         bonusRoundUsedRef.current = true
       }
+
+      const bonusLevel = Math.max(1, newState.currentLevel - 2)
+      const targetLevel = needsBonusRound ? bonusLevel : newState.currentLevel
+
+      // Try question bank first (instant, no latency)
+      const recentSkills = updatedQuestions.slice(-3).map((q) => q.skill)
+      const bankedQuestion = !needsBonusRound
+        ? tryBankQuestion(targetLevel, activeDomainRef.current, recentSkills)
+        : null // Always use AI for bonus rounds (needs custom framing)
+
+      if (bankedQuestion) {
+        setCurrentQuestion(bankedQuestion)
+        questionStartRef.current = Date.now()
+        setScreen(QuestScreen.Question)
+        return
+      }
+
+      // Fallback: AI-generated question
+      setScreen(QuestScreen.Loading)
 
       // Send recent question types so AI can vary format
       const recentQuestionTypes = updatedQuestions
         .slice(-3)
         .map((q) => q.prompt.slice(0, 50))
 
-      const bonusLevel = Math.max(1, newState.currentLevel - 2)
       const userMessage: AIChatMessage = {
         role: 'user',
         content: JSON.stringify({
           action: 'answer',
           childAnswer,
           correct,
-          currentLevel: needsBonusRound ? bonusLevel : newState.currentLevel,
+          currentLevel: targetLevel,
           consecutiveCorrect: newState.consecutiveCorrect,
           consecutiveWrong: newState.consecutiveWrong,
           totalQuestions: newState.totalQuestions,
@@ -733,7 +769,7 @@ export function useQuestSession() {
       questionStartRef.current = Date.now()
       setScreen(QuestScreen.Question)
     },
-    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
+    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession, tryBankQuestion],
   )
 
   // ── Skip question ───────────────────────────────────────────
@@ -769,7 +805,17 @@ export function useQuestSession() {
       // DO NOT call computeNextState — skip doesn't affect adaptive state
       // DO NOT increment totalQuestions — question counter stays the same
 
-      // Request replacement question at same level
+      // Try question bank first for replacement
+      const recentSkills = updatedQuestions.slice(-3).map((q) => q.skill)
+      const bankedQuestion = tryBankQuestion(questState.currentLevel, activeDomainRef.current, recentSkills)
+      if (bankedQuestion) {
+        setCurrentQuestion(bankedQuestion)
+        questionStartRef.current = Date.now()
+        setScreen(QuestScreen.Question)
+        return
+      }
+
+      // Fallback: AI-generated replacement
       setScreen(QuestScreen.Loading)
 
       const recentQuestionTypes = updatedQuestions
@@ -832,7 +878,7 @@ export function useQuestSession() {
       questionStartRef.current = Date.now()
       setScreen(QuestScreen.Question)
     },
-    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
+    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession, tryBankQuestion],
   )
 
   // ── Reset to intro ────────────────────────────────────────────
@@ -870,5 +916,9 @@ export function useQuestSession() {
     submitAnswer,
     handleSkip,
     resetToIntro,
+    /** Question bank status */
+    bankRemaining: questionBank.remainingCount,
+    bankRefreshing: questionBank.refreshing,
+    refreshBank: questionBank.refreshBank,
   }
 }
