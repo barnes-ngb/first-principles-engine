@@ -1143,11 +1143,21 @@ ${weekNotes ? `\nNotes: ${weekNotes}` : ''}
 Generate a plan for Monday through Friday.`.trim()
 
     setSetupComplete(true)
-    setInputText(contextMessage)
+
+    // Add context message to chat for visual display
+    const userMsg: ChatMessage = {
+      id: generateItemId(),
+      role: ChatMessageRole.User,
+      text: contextMessage,
+      createdAt: new Date().toISOString(),
+    }
+    setMessages(prev => [...prev, userMsg])
+
+    // Generate through the proper path with full context (not handleSend which lacks structured prompt)
     setTimeout(() => {
-      void handleSend(contextMessage)
+      void handleGeneratePlan()
     }, 100)
-  }, [weekEnergy, hoursPerDay, workbookConfigs, selectedWorkbookIds, readAloud, weekNotes, activeChild, handleSend, quickWorkbooks, dailyRoutine, activeChildId, familyId, subjectTimeDefaults])
+  }, [weekEnergy, hoursPerDay, workbookConfigs, selectedWorkbookIds, readAloud, weekNotes, activeChild, handleGeneratePlan, quickWorkbooks, dailyRoutine, activeChildId, familyId, subjectTimeDefaults])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
