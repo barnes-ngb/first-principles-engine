@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v8 **Version:** v8 — March 22, 2026 **Status:** Living document — updated after architecture cleanup sprint Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: 52k+ lines TypeScript, 30+ test files, 600+ tests, 32+ Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v8 **Version:** v8 — March 22, 2026 **Status:** Living document — updated after architecture cleanup sprint Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: 52k+ lines TypeScript, 30+ test files, 600+ tests, 32+ Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -38,7 +38,56 @@ Barnes Family Homeschool — Master Project Outline v8 **Version:** v8 — March
 * End-on-a-win — bonus round question if last question is wrong, framed as "BONUS ROUND"
 * 24 unit tests for adaptive logic
 * Quest diamonds → 2 XP each → avatar progression
-* Math Quest + Speech Quest shown as "coming soon" My Books (Book Builder + AI Story Generator)
+* Math Quest + Speech Quest shown as "coming soon"
+
+### Story Game Workshop
+- Kid nav item → `/workshop` route (London's creative space)
+- **Three game types:** 🎲 Board Games, 📖 Choose-Your-Adventure, 🃏 Card Games
+- **Voice-first guided wizard** with read-aloud tiles (tap to hear, tap again to select)
+  - Game Type → Theme → Players → type-specific steps
+  - TTS prompts at every step (SpeechSynthesis API)
+  - Keyboard dictation for text input (native device mic)
+  - Draft auto-save — resume wizard at last completed step
+- **Player selection** pulls real family members:
+  - Lincoln/London use Minecraft avatars from `avatarProfiles`
+  - Mom/Dad get DALL-E generated themed tokens
+  - London auto-selected as Story Keeper (always plays)
+- **Board Games:** CSS Grid snaking path, 15/25/35 spaces, challenge cards (Reading/Math/Story/Action), boss challenges, bonus/setback/shortcut spaces
+- **Choose-Your-Adventure:** AI-generated branching story tree, 2-3 choices per node, no dead ends (retry endings), embedded challenges at nodes, scene illustrations via DALL-E
+- **Card Games (3 mechanics):** Matching (Memory), Collecting (Go Fish), Battle (War+). 20-30% of cards have embedded learning elements.
+- **DALL-E art generation** in parallel during wizard completion:
+  - Board backgrounds, title screens, per-type challenge card art, parent tokens, adventure scene illustrations, card game faces/backs
+  - `Promise.allSettled` — partial failures graceful, CSS/emoji fallbacks
+  - "Regenerate Art" retry for failed generations
+- **Polished play experience:**
+  - Animated dice roll, space-by-space token movement, 3D card flip reveals
+  - Boss challenge dramatic reveal (screen shake, glow border)
+  - Sound effects throughout (dice, cards, success, bonus, setback, game over fanfare)
+  - Confetti celebration on game completion
+  - Mute toggle for sound effects (TTS stays on)
+- **London voice recording** — optional post-creation step:
+  - Records his voice for any card/node via MediaRecorder API
+  - Plays back during game INSTEAD of TTS
+  - 🎤 badge on games with recordings
+  - Reusable `useAudioRecorder` hook
+- **Lincoln Playtester:**
+  - Dedicated Playtest mode — goes through ALL cards/nodes
+  - Per-item feedback: 👍🤔😬😴🔄 with text/audio comments
+  - London reviews flagged items, "Fix It" or "Keep It"
+  - AI-assisted card fixes
+  - Version tracking + revision history
+- **Cross-device visibility** — all family members see all games
+- **Save/resume** — in-progress game state persists, "Pick up where you left off?" prompt
+- **Today page integration:**
+  - "London made a new game!" card for unplayed games
+  - "Continue [Title]?" card for in-progress games
+- **Hours logging** split proportionally by challenge card types
+- Completed games saved as portfolio artifacts
+- My Games gallery with type icons (🎲📖🃏), title art thumbnails, play count
+- Cloud Function: `chat` with `taskType: 'workshop'` (board/adventure/card gen + card fixes)
+- Saves to `families/{familyId}/storyGames/{gameId}`
+
+My Books (Book Builder + AI Story Generator)
 * Bookshelf — filter tabs (All/My Stories/Generated/Sight Words), theme filter row (9 themes: Adventure, Animals, Family, Fantasy, Minecraft, Science, Sight Words, Faith, Other), 3-dot menu (Read/Edit/Print/Delete), auto-cover, sort drafts first
 * Book Editor — page editor with text, photos, voice recording, speech-to-text dictation, AI scene generation ("Make a Scene"), sticker picker, drag-to-position images, text sizing (Big/Medium/Small), font family (Handwriting/Print/Pixel), page reorder, Together Book toggle, "Finish My Book" with cover picker
 * AI Scene Generation — Claude Haiku rewrites prompts for copyright safety, DALL-E 3 generates scenes, 6 world styles (4 base + Garden Battle + Platformer World), world-type quick-pick chips
@@ -131,7 +180,7 @@ Progress
 * General family profile, AI usage dashboard
 * Avatar & XP tab — parent XP controls, piece management, force tier upgrade
 * Sticker Library tab — all generated stickers, tag editing, child profile assignment Cloud Functions (6 deployed, task registry pattern)
-1. `chat` — Task registry routing to: plan, chat, evaluate, quest, generateStory
+1. `chat` — Task registry routing to: plan, chat, evaluate, quest, generateStory, workshop
 2. `analyzePatterns` — Standalone evaluation pattern analysis (extracted from chat)
 3. `generateActivity` — Lesson card generation
 4. `generateImage` — Task registry routing to: scene, armorSheet, sticker, photoTransform, avatarPiece, baseCharacter, starterAvatar
@@ -143,19 +192,21 @@ Progress
 - Quest: child profile + skill snapshot + recent eval + quest recommendations from findings
 - Planner reads both guided and interactive evaluation sessions
 - Story generation: child profile + skill snapshot + week focus only
+- Workshop: story inputs + skill snapshot for challenge calibration + game structure constraints + adventure tree generation + card game generation + card fix suggestions
 - Pattern analysis: child profile + skill snapshot + eval findings + conceptual blocks
 - Engagement data compressed to summary format (reduces tokens ~60%)
-- Token usage logged per task type to aiUsage collection Firestore Collections (31) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, sessions, projects, labSessions, weeklyScores, dadLabReports, books, bookPages, sightWordProgress, xpLedger, readingSessions, dailyArmorSessions, stickerLibrary, weeklyScores
+- Token usage logged per task type to aiUsage collection Firestore Collections (32) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, sessions, projects, labSessions, weeklyScores, dadLabReports, books, bookPages, sightWordProgress, xpLedger, readingSessions, dailyArmorSessions, stickerLibrary, weeklyScores, storyGames
 
 * `avatarProfiles` — per-child avatar data (features, XP, tier, equipped pieces, customization)
 * `xpLedger` — append-only XP event history per child
 
-**Note:** xpEventLog merged into xpLedger (dedup via dedupKey field on ledger entries). Interactive quest sessions stored in `evaluationSessions` with `sessionType: 'interactive'` field. What's Built but Untested with Real Users
+**Note:** xpEventLog merged into xpLedger (dedup via dedupKey field on ledger entries). Interactive quest sessions stored in `evaluationSessions` with `sessionType: 'interactive'` field. Story games stored in `storyGames` with `gameType` field ('board' | 'adventure' | 'cards'). What's Built but Untested with Real Users
 * Weekly Review (needs full week of data)
 * Print materials (quality varies — book PDFs and worksheets)
 * Skip guidance (depends on evaluation data quality)
 * Lincoln's kid Today view (Must-Do/Choose flow — needs real week)
 * Knowledge Mine reading quest — core bugs fixed Mar 22, needs Lincoln to verify question quality + adaptive pacing + XP accumulation
+* Story Game Workshop — needs London to test: voice recognition via keyboard dictation, wizard flow, all three game types, art generation quality, playtester flow with Lincoln
 * My Books full flow (needs Shelly + kids — AI story gen, sight word tracking, reading sessions)
 * Story Guide handoff to generator (questions work, generator handoff unverified)
 * Book theme filter row on bookshelf (auto-tagging unverified)
@@ -171,8 +222,18 @@ Progress
 * Auto-XP from checklist/quest/book completion What's Not Built Yet Priority Queue (ready to prompt)
 * Lincoln Development Chat — dedicated AI chat mode reviewing evaluations, skill snapshot, recent progress → recommends what to work on this week
 * Planning improvements — activity ideas mode, engagement-based suggestions, individual time adjustments, better day generation
-* Docs update — this outline (v6) needs to go into the repo as docs/MASTER_OUTLINE.md Knowledge Mine Phase 2-4
-* Phase 2: Voice input (Web Speech API) + type-to-answer questions
+* Docs update — this outline (v6) needs to go into the repo as docs/MASTER_OUTLINE.md Story Game Workshop — Future
+* Print & Draw (printable board PDF, cut-out cards, London's hand-drawn art)
+* Open Creator (freeform + AI chat helper + game remix)
+* Quiz show game type
+* Multi-device play (Firestore real-time sync across tablets)
+* Week Focus integration (virtue → game theme suggestions)
+* Together Time block (London's games as paired activities)
+* Avatar integration (game creation → crafting materials, "Story Keeper" armor)
+* Evaluation tie-in (challenge card performance → skill snapshot feedback)
+
+Knowledge Mine Phase 2-4
+* Phase 2: Voice input (Web Speech API) + type-to-answer questions — **NOTE: `useSpeechRecognition`, `useTTS`, and `useAudioRecorder` hooks now exist from Workshop build, reuse them**
 * Phase 3: Pre-generated question bank (zero latency)
 * Phase 4: Full avatar integration (quest → mine → armor XP)
 * Parent review view for interactive sessions in Records
@@ -219,7 +280,11 @@ Avatar v4 Mar 21 Iron tier weathering, Lincoln likeness, ghost armor
 Architecture Cleanup Mar 21 Split domain.ts (1336→8 files), merge xpEventLog into xpLedger, task registry pattern for Cloud Functions, AI context slicing (task-specific), perf instrumentation, Firestore audit
 Avatar v5 Mar 22 Poses (6), pixel face, helmet redesign, arm clipping fixes
 Avatar Audit Mar 22 Memory leak fix, event listener cleanup, camera auto-frame, XP bar fix
-Mine/Eval Engine Mar 22 Quest display fixes (word stimulus, text-only, question variety), XP pipeline (quest→ledger→avatar), eval pipeline (findings→snapshot→planner recommendations), phoneme simplification, end-on-a-win Key Design Decisions
+Mine/Eval Engine Mar 22 Quest display fixes (word stimulus, text-only, question variety), XP pipeline (quest→ledger→avatar), eval pipeline (findings→snapshot→planner recommendations), phoneme simplification, end-on-a-win
+Workshop P1 Mar 22 Voice-first story game wizard, board game play, reusable TTS/speech hooks, read-aloud tiles
+Workshop P1.5 Mar 22 Player selection with avatars, DALL-E art generation (boards, titles, cards, tokens), saving/cross-device/resume, Today page cards, draft auto-save
+Workshop P2 Mar 22 Play polish (animations, sound effects, confetti), London voice recording for cards, Lincoln playtester feedback loop with AI card fixes, version tracking
+Workshop P3 Mar 22 Choose-your-adventure game type (branching story tree, scene art, retry endings), Card game type (Matching/Collecting/Battle mechanics) Key Design Decisions
 1. Portfolio over grades — no scores, no rankings, evidence-based assessment
 2. No shame rule — MVD is real school, bad days count, app never makes Shelly feel like failing
 3. Formation first — prayer/scripture before academics every day
@@ -244,7 +309,10 @@ Mine/Eval Engine Mar 22 Quest display fixes (word stimulus, text-only, question 
 22. Open-face helmet — Lincoln's face must be visible through the helmet. Identity > armor coverage.
 23. Arms pivot from shoulder — sword/shield are children of arm groups, not the character root. Poses animate arms and weapons move naturally.
 24. Painted face > photo pixelation — client-side photo-to-8×8 pixelation creates zombie/camo artifacts. Programmatic face painting from extracted features is reliable.
-25. Poses are formation moments — Prayer pose (arms together, head bowed, eyes closed) is intentionally included. The armor is spiritual, not violent. Key Files Reference src/app/AppShell.tsx — nav structure (parent + kid) src/app/router.tsx — all routes src/core/types/domain.ts — ALL data types src/core/firebase/firestore.ts — ALL collection references src/core/ai/useAI.ts — chat + generateImage hooks src/core/xp/addXpEvent.ts — XP writer with dedup guards src/core/xp/checkAndUnlockArmor.ts — tier unlock + sheet generation trigger src/core/avatar/getDailyArmorSession.ts — daily reset logic src/core/avatar/cropArmorSheet.ts — client-side 3x2 sheet cropper functions/src/ai/chat.ts — AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) functions/src/ai/imageGen.ts — DALL-E 3 + gpt-image-1 + Haiku rewriter src/features/avatar/ — My Armor (MyAvatarPage, VerseCard, ArmorIcons, AttachAnimation, CharacterDisplay, Particles) src/features/books/ — My Books (22+ files, 6500+ lines) src/features/quest/ — Knowledge Mine (7 files) src/features/today/ — Today page src/features/records/ — Records + compliance src/features/settings/ — Settings (AvatarAdminTab, StickerLibraryTab) src/core/types/                         — split type files (common, family, planning, evaluation, xp, books, compliance, dadlab)
+25. Poses are formation moments — Prayer pose (arms together, head bowed, eyes closed) is intentionally included. The armor is spiritual, not violent.
+26. Voice-first for London — he talks, the app listens; he listens, the app talks. Reading/typing are fallbacks, not primary input
+27. London creates, Lincoln refines — Story Keeper / Playtester roles give both boys meaningful work from one feature
+28. Players ARE the family — game tokens are real people with real avatars, not fictional characters Key Files Reference src/app/AppShell.tsx — nav structure (parent + kid) src/app/router.tsx — all routes src/core/types/domain.ts — ALL data types src/core/firebase/firestore.ts — ALL collection references src/core/ai/useAI.ts — chat + generateImage hooks src/core/xp/addXpEvent.ts — XP writer with dedup guards src/core/xp/checkAndUnlockArmor.ts — tier unlock + sheet generation trigger src/core/avatar/getDailyArmorSession.ts — daily reset logic src/core/avatar/cropArmorSheet.ts — client-side 3x2 sheet cropper functions/src/ai/chat.ts — AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) functions/src/ai/imageGen.ts — DALL-E 3 + gpt-image-1 + Haiku rewriter src/features/avatar/ — My Armor (MyAvatarPage, VerseCard, ArmorIcons, AttachAnimation, CharacterDisplay, Particles) src/features/books/ — My Books (22+ files, 6500+ lines) src/features/quest/ — Knowledge Mine (7 files) src/features/today/ — Today page src/features/records/ — Records + compliance src/features/settings/ — Settings (AvatarAdminTab, StickerLibraryTab) src/core/types/                         — split type files (common, family, planning, evaluation, xp, books, compliance, dadlab)
 src/core/types/index.ts                 — barrel re-export (replaces old domain.ts)
 src/core/utils/perf.ts                  — performance measurement helpers
 functions/src/ai/tasks/                 — chat task registry (plan, chat, evaluate, quest, generateStory, analyzePatterns)
