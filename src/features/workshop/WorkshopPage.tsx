@@ -28,7 +28,7 @@ import { useAI, TaskType } from '../../core/ai/useAI'
 import type { ChatResponse } from '../../core/ai/useAI'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { db, storyGamesCollection } from '../../core/firebase/firestore'
+import { db, storyGamesCollection, stripUndefined } from '../../core/firebase/firestore'
 import WorkshopWizard from './WorkshopWizard'
 import GamePlayView from './GamePlayView'
 import type { GamePlayResult } from './GamePlayView'
@@ -129,33 +129,53 @@ export default function WorkshopPage() {
       if (!familyId || !activeChildId) return null
       const now = new Date().toISOString()
 
-      const partialInputs = {
+      const baseInputs = {
         theme: wizardState.theme || '',
         players: wizardState.players,
-        goal: wizardState.goal || '',
-        challenges: wizardState.challenges,
-        boardStyle: wizardState.boardStyle || '',
-        boardLength: wizardState.boardLength || '',
-        storySetup: wizardState.storySetup || '',
-        choiceSeeds: wizardState.choiceSeeds,
-        adventureLength: wizardState.adventureLength || '',
-        cardMechanic: wizardState.cardMechanic || undefined,
-        cardDescriptions: wizardState.cardDescriptions,
-        cardBackStyle: wizardState.cardBackStyle || undefined,
-        cardBackCustom: wizardState.cardBackCustom || undefined,
-      } as StoryInputs
+      }
+
+      const partialInputs: StoryInputs = wizardState.gameType === 'adventure'
+        ? {
+            ...baseInputs,
+            goal: '',
+            challenges: [],
+            boardStyle: '' as StoryInputs['boardStyle'],
+            boardLength: '' as StoryInputs['boardLength'],
+            storySetup: wizardState.storySetup || '',
+            choiceSeeds: wizardState.choiceSeeds,
+            adventureLength: wizardState.adventureLength || '' as StoryInputs['boardLength'],
+          }
+        : wizardState.gameType === 'cards'
+        ? {
+            ...baseInputs,
+            goal: '',
+            challenges: [],
+            boardStyle: '' as StoryInputs['boardStyle'],
+            boardLength: '' as StoryInputs['boardLength'],
+            cardMechanic: wizardState.cardMechanic || undefined,
+            cardDescriptions: wizardState.cardDescriptions,
+            cardBackStyle: wizardState.cardBackStyle || undefined,
+            cardBackCustom: wizardState.cardBackCustom || undefined,
+          }
+        : {
+            ...baseInputs,
+            goal: wizardState.goal || '',
+            challenges: wizardState.challenges,
+            boardStyle: wizardState.boardStyle || '',
+            boardLength: wizardState.boardLength || '',
+          } as StoryInputs
 
       if (draftDocId) {
         // Update existing draft
         try {
           await updateDoc(
             doc(db, `families/${familyId}/storyGames/${draftDocId}`),
-            {
+            stripUndefined({
               storyInputs: partialInputs,
               gameType: wizardState.gameType || undefined,
               currentWizardStep: step,
               updatedAt: now,
-            },
+            }),
           )
         } catch (err) {
           console.warn('Failed to update draft:', err)
@@ -164,7 +184,7 @@ export default function WorkshopPage() {
       } else {
         // Create new draft
         try {
-          const draftDoc: Omit<StoryGame, 'id'> = {
+          const draftDoc = {
             childId: activeChildId,
             createdAt: now,
             updatedAt: now,
@@ -172,7 +192,7 @@ export default function WorkshopPage() {
             gameType: (wizardState.gameType as GameType) || undefined,
             storyInputs: partialInputs,
             currentWizardStep: step,
-          }
+          } as Omit<StoryGame, 'id'>
           const docRef = await addDoc(storyGamesCollection(familyId), draftDoc)
           setDraftDocId(docRef.id)
           return docRef.id
@@ -270,7 +290,7 @@ export default function WorkshopPage() {
           try {
             await updateDoc(
               doc(db, `families/${familyId}/storyGames/${draftDocId}`),
-              {
+              stripUndefined({
                 status: WorkshopStatus.Ready,
                 gameType: GameType.Cards,
                 storyInputs: inputs,
@@ -279,7 +299,7 @@ export default function WorkshopPage() {
                 playSessions: [],
                 updatedAt: now,
                 currentWizardStep: deleteField(),
-              },
+              }),
             )
             setCurrentGame({
               id: draftDocId,
@@ -372,7 +392,7 @@ export default function WorkshopPage() {
           try {
             await updateDoc(
               doc(db, `families/${familyId}/storyGames/${draftDocId}`),
-              {
+              stripUndefined({
                 status: WorkshopStatus.Ready,
                 gameType: GameType.Adventure,
                 storyInputs: inputs,
@@ -381,7 +401,7 @@ export default function WorkshopPage() {
                 playSessions: [],
                 updatedAt: now,
                 currentWizardStep: deleteField(),
-              },
+              }),
             )
             setCurrentGame({
               id: draftDocId,
@@ -480,7 +500,7 @@ export default function WorkshopPage() {
           try {
             await updateDoc(
               doc(db, `families/${familyId}/storyGames/${draftDocId}`),
-              {
+              stripUndefined({
                 status: WorkshopStatus.Ready,
                 gameType: GameType.Board,
                 storyInputs: inputs,
@@ -489,7 +509,7 @@ export default function WorkshopPage() {
                 playSessions: [],
                 updatedAt: now,
                 currentWizardStep: deleteField(),
-              },
+              }),
             )
             setCurrentGame({
               id: draftDocId,
@@ -919,7 +939,7 @@ export default function WorkshopPage() {
 
       await updateDoc(
         doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-        updatePayload,
+        stripUndefined(updatePayload),
       )
 
       setCurrentGame({

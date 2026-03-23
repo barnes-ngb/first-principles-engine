@@ -46,7 +46,7 @@ import { app } from './firebase'
 export const db = getFirestore(app)
 
 /** Recursively strip `undefined` values, which Firestore rejects. */
-function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
+export function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(obj)) {
     if (value === undefined) continue
