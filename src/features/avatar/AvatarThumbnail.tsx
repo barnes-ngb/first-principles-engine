@@ -6,7 +6,7 @@ import { DEFAULT_CHARACTER_FEATURES } from '../../core/types'
 import { buildCharacter } from './voxel/buildCharacter'
 import { buildArmorPiece } from './voxel/buildArmorPiece'
 import { frameCameraToCharacter } from './voxel/cameraUtils'
-import { applyTierToArmor, calculateTier, TIER_MATERIALS } from './voxel/tierMaterials'
+import { applyTierToArmor, calculateTier } from './voxel/tierMaterials'
 import { buildPaintedFace, applyCanvasToHead } from './voxel/pixelFace'
 
 interface AvatarThumbnailProps {
