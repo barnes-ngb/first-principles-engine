@@ -183,11 +183,13 @@ const PRESETS = [
 function QuickAwardXP({
   childId,
   childName,
+  currentXp,
   onAward,
 }: {
   childId: string
   childName: string
-  onAward: (amount: number, unlocks: string[]) => void
+  currentXp: number
+  onAward: (amount: number, unlocks: string[], tierUp?: { from: string; to: string }) => void
 }) {
   const familyId = useFamilyId()
   const [customAmount, setCustomAmount] = useState('')
@@ -205,6 +207,9 @@ function QuickAwardXP({
       }
       if (reason) meta.reason = reason
 
+      // Detect tier change
+      const oldTier = calculateTier(currentXp)
+
       await addXpEvent(familyId, childId, 'MANUAL_AWARD', amount, dedupKey, meta)
 
       // Check for new unlocks
@@ -214,7 +219,11 @@ function QuickAwardXP({
         return piece ? piece.name : vId
       })
 
-      onAward(amount, unlockNames)
+      // Check for tier-up
+      const newTier = calculateTier(currentXp + amount)
+      const tierUp = newTier !== oldTier ? { from: oldTier, to: newTier } : undefined
+
+      onAward(amount, unlockNames, tierUp)
       setReason('')
       setCustomAmount('')
     } catch (err) {
@@ -372,8 +381,14 @@ export default function ArmorTab() {
 
   const childName = activeChild?.name ?? 'Child'
 
-  function handleAward(amount: number, unlocks: string[]) {
-    if (unlocks.length > 0) {
+  function handleAward(amount: number, unlocks: string[], tierUp?: { from: string; to: string }) {
+    if (tierUp) {
+      const tierLabel = TIERS[tierUp.to]?.label ?? tierUp.to
+      setSnack({
+        message: `${childName} reached ${tierLabel} tier!`,
+        severity: 'info',
+      })
+    } else if (unlocks.length > 0) {
       setSnack({
         message: `${childName} unlocked ${unlocks.join(', ')}!`,
         severity: 'info',
@@ -409,7 +424,7 @@ export default function ArmorTab() {
       {activeChildId && (
         <>
           <XpOverviewCard totalXp={xpData.totalXp} childName={childName} />
-          <QuickAwardXP childId={activeChildId} childName={childName} onAward={handleAward} />
+          <QuickAwardXP childId={activeChildId} childName={childName} currentXp={xpData.totalXp} onAward={handleAward} />
           <XpHistory key={`${activeChildId}-${refreshKey}`} childId={activeChildId} />
         </>
       )}
