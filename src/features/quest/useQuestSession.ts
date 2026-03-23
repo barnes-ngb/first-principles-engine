@@ -13,6 +13,7 @@ import { MasteryGate, SkillLevel } from '../../core/types/enums'
 import { calculateStreak, computeNextState, formatSkillLabel, shouldEndSession } from './questAdaptive'
 import { checkAnswer, extractPattern, extractTargetWord, shouldFlagAsError } from './questHelpers'
 import type {
+  AnswerInputMethod,
   InteractiveSessionData,
   QuestQuestion,
   QuestState,
@@ -46,6 +47,7 @@ function parseQuestBlock(text: string): QuestQuestion | null {
       correctAnswer: parsed.correctAnswer ?? '',
       encouragement: parsed.encouragement,
       isBonusRound: parsed.bonusRound ?? undefined,
+      allowOpenResponse: parsed.allowOpenResponse ?? undefined,
     }
   } catch {
     return null
@@ -105,6 +107,7 @@ function getDateString(d: Date): string {
 function generateFallbackRecommendations(
   sessionFindings: EvaluationFinding[],
   finalLevel: number,
+  domain: string = 'reading',
 ): Array<{ priority: number; skill: string; action: string; duration: string; frequency: string }> {
   const recs: Array<{ priority: number; skill: string; action: string; duration: string; frequency: string }> = []
   let priority = 1
@@ -133,30 +136,58 @@ function generateFallbackRecommendations(
   }
 
   // Level-based general recommendation
-  if (finalLevel <= 2) {
-    recs.push({
-      priority: priority++,
-      skill: 'phonics.basics',
-      action: 'Continue phonics basics — letter sounds and simple CVC words',
-      duration: '2 weeks',
-      frequency: 'Daily, 8-10 minutes',
-    })
-  } else if (finalLevel <= 4) {
-    recs.push({
-      priority: priority++,
-      skill: 'phonics.blends',
-      action: 'Ready for blends and digraphs — introduce sh, ch, th, bl, cr patterns',
-      duration: '2 weeks',
-      frequency: 'Daily, 8-10 minutes',
-    })
+  if (domain === 'math') {
+    if (finalLevel <= 2) {
+      recs.push({
+        priority: priority++,
+        skill: 'math.addition',
+        action: 'Continue addition and subtraction facts within 20',
+        duration: '2 weeks',
+        frequency: 'Daily, 8-10 minutes',
+      })
+    } else if (finalLevel <= 4) {
+      recs.push({
+        priority: priority++,
+        skill: 'math.multiplication',
+        action: 'Practice multiplication concepts — skip counting and times tables for 2, 5, 10',
+        duration: '2 weeks',
+        frequency: 'Daily, 8-10 minutes',
+      })
+    } else {
+      recs.push({
+        priority: priority++,
+        skill: 'math.fractions',
+        action: 'Introduce fractions — halves, quarters, and fraction comparison',
+        duration: '2 weeks',
+        frequency: 'Daily, 8-10 minutes',
+      })
+    }
   } else {
-    recs.push({
-      priority: priority++,
-      skill: 'phonics.cvce',
-      action: 'Ready for long vowels and CVCe — focus on silent-e patterns',
-      duration: '2 weeks',
-      frequency: 'Daily, 8-10 minutes',
-    })
+    if (finalLevel <= 2) {
+      recs.push({
+        priority: priority++,
+        skill: 'phonics.basics',
+        action: 'Continue phonics basics — letter sounds and simple CVC words',
+        duration: '2 weeks',
+        frequency: 'Daily, 8-10 minutes',
+      })
+    } else if (finalLevel <= 4) {
+      recs.push({
+        priority: priority++,
+        skill: 'phonics.blends',
+        action: 'Ready for blends and digraphs — introduce sh, ch, th, bl, cr patterns',
+        duration: '2 weeks',
+        frequency: 'Daily, 8-10 minutes',
+      })
+    } else {
+      recs.push({
+        priority: priority++,
+        skill: 'phonics.cvce',
+        action: 'Ready for long vowels and CVCe — focus on silent-e patterns',
+        duration: '2 weeks',
+        frequency: 'Daily, 8-10 minutes',
+      })
+    }
   }
 
   return recs
@@ -179,6 +210,7 @@ export function useQuestSession() {
   const [sessionSaved, setSessionSaved] = useState(false)
   const [summarizing, setSummarizing] = useState(false)
   const [previousSessions, setPreviousSessions] = useState<Array<{ evaluatedAt: string }>>([])
+  const activeDomainRef = useRef<EvaluationDomain>('reading')
 
   const conversationRef = useRef<AIChatMessage[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -246,6 +278,7 @@ export function useQuestSession() {
         elapsedSeconds: 0,
       }
 
+      activeDomainRef.current = domain
       setQuestState(initialState)
       setAnsweredQuestions([])
       setFindings([])
@@ -346,7 +379,8 @@ export function useQuestSession() {
       if (!activeChildId) return
 
       // Request AI-generated summary
-      let summaryText = `Interactive reading quest: ${finalState.totalCorrect}/${finalState.totalQuestions} correct, reached level ${finalState.currentLevel}`
+      const domain = activeDomainRef.current
+      let summaryText = `Interactive ${domain} quest: ${finalState.totalCorrect}/${finalState.totalQuestions} correct, reached level ${finalState.currentLevel}`
       let sessionRecommendations: EvaluationSession['recommendations'] = []
 
       try {
@@ -359,7 +393,7 @@ export function useQuestSession() {
             finalLevel: finalState.currentLevel,
             totalCorrect: finalState.totalCorrect,
             totalQuestions: finalState.totalQuestions,
-            domain: 'reading',
+            domain,
           }),
         }
 
@@ -368,7 +402,7 @@ export function useQuestSession() {
           childId: activeChildId,
           taskType: TaskType.Quest,
           messages: [...conversationRef.current, summaryMessage],
-          domain: 'reading',
+          domain,
         })
 
         if (summaryResponse) {
@@ -395,12 +429,12 @@ export function useQuestSession() {
 
       // Fallback: generate client-side recommendations if AI didn't produce any
       if (sessionRecommendations.length === 0 && findings.length > 0) {
-        sessionRecommendations = generateFallbackRecommendations(findings, finalState.currentLevel)
+        sessionRecommendations = generateFallbackRecommendations(findings, finalState.currentLevel, domain)
       }
 
       // Fallback: generate level-based recommendation even with no findings
       if (sessionRecommendations.length === 0) {
-        sessionRecommendations = generateFallbackRecommendations([], finalState.currentLevel)
+        sessionRecommendations = generateFallbackRecommendations([], finalState.currentLevel, domain)
       }
 
       // Save to Firestore
@@ -412,7 +446,7 @@ export function useQuestSession() {
 
       const session: EvaluationSession & InteractiveSessionData = {
         childId: activeChildId,
-        domain: 'reading',
+        domain,
         status: 'complete',
         messages: [],
         findings,
@@ -453,7 +487,7 @@ export function useQuestSession() {
           questXp,
           dedupKey,
           {
-            domain: 'reading',
+            domain,
             questionsCorrect: String(finalState.totalCorrect),
             questionsTotal: String(finalState.totalQuestions),
             finalLevel: String(finalState.currentLevel),
@@ -577,7 +611,7 @@ export function useQuestSession() {
   // ── Submit answer ─────────────────────────────────────────────
 
   const submitAnswer = useCallback(
-    async (childAnswer: string) => {
+    async (childAnswer: string, inputMethod?: AnswerInputMethod) => {
       if (!currentQuestion || !questState || !activeChildId) return
 
       const responseTimeMs = Date.now() - questionStartRef.current
@@ -596,6 +630,7 @@ export function useQuestSession() {
         correct,
         responseTimeMs,
         timestamp: new Date().toISOString(),
+        inputMethod: inputMethod || 'multiple-choice',
       }
 
       const updatedQuestions = [...answeredQuestions, sessionQ]
@@ -671,7 +706,7 @@ export function useQuestSession() {
         childId: activeChildId,
         taskType: TaskType.Quest,
         messages: [...conversationRef.current],
-        domain: 'reading',
+        domain: activeDomainRef.current,
       })
 
       if (!response) {
@@ -771,7 +806,7 @@ export function useQuestSession() {
         childId: activeChildId,
         taskType: TaskType.Quest,
         messages: [...conversationRef.current],
-        domain: 'reading',
+        domain: activeDomainRef.current,
       })
 
       if (!response) {

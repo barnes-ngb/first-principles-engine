@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -39,8 +40,8 @@ const QUEST_DOMAINS: QuestDomainConfig[] = [
     domain: EvaluationDomain.Math,
     label: 'Math Quest',
     icon: '🔢',
-    enabled: false,
-    description: 'Coming soon!',
+    enabled: true,
+    description: 'Counting, addition, multiplication & more',
   },
   {
     domain: EvaluationDomain.Speech,
@@ -67,6 +68,7 @@ export default function KnowledgeMinePage() {
   const familyId = useFamilyId()
   const quest = useQuestSession()
   const xpLedger = useXpLedger(familyId, activeChildId ?? '')
+  const activeDomainRef = useRef<QuestDomainConfig | null>(null)
 
   const childName = activeChild?.name || 'Explorer'
 
@@ -142,11 +144,15 @@ export default function KnowledgeMinePage() {
                 role={qd.enabled ? 'button' : undefined}
                 tabIndex={qd.enabled ? 0 : undefined}
                 onClick={() => {
-                  if (qd.enabled) void quest.startQuest(qd.domain)
+                  if (qd.enabled) {
+                    activeDomainRef.current = qd
+                    void quest.startQuest(qd.domain)
+                  }
                 }}
                 onKeyDown={(e) => {
                   if (qd.enabled && (e.key === 'Enter' || e.key === ' ')) {
                     e.preventDefault()
+                    activeDomainRef.current = qd
                     void quest.startQuest(qd.domain)
                   }
                 }}
@@ -258,7 +264,9 @@ export default function KnowledgeMinePage() {
           questState={quest.questState}
           consecutiveWrong={quest.questState.consecutiveWrong}
           onAnswer={quest.submitAnswer}
+          onAnswerWithMethod={quest.submitAnswer}
           onSkip={quest.handleSkip}
+          domainLabel={activeDomainRef.current?.label || 'Reading Quest'}
         />
       )}
 
