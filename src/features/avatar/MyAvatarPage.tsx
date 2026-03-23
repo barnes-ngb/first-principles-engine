@@ -113,7 +113,7 @@ function speakVerse(pieceName: string, verseText: string) {
 
 export default function MyAvatarPage() {
   const familyId = useFamilyId()
-  const { activeChild } = useActiveChild()
+  const { activeChild, children, setActiveChildId, isChildProfile } = useActiveChild()
   const childId = activeChild?.id ?? ''
   const isLincoln = activeChild?.name?.toLowerCase() === 'lincoln'
 
@@ -260,8 +260,16 @@ export default function MyAvatarPage() {
   }, [familyId, childId, today])
 
   // ── Auto-equip unlocked pieces on page load ────────────────────
-  // Only runs once on initial load — does NOT re-fire on every session change.
+  // Only runs once per child on initial load — does NOT re-fire on every session change.
   const autoEquipRanRef = useRef(false)
+  const autoEquipChildRef = useRef(childId)
+
+  // Reset auto-equip when switching children
+  if (autoEquipChildRef.current !== childId) {
+    autoEquipRanRef.current = false
+    autoEquipChildRef.current = childId
+  }
+
   useEffect(() => {
     if (!profile || !session || !familyId || !childId) return
     if (autoEquipRanRef.current) return
@@ -389,7 +397,7 @@ export default function MyAvatarPage() {
         return aid && updatedApplied.includes(aid)
       })
 
-      if (allApplied && isLincoln) {
+      if (allApplied) {
         playArmorFanfare(1.5)
       }
 
@@ -420,7 +428,7 @@ export default function MyAvatarPage() {
         void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
       }
     },
-    [profile, familyId, childId, session, today, isLincoln],
+    [profile, familyId, childId, session, today],
   )
 
   // ── Unequip a piece (direct — no dialog) ──────────────────────
@@ -561,18 +569,59 @@ export default function MyAvatarPage() {
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3 }}>
       <Page>
-        {/* ── XP Subtitle with Tier Badge ─────────────────────── */}
+        {/* ── Child Switcher + XP Subtitle with Tier Badge ────── */}
         <Box sx={{ textAlign: 'center', py: 1 }}>
+          {/* Child switcher — only for parent profiles with multiple children */}
+          {!isChildProfile && children.length > 1 && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', gap: '4px', mb: '6px' }}>
+              {children.map((child) => {
+                const isActive = child.id === childId
+                const childIsLincoln = child.name.toLowerCase() === 'lincoln'
+                return (
+                  <Box
+                    key={child.id}
+                    component="button"
+                    onClick={() => setActiveChildId(child.id)}
+                    sx={{
+                      px: '14px',
+                      py: '5px',
+                      border: isActive
+                        ? `2px solid ${childIsLincoln ? '#7EFC20' : '#E8A0BF'}`
+                        : '2px solid transparent',
+                      borderRadius: childIsLincoln ? '2px' : '14px',
+                      bgcolor: isActive
+                        ? (childIsLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.15)')
+                        : 'transparent',
+                      color: isActive
+                        ? (childIsLincoln ? '#7EFC20' : '#E8A0BF')
+                        : (isLincoln ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'),
+                      fontFamily: childIsLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                      fontSize: childIsLincoln ? '0.4rem' : '14px',
+                      fontWeight: isActive ? 700 : 400,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      background: 'none',
+                    }}
+                  >
+                    {child.name}
+                  </Box>
+                )
+              })}
+            </Box>
+          )}
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', mb: '4px' }}>
-            <Typography
-              sx={{
-                fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                fontSize: isLincoln ? '0.45rem' : '14px',
-                color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)',
-              }}
-            >
-              {activeChild?.name}
-            </Typography>
+            {/* Show name only when switcher is not visible (child profiles or single child) */}
+            {(isChildProfile || children.length <= 1) && (
+              <Typography
+                sx={{
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                  fontSize: isLincoln ? '0.45rem' : '14px',
+                  color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)',
+                }}
+              >
+                {activeChild?.name}
+              </Typography>
+            )}
             <Box
               component="span"
               sx={{
@@ -650,12 +699,10 @@ export default function MyAvatarPage() {
               })
             }}
           />
-          {isLincoln && (
-            <PoseButtons
-              onPose={(poseId) => setActivePoseId(poseId)}
-              currentPose={activePoseId}
-            />
-          )}
+          <PoseButtons
+            onPose={(poseId) => setActivePoseId(poseId)}
+            currentPose={activePoseId}
+          />
         </Box>
 
         {/* ── Armor status text ────────────────────────────────── */}
