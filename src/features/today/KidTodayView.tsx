@@ -24,7 +24,8 @@ import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload
 import type { Artifact, ChecklistItem, Child, DayLog } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
-import MinecraftAvatar from '../minecraft/MinecraftAvatar'
+import AvatarThumbnail from '../avatar/AvatarThumbnail'
+import { useAvatarProfile } from '../avatar/useAvatarProfile'
 import MinecraftXpBar from '../minecraft/MinecraftXpBar'
 import { useXpLedger } from '../minecraft/useXpLedger'
 import { useDraftBook } from '../books/useBook'
@@ -162,6 +163,7 @@ export default function KidTodayView({
   const isLincoln = child.name.toLowerCase() === 'lincoln'
   const todayXp = useMemo(() => calculateXp(dayLog), [dayLog])
   const xpLedger = useXpLedger(familyId, child.id)
+  const avatarProfile = useAvatarProfile(familyId, child.id)
 
   const greeting = useMemo(() => getGreeting(child.name, isLincoln), [child.name, isLincoln])
   const celebrationMessage = useMemo(() => getCelebration(today, isLincoln), [today, isLincoln])
@@ -308,22 +310,29 @@ export default function KidTodayView({
     <Page>
       {/* Greeting */}
       <Stack direction="row" alignItems="center" spacing={2}>
-        {isLincoln && (
+        {avatarProfile && (
           <Box sx={{ flexShrink: 0 }}>
-            <MinecraftAvatar xp={xpLedger.totalXp} scale={3} />
+            <AvatarThumbnail
+              features={avatarProfile.characterFeatures}
+              ageGroup={avatarProfile.ageGroup}
+              equippedPieces={avatarProfile.equippedPieces}
+              totalXp={avatarProfile.totalXp}
+              size={64}
+              animated
+            />
           </Box>
         )}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
             {greeting}
           </Typography>
-          {isLincoln && todayXp > 0 && (
+          {todayXp > 0 && (
             <Typography
               sx={{
-                fontFamily: '"Press Start 2P", monospace',
-                fontSize: '0.55rem',
-                color: '#7EFC20',
-                textShadow: '1px 1px 0 rgba(0,0,0,0.3)',
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
+                fontSize: isLincoln ? '0.55rem' : '0.75rem',
+                color: isLincoln ? '#7EFC20' : 'success.main',
+                textShadow: isLincoln ? '1px 1px 0 rgba(0,0,0,0.3)' : undefined,
                 mt: 0.5,
               }}
             >
