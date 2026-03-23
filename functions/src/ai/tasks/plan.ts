@@ -33,7 +33,10 @@ export const handlePlan = async (
   // Load per-child subject time defaults and inject into system prompt
   const subjectDefaults = await loadSubjectTimeDefaults(db, familyId, childId);
   if (subjectDefaults && Object.keys(subjectDefaults).length > 0) {
-    const lines = ["SUBJECT TIME DEFAULTS (use as baseline for estimatedMinutes per item):"];
+    const lines = [
+      "── SUBJECT TIME DEFAULTS ──",
+      "Use these as the baseline for estimatedMinutes on each item:",
+    ];
     for (const [subject, minutes] of Object.entries(subjectDefaults)) {
       const label = subject === "Other" ? "Formation/Prayer"
         : subject === "LanguageArts" ? "Language Arts"
@@ -41,7 +44,8 @@ export const handlePlan = async (
         : subject;
       lines.push(`- ${label}: ${minutes} min/day`);
     }
-    lines.push("Adjust from these baselines only when energy level or specific notes suggest otherwise.");
+    lines.push("Only adjust from these baselines when energy level, daily routine, or special notes suggest otherwise.");
+    lines.push("If the user specified a daily routine with specific times, those times take priority over these defaults.");
     sections.push(lines.join("\n"));
   }
 
