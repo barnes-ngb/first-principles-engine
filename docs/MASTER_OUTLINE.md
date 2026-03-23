@@ -238,14 +238,33 @@ Mine/Eval Engine Mar 22 Quest display fixes (word stimulus, text-only, question 
 16. Armor is devotional, not decorative — daily ritual of putting on each piece teaches scripture through repetition and embodiment
 17. Cohesive generation — when multiple visual assets share a theme, generate together for visual consistency (armor sheets, not individual pieces)
 18. Quest variety over repetition — AI rotates question types within a session, never same format twice in a row
-19. End on a win — quest always finishes with success, bonus round if needed Key Files Reference src/app/AppShell.tsx — nav structure (parent + kid) src/app/router.tsx — all routes src/core/types/domain.ts — ALL data types src/core/firebase/firestore.ts — ALL collection references src/core/ai/useAI.ts — chat + generateImage hooks src/core/xp/addXpEvent.ts — XP writer with dedup guards src/core/xp/checkAndUnlockArmor.ts — tier unlock + sheet generation trigger src/core/avatar/getDailyArmorSession.ts — daily reset logic src/core/avatar/cropArmorSheet.ts — client-side 3x2 sheet cropper functions/src/ai/chat.ts — AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) functions/src/ai/imageGen.ts — DALL-E 3 + gpt-image-1 + Haiku rewriter src/features/avatar/ — My Armor (MyAvatarPage, VerseCard, ArmorIcons, AttachAnimation, CharacterDisplay, Particles) src/features/books/ — My Books (22+ files, 6500+ lines) src/features/quest/ — Knowledge Mine (7 files) src/features/today/ — Today page src/features/records/ — Records + compliance src/features/settings/ — Settings (AvatarAdminTab, StickerLibraryTab) src/core/types/                         — split type files (common, family, planning, evaluation, xp, books, compliance, dadlab)
+19. End on a win — quest always finishes with success, bonus round if needed
+20. 3D over 2D — 2D image cropping for armor overlay failed (alignment impossible between two AI-generated images). 3D voxel geometry solves alignment permanently.
+21. Tier reset = always earning — each tier resets piece collection so there's always 6 pieces to earn. Prevents "I have everything" at 1000 XP.
+22. Open-face helmet — Lincoln's face must be visible through the helmet. Identity > armor coverage.
+23. Arms pivot from shoulder — sword/shield are children of arm groups, not the character root. Poses animate arms and weapons move naturally.
+24. Painted face > photo pixelation — client-side photo-to-8×8 pixelation creates zombie/camo artifacts. Programmatic face painting from extracted features is reliable.
+25. Poses are formation moments — Prayer pose (arms together, head bowed, eyes closed) is intentionally included. The armor is spiritual, not violent. Key Files Reference src/app/AppShell.tsx — nav structure (parent + kid) src/app/router.tsx — all routes src/core/types/domain.ts — ALL data types src/core/firebase/firestore.ts — ALL collection references src/core/ai/useAI.ts — chat + generateImage hooks src/core/xp/addXpEvent.ts — XP writer with dedup guards src/core/xp/checkAndUnlockArmor.ts — tier unlock + sheet generation trigger src/core/avatar/getDailyArmorSession.ts — daily reset logic src/core/avatar/cropArmorSheet.ts — client-side 3x2 sheet cropper functions/src/ai/chat.ts — AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) functions/src/ai/imageGen.ts — DALL-E 3 + gpt-image-1 + Haiku rewriter src/features/avatar/ — My Armor (MyAvatarPage, VerseCard, ArmorIcons, AttachAnimation, CharacterDisplay, Particles) src/features/books/ — My Books (22+ files, 6500+ lines) src/features/quest/ — Knowledge Mine (7 files) src/features/today/ — Today page src/features/records/ — Records + compliance src/features/settings/ — Settings (AvatarAdminTab, StickerLibraryTab) src/core/types/                         — split type files (common, family, planning, evaluation, xp, books, compliance, dadlab)
 src/core/types/index.ts                 — barrel re-export (replaces old domain.ts)
 src/core/utils/perf.ts                  — performance measurement helpers
 functions/src/ai/tasks/                 — chat task registry (plan, chat, evaluate, quest, generateStory, analyzePatterns)
 functions/src/ai/imageTasks/            — image task registry (7 handlers)
 functions/src/ai/contextSlices.ts       — task-specific context assembly + engagement compression
 docs/FIRESTORE_AUDIT.md                — Firestore collection + index audit (March 21, 2026)
-docs/MASTER_OUTLINE.md — this file (update after each session) .github/workflows/deploy.yml — CI/CD pipeline Architecture Review Notes (March 21, 2026) The following areas are flagged for architecture review in the next chat session:
+docs/MASTER_OUTLINE.md — this file (update after each session) .github/workflows/deploy.yml — CI/CD pipeline
+
+### Architecture Notes
+
+#### Avatar / Three.js Architecture
+- Three.js scene lifecycle managed in a single React component with `useEffect` cleanup
+- `initScene` callback decoupled from re-render cycle (intentional `eslint-disable`)
+- `enforceArmorOpacity` runs every frame — could optimize to on-change only
+- Character and armor meshes stored in `useRef` (not React state)
+- `equippedPieces` React state → `useEffect` syncs to Three.js mesh materials
+- Consider extracting Three.js lifecycle into custom `useThreeScene` hook
+- `DailyArmorSession` and `AvatarProfile` both track equipped pieces — potential drift
+
+Architecture Review Notes (March 21, 2026) The following areas are flagged for architecture review in the next chat session:
 * XP system — xpLedger + xpEventLog as separate collections; dedup guard pattern; whether totalXp should be cached on avatarProfile or always summed from ledger
 * Avatar generation costs — DALL-E 3 sheet generation per tier per child; when to generate vs cache; cost implications at scale
 * Cloud Function sprawl — chat function handles 6+ task types; generateImage handles 4+; whether these should be split into separate functions
