@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -68,7 +68,7 @@ export default function KnowledgeMinePage() {
   const familyId = useFamilyId()
   const quest = useQuestSession()
   const xpLedger = useXpLedger(familyId, activeChildId ?? '')
-  const activeDomainRef = useRef<QuestDomainConfig | null>(null)
+  const [activeDomain, setActiveDomain] = useState<QuestDomainConfig | null>(null)
 
   const childName = activeChild?.name || 'Explorer'
 
@@ -145,14 +145,14 @@ export default function KnowledgeMinePage() {
                 tabIndex={qd.enabled ? 0 : undefined}
                 onClick={() => {
                   if (qd.enabled) {
-                    activeDomainRef.current = qd
+                    setActiveDomain(qd)
                     void quest.startQuest(qd.domain)
                   }
                 }}
                 onKeyDown={(e) => {
                   if (qd.enabled && (e.key === 'Enter' || e.key === ' ')) {
                     e.preventDefault()
-                    activeDomainRef.current = qd
+                    setActiveDomain(qd)
                     void quest.startQuest(qd.domain)
                   }
                 }}
@@ -266,7 +266,7 @@ export default function KnowledgeMinePage() {
           onAnswer={quest.submitAnswer}
           onAnswerWithMethod={quest.submitAnswer}
           onSkip={quest.handleSkip}
-          domainLabel={activeDomainRef.current?.label || 'Reading Quest'}
+          domainLabel={activeDomain?.label || 'Reading Quest'}
         />
       )}
 
