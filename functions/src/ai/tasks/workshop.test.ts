@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildWorkshopPrompt, extractGameJson } from "./workshop.js";
+import { buildWorkshopPrompt, buildAdventurePrompt, extractGameJson, extractAdventureJson } from "./workshop.js";
 import type { WorkshopInput } from "./workshop.js";
 
 const sampleInput: WorkshopInput = {
@@ -99,5 +99,110 @@ describe("extractGameJson", () => {
     const parsed = JSON.parse(result);
     expect(parsed.title).toBe("Dragon Race");
     expect(parsed.board.totalSpaces).toBe(25);
+  });
+});
+
+// ── Adventure prompt tests ──────────────────────────────────────
+
+const adventureInput: WorkshopInput = {
+  theme: "dragons",
+  players: [
+    { id: "child-london", name: "London", isCreator: true },
+    { id: "child-lincoln", name: "Lincoln", isCreator: false },
+  ],
+  goal: "",
+  challenges: [],
+  boardStyle: "",
+  boardLength: "",
+  gameType: "adventure",
+  storySetup: "A knight finds a magic door in the forest",
+  choiceSeeds: ["Go left or go right", "Open the chest or leave it"],
+  adventureLength: "medium",
+};
+
+describe("buildAdventurePrompt", () => {
+  it("includes the child's name and theme", () => {
+    const prompt = buildAdventurePrompt("London", "kindergarten", undefined, adventureInput);
+    expect(prompt).toContain("London");
+    expect(prompt).toContain("dragons");
+  });
+
+  it("includes story setup", () => {
+    const prompt = buildAdventurePrompt("London", "kindergarten", undefined, adventureInput);
+    expect(prompt).toContain("A knight finds a magic door in the forest");
+  });
+
+  it("includes choice seeds", () => {
+    const prompt = buildAdventurePrompt("London", "kindergarten", undefined, adventureInput);
+    expect(prompt).toContain("Go left or go right");
+    expect(prompt).toContain("Open the chest or leave it");
+  });
+
+  it("sets correct depth based on adventure length", () => {
+    const shortInput = { ...adventureInput, adventureLength: "short" as const };
+    const prompt = buildAdventurePrompt("London", "kindergarten", undefined, shortInput);
+    expect(prompt).toContain("3-4 levels");
+    expect(prompt).toContain("about 5");
+
+    const longInput = { ...adventureInput, adventureLength: "long" as const };
+    const longPrompt = buildAdventurePrompt("London", "kindergarten", undefined, longInput);
+    expect(longPrompt).toContain("5-6 levels");
+    expect(longPrompt).toContain("about 12");
+  });
+
+  it("includes the <adventure> JSON schema in the prompt", () => {
+    const prompt = buildAdventurePrompt("London", "kindergarten", undefined, adventureInput);
+    expect(prompt).toContain("<adventure>");
+    expect(prompt).toContain("rootNodeId");
+    expect(prompt).toContain("spokenText");
+    expect(prompt).toContain("retryNodeId");
+  });
+
+  it("includes no-bad-endings constraint", () => {
+    const prompt = buildAdventurePrompt("London", "kindergarten", undefined, adventureInput);
+    expect(prompt).toContain("NO bad endings");
+    expect(prompt).toContain("retry");
+  });
+
+  it("includes skill snapshot when available", () => {
+    const snapshot = {
+      prioritySkills: [
+        { tag: "reading.phonics.cvc", label: "CVC Words", level: "developing" },
+      ],
+    };
+    const prompt = buildAdventurePrompt("London", "kindergarten", snapshot, adventureInput);
+    expect(prompt).toContain("CVC Words: developing");
+  });
+});
+
+describe("extractAdventureJson", () => {
+  it("extracts JSON from <adventure> tags", () => {
+    const input = `Here is your adventure!\n<adventure>\n{"rootNodeId": "node-1", "totalNodes": 10}\n</adventure>\nEnjoy!`;
+    const result = extractAdventureJson(input);
+    const parsed = JSON.parse(result);
+    expect(parsed.rootNodeId).toBe("node-1");
+    expect(parsed.totalNodes).toBe(10);
+  });
+
+  it("throws when no <adventure> tags found", () => {
+    const input = "Here is some text without adventure tags.";
+    expect(() => extractAdventureJson(input)).toThrow("did not contain <adventure> tags");
+  });
+
+  it("handles multiline JSON in <adventure> tags", () => {
+    const input = `<adventure>
+{
+  "nodes": {},
+  "rootNodeId": "node-1",
+  "totalNodes": 5,
+  "totalEndings": 2,
+  "challengeCount": 3
+}
+</adventure>`;
+    const result = extractAdventureJson(input);
+    const parsed = JSON.parse(result);
+    expect(parsed.rootNodeId).toBe("node-1");
+    expect(parsed.totalNodes).toBe(5);
+    expect(parsed.challengeCount).toBe(3);
   });
 });

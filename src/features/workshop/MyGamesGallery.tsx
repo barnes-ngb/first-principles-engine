@@ -10,7 +10,7 @@ import MicIcon from '@mui/icons-material/Mic'
 import { deleteDoc, doc, getDocs, orderBy, query } from 'firebase/firestore'
 import { db, storyGamesCollection } from '../../core/firebase/firestore'
 import type { Child, StoryGame } from '../../core/types'
-import { PlaytestStatus, WorkshopStatus } from '../../core/types/workshop'
+import { GameType, PlaytestStatus, WorkshopStatus } from '../../core/types/workshop'
 
 /** Check if a game is missing any expected art */
 function hasMissingArt(game: StoryGame): boolean {
@@ -170,6 +170,13 @@ export default function MyGamesGallery({
           const isCreator = game.childId === childId
           const creatorName = getCreatorName(game, children)
           const statusBadge = isDraft ? null : getStatusBadge(game)
+          const isAdventure = game.gameType === GameType.Adventure
+          const gameTypeIcon = isAdventure ? '\uD83D\uDCD6' : '\uD83C\uDFB2'
+          const gameTitle = isAdventure
+            ? `${game.storyInputs.theme} Adventure`
+            : (game.generatedGame?.title ?? game.storyInputs.theme)
+          const hasGame = isAdventure ? !!game.adventureTree : !!game.generatedGame
+          const totalSteps = 6
 
           return (
             <Box
@@ -192,7 +199,7 @@ export default function MyGamesGallery({
                 <Box
                   component="img"
                   src={titleArt}
-                  alt={game.generatedGame?.title ?? game.storyInputs.theme}
+                  alt={gameTitle}
                   sx={{
                     width: 64,
                     height: 64,
@@ -214,12 +221,12 @@ export default function MyGamesGallery({
                     flexShrink: 0,
                     color: isDraft ? 'warning.contrastText' : 'primary.contrastText',
                     fontWeight: 700,
-                    fontSize: '0.75rem',
+                    fontSize: isDraft ? '0.75rem' : '1.5rem',
                     textAlign: 'center',
                     p: 0.5,
                   }}
                 >
-                  {isDraft ? `Step ${(game.currentWizardStep ?? 0) + 1} of 5` : (game.generatedGame?.title ?? game.storyInputs.theme)}
+                  {isDraft ? `Step ${(game.currentWizardStep ?? 0) + 1} of ${totalSteps}` : gameTypeIcon}
                 </Box>
               )}
 
@@ -228,7 +235,7 @@ export default function MyGamesGallery({
                 <Typography variant="subtitle1" sx={{ fontWeight: 600 }} noWrap>
                   {isDraft
                     ? `${game.storyInputs.theme || 'New Game'} (Draft)`
-                    : (game.generatedGame?.title ?? game.storyInputs.theme)}
+                    : `${gameTypeIcon} ${gameTitle}`}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
                   By {creatorName}
@@ -240,6 +247,13 @@ export default function MyGamesGallery({
                   {game.generatedGame && (
                     <Chip
                       label={`${game.generatedGame.challengeCards.length} cards`}
+                      size="small"
+                      variant="outlined"
+                    />
+                  )}
+                  {game.adventureTree && (
+                    <Chip
+                      label={`${game.adventureTree.totalNodes} scenes`}
                       size="small"
                       variant="outlined"
                     />
@@ -271,7 +285,7 @@ export default function MyGamesGallery({
                   )}
                   {isDraft && (
                     <Chip
-                      label={`Step ${(game.currentWizardStep ?? 0) + 1} of 5`}
+                      label={`Step ${(game.currentWizardStep ?? 0) + 1} of ${totalSteps}`}
                       size="small"
                       color="warning"
                       variant="outlined"
@@ -307,11 +321,11 @@ export default function MyGamesGallery({
                       variant="outlined"
                       size="small"
                       onClick={() => onSelectGame(game)}
-                      disabled={!game.generatedGame}
+                      disabled={!hasGame}
                     >
-                      Play
+                      {isAdventure ? 'Play Adventure' : 'Play'}
                     </Button>
-                    {canPlaytest(game, childId, isParent) && onPlaytestGame && (
+                    {!isAdventure && canPlaytest(game, childId, isParent) && onPlaytestGame && (
                       <Button
                         variant="outlined"
                         size="small"
@@ -339,7 +353,7 @@ export default function MyGamesGallery({
                         </Button>
                       </Badge>
                     )}
-                    {isCreator && hasMissingArt(game) && onRegenerateArt && (
+                    {isCreator && !isAdventure && hasMissingArt(game) && onRegenerateArt && (
                       <Button
                         variant="text"
                         size="small"

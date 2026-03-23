@@ -9,11 +9,17 @@ export interface StoryGame {
   updatedAt: string
   status: WorkshopStatus
 
+  /** Game type: board game or choose-your-adventure */
+  gameType?: GameType
+
   /** London's creative choices from the wizard (mostly captured via voice) */
   storyInputs: StoryInputs
 
-  /** AI-generated game definition */
+  /** AI-generated game definition (board games) */
   generatedGame?: GeneratedGame
+
+  /** AI-generated adventure tree (adventure games) */
+  adventureTree?: AdventureTree
 
   /** Play session records */
   playSessions?: GamePlaySession[]
@@ -24,7 +30,10 @@ export interface StoryGame {
   /** In-progress game session (saved after each turn for resume) */
   activeSession?: ActiveSession | null
 
-  /** Voice recordings keyed by card/space ID */
+  /** In-progress adventure session (saved after each choice for resume) */
+  activeAdventureSession?: ActiveAdventureSession | null
+
+  /** Voice recordings keyed by card/space/node ID */
   voiceRecordings?: VoiceRecordingMap
 
   /** Tracks wizard step for draft resume (removed when wizard completes) */
@@ -64,6 +73,16 @@ export interface ActiveSession {
   updatedAt: string
 }
 
+export interface ActiveAdventureSession {
+  currentNodeId: string
+  pathTaken: string[]
+  choicesMade: Array<{ nodeId: string; choiceId: string }>
+  challengeResults: Array<{ nodeId: string; passed: boolean }>
+  status: 'playing' | 'finished'
+  startedAt: string
+  updatedAt: string
+}
+
 export interface ActiveSessionPlayer {
   id: string
   name: string
@@ -83,6 +102,10 @@ export interface GeneratedArt {
   parentTokens?: {
     [parentId: string]: string
   }
+  /** Scene illustrations for adventure nodes, keyed by nodeId */
+  sceneArt?: {
+    [nodeId: string]: string
+  }
 }
 
 export interface StoryInputs {
@@ -94,6 +117,12 @@ export interface StoryInputs {
   boardLength: BoardLength
   /** Raw voice transcriptions for portfolio/debugging */
   voiceTranscripts?: string[]
+  /** Adventure-specific: story setup description */
+  storySetup?: string
+  /** Adventure-specific: choice seed descriptions */
+  choiceSeeds?: string[]
+  /** Adventure-specific: story length preference */
+  adventureLength?: AdventureLength
 }
 
 export interface StoryPlayer {
@@ -164,6 +193,61 @@ export interface GamePlaySession {
   durationMinutes?: number
   /** Cards encountered during play, for hours split calculation */
   cardsEncountered?: string[]
+  /** Adventure-specific: path of nodeIds visited */
+  pathTaken?: string[]
+  /** Adventure-specific: choices made at each node */
+  choicesMade?: Array<{ nodeId: string; choiceId: string }>
+  /** Adventure-specific: challenge results */
+  challengeResults?: Array<{ nodeId: string; passed: boolean }>
+}
+
+// ── Adventure Types ──────────────────────────────────────────
+
+export interface AdventureNode {
+  id: string
+  /** Narrative text for this node (2-4 sentences) */
+  text: string
+  /** TTS-optimized version */
+  spokenText: string
+  /** Brief description for DALL-E prompt */
+  illustration?: string
+  /** Choices available at this node (absent for endings) */
+  choices?: AdventureChoice[]
+  /** Optional embedded challenge at this node */
+  challenge?: AdventureChallenge
+  /** True for leaf nodes */
+  isEnding?: boolean
+  /** Ending type — no bad endings */
+  endingType?: 'victory' | 'neutral' | 'retry'
+  /** For retry endings, the node to return to */
+  retryNodeId?: string
+}
+
+export interface AdventureChoice {
+  id: string
+  /** Choice label shown on button */
+  text: string
+  /** TTS-optimized version */
+  spokenText: string
+  /** Where this choice leads */
+  nextNodeId: string
+}
+
+export interface AdventureChallenge {
+  type: 'reading' | 'math' | 'story' | 'action'
+  content: string
+  spokenText: string
+  answer?: string
+  options?: string[]
+  difficulty: 'easy' | 'medium' | 'stretch'
+}
+
+export interface AdventureTree {
+  nodes: { [nodeId: string]: AdventureNode }
+  rootNodeId: string
+  totalNodes: number
+  totalEndings: number
+  challengeCount: number
 }
 
 // ── Playtest Types ───────────────────────────────────────────
@@ -292,3 +376,16 @@ export const TurnPhase = {
   Resolve: 'resolve',
 } as const
 export type TurnPhase = (typeof TurnPhase)[keyof typeof TurnPhase]
+
+export const GameType = {
+  Board: 'board',
+  Adventure: 'adventure',
+} as const
+export type GameType = (typeof GameType)[keyof typeof GameType]
+
+export const AdventureLength = {
+  Short: 'short',
+  Medium: 'medium',
+  Long: 'long',
+} as const
+export type AdventureLength = (typeof AdventureLength)[keyof typeof AdventureLength]

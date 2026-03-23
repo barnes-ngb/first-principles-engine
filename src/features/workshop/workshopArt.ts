@@ -1,5 +1,5 @@
 import type { ImageGenRequest, ImageGenResponse } from '../../core/ai/useAI'
-import type { GeneratedArt, StoryInputs } from '../../core/types'
+import type { AdventureTree, GeneratedArt, StoryInputs } from '../../core/types'
 
 // ── DALL-E Prompt Builders ───────────────────────────────────────
 
@@ -190,6 +190,105 @@ export async function generateAllArt(
           }
         }
         break
+    }
+  }
+
+  return { art, failures }
+}
+
+// ── Adventure Art Generation ─────────────────────────────────────
+
+interface AdventureArtResult {
+  art: GeneratedArt
+  failures: string[]
+}
+
+/**
+ * Generate art for an adventure: title screen + key scene illustrations.
+ * Generates for root, major choice points, and endings (up to 5 scenes).
+ */
+export async function generateAdventureArt(
+  generateImage: GenerateImageFn,
+  familyId: string,
+  inputs: StoryInputs,
+  adventure: AdventureTree,
+): Promise<AdventureArtResult> {
+  const theme = inputs.theme
+  const art: GeneratedArt = {}
+  const failures: string[] = []
+
+  // Collect key nodes: root, nodes with illustration fields, and endings (max 5)
+  const keyNodeIds: string[] = [adventure.rootNodeId]
+  const nodes = Object.values(adventure.nodes)
+
+  for (const node of nodes) {
+    if (node.id === adventure.rootNodeId) continue
+    if (node.illustration) keyNodeIds.push(node.id)
+    if (node.isEnding && node.endingType === 'victory') keyNodeIds.push(node.id)
+    if (keyNodeIds.length >= 6) break // title + 5 scenes
+  }
+
+  // Build requests
+  const requests: Array<{ key: string; prompt: string }> = [
+    {
+      key: 'title',
+      prompt: `A title card illustration for a children's choose-your-adventure story, ${theme} themed, exciting, colorful, storybook illustration style, centered composition, no text`,
+    },
+  ]
+
+  for (const nodeId of keyNodeIds) {
+    const node = adventure.nodes[nodeId]
+    if (!node) continue
+    const desc = node.illustration ?? node.text.slice(0, 100)
+    requests.push({
+      key: `scene-${nodeId}`,
+      prompt: `A storybook illustration scene: ${desc}, ${theme} themed, colorful, children's book art style, no text`,
+    })
+  }
+
+  // Card art for challenge types present in the adventure
+  const challengeTypes = new Set<string>()
+  for (const node of nodes) {
+    if (node.challenge) challengeTypes.add(node.challenge.type)
+  }
+  for (const cType of challengeTypes) {
+    requests.push({
+      key: `card-${cType}`,
+      prompt: buildCardPrompt(theme, cType),
+    })
+  }
+
+  const results = await Promise.allSettled(
+    requests.map(async (req) => {
+      const response = await generateImage({
+        familyId,
+        prompt: req.prompt,
+        style: 'general',
+        size: '1024x1024',
+      })
+      return { key: req.key, response }
+    }),
+  )
+
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      failures.push('unknown')
+      continue
+    }
+    const { key, response } = result.value
+    if (!response?.url) {
+      failures.push(key)
+      continue
+    }
+
+    if (key === 'title') {
+      art.titleScreen = response.url
+    } else if (key.startsWith('scene-')) {
+      const nodeId = key.replace('scene-', '')
+      art.sceneArt = { ...art.sceneArt, [nodeId]: response.url }
+    } else if (key.startsWith('card-')) {
+      const cType = key.replace('card-', '') as 'reading' | 'math' | 'story' | 'action'
+      art.cardArt = { ...art.cardArt, [cType]: response.url }
     }
   }
 
