@@ -627,6 +627,25 @@ export default function MyAvatarPage() {
             activePoseId={activePoseId}
             onPoseComplete={() => setActivePoseId(null)}
             onSwipePose={(poseId) => setActivePoseId(poseId)}
+            onTierUp={async (_oldTier, newTier) => {
+              if (!familyId || !childId) return
+              // Reset equipped pieces for the new tier and clear pendingTierUpgrade
+              const profileRef = doc(avatarProfilesCollection(familyId), childId)
+              await updateDoc(profileRef, {
+                equippedPieces: [],
+                currentTier: newTier.toLowerCase(),
+                pendingTierUpgrade: deleteField(),
+                updatedAt: new Date().toISOString(),
+              })
+              // Clear today's session applied pieces
+              const docId = dailyArmorSessionDocId(childId, today)
+              const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+              await updateDoc(sessionRef, {
+                appliedPieces: [],
+                manuallyUnequipped: [],
+                completedAt: deleteField(),
+              })
+            }}
           />
           {isLincoln && (
             <PoseButtons

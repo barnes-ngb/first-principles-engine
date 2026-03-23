@@ -10,7 +10,8 @@ import { buildArmorPiece, VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import { animateEquip, animateUnequip, animateJump, animateNod, animateSwordFlourish, animateHipTurn, animateTorsoPuff } from './voxel/equipAnimation'
 import { createTouchControls, updateRotation, destroyTouchControls } from './voxel/touchControls'
 import type { TouchControlState } from './voxel/touchControls'
-import { applyTierToArmor, calculateTier, animateTierUpgrade, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
+import { applyTierToArmor, calculateTier, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
+import { triggerTierUpCeremony } from './voxel/tierUpCeremony'
 import { PoseAnimator, POSES, POSE_EXPRESSIONS, applyExpression, getEquipmentIdlePose } from './voxel/poseSystem'
 import type { Pose } from './voxel/poseSystem'
 import { applyPaintedFace } from './voxel/pixelFace'
@@ -37,6 +38,8 @@ interface VoxelCharacterProps {
   onPoseComplete?: () => void
   /** Callback when swipe cycles to a new pose */
   onSwipePose?: (poseId: string) => void
+  /** Callback when tier-up ceremony completes (equipped pieces reset, new tier set) */
+  onTierUp?: (oldTier: string, newTier: string) => void
 }
 
 // ── Helmet hair management ────────────────────────────────────────────
@@ -214,6 +217,7 @@ export default function VoxelCharacter({
   activePoseId,
   onPoseComplete,
   onSwipePose,
+  onTierUp,
 }: VoxelCharacterProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -231,6 +235,8 @@ export default function VoxelCharacter({
   const swipePoseIndexRef = useRef(0)
   const onSwipePoseRef = useRef(onSwipePose)
   const onPoseCompleteRef = useRef(onPoseComplete)
+  const onTierUpRef = useRef(onTierUp)
+  const ceremonyActiveRef = useRef(false)
 
   const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
   const currentTier = calculateTier(totalXp)
@@ -239,6 +245,7 @@ export default function VoxelCharacter({
   equippedRef.current = equippedPieces
   onSwipePoseRef.current = onSwipePose
   onPoseCompleteRef.current = onPoseComplete
+  onTierUpRef.current = onTierUp
 
   // ── Initialize scene ────────────────────────────────────────────
   const initScene = useCallback(() => {
@@ -600,13 +607,39 @@ export default function VoxelCharacter({
     return () => observer.disconnect()
   }, [])
 
-  // ── Tier upgrade animation when XP changes tier ────────────────
+  // ── Tier upgrade ceremony when XP changes tier ─────────────────
   useEffect(() => {
     if (!prevTierRef.current || prevTierRef.current === currentTier) {
       prevTierRef.current = currentTier
       return
     }
-    animateTierUpgrade(armorGroupsRef.current, equippedPieces, currentTier)
+    if (ceremonyActiveRef.current) return
+
+    const container = containerRef.current
+    const scene = sceneRef.current
+    if (!container || !scene) {
+      prevTierRef.current = currentTier
+      return
+    }
+
+    const oldTier = prevTierRef.current
+    ceremonyActiveRef.current = true
+
+    triggerTierUpCeremony({
+      scene,
+      armorMeshes: armorGroupsRef.current,
+      equippedPieces,
+      oldTier,
+      newTier: currentTier,
+      containerEl: container,
+    })
+
+    // After ceremony completes (~5s), notify parent and reset flag
+    setTimeout(() => {
+      ceremonyActiveRef.current = false
+      onTierUpRef.current?.(oldTier, currentTier)
+    }, 5000)
+
     prevTierRef.current = currentTier
   }, [currentTier, equippedPieces])
 
