@@ -38,6 +38,8 @@ interface VoxelCharacterProps {
   onPoseComplete?: () => void
   /** Callback when swipe cycles to a new pose */
   onSwipePose?: (poseId: string) => void
+  /** Callback when tier-up ceremony starts (block UI interactions) */
+  onTierUpStart?: () => void
   /** Callback when tier-up ceremony completes (equipped pieces reset, new tier set) */
   onTierUp?: (oldTier: string, newTier: string) => void
 }
@@ -217,6 +219,7 @@ export default function VoxelCharacter({
   activePoseId,
   onPoseComplete,
   onSwipePose,
+  onTierUpStart,
   onTierUp,
 }: VoxelCharacterProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -235,6 +238,7 @@ export default function VoxelCharacter({
   const swipePoseIndexRef = useRef(0)
   const onSwipePoseRef = useRef(onSwipePose)
   const onPoseCompleteRef = useRef(onPoseComplete)
+  const onTierUpStartRef = useRef(onTierUpStart)
   const onTierUpRef = useRef(onTierUp)
   const ceremonyActiveRef = useRef(false)
 
@@ -245,6 +249,7 @@ export default function VoxelCharacter({
   equippedRef.current = equippedPieces
   onSwipePoseRef.current = onSwipePose
   onPoseCompleteRef.current = onPoseComplete
+  onTierUpStartRef.current = onTierUpStart
   onTierUpRef.current = onTierUp
 
   // ── Initialize scene ────────────────────────────────────────────
@@ -629,9 +634,11 @@ export default function VoxelCharacter({
     }
 
     const oldTier = prevTierRef.current
+    prevTierRef.current = currentTier
     ceremonyActiveRef.current = true
+    onTierUpStartRef.current?.()
 
-    triggerTierUpCeremony({
+    const cleanupCeremony = triggerTierUpCeremony({
       scene,
       armorMeshes: armorGroupsRef.current,
       equippedPieces,
@@ -641,12 +648,15 @@ export default function VoxelCharacter({
     })
 
     // After ceremony completes (~5s), notify parent and reset flag
-    setTimeout(() => {
+    const timerId = setTimeout(() => {
       ceremonyActiveRef.current = false
       onTierUpRef.current?.(oldTier, currentTier)
     }, 5000)
 
-    prevTierRef.current = currentTier
+    return () => {
+      clearTimeout(timerId)
+      cleanupCeremony()
+    }
   }, [currentTier, equippedPieces])
 
   // ── Sync equipped pieces (without full rebuild) ─────────────────

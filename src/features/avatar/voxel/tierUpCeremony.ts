@@ -321,8 +321,10 @@ function speakTierUp(tierName: string): void {
 
 // ── Full ceremony orchestrator ──────────────────────────────────────
 
-export function triggerTierUpCeremony(config: TierUpCeremonyConfig): void {
+/** Returns a cleanup function that cancels pending timers */
+export function triggerTierUpCeremony(config: TierUpCeremonyConfig): () => void {
   const { scene, armorMeshes, equippedPieces, oldTier, newTier, containerEl } = config
+  const timerIds: ReturnType<typeof setTimeout>[] = []
 
   const oldTint = getTierTint(oldTier)
   const oldMaterials = TIER_MATERIALS[oldTint] ?? TIER_MATERIALS.wood
@@ -331,21 +333,26 @@ export function triggerTierUpCeremony(config: TierUpCeremonyConfig): void {
   shatterArmor(scene, armorMeshes, equippedPieces, oldMaterials)
 
   // Phase 2: Flash + Banner (starts at 1s)
-  setTimeout(() => {
+  timerIds.push(setTimeout(() => {
     showTierUpBanner(containerEl, newTier, () => {
       // Phase 4: Ghost pieces appear (after banner fades at ~3.5s)
       showNewTierGhosts(armorMeshes, newTier)
     })
-  }, 1000)
+  }, 1000))
 
   // Phase 3: Update material metadata (at 2.5s)
-  setTimeout(() => {
+  timerIds.push(setTimeout(() => {
     updateArmorMaterials(armorMeshes, newTier)
     updatePlatformColor(scene, newTier)
-  }, 2500)
+  }, 2500))
 
   // TTS announcement (at 1.5s)
-  setTimeout(() => {
+  timerIds.push(setTimeout(() => {
     speakTierUp(newTier)
-  }, 1500)
+  }, 1500))
+
+  return () => {
+    timerIds.forEach(clearTimeout)
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel()
+  }
 }

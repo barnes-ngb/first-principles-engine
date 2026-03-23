@@ -392,10 +392,35 @@ describe('triggerTierUpCeremony orchestration', () => {
       containerEl: container,
     }
 
-    expect(() => triggerTierUpCeremony(config)).not.toThrow()
+    const cleanup = triggerTierUpCeremony(config)
+    expect(typeof cleanup).toBe('function')
 
     // Advance through all ceremony phases
     vi.advanceTimersByTime(5000)
+
+    container.remove()
+  })
+
+  it('returns cleanup function that cancels pending timers', () => {
+    const scene = new THREE.Scene()
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+
+    const cleanup = triggerTierUpCeremony({
+      scene,
+      armorMeshes: createMockArmorMeshes(),
+      equippedPieces: ['helmet'],
+      oldTier: 'IRON',
+      newTier: 'GOLD',
+      containerEl: container,
+    })
+
+    // Call cleanup before timers fire — banner should NOT appear
+    cleanup()
+    vi.advanceTimersByTime(5000)
+
+    // Banner would have been added at 1s, but cleanup cancelled it
+    expect(container.innerHTML).not.toContain('GOLD TIER')
 
     container.remove()
   })
