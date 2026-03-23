@@ -72,6 +72,89 @@ export async function logWorkshopHours(
   await Promise.all(promises)
 }
 
+// ── Log hours for Lincoln's playtest session ──────────────────────
+
+export async function logPlaytestHours(
+  familyId: string,
+  childId: string,
+  game: GeneratedGame,
+  durationMinutes: number,
+  hasAudioFeedback: boolean,
+): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10)
+  const promises: Promise<unknown>[] = []
+
+  // Count cards by type for proportional split (reading aloud = language arts)
+  const bucketCounts: Record<string, number> = {}
+  let totalCards = 0
+  for (const card of game.challengeCards) {
+    const bucket = getSubjectBucket(card)
+    bucketCounts[bucket] = (bucketCounts[bucket] ?? 0) + 1
+    totalCards++
+  }
+
+  if (totalCards === 0) {
+    promises.push(
+      addDoc(hoursCollection(familyId), {
+        childId,
+        date: today,
+        minutes: durationMinutes,
+        subjectBucket: SubjectBucket.LanguageArts,
+        notes: `Playtested "${game.title}" (Story Game Workshop)`,
+      }),
+    )
+  } else {
+    // Allocate time proportionally — reading cards aloud counts as Language Arts
+    // The primary learning activity is reading + giving feedback
+    const readingMinutes = Math.round(durationMinutes * 0.6) // 60% reading cards
+    const feedbackMinutes = durationMinutes - readingMinutes // 40% giving feedback
+
+    // Reading cards — split by card type
+    for (const [bucket, count] of Object.entries(bucketCounts)) {
+      const minutes = Math.round((count / totalCards) * readingMinutes)
+      if (minutes <= 0) continue
+      promises.push(
+        addDoc(hoursCollection(familyId), {
+          childId,
+          date: today,
+          minutes,
+          subjectBucket: bucket as SubjectBucket,
+          notes: `Playtested "${game.title}" — read ${count} ${bucket.toLowerCase()} cards aloud`,
+        }),
+      )
+    }
+
+    // Feedback time = Language Arts (writing/speaking feedback)
+    if (feedbackMinutes > 0) {
+      promises.push(
+        addDoc(hoursCollection(familyId), {
+          childId,
+          date: today,
+          minutes: feedbackMinutes,
+          subjectBucket: SubjectBucket.LanguageArts,
+          notes: `Playtested "${game.title}" — feedback & critical thinking`,
+        }),
+      )
+    }
+  }
+
+  // Additional speech/communication time if audio feedback was recorded
+  if (hasAudioFeedback) {
+    const speechMinutes = Math.max(Math.round(durationMinutes * 0.1), 1)
+    promises.push(
+      addDoc(hoursCollection(familyId), {
+        childId,
+        date: today,
+        minutes: speechMinutes,
+        subjectBucket: SubjectBucket.LanguageArts,
+        notes: `Playtested "${game.title}" — verbal feedback (speech practice)`,
+      }),
+    )
+  }
+
+  await Promise.all(promises)
+}
+
 // ── Create artifact for completed game ────────────────────────────
 
 export async function createGameArtifact(

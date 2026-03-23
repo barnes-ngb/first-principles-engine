@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
+import Badge from '@mui/material/Badge'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import IconButton from '@mui/material/IconButton'
@@ -9,7 +10,7 @@ import MicIcon from '@mui/icons-material/Mic'
 import { deleteDoc, doc, getDocs, orderBy, query } from 'firebase/firestore'
 import { db, storyGamesCollection } from '../../core/firebase/firestore'
 import type { Child, StoryGame } from '../../core/types'
-import { WorkshopStatus } from '../../core/types/workshop'
+import { PlaytestStatus, WorkshopStatus } from '../../core/types/workshop'
 
 /** Check if a game is missing any expected art */
 function hasMissingArt(game: StoryGame): boolean {
@@ -37,11 +38,37 @@ function getCreatorName(game: StoryGame, children: Child[]): string {
   return child?.name ?? 'Unknown'
 }
 
+/** Check if game has unreviewed playtest sessions (for creator notification) */
+function hasUnreviewedPlaytest(game: StoryGame): boolean {
+  return (
+    game.playtestSessions?.some((s) => s.status === PlaytestStatus.Complete) ?? false
+  )
+}
+
+/** Get the latest complete (unreviewed) playtest tester name */
+function getPlaytestTesterName(game: StoryGame): string | null {
+  const session = game.playtestSessions?.find((s) => s.status === PlaytestStatus.Complete)
+  return session?.testerName ?? null
+}
+
+/** Whether this child can see the Playtest button for a given game */
+function canPlaytest(game: StoryGame, childId: string, isParent: boolean): boolean {
+  // Creator doesn't see Playtest on their own games
+  if (game.childId === childId) return false
+  // Parents can always playtest
+  if (isParent) return true
+  // Non-creator children can playtest (Lincoln on London's games)
+  return true
+}
+
 interface MyGamesGalleryProps {
   familyId: string
   childId: string
+  isParent?: boolean
   children: Child[]
   onSelectGame: (game: StoryGame) => void
+  onPlaytestGame?: (game: StoryGame) => void
+  onReviewPlaytest?: (game: StoryGame) => void
   onResumeDraft?: (game: StoryGame) => void
   onRegenerateArt?: (game: StoryGame) => Promise<void>
 }
@@ -49,8 +76,11 @@ interface MyGamesGalleryProps {
 export default function MyGamesGallery({
   familyId,
   childId,
+  isParent = false,
   children,
   onSelectGame,
+  onPlaytestGame,
+  onReviewPlaytest,
   onResumeDraft,
   onRegenerateArt,
 }: MyGamesGalleryProps) {
@@ -222,6 +252,14 @@ export default function MyGamesGallery({
                       variant="outlined"
                     />
                   )}
+                  {game.version && game.version > 1 && (
+                    <Chip
+                      label={`v${game.version}`}
+                      size="small"
+                      color="secondary"
+                      variant="outlined"
+                    />
+                  )}
                   {game.voiceRecordings && Object.keys(game.voiceRecordings).length > 0 && (
                     <Chip
                       icon={<MicIcon sx={{ fontSize: 14 }} />}
@@ -273,6 +311,34 @@ export default function MyGamesGallery({
                     >
                       Play
                     </Button>
+                    {canPlaytest(game, childId, isParent) && onPlaytestGame && (
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        color="secondary"
+                        onClick={() => onPlaytestGame(game)}
+                        disabled={!game.generatedGame}
+                      >
+                        Playtest
+                      </Button>
+                    )}
+                    {isCreator && hasUnreviewedPlaytest(game) && onReviewPlaytest && (
+                      <Badge
+                        badgeContent="!"
+                        color="warning"
+                        sx={{ '& .MuiBadge-badge': { fontSize: '0.6rem', minWidth: 16, height: 16 } }}
+                      >
+                        <Button
+                          variant="contained"
+                          size="small"
+                          color="warning"
+                          onClick={() => onReviewPlaytest(game)}
+                          sx={{ fontSize: '0.7rem' }}
+                        >
+                          {getPlaytestTesterName(game)} tested!
+                        </Button>
+                      </Badge>
+                    )}
                     {isCreator && hasMissingArt(game) && onRegenerateArt && (
                       <Button
                         variant="text"

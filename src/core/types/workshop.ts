@@ -29,6 +29,15 @@ export interface StoryGame {
 
   /** Tracks wizard step for draft resume (removed when wizard completes) */
   currentWizardStep?: number
+
+  /** Playtest sessions from Lincoln (or other testers) */
+  playtestSessions?: PlaytestSession[]
+
+  /** Game version counter (starts at 1, increments on revision) */
+  version?: number
+
+  /** History of revisions made after playtests */
+  revisionHistory?: RevisionEntry[]
 }
 
 export interface VoiceRecording {
@@ -157,6 +166,65 @@ export interface GamePlaySession {
   cardsEncountered?: string[]
 }
 
+// ── Playtest Types ───────────────────────────────────────────
+
+export const PlaytestReaction = {
+  Good: 'good',
+  Confusing: 'confusing',
+  TooHard: 'too-hard',
+  TooEasy: 'too-easy',
+  Change: 'change',
+} as const
+export type PlaytestReaction = (typeof PlaytestReaction)[keyof typeof PlaytestReaction]
+
+export interface PlaytestFeedback {
+  cardId: string
+  reaction: PlaytestReaction
+  comment?: string
+  audioUrl?: string
+  timestamp: string
+}
+
+export interface PlaytestSummary {
+  totalCards: number
+  good: number
+  confusing: number
+  tooHard: number
+  tooEasy: number
+  change: number
+}
+
+export const PlaytestStatus = {
+  InProgress: 'in-progress',
+  Complete: 'complete',
+  Reviewed: 'reviewed',
+} as const
+export type PlaytestStatus = (typeof PlaytestStatus)[keyof typeof PlaytestStatus]
+
+export interface PlaytestSession {
+  id: string
+  testerId: string
+  testerName: string
+  completedAt: string
+  feedback: PlaytestFeedback[]
+  summary: PlaytestSummary
+  status: PlaytestStatus
+}
+
+export interface CardRevision {
+  cardId: string
+  oldContent: string
+  newContent: string
+  reason: string
+}
+
+export interface RevisionEntry {
+  version: number
+  revisedAt: string
+  changes: CardRevision[]
+  playtestId: string
+}
+
 // ── Const enums (as const pattern) ────────────────────────────
 
 export const WorkshopStatus = {
@@ -212,6 +280,8 @@ export const GamePhase = {
   Ready: 'ready',
   Playing: 'playing',
   Finished: 'finished',
+  Playtesting: 'playtesting',
+  PlaytestReview: 'playtest-review',
 } as const
 export type GamePhase = (typeof GamePhase)[keyof typeof GamePhase]
 

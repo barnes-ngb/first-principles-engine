@@ -7,8 +7,9 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import Typography from '@mui/material/Typography'
 import { addDoc, deleteField, doc, updateDoc } from 'firebase/firestore'
-import type { GeneratedArt, GeneratedGame, StoryGame, StoryInputs, VoiceRecordingMap } from '../../core/types'
-import { GamePhase, WorkshopStatus } from '../../core/types/workshop'
+import type { ChallengeCard, GeneratedArt, GeneratedGame, PlaytestFeedback, PlaytestSession, StoryGame, StoryInputs, VoiceRecordingMap } from '../../core/types'
+import { GamePhase, PlaytestStatus, WorkshopStatus } from '../../core/types/workshop'
+import type { CardRevision } from '../../core/types/workshop'
 import type { WizardState } from './useWorkshopWizard'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -17,11 +18,15 @@ import { db, storyGamesCollection } from '../../core/firebase/firestore'
 import WorkshopWizard from './WorkshopWizard'
 import GamePlayView from './GamePlayView'
 import type { GamePlayResult } from './GamePlayView'
-import { logWorkshopHours, createGameArtifact, recordPlaySession } from './workshopUtils'
+import { logWorkshopHours, logPlaytestHours, createGameArtifact, recordPlaySession } from './workshopUtils'
 import MyGamesGallery from './MyGamesGallery'
 import GameCreationScreen from './GameCreationScreen'
 import VoiceRecordingStep from './VoiceRecordingStep'
 import { generateAllArt } from './workshopArt'
+import PlaytestView from './PlaytestView'
+import PlaytestSummaryView from './PlaytestSummaryView'
+import { computeSummary } from './playtestUtils'
+import PlaytestReviewView from './PlaytestReviewView'
 
 /** Extract JSON from <game> tags in AI response */
 function extractGameJson(text: string): GeneratedGame | null {
@@ -43,6 +48,10 @@ export default function WorkshopPage() {
   // Resume dialog state
   const [resumeDialogOpen, setResumeDialogOpen] = useState(false)
   const [confirmRestartOpen, setConfirmRestartOpen] = useState(false)
+  // Playtest state
+  const [playtestFeedback, setPlaytestFeedback] = useState<PlaytestFeedback[] | null>(null)
+  const [playtestDuration, setPlaytestDuration] = useState(0)
+  const [activePlaytestSession, setActivePlaytestSession] = useState<PlaytestSession | null>(null)
 
   const { chat, generateImage } = useAI()
   const familyId = useFamilyId()
@@ -340,10 +349,165 @@ export default function WorkshopPage() {
     [familyId, activeChildId, currentGame],
   )
 
+  // ── Playtest flow ───────────────────────────────────────────────
+
+  const handleStartPlaytest = useCallback((game: StoryGame) => {
+    setCurrentGame(game)
+    setPlaytestFeedback(null)
+    setPlaytestDuration(0)
+    setPhase(GamePhase.Playtesting)
+  }, [])
+
+  const handlePlaytestComplete = useCallback(
+    async (feedback: PlaytestFeedback[], durationMinutes: number) => {
+      setPlaytestFeedback(feedback)
+      setPlaytestDuration(durationMinutes)
+      // Stay on the summary screen (rendered below)
+    },
+    [],
+  )
+
+  const handleSendPlaytest = useCallback(async () => {
+    if (!familyId || !activeChildId || !currentGame?.id || !currentGame.generatedGame || !playtestFeedback) return
+
+    const childName = children.find((c) => c.id === activeChildId)?.name ?? 'Tester'
+    const summary = computeSummary(playtestFeedback)
+    const sessionId = `pt-${Date.now()}`
+
+    const session: PlaytestSession = {
+      id: sessionId,
+      testerId: activeChildId,
+      testerName: childName,
+      completedAt: new Date().toISOString(),
+      feedback: playtestFeedback,
+      summary,
+      status: PlaytestStatus.Complete,
+    }
+
+    try {
+      const existingSessions = currentGame.playtestSessions ?? []
+      await updateDoc(
+        doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
+        {
+          playtestSessions: [...existingSessions, session],
+          updatedAt: new Date().toISOString(),
+        },
+      )
+
+      // Log hours for Lincoln
+      const hasAudio = playtestFeedback.some((f) => !!f.audioUrl)
+      await logPlaytestHours(
+        familyId,
+        activeChildId,
+        currentGame.generatedGame,
+        playtestDuration,
+        hasAudio,
+      )
+
+      setCurrentGame({
+        ...currentGame,
+        playtestSessions: [...existingSessions, session],
+      })
+    } catch (err) {
+      console.warn('Failed to save playtest session:', err)
+    }
+
+    setPhase(GamePhase.Idle)
+    setPlaytestFeedback(null)
+    setCurrentGame(null)
+  }, [familyId, activeChildId, currentGame, playtestFeedback, playtestDuration, children])
+
+  const handlePlaytestAgain = useCallback(() => {
+    setPlaytestFeedback(null)
+    setPlaytestDuration(0)
+    setPhase(GamePhase.Playtesting)
+  }, [])
+
+  const handleReviewPlaytest = useCallback((game: StoryGame) => {
+    setCurrentGame(game)
+    const unreviewed = game.playtestSessions?.find((s) => s.status === PlaytestStatus.Complete)
+    setActivePlaytestSession(unreviewed ?? null)
+    setPhase(GamePhase.PlaytestReview)
+  }, [])
+
+  const handleSaveRevisions = useCallback(
+    async (
+      updatedCards: ChallengeCard[],
+      revisions: CardRevision[],
+      playtestId: string,
+    ) => {
+      if (!familyId || !currentGame?.id || !currentGame.generatedGame) return
+
+      const newVersion = (currentGame.version ?? 1) + (revisions.length > 0 ? 1 : 0)
+      const existingHistory = currentGame.revisionHistory ?? []
+      const newHistoryEntry = revisions.length > 0
+        ? {
+            version: newVersion,
+            revisedAt: new Date().toISOString(),
+            changes: revisions,
+            playtestId,
+          }
+        : null
+
+      // Mark the playtest session as reviewed
+      const updatedSessions = (currentGame.playtestSessions ?? []).map((s) =>
+        s.id === playtestId ? { ...s, status: PlaytestStatus.Reviewed as const } : s,
+      )
+
+      const updatedGame = {
+        ...currentGame.generatedGame,
+        challengeCards: updatedCards,
+      }
+
+      const updatePayload: Record<string, unknown> = {
+        generatedGame: updatedGame,
+        playtestSessions: updatedSessions,
+        updatedAt: new Date().toISOString(),
+      }
+
+      if (revisions.length > 0) {
+        updatePayload.version = newVersion
+        updatePayload.revisionHistory = [
+          ...existingHistory,
+          ...(newHistoryEntry ? [newHistoryEntry] : []),
+        ]
+      }
+
+      await updateDoc(
+        doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
+        updatePayload,
+      )
+
+      setCurrentGame({
+        ...currentGame,
+        generatedGame: updatedGame,
+        playtestSessions: updatedSessions,
+        version: newVersion,
+        revisionHistory: newHistoryEntry
+          ? [...existingHistory, newHistoryEntry]
+          : existingHistory,
+      })
+
+      setPhase(GamePhase.Idle)
+      setCurrentGame(null)
+      setActivePlaytestSession(null)
+    },
+    [familyId, currentGame],
+  )
+
+  const handleRequestRetest = useCallback(() => {
+    // Just go back — Lincoln will see the Playtest button again
+    setPhase(GamePhase.Idle)
+    setCurrentGame(null)
+    setActivePlaytestSession(null)
+  }, [])
+
   const handleBackToWorkshop = useCallback(() => {
     setPhase(GamePhase.Idle)
     setCurrentGame(null)
     setDraftDocId(null)
+    setPlaytestFeedback(null)
+    setActivePlaytestSession(null)
   }, [])
 
   const handleRegenerateArt = useCallback(
@@ -414,6 +578,8 @@ export default function WorkshopPage() {
               childId={activeChildId}
               children={children}
               onSelectGame={handleSelectExistingGame}
+              onPlaytestGame={handleStartPlaytest}
+              onReviewPlaytest={handleReviewPlaytest}
               onResumeDraft={handleResumeDraft}
               onRegenerateArt={handleRegenerateArt}
             />
@@ -570,6 +736,44 @@ export default function WorkshopPage() {
           activeSession={currentGame.activeSession}
           voiceRecordings={currentGame.voiceRecordings}
           onFinished={handleGameFinished}
+        />
+      )}
+
+      {phase === GamePhase.Playtesting && currentGame?.generatedGame && currentGame.id && familyId && activeChildId && !playtestFeedback && (
+        <PlaytestView
+          game={currentGame.generatedGame}
+          gameId={currentGame.id}
+          familyId={familyId}
+          testerId={activeChildId}
+          testerName={children.find((c) => c.id === activeChildId)?.name ?? 'Tester'}
+          generatedArt={currentGame.generatedArt}
+          voiceRecordings={currentGame.voiceRecordings}
+          onComplete={handlePlaytestComplete}
+          onCancel={handleBackToWorkshop}
+        />
+      )}
+
+      {phase === GamePhase.Playtesting && playtestFeedback && currentGame?.generatedGame && (
+        <PlaytestSummaryView
+          feedback={playtestFeedback}
+          cards={currentGame.generatedGame.challengeCards}
+          testerName={children.find((c) => c.id === activeChildId)?.name ?? 'Tester'}
+          gameTitle={currentGame.generatedGame.title}
+          onSendToCreator={handleSendPlaytest}
+          onPlayAgain={handlePlaytestAgain}
+          onBack={handleBackToWorkshop}
+        />
+      )}
+
+      {phase === GamePhase.PlaytestReview && currentGame && activePlaytestSession && familyId && activeChildId && (
+        <PlaytestReviewView
+          game={currentGame}
+          playtestSession={activePlaytestSession}
+          familyId={familyId}
+          childId={activeChildId}
+          onSaveRevisions={handleSaveRevisions}
+          onRequestRetest={handleRequestRetest}
+          onBack={handleBackToWorkshop}
         />
       )}
 
