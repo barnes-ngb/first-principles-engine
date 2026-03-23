@@ -799,7 +799,11 @@ function ActiveLabCard({
             {/* London's contributions */}
             {(() => {
               const londonReport = report.childReports?.london
-              return (londonReport?.artifacts?.length ?? 0) > 0 ? (
+              const hasLondonInput = !!(
+                londonReport?.observation ||
+                (londonReport?.artifacts?.length ?? 0) > 0
+              )
+              return hasLondonInput ? (
                 <Box
                   sx={{
                     mt: 1,
@@ -813,13 +817,28 @@ function ActiveLabCard({
                   <Typography variant="caption" color="info.main" sx={{ fontWeight: 600 }}>
                     London contributed:
                   </Typography>
-                  <Box sx={{ mt: 0.5 }}>
-                    <ArtifactGallery
-                      familyId={familyId}
-                      artifactIds={londonReport!.artifacts}
-                      thumbnailSize={56}
-                    />
-                  </Box>
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                    {londonReport?.observation && (
+                      <Chip label="Observation" size="small" color="info" variant="outlined" />
+                    )}
+                    {(londonReport?.artifacts?.length ?? 0) > 0 && (
+                      <Chip
+                        label={`${londonReport!.artifacts.length} drawing${londonReport!.artifacts.length !== 1 ? 's' : ''}`}
+                        size="small"
+                        color="info"
+                        variant="outlined"
+                      />
+                    )}
+                  </Stack>
+                  {(londonReport?.artifacts?.length ?? 0) > 0 && (
+                    <Box sx={{ mt: 0.5 }}>
+                      <ArtifactGallery
+                        familyId={familyId}
+                        artifactIds={londonReport!.artifacts}
+                        thumbnailSize={56}
+                      />
+                    </Box>
+                  )}
                 </Box>
               ) : null
             })()}
