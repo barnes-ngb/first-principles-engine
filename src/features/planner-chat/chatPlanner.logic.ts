@@ -726,12 +726,32 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
     // Handle wrapped structures: { plan: { days: [...] } } or { weeklyPlan: { days: [...] } }
     let planData = parsed
     if (!Array.isArray(parsed.days)) {
-      for (const key of ['plan', 'weeklyPlan', 'weekly_plan', 'weekPlan']) {
+      // Check well-known keys first, then fall back to scanning all keys
+      const knownKeys = ['plan', 'weeklyPlan', 'weekly_plan', 'weekPlan', 'response', 'result', 'schedule']
+      let found = false
+      for (const key of knownKeys) {
         const nested = parsed[key]
         if (nested && typeof nested === 'object' && Array.isArray((nested as Record<string, unknown>).days)) {
           planData = nested as Record<string, unknown>
+          console.log(`[parseAIResponse] Found days array under known key "${key}"`)
+          found = true
           break
         }
+      }
+      // Scan all keys if known keys didn't match
+      if (!found) {
+        for (const key of Object.keys(parsed)) {
+          const nested = parsed[key]
+          if (nested && typeof nested === 'object' && Array.isArray((nested as Record<string, unknown>).days)) {
+            planData = nested as Record<string, unknown>
+            console.log(`[parseAIResponse] Found days array under key "${key}"`)
+            found = true
+            break
+          }
+        }
+      }
+      if (!found) {
+        console.warn('[parseAIResponse] No days array found. Top-level keys:', Object.keys(parsed))
       }
     }
 
@@ -740,10 +760,11 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
       return extractDaysFromText(response.message)
     }
 
-    // Use planData from here on for days/minimumWin/skipSuggestions
+    // Use planData from here on for days/minimumWin/skipSuggestions/weekSkipSummary
     parsed.days = planData.days
     if (planData.minimumWin) parsed.minimumWin = planData.minimumWin
     if (planData.skipSuggestions) parsed.skipSuggestions = planData.skipSuggestions
+    if (planData.weekSkipSummary) parsed.weekSkipSummary = planData.weekSkipSummary
 
     // minimumWin is nice-to-have, not required
     const minimumWin = typeof parsed.minimumWin === 'string'
@@ -800,6 +821,7 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
           accepted: rawItem.accepted !== false,
           mvdEssential: rawItem.mvdEssential === true ? true : rawItem.category === 'must-do' ? true : undefined,
           category: rawItem.category === 'must-do' || rawItem.category === 'choose' ? rawItem.category as 'must-do' | 'choose' : undefined,
+          skipGuidance: typeof rawItem.skipGuidance === 'string' ? rawItem.skipGuidance : undefined,
         })
       }
 
@@ -842,7 +864,9 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
           }))
       : []
 
-    return { days, skipSuggestions, minimumWin }
+    const weekSkipSummary = typeof parsed.weekSkipSummary === 'string' ? parsed.weekSkipSummary : undefined
+
+    return { days, skipSuggestions, minimumWin, weekSkipSummary }
   } catch (err) {
     console.error('[parseAIResponse] Parse error:', err, 'Raw:', response.message.substring(0, 300))
     // Last-resort: try to extract structured day data from free text
