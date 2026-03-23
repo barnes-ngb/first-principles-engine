@@ -8,9 +8,12 @@ import IconButton from '@mui/material/IconButton'
 import MenuIcon from '@mui/icons-material/Menu'
 import DebugPanel from '../components/DebugPanel'
 import ProfileMenu from '../components/ProfileMenu'
+import { useAuth } from '../core/auth/useAuth'
 import { useActiveChild } from '../core/hooks/useActiveChild'
 import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
+import AvatarThumbnail from '../features/avatar/AvatarThumbnail'
+import { useAvatarProfile } from '../features/avatar/useAvatarProfile'
 
 const navItems = [
   { label: 'Today', to: '/today' },
@@ -70,6 +73,8 @@ function NavContent({
 export function AppShell({ children }: AppShellProps) {
   const { profile } = useProfile()
   const { activeChild } = useActiveChild()
+  const { familyId } = useAuth()
+  const avatarProfile = useAvatarProfile(familyId ?? undefined, activeChild?.id)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const location = useLocation()
 
@@ -119,12 +124,23 @@ export function AppShell({ children }: AppShellProps) {
           {currentLabel}
         </Box>
         {activeChild && (
-          <Chip
-            label={activeChild.name}
-            size="small"
-            variant="outlined"
-            color="primary"
-          />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {avatarProfile && (
+              <AvatarThumbnail
+                features={avatarProfile.characterFeatures}
+                ageGroup={avatarProfile.ageGroup}
+                equippedPieces={avatarProfile.equippedPieces}
+                totalXp={avatarProfile.totalXp}
+                size={32}
+              />
+            )}
+            <Chip
+              label={activeChild.name}
+              size="small"
+              variant="outlined"
+              color="primary"
+            />
+          </Box>
         )}
         <ProfileMenu />
       </Box>
