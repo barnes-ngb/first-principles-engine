@@ -9,7 +9,7 @@ export interface StoryGame {
   updatedAt: string
   status: WorkshopStatus
 
-  /** Game type: board game or choose-your-adventure */
+  /** Game type: board game, choose-your-adventure, or card game */
   gameType?: GameType
 
   /** London's creative choices from the wizard (mostly captured via voice) */
@@ -20,6 +20,12 @@ export interface StoryGame {
 
   /** AI-generated adventure tree (adventure games) */
   adventureTree?: AdventureTree
+
+  /** AI-generated card game data (card games) */
+  cardGame?: CardGameData
+
+  /** In-progress card game session (saved after each turn for resume) */
+  activeCardGameSession?: ActiveCardGameSession | null
 
   /** Play session records */
   playSessions?: GamePlaySession[]
@@ -106,6 +112,12 @@ export interface GeneratedArt {
   sceneArt?: {
     [nodeId: string]: string
   }
+  /** Card back design for card games */
+  cardBack?: string
+  /** Per-card or per-group face art for card games, keyed by cardId or group key */
+  cardFaces?: {
+    [cardId: string]: string
+  }
 }
 
 export interface StoryInputs {
@@ -123,6 +135,14 @@ export interface StoryInputs {
   choiceSeeds?: string[]
   /** Adventure-specific: story length preference */
   adventureLength?: AdventureLength
+  /** Card game-specific: game mechanic */
+  cardMechanic?: 'matching' | 'collecting' | 'battle'
+  /** Card game-specific: card descriptions/categories from the child */
+  cardDescriptions?: string[]
+  /** Card game-specific: card back style */
+  cardBackStyle?: 'classic' | 'decorated' | 'custom'
+  /** Card game-specific: custom card back description */
+  cardBackCustom?: string
 }
 
 export interface StoryPlayer {
@@ -248,6 +268,71 @@ export interface AdventureTree {
   totalNodes: number
   totalEndings: number
   challengeCount: number
+}
+
+// ── Card Game Types ─────────────────────────────────────────
+
+export interface CardGameData {
+  mechanic: 'matching' | 'collecting' | 'battle'
+  cards: CardGameCard[]
+  rules: GameRule[]
+  metadata: {
+    deckSize: number
+    estimatedMinutes: number
+    playerCount: { min: number; max: number }
+  }
+}
+
+export interface CardGameCard {
+  id: string
+  name: string
+  spokenText: string
+  /** For matching/collecting: which group this card belongs to */
+  category?: string
+  /** For battle: power level (1-10) */
+  value?: number
+  /** For battle: optional special ability */
+  specialAbility?: string
+  learningElement?: {
+    type: 'reading' | 'math'
+    content: string
+    answer?: string
+    options?: string[]
+  }
+  /** Description for DALL-E card face art */
+  artPrompt: string
+}
+
+export interface ActiveCardGameSession {
+  mechanic: 'matching' | 'collecting' | 'battle'
+  players: ActiveCardGamePlayer[]
+  currentPlayerIndex: number
+  /** Matching: which cards are face-up */
+  revealedCardIds: string[]
+  /** Matching: which pairs have been found */
+  matchedCardIds: string[]
+  /** Collecting: cards in draw pile */
+  drawPile: string[]
+  /** Collecting/Battle: cards in each player's hand */
+  playerHands: { [playerId: string]: string[] }
+  /** Collecting: completed sets per player */
+  completedSets: { [playerId: string]: string[][] }
+  /** Battle: cards won per player */
+  wonCards: { [playerId: string]: string[] }
+  /** Battle: current round number */
+  currentRound: number
+  /** Battle: max rounds */
+  maxRounds: number
+  scores: { [playerId: string]: number }
+  status: 'playing' | 'finished'
+  startedAt: string
+  updatedAt: string
+}
+
+export interface ActiveCardGamePlayer {
+  id: string
+  name: string
+  avatarUrl?: string
 }
 
 // ── Playtest Types ───────────────────────────────────────────
@@ -380,8 +465,23 @@ export type TurnPhase = (typeof TurnPhase)[keyof typeof TurnPhase]
 export const GameType = {
   Board: 'board',
   Adventure: 'adventure',
+  Cards: 'cards',
 } as const
 export type GameType = (typeof GameType)[keyof typeof GameType]
+
+export const CardMechanic = {
+  Matching: 'matching',
+  Collecting: 'collecting',
+  Battle: 'battle',
+} as const
+export type CardMechanic = (typeof CardMechanic)[keyof typeof CardMechanic]
+
+export const CardBackStyle = {
+  Classic: 'classic',
+  Decorated: 'decorated',
+  Custom: 'custom',
+} as const
+export type CardBackStyle = (typeof CardBackStyle)[keyof typeof CardBackStyle]
 
 export const AdventureLength = {
   Short: 'short',

@@ -1,7 +1,7 @@
 import { addDoc } from 'firebase/firestore'
 import { hoursCollection, artifactsCollection, storyGamesCollection } from '../../core/firebase/firestore'
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore'
-import type { AdventureTree, ChallengeCard, GeneratedGame } from '../../core/types'
+import type { AdventureTree, CardGameData, ChallengeCard, GeneratedGame } from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
 import { WorkshopStatus } from '../../core/types/workshop'
 
@@ -427,4 +427,181 @@ export async function recordPlaySession(
       cardsEncountered,
     }),
   })
+}
+
+// ── Card Game Hours Logging ──────────────────────────────────────
+
+export async function logCardGameHours(
+  familyId: string,
+  childId: string,
+  cardGame: CardGameData,
+  durationMinutes: number,
+): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10)
+  const promises: Promise<unknown>[] = []
+
+  // Count cards with learning elements by type
+  const learningCounts: Record<string, number> = {}
+  let totalLearning = 0
+
+  for (const card of cardGame.cards) {
+    if (card.learningElement) {
+      const bucket = card.learningElement.type === 'math'
+        ? SubjectBucket.Math
+        : SubjectBucket.Reading
+      learningCounts[bucket] = (learningCounts[bucket] ?? 0) + 1
+      totalLearning++
+    }
+  }
+
+  if (totalLearning === 0) {
+    // No learning elements — log all time as Art (creative play)
+    promises.push(
+      addDoc(hoursCollection(familyId), {
+        childId,
+        date: today,
+        minutes: durationMinutes,
+        subjectBucket: SubjectBucket.Art,
+        notes: `Played card game (${cardGame.mechanic}) — creative play`,
+      }),
+    )
+  } else {
+    // Split time: 60% on learning elements, 40% on game play (Art)
+    const learningMinutes = Math.round(durationMinutes * 0.6)
+    const playMinutes = durationMinutes - learningMinutes
+
+    for (const [bucket, count] of Object.entries(learningCounts)) {
+      const minutes = Math.round((count / totalLearning) * learningMinutes)
+      if (minutes <= 0) continue
+      promises.push(
+        addDoc(hoursCollection(familyId), {
+          childId,
+          date: today,
+          minutes,
+          subjectBucket: bucket as SubjectBucket,
+          notes: `Card game — ${count} ${bucket.toLowerCase()} challenges`,
+        }),
+      )
+    }
+
+    if (playMinutes > 0) {
+      promises.push(
+        addDoc(hoursCollection(familyId), {
+          childId,
+          date: today,
+          minutes: playMinutes,
+          subjectBucket: SubjectBucket.Art,
+          notes: `Card game (${cardGame.mechanic}) — creative play`,
+        }),
+      )
+    }
+  }
+
+  await Promise.all(promises)
+}
+
+// ── Create artifact for completed card game ──────────────────────
+
+export async function createCardGameArtifact(
+  familyId: string,
+  childId: string,
+  cardGame: CardGameData,
+  theme: string,
+): Promise<string> {
+  const mechanicLabel = cardGame.mechanic === 'matching' ? 'matching'
+    : cardGame.mechanic === 'collecting' ? 'collecting'
+      : 'battle'
+
+  const artifactDoc = await addDoc(artifactsCollection(familyId), {
+    childId,
+    title: `${theme} Card Game`,
+    type: 'Note' as const,
+    content: `${theme} Card Game — A ${mechanicLabel} card game created in Story Game Workshop! ${cardGame.metadata.deckSize} cards. Theme: ${theme}.`,
+    createdAt: new Date().toISOString(),
+    tags: {
+      engineStage: 'Build' as const,
+      domain: 'creative',
+      subjectBucket: SubjectBucket.Art,
+      location: 'Home' as const,
+    },
+  })
+  return artifactDoc.id
+}
+
+// ── Record card game play session ────────────────────────────────
+
+export async function recordCardGamePlaySession(
+  familyId: string,
+  gameId: string,
+  players: string[],
+  winner: string | undefined,
+  durationMinutes: number,
+): Promise<void> {
+  const gameRef = doc(storyGamesCollection(familyId), gameId)
+  await updateDoc(gameRef, {
+    status: WorkshopStatus.Played,
+    updatedAt: new Date().toISOString(),
+    playSessions: arrayUnion({
+      playedAt: new Date().toISOString(),
+      players,
+      winner,
+      durationMinutes,
+    }),
+  })
+}
+
+// ── Log hours for card game playtest ─────────────────────────────
+
+export async function logCardGamePlaytestHours(
+  familyId: string,
+  childId: string,
+  cardGame: CardGameData,
+  durationMinutes: number,
+  hasAudioFeedback: boolean,
+): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10)
+  const promises: Promise<unknown>[] = []
+
+  // 60% reading cards, 40% giving feedback
+  const readingMinutes = Math.round(durationMinutes * 0.6)
+  const feedbackMinutes = durationMinutes - readingMinutes
+
+  if (readingMinutes > 0) {
+    promises.push(
+      addDoc(hoursCollection(familyId), {
+        childId,
+        date: today,
+        minutes: readingMinutes,
+        subjectBucket: SubjectBucket.LanguageArts,
+        notes: `Playtested card game — read ${cardGame.cards.length} cards aloud`,
+      }),
+    )
+  }
+
+  if (feedbackMinutes > 0) {
+    promises.push(
+      addDoc(hoursCollection(familyId), {
+        childId,
+        date: today,
+        minutes: feedbackMinutes,
+        subjectBucket: SubjectBucket.LanguageArts,
+        notes: `Playtested card game — feedback & critical thinking`,
+      }),
+    )
+  }
+
+  if (hasAudioFeedback) {
+    const speechMinutes = Math.max(Math.round(durationMinutes * 0.1), 1)
+    promises.push(
+      addDoc(hoursCollection(familyId), {
+        childId,
+        date: today,
+        minutes: speechMinutes,
+        subjectBucket: SubjectBucket.LanguageArts,
+        notes: `Playtested card game — verbal feedback (speech practice)`,
+      }),
+    )
+  }
+
+  await Promise.all(promises)
 }

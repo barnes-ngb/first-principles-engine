@@ -12,10 +12,14 @@ interface WorkshopInput {
   challenges: Array<{ type: string; idea?: string }>;
   boardStyle: string;
   boardLength: string;
-  gameType?: "board" | "adventure";
+  gameType?: "board" | "adventure" | "cards";
   storySetup?: string;
   choiceSeeds?: string[];
   adventureLength?: "short" | "medium" | "long";
+  cardMechanic?: "matching" | "collecting" | "battle";
+  cardDescriptions?: string[];
+  cardBackStyle?: "classic" | "decorated" | "custom";
+  cardBackCustom?: string;
 }
 
 function buildWorkshopPrompt(
@@ -233,6 +237,145 @@ IMPORTANT:
 - Weave ${childName}'s story setup and choice seeds throughout naturally`;
 }
 
+// ── Card game prompt builder ────────────────────────────────
+
+function buildCardGamePrompt(
+  childName: string,
+  childGrade: string | undefined,
+  snapshot: { prioritySkills?: Array<{ tag: string; label: string; level: string }> } | undefined,
+  inputs: WorkshopInput,
+): string {
+  const skillContext = snapshot?.prioritySkills?.length
+    ? `\nChild's current skill levels:\n${snapshot.prioritySkills.map((s) => `- ${s.label}: ${s.level}`).join("\n")}`
+    : "";
+
+  const playerNames = inputs.players.map((p) => p.name).join(", ");
+  const mechanic = inputs.cardMechanic ?? "matching";
+  const descriptions = inputs.cardDescriptions?.length
+    ? inputs.cardDescriptions.map((d) => `- "${d}"`).join("\n")
+    : "- (none provided — create interesting cards that fit the theme)";
+
+  const mechanicConfig: Record<string, { label: string; pairCount: string; setCount: string; cardCount: string; rules: string }> = {
+    matching: {
+      label: "Matching (Memory)",
+      pairCount: "6-12 pairs",
+      setCount: "",
+      cardCount: "",
+      rules: "Cards are face-down. On your turn, flip two cards. If they match, keep them! If not, flip them back. Most pairs wins.",
+    },
+    collecting: {
+      label: "Collecting (Go Fish)",
+      pairCount: "",
+      setCount: "4-6 sets of 3-4 cards each",
+      cardCount: "",
+      rules: "Draw cards or ask other players for cards. Collect complete sets. Most sets wins.",
+    },
+    battle: {
+      label: "Battle (War with a twist)",
+      pairCount: "",
+      setCount: "",
+      cardCount: "16-24 cards",
+      rules: "Each player plays a card. Compare power values — highest wins and collects the played cards. If tied, play again! Most cards at the end wins.",
+    },
+  };
+
+  const config = mechanicConfig[mechanic] ?? mechanicConfig.matching;
+
+  return `You are the Card Game Wizard, helping a child named ${childName} (${childGrade ?? "kindergarten"}) create a custom card game from their ideas.
+${skillContext}
+
+FAMILY VALUES CONTEXT:
+- Every game ${childName} makes is a real game — never say "try again" or suggest the idea isn't good enough.
+- Learning is invisible: reading practice and math are woven into card text naturally.
+- ${childName} is the Story Keeper — the creator and authority of this game.
+- All text will be read aloud by text-to-speech. Write for the ear, not the eye.
+
+CARD GAME DESIGN CONSTRAINTS:
+- Game mechanic: ${config.label}
+- Core rules: ${config.rules}
+- Maximum 5 rules (simple, clear sentences)
+- All card text must be TTS-friendly: short sentences, no abbreviations, no special symbols
+- 20-30% of cards should have a learning element (reading or math), calibrated to ${childName}'s level
+  - Learning elements should feel natural, not forced — "read the magic word to activate your card" or "solve this to power up"
+  - Mostly at the child's current skill level, 1-2 stretch challenges framed as "boss" or "legendary" cards
+- Target play time: 10-15 minutes
+- Tone: creative, encouraging, ${childName} is the creator
+
+STORY INPUTS FROM ${childName.toUpperCase()}:
+- Theme: ${inputs.theme}
+- Players: ${playerNames}
+- Game mechanic: ${mechanic}
+- Card ideas from ${childName}:
+${descriptions}
+
+${mechanic === "matching" ? `Generate ${config.pairCount}. Each pair shares a connection (same category but different variations). For learning elements, pairs might be "word + picture" or "3+2" matched with "5".` : ""}
+${mechanic === "collecting" ? `Generate ${config.setCount}. Each set has a theme name and 3-4 cards within it. For learning elements, claiming a card might require reading a word or answering a question.` : ""}
+${mechanic === "battle" ? `Generate ${config.cardCount}. Each card has a name, power value (1-10), and optional special ability. For learning elements, answering correctly gives a +2 power bonus.` : ""}
+
+Use ${childName}'s card ideas throughout. The players are real family members playing together.
+
+Generate a complete card game definition. Return your response as JSON wrapped in <cardgame> tags.
+
+The JSON must follow this exact schema:
+<cardgame>
+{
+  "mechanic": "${mechanic}",
+  "cards": [
+    {
+      "id": "card-1",
+      "name": "string — card name",
+      "spokenText": "TTS-optimized card name/description",
+      "category": "string — group/pair/set name (for matching/collecting)",
+      "value": 5,
+      "specialAbility": "optional ability text for battle cards",
+      "learningElement": {
+        "type": "reading | math",
+        "content": "the learning challenge text",
+        "answer": "correct answer",
+        "options": ["optional", "multiple", "choice", "answers"]
+      },
+      "artPrompt": "brief description for generating card face art"
+    }
+  ],
+  "rules": [
+    {
+      "number": 1,
+      "text": "rule text",
+      "spokenText": "TTS-optimized version of the rule"
+    }
+  ],
+  "metadata": {
+    "deckSize": 24,
+    "estimatedMinutes": 12,
+    "playerCount": { "min": 2, "max": 4 }
+  }
+}
+</cardgame>
+
+IMPORTANT:
+- Every card must have a unique ID starting with "card-"
+- For matching: cards come in pairs sharing the same "category" value. Generate exactly 2 cards per pair.
+- For collecting: cards are grouped by "category" into sets of 3-4 cards each.
+- For battle: every card needs a "value" (1-10 power level). Higher = rarer/cooler.
+- 20-30% of cards should have a "learningElement" — not every card
+- "artPrompt" should describe the card's visual for art generation
+- "spokenText" is what gets spoken aloud by TTS — keep it short and natural
+- Keep rules to a maximum of 5, simple enough for a kindergartener to follow`;
+}
+
+// ── Extract JSON from <cardgame> tags ───────────────────────
+
+function extractCardGameJson(text: string): string {
+  const match = text.match(/<cardgame>\s*([\s\S]*?)\s*<\/cardgame>/);
+  if (!match) {
+    throw new HttpsError(
+      "internal",
+      "AI response did not contain <cardgame> tags. Cannot parse card game definition.",
+    );
+  }
+  return match[1].trim();
+}
+
 // ── Extract JSON from <game> tags ───────────────────────────────
 
 function extractGameJson(text: string): string {
@@ -278,30 +421,47 @@ export const handleWorkshop = async (
   }
 
   const isAdventure = workshopInput.gameType === "adventure";
+  const isCards = workshopInput.gameType === "cards";
 
-  const systemPrompt = isAdventure
-    ? buildAdventurePrompt(childData.name, childData.grade, snapshotData, workshopInput)
-    : buildWorkshopPrompt(childData.name, childData.grade, snapshotData, workshopInput);
+  const systemPrompt = isCards
+    ? buildCardGamePrompt(childData.name, childData.grade, snapshotData, workshopInput)
+    : isAdventure
+      ? buildAdventurePrompt(childData.name, childData.grade, snapshotData, workshopInput)
+      : buildWorkshopPrompt(childData.name, childData.grade, snapshotData, workshopInput);
 
   const model = modelForTask("workshop");
+
+  const userContent = isCards
+    ? "Generate the card game now."
+    : isAdventure
+      ? "Generate the choose-your-adventure story now."
+      : "Generate the board game now.";
 
   const result = await callClaude({
     apiKey,
     model,
-    maxTokens: isAdventure ? 8192 : 4096,
+    maxTokens: isCards ? 6144 : isAdventure ? 8192 : 4096,
     systemPrompt,
     messages: [
       {
         role: "user",
-        content: isAdventure
-          ? "Generate the choose-your-adventure story now."
-          : "Generate the board game now.",
+        content: userContent,
       },
     ],
   });
 
   // Validate JSON extraction
-  if (isAdventure) {
+  if (isCards) {
+    const cardGameJson = extractCardGameJson(result.text);
+    try {
+      JSON.parse(cardGameJson);
+    } catch {
+      throw new HttpsError(
+        "internal",
+        "AI returned malformed JSON in <cardgame> tags. Please try again.",
+      );
+    }
+  } else if (isAdventure) {
     const adventureJson = extractAdventureJson(result.text);
     try {
       JSON.parse(adventureJson);
@@ -323,8 +483,9 @@ export const handleWorkshop = async (
     }
   }
 
+  const typeLabel = isCards ? "-cards" : isAdventure ? "-adventure" : "";
   console.log(
-    `[AI] taskType=workshop${isAdventure ? "-adventure" : ""} inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`,
+    `[AI] taskType=workshop${typeLabel} inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`,
   );
 
   await logAiUsage(db, familyId, {
@@ -346,5 +507,5 @@ export const handleWorkshop = async (
 };
 
 // Export for testing
-export { buildWorkshopPrompt, buildAdventurePrompt, extractGameJson, extractAdventureJson };
+export { buildWorkshopPrompt, buildAdventurePrompt, buildCardGamePrompt, extractGameJson, extractAdventureJson, extractCardGameJson };
 export type { WorkshopInput };
