@@ -108,7 +108,9 @@ export interface AnalyzePatternsResponse {
 // ── Hook ────────────────────────────────────────────────────────
 
 const functions = getFunctions(app)
-const chatFn = httpsCallable<ChatRequest, ChatResponse>(functions, 'chat')
+const chatFn = httpsCallable<ChatRequest, ChatResponse>(functions, 'chat', {
+  timeout: 300_000, // 5 min — match server-side timeoutSeconds to avoid client-side timeout on large generations (adventure trees)
+})
 const generateFn = httpsCallable<GenerateRequest, GenerateResponse>(functions, 'generateActivity')
 const imageGenFn = httpsCallable<ImageGenRequest, ImageGenResponse>(functions, 'generateImage')
 const analyzePatternsFn = httpsCallable<AnalyzePatternsRequest, AnalyzePatternsResponse>(

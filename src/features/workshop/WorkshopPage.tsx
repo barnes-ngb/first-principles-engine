@@ -214,17 +214,25 @@ export default function WorkshopPage() {
 
       if (gameType === GameType.Cards) {
         // ── Card game generation ─────────────────────────────
-        const response = await chat({
-          familyId,
-          childId: activeChildId,
-          taskType: TaskType.Workshop,
-          messages: [
-            {
-              role: 'user',
-              content: JSON.stringify({ ...inputs, gameType: 'cards' }),
-            },
-          ],
-        })
+        let response: ChatResponse | null = null
+        try {
+          response = await chat({
+            familyId,
+            childId: activeChildId,
+            taskType: TaskType.Workshop,
+            messages: [
+              {
+                role: 'user',
+                content: JSON.stringify({ ...inputs, gameType: 'cards' }),
+              },
+            ],
+          })
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err)
+          console.error('[Workshop] Card game generation threw:', detail, err)
+          setGenerateError(`Failed to generate card game: ${detail}. Please try again.`)
+          return
+        }
 
         if (!response) {
           console.error('[Workshop] Card game generation failed: no response from AI')
@@ -322,7 +330,10 @@ export default function WorkshopPage() {
             ],
           })
         } catch (err) {
-          console.error('[Workshop] Adventure generation threw:', err)
+          const detail = err instanceof Error ? err.message : String(err)
+          console.error('[Workshop] Adventure generation threw:', detail, err)
+          setGenerateError(`Failed to generate adventure: ${detail}. Please try again.`)
+          return
         }
 
         if (!response) {
@@ -407,18 +418,27 @@ export default function WorkshopPage() {
         setPhase(GamePhase.Recording)
       } else {
         // ── Board game generation (existing flow) ──────────────
-        const [response, artResult] = await Promise.all([
-          chat({
-            familyId,
-            childId: activeChildId,
-            taskType: TaskType.Workshop,
-            messages: [{ role: 'user', content: JSON.stringify(inputs) }],
-          }),
-          generateAllArt(generateImage, familyId, inputs).catch((err) => {
-            console.warn('Art generation batch failed:', err)
-            return null
-          }),
-        ])
+        let response: ChatResponse | null = null
+        let artResult: Awaited<ReturnType<typeof generateAllArt>> | null = null
+        try {
+          ;[response, artResult] = await Promise.all([
+            chat({
+              familyId,
+              childId: activeChildId,
+              taskType: TaskType.Workshop,
+              messages: [{ role: 'user', content: JSON.stringify(inputs) }],
+            }),
+            generateAllArt(generateImage, familyId, inputs).catch((err) => {
+              console.warn('Art generation batch failed:', err)
+              return null
+            }),
+          ])
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err)
+          console.error('[Workshop] Board game generation threw:', detail, err)
+          setGenerateError(`Failed to generate game: ${detail}. Please try again.`)
+          return
+        }
 
         if (!response) {
           console.error('[Workshop] Board game generation failed: no response from AI')
