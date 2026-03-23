@@ -553,17 +553,19 @@ function extractJsonObject(text: string): string | null {
   const trimmed = text.trim()
   if (!trimmed) return null
 
-  // Strip ALL markdown code fences (greedy match for large responses)
   let candidate = trimmed
-  // Try greedy match first (handles complete fences)
-  const greedyFence = trimmed.match(/```(?:json)?\s*\n?([\s\S]*)\n?\s*```/)
-  if (greedyFence) {
-    candidate = greedyFence[1].trim()
+
+  // Pattern 1: ```json ... ``` (complete fences) — lazy match to stop at FIRST closing fence
+  const lazyFence = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/)
+  if (lazyFence) {
+    candidate = lazyFence[1].trim()
   } else {
-    // No closing fence? Strip opening fence and use everything after it
+    // Pattern 2: starts with ``` but no closing (AI truncated)
     const openFence = trimmed.match(/^```(?:json)?\s*\n?/)
     if (openFence) {
       candidate = trimmed.slice(openFence[0].length).trim()
+      // Remove trailing ``` if present without matching open
+      candidate = candidate.replace(/\s*```\s*$/, '').trim()
     }
   }
 
@@ -572,7 +574,10 @@ function extractJsonObject(text: string): string | null {
   if (firstBrace === -1) return null
   const lastBrace = candidate.lastIndexOf('}')
   if (lastBrace <= firstBrace) return null
-  return candidate.slice(firstBrace, lastBrace + 1)
+
+  const extracted = candidate.slice(firstBrace, lastBrace + 1)
+  console.log('[extractJsonObject] Extracted', extracted.length, 'chars')
+  return extracted
 }
 
 /**
@@ -642,9 +647,11 @@ function guessSubjectFromTitle(title: string): SubjectBucket {
 function forgivingJsonParse(text: string): Record<string, unknown> | null {
   // First try strict parse
   try {
-    return JSON.parse(text) as Record<string, unknown>
-  } catch {
-    // Continue to forgiving parse
+    const result = JSON.parse(text) as Record<string, unknown>
+    console.log('[forgivingJsonParse] Strict JSON.parse succeeded')
+    return result
+  } catch (err) {
+    console.warn('[forgivingJsonParse] Strict parse failed:', (err as Error).message)
   }
 
   let fixed = text
@@ -652,12 +659,17 @@ function forgivingJsonParse(text: string): Record<string, unknown> | null {
     .replace(/,\s*([}\]])/g, '$1')
     // Replace single-quoted string values with double-quoted (simple cases)
     .replace(/:\s*'([^']*)'/g, ': "$1"')
+    // Remove newlines/tabs that may be inside string values
+    .replace(/\n/g, ' ')
+    .replace(/\t/g, ' ')
 
   // Try again after fixes
   try {
-    return JSON.parse(fixed) as Record<string, unknown>
-  } catch {
-    // Continue to truncation repair
+    const result = JSON.parse(fixed) as Record<string, unknown>
+    console.log('[forgivingJsonParse] Fixed JSON parsed successfully after cleanup')
+    return result
+  } catch (err) {
+    console.warn('[forgivingJsonParse] Cleanup parse failed:', (err as Error).message)
   }
 
   // Try to repair truncated JSON by closing open brackets/braces
@@ -683,8 +695,11 @@ function forgivingJsonParse(text: string): Record<string, unknown> | null {
   while (openBraces > 0) { fixed += '}'; openBraces-- }
 
   try {
-    return JSON.parse(fixed) as Record<string, unknown>
-  } catch {
+    const result = JSON.parse(fixed) as Record<string, unknown>
+    console.log('[forgivingJsonParse] Truncation repair succeeded')
+    return result
+  } catch (err) {
+    console.error('[forgivingJsonParse] All recovery attempts failed:', (err as Error).message)
     return null
   }
 }
@@ -699,10 +714,11 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
       // Last-resort: try to extract structured day data from free text
       return extractDaysFromText(response.message)
     }
+    console.log('[parseAIResponse] Extracted text length:', jsonText.length)
     const parsed = forgivingJsonParse(jsonText)
     if (!parsed) {
-      console.warn('[parseAIResponse] JSON parse failed. Extracted text starts with:', jsonText.substring(0, 200))
-      console.warn('[parseAIResponse] Extracted text length:', jsonText.length)
+      console.error('[parseAIResponse] JSON parse failed after all recovery attempts')
+      console.error('[parseAIResponse] JSON text starts with:', jsonText.substring(0, 500))
       // Last-resort: try to extract structured day data from free text
       return extractDaysFromText(response.message)
     }
@@ -735,26 +751,39 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
       : 'Complete the core items for each day.'
 
     const days: DraftDayPlan[] = []
-    for (const rawDay of parsed.days as Array<Record<string, unknown>>) {
+    for (let dayIdx = 0; dayIdx < (parsed.days as Array<Record<string, unknown>>).length; dayIdx++) {
+      const rawDay = (parsed.days as Array<Record<string, unknown>>)[dayIdx]
       const dayName = typeof rawDay.day === 'string' ? rawDay.day : String(rawDay.day ?? '')
-      if (!dayName) continue // skip bad days, don't fail
-      if (!Array.isArray(rawDay.items)) continue
+      if (!dayName) {
+        console.warn(`[parseAIResponse] Day ${dayIdx}: missing day name, skipping`)
+        continue
+      }
+
+      if (!Array.isArray(rawDay.items)) {
+        console.warn(`[parseAIResponse] Day ${dayIdx} (${dayName}): items is not an array, type=${typeof rawDay.items}`)
+        continue // skip this day, don't fail everything
+      }
 
       const items: DraftPlanItem[] = []
-      for (const rawItem of rawDay.items as Array<Record<string, unknown>>) {
-        const title = typeof rawItem.title === 'string' ? rawItem.title : String(rawItem.title ?? 'Activity')
-        if (!title) continue // skip empty items, don't fail
+      for (let itemIdx = 0; itemIdx < (rawDay.items as Array<Record<string, unknown>>).length; itemIdx++) {
+        const rawItem = (rawDay.items as Array<Record<string, unknown>>)[itemIdx]
+        const title = typeof rawItem.title === 'string' ? rawItem.title : String(rawItem.title ?? '')
+        if (!title) {
+          console.warn(`[parseAIResponse] Day ${dayIdx} item ${itemIdx}: empty title, skipping`)
+          continue
+        }
 
-        // Coerce estimatedMinutes from string to number
-        const estimatedMinutes = typeof rawItem.estimatedMinutes === 'number'
-          ? rawItem.estimatedMinutes
-          : typeof rawItem.estimatedMinutes === 'string'
-            ? parseInt(rawItem.estimatedMinutes, 10)
+        // Coerce estimatedMinutes from string/number, accept "minutes" as alias
+        const rawMinutes = rawItem.estimatedMinutes ?? rawItem.minutes
+        const estimatedMinutes = typeof rawMinutes === 'number'
+          ? rawMinutes
+          : typeof rawMinutes === 'string'
+            ? parseInt(rawMinutes, 10)
             : 15 // default
 
-        if (isNaN(estimatedMinutes) || estimatedMinutes < 0) {
-          console.warn('[parseAIResponse] Bad estimatedMinutes:', rawItem.estimatedMinutes, 'for', title)
-          continue // skip this item, don't fail the entire plan
+        const finalMinutes = isNaN(estimatedMinutes) || estimatedMinutes < 0 ? 15 : estimatedMinutes
+        if (finalMinutes !== estimatedMinutes) {
+          console.warn(`[parseAIResponse] Day ${dayIdx} item ${itemIdx} (${title}): bad minutes=${rawMinutes}, using 15`)
         }
 
         const subjectBucket = VALID_SUBJECT_BUCKETS.has(rawItem.subjectBucket as string)
@@ -765,13 +794,18 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
           id: generateItemId(),
           title,
           subjectBucket,
-          estimatedMinutes,
+          estimatedMinutes: finalMinutes,
           skillTags: Array.isArray(rawItem.skillTags) ? (rawItem.skillTags as string[]).filter(Boolean) : [],
           isAppBlock: rawItem.isAppBlock === true,
           accepted: rawItem.accepted !== false,
           mvdEssential: rawItem.mvdEssential === true ? true : rawItem.category === 'must-do' ? true : undefined,
           category: rawItem.category === 'must-do' || rawItem.category === 'choose' ? rawItem.category as 'must-do' | 'choose' : undefined,
         })
+      }
+
+      if (items.length === 0) {
+        console.warn(`[parseAIResponse] Day ${dayIdx} (${dayName}): no valid items after parsing, skipping day`)
+        continue
       }
 
       days.push({
@@ -786,6 +820,8 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
       console.warn('[parseAIResponse] First raw day sample:', JSON.stringify((planData.days as unknown[])[0]).substring(0, 200))
       return null
     }
+
+    console.log(`[parseAIResponse] Successfully parsed ${days.length} days with ${days.reduce((s, d) => s + d.items.length, 0)} total items`)
 
     const validSkipActions = new Set(['skip', 'modify'])
     const skipSuggestions: SkipSuggestion[] = Array.isArray(parsed.skipSuggestions)
