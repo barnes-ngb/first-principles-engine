@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import CircularProgress from '@mui/material/CircularProgress'
 import LinearProgress from '@mui/material/LinearProgress'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import { useSpeechRecognition } from '../../core/hooks/useSpeechRecognition'
 import { sanitizeStimulus } from './questHelpers'
-import type { QuestQuestion, QuestState } from './questTypes'
+import type { AnswerInputMethod, QuestQuestion, QuestState } from './questTypes'
 import { MAX_QUESTIONS } from './questTypes'
 
 // ── Minecraft color palette ────────────────────────────────────
@@ -163,12 +164,221 @@ export function QuestFeedback({
 
 // ── QuestQuestionScreen ───────────────────────────────────────
 
+// ── Voice/Type answer input ────────────────────────────────────
+
+interface OpenResponseInputProps {
+  onSubmit: (answer: string, method: AnswerInputMethod) => void
+  disabled: boolean
+  questionId: string
+}
+
+function OpenResponseInput({ onSubmit, disabled, questionId }: OpenResponseInputProps) {
+  const speech = useSpeechRecognition()
+  const [typedValue, setTypedValue] = useState('')
+  const [prevQuestionId, setPrevQuestionId] = useState(questionId)
+  const submittedRef = useRef(false)
+
+  // Reset on question change
+  if (prevQuestionId !== questionId) {
+    setPrevQuestionId(questionId)
+    setTypedValue('')
+    if (speech.isListening) speech.stop()
+    speech.reset()
+  }
+
+  // Reset submitted flag when question changes (must be in effect, not during render)
+  useEffect(() => {
+    submittedRef.current = false
+  }, [questionId])
+
+  // Auto-submit when voice produces a final word
+  useEffect(() => {
+    if (speech.transcript && !submittedRef.current && !disabled) {
+      // Take the first word from the transcript (Lincoln says one word)
+      const word = speech.transcript.trim().split(/\s+/)[0]
+      if (word) {
+        submittedRef.current = true
+        speech.stop()
+        onSubmit(word, 'voice')
+      }
+    }
+  }, [speech.transcript, disabled, onSubmit, speech])
+
+  const handleTypedSubmit = useCallback(() => {
+    const word = typedValue.trim()
+    if (word && !disabled && !submittedRef.current) {
+      submittedRef.current = true
+      onSubmit(word, 'typed')
+    }
+  }, [typedValue, disabled, onSubmit])
+
+  const toggleListening = useCallback(() => {
+    if (speech.isListening) {
+      speech.stop()
+    } else {
+      speech.reset()
+      setTypedValue('')
+      speech.start()
+    }
+  }, [speech])
+
+  return (
+    <Box sx={{ mt: 2 }}>
+      <Typography
+        sx={{
+          fontFamily: MC.font,
+          fontSize: '0.4rem',
+          color: MC.stone,
+          textAlign: 'center',
+          mb: 1,
+        }}
+      >
+        Or say / type the word:
+      </Typography>
+      <Stack direction="row" spacing={1} alignItems="center">
+        {/* Mic button */}
+        {speech.isSupported && (
+          <Box
+            role="button"
+            tabIndex={0}
+            onClick={toggleListening}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                toggleListening()
+              }
+            }}
+            sx={{
+              width: 48,
+              height: 48,
+              borderRadius: 2,
+              bgcolor: speech.isListening ? MC.red : MC.darkStone,
+              border: `2px solid ${speech.isListening ? MC.red : MC.stone}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: disabled ? 'default' : 'pointer',
+              flexShrink: 0,
+              ...(speech.isListening && {
+                animation: 'mic-pulse 1.2s ease-in-out infinite',
+                '@keyframes mic-pulse': {
+                  '0%, 100%': { boxShadow: `0 0 4px ${MC.red}40` },
+                  '50%': { boxShadow: `0 0 12px ${MC.red}80` },
+                },
+              }),
+            }}
+          >
+            <Typography sx={{ fontSize: '1.2rem' }}>
+              {speech.isListening ? '🔴' : '🎤'}
+            </Typography>
+          </Box>
+        )}
+
+        {/* Text input */}
+        <Box
+          component="input"
+          type="text"
+          value={speech.isListening ? (speech.interimTranscript || '') : typedValue}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+            if (!speech.isListening) setTypedValue(e.target.value)
+          }}
+          onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              handleTypedSubmit()
+            }
+          }}
+          placeholder={speech.isListening ? 'Listening...' : 'Type the word'}
+          readOnly={speech.isListening}
+          disabled={disabled}
+          sx={{
+            flex: 1,
+            fontFamily: MC.font,
+            fontSize: '0.7rem',
+            color: MC.white,
+            bgcolor: MC.darkStone,
+            border: `2px solid ${speech.isListening ? MC.gold : MC.stone}`,
+            borderRadius: 2,
+            p: 1.5,
+            outline: 'none',
+            '&:focus': { borderColor: MC.diamond },
+            '&::placeholder': { color: MC.stone, opacity: 0.7 },
+          }}
+        />
+
+        {/* Submit button (for typed input) */}
+        {!speech.isListening && typedValue.trim() && (
+          <Box
+            role="button"
+            tabIndex={0}
+            onClick={handleTypedSubmit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                handleTypedSubmit()
+              }
+            }}
+            sx={{
+              width: 48,
+              height: 48,
+              borderRadius: 2,
+              bgcolor: MC.green,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: disabled ? 'default' : 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            <Typography sx={{ fontSize: '1.2rem' }}>✓</Typography>
+          </Box>
+        )}
+      </Stack>
+
+      {/* Listening feedback */}
+      {speech.isListening && (
+        <Typography
+          sx={{
+            fontFamily: MC.font,
+            fontSize: '0.35rem',
+            color: MC.gold,
+            textAlign: 'center',
+            mt: 0.5,
+          }}
+        >
+          Say the word...
+        </Typography>
+      )}
+
+      {speech.error && (
+        <Typography
+          sx={{
+            fontFamily: MC.font,
+            fontSize: '0.35rem',
+            color: MC.red,
+            textAlign: 'center',
+            mt: 0.5,
+          }}
+        >
+          {speech.error} — try typing instead
+        </Typography>
+      )}
+    </Box>
+  )
+}
+
+// ── QuestQuestionScreen ───────────────────────────────────────
+
 interface QuestQuestionScreenProps {
   question: QuestQuestion
   questState: QuestState
   consecutiveWrong: number
   onAnswer: (answer: string) => void
+  /** Answer with input method tracking */
+  onAnswerWithMethod?: (answer: string, method: AnswerInputMethod) => void
   onSkip: () => void
+  /** Domain label for the header (defaults to "Reading Quest") */
+  domainLabel?: string
 }
 
 export default function QuestQuestionScreen({
@@ -176,7 +386,9 @@ export default function QuestQuestionScreen({
   questState,
   consecutiveWrong,
   onAnswer,
+  onAnswerWithMethod,
   onSkip,
+  domainLabel = 'Reading Quest',
 }: QuestQuestionScreenProps) {
   const progress = (questState.totalQuestions / MAX_QUESTIONS) * 100
 
@@ -199,6 +411,10 @@ export default function QuestQuestionScreen({
 
   // Show skip if timer elapsed or 2+ consecutive wrong
   const showSkip = timerElapsed || consecutiveWrong >= 2
+
+  // Show voice/type input for word-reading questions (stimulus-based) or if question opts in
+  const showOpenResponse = question.allowOpenResponse
+    || (question.stimulus && !question.stimulus.includes('_') && /what word/i.test(question.prompt))
 
   const handleSkip = () => {
     setRevealingAnswer(true)
@@ -230,7 +446,7 @@ export default function QuestQuestionScreen({
             color: MC.gold,
           }}
         >
-          ⛏️ Reading Quest — Level {questState.currentLevel}
+          ⛏️ {domainLabel} — Level {questState.currentLevel}
         </Typography>
         <Typography
           sx={{
@@ -413,6 +629,21 @@ export default function QuestQuestionScreen({
           )
         })}
       </Stack>
+
+      {/* Voice / Type input — shown for word-reading questions */}
+      {showOpenResponse && !revealingAnswer && (
+        <OpenResponseInput
+          questionId={question.id}
+          disabled={revealingAnswer}
+          onSubmit={(answer, method) => {
+            if (onAnswerWithMethod) {
+              onAnswerWithMethod(answer, method)
+            } else {
+              onAnswer(answer)
+            }
+          }}
+        />
+      )}
 
       {/* Skip button */}
       {showSkip && !revealingAnswer && (

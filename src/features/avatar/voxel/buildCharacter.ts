@@ -75,11 +75,12 @@ export function buildCharacter(
   const scale = ageGroup === 'younger' ? 0.88 : 1.0
   const U = 0.125 * scale // 1 Minecraft pixel
 
-  // Colors from features (with fallbacks) — skin & hair from photo, clothes are fixed defaults
+  // Colors from features (with fallbacks) — skin & hair from photo, clothes are child-specific
   const skinColor = new THREE.Color(features.skinTone ?? '#F5D6B8')
   const hairColor = new THREE.Color(features.hairColor ?? '#6B4C32')
-  const shirtColor = new THREE.Color('#B0B0B0') // Light heather gray (Lincoln's Minecraft tee)
-  const pantsColor = new THREE.Color('#2A3A52') // Dark navy blue (his actual shorts)
+  // Lincoln: gray Minecraft tee; London: bright blue (his favorite color)
+  const shirtColor = new THREE.Color(ageGroup === 'younger' ? '#4A90C2' : '#B0B0B0')
+  const pantsColor = new THREE.Color('#2A3A52') // Dark navy blue
   const shoeColor = new THREE.Color('#3D3D3D')
 
   // --- HEAD (8×8×8 = 1×1×1) ---
@@ -133,17 +134,29 @@ export function buildCharacter(
   torso.position.y = U * 18 // Center of body
   character.add(torso)
 
-  // Creeper face on gray shirt — darker green to contrast against gray
-  const creeperGreen = 0x3D8C35
-  const cEyeL = box(U * 1.2, U * 1.2, U * 0.3, creeperGreen, 'creeperEyeL')
-  cEyeL.position.set(-U * 1.5, U * 20, U * 2.15)
-  character.add(cEyeL)
-  const cEyeR = box(U * 1.2, U * 1.2, U * 0.3, creeperGreen, 'creeperEyeR')
-  cEyeR.position.set(U * 1.5, U * 20, U * 2.15)
-  character.add(cEyeR)
-  const cMouth = box(U * 2, U * 1, U * 0.3, creeperGreen, 'creeperMouth')
-  cMouth.position.set(0, U * 17.5, U * 2.15)
-  character.add(cMouth)
+  // Shirt design — Lincoln gets a creeper face, London gets a simple star
+  if (ageGroup === 'older') {
+    // Creeper face on gray shirt — darker green to contrast against gray
+    const creeperGreen = 0x3D8C35
+    const cEyeL = box(U * 1.2, U * 1.2, U * 0.3, creeperGreen, 'creeperEyeL')
+    cEyeL.position.set(-U * 1.5, U * 20, U * 2.15)
+    character.add(cEyeL)
+    const cEyeR = box(U * 1.2, U * 1.2, U * 0.3, creeperGreen, 'creeperEyeR')
+    cEyeR.position.set(U * 1.5, U * 20, U * 2.15)
+    character.add(cEyeR)
+    const cMouth = box(U * 2, U * 1, U * 0.3, creeperGreen, 'creeperMouth')
+    cMouth.position.set(0, U * 17.5, U * 2.15)
+    character.add(cMouth)
+  } else {
+    // Simple yellow star on London's blue shirt
+    const starColor = 0xFFD700
+    const starV = box(U * 1.2, U * 3, U * 0.3, starColor, 'starV')
+    starV.position.set(0, U * 19, U * 2.15)
+    character.add(starV)
+    const starH = box(U * 3, U * 1.2, U * 0.3, starColor, 'starH')
+    starH.position.set(0, U * 19, U * 2.15)
+    character.add(starH)
+  }
 
   // --- ARMS (4×12×4 each) ---
   // Geometry is shifted so pivot point is at the SHOULDER (top of arm),

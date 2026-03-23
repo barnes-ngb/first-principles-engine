@@ -35,6 +35,15 @@ export interface QuestState {
 
 // ── Question from AI ──────────────────────────────────────────
 
+// ── Answer input method tracking ─────────────────────────────
+
+export const AnswerInputMethod = {
+  MultipleChoice: 'multiple-choice',
+  Voice: 'voice',
+  Typed: 'typed',
+} as const
+export type AnswerInputMethod = (typeof AnswerInputMethod)[keyof typeof AnswerInputMethod]
+
 export interface QuestQuestion {
   id: string
   type: 'multiple-choice'
@@ -47,6 +56,8 @@ export interface QuestQuestion {
   correctAnswer: string
   encouragement?: string // shown after wrong answer
   isBonusRound?: boolean // true for end-on-a-win bonus question
+  /** Whether this question should also show voice/type input alongside MC options */
+  allowOpenResponse?: boolean
 }
 
 // ── Answered question ─────────────────────────────────────────
@@ -66,6 +77,8 @@ export interface SessionQuestion {
   flaggedAsError?: boolean
   responseTimeMs: number
   timestamp: string
+  /** How the child answered: tapped an MC option, spoke via voice, or typed */
+  inputMethod?: AnswerInputMethod
 }
 
 // ── Extra fields on EvaluationSession for interactive sessions ─

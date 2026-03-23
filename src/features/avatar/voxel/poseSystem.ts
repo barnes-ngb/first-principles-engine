@@ -32,16 +32,20 @@ export interface Pose {
 // ── Pose definitions ────────────────────────────────────────────────
 
 export const POSES: Pose[] = [
+  // IDLE — default resting pose
   {
     id: 'idle',
     name: 'Standing',
     icon: '\u{1F9CD}',
     duration: 0,
-    armL: { rotZ: [0] },
-    armR: { rotZ: [0] },
+    armL: { rotZ: [0.05], rotX: [0] },      // Very slight outward at rest
+    armR: { rotZ: [-0.05], rotX: [0] },
     head: { rotX: [0], rotY: [0] },
     body: { posY: [0] },
   },
+
+  // VICTORY — sword arm raised overhead
+  // Path: arm out to side → up overhead (clears body)
   {
     id: 'victory',
     name: 'Victory',
@@ -49,23 +53,28 @@ export const POSES: Pose[] = [
     duration: 2000,
     requiresPiece: 'sword',
     armL: {
-      rotZ: [0, 0.3, 0.3, 0],
-      times: [0, 0.2, 0.8, 1],
+      rotZ: [0.05, 0.3, 0.3, 0.05],        // Slight pump
+      rotX: [0, 0, 0, 0],
+      times: [0, 0.3, 0.7, 1],
     },
     armR: {
-      rotZ: [0, -2.8, -2.8, -0.55],
-      rotX: [0, -0.3, -0.3, -0.15],
-      times: [0, 0.3, 0.7, 1],
+      // Go OUT first (rotZ -0.8 ~45°), THEN up (rotZ -3.0 overhead)
+      rotZ: [-0.05, -0.8, -2.8, -2.8, -0.55],
+      rotX: [0, -0.1, -0.2, -0.2, -0.1],    // Slight forward through the arc
+      times: [0, 0.15, 0.4, 0.7, 1],
     },
     head: {
-      rotX: [-0.1, -0.25, -0.25, 0],
-      times: [0, 0.3, 0.7, 1],
+      rotX: [0, 0, -0.2, -0.2, 0],          // Look up at sword
+      times: [0, 0.15, 0.4, 0.7, 1],
     },
     body: {
-      posY: [0, 0.15, 0.15, 0],
-      times: [0, 0.3, 0.7, 1],
+      posY: [0, 0, 0.12, 0.12, 0],
+      times: [0, 0.15, 0.4, 0.7, 1],
     },
   },
+
+  // SHIELD WALL — shield forward, crouch
+  // Path: left arm goes FORWARD (rotX), not sideways through body
   {
     id: 'shieldWall',
     name: 'Shield Wall',
@@ -73,79 +82,94 @@ export const POSES: Pose[] = [
     duration: 1800,
     requiresPiece: 'shield',
     armL: {
-      rotZ: [0, 0.2, 0.2, 0.2],          // Very slight outward
-      rotX: [0, -1.0, -1.0, -0.8],        // FORWARD — shield presents in front of body
+      rotZ: [0.05, 0.25, 0.25, 0.2],       // Slight outward to clear body
+      rotX: [0, -0.9, -0.9, -0.7],          // Forward — shield in front
       times: [0, 0.3, 0.7, 1],
     },
     armR: {
-      rotZ: [0, -0.3, -0.3, -0.55],
+      rotZ: [-0.05, -0.3, -0.3, -0.55],     // Sword arm slightly out
+      rotX: [0, -0.2, -0.2, -0.1],
       times: [0, 0.3, 0.7, 1],
     },
     head: {
-      rotX: [0, 0.1, 0.1, 0],
+      rotX: [0, 0.08, 0.08, 0],             // Slight duck
       times: [0, 0.3, 0.7, 1],
     },
     body: {
-      posY: [0, -0.3, -0.3, 0],
+      posY: [0, -0.25, -0.25, 0],           // Crouch
       times: [0, 0.25, 0.75, 1],
     },
   },
+
+  // PRAYER — both arms FORWARD, meeting in front of chest
+  // Path: arms swing forward (rotX), NOT sideways through torso
   {
     id: 'prayer',
     name: 'Prayer',
     icon: '\u{1F64F}',
     duration: 3000,
     armL: {
-      rotZ: [0, 0, 0, 0],                // NO side rotation — arms stay at sides
-      rotX: [0, -1.2, -1.2, 0],           // Swing FORWARD (negative X = forward)
+      rotZ: [0.05, 0.05, 0.05, 0.05],      // Stay at rest sideways — NO inward
+      rotX: [0, -1.3, -1.3, 0],             // Forward — hands meet in front
       times: [0, 0.3, 0.85, 1],
     },
     armR: {
-      rotZ: [0, 0, 0, 0],
-      rotX: [0, -1.2, -1.2, 0],           // Same — both arms forward
+      rotZ: [-0.05, -0.05, -0.05, -0.05],
+      rotX: [0, -1.3, -1.3, 0],
       times: [0, 0.3, 0.85, 1],
     },
     head: {
-      rotX: [0, 0.3, 0.3, 0],
+      rotX: [0, 0.3, 0.3, 0],              // Head bows
       rotY: [0, 0, 0, 0],
       times: [0, 0.3, 0.85, 1],
     },
     body: { posY: [0] },
   },
+
+  // WAVE — right arm goes OUT then UP, hand waves via rotY (forward/back)
+  // Fixed: arm no longer sweeps through the head
   {
     id: 'wave',
     name: 'Wave',
     icon: '\u{1F44B}',
-    duration: 2000,
-    armL: { rotZ: [0] },
+    duration: 2500,
+    armL: { rotZ: [0.05], rotX: [0] },
     armR: {
-      rotZ: [0, -2.2, -2.0, -2.2, -2.0, -2.2, 0],
-      rotX: [0, -0.3, -0.3, -0.3, -0.3, -0.3, 0],
-      times: [0, 0.15, 0.3, 0.45, 0.6, 0.75, 1],
+      // Phase 1 (0-0.1): arm goes OUT to side (clears body)
+      // Phase 2 (0.1-0.2): arm goes UP from side position
+      // Phase 3 (0.2-0.8): wave back and forth via rotY
+      // Phase 4 (0.8-1): return to rest
+      rotZ: [-0.05, -1.0, -2.5, -2.5, -2.5, -2.5, -2.5, -0.05],
+      rotX: [0, -0.15, -0.2, -0.2, -0.2, -0.2, -0.2, 0],
+      rotY: [0, 0, 0, 0.4, -0.4, 0.4, -0.4, 0],  // Wave motion!
+      times: [0, 0.1, 0.2, 0.35, 0.5, 0.65, 0.8, 1],
     },
     head: {
-      rotY: [0, 0.2, 0.2, 0.2, 0.2, 0.2, 0],
-      times: [0, 0.15, 0.3, 0.45, 0.6, 0.75, 1],
+      rotY: [0, 0, 0.15, 0.15, 0.15, 0.15, 0.15, 0],
+      times: [0, 0.1, 0.2, 0.35, 0.5, 0.65, 0.8, 1],
     },
     body: { posY: [0] },
   },
+
+  // BATTLE READY — sword forward, shield up, low stance
+  // Path: both arms go FORWARD via rotX
   {
     id: 'battleReady',
     name: 'Battle Ready',
     icon: '\u2694',
     duration: 1500,
     armL: {
-      rotZ: [0, 0.7, 0.7, 0.5],
-      rotX: [0, 0.5, 0.5, 0.35],
+      rotZ: [0.05, 0.3, 0.3, 0.2],         // Shield arm slightly out
+      rotX: [0, -0.8, -0.8, -0.7],          // Forward
       times: [0, 0.3, 0.7, 1],
     },
     armR: {
-      rotZ: [0, -1.2, -1.2, -0.55],
-      rotX: [0, -0.6, -0.6, -0.15],
+      rotZ: [-0.05, -0.5, -0.5, -0.55],     // Sword arm out to side
+      rotX: [0, -0.7, -0.7, -0.15],          // Forward thrust, then relax
       times: [0, 0.3, 0.7, 1],
     },
     head: {
-      rotX: [-0.05, -0.1, -0.1, 0],
+      rotX: [0, -0.08, -0.08, 0],            // Lean forward slightly
       times: [0, 0.3, 0.7, 1],
     },
     body: {
@@ -153,24 +177,28 @@ export const POSES: Pose[] = [
       times: [0, 0.3, 0.7, 1],
     },
   },
+
+  // DAB — left arm extends OUT, right arm goes up and FORWARD (in front of face)
+  // Head tucks into right arm — arm doesn't go through head
   {
     id: 'dab',
     name: 'Dab',
     icon: '\u{1F60E}',
     duration: 1200,
     armL: {
-      rotZ: [0, 1.2, 1.2, 0],
-      rotX: [0, -0.3, -0.3, 0],
+      rotZ: [0.05, 1.5, 1.5, 0.05],        // Out to side and up
+      rotX: [0, -0.2, -0.2, 0],              // Slight forward
       times: [0, 0.2, 0.7, 1],
     },
     armR: {
-      rotZ: [0, -2.0, -2.0, 0],
-      rotX: [0, -0.8, -0.8, 0],
+      rotZ: [-0.05, -1.8, -1.8, -0.05],     // Up and slightly across
+      rotX: [0, -0.6, -0.6, 0],              // Forward — arm in front of face, not through it
       times: [0, 0.2, 0.7, 1],
     },
     head: {
-      rotX: [0, 0.3, 0.3, 0],
-      rotY: [0, -0.4, -0.4, 0],
+      rotX: [0, 0.15, 0.15, 0],              // Head tilts down toward right arm
+      rotY: [0, 0.35, 0.35, 0],              // Head turns right
+      rotZ: [0, 0.15, 0.15, 0],              // Head tilts into the dab
       times: [0, 0.2, 0.7, 1],
     },
     body: { posY: [0] },
@@ -333,18 +361,21 @@ export function applyExpression(
  * Used for smooth return to idle after a pose animation completes.
  */
 export function getEquipmentIdlePose(equipped: string[]): Pose {
+  const hasSword = equipped.includes('sword')
+  const hasShield = equipped.includes('shield')
+
   return {
     id: 'equipIdle',
     name: 'Idle',
     icon: '',
     duration: 500,
     armL: {
-      rotZ: [equipped.includes('shield') ? 0.2 : 0],
-      rotX: [equipped.includes('shield') ? -0.3 : 0],
+      rotZ: [hasShield ? 0.25 : 0.05],    // Shield arm slightly out
+      rotX: [hasShield ? -0.3 : 0],       // And slightly forward
     },
     armR: {
-      rotZ: [equipped.includes('sword') ? -0.3 : 0],
-      rotX: [equipped.includes('sword') ? -0.1 : 0],
+      rotZ: [hasSword ? -0.35 : -0.05],   // Sword arm slightly out
+      rotX: [hasSword ? -0.1 : 0],        // Barely forward
     },
     head: { rotX: [0], rotY: [0] },
     body: { posY: [0] },

@@ -80,7 +80,7 @@ import {
 import { fixUnicodeEscapes, formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
-import { defaultAppBlocks } from '../planner/planner.logic'
+import { defaultAppBlocks, defaultDailyRoutine } from '../planner/planner.logic'
 import {
   buildMinimumWinText,
   buildPlannerPrompt,
@@ -228,8 +228,8 @@ export default function PlannerChatPage() {
     { name: '', subject: 'Reading' },
   ])
 
-  // Daily routine state
-  const [dailyRoutine, setDailyRoutine] = useState('')
+  // Daily routine state — initialized with default template
+  const [dailyRoutine, setDailyRoutine] = useState(defaultDailyRoutine)
 
   // Suggest focus state
   const [suggestingFocus, setSuggestingFocus] = useState(false)
@@ -250,19 +250,34 @@ export default function PlannerChatPage() {
     setQuickWorkbooks(prev => [...prev, { name: '', subject: 'Reading' }])
   }, [])
 
-  // Load planner defaults (daily routine, hoursPerDay, readAloud)
+  // Load planner defaults (hoursPerDay, readAloud — family-level)
   useEffect(() => {
     if (!familyId) return
     const settingsRef = doc(db, `families/${familyId}/settings/plannerDefaults`)
     void getDoc(settingsRef).then((snap) => {
       if (snap.exists()) {
         const data = snap.data()
-        if (data.dailyRoutine) setDailyRoutine(data.dailyRoutine)
         if (data.hoursPerDay) setHoursPerDay(data.hoursPerDay)
         if (data.readAloud) setReadAloud(data.readAloud)
       }
     })
   }, [familyId])
+
+  // Load per-child daily routine (falls back to default template)
+  useEffect(() => {
+    if (!familyId || !activeChildId) {
+      setDailyRoutine(defaultDailyRoutine)
+      return
+    }
+    const childSettingsRef = doc(db, `families/${familyId}/settings/plannerDefaults_${activeChildId}`)
+    void getDoc(childSettingsRef).then((snap) => {
+      if (snap.exists() && snap.data().dailyRoutine) {
+        setDailyRoutine(snap.data().dailyRoutine)
+      } else {
+        setDailyRoutine(defaultDailyRoutine)
+      }
+    })
+  }, [familyId, activeChildId])
 
   // Load existing conversation
   useEffect(() => {
@@ -419,7 +434,10 @@ export default function PlannerChatPage() {
     [familyId, conversationDocId, activeChildId, weekRange.start, hoursPerDay, appBlocks],
   )
 
-  // Photo upload handler
+  // Cached base64 images for vision API (cleared after plan generation)
+  const photoBase64Cache = useRef<Map<string, { data: string; mediaType: string }>>(new Map())
+
+  // Photo upload handler — also caches base64 for vision analysis
   const handlePhotoCapture = useCallback(
     async (file: File): Promise<string | null> => {
       if (!activeChildId) return null
@@ -442,6 +460,30 @@ export default function PlannerChatPage() {
         const ext = file.name.split('.').pop() ?? 'jpg'
         const filename = generateFilename(ext)
         await uploadArtifactFile(familyId, docRef.id, file, filename)
+
+        // Cache base64 for vision API analysis (read file once)
+        try {
+          const reader = new FileReader()
+          const base64Promise = new Promise<string>((resolve) => {
+            reader.onload = () => {
+              const result = reader.result as string
+              // Strip data URL prefix to get raw base64
+              const base64 = result.split(',')[1] ?? ''
+              resolve(base64)
+            }
+          })
+          reader.readAsDataURL(file)
+          const base64Data = await base64Promise
+          if (base64Data) {
+            photoBase64Cache.current.set(docRef.id, {
+              data: base64Data,
+              mediaType: file.type || 'image/jpeg',
+            })
+          }
+        } catch {
+          // Non-fatal: vision analysis will fall back to text-only
+        }
+
         return docRef.id
       } catch (err) {
         console.error('Photo upload failed', err)
@@ -454,10 +496,12 @@ export default function PlannerChatPage() {
     [activeChildId, familyId],
   )
 
-  // Extract photo content using AI (MVP: uses label + workbook config, not image analysis)
+  // Extract photo content using AI vision (analyzes actual image) with text-only fallback
   const extractPhotoContent = useCallback(async (
     userLabel: string,
     subject: SubjectBucket,
+    imageBase64?: string,
+    imageMediaType?: string,
   ): Promise<PhotoContentExtraction | null> => {
     if (!activeChildId) return null
 
@@ -468,13 +512,34 @@ export default function PlannerChatPage() {
       : ''
 
     try {
-      const response = await aiChat({
-        familyId,
-        childId: activeChildId,
-        taskType: TaskType.Generate,
-        messages: [{
-          role: 'user',
-          content: `I'm uploading a photo of homeschool materials labeled "${userLabel}" (subject: ${subject}).${configContext}
+      let response: { message: string } | null = null
+
+      // Vision path: send actual image to Claude for analysis
+      if (imageBase64) {
+        response = await aiChat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.AnalyzeWorkbook,
+          messages: [{
+            role: 'user',
+            content: JSON.stringify({
+              imageBase64,
+              mediaType: imageMediaType || 'image/jpeg',
+              textLabel: `${userLabel} (subject: ${subject})${configContext}`,
+            }),
+          }],
+        })
+      }
+
+      // Text-only fallback when no image or vision call failed
+      if (!response?.message) {
+        response = await aiChat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.Generate,
+          messages: [{
+            role: 'user',
+            content: `I'm uploading a photo of homeschool materials labeled "${userLabel}" (subject: ${subject}).${configContext}
 
 Please extract:
 1. Subject (math, reading, phonics, science, etc.)
@@ -494,8 +559,9 @@ Return as JSON:
   "modifications": "...",
   "rawDescription": "..."
 }`,
-        }],
-      })
+          }],
+        })
+      }
 
       if (!response?.message) return null
 
@@ -527,16 +593,25 @@ Return as JSON:
     if (photoLabels.length === 0) return
 
     // Attempt AI-based content extraction for labels without existing extracted content
+    // Uses vision API when base64 image data is cached, otherwise falls back to text analysis
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       const enriched = await Promise.all(
         photoLabels.map(async (label) => {
           if (label.extractedContent || !label.lessonOrPages.trim()) return label
-          const extracted = await extractPhotoContent(label.lessonOrPages, label.subjectBucket)
+          const cached = photoBase64Cache.current.get(label.artifactId)
+          const extracted = await extractPhotoContent(
+            label.lessonOrPages,
+            label.subjectBucket,
+            cached?.data,
+            cached?.mediaType,
+          )
           if (extracted) return { ...label, extractedContent: extracted }
           return label
         }),
       )
       setPhotoLabels(enriched)
+      // Clear base64 cache after extraction to free memory
+      photoBase64Cache.current.clear()
     }
 
     const assignments = photoLabelsToAssignments(photoLabels)
@@ -550,7 +625,7 @@ Return as JSON:
       createdAt: new Date().toISOString(),
     }
 
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments }
+    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -602,7 +677,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -618,7 +693,7 @@ Return as JSON:
       createdAt: new Date().toISOString(),
     }
 
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments }
+    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -672,7 +747,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -925,13 +1000,20 @@ Return ONLY valid JSON, no markdown.`,
         .map((qw) => `- ${qw.name} (${qw.subject})`),
     ].join('\n')
 
-    // Save planner defaults so daily routine persists across weeks
+    // Save family-level planner defaults (hoursPerDay, readAloud)
     void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
-      dailyRoutine,
       hoursPerDay,
       readAloud,
       updatedAt: new Date().toISOString(),
     }, { merge: true })
+
+    // Save per-child daily routine
+    if (activeChildId) {
+      void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults_${activeChildId}`), {
+        dailyRoutine,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true })
+    }
 
     const contextMessage = `Plan ${activeChild?.name ?? 'my child'}'s week.
 
@@ -1243,7 +1325,7 @@ Generate a plan for Monday through Friday.`.trim()
       const response = await aiChat({
         familyId,
         childId: activeChildId,
-        taskType: TaskType.Chat,
+        taskType: TaskType.Workshop,
         messages: [{ role: 'user', content: prompt }],
       })
 

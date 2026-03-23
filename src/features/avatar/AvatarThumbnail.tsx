@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import * as THREE from 'three'
 
 import type { CharacterFeatures } from '../../core/types'
@@ -6,53 +6,92 @@ import { DEFAULT_CHARACTER_FEATURES } from '../../core/types'
 import { buildCharacter } from './voxel/buildCharacter'
 import { buildArmorPiece } from './voxel/buildArmorPiece'
 import { frameCameraToCharacter } from './voxel/cameraUtils'
+import { applyTierToArmor, calculateTier } from './voxel/tierMaterials'
+import { buildPaintedFace, applyCanvasToHead } from './voxel/pixelFace'
 
 interface AvatarThumbnailProps {
   features?: CharacterFeatures
   ageGroup?: 'older' | 'younger'
   equippedPieces?: string[]
+  totalXp?: number
   size?: number
   showArmor?: boolean
-  animate?: boolean
+  animated?: boolean
+  className?: string
+  style?: React.CSSProperties
 }
 
-export default function AvatarThumbnail({
+// Track active renderers to warn about performance
+let activeThumbnails = 0
+const MAX_THUMBNAILS = 6
+
+const AvatarThumbnail = memo(function AvatarThumbnail({
   features,
   ageGroup = 'older',
   equippedPieces = [],
+  totalXp = 0,
   size = 48,
   showArmor = true,
-  animate = false,
+  animated = false,
+  className,
+  style,
 }: AvatarThumbnailProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const rafRef = useRef<number>(0)
+  const cleanupRef = useRef<(() => void) | null>(null)
+
+  // Only animate for sizes > 48
+  const shouldAnimate = animated && size > 48
+
+  useEffect(() => {
+    activeThumbnails++
+    if (activeThumbnails > MAX_THUMBNAILS) {
+      console.warn('AvatarThumbnail: many active instances — consider static mode')
+    }
+    return () => { activeThumbnails-- }
+  }, [])
 
   useEffect(() => {
     if (!canvasRef.current) return
 
+    // Cleanup previous scene
+    cleanupRef.current?.()
+    cleanupRef.current = null
+
     const canvas = canvasRef.current
     const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
 
-    // Minimal Three.js scene
     const scene = new THREE.Scene()
-
-    const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100)
     const renderer = new THREE.WebGLRenderer({
       canvas,
       alpha: true,
-      antialias: true,
+      antialias: size > 64,
     })
     renderer.setSize(size, size)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
+    const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100)
+
+    // Simplified lighting
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6))
+    const dir = new THREE.DirectionalLight(0xffffff, 0.8)
+    dir.position.set(3, 5, 4)
+    scene.add(dir)
+
     // Build character
     const character = buildCharacter(resolvedFeatures, ageGroup)
+
+    // Track armor meshes for tier coloring
+    const armorMeshes = new Map<string, THREE.Group>()
 
     // Add equipped armor
     if (showArmor && equippedPieces.length > 0) {
       for (const pieceId of equippedPieces) {
-        const piece = buildArmorPiece(pieceId as 'belt' | 'breastplate' | 'shoes' | 'shield' | 'helmet' | 'sword', ageGroup)
+        const piece = buildArmorPiece(
+          pieceId as 'belt' | 'breastplate' | 'shoes' | 'shield' | 'helmet' | 'sword',
+          ageGroup,
+        )
         piece.visible = true
+
         // Force solid materials
         piece.traverse((child) => {
           if (child instanceof THREE.Mesh) {
@@ -78,67 +117,116 @@ export default function AvatarThumbnail({
           if (armL) armL.add(piece)
           else character.add(piece)
         } else {
-          // Move arm-cover children to their respective arms
           const armChildren: THREE.Object3D[] = []
           piece.traverse((child) => {
             if (child.userData.attachToArm) armChildren.push(child)
           })
           for (const child of armChildren) {
             piece.remove(child)
-            const targetArm = child.userData.attachToArm === 'L'
-              ? character.getObjectByName('armL')
-              : character.getObjectByName('armR')
+            const targetArm =
+              child.userData.attachToArm === 'L'
+                ? character.getObjectByName('armL')
+                : character.getObjectByName('armR')
             if (targetArm) targetArm.add(child)
             else character.add(child)
           }
           character.add(piece)
         }
+
+        armorMeshes.set(pieceId, piece)
+      }
+
+      // Apply tier colors to equipped armor
+      const tier = calculateTier(totalXp)
+      applyTierToArmor(armorMeshes, tier, equippedPieces)
+    }
+
+    // Apply painted face for sizes >= 64
+    if (size >= 64 && resolvedFeatures) {
+      try {
+        const faceCanvas = buildPaintedFace(resolvedFeatures)
+        const headMesh = character.getObjectByName('head') as THREE.Mesh | undefined
+        if (headMesh) {
+          applyCanvasToHead(
+            headMesh,
+            faceCanvas,
+            new THREE.Color(resolvedFeatures.skinTone).getHex(),
+          )
+        }
+      } catch {
+        // Fallback: solid color head is fine for thumbnails
       }
     }
 
     scene.add(character)
 
-    // Simple lighting
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6))
-    const dir = new THREE.DirectionalLight(0xffffff, 0.8)
-    dir.position.set(3, 5, 4)
-    scene.add(dir)
-
-    // Frame camera to character
-    frameCameraToCharacter(camera, character, 1.3)
-
     // Slight angle for visual interest
-    character.rotation.y = -0.3
+    character.rotation.y = -0.35
 
-    if (animate) {
+    // Frame camera
+    frameCameraToCharacter(camera, character, 1.4)
+
+    if (shouldAnimate) {
+      let animId: number
       let time = 0
-      function loop() {
+      const baseY = character.position.y
+
+      function animate() {
         time += 0.016
-        character.rotation.y = -0.3 + Math.sin(time) * 0.1
+        character.rotation.y = -0.35 + Math.sin(time * 0.5) * 0.15
+        character.position.y = baseY + Math.sin(time * 1.2) * 0.03
         renderer.render(scene, camera)
-        rafRef.current = requestAnimationFrame(loop)
+        animId = requestAnimationFrame(animate)
       }
-      loop()
+      animate()
+
+      cleanupRef.current = () => {
+        cancelAnimationFrame(animId)
+        disposeScene(scene, renderer)
+      }
     } else {
+      // Static: single render
       renderer.render(scene, camera)
+
+      cleanupRef.current = () => {
+        disposeScene(scene, renderer)
+      }
     }
 
     return () => {
-      cancelAnimationFrame(rafRef.current)
-      renderer.dispose()
+      cleanupRef.current?.()
+      cleanupRef.current = null
     }
-  }, [features, ageGroup, equippedPieces, size, showArmor, animate])
+  }, [features, ageGroup, equippedPieces, totalXp, size, showArmor, shouldAnimate])
 
   return (
     <canvas
       ref={canvasRef}
       width={size}
       height={size}
+      className={className}
       style={{
         width: size,
         height: size,
-        borderRadius: size > 40 ? 8 : 4,
+        borderRadius: size >= 64 ? 8 : 4,
+        ...style,
       }}
     />
   )
+})
+
+function disposeScene(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
+  scene.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) {
+      obj.geometry.dispose()
+      if (Array.isArray(obj.material)) {
+        obj.material.forEach((m: THREE.Material) => m.dispose())
+      } else {
+        obj.material.dispose()
+      }
+    }
+  })
+  renderer.dispose()
 }
+
+export default AvatarThumbnail

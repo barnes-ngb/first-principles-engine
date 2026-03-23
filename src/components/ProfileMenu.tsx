@@ -8,10 +8,12 @@ import ListItemText from '@mui/material/ListItemText'
 import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
 import SettingsIcon from '@mui/icons-material/Settings'
+import { useAuth } from '../core/auth/useAuth'
+import { useChildren } from '../core/hooks/useChildren'
 import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
-import MinecraftAvatar from '../features/minecraft/MinecraftAvatar'
-import { ARMOR_TIERS } from '../features/minecraft/armorTiers'
+import AvatarThumbnail from '../features/avatar/AvatarThumbnail'
+import { useAvatarProfile } from '../features/avatar/useAvatarProfile'
 
 const profileMeta: Record<
   UserProfile,
@@ -20,6 +22,41 @@ const profileMeta: Record<
   [UserProfile.Lincoln]: { label: 'Lincoln', color: '#5A8C32', initial: 'L' },
   [UserProfile.London]: { label: 'London', color: '#E52521', initial: 'L' },
   [UserProfile.Parents]: { label: 'Parents', color: '#5c6bc0', initial: 'P' },
+}
+
+/** Small helper to render a child's AvatarThumbnail by profile type. */
+function ChildAvatar({ profileType, size = 28 }: { profileType: UserProfile; size?: number }) {
+  const { familyId } = useAuth()
+  const { children } = useChildren()
+  const meta = profileMeta[profileType]
+  const child = children.find((c) => c.name.toLowerCase() === meta.label.toLowerCase())
+  const avatarProfile = useAvatarProfile(familyId ?? undefined, child?.id)
+
+  if (!avatarProfile) {
+    return (
+      <Avatar
+        sx={{
+          width: size,
+          height: size,
+          bgcolor: meta.color,
+          fontSize: size < 30 ? '0.75rem' : '0.875rem',
+          fontWeight: 700,
+        }}
+      >
+        {meta.initial}
+      </Avatar>
+    )
+  }
+
+  return (
+    <AvatarThumbnail
+      features={avatarProfile.characterFeatures}
+      ageGroup={avatarProfile.ageGroup}
+      equippedPieces={avatarProfile.equippedPieces}
+      totalXp={avatarProfile.totalXp}
+      size={size}
+    />
+  )
 }
 
 export default function ProfileMenu() {
@@ -65,8 +102,8 @@ export default function ProfileMenu() {
           '&:hover': { bgcolor: 'action.hover' },
         }}
       >
-        {profile === UserProfile.Lincoln ? (
-          <MinecraftAvatar tier={ARMOR_TIERS[3]} scale={2} />
+        {profile === UserProfile.Lincoln || profile === UserProfile.London ? (
+          <ChildAvatar profileType={profile} size={32} />
         ) : (
           <Avatar
             sx={{
@@ -113,8 +150,8 @@ export default function ProfileMenu() {
               onClick={() => handleSwitch(p)}
             >
               <ListItemIcon>
-                {p === UserProfile.Lincoln ? (
-                  <MinecraftAvatar tier={ARMOR_TIERS[3]} scale={2} />
+                {p === UserProfile.Lincoln || p === UserProfile.London ? (
+                  <ChildAvatar profileType={p} size={28} />
                 ) : (
                   <Avatar
                     sx={{

@@ -30,6 +30,8 @@ export interface PlanGeneratorInputs {
   appBlocks: AppBlock[]
   assignments: AssignmentCandidate[]
   adjustments?: AdjustmentIntent[]
+  /** Daily routine text from Shelly's setup (activities + times) */
+  dailyRoutine?: string
 }
 
 // ── Adjustment Intents ─────────────────────────────────────────
@@ -377,11 +379,19 @@ function skillTagToSubject(tag: string): SubjectBucket {
 
 /** Build the user message content that describes assignments and context for the LLM. */
 export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
-  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [] } = inputs
+  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], dailyRoutine } = inputs
   const lines: string[] = []
 
   lines.push(`Generate a weekly school plan (Monday–Friday) with ${hoursPerDay} hours/day budget.`)
   lines.push('')
+
+  if (dailyRoutine) {
+    lines.push('IMPORTANT — Mom\'s daily routine template (use these EXACT activities and times as the base for each day):')
+    lines.push(dailyRoutine)
+    lines.push('')
+    lines.push('Vary the specific content across days (different lessons, chapters, word lists) but keep the same activity structure and time blocks.')
+    lines.push('')
+  }
 
   if (appBlocks.length > 0) {
     lines.push('App blocks (pre-scheduled daily):')
@@ -455,16 +465,130 @@ function extractJsonObject(text: string): string | null {
   const trimmed = text.trim()
   if (!trimmed) return null
 
-  // Strip markdown code fences anywhere in the text
+  // Strip markdown code fences anywhere in the text (greedy: match the last ```)
   const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
-  if (fenceMatch) return fenceMatch[1].trim()
+  const candidate = fenceMatch ? fenceMatch[1].trim() : trimmed
 
   // Find the outermost { ... } in the text
-  const firstBrace = trimmed.indexOf('{')
+  const firstBrace = candidate.indexOf('{')
   if (firstBrace === -1) return null
-  const lastBrace = trimmed.lastIndexOf('}')
+  const lastBrace = candidate.lastIndexOf('}')
   if (lastBrace <= firstBrace) return null
-  return trimmed.slice(firstBrace, lastBrace + 1)
+  return candidate.slice(firstBrace, lastBrace + 1)
+}
+
+/**
+ * Attempt to extract a "days" array from flat text when JSON parsing completely fails.
+ * This is a last-resort fallback that reconstructs minimal plan data from structured text.
+ */
+function extractDaysFromText(text: string): DraftWeeklyPlan | null {
+  const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+  const days: DraftDayPlan[] = []
+
+  for (let i = 0; i < dayNames.length; i++) {
+    const dayName = dayNames[i]
+    const nextDay = dayNames[i + 1]
+    // Find section for this day
+    const dayRegex = new RegExp(`\\b${dayName}\\b`, 'i')
+    const start = text.search(dayRegex)
+    if (start === -1) continue
+
+    const end = nextDay
+      ? text.search(new RegExp(`\\b${nextDay}\\b`, 'i'))
+      : text.length
+    const section = text.slice(start, end === -1 ? undefined : end)
+
+    // Extract bullet items (- or * prefixed lines)
+    const itemRegex = /[-*•]\s+(.+?)(?:\s*[-–—]\s*(\d+)\s*(?:min|m)\b)?$/gm
+    const items: DraftPlanItem[] = []
+    let match: RegExpExecArray | null
+    while ((match = itemRegex.exec(section)) !== null) {
+      const title = match[1].replace(/\s*[-–—]\s*\d+\s*(?:min|m)\s*$/, '').trim()
+      if (!title) continue
+      items.push({
+        id: generateItemId(),
+        title,
+        subjectBucket: guessSubjectFromTitle(title),
+        estimatedMinutes: match[2] ? parseInt(match[2], 10) : 15,
+        skillTags: [],
+        accepted: true,
+      })
+    }
+
+    if (items.length > 0) {
+      days.push({ day: dayName, timeBudgetMinutes: 150, items })
+    }
+  }
+
+  if (days.length === 0) return null
+  return { days, skipSuggestions: [], minimumWin: 'Complete the core items for each day.' }
+}
+
+/** Best-effort subject guess from an activity title string. */
+function guessSubjectFromTitle(title: string): SubjectBucket {
+  const lower = title.toLowerCase()
+  if (/\bread|phonics|sight\s*word|book|gatb\s*read|booster/i.test(lower)) return SubjectBucket.Reading
+  if (/\bmath|number|add|subtract|multiply|gatb\s*math/i.test(lower)) return SubjectBucket.Math
+  if (/\bwrit|handwrit|language\s*art|spell|grammar/i.test(lower)) return SubjectBucket.LanguageArts
+  if (/\bscience|experiment|nature/i.test(lower)) return SubjectBucket.Science
+  if (/\bsocial|histor|geograph/i.test(lower)) return SubjectBucket.SocialStudies
+  return SubjectBucket.Other
+}
+
+/**
+ * Attempt to fix common JSON issues from LLM output:
+ * - Trailing commas before ] or }
+ * - Single-quoted strings
+ * - Truncated arrays/objects (attempt to close them)
+ */
+function forgivingJsonParse(text: string): Record<string, unknown> | null {
+  // First try strict parse
+  try {
+    return JSON.parse(text) as Record<string, unknown>
+  } catch {
+    // Continue to forgiving parse
+  }
+
+  let fixed = text
+    // Remove trailing commas before } or ]
+    .replace(/,\s*([}\]])/g, '$1')
+    // Replace single-quoted string values with double-quoted (simple cases)
+    .replace(/:\s*'([^']*)'/g, ': "$1"')
+
+  // Try again after fixes
+  try {
+    return JSON.parse(fixed) as Record<string, unknown>
+  } catch {
+    // Continue to truncation repair
+  }
+
+  // Try to repair truncated JSON by closing open brackets/braces
+  let openBraces = 0
+  let openBrackets = 0
+  let inString = false
+  let escaped = false
+  for (const ch of fixed) {
+    if (escaped) { escaped = false; continue }
+    if (ch === '\\') { escaped = true; continue }
+    if (ch === '"') { inString = !inString; continue }
+    if (inString) continue
+    if (ch === '{') openBraces++
+    else if (ch === '}') openBraces--
+    else if (ch === '[') openBrackets++
+    else if (ch === ']') openBrackets--
+  }
+
+  // Close any unclosed strings, remove trailing comma, then close brackets/braces
+  if (inString) fixed += '"'
+  fixed = fixed.replace(/,\s*$/, '')
+  while (openBrackets > 0) { fixed += ']'; openBrackets-- }
+  while (openBraces > 0) { fixed += '}'; openBraces-- }
+
+  try {
+    return JSON.parse(fixed) as Record<string, unknown>
+  } catch {
+    return null
+  }
 }
 
 /** Parse and validate an AI response into a DraftWeeklyPlan. Returns null if malformed. */
@@ -472,15 +596,38 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
   try {
     const jsonText = extractJsonObject(response.message)
     if (!jsonText) {
-      console.warn('[parseAIResponse] No JSON object found in response:', response.message.substring(0, 200))
-      return null
+      console.warn('[parseAIResponse] No JSON object found in response, trying text extraction:', response.message.substring(0, 200))
+      // Last-resort: try to extract structured day data from free text
+      return extractDaysFromText(response.message)
     }
-    const parsed = JSON.parse(jsonText) as Record<string, unknown>
+    const parsed = forgivingJsonParse(jsonText)
+    if (!parsed) {
+      console.warn('[parseAIResponse] Failed to parse JSON (even with forgiving parser), trying text extraction:', jsonText.substring(0, 200))
+      // Last-resort: try to extract structured day data from free text
+      return extractDaysFromText(response.message)
+    }
 
-    if (!Array.isArray(parsed.days) || parsed.days.length === 0) {
-      console.warn('[parseAIResponse] Missing or empty days array')
-      return null
+    // Handle wrapped structures: { plan: { days: [...] } } or { weeklyPlan: { days: [...] } }
+    let planData = parsed
+    if (!Array.isArray(parsed.days)) {
+      for (const key of ['plan', 'weeklyPlan', 'weekly_plan', 'weekPlan']) {
+        const nested = parsed[key]
+        if (nested && typeof nested === 'object' && Array.isArray((nested as Record<string, unknown>).days)) {
+          planData = nested as Record<string, unknown>
+          break
+        }
+      }
     }
+
+    if (!Array.isArray(planData.days) || planData.days.length === 0) {
+      console.warn('[parseAIResponse] Missing or empty days array')
+      return extractDaysFromText(response.message)
+    }
+
+    // Use planData from here on for days/minimumWin/skipSuggestions
+    parsed.days = planData.days
+    if (planData.minimumWin) parsed.minimumWin = planData.minimumWin
+    if (planData.skipSuggestions) parsed.skipSuggestions = planData.skipSuggestions
 
     // minimumWin is nice-to-have, not required
     const minimumWin = typeof parsed.minimumWin === 'string'
@@ -561,6 +708,7 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
     return { days, skipSuggestions, minimumWin }
   } catch (err) {
     console.error('[parseAIResponse] Parse error:', err, 'Raw:', response.message.substring(0, 300))
-    return null
+    // Last-resort: try to extract structured day data from free text
+    return extractDaysFromText(response.message)
   }
 }

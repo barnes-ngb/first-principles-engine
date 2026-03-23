@@ -6,6 +6,7 @@ import type { QuestQuestion, SessionQuestion } from './questTypes'
  * Check whether the child's selected answer is correct.
  * Handles fill-in-blank where selected is a fragment (e.g. "th")
  * but correctAnswer might be the full word (e.g. "then").
+ * Also handles voice/typed open-response answers with fuzzy matching.
  */
 export function checkAnswer(selected: string, question: QuestQuestion): boolean {
   const correct = (question.correctAnswer || '').trim().toLowerCase()
@@ -13,6 +14,19 @@ export function checkAnswer(selected: string, question: QuestQuestion): boolean 
 
   // Direct match (works for most question types)
   if (answer === correct) return true
+
+  // Open-response fuzzy matching: voice recognition may add/drop articles,
+  // produce homophones, or include extra words. Check if the answer
+  // contains the correct word or vice versa (for single-word answers only).
+  const isOpenResponse = !question.options?.some((o) => o.trim().toLowerCase() === answer)
+  if (isOpenResponse && correct.length <= 15) {
+    // Strip common voice artifacts
+    const cleanAnswer = answer.replace(/^(the|a|an|it's|its)\s+/i, '').trim()
+    if (cleanAnswer === correct) return true
+    // Check if voice said the correct word among other words
+    const words = cleanAnswer.split(/\s+/)
+    if (words.some((w) => w === correct)) return true
+  }
 
   // Fill-in-blank fallback: selected is fragment, correctAnswer is full word
   // Check if plugging the fragment into the blank produces the full word

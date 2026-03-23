@@ -19,9 +19,13 @@ function isInteractive(session: AnySession): boolean {
   return session.sessionType === 'interactive'
 }
 
+function domainLabel(domain: string): string {
+  return domain.charAt(0).toUpperCase() + domain.slice(1)
+}
+
 function sessionTitle(session: AnySession): string {
-  if (isInteractive(session)) return '\u26CF\uFE0F Reading Quest'
-  return session.domain.charAt(0).toUpperCase() + session.domain.slice(1) + ' Evaluation'
+  if (isInteractive(session)) return `\u26CF\uFE0F ${domainLabel(session.domain)} Quest`
+  return domainLabel(session.domain) + ' Evaluation'
 }
 
 function sessionSubtitle(session: AnySession): string {

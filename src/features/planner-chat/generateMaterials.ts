@@ -13,16 +13,23 @@ export function buildMaterialsPrompt(
 ): string {
   const items = day.items.filter((i) => i.accepted && !i.isAppBlock)
 
+  const childContext = childName === 'Lincoln'
+    ? `Lincoln (10): Speech + neurodivergence. ~3rd grade math, ~1st grade reading. Phonics recently clicking. Motivators: Minecraft, Lego, Art. Short routines, frequent wins.`
+    : childName === 'London'
+      ? `London (6): Kindergarten. Story-driven, creates own books. Knows most letter sounds. Motivators: Stories, drawing, book-making.`
+      : `${childName}: elementary-level student`
+
   return `Generate printable Minecraft-themed worksheets for ${childName}'s ${day.day} activities.
 
 CHILD CONTEXT:
+${childContext}
 ${snapshot?.prioritySkills?.length ? `Skill focus: ${snapshot.prioritySkills.map((s) => `${s.label} (${s.level})`).join(', ')}` : ''}
 ${theme ? `Week theme: ${theme}` : ''}
 
 ACTIVITIES:
 ${items.map((i) => `- ${i.title} (${i.estimatedMinutes}m, ${i.subjectBucket})${i.skipSuggestion ? ` [Skip: ${i.skipSuggestion.reason}]` : ''}`).join('\n')}
 
-CRITICAL RULES:
+CRITICAL RULES — READ THESE CAREFULLY:
 1. Return ONLY valid HTML. No markdown fences, no backticks, no explanation outside the HTML.
 2. Start directly with <html> tag.
 3. Every worksheet must be MINECRAFT THEMED:
@@ -31,43 +38,58 @@ CRITICAL RULES:
    - Story prompts set in Minecraft worlds
    - Headers use blocky/pixel style with emojis: ⛏️ ⚔️ 🧱 💎 🏔️
 4. Each activity gets its own page with page-break-before.
-5. Include REAL CONTENT — actual problems, actual words, actual questions. NOT blank forms.
+5. **ABSOLUTELY NO BLANK FORMS.** Every worksheet MUST contain REAL, FILLED-IN content.
+   - WRONG: "Problem 1: ___" or "Write a math problem here" or empty boxes
+   - RIGHT: "Steve has 43 diamond blocks. He gives 17 to Alex. How many does Steve have left?"
+   - If you generate a worksheet with placeholder text or empty problems, the worksheet is USELESS.
+6. The child should be able to sit down and DO the worksheet immediately with no teacher setup.
+7. Include an ANSWER KEY section at the bottom of each worksheet page (small font, upside-down or in a bordered box marked "Answer Key").
 
 PER ACTIVITY TYPE:
 
-MATH: Generate 6-8 actual problems at the child's level.
-Example for subtraction with regrouping:
-  "Steve has 43 diamond blocks. He gives 17 to Alex. How many does Steve have left?"
-  Show work space with place value boxes.
-  Include 2 guided examples at top with solutions shown.
+MATH: Generate 6-8 ACTUAL problems with REAL numbers at the child's level.
+  EVERY problem must have specific numbers and a clear question.
+  Example for subtraction with regrouping:
+    "1. Steve has 43 diamond blocks. He gives 17 to Alex. How many does Steve have left?"
+    "2. A creeper drops 52 gunpowder. You use 28 to make TNT. How much is left?"
+    "3. 64 - 37 = ___"
+  Include 2 guided examples at top WITH SOLUTIONS SHOWN (worked out step by step).
+  Show work space with place value boxes after each problem.
+  Include answer key at bottom.
 
-PHONICS/READING: Generate actual word lists and activities.
-  Word bank: 8-10 real words matching the target pattern
-  Sound boxes: empty boxes for each phoneme (e.g., 3 boxes for CVC words)
-  Sentences: 3-4 real sentences using the target words
-  "Circle the word that rhymes with 'block': clock, creep, stone, sock"
+PHONICS/READING: Generate ACTUAL word lists and activities with REAL words.
+  Word bank: 8-10 SPECIFIC real words matching the target pattern (e.g., for CVC -at: cat, hat, sat, mat, bat, rat, fat, pat)
+  Sound boxes: boxes for each phoneme with the ACTUAL WORDS listed (e.g., "c-a-t" → 3 boxes)
+  Sentences: 3-4 REAL sentences using the target words:
+    "The cat sat on the mat."
+    "The rat wore a hat."
+  Multiple choice: "Circle the word that rhymes with 'block': clock, creep, stone, sock"
+  Include answer key.
 
-COMPREHENSION: Generate real questions about the reading.
-  3-4 specific questions (not generic "what happened")
+COMPREHENSION: Generate REAL questions — not generic placeholders.
+  3-4 SPECIFIC questions (not "what happened?" — instead "Why did Steve build a shelter before nightfall?")
   Mix: 1 recall, 1 inference, 1 vocabulary, 1 connection
-  Include space for answers (lined areas)
+  Include lined space for written answers
+  Include answer key with sample answers.
 
-FORMATION/PRAYER: Generate a reflection page.
-  Scripture verse written out
-  "What does this mean to you?" prompt
-  Gratitude list: "Name 3 things you're grateful for today"
+FORMATION/PRAYER: Generate a reflection page with ACTUAL content.
+  Scripture verse WRITTEN OUT in full (e.g., "Philippians 4:13 — I can do all things through Christ who strengthens me.")
+  Specific prompts: "What does this verse mean for your day today?"
+  Gratitude list: "Name 3 things you're grateful for today: 1.___ 2.___ 3.___"
   Prayer space: "What do you want to talk to God about?"
-  Minecraft theme: "In your Minecraft world, what would you build to show gratitude?"
+  Minecraft tie-in: "In your Minecraft world, what would you build to show gratitude?"
 
-WRITING: Generate a themed writing prompt.
-  Minecraft scenario: "You discovered a new biome! Describe what you see."
+WRITING: Generate a themed writing prompt with REAL scaffolding.
+  Minecraft scenario: "You discovered a new biome called the Crystal Caverns! It's full of glowing crystals and underground rivers. Describe what you see, hear, and feel."
   Picture area (empty box for drawing)
+  Word bank with 8-10 SPECIFIC helpful vocabulary words: "glowing, crystals, underground, sparkling, echo, dripping, mysterious, cavern, stalactite, river"
   4-6 lined spaces for writing
-  Word bank with helpful vocabulary
+  Sentence starters: "When I entered the cavern, I saw..." "The most amazing thing was..."
 
-SPEECH: Generate a practice card.
-  Target sounds/words listed clearly in large font
-  3-4 sentences to practice reading aloud
+SPEECH: Generate a practice card with REAL target content.
+  Target sounds/words listed clearly in large font (e.g., for /s/ blends: "stop, step, star, stick, stone, stamp")
+  3-4 REAL sentences to practice reading aloud:
+    "Steve stepped on a stone and stopped to look at the stars."
   "Say each word 3 times. Circle the ones you said clearly."
 
 DESIGN:

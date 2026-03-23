@@ -10,7 +10,8 @@ import { buildArmorPiece, VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import { animateEquip, animateUnequip, animateJump, animateNod, animateSwordFlourish, animateHipTurn, animateTorsoPuff } from './voxel/equipAnimation'
 import { createTouchControls, updateRotation, destroyTouchControls } from './voxel/touchControls'
 import type { TouchControlState } from './voxel/touchControls'
-import { applyTierToArmor, calculateTier, animateTierUpgrade, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
+import { applyTierToArmor, calculateTier, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
+import { triggerTierUpCeremony } from './voxel/tierUpCeremony'
 import { PoseAnimator, POSES, POSE_EXPRESSIONS, applyExpression, getEquipmentIdlePose } from './voxel/poseSystem'
 import type { Pose } from './voxel/poseSystem'
 import { applyPaintedFace } from './voxel/pixelFace'
@@ -37,6 +38,10 @@ interface VoxelCharacterProps {
   onPoseComplete?: () => void
   /** Callback when swipe cycles to a new pose */
   onSwipePose?: (poseId: string) => void
+  /** Callback when tier-up ceremony starts (block UI interactions) */
+  onTierUpStart?: () => void
+  /** Callback when tier-up ceremony completes (equipped pieces reset, new tier set) */
+  onTierUp?: (oldTier: string, newTier: string) => void
 }
 
 // ── Helmet hair management ────────────────────────────────────────────
@@ -214,6 +219,8 @@ export default function VoxelCharacter({
   activePoseId,
   onPoseComplete,
   onSwipePose,
+  onTierUpStart,
+  onTierUp,
 }: VoxelCharacterProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -231,6 +238,9 @@ export default function VoxelCharacter({
   const swipePoseIndexRef = useRef(0)
   const onSwipePoseRef = useRef(onSwipePose)
   const onPoseCompleteRef = useRef(onPoseComplete)
+  const onTierUpStartRef = useRef(onTierUpStart)
+  const onTierUpRef = useRef(onTierUp)
+  const ceremonyActiveRef = useRef(false)
 
   const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
   const currentTier = calculateTier(totalXp)
@@ -239,6 +249,8 @@ export default function VoxelCharacter({
   equippedRef.current = equippedPieces
   onSwipePoseRef.current = onSwipePose
   onPoseCompleteRef.current = onPoseComplete
+  onTierUpStartRef.current = onTierUpStart
+  onTierUpRef.current = onTierUp
 
   // ── Initialize scene ────────────────────────────────────────────
   const initScene = useCallback(() => {
@@ -417,6 +429,8 @@ export default function VoxelCharacter({
     // Wire up swipe-to-cycle-poses
     const actionablePoses = POSES.filter((p) => p.id !== 'idle')
     controls.onSwipe = (direction: 'left' | 'right') => {
+      // Block pose changes during tier-up ceremony
+      if (ceremonyActiveRef.current) return
       if (direction === 'left') {
         swipePoseIndexRef.current = (swipePoseIndexRef.current + 1) % actionablePoses.length
       } else {
@@ -461,21 +475,25 @@ export default function VoxelCharacter({
         updateRotation(characterRef.current, controlsRef.current)
       }
 
-      // Enforce solid opacity on equipped armor every frame
-      enforceArmorOpacity(armorGroupsRef.current, equippedRef.current)
+      // Enforce solid opacity on equipped armor every frame (skip during ceremony)
+      if (!ceremonyActiveRef.current) {
+        enforceArmorOpacity(armorGroupsRef.current, equippedRef.current)
+      }
 
       if (characterRef.current) {
         const dt = clock.getDelta()
         const time = clock.getElapsedTime()
 
-        // Gentle bob
-        characterRef.current.position.y = baseY + Math.sin(time * 1.2) * 0.03
+        // Gentle bob (freeze during ceremony so character stays still)
+        if (!ceremonyActiveRef.current) {
+          characterRef.current.position.y = baseY + Math.sin(time * 1.2) * 0.03
+        }
 
         // Idle blink — every 3-6 seconds, close eyes briefly
         const blinkCycle = time % (3 + Math.sin(time * 0.37) * 1.5) // Varies between 1.5-4.5s
         const isBlinking = blinkCycle < 0.12 // 120ms blink
         const eyeNames = ['eyeWhiteL', 'eyeWhiteR', 'pupilL', 'pupilR']
-        if (!poseAnimator.playing) {
+        if (!poseAnimator.playing && !ceremonyActiveRef.current) {
           for (const eName of eyeNames) {
             const eyeMesh = characterRef.current.getObjectByName(eName)
             if (eyeMesh) {
@@ -488,12 +506,12 @@ export default function VoxelCharacter({
         const armRObj = characterRef.current.getObjectByName('armR')
         const headObj = characterRef.current.getObjectByName('head')
 
-        // Check if pose animator is actively playing
-        const poseActive = armLObj && armRObj && headObj && poseAnimator.update(
+        // Check if pose animator is actively playing (skip during ceremony)
+        const poseActive = !ceremonyActiveRef.current && armLObj && armRObj && headObj && poseAnimator.update(
           armLObj, armRObj, headObj, characterRef.current, performance.now(),
         )
 
-        if (!poseActive) {
+        if (!poseActive && !ceremonyActiveRef.current) {
           // Lerp toward equipment-based idle pose + idle sway
           const lerpSpeed = Math.min(3.0 * dt, 1)
           currentEqPose.armLRotZ += (targetEqPose.armLRotZ - currentEqPose.armLRotZ) * lerpSpeed
@@ -600,18 +618,52 @@ export default function VoxelCharacter({
     return () => observer.disconnect()
   }, [])
 
-  // ── Tier upgrade animation when XP changes tier ────────────────
+  // ── Tier upgrade ceremony when XP changes tier ─────────────────
   useEffect(() => {
     if (!prevTierRef.current || prevTierRef.current === currentTier) {
       prevTierRef.current = currentTier
       return
     }
-    animateTierUpgrade(armorGroupsRef.current, equippedPieces, currentTier)
+    if (ceremonyActiveRef.current) return
+
+    const container = containerRef.current
+    const scene = sceneRef.current
+    if (!container || !scene) {
+      prevTierRef.current = currentTier
+      return
+    }
+
+    const oldTier = prevTierRef.current
     prevTierRef.current = currentTier
+    ceremonyActiveRef.current = true
+    onTierUpStartRef.current?.()
+
+    const cleanupCeremony = triggerTierUpCeremony({
+      scene,
+      armorMeshes: armorGroupsRef.current,
+      equippedPieces,
+      oldTier,
+      newTier: currentTier,
+      containerEl: container,
+    })
+
+    // After ceremony completes (~5s), notify parent and reset flag
+    const timerId = setTimeout(() => {
+      ceremonyActiveRef.current = false
+      onTierUpRef.current?.(oldTier, currentTier)
+    }, 5000)
+
+    return () => {
+      clearTimeout(timerId)
+      cleanupCeremony()
+    }
   }, [currentTier, equippedPieces])
 
   // ── Sync equipped pieces (without full rebuild) ─────────────────
   useEffect(() => {
+    // Skip equipment sync during ceremony — the ceremony manages piece visibility
+    if (ceremonyActiveRef.current) return
+
     const prev = prevEquippedRef.current
     const current = new Set(equippedPieces)
 
