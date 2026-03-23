@@ -32,6 +32,8 @@ export interface PlanGeneratorInputs {
   adjustments?: AdjustmentIntent[]
   /** Daily routine text from Shelly's setup (activities + times) */
   dailyRoutine?: string
+  /** Per-subject default minutes (e.g., { Reading: 25, Math: 30 }) */
+  subjectTimeDefaults?: Record<string, number>
 }
 
 // ── Adjustment Intents ─────────────────────────────────────────
@@ -379,11 +381,20 @@ function skillTagToSubject(tag: string): SubjectBucket {
 
 /** Build the user message content that describes assignments and context for the LLM. */
 export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
-  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], dailyRoutine } = inputs
+  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], dailyRoutine, subjectTimeDefaults } = inputs
   const lines: string[] = []
 
   lines.push(`Generate a weekly school plan (Monday–Friday) with ${hoursPerDay} hours/day budget.`)
   lines.push('')
+
+  if (subjectTimeDefaults && Object.keys(subjectTimeDefaults).length > 0) {
+    lines.push('Subject time defaults (use these as the baseline for estimatedMinutes per item):')
+    for (const [subject, minutes] of Object.entries(subjectTimeDefaults)) {
+      const label = subject === 'Other' ? 'Formation/Prayer' : subject === 'LanguageArts' ? 'Language Arts' : subject === 'SocialStudies' ? 'Social Studies' : subject
+      lines.push(`- ${label}: ${minutes} min/day`)
+    }
+    lines.push('')
+  }
 
   if (dailyRoutine) {
     lines.push('IMPORTANT — Mom\'s daily routine template (use these EXACT activities and times as the base for each day):')

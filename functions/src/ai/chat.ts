@@ -679,7 +679,7 @@ Rules:
 - Valid subjectBucket values: Reading, LanguageArts, Math, Science, SocialStudies, Other.
 - Include app blocks (like Reading Eggs, Math app) as items with "isAppBlock": true.
 - Every item must have "accepted": true.
-- "estimatedMinutes" must be a positive number.
+- "estimatedMinutes" must be a positive number. When the user provides subject time defaults, use those as the baseline. Adjust only if energy level or specific notes suggest otherwise (e.g., "lighter week" → reduce by ~30%).
 - "mvdEssential" must be a boolean. Mark the 3-4 core items per day as true (Formation, core math, core reading, speech if applicable).
 - "category" must be either "must-do" or "choose". Core academics are "must-do", elective/fun activities are "choose".
 - "Make a Book" can be included as a "choose" category item. SubjectBucket: "LanguageArts". EstimatedMinutes: 15-20. It counts as both Language Arts and Art for compliance hours.

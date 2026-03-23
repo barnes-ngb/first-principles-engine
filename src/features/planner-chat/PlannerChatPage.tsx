@@ -68,6 +68,8 @@ import type {
   WeekPlan,
   WorkbookConfig,
 } from '../../core/types'
+import { DEFAULT_SUBJECT_MINUTES } from '../../core/types/planning'
+import type { SubjectTimeDefaults } from '../../core/types/planning'
 import {
   AssignmentAction,
   ChatMessageRole,
@@ -101,6 +103,11 @@ import PhotoLabelForm from './PhotoLabelForm'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
 import { buildMaterialsPrompt, openPrintWindow } from './generateMaterials'
 
+
+/** Detect if an AI response looks like it was trying to return plan JSON (contains days/items structure). */
+function looksLikePlanJson(text: string): boolean {
+  return /["']days["']\s*:/.test(text) && /["']items["']\s*:/.test(text)
+}
 
 function subjectToDayBlockType(subject: SubjectBucket): DayBlockType {
   switch (subject) {
@@ -228,6 +235,9 @@ export default function PlannerChatPage() {
     { name: '', subject: 'Reading' },
   ])
 
+  // Per-subject default time overrides (minutes per day)
+  const [subjectTimeDefaults, setSubjectTimeDefaults] = useState<SubjectTimeDefaults>({})
+
   // Daily routine state — initialized with default template
   const [dailyRoutine, setDailyRoutine] = useState(defaultDailyRoutine)
 
@@ -275,6 +285,22 @@ export default function PlannerChatPage() {
         setDailyRoutine(snap.data().dailyRoutine)
       } else {
         setDailyRoutine(defaultDailyRoutine)
+      }
+    })
+  }, [familyId, activeChildId])
+
+  // Load per-child subject time defaults
+  useEffect(() => {
+    if (!familyId || !activeChildId) {
+      setSubjectTimeDefaults({})
+      return
+    }
+    const childSettingsRef = doc(db, `families/${familyId}/settings/plannerDefaults_${activeChildId}`)
+    void getDoc(childSettingsRef).then((snap) => {
+      if (snap.exists() && snap.data().subjectTimeDefaults) {
+        setSubjectTimeDefaults(snap.data().subjectTimeDefaults as SubjectTimeDefaults)
+      } else {
+        setSubjectTimeDefaults({})
       }
     })
   }, [familyId, activeChildId])
@@ -807,8 +833,24 @@ Return as JSON:
           draftPlan: aiDraft,
           createdAt: new Date().toISOString(),
         }
+      } else if (response?.message && looksLikePlanJson(response.message)) {
+        // AI returned plan-like JSON but parseAIResponse failed — fall back to local planner
+        const assignments = photoLabelsToAssignments(photoLabels)
+        const localDraft = generateDraftPlanFromInputs({
+          snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine,
+        })
+        setCurrentDraft(localDraft)
+        if (applied) setApplied(false)
+        assistantMsg = {
+          id: generateItemId(),
+          role: ChatMessageRole.Assistant,
+          text: 'The AI plan had formatting issues — here\'s a plan from the local planner instead. You can adjust it or try "Generate Plan" again.',
+          draftPlan: localDraft,
+          createdAt: new Date().toISOString(),
+        }
+        setSnack({ text: 'AI response had formatting issues — used local planner.', severity: 'info' })
       } else {
-        // Non-plan text response or failure — show as conversational reply
+        // Non-plan text response (conversational reply) or service unavailable
         assistantMsg = {
           id: generateItemId(),
           role: ChatMessageRole.Assistant,
@@ -902,7 +944,7 @@ Return as JSON:
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, dailyRoutine])
 
   // Toggle workbook selection in setup wizard
   const handleWorkbookToggle = useCallback((wbId: string, checked: boolean) => {
@@ -1007,13 +1049,23 @@ Return ONLY valid JSON, no markdown.`,
       updatedAt: new Date().toISOString(),
     }, { merge: true })
 
-    // Save per-child daily routine
+    // Save per-child daily routine and subject time defaults
     if (activeChildId) {
       void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults_${activeChildId}`), {
         dailyRoutine,
+        subjectTimeDefaults,
         updatedAt: new Date().toISOString(),
       }, { merge: true })
     }
+
+    // Build subject time defaults section for AI prompt
+    const mergedDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
+    const subjectDefaultsLines = Object.entries(mergedDefaults)
+      .map(([subject, minutes]) => {
+        const label = subject === 'Other' ? 'Formation/Prayer' : subject === 'LanguageArts' ? 'Language Arts' : subject === 'SocialStudies' ? 'Social Studies' : subject
+        return `- ${label}: ${minutes} min/day`
+      })
+      .join('\n')
 
     const contextMessage = `Plan ${activeChild?.name ?? 'my child'}'s week.
 
@@ -1024,6 +1076,9 @@ Workbooks:
 ${allWorkbookLines || '(none configured)'}
 ${readAloud ? `Read-aloud: ${readAloud}` : ''}
 ${dailyRoutine ? `\nDaily routine (use this as the base template for each day — keep these activities and times, vary them across the week as appropriate):\n${dailyRoutine}` : ''}
+
+Subject time defaults (use these as the baseline for estimatedMinutes per item):
+${subjectDefaultsLines}
 ${weekNotes ? `\nNotes: ${weekNotes}` : ''}
 
 Generate a plan for Monday through Friday.`.trim()
@@ -1033,7 +1088,7 @@ Generate a plan for Monday through Friday.`.trim()
     setTimeout(() => {
       void handleSend(contextMessage)
     }, 100)
-  }, [weekEnergy, hoursPerDay, workbookConfigs, selectedWorkbookIds, readAloud, weekNotes, activeChild, handleSend, quickWorkbooks, dailyRoutine, activeChildId, familyId])
+  }, [weekEnergy, hoursPerDay, workbookConfigs, selectedWorkbookIds, readAloud, weekNotes, activeChild, handleSend, quickWorkbooks, dailyRoutine, activeChildId, familyId, subjectTimeDefaults])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -1722,7 +1777,42 @@ Generate a plan for Monday through Friday.`.trim()
                 />
               </Box>
 
-              {/* Step 2.5: Daily Routine */}
+              {/* Step 2.5: Per-subject default times */}
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  How long does each subject usually take?
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  Set per-day defaults so the AI knows your family&apos;s pace.
+                </Typography>
+                <Stack spacing={1}>
+                  {Object.entries(DEFAULT_SUBJECT_MINUTES).map(([subject, fallback]) => {
+                    const current = subjectTimeDefaults[subject] ?? fallback
+                    return (
+                      <Stack key={subject} direction="row" spacing={1} alignItems="center">
+                        <Typography variant="body2" sx={{ width: 120 }}>
+                          {subject === 'Other' ? 'Formation' : subject === 'LanguageArts' ? 'Language Arts' : subject === 'SocialStudies' ? 'Social Studies' : subject}
+                        </Typography>
+                        <Select
+                          size="small"
+                          value={current}
+                          onChange={(e) => {
+                            const val = Number(e.target.value)
+                            setSubjectTimeDefaults((prev) => ({ ...prev, [subject]: val }))
+                          }}
+                          sx={{ minWidth: 90 }}
+                        >
+                          {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60].map((m) => (
+                            <MenuItem key={m} value={m}>{m} min</MenuItem>
+                          ))}
+                        </Select>
+                      </Stack>
+                    )
+                  })}
+                </Stack>
+              </Box>
+
+              {/* Step 3: Daily Routine */}
               <Box>
                 <Typography variant="subtitle2" gutterBottom>
                   What does a typical school day look like?
