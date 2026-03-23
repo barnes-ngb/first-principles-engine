@@ -45,6 +45,8 @@ export interface Artifact {
   projectId?: string
   /** Week key (YYYY-MM-DD) for the week this artifact belongs to */
   weekKey?: string
+  /** Multiple media URLs (e.g. voice recordings) */
+  mediaUrls?: string[]
 }
 
 // ── Ladders ────────────────────────────────────────────────────
