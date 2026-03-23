@@ -125,6 +125,7 @@ export default function MyAvatarPage() {
 
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
+  const [ceremonyActive, setCeremonyActive] = useState(false)
 
   // Card scroll ref — reset to start on load
   const cardScrollRef = useRef<HTMLDivElement>(null)
@@ -462,7 +463,7 @@ export default function MyAvatarPage() {
   // ── Piece tap handler — single tap to equip/unequip ────────────
   const handlePieceTap = useCallback(
     (piece: ArmorPieceMeta) => {
-      if (!profile || !session) return
+      if (!profile || !session || ceremonyActive) return
       const armorPieceId = ARMOR_PIECES.find(
         (p) => ARMOR_PIECE_TO_VOXEL[p.id] === piece.id,
       )?.id
@@ -488,7 +489,7 @@ export default function MyAvatarPage() {
         })
       }
     },
-    [profile, session, handleApplyPiece, handleUnequipDirect],
+    [profile, session, ceremonyActive, handleApplyPiece, handleUnequipDirect],
   )
 
   // ── Screen flash on equip ──────────────────────────────────────
@@ -627,7 +628,9 @@ export default function MyAvatarPage() {
             activePoseId={activePoseId}
             onPoseComplete={() => setActivePoseId(null)}
             onSwipePose={(poseId) => setActivePoseId(poseId)}
+            onTierUpStart={() => setCeremonyActive(true)}
             onTierUp={async (_oldTier, newTier) => {
+              setCeremonyActive(false)
               if (!familyId || !childId) return
               // Reset equipped pieces for the new tier and clear pendingTierUpgrade
               const profileRef = doc(avatarProfilesCollection(familyId), childId)
@@ -669,6 +672,19 @@ export default function MyAvatarPage() {
               {allSixUnlocked
                 ? 'Full armor on! Ready for today.'
                 : `${unlockedVoxel.length} of 6 ${currentTierName.toLowerCase()} pieces equipped — keep going!`}
+            </Typography>
+          </Box>
+        ) : unlockedVoxel.length > 0 && appliedVoxel.length < unlockedVoxel.length ? (
+          <Box sx={{ textAlign: 'center', py: 1, mb: 1 }}>
+            <Typography
+              sx={{
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '0.5rem' : '18px',
+                fontWeight: 600,
+                color: isLincoln ? '#aaa' : 'text.secondary',
+              }}
+            >
+              {`${appliedVoxel.length} of 6 ${currentTierName.toLowerCase()} pieces`}
             </Typography>
           </Box>
         ) : (
