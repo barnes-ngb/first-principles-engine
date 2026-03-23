@@ -596,4 +596,71 @@ describe('parseAIResponse', () => {
     const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
     expect(result!.skipSuggestions).toHaveLength(1)
   })
+
+  it('handles JSON with trailing commas (forgiving parser)', () => {
+    const jsonWithTrailing = `{
+      "days": [
+        {
+          "day": "Monday",
+          "timeBudgetMinutes": 150,
+          "items": [
+            { "title": "Math", "estimatedMinutes": 20, "subjectBucket": "Math", },
+          ],
+        },
+      ],
+      "minimumWin": "Complete math",
+    }`
+    const result = parseAIResponse(makeResponse(jsonWithTrailing))
+    expect(result).not.toBeNull()
+    expect(result!.days[0].items[0].title).toBe('Math')
+  })
+
+  it('handles truncated JSON response (forgiving parser)', () => {
+    const truncated = `{
+      "days": [
+        {
+          "day": "Monday",
+          "timeBudgetMinutes": 150,
+          "items": [
+            { "title": "Reading practice", "estimatedMinutes": 15, "subjectBucket": "Reading" }
+          ]
+        }
+      ],
+      "minimumWin": "Complete reading`
+    const result = parseAIResponse(makeResponse(truncated))
+    expect(result).not.toBeNull()
+    expect(result!.days).toHaveLength(1)
+    expect(result!.days[0].items[0].title).toBe('Reading practice')
+  })
+
+  it('extracts JSON from markdown fences with preamble and trailing text', () => {
+    const messy = `Sure! Here's your plan:
+
+\`\`\`json
+${JSON.stringify(validPlan)}
+\`\`\`
+
+Let me know if you'd like any changes!`
+    const result = parseAIResponse(makeResponse(messy))
+    expect(result).not.toBeNull()
+    expect(result!.days).toHaveLength(2)
+  })
+})
+
+describe('buildPlannerPrompt with dailyRoutine', () => {
+  it('includes daily routine when provided', () => {
+    const inputs: PlanGeneratorInputs = {
+      ...baseInputs,
+      dailyRoutine: 'Handwriting (20 min)\nReading Eggs (45 min)',
+    }
+    const prompt = buildPlannerPrompt(inputs)
+    expect(prompt).toContain('Handwriting (20 min)')
+    expect(prompt).toContain('Reading Eggs (45 min)')
+    expect(prompt).toContain('EXACT activities and times')
+  })
+
+  it('excludes daily routine section when not provided', () => {
+    const prompt = buildPlannerPrompt(baseInputs)
+    expect(prompt).not.toContain('daily routine template')
+  })
 })
