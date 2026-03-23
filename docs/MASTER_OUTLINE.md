@@ -162,7 +162,13 @@ Progress
 * Evaluation pattern detection — Foundations section (needs 2+ prior evals, not yet tested)
 * Armor piece overlays on character (in flight — overlay prompt just run)
 * Avatar XP adjustment (Firestore undefined error — fix prompt run, needs verification)
-* Armor attachment animation + verse TTS sync (prompt written, not yet run) What's Not Built Yet Priority Queue (ready to prompt)
+* Armor attachment animation + verse TTS sync (prompt written, not yet run)
+* Tier-up animation (crossing tier boundaries)
+* London's avatar (younger proportions, separate XP)
+* Customization UI (dye colors, emblems, crests)
+* AvatarThumbnail on other pages
+* Parent XP management UI
+* Auto-XP from checklist/quest/book completion What's Not Built Yet Priority Queue (ready to prompt)
 * Lincoln Development Chat — dedicated AI chat mode reviewing evaluations, skill snapshot, recent progress → recommends what to work on this week
 * Planning improvements — activity ideas mode, engagement-based suggestions, individual time adjustments, better day generation
 * Docs update — this outline (v6) needs to go into the repo as docs/MASTER_OUTLINE.md Knowledge Mine Phase 2-4
@@ -170,7 +176,16 @@ Progress
 * Phase 3: Pre-generated question bank (zero latency)
 * Phase 4: Full avatar integration (quest → mine → armor XP)
 * Parent review view for interactive sessions in Records
-* Math Quest + Speech Quest domains Avatar Phase 2
+* Math Quest + Speech Quest domains Avatar System — Remaining
+* **Parent XP Management** — Quick award buttons, XP history, tier-up notifications (HIGH)
+* **Tier-Up Animation** — Old armor shatters, new tier announced, ghost pieces appear (HIGH)
+* **London's Avatar** — Younger proportions, separate profile, own photo/features (HIGH)
+* **AvatarThumbnail** — Compact 3D preview for Today page header, nav sidebar, Knowledge Mine (MEDIUM)
+* **Customization UI** — Dye colors (Stone+), shield emblems (Iron+), helmet crests (Iron+), enchantment glow (Gold+), cape (Gold+), particle effects (Diamond+) (MEDIUM)
+* **Auto-XP Wiring** — Checklist items, quests, books auto-award XP (MEDIUM)
+* **Daily Armor Session** — Track which pieces equipped today, streak tracking (LOW)
+* **Avatar in Knowledge Mine** — Character celebrates correct answers (LOW)
+* **Pet companion** — Minecraft-style wolf/cat/parrot follows character (LOW) Avatar Phase 2
 * Memorization mode on verse card (hide words, speak from memory, major XP reward)
 * Daily streak counter
 * Piece order guidance (canonical Ephesians 6 order hints)
@@ -195,9 +210,15 @@ Progress
 * Mobile app (web-only for now)
 * Co-op integration, full curriculum database
 * Automated worksheet grading (AI vision) Sprint History Sprint Date What A Mar 3-4 Core pipeline fixes (Firebase, AI planner, date bugs, MVD) B Mar 4 Data richness (workbook configs, energy selector, enriched chat) C Mar 4-5 UX cleanup (nav consolidation, plan quality, Today layout) Planning Mar 5 Lesson card fixes, guided setup wizard, auto-generate on Apply P0 Bugs Mar 5 Generate failures, 0m planned, stale items, week theme display Evaluation Mar 5-6 Reading diagnostic chat, findings extraction, Apply to Snapshot Dad Lab Mar 6-7 Charter, capture page, lifecycle, kid view, artifact gallery Hours Mar 7-9 Additive computation, backfill tool, clear test data D1-D4 Mar 9 Engagement emoji, print materials, skip guidance, per-item capture Worksheets Mar 14 Improved worksheet generation, per-item print from Teach Helper Knowledge Mine Mar 15 Interactive quest Phase 1: MC reading quest, adaptive leveling E1 Mar 15 Quest loop fixes, adaptive logic, 24 unit tests E2 Mar 15 Diamonds → XP → Avatar (XP ledger, armor tiers, KidTodayView bar) E3-E5 Mar 15-16 My Books core: editor, AI scene gen, finish flow, reader, reorder Infra Mar 16 Storage rules, deploy pipeline, Firestore indexes, signed URL fix Sticker Mar 16 gpt-image-1 transparent stickers SightWord Mar 16 Sight word reader, mastery tracking, dashboard, AI story generator Print Mar 16 PDF fix, settings dialog, NaN fix London Mar 16 London theming, child-aware generation, content violation helpers Fixes Mar 16 Progressive save, reading tracking, tappable words, sketch cleanup, pinch-to-zoom (#353-357) F1 Mar 21 Armor of God daily ritual system (full rewrite): verse card, daily reset, tier progression, DALL-E sheet generation, client-side crop, parent controls F2 Mar 21 Armor fixes: XP undefined error, duplicate children selector, base character regen prompt F3 Mar 21 Armor overlays: CharacterDisplay layering, percentage positions, fly animation scaffolding F4 Mar 21 Book editor polish: sticker toolbar, edge clamping, London card max-width, percentage-based sticker positions F5 Mar 21 Story Guide: 5-question TTS-driven wizard, sight word injection, AI shaping, generator handoff F6 Mar 21 Book organization: 9 themes, filter row, sticker tagging, Sticker Library in Settings F7 Mar 21 Evaluation pattern detection: Foundations section, conceptual blocks, Skill Snapshot integration F8 Mar 21 Cohesive armor set: DALL-E 3×2 sheet, cropArmorSheet utility, bigger cards, readable text F9 Mar 21 Armor animation UX: SVG icons (6 pieces), fly-to-body animation, landing impact + particles, pose shift, progressive glow, full armor on! state, word-by-word TTS verse sync
+Avatar v1 Mar 15 2D crop-based armor overlay (REPLACED)
 Avatar System Mar 15-20 My Armor ritual, XP system, armor generation, verse cards, animations, photo transform, parent controls
 Books + Stories Mar 16-19 Story guide wizard, book editor polish, book organization, sticker library, evaluation pattern detection
+Avatar v2 Mar 21 3D voxel character, basic armor equip
+Avatar v3 Mar 21 Minecraft proportions, edge outlines, platform, tier colors
+Avatar v4 Mar 21 Iron tier weathering, Lincoln likeness, ghost armor
 Architecture Cleanup Mar 21 Split domain.ts (1336→8 files), merge xpEventLog into xpLedger, task registry pattern for Cloud Functions, AI context slicing (task-specific), perf instrumentation, Firestore audit
+Avatar v5 Mar 22 Poses (6), pixel face, helmet redesign, arm clipping fixes
+Avatar Audit Mar 22 Memory leak fix, event listener cleanup, camera auto-frame, XP bar fix
 Mine/Eval Engine Mar 22 Quest display fixes (word stimulus, text-only, question variety), XP pipeline (quest→ledger→avatar), eval pipeline (findings→snapshot→planner recommendations), phoneme simplification, end-on-a-win Key Design Decisions
 1. Portfolio over grades — no scores, no rankings, evidence-based assessment
 2. No shame rule — MVD is real school, bad days count, app never makes Shelly feel like failing
