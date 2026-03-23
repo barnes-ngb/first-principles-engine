@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
+import { useTTS } from '../../../core/hooks/useTTS'
 
 const TEMPLATE_CHIPS: Record<string, string[]> = {
   matching: ['Animals', 'Colors', 'Numbers', 'Characters', 'Foods', 'Vehicles'],
@@ -40,6 +41,7 @@ interface CardDesignStepProps {
 
 export default function CardDesignStep({ mechanic, value, onChange }: CardDesignStepProps) {
   const [customInput, setCustomInput] = useState('')
+  const tts = useTTS({ rate: 0.85 })
   const prompts = MECHANIC_PROMPTS[mechanic] ?? MECHANIC_PROMPTS.matching
   const templates = TEMPLATE_CHIPS[mechanic] ?? TEMPLATE_CHIPS.matching
 
@@ -56,6 +58,8 @@ export default function CardDesignStep({ mechanic, value, onChange }: CardDesign
 
   const handleAddTemplate = (template: string) => {
     if (canAdd && !value.includes(template)) {
+      tts.cancel()
+      tts.speak(template)
       onChange([...value, template])
     }
   }

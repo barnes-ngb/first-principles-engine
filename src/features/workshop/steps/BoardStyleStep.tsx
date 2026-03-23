@@ -68,7 +68,7 @@ export default function BoardStyleStep({
           return (
             <Box
               key={option.value}
-              onClick={() => styleTap.handleTileTap(option.value, option.label)}
+              onClick={() => styleTap.handleTileTap(option.value, `${option.label}. ${option.description}`)}
               sx={{
                 position: 'relative',
                 display: 'flex',
@@ -111,7 +111,7 @@ export default function BoardStyleStep({
                   size="small"
                   onClick={(e) => {
                     e.stopPropagation()
-                    styleTap.replayTTS(option.label)
+                    styleTap.replayTTS(`${option.label}. ${option.description}`)
                   }}
                   sx={{
                     position: 'absolute',
@@ -146,7 +146,7 @@ export default function BoardStyleStep({
           return (
             <Box
               key={option.value}
-              onClick={() => lengthTap.handleTileTap(option.value, option.label)}
+              onClick={() => lengthTap.handleTileTap(option.value, `${option.label}. ${option.description}. About ${option.spaces} spaces`)}
               sx={{
                 position: 'relative',
                 display: 'flex',
@@ -191,7 +191,7 @@ export default function BoardStyleStep({
                   size="small"
                   onClick={(e) => {
                     e.stopPropagation()
-                    lengthTap.replayTTS(option.label)
+                    lengthTap.replayTTS(`${option.label}. ${option.description}. About ${option.spaces} spaces`)
                   }}
                   sx={{
                     position: 'absolute',
