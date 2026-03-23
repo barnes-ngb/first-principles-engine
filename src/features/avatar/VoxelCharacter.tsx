@@ -424,6 +424,8 @@ export default function VoxelCharacter({
     // Wire up swipe-to-cycle-poses
     const actionablePoses = POSES.filter((p) => p.id !== 'idle')
     controls.onSwipe = (direction: 'left' | 'right') => {
+      // Block pose changes during tier-up ceremony
+      if (ceremonyActiveRef.current) return
       if (direction === 'left') {
         swipePoseIndexRef.current = (swipePoseIndexRef.current + 1) % actionablePoses.length
       } else {
@@ -468,21 +470,25 @@ export default function VoxelCharacter({
         updateRotation(characterRef.current, controlsRef.current)
       }
 
-      // Enforce solid opacity on equipped armor every frame
-      enforceArmorOpacity(armorGroupsRef.current, equippedRef.current)
+      // Enforce solid opacity on equipped armor every frame (skip during ceremony)
+      if (!ceremonyActiveRef.current) {
+        enforceArmorOpacity(armorGroupsRef.current, equippedRef.current)
+      }
 
       if (characterRef.current) {
         const dt = clock.getDelta()
         const time = clock.getElapsedTime()
 
-        // Gentle bob
-        characterRef.current.position.y = baseY + Math.sin(time * 1.2) * 0.03
+        // Gentle bob (freeze during ceremony so character stays still)
+        if (!ceremonyActiveRef.current) {
+          characterRef.current.position.y = baseY + Math.sin(time * 1.2) * 0.03
+        }
 
         // Idle blink — every 3-6 seconds, close eyes briefly
         const blinkCycle = time % (3 + Math.sin(time * 0.37) * 1.5) // Varies between 1.5-4.5s
         const isBlinking = blinkCycle < 0.12 // 120ms blink
         const eyeNames = ['eyeWhiteL', 'eyeWhiteR', 'pupilL', 'pupilR']
-        if (!poseAnimator.playing) {
+        if (!poseAnimator.playing && !ceremonyActiveRef.current) {
           for (const eName of eyeNames) {
             const eyeMesh = characterRef.current.getObjectByName(eName)
             if (eyeMesh) {
@@ -495,12 +501,12 @@ export default function VoxelCharacter({
         const armRObj = characterRef.current.getObjectByName('armR')
         const headObj = characterRef.current.getObjectByName('head')
 
-        // Check if pose animator is actively playing
-        const poseActive = armLObj && armRObj && headObj && poseAnimator.update(
+        // Check if pose animator is actively playing (skip during ceremony)
+        const poseActive = !ceremonyActiveRef.current && armLObj && armRObj && headObj && poseAnimator.update(
           armLObj, armRObj, headObj, characterRef.current, performance.now(),
         )
 
-        if (!poseActive) {
+        if (!poseActive && !ceremonyActiveRef.current) {
           // Lerp toward equipment-based idle pose + idle sway
           const lerpSpeed = Math.min(3.0 * dt, 1)
           currentEqPose.armLRotZ += (targetEqPose.armLRotZ - currentEqPose.armLRotZ) * lerpSpeed
@@ -645,6 +651,9 @@ export default function VoxelCharacter({
 
   // ── Sync equipped pieces (without full rebuild) ─────────────────
   useEffect(() => {
+    // Skip equipment sync during ceremony — the ceremony manages piece visibility
+    if (ceremonyActiveRef.current) return
+
     const prev = prevEquippedRef.current
     const current = new Set(equippedPieces)
 
