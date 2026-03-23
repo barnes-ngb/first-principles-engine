@@ -637,7 +637,16 @@ export function buildPlanOutputInstructions(): string {
 }
 
 const PLAN_OUTPUT_INSTRUCTIONS = `OUTPUT FORMAT INSTRUCTIONS:
-When the user asks you to generate, create, or build a plan (or says "generate the plan", "make a plan", "plan the week", etc.), respond ONLY with valid JSON matching this exact schema — no markdown fences, no preamble, no explanation:
+When the user asks you to generate, create, or build a plan (or says "generate the plan", "make a plan", "plan the week", etc.), respond with ONLY the raw JSON object.
+
+CRITICAL FORMAT RULES:
+- Do NOT wrap the JSON in markdown code fences (no \`\`\` or \`\`\`json)
+- Do NOT include any preamble, explanation, or text before or after the JSON
+- Do NOT include "Here's your plan:" or similar introductions
+- Start your response with the opening { and end with the closing }
+- The response must be parseable by JSON.parse() directly
+
+Schema:
 
 PLAN CONTENT RULES:
 - Every day MUST start with a Formation block: prayer, scripture reading, and/or gratitude. 5-10 minutes. SubjectBucket: "Other".
@@ -647,8 +656,11 @@ PLAN CONTENT RULES:
 - Mark the 3-4 most essential items with "mvdEssential": true — these are the Minimum Viable Day items.
 - Total daily minutes should not exceed the hours budget.
 - Vary activities slightly across days (different read-aloud chapters, different phonics focuses) to avoid monotony.
-- Every item must have a "category" field: "must-do" for core academic work (math, phonics, formation/prayer — usually 3-4 items), or "choose" for activities the child picks from after must-do items (Reading Eggs, Minecraft reading, read-aloud, art — include 3-4 options, child picks 2).
-- Items with category "must-do" should have mvdEssential: true. On MVD days, only must-do items are required.
+- Every item must have a "category" field with value "must-do" or "choose":
+  - "must-do": Core non-negotiable items (3-4 per day). Always includes: Formation/Prayer, primary reading/phonics workbook, primary math workbook. These happen every day in order.
+  - "choose": Enrichment activities the child picks from AFTER completing must-do items (3-4 options per day, child picks 2). Examples: Reading Eggs, Minecraft reading, read-aloud time, art, sight word games, science exploration.
+  - On MVD (Minimum Viable Day) weeks, ONLY must-do items are required. Choose items are bonus.
+  - Items with category "must-do" should always have "mvdEssential": true.
 
 {
   "days": [
@@ -679,7 +691,7 @@ Rules:
 - Valid subjectBucket values: Reading, LanguageArts, Math, Science, SocialStudies, Other.
 - Include app blocks (like Reading Eggs, Math app) as items with "isAppBlock": true.
 - Every item must have "accepted": true.
-- "estimatedMinutes" must be a positive number.
+- "estimatedMinutes" must be a positive number. When the user provides subject time defaults, use those as the baseline. Adjust only if energy level or specific notes suggest otherwise (e.g., "lighter week" → reduce by ~30%).
 - "mvdEssential" must be a boolean. Mark the 3-4 core items per day as true (Formation, core math, core reading, speech if applicable).
 - "category" must be either "must-do" or "choose". Core academics are "must-do", elective/fun activities are "choose".
 - "Make a Book" can be included as a "choose" category item. SubjectBucket: "LanguageArts". EstimatedMinutes: 15-20. It counts as both Language Arts and Art for compliance hours.
@@ -687,7 +699,9 @@ Rules:
 - If the child has sight word stories available (see SIGHT WORD PROGRESS in context), suggest reading one as a "choose" activity. Reference specific word counts and mastery progress.
 - "skipSuggestions" is an array of { "action": "skip"|"modify", "reason": "string", "replacement": "string", "evidence": "string" }.
 
-When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.`;
+When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.
+
+REMINDER: Your entire response must be ONLY the JSON object. No markdown, no code fences, no text outside the JSON. Start with { and end with }.`;
 
 // ── Evaluation diagnostic prompt ─────────────────────────────
 

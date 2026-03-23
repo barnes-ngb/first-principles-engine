@@ -32,6 +32,8 @@ export interface PlanGeneratorInputs {
   adjustments?: AdjustmentIntent[]
   /** Daily routine text from Shelly's setup (activities + times) */
   dailyRoutine?: string
+  /** Per-subject default minutes (e.g., { Reading: 25, Math: 30 }) */
+  subjectTimeDefaults?: Record<string, number>
 }
 
 // ── Adjustment Intents ─────────────────────────────────────────
@@ -138,7 +140,7 @@ export function applySnapshotSuggestions(
 // ── Core Draft Plan Generator ──────────────────────────────────
 
 export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftWeeklyPlan {
-  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [] } = inputs
+  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], subjectTimeDefaults } = inputs
   const minutesPerDay = hoursPerDay * 60
 
   // Apply snapshot suggestions
@@ -220,10 +222,12 @@ export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftW
 
   // Distribute remaining assignments
   for (const assignment of activeAssignments) {
+    // Use subject time defaults as baseline, fall back to assignment's own estimate
+    const baseMinutes = subjectTimeDefaults?.[assignment.subjectBucket] ?? assignment.estimatedMinutes
     const effectiveMinutes =
       assignment.action === AssignmentAction.Modify
-        ? Math.ceil(assignment.estimatedMinutes * 0.6)
-        : assignment.estimatedMinutes
+        ? Math.ceil(baseMinutes * 0.6)
+        : baseMinutes
 
     // Find day with most remaining budget
     let bestDay: WeekDay = WEEK_DAYS[0]
@@ -379,11 +383,20 @@ function skillTagToSubject(tag: string): SubjectBucket {
 
 /** Build the user message content that describes assignments and context for the LLM. */
 export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
-  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], dailyRoutine } = inputs
+  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], dailyRoutine, subjectTimeDefaults } = inputs
   const lines: string[] = []
 
   lines.push(`Generate a weekly school plan (Monday–Friday) with ${hoursPerDay} hours/day budget.`)
   lines.push('')
+
+  if (subjectTimeDefaults && Object.keys(subjectTimeDefaults).length > 0) {
+    lines.push('Subject time defaults (use these as the baseline for estimatedMinutes per item):')
+    for (const [subject, minutes] of Object.entries(subjectTimeDefaults)) {
+      const label = subject === 'Other' ? 'Formation/Prayer' : subject === 'LanguageArts' ? 'Language Arts' : subject === 'SocialStudies' ? 'Social Studies' : subject
+      lines.push(`- ${label}: ${minutes} min/day`)
+    }
+    lines.push('')
+  }
 
   if (dailyRoutine) {
     lines.push('IMPORTANT — Mom\'s daily routine template (use these EXACT activities and times as the base for each day):')
@@ -465,9 +478,19 @@ function extractJsonObject(text: string): string | null {
   const trimmed = text.trim()
   if (!trimmed) return null
 
-  // Strip markdown code fences anywhere in the text (greedy: match the last ```)
-  const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
-  const candidate = fenceMatch ? fenceMatch[1].trim() : trimmed
+  // Strip ALL markdown code fences (greedy match for large responses)
+  let candidate = trimmed
+  // Try greedy match first (handles complete fences)
+  const greedyFence = trimmed.match(/```(?:json)?\s*\n?([\s\S]*)\n?\s*```/)
+  if (greedyFence) {
+    candidate = greedyFence[1].trim()
+  } else {
+    // No closing fence? Strip opening fence and use everything after it
+    const openFence = trimmed.match(/^```(?:json)?\s*\n?/)
+    if (openFence) {
+      candidate = trimmed.slice(openFence[0].length).trim()
+    }
+  }
 
   // Find the outermost { ... } in the text
   const firstBrace = candidate.indexOf('{')
@@ -596,13 +619,15 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
   try {
     const jsonText = extractJsonObject(response.message)
     if (!jsonText) {
-      console.warn('[parseAIResponse] No JSON object found in response, trying text extraction:', response.message.substring(0, 200))
+      console.warn('[parseAIResponse] No JSON found. Response starts with:', response.message.substring(0, 200))
+      console.warn('[parseAIResponse] Response length:', response.message.length)
       // Last-resort: try to extract structured day data from free text
       return extractDaysFromText(response.message)
     }
     const parsed = forgivingJsonParse(jsonText)
     if (!parsed) {
-      console.warn('[parseAIResponse] Failed to parse JSON (even with forgiving parser), trying text extraction:', jsonText.substring(0, 200))
+      console.warn('[parseAIResponse] JSON parse failed. Extracted text starts with:', jsonText.substring(0, 200))
+      console.warn('[parseAIResponse] Extracted text length:', jsonText.length)
       // Last-resort: try to extract structured day data from free text
       return extractDaysFromText(response.message)
     }
@@ -682,7 +707,8 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
     }
 
     if (days.length === 0) {
-      console.warn('[parseAIResponse] No valid days parsed')
+      console.warn('[parseAIResponse] No valid days parsed. Raw days array length:', (planData.days as unknown[]).length)
+      console.warn('[parseAIResponse] First raw day sample:', JSON.stringify((planData.days as unknown[])[0]).substring(0, 200))
       return null
     }
 

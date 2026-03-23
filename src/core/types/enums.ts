@@ -300,6 +300,8 @@ export const RoutineItemKey = {
   WordProblemsModeled: 'wordProblemsModeled',
   // Lincoln Speech Micro
   NarrationOrSoundReps: 'narrationOrSoundReps',
+  // Workshop
+  WorkshopGame: 'workshopGame',
 } as const
 export type RoutineItemKey = (typeof RoutineItemKey)[keyof typeof RoutineItemKey]
 

@@ -765,3 +765,41 @@ describe('buildPlannerPrompt with dailyRoutine', () => {
     expect(prompt).not.toContain('daily routine template')
   })
 })
+
+describe('buildPlannerPrompt with subjectTimeDefaults', () => {
+  it('includes subject time defaults when provided', () => {
+    const inputs: PlanGeneratorInputs = {
+      ...baseInputs,
+      subjectTimeDefaults: { Reading: 25, Math: 30, Other: 10 },
+    }
+    const prompt = buildPlannerPrompt(inputs)
+    expect(prompt).toContain('Subject time defaults')
+    expect(prompt).toContain('Reading: 25 min/day')
+    expect(prompt).toContain('Math: 30 min/day')
+    expect(prompt).toContain('Formation/Prayer: 10 min/day')
+  })
+
+  it('formats LanguageArts and SocialStudies labels correctly', () => {
+    const inputs: PlanGeneratorInputs = {
+      ...baseInputs,
+      subjectTimeDefaults: { LanguageArts: 20, SocialStudies: 15 },
+    }
+    const prompt = buildPlannerPrompt(inputs)
+    expect(prompt).toContain('Language Arts: 20 min/day')
+    expect(prompt).toContain('Social Studies: 15 min/day')
+  })
+
+  it('excludes subject time defaults section when not provided', () => {
+    const prompt = buildPlannerPrompt(baseInputs)
+    expect(prompt).not.toContain('Subject time defaults')
+  })
+
+  it('excludes subject time defaults section when empty object', () => {
+    const inputs: PlanGeneratorInputs = {
+      ...baseInputs,
+      subjectTimeDefaults: {},
+    }
+    const prompt = buildPlannerPrompt(inputs)
+    expect(prompt).not.toContain('Subject time defaults')
+  })
+})

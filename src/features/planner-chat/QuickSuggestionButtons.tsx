@@ -7,11 +7,11 @@ import Typography from '@mui/material/Typography'
  */
 const SUGGESTIONS = [
   { label: 'Make Wed light', text: 'make wednesday light' },
-  { label: 'Swap Tue/Thu math', text: 'move math to tue/thu' },
-  { label: 'Cap handwriting 10m', text: 'cap writing at 10 min' },
-  { label: 'Reduce writing', text: 'reduce writing' },
   { label: 'Make Fri light', text: 'make friday light' },
+  { label: 'More reading', text: 'add more reading time' },
   { label: 'Less math', text: 'reduce math' },
+  { label: 'Swap Thu/Fri', text: 'swap thursday and friday' },
+  { label: 'Cap writing 10m', text: 'cap writing at 10 min' },
 ] as const
 
 interface QuickSuggestionButtonsProps {

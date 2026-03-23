@@ -18,6 +18,7 @@ import {
   computeHoursSummary,
   deriveChildIdFromDocId,
   entryMinutes,
+  generateComplianceReportHtml,
   generateDailyLogCsv,
   generateEvaluationMarkdown,
   generateHoursSummaryCsv,
@@ -895,5 +896,158 @@ describe('buildComplianceZip', () => {
 
     expect(names).toContain('lincoln-evaluations-2026-01-01-to-2026-01-31.md')
     expect(names).toContain('lincoln-portfolio-2026-01-01-to-2026-01-31.md')
+  })
+})
+
+// ─── generateComplianceReportHtml ──────────────────────────────────────────
+
+describe('generateComplianceReportHtml', () => {
+  it('generates valid HTML with hours summary', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 60,
+            location: 'Home',
+          },
+          {
+            type: DayBlockType.Math,
+            subjectBucket: SubjectBucket.Math,
+            actualMinutes: 45,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    const html = generateComplianceReportHtml({
+      summary,
+      dayLogs: logs,
+      hoursEntries: [],
+      evaluations: [],
+      artifacts: [],
+      children: [{ id: 'child-a', name: 'Lincoln' }],
+      startDate: '2026-01-01',
+      endDate: '2026-01-31',
+      childName: 'Lincoln',
+    })
+
+    expect(html).toContain('<!DOCTYPE html>')
+    expect(html).toContain('Missouri Homeschool Compliance Report')
+    expect(html).toContain('Lincoln')
+    expect(html).toContain('2026-01-01')
+    expect(html).toContain('1,000 hours')
+    expect(html).toContain('600')
+    // Should contain subject rows
+    expect(html).toContain('Reading')
+    expect(html).toContain('Math')
+  })
+
+  it('includes evaluations when present', () => {
+    const summary = computeHoursSummary([], [], [])
+
+    const evaluations: Evaluation[] = [
+      {
+        childId: 'lincoln',
+        monthStart: '2026-01-01',
+        monthEnd: '2026-01-31',
+        wins: ['Mastered addition facts'],
+        struggles: ['Slow with reading'],
+        nextSteps: ['Start multiplication'],
+        sampleArtifactIds: [],
+      },
+    ]
+
+    const html = generateComplianceReportHtml({
+      summary,
+      dayLogs: [],
+      hoursEntries: [],
+      evaluations,
+      artifacts: [],
+      children: [{ id: 'lincoln', name: 'Lincoln' }],
+      startDate: '2026-01-01',
+      endDate: '2026-01-31',
+      childName: 'Lincoln',
+    })
+
+    expect(html).toContain('Mastered addition facts')
+    expect(html).toContain('Slow with reading')
+    expect(html).toContain('Start multiplication')
+  })
+
+  it('includes portfolio samples when artifacts present', () => {
+    const summary = computeHoursSummary([], [], [])
+
+    const artifacts: Artifact[] = [
+      {
+        id: 'art-1',
+        childId: 'lincoln',
+        title: 'Science Observation',
+        type: EvidenceType.Note,
+        createdAt: '2026-01-15T10:00:00',
+        tags: {
+          engineStage: EngineStage.Wonder,
+          domain: 'Science',
+          subjectBucket: SubjectBucket.Science,
+          location: 'Home',
+        },
+      },
+    ]
+
+    const html = generateComplianceReportHtml({
+      summary,
+      dayLogs: [],
+      hoursEntries: [],
+      evaluations: [],
+      artifacts,
+      children: [{ id: 'lincoln', name: 'Lincoln' }],
+      startDate: '2026-01-01',
+      endDate: '2026-01-31',
+      childName: 'Lincoln',
+    })
+
+    expect(html).toContain('Science Observation')
+    expect(html).toContain('Note')
+  })
+
+  it('shows daily log with date and hours', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 120,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    const html = generateComplianceReportHtml({
+      summary,
+      dayLogs: logs,
+      hoursEntries: [],
+      evaluations: [],
+      artifacts: [],
+      children: [{ id: 'child-a', name: 'Lincoln' }],
+      startDate: '2026-01-01',
+      endDate: '2026-01-31',
+      childName: 'Lincoln',
+    })
+
+    expect(html).toContain('2026-01-10')
+    expect(html).toContain('2.0') // 120 minutes = 2.0 hours
+    expect(html).toContain('1 school days logged')
   })
 })

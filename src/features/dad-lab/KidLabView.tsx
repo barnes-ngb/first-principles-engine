@@ -37,6 +37,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
   const [loading, setLoading] = useState(true)
   const [prediction, setPrediction] = useState('')
   const [explanation, setExplanation] = useState('')
+  const [observation, setObservation] = useState('')
   const [uploading, setUploading] = useState(false)
   const [artifactRefreshKey, setArtifactRefreshKey] = useState(0)
 
@@ -72,11 +73,12 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
       const completedSnap = await getDocs(completedQ)
       setPastLabs(completedSnap.docs.map((d) => ({ ...d.data(), id: d.id })).slice(0, 5))
 
-      // Initialize child's prediction/explanation from active lab
+      // Initialize child's fields from active lab
       if (activeLabs[0]) {
         const cr = activeLabs[0].childReports[childKey]
         if (cr?.prediction) setPrediction(cr.prediction)
         if (cr?.explanation) setExplanation(cr.explanation)
+        if (cr?.observation) setObservation(cr.observation)
       }
 
       setLoading(false)
@@ -274,20 +276,58 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
                 </Box>
               </Stack>
             ) : (
-              <Stack spacing={1.5}>
+              <Stack spacing={2}>
                 {activeLab.londonRole && (
-                  <Box>
-                    <Typography variant="subtitle2" color="primary">
-                      Your Role
+                  <Box
+                    sx={{
+                      p: 1.5,
+                      borderRadius: 2,
+                      bgcolor: 'info.50',
+                      border: '1px solid',
+                      borderColor: 'info.200',
+                    }}
+                  >
+                    <Typography variant="subtitle2" color="info.main">
+                      Your Job
                     </Typography>
-                    <Typography variant="body2">{activeLab.londonRole}</Typography>
+                    <Typography variant="body1">{activeLab.londonRole}</Typography>
                   </Box>
                 )}
                 <Box>
-                  <Typography variant="subtitle2" color="primary">
-                    My Job
+                  <Typography variant="subtitle2" color="primary" sx={{ mb: 1 }}>
+                    What did you see?
                   </Typography>
-                  <Typography variant="body2">Watch, help, and draw what you see!</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Tell Dad what you noticed! You can talk or type.
+                  </Typography>
+                  <AudioRecorder
+                    onCapture={handleAudioCapture}
+                    uploading={uploading}
+                  />
+                  <TextField
+                    placeholder="Or type what you saw..."
+                    value={observation}
+                    onChange={(e) => setObservation(e.target.value)}
+                    onBlur={() => handleSaveField('observation', observation)}
+                    fullWidth
+                    multiline
+                    minRows={2}
+                    size="small"
+                    sx={{ mt: 1.5 }}
+                  />
+                </Box>
+                <Box>
+                  <Typography variant="subtitle2" color="primary" sx={{ mb: 1 }}>
+                    Draw what happened!
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Take a photo of your drawing or pick one from your pictures.
+                  </Typography>
+                  <PhotoCapture
+                    onCapture={handlePhotoCapture}
+                    uploading={uploading}
+                    multiple
+                  />
                 </Box>
               </Stack>
             )}

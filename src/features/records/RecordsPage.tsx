@@ -62,6 +62,7 @@ import {
   buildComplianceZip,
   computeHoursSummary,
   deriveChildIdFromDocId,
+  generateComplianceReportHtml,
   generateDailyLogCsv,
   generateEvaluationMarkdown,
   generateHoursSummaryCsv,
@@ -165,6 +166,13 @@ function HoursComplianceTab() {
     { subject: SubjectBucket.Science, hours: 0 },
     { subject: SubjectBucket.SocialStudies, hours: 0 },
   ])
+
+  // Quick estimate state
+  const [quickEstimateMode, setQuickEstimateMode] = useState(false)
+  const [estimateStartMonth, setEstimateStartMonth] = useState('')
+  const [estimateEndMonth, setEstimateEndMonth] = useState('')
+  const [estimateDailyHours, setEstimateDailyHours] = useState('')
+  const [estimateDaysPerWeek, setEstimateDaysPerWeek] = useState('4')
 
   const fetchRecords = useCallback(async () => {
     const hoursQuery = query(
@@ -362,6 +370,71 @@ function HoursComplianceTab() {
     }
   }, [activeChildId, backfillMonth, backfillEntries, familyId, fetchRecords, applyRecords])
 
+  // Quick estimate: generate months from startMonth to endMonth with subject split
+  const handleSaveQuickEstimate = useCallback(async () => {
+    if (!activeChildId || !estimateStartMonth || !estimateEndMonth || !estimateDailyHours) return
+
+    try {
+      const dailyHours = parseFloat(estimateDailyHours)
+      const daysPerWeek = parseInt(estimateDaysPerWeek) || 4
+      if (dailyHours <= 0) return
+
+      // Default subject split: 25% Reading, 20% LanguageArts, 25% Math, 15% Science, 15% SocialStudies
+      const subjectSplit: Array<{ subject: SubjectBucket; pct: number }> = [
+        { subject: SubjectBucket.Reading, pct: 0.25 },
+        { subject: SubjectBucket.LanguageArts, pct: 0.20 },
+        { subject: SubjectBucket.Math, pct: 0.25 },
+        { subject: SubjectBucket.Science, pct: 0.15 },
+        { subject: SubjectBucket.SocialStudies, pct: 0.15 },
+      ]
+
+      // Iterate month by month
+      const [startY, startM] = estimateStartMonth.split('-').map(Number)
+      const [endY, endM] = estimateEndMonth.split('-').map(Number)
+      let y = startY
+      let m = startM
+
+      while (y < endY || (y === endY && m <= endM)) {
+        // ~4.33 weeks/month
+        const monthlyHours = dailyHours * daysPerWeek * 4.33
+        const monthStr = `${y}-${String(m).padStart(2, '0')}`
+        const midMonth = `${monthStr}-15`
+
+        for (const { subject, pct } of subjectSplit) {
+          const hours = monthlyHours * pct
+          const minutes = Math.round(hours * 60)
+          if (minutes <= 0) continue
+
+          await addDoc(hoursAdjustmentsCollection(familyId), {
+            childId: activeChildId,
+            date: midMonth,
+            subjectBucket: subject,
+            minutes,
+            reason: `Quick estimate: ~${dailyHours}h/day x ${daysPerWeek}d/wk for ${monthStr}`,
+            source: 'backfill',
+            location: 'Home',
+            createdAt: new Date().toISOString(),
+          })
+        }
+
+        m++
+        if (m > 12) { m = 1; y++ }
+      }
+
+      setBackfillOpen(false)
+      setQuickEstimateMode(false)
+      setEstimateStartMonth('')
+      setEstimateEndMonth('')
+      setEstimateDailyHours('')
+      const data = await fetchRecords()
+      applyRecords(data)
+      setSnackMessage({ text: 'Quick estimate hours saved', severity: 'success' })
+    } catch (err) {
+      console.error('Quick estimate failed:', err)
+      setSnackMessage({ text: `Quick estimate failed: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+    }
+  }, [activeChildId, estimateStartMonth, estimateEndMonth, estimateDailyHours, estimateDaysPerWeek, familyId, fetchRecords, applyRecords])
+
   // Export handlers
   const filePrefix = childNameLower ? `${childNameLower}-` : ''
 
@@ -439,6 +512,27 @@ function HoursComplianceTab() {
       setIsZipping(false)
     }
   }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, activeChild, filePrefix, startDate, endDate])
+
+  const handlePrintComplianceReport = useCallback(() => {
+    const html = generateComplianceReportHtml({
+      summary,
+      dayLogs,
+      hoursEntries,
+      evaluations,
+      artifacts,
+      children: children.map((c) => ({ id: c.id, name: c.name })),
+      startDate,
+      endDate,
+      childName: activeChild?.name ?? '',
+    })
+    const printWindow = window.open('', '_blank')
+    if (printWindow) {
+      printWindow.document.write(html)
+      printWindow.document.close()
+      printWindow.focus()
+      printWindow.print()
+    }
+  }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, activeChild, startDate, endDate])
 
   const handleClearHoursData = useCallback(async () => {
     if (!window.confirm('This will delete manual hours entries and adjustments. Auto-generated hours (Dad Lab, etc.) will be kept. Continue?')) return
@@ -736,13 +830,22 @@ function HoursComplianceTab() {
             Download a single zip with all compliance records, or use the
             individual buttons below for a specific file.
           </Typography>
-          <Button
-            variant="contained"
-            onClick={handleDownloadZip}
-            disabled={!hasData || isZipping}
-          >
-            {isZipping ? 'Building zip\u2026' : 'Download Compliance Pack (.zip)'}
-          </Button>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <Button
+              variant="contained"
+              onClick={handleDownloadZip}
+              disabled={!hasData || isZipping}
+            >
+              {isZipping ? 'Building zip\u2026' : 'Download Compliance Pack (.zip)'}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handlePrintComplianceReport}
+              disabled={!hasData}
+            >
+              Print Compliance Report
+            </Button>
+          </Stack>
           <Divider />
           <Typography variant="body2" color="text.secondary">
             Individual exports
@@ -806,20 +909,22 @@ function HoursComplianceTab() {
         <DialogTitle>Add Historical Hours</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
-            <Typography variant="body2" color="text.secondary">
-              Enter approximate hours per subject for a past month. These count toward MO compliance totals.
-            </Typography>
-
-            <TextField
-              label="Month"
-              type="month"
-              value={backfillMonth}
-              onChange={e => setBackfillMonth(e.target.value)}
-              fullWidth
-              size="small"
-              slotProps={{ inputLabel: { shrink: true } }}
-              helperText="e.g., 2025-09 for September 2025"
-            />
+            <Stack direction="row" spacing={1}>
+              <Button
+                size="small"
+                variant={quickEstimateMode ? 'text' : 'contained'}
+                onClick={() => setQuickEstimateMode(false)}
+              >
+                Per-Month
+              </Button>
+              <Button
+                size="small"
+                variant={quickEstimateMode ? 'contained' : 'text'}
+                onClick={() => setQuickEstimateMode(true)}
+              >
+                Quick Estimate
+              </Button>
+            </Stack>
 
             {activeChildId && (
               <Typography variant="caption" color="text.secondary">
@@ -827,39 +932,117 @@ function HoursComplianceTab() {
               </Typography>
             )}
 
-            {backfillEntries.map((entry, i) => (
-              <Stack key={entry.subject} direction="row" spacing={1} alignItems="center">
-                <Typography variant="body2" sx={{ minWidth: 120 }}>
-                  {entry.subject}
+            {quickEstimateMode ? (
+              <>
+                <Typography variant="body2" color="text.secondary">
+                  Estimate a range of months at once. Hours are split across core subjects automatically
+                  (25% Reading, 25% Math, 20% Language Arts, 15% Science, 15% Social Studies).
                 </Typography>
+                <Stack direction="row" spacing={2}>
+                  <TextField
+                    label="Start month"
+                    type="month"
+                    value={estimateStartMonth}
+                    onChange={e => setEstimateStartMonth(e.target.value)}
+                    size="small"
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    helperText="e.g., 2025-09"
+                  />
+                  <TextField
+                    label="End month"
+                    type="month"
+                    value={estimateEndMonth}
+                    onChange={e => setEstimateEndMonth(e.target.value)}
+                    size="small"
+                    slotProps={{ inputLabel: { shrink: true } }}
+                  />
+                </Stack>
+                <Stack direction="row" spacing={2}>
+                  <TextField
+                    label="Hours per school day"
+                    type="number"
+                    value={estimateDailyHours}
+                    onChange={e => setEstimateDailyHours(e.target.value)}
+                    size="small"
+                    sx={{ width: 180 }}
+                    slotProps={{ htmlInput: { min: 0, max: 12, step: 0.5 } }}
+                  />
+                  <TextField
+                    label="Days per week"
+                    type="number"
+                    value={estimateDaysPerWeek}
+                    onChange={e => setEstimateDaysPerWeek(e.target.value)}
+                    size="small"
+                    sx={{ width: 140 }}
+                    slotProps={{ htmlInput: { min: 1, max: 7, step: 1 } }}
+                  />
+                </Stack>
+                {estimateDailyHours && (
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    ~{(parseFloat(estimateDailyHours) * (parseInt(estimateDaysPerWeek) || 4) * 4.33).toFixed(0)} hours/month
+                  </Typography>
+                )}
+                <Button
+                  variant="contained"
+                  onClick={handleSaveQuickEstimate}
+                  disabled={!estimateStartMonth || !estimateEndMonth || !estimateDailyHours || !activeChildId}
+                  fullWidth
+                >
+                  Save Quick Estimate
+                </Button>
+              </>
+            ) : (
+              <>
+                <Typography variant="body2" color="text.secondary">
+                  Enter approximate hours per subject for a past month. These count toward MO compliance totals.
+                </Typography>
+
                 <TextField
-                  type="number"
+                  label="Month"
+                  type="month"
+                  value={backfillMonth}
+                  onChange={e => setBackfillMonth(e.target.value)}
+                  fullWidth
                   size="small"
-                  value={entry.hours || ''}
-                  onChange={e => {
-                    const updated = [...backfillEntries]
-                    updated[i] = { ...entry, hours: parseFloat(e.target.value) || 0 }
-                    setBackfillEntries(updated)
-                  }}
-                  sx={{ width: 100 }}
-                  slotProps={{ htmlInput: { min: 0, max: 200, step: 0.5 } }}
+                  slotProps={{ inputLabel: { shrink: true } }}
+                  helperText="e.g., 2025-09 for September 2025"
                 />
-                <Typography variant="caption" color="text.secondary">hours</Typography>
-              </Stack>
-            ))}
 
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              Total: {backfillEntries.reduce((sum, e) => sum + e.hours, 0).toFixed(1)} hours
-            </Typography>
+                {backfillEntries.map((entry, i) => (
+                  <Stack key={entry.subject} direction="row" spacing={1} alignItems="center">
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>
+                      {entry.subject}
+                    </Typography>
+                    <TextField
+                      type="number"
+                      size="small"
+                      value={entry.hours || ''}
+                      onChange={e => {
+                        const updated = [...backfillEntries]
+                        updated[i] = { ...entry, hours: parseFloat(e.target.value) || 0 }
+                        setBackfillEntries(updated)
+                      }}
+                      sx={{ width: 100 }}
+                      slotProps={{ htmlInput: { min: 0, max: 200, step: 0.5 } }}
+                    />
+                    <Typography variant="caption" color="text.secondary">hours</Typography>
+                  </Stack>
+                ))}
 
-            <Button
-              variant="contained"
-              onClick={handleSaveBackfill}
-              disabled={!backfillMonth || !activeChildId || backfillEntries.every(e => e.hours === 0)}
-              fullWidth
-            >
-              Save Historical Hours
-            </Button>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  Total: {backfillEntries.reduce((sum, e) => sum + e.hours, 0).toFixed(1)} hours
+                </Typography>
+
+                <Button
+                  variant="contained"
+                  onClick={handleSaveBackfill}
+                  disabled={!backfillMonth || !activeChildId || backfillEntries.every(e => e.hours === 0)}
+                  fullWidth
+                >
+                  Save Historical Hours
+                </Button>
+              </>
+            )}
           </Stack>
         </DialogContent>
       </Dialog>

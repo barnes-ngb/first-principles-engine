@@ -95,6 +95,7 @@ import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateM
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
 import WorkshopGameCards from './WorkshopGameCards'
+import { syncChecklistToRoutine } from './checklistRoutineSync'
 import { calculateXp } from './xp'
 
 const subjectBucketColor: Record<string, string> = {
@@ -891,6 +892,15 @@ export default function TodayPage() {
         const totalPlannedMinutes = checklist.reduce((sum, item) => {
           return sum + (item.plannedMinutes ?? item.estimatedMinutes ?? parseMinutesFromLabel(item.label))
         }, 0)
+        const xp = calculateXp(dayLog, activeRoutineItems)
+        const isLincoln = selectedChild?.name?.toLowerCase() === 'lincoln'
+
+        // Engagement pattern insights
+        const itemsWithEngagement = checklist.filter((ci) => ci.engagement)
+        const engagementCounts = itemsWithEngagement.reduce((acc, ci) => {
+          if (ci.engagement) acc[ci.engagement] = (acc[ci.engagement] ?? 0) + 1
+          return acc
+        }, {} as Record<string, number>)
 
         const handleReorder = (fromIndex: number, direction: 'up' | 'down') => {
           const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1
@@ -997,21 +1007,37 @@ export default function TodayPage() {
           }>
             {hasPlanItems ? (
               <Stack spacing={1.5}>
-                {/* Summary line */}
-                <Typography variant="body2" color="text.secondary" sx={{ px: 0.5 }}>
-                  {formatMinutes(totalPlannedMinutes)} planned{' \u00B7 '}
-                  {completedCount} of {checklist.length} done
-                  {(() => {
-                    const remainingMinutes = checklist
-                      .filter((ci) => !ci.completed)
-                      .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
-                    if (remainingMinutes > 0 && completedCount < checklist.length) {
-                      const est = new Date(Date.now() + remainingMinutes * 60_000)
-                      return ` \u00B7 Est. finish: ${formatTime12h(est)}`
-                    }
-                    return ''
-                  })()}
-                </Typography>
+                {/* Summary line with XP */}
+                <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 0.5 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    {formatMinutes(totalPlannedMinutes)} planned{' \u00B7 '}
+                    {completedCount} of {checklist.length} done
+                    {(() => {
+                      const remainingMinutes = checklist
+                        .filter((ci) => !ci.completed)
+                        .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
+                      if (remainingMinutes > 0 && completedCount < checklist.length) {
+                        const est = new Date(Date.now() + remainingMinutes * 60_000)
+                        return ` \u00B7 Est. finish: ${formatTime12h(est)}`
+                      }
+                      return ''
+                    })()}
+                  </Typography>
+                  <Chip
+                    label={`${xp} XP`}
+                    size="small"
+                    color={xp > 0 ? 'success' : 'default'}
+                    variant={xp > 0 ? 'filled' : 'outlined'}
+                    sx={isLincoln ? {
+                      fontFamily: '"Press Start 2P", monospace',
+                      fontSize: '0.45rem',
+                      bgcolor: xp > 0 ? '#1A1A1A' : undefined,
+                      color: xp > 0 ? '#7EFC20' : undefined,
+                      border: xp > 0 ? '2px solid #3A3A3A' : undefined,
+                      borderRadius: 0,
+                    } : {}}
+                  />
+                </Stack>
 
                 {/* Checklist items */}
                 {checklist.map((item, index) => {
@@ -1128,7 +1154,14 @@ export default function TodayPage() {
                                 return block
                               })
                             }
-                            persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist, blocks: updatedBlocks })
+                            // Sync checklist → routine fields → XP
+                            const synced = syncChecklistToRoutine(
+                              { ...dayLog, checklist: updatedChecklist, blocks: updatedBlocks },
+                              item, newCompleted, activeRoutineItems,
+                            )
+                            const withMinutes = autoFillBlockMinutes(synced, activeRoutineItems)
+                            const withXp = { ...withMinutes, xpTotal: calculateXp(withMinutes, activeRoutineItems) }
+                            persistDayLogImmediate(withXp)
                           }}
                         />
                         <Typography variant="body2" sx={{ flex: 1 }}>
@@ -1271,6 +1304,29 @@ export default function TodayPage() {
                     </Box>
                   )
                 })}
+
+                {/* Engagement pattern insights */}
+                {itemsWithEngagement.length >= 2 && (
+                  <Box sx={{ px: 1, py: 1.5, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: 'block', mb: 0.5 }}>
+                      Today&apos;s Engagement
+                    </Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap">
+                      {engagementCounts.engaged != null && engagementCounts.engaged > 0 && (
+                        <Chip size="small" label={`\u{1F60A} ${engagementCounts.engaged} engaged`} color="success" variant="outlined" sx={{ height: 24 }} />
+                      )}
+                      {engagementCounts.okay != null && engagementCounts.okay > 0 && (
+                        <Chip size="small" label={`\u{1F610} ${engagementCounts.okay} okay`} variant="outlined" sx={{ height: 24 }} />
+                      )}
+                      {engagementCounts.struggled != null && engagementCounts.struggled > 0 && (
+                        <Chip size="small" label={`\u{1F62B} ${engagementCounts.struggled} struggled`} color="warning" variant="outlined" sx={{ height: 24 }} />
+                      )}
+                      {engagementCounts.refused != null && engagementCounts.refused > 0 && (
+                        <Chip size="small" label={`\u{274C} ${engagementCounts.refused} refused`} color="error" variant="outlined" sx={{ height: 24 }} />
+                      )}
+                    </Stack>
+                  </Box>
+                )}
 
                 {/* Add Item (edit mode only) */}
                 {editingPlan && !addingItem && (

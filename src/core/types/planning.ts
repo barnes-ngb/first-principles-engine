@@ -143,6 +143,7 @@ export interface DayLog {
   together?: { done: boolean; note?: string; mediaUrl?: string }
   movement?: { done: boolean; note?: string }
   project?: { done: boolean; note?: string; mediaUrl?: string }
+  workshop?: { done: boolean; gamesPlayed?: number; note?: string }
   xpTotal?: number
   retro?: string
   checklist?: ChecklistItem[]
@@ -445,8 +446,25 @@ export interface WorkbookConfig {
   targetFinishDate: string
   /** Typical school days per week */
   schoolDaysPerWeek: number
+  /** Default minutes per day for this workbook/subject (used by AI planner as baseline) */
+  defaultMinutes?: number
   createdAt?: string
   updatedAt?: string
+}
+
+/** Default minutes per subject for AI plan generation. Stored on family settings per child. */
+export interface SubjectTimeDefaults {
+  [subjectBucket: string]: number
+}
+
+/** Sensible defaults when no per-subject time has been configured. */
+export const DEFAULT_SUBJECT_MINUTES: Record<string, number> = {
+  Other: 10,       // Formation/Prayer
+  Reading: 30,
+  LanguageArts: 30,
+  Math: 30,
+  Science: 20,
+  SocialStudies: 20,
 }
 
 export interface PaceGaugeResult {

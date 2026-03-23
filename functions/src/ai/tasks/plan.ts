@@ -6,6 +6,20 @@ import { buildContextForTask } from "../contextSlices.js";
 // Import plan-specific prompt pieces from chat.ts
 import { buildPlanOutputInstructions } from "../chat.js";
 
+/** Load per-child subject time defaults from plannerDefaults doc. */
+async function loadSubjectTimeDefaults(
+  db: import("firebase-admin/firestore").Firestore,
+  familyId: string,
+  childId: string,
+): Promise<Record<string, number> | null> {
+  const snap = await db
+    .doc(`families/${familyId}/settings/plannerDefaults_${childId}`)
+    .get();
+  if (!snap.exists) return null;
+  const data = snap.data();
+  return (data?.subjectTimeDefaults as Record<string, number>) ?? null;
+}
+
 export const handlePlan = async (
   ctx: ChatTaskContext,
 ): Promise<ChatTaskResult> => {
@@ -15,6 +29,25 @@ export const handlePlan = async (
   const sections = await buildContextForTask("plan", {
     db, familyId, childId, childData, snapshotData,
   });
+
+  // Load per-child subject time defaults and inject into system prompt
+  const subjectDefaults = await loadSubjectTimeDefaults(db, familyId, childId);
+  if (subjectDefaults && Object.keys(subjectDefaults).length > 0) {
+    const lines = [
+      "── SUBJECT TIME DEFAULTS ──",
+      "Use these as the baseline for estimatedMinutes on each item:",
+    ];
+    for (const [subject, minutes] of Object.entries(subjectDefaults)) {
+      const label = subject === "Other" ? "Formation/Prayer"
+        : subject === "LanguageArts" ? "Language Arts"
+        : subject === "SocialStudies" ? "Social Studies"
+        : subject;
+      lines.push(`- ${label}: ${minutes} min/day`);
+    }
+    lines.push("Only adjust from these baselines when energy level, daily routine, or special notes suggest otherwise.");
+    lines.push("If the user specified a daily routine with specific times, those times take priority over these defaults.");
+    sections.push(lines.join("\n"));
+  }
 
   // Append plan-specific output format instructions
   sections.push(buildPlanOutputInstructions());

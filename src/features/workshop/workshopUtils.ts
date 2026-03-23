@@ -1,7 +1,7 @@
-import { addDoc } from 'firebase/firestore'
-import { hoursCollection, artifactsCollection, storyGamesCollection } from '../../core/firebase/firestore'
+import { addDoc, getDoc, setDoc } from 'firebase/firestore'
+import { hoursCollection, artifactsCollection, storyGamesCollection, daysCollection } from '../../core/firebase/firestore'
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore'
-import type { AdventureTree, CardGameData, ChallengeCard, GeneratedGame } from '../../core/types'
+import type { AdventureTree, CardGameData, ChallengeCard, GeneratedGame, VoiceRecordingMap } from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
 import { WorkshopStatus } from '../../core/types/workshop'
 
@@ -604,4 +604,72 @@ export async function logCardGamePlaytestHours(
   }
 
   await Promise.all(promises)
+}
+
+// ── Create artifacts for voice recordings (speech evidence) ──────
+
+/**
+ * Create Audio artifacts for voice recordings made during game creation.
+ * Each recording becomes a speech practice evidence artifact linked to
+ * the child's portfolio, making Lincoln's speech work visible in records.
+ */
+export async function createVoiceRecordingArtifacts(
+  familyId: string,
+  childId: string,
+  gameTitle: string,
+  recordings: VoiceRecordingMap,
+): Promise<string[]> {
+  const entries = Object.entries(recordings)
+  if (entries.length === 0) return []
+
+  const now = new Date().toISOString()
+  const totalDurationMs = entries.reduce((sum, [, rec]) => sum + (rec.durationMs ?? 0), 0)
+  const totalSeconds = Math.round(totalDurationMs / 1000)
+
+  // Create a single combined artifact rather than one per recording
+  const artifactDoc = await addDoc(artifactsCollection(familyId), {
+    childId,
+    title: `Voice Recordings — ${gameTitle}`,
+    type: 'Audio' as const,
+    content: `Recorded ${entries.length} voice clips for "${gameTitle}" (${totalSeconds}s total). Speech practice through game card narration.`,
+    mediaUrls: entries.map(([, rec]) => rec.url).filter(Boolean),
+    createdAt: now,
+    tags: {
+      engineStage: 'Build' as const,
+      domain: 'speech',
+      subjectBucket: SubjectBucket.LanguageArts,
+      location: 'Home' as const,
+    },
+  })
+
+  return [artifactDoc.id]
+}
+
+// ── Mark workshop game played on the DayLog for XP ──────────────
+
+/**
+ * Mark the workshop.done flag on today's DayLog so it contributes XP.
+ * Uses merge to avoid overwriting other fields.
+ */
+export async function markWorkshopPlayed(
+  familyId: string,
+  childId: string,
+  gameTitle: string,
+): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10)
+  const docId = `${today}_${childId}`
+  const dayRef = doc(daysCollection(familyId), docId)
+
+  const snap = await getDoc(dayRef)
+  const existing = snap.data()
+  const gamesPlayed = (existing?.workshop?.gamesPlayed ?? 0) + 1
+
+  await setDoc(dayRef, {
+    workshop: {
+      done: true,
+      gamesPlayed,
+      note: gameTitle,
+    },
+    updatedAt: new Date().toISOString(),
+  }, { merge: true })
 }

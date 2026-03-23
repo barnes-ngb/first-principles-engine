@@ -20,6 +20,8 @@ export const XP_VALUES = {
   wordProblemsModeled: 2,
   // Lincoln Speech Micro
   narrationOrSoundReps: 1,
+  // Workshop game play
+  workshopGame: 2,
 } as const
 
 /**
@@ -68,6 +70,8 @@ export function calculateXp(dayLog: DayLog, routineItems?: RoutineItemKey[]): nu
   // Legacy speech toggle — counts when "speech" is in scope (or unscoped)
   if ((!scope || scope.has('speech' as RoutineItemKey)) && dayLog.speech?.done && !dayLog.speech?.narrationReps?.done)
     xp += 1
+  if ((!scope || scope.has('workshopGame' as RoutineItemKey)) && dayLog.workshop?.done)
+    xp += XP_VALUES.workshopGame
 
   return xp
 }

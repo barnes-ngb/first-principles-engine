@@ -142,6 +142,8 @@ RULES:
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "photo-transform",
       model: "gpt-image-1",
+      inputTokens: 0,
+      outputTokens: 0,
       childId,
       themeStyle,
       storagePath,

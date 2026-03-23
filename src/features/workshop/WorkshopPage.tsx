@@ -49,6 +49,8 @@ import {
   createGameArtifact,
   createAdventureArtifact,
   createCardGameArtifact,
+  createVoiceRecordingArtifacts,
+  markWorkshopPlayed,
   recordPlaySession,
   recordAdventurePlaySession,
   recordCardGamePlaySession,
@@ -499,10 +501,19 @@ export default function WorkshopPage() {
     (voiceRecordings: VoiceRecordingMap) => {
       if (currentGame) {
         setCurrentGame({ ...currentGame, voiceRecordings })
+
+        // Create speech practice artifacts for voice recordings
+        if (familyId && activeChildId && Object.keys(voiceRecordings).length > 0) {
+          const gameTitle = currentGame.generatedGame?.title
+            ?? currentGame.storyInputs?.theme
+            ?? 'Workshop Game'
+          createVoiceRecordingArtifacts(familyId, activeChildId, gameTitle, voiceRecordings)
+            .catch((err) => console.warn('Failed to create voice recording artifacts:', err))
+        }
       }
       setPhase(GamePhase.Ready)
     },
-    [currentGame],
+    [currentGame, familyId, activeChildId],
   )
 
   const handleRecordingSkip = useCallback(() => {
@@ -605,6 +616,7 @@ export default function WorkshopPage() {
             result.durationMinutes,
             result.cardsEncountered,
           ),
+          markWorkshopPlayed(familyId, activeChildId, currentGame.generatedGame.title),
         ])
         setCurrentGame({ ...currentGame, activeSession: null })
       } catch (err) {
@@ -649,6 +661,7 @@ export default function WorkshopPage() {
             result.choicesMade,
             result.challengeResults,
           ),
+          markWorkshopPlayed(familyId, activeChildId, currentGame.storyInputs.theme + ' Adventure'),
         ])
         setCurrentGame({ ...currentGame, activeAdventureSession: null })
       } catch (err) {
@@ -706,6 +719,7 @@ export default function WorkshopPage() {
             result.winner ?? undefined,
             result.durationMinutes,
           ),
+          markWorkshopPlayed(familyId, activeChildId, currentGame.storyInputs.theme + ' Card Game'),
         ])
         setCurrentGame({ ...currentGame, activeCardGameSession: null })
       } catch (err) {

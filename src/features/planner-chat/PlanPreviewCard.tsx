@@ -54,8 +54,104 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
       {plan.days.map((day, dayIndex) => {
         const total = dayTotalMinutes(day)
         const overBudget = total > budgetMinutes
+        const mustDoItems = day.items.filter(item => item.category === 'must-do')
+        const chooseItems = day.items.filter(item => item.category === 'choose' || item.category === undefined)
+
+        const renderItem = (item: DraftPlanItem) => (
+          <Box key={item.id}>
+            <Stack
+              direction="row"
+              spacing={0.5}
+              alignItems="center"
+              sx={{
+                py: 0.25,
+                opacity: item.accepted ? 1 : 0.4,
+              }}
+            >
+              {onToggleItem ? (
+                <IconButton
+                  size="small"
+                  onClick={() => onToggleItem(dayIndex, item.id)}
+                  sx={{ p: 0.25 }}
+                >
+                  {item.accepted ? (
+                    <CheckCircleIcon fontSize="small" color="success" />
+                  ) : (
+                    <RadioButtonUncheckedIcon fontSize="small" />
+                  )}
+                </IconButton>
+              ) : (
+                item.accepted ? (
+                  <CheckCircleIcon fontSize="small" color="success" sx={{ mr: 0.5 }} />
+                ) : (
+                  <RadioButtonUncheckedIcon fontSize="small" sx={{ mr: 0.5, opacity: 0.4 }} />
+                )
+              )}
+              <Typography
+                variant="body2"
+                sx={{
+                  flex: 1,
+                  textDecoration: item.accepted ? 'none' : 'line-through',
+                }}
+              >
+                {item.title}
+              </Typography>
+              {item.skillTags.length > 0 && (
+                <Stack direction="row" spacing={0.25} flexWrap="wrap" useFlexGap>
+                  {item.skillTags.slice(0, 2).map((tag) => {
+                    const def = SKILL_TAG_MAP[tag]
+                    return (
+                      <Tooltip key={tag} title={def?.evidence ?? tag} arrow>
+                        <Chip
+                          label={def?.label ?? tag.split('.').pop()}
+                          size="small"
+                          color="info"
+                          variant="outlined"
+                          sx={{ height: 18, fontSize: '0.65rem' }}
+                        />
+                      </Tooltip>
+                    )
+                  })}
+                </Stack>
+              )}
+              {item.isAppBlock && (
+                <Chip label="App" size="small" variant="outlined" sx={{ height: 20 }} />
+              )}
+              {item.skipSuggestion && (
+                <Tooltip
+                  title={`${item.skipSuggestion.reason} \u2014 ${item.skipSuggestion.replacement}`}
+                  arrow
+                >
+                  <Chip
+                    label={item.skipSuggestion.action}
+                    size="small"
+                    color={item.skipSuggestion.action === 'skip' ? 'error' : 'warning'}
+                    sx={{ height: 20 }}
+                  />
+                </Tooltip>
+              )}
+              <Typography variant="caption" color="text.secondary">
+                {item.estimatedMinutes}m
+              </Typography>
+              {onGenerateActivity && item.accepted && !item.isAppBlock && (
+                <Tooltip title="Generate activity" arrow>
+                  <IconButton
+                    size="small"
+                    onClick={() => onGenerateActivity(item)}
+                    disabled={generatingItemId === item.id}
+                    sx={{ p: 0.25, ml: 0.25 }}
+                    color="secondary"
+                  >
+                    <AutoAwesomeIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Stack>
+          </Box>
+        )
+
         return (
-          <Box key={day.day} sx={{ mb: 1.5 }}>
+          <Box key={day.day} sx={{ mb: 2 }}>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                 {day.day}
@@ -67,107 +163,38 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
                 variant="outlined"
               />
             </Stack>
-            <Stack spacing={0.25} sx={{ pl: 1 }}>
-              {day.items.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  No items
-                </Typography>
-              ) : (
-                day.items.map((item) => (
-                  <Box key={item.id}>
-                    <Stack
-                      direction="row"
-                      spacing={0.5}
-                      alignItems="center"
-                      sx={{
-                        py: 0.25,
-                        opacity: item.accepted ? 1 : 0.4,
-                      }}
-                    >
-                      {onToggleItem ? (
-                        <IconButton
-                          size="small"
-                          onClick={() => onToggleItem(dayIndex, item.id)}
-                          sx={{ p: 0.25 }}
-                        >
-                          {item.accepted ? (
-                            <CheckCircleIcon fontSize="small" color="success" />
-                          ) : (
-                            <RadioButtonUncheckedIcon fontSize="small" />
-                          )}
-                        </IconButton>
-                      ) : (
-                        item.accepted ? (
-                          <CheckCircleIcon fontSize="small" color="success" sx={{ mr: 0.5 }} />
-                        ) : (
-                          <RadioButtonUncheckedIcon fontSize="small" sx={{ mr: 0.5, opacity: 0.4 }} />
-                        )
-                      )}
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          flex: 1,
-                          textDecoration: item.accepted ? 'none' : 'line-through',
-                        }}
-                      >
-                        {item.title}
-                      </Typography>
-                      {/* Skill tags as small chips */}
-                      {item.skillTags.length > 0 && (
-                        <Stack direction="row" spacing={0.25} flexWrap="wrap" useFlexGap>
-                          {item.skillTags.slice(0, 2).map((tag) => {
-                            const def = SKILL_TAG_MAP[tag]
-                            return (
-                              <Tooltip key={tag} title={def?.evidence ?? tag} arrow>
-                                <Chip
-                                  label={def?.label ?? tag.split('.').pop()}
-                                  size="small"
-                                  color="info"
-                                  variant="outlined"
-                                  sx={{ height: 18, fontSize: '0.65rem' }}
-                                />
-                              </Tooltip>
-                            )
-                          })}
-                        </Stack>
-                      )}
-                      {item.isAppBlock && (
-                        <Chip label="App" size="small" variant="outlined" sx={{ height: 20 }} />
-                      )}
-                      {item.skipSuggestion && (
-                        <Tooltip
-                          title={`${item.skipSuggestion.reason} \u2014 ${item.skipSuggestion.replacement}`}
-                          arrow
-                        >
-                          <Chip
-                            label={item.skipSuggestion.action}
-                            size="small"
-                            color={item.skipSuggestion.action === 'skip' ? 'error' : 'warning'}
-                            sx={{ height: 20 }}
-                          />
-                        </Tooltip>
-                      )}
-                      <Typography variant="caption" color="text.secondary">
-                        {item.estimatedMinutes}m
-                      </Typography>
-                      {onGenerateActivity && item.accepted && !item.isAppBlock && (
-                        <Tooltip title="Generate activity" arrow>
-                          <IconButton
-                            size="small"
-                            onClick={() => onGenerateActivity(item)}
-                            disabled={generatingItemId === item.id}
-                            sx={{ p: 0.25, ml: 0.25 }}
-                            color="secondary"
-                          >
-                            <AutoAwesomeIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
-                        </Tooltip>
-                      )}
+
+            {day.items.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ pl: 1 }}>
+                No items
+              </Typography>
+            ) : (
+              <>
+                {/* Must-Do section */}
+                {mustDoItems.length > 0 && (
+                  <Box sx={{ pl: 1, mb: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Must Do
+                    </Typography>
+                    <Stack spacing={0.25}>
+                      {mustDoItems.map(item => renderItem(item))}
                     </Stack>
                   </Box>
-                ))
-              )}
-            </Stack>
+                )}
+
+                {/* Choose section */}
+                {chooseItems.length > 0 && (
+                  <Box sx={{ pl: 1, mt: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Choose{chooseItems.length >= 3 ? ' 2' : ''}
+                    </Typography>
+                    <Stack spacing={0.25}>
+                      {chooseItems.map(item => renderItem(item))}
+                    </Stack>
+                  </Box>
+                )}
+              </>
+            )}
           </Box>
         )
       })}
