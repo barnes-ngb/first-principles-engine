@@ -369,6 +369,8 @@ export interface DraftWeeklyPlan {
   days: DraftDayPlan[]
   skipSuggestions: SkipSuggestion[]
   minimumWin: string
+  /** AI-generated summary of what to skip if time is short. */
+  weekSkipSummary?: string
 }
 
 export interface DraftDayPlan {
@@ -392,6 +394,8 @@ export interface DraftPlanItem {
   mvdEssential?: boolean
   /** Category for kid-facing view: must-do or choose. */
   category?: 'must-do' | 'choose'
+  /** Guidance note when an item is skipped (from AI). */
+  skipGuidance?: string
 }
 
 export interface PlannerConversation {

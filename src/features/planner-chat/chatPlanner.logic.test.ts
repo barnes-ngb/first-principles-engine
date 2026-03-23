@@ -751,6 +751,116 @@ Let me know if you want changes!`
   })
 })
 
+describe('parseAIResponse — skipGuidance and weekSkipSummary', () => {
+  const makeResponse = (message: string): ChatResponse => ({
+    message,
+    model: 'test',
+    usage: { inputTokens: 0, outputTokens: 0 },
+  })
+
+  it('extracts skipGuidance from items', () => {
+    const plan = {
+      days: [{
+        day: 'Monday',
+        timeBudgetMinutes: 150,
+        items: [{
+          title: 'Math drills',
+          subjectBucket: 'Math',
+          estimatedMinutes: 20,
+          skillTags: [],
+          skipGuidance: 'Do odds only if time is short',
+        }],
+      }],
+      minimumWin: 'Do math',
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result).not.toBeNull()
+    expect(result!.days[0].items[0].skipGuidance).toBe('Do odds only if time is short')
+  })
+
+  it('extracts weekSkipSummary from plan', () => {
+    const plan = {
+      days: [{
+        day: 'Monday',
+        timeBudgetMinutes: 150,
+        items: [{
+          title: 'Reading',
+          subjectBucket: 'Reading',
+          estimatedMinutes: 30,
+          skillTags: [],
+        }],
+      }],
+      minimumWin: 'Read daily',
+      weekSkipSummary: 'Drop Wednesday art if needed',
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result).not.toBeNull()
+    expect(result!.weekSkipSummary).toBe('Drop Wednesday art if needed')
+  })
+
+  it('handles wrapped plan with weekSkipSummary', () => {
+    const wrapped = {
+      weeklyPlan: {
+        days: [{
+          day: 'Tuesday',
+          timeBudgetMinutes: 120,
+          items: [{
+            title: 'Phonics',
+            subjectBucket: 'Reading',
+            estimatedMinutes: 15,
+            skillTags: [],
+          }],
+        }],
+        minimumWin: 'Phonics daily',
+        weekSkipSummary: 'Skip science if energy is low',
+      },
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(wrapped)))
+    expect(result).not.toBeNull()
+    expect(result!.weekSkipSummary).toBe('Skip science if energy is low')
+  })
+
+  it('parses items with minutes alias for estimatedMinutes', () => {
+    const plan = {
+      days: [{
+        day: 'Monday',
+        timeBudgetMinutes: 150,
+        items: [{
+          title: 'Handwriting',
+          subjectBucket: 'LanguageArts',
+          minutes: 25,
+          skillTags: [],
+        }],
+      }],
+      minimumWin: 'Write daily',
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(plan)))
+    expect(result).not.toBeNull()
+    expect(result!.days[0].items[0].estimatedMinutes).toBe(25)
+  })
+
+  it('finds days under arbitrary wrapper key', () => {
+    const wrapped = {
+      schedule: {
+        days: [{
+          day: 'Wednesday',
+          timeBudgetMinutes: 120,
+          items: [{
+            title: 'Science',
+            subjectBucket: 'Science',
+            estimatedMinutes: 30,
+            skillTags: [],
+          }],
+        }],
+        minimumWin: 'Explore',
+      },
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(wrapped)))
+    expect(result).not.toBeNull()
+    expect(result!.days[0].day).toBe('Wednesday')
+  })
+})
+
 describe('buildPlannerPrompt with dailyRoutine', () => {
   it('includes daily routine when provided', () => {
     const inputs: PlanGeneratorInputs = {
