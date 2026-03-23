@@ -12,6 +12,7 @@ export const TaskType = {
   Quest: 'quest',
   GenerateStory: 'generateStory',
   Workshop: 'workshop',
+  AnalyzeWorkbook: 'analyzeWorkbook',
 } as const
 export type TaskType = (typeof TaskType)[keyof typeof TaskType]
 

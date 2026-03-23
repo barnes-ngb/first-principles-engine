@@ -647,6 +647,107 @@ Let me know if you'd like any changes!`
   })
 })
 
+describe('parseAIResponse — enhanced fallbacks', () => {
+  const makeResponse = (message: string): ChatResponse => ({
+    message,
+    model: 'claude-sonnet-4-20250514',
+    usage: { inputTokens: 100, outputTokens: 200 },
+  })
+
+  it('extracts plan from nested { plan: { days: [...] } } wrapper', () => {
+    const wrapped = {
+      plan: {
+        days: [
+          {
+            day: 'Monday',
+            timeBudgetMinutes: 150,
+            items: [{ title: 'Math practice', subjectBucket: 'Math', estimatedMinutes: 20 }],
+          },
+        ],
+        minimumWin: 'Complete math',
+      },
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(wrapped)))
+    expect(result).not.toBeNull()
+    expect(result!.days).toHaveLength(1)
+    expect(result!.days[0].items[0].title).toBe('Math practice')
+    expect(result!.minimumWin).toBe('Complete math')
+  })
+
+  it('extracts plan from nested { weeklyPlan: { days: [...] } } wrapper', () => {
+    const wrapped = {
+      weeklyPlan: {
+        days: [
+          { day: 'Tuesday', items: [{ title: 'Reading', estimatedMinutes: 15, subjectBucket: 'Reading' }] },
+        ],
+        minimumWin: 'Read daily',
+      },
+    }
+    const result = parseAIResponse(makeResponse(JSON.stringify(wrapped)))
+    expect(result).not.toBeNull()
+    expect(result!.days).toHaveLength(1)
+    expect(result!.days[0].day).toBe('Tuesday')
+  })
+
+  it('falls back to text extraction when no JSON is found', () => {
+    const text = `Here is your plan:
+
+Monday:
+- Handwriting practice — 20 min
+- GATB Reading — 30 min
+- Math worksheet — 25 min
+
+Tuesday:
+- Booster cards — 15 min
+- Sight word games — 15 min
+
+Let me know if you want changes!`
+
+    const result = parseAIResponse(makeResponse(text))
+    expect(result).not.toBeNull()
+    expect(result!.days.length).toBeGreaterThanOrEqual(2)
+    expect(result!.days[0].day).toBe('Monday')
+    expect(result!.days[0].items.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('falls back to text extraction when days array is empty in JSON', () => {
+    const result = parseAIResponse(makeResponse(JSON.stringify({ days: [], minimumWin: 'x' })))
+    // Empty days JSON → returns null (no text fallback content either)
+    expect(result).toBeNull()
+  })
+
+  it('guesses subject from activity title in text fallback', () => {
+    const text = `Monday:
+- GATB Math lesson 5 — 30 min
+- Phonics practice — 15 min
+- Handwriting — 20 min
+- Science experiment — 25 min`
+
+    const result = parseAIResponse(makeResponse(text))
+    expect(result).not.toBeNull()
+    const items = result!.days[0].items
+    const mathItem = items.find((i) => i.title.includes('Math'))
+    expect(mathItem?.subjectBucket).toBe(SubjectBucket.Math)
+    const phonicsItem = items.find((i) => i.title.includes('Phonics'))
+    expect(phonicsItem?.subjectBucket).toBe(SubjectBucket.Reading)
+    const handwritingItem = items.find((i) => i.title.includes('Handwriting'))
+    expect(handwritingItem?.subjectBucket).toBe(SubjectBucket.LanguageArts)
+    const scienceItem = items.find((i) => i.title.includes('Science'))
+    expect(scienceItem?.subjectBucket).toBe(SubjectBucket.Science)
+  })
+
+  it('extracts time from bullet items in text fallback', () => {
+    const text = `Monday:
+- Booster cards — 15 min
+- Reading practice — 30 min`
+
+    const result = parseAIResponse(makeResponse(text))
+    expect(result).not.toBeNull()
+    const booster = result!.days[0].items.find((i) => i.title.includes('Booster'))
+    expect(booster?.estimatedMinutes).toBe(15)
+  })
+})
+
 describe('buildPlannerPrompt with dailyRoutine', () => {
   it('includes daily routine when provided', () => {
     const inputs: PlanGeneratorInputs = {
