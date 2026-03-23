@@ -770,7 +770,11 @@ Return as JSON:
         if (!response) {
           // AI call threw — snack already set above
         } else {
-          setSnack({ text: 'AI response could not be parsed — used local planner.', severity: 'info' })
+          console.warn('[handleGeneratePlan] AI response unparseable:', response.message.substring(0, 500))
+          setSnack({
+            text: 'AI plan could not be read — using your routine as the base. You can try "Generate Plan" again or adjust the plan below.',
+            severity: 'info',
+          })
         }
       }
     } else {
@@ -2256,8 +2260,8 @@ Generate a plan for Monday through Friday.`.trim()
             </IconButton>
           </Stack>
 
-          {/* Generate Plan button — visible after chat exchange or photo labels, before a draft exists */}
-          {!currentDraft && !applied && (
+          {/* Generate Plan button — visible after setup is complete (or conversation loaded), before a draft exists */}
+          {(setupComplete || conversationLoaded) && !currentDraft && !applied && (
             <Button
               variant="contained"
               color="primary"

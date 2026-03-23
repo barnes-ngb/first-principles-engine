@@ -140,34 +140,109 @@ export function applySnapshotSuggestions(
 // ── Core Draft Plan Generator ──────────────────────────────────
 
 export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftWeeklyPlan {
-  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], subjectTimeDefaults } = inputs
+  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], dailyRoutine, subjectTimeDefaults } = inputs
   const minutesPerDay = hoursPerDay * 60
 
   // Apply snapshot suggestions
   const { assignments: processed, skipSuggestions } = applySnapshotSuggestions(assignments, snapshot)
 
-  // Build per-day app block items
-  const appMinutesPerDay = appBlocks.reduce((sum, b) => sum + b.defaultMinutes, 0)
-  const remainingPerDay = Math.max(0, minutesPerDay - appMinutesPerDay)
+  // ── Parse daily routine into plan items ──
+  const routineItems: DraftPlanItem[] = []
+  if (dailyRoutine) {
+    const lines = dailyRoutine.split('\n').filter(l => l.trim())
+    for (const line of lines) {
+      // Parse format: "Activity name — 20 min — Subject" or "Activity name (20 min) — Subject"
+      const dashMatch = line.match(/^(.+?)\s*[—–-]\s*(\d+)\s*min\s*(?:[—–-]\s*(.+?))?(?:\s*[—–-]\s*(.+?))?$/)
+      const parenMatch = line.match(/^(.+?)\s*\((\d+)\s*min\)\s*(?:[—–-]\s*(.+?))?$/)
+
+      const match = dashMatch || parenMatch
+      if (!match) continue
+
+      const name = match[1].trim()
+      const minutes = parseInt(match[2])
+      // Try to find subject from remaining parts
+      let subject: SubjectBucket = SubjectBucket.Other
+      const remaining = [match[3], match[4]].filter(Boolean).join(' ').trim().toLowerCase()
+
+      if (remaining.includes('reading') || remaining.includes('phonics')) subject = SubjectBucket.Reading
+      else if (remaining.includes('math')) subject = SubjectBucket.Math
+      else if (remaining.includes('language') || remaining.includes('handwriting') || remaining.includes('writing')) subject = SubjectBucket.LanguageArts
+      else if (remaining.includes('science')) subject = SubjectBucket.Science
+      else if (remaining.includes('social')) subject = SubjectBucket.SocialStudies
+      else subject = guessSubjectFromTitle(name)
+
+      // Check if this is an app block
+      const isApp = remaining.includes('app') || remaining.includes('tablet') ||
+                     name.toLowerCase().includes('reading eggs') || name.toLowerCase().includes('math app')
+
+      routineItems.push({
+        id: generateItemId(),
+        title: name,
+        subjectBucket: subject,
+        estimatedMinutes: minutes,
+        skillTags: [],
+        isAppBlock: isApp,
+        accepted: true,
+        category: 'must-do',
+        mvdEssential: minutes >= 15,
+      })
+    }
+  }
 
   // Initialize day plans
   const dayMap = new Map<WeekDay, DraftDayPlan>()
+  const routineMinutesPerDay = routineItems.reduce((sum, item) => sum + item.estimatedMinutes, 0)
+  const appMinutesPerDay = appBlocks.reduce((sum, b) => sum + b.defaultMinutes, 0)
+
   for (const day of WEEK_DAYS) {
-    const appItems: DraftPlanItem[] = appBlocks.map((block) => ({
-      id: generateItemId(),
-      title: block.label,
-      subjectBucket: SubjectBucket.Other,
-      estimatedMinutes: block.defaultMinutes,
-      skillTags: [],
-      isAppBlock: true,
-      accepted: true,
-    }))
+    const dayItems: DraftPlanItem[] = []
+
+    if (routineItems.length > 0) {
+      // Use routine items as the base — give each a fresh ID per day
+      for (const item of routineItems) {
+        dayItems.push({ ...item, id: generateItemId() })
+      }
+      // Add app blocks that aren't already covered by routine
+      for (const block of appBlocks) {
+        const alreadyInRoutine = routineItems.some(r =>
+          r.title.toLowerCase().includes(block.label.toLowerCase()) ||
+          block.label.toLowerCase().includes(r.title.toLowerCase())
+        )
+        if (!alreadyInRoutine) {
+          dayItems.push({
+            id: generateItemId(),
+            title: block.label,
+            subjectBucket: SubjectBucket.Other,
+            estimatedMinutes: block.defaultMinutes,
+            skillTags: [],
+            isAppBlock: true,
+            accepted: true,
+            category: 'choose',
+          })
+        }
+      }
+    } else {
+      // No routine — fall back to app blocks only (old behavior)
+      const appItems: DraftPlanItem[] = appBlocks.map((block) => ({
+        id: generateItemId(),
+        title: block.label,
+        subjectBucket: SubjectBucket.Other,
+        estimatedMinutes: block.defaultMinutes,
+        skillTags: [],
+        isAppBlock: true,
+        accepted: true,
+      }))
+      dayItems.push(...appItems)
+    }
+
     dayMap.set(day, {
       day,
       timeBudgetMinutes: minutesPerDay,
-      items: appItems,
+      items: dayItems,
     })
   }
+
+  const remainingPerDay = Math.max(0, minutesPerDay - (routineItems.length > 0 ? routineMinutesPerDay : appMinutesPerDay))
 
   // Distribute active assignments across days (greedy: fill least-loaded day)
   const activeAssignments = processed.filter(
