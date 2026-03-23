@@ -5,7 +5,7 @@ import Chip from '@mui/material/Chip'
 import Divider from '@mui/material/Divider'
 import Typography from '@mui/material/Typography'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
-import type { ChallengeCard, PlaytestFeedback } from '../../core/types'
+import type { AdventureTree, ChallengeCard, PlaytestFeedback } from '../../core/types'
 import { PlaytestReaction } from '../../core/types/workshop'
 import { useTTS } from '../../core/hooks/useTTS'
 import { computeSummary } from './playtestUtils'
@@ -21,6 +21,8 @@ const REACTION_EMOJI: Record<string, string> = {
 interface PlaytestSummaryViewProps {
   feedback: PlaytestFeedback[]
   cards: ChallengeCard[]
+  /** Optional adventure tree — when provided, feedback items are looked up as nodes */
+  adventureTree?: AdventureTree
   testerName: string
   gameTitle: string
   onSendToCreator: () => void
@@ -31,6 +33,7 @@ interface PlaytestSummaryViewProps {
 export default function PlaytestSummaryView({
   feedback,
   cards,
+  adventureTree,
   testerName,
   gameTitle,
   onSendToCreator,
@@ -86,11 +89,13 @@ export default function PlaytestSummaryView({
         <>
           <Divider sx={{ mb: 2 }} />
           <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
-            Cards to review ({flaggedFeedback.length}):
+            {adventureTree ? 'Scenes' : 'Cards'} to review ({flaggedFeedback.length}):
           </Typography>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mb: 3 }}>
             {flaggedFeedback.map((fb) => {
               const card = cards.find((c) => c.id === fb.cardId)
+              const adventureNode = adventureTree?.nodes[fb.cardId]
+              const itemContent = card?.content ?? adventureNode?.text ?? fb.cardId
               return (
                 <Box
                   key={fb.cardId}
@@ -108,7 +113,7 @@ export default function PlaytestSummaryView({
                     </Typography>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                        {card?.content ?? fb.cardId}
+                        {itemContent.length > 150 ? itemContent.slice(0, 150) + '...' : itemContent}
                       </Typography>
                       {fb.comment && (
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
