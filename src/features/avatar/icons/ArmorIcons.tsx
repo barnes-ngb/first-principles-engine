@@ -3,7 +3,10 @@ import type { ArmorPiece } from '../../../core/types'
 // ── Tier color scheme ──────────────────────────────────────────────
 
 export const TIER_COLORS = {
+  wood:       { fill: '#8B6914', stroke: '#6B4F12', glow: 'none' },
   stone:      { fill: '#8B7355', stroke: '#5C4A2A', glow: 'none' },
+  iron:       { fill: '#6E6E6E', stroke: '#4E4E4E', glow: 'none' },
+  gold:       { fill: '#DAA520', stroke: '#B8860B', glow: '#332200' },
   diamond:    { fill: '#4FC3F7', stroke: '#FFD700', glow: '#4FC3F7' },
   netherite:  { fill: '#2C2C3E', stroke: '#9C27B0', glow: '#7B1FA2' },
   basic:      { fill: '#FF9EBC', stroke: '#FF6B9D', glow: 'none' },
