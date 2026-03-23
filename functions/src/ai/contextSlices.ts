@@ -28,6 +28,7 @@ export const ContextSlice = {
   SightWords: "sightWords",
   RecentEval: "recentEval",
   WordMastery: "wordMastery",
+  GeneratedContent: "generatedContent",
 } as const;
 export type ContextSlice = (typeof ContextSlice)[keyof typeof ContextSlice];
 
@@ -37,7 +38,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   plan: [
     "charter", "childProfile", "recentSessions", "workbookPaces",
     "weekFocus", "hoursProgress", "engagement", "gradeResults",
-    "bookStatus", "sightWords", "recentEval", "wordMastery",
+    "bookStatus", "sightWords", "recentEval", "wordMastery", "generatedContent",
   ],
   chat: ["charter", "childProfile"],
   generate: ["charter", "childProfile"],
@@ -245,6 +246,9 @@ export async function buildContextForTask(
   if (slices.includes("wordMastery")) {
     fetches.push({ slice: "wordMastery", promise: loadWordMasterySummary(db, familyId, childId) });
   }
+  if (slices.includes("generatedContent")) {
+    fetches.push({ slice: "generatedContent", promise: loadGeneratedContent(db, familyId, childId) });
+  }
 
   // Await all in parallel
   const results = await Promise.allSettled(fetches.map((f) => f.promise));
@@ -369,5 +373,43 @@ export async function buildContextForTask(
     if (wordMasteryContext) sections.push(wordMasteryContext);
   }
 
+  // Generated content (books, stories available for plan activities)
+  if (sliceData.has("generatedContent")) {
+    const generatedContent = sliceData.get("generatedContent") as string;
+    if (generatedContent) sections.push(generatedContent);
+  }
+
   return sections;
+}
+
+// ── Generated content loader ──────────────────────────────────
+
+/** Load recently generated books/stories that can be included as plan activities. */
+async function loadGeneratedContent(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<string> {
+  const snap = await db
+    .collection(`families/${familyId}/books`)
+    .where("childId", "==", childId)
+    .orderBy("createdAt", "desc")
+    .limit(5)
+    .get();
+
+  if (snap.empty) return "";
+
+  const lines = ["AVAILABLE GENERATED CONTENT:"];
+  for (const bookDoc of snap.docs) {
+    const book = bookDoc.data() as {
+      title?: string;
+      skillTags?: string[];
+      status?: string;
+    };
+    const tags = book.skillTags?.join(", ") || "general reading";
+    lines.push(`- Reading book: "${book.title}" (targets: ${tags}${book.status === "draft" ? ", in progress" : ""})`);
+  }
+  lines.push('Include 1-2 of these as "choose" activities in the plan, like "Read: [title]".');
+
+  return lines.join("\n");
 }
