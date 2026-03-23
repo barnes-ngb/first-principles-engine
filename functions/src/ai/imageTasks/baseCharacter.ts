@@ -129,6 +129,8 @@ RULES:
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "base-character-generation",
       model: "dall-e-3",
+      inputTokens: 0,
+      outputTokens: 0,
       childId,
       themeStyle,
       storagePath,

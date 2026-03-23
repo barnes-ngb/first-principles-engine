@@ -11,6 +11,7 @@ import InputLabel from '@mui/material/InputLabel'
 import MenuItem from '@mui/material/MenuItem'
 import Select from '@mui/material/Select'
 import Stack from '@mui/material/Stack'
+import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { getDocs, query, where } from 'firebase/firestore'
 
@@ -27,7 +28,7 @@ import {
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Artifact } from '../../core/types'
-import { EvidenceType } from '../../core/types/enums'
+import { EvidenceType, SubjectBucket } from '../../core/types/enums'
 import {
   generatePortfolioMarkdown,
   getMonthLabel,
@@ -50,11 +51,37 @@ export default function PortfolioPage() {
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
 
+  // Portfolio filters
+  const [searchQuery, setSearchQuery] = useState('')
+  const [filterSubject, setFilterSubject] = useState<SubjectBucket | ''>('')
+  const [filterType, setFilterType] = useState<EvidenceType | ''>('')
+
   // Filter artifacts by active child
-  const artifacts = useMemo(
+  const childArtifacts = useMemo(
     () => activeChildId ? allArtifacts.filter((a) => a.childId === activeChildId) : allArtifacts,
     [allArtifacts, activeChildId],
   )
+
+  // Apply search + subject + type filters
+  const artifacts = useMemo(() => {
+    let filtered = childArtifacts
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      filtered = filtered.filter(
+        (a) =>
+          a.title?.toLowerCase().includes(q) ||
+          a.content?.toLowerCase().includes(q) ||
+          a.notes?.toLowerCase().includes(q),
+      )
+    }
+    if (filterSubject) {
+      filtered = filtered.filter((a) => a.tags?.subjectBucket === filterSubject)
+    }
+    if (filterType) {
+      filtered = filtered.filter((a) => (a.type as string) === filterType)
+    }
+    return filtered
+  }, [childArtifacts, searchQuery, filterSubject, filterType])
 
   const { start: monthStart, end: monthEnd } = useMemo(
     () => getMonthRange(year, month),
@@ -187,10 +214,47 @@ export default function PortfolioPage() {
               </Typography>
             </Stack>
           ) : (
-            <Typography variant="subtitle2" color="text.secondary">
-              {artifacts.length} artifacts for {activeChild?.name ?? 'child'} in {monthLabel} — {selectedIds.size}{' '}
-              selected for portfolio
-            </Typography>
+            <>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <TextField
+                  label="Search by title"
+                  size="small"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  sx={{ minWidth: 180 }}
+                />
+                <FormControl size="small" sx={{ minWidth: 140 }}>
+                  <InputLabel>Subject</InputLabel>
+                  <Select
+                    value={filterSubject}
+                    label="Subject"
+                    onChange={(e) => setFilterSubject(e.target.value as SubjectBucket | '')}
+                  >
+                    <MenuItem value="">All Subjects</MenuItem>
+                    {Object.values(SubjectBucket).map((s) => (
+                      <MenuItem key={s} value={s}>{s}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ minWidth: 120 }}>
+                  <InputLabel>Type</InputLabel>
+                  <Select
+                    value={filterType}
+                    label="Type"
+                    onChange={(e) => setFilterType(e.target.value as EvidenceType | '')}
+                  >
+                    <MenuItem value="">All Types</MenuItem>
+                    {Object.values(EvidenceType).map((t) => (
+                      <MenuItem key={t} value={t}>{t}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Stack>
+              <Typography variant="subtitle2" color="text.secondary">
+                {artifacts.length}{artifacts.length !== childArtifacts.length ? ` of ${childArtifacts.length}` : ''} artifacts for {activeChild?.name ?? 'child'} in {monthLabel} — {selectedIds.size}{' '}
+                selected for portfolio
+              </Typography>
+            </>
           )}
 
           {activeChildId && <>

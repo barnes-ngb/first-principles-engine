@@ -284,6 +284,8 @@ IMPORTANT: The child will overlay their own characters on top of this scene. So 
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "image-generation",
       model: imageOpts.model ?? "dall-e-3",
+      inputTokens: 0,
+      outputTokens: 0,
       prompt: prompt.slice(0, 200),
       style: style ?? "general",
       size: size ?? "1024x1024",
