@@ -81,40 +81,68 @@ Profile selection happens at `/login` (ProfileSelectPage) before accessing the a
 
 **Route:** `/planner/chat` (parent-only)
 
-**Purpose:** AI-powered conversational weekly plan creation.
+**Purpose:** Shelly's Sunday night workflow — set up the week, review the AI plan, lock it in.
 
-### Step-by-step
+### Step-by-step (Returning User)
 
-1. **Navigate** to Plan My Week from sidebar (or `/planner/chat`)
-2. **Verify** profile selection gate — must be logged in as parent
-3. **Select child** — choose Lincoln or London from the child selector
-4. **Start conversation** — the chat interface loads with a greeting
-5. **Provide context** — tell the AI about the week:
-   - Energy level expectations
-   - Any schedule constraints ("we have a dentist appointment Tuesday")
-   - Focus areas ("Lincoln needs extra phonics this week")
-   - App blocks to include ("Reading Eggs 15 min daily")
-6. **Request plan generation** — say "generate the plan" or "make a plan"
-7. **Verify JSON response** — AI should return a `DraftWeeklyPlan` JSON:
+1. **Navigate** to Plan My Week from sidebar
+2. **Select child** — choose Lincoln or London from the child selector
+3. **Verify auto-suggest** — Week Focus fields (theme, virtue, scripture, heart question) should auto-populate from AI within a few seconds. Shelly can edit any field.
+4. **Compact setup loads** — should show:
+   - [ ] Energy selector (Full / Lighter / Tough Week)
+   - [ ] "Your usual routine" shown read-only (loaded from Firestore)
+   - [ ] "Edit" button expands routine to editable text field
+   - [ ] Workbooks shown as chips (loaded from workbookConfigs)
+   - [ ] Special notes text field
+   - [ ] Per-subject default times (if configured)
+5. **Tap "Generate Plan"** — loading indicator while AI generates
+6. **Verify plan preview** — should render as **full-width card** (NOT inside a chat bubble):
    - [ ] 5 days (Monday-Friday)
-   - [ ] Each day has a `timeBudgetMinutes`
-   - [ ] Formation block first each day
-   - [ ] 3-4 items marked `mvdEssential: true`
-   - [ ] Items have `category`: `"must-do"` or `"choose"`
-   - [ ] App blocks have `isAppBlock: true`
-   - [ ] Valid `subjectBucket` values
-   - [ ] `minimumWin` sentence present
-8. **Review plan preview** — plan should render in the UI preview panel
-9. **Accept/modify** — user can accept items, remove them, or ask for changes
-10. **Save plan** — confirm it writes to `families/{familyId}/weeks/{weekKey}`
+   - [ ] Each day shows time used / budget
+   - [ ] **Must Do** section: 3-4 items (Formation, core reading, core math)
+   - [ ] **Choose** section: 3-4 options (apps, enrichment, read-aloud)
+   - [ ] Items have estimated minutes matching subject defaults
+   - [ ] Skip suggestions shown if applicable
+   - [ ] Minimum Win text visible
+7. **Quick adjustments** — tap a chip (e.g., "Make Wed light") → plan updates immediately without typing
+8. **Chat adjustments** — type "move math to Thu" in the text input → plan updates
+9. **Lock in** — tap "Lock In This Plan" button
+10. **Verify post-apply:**
+    - [ ] Success message with "Go to Today →" button
+    - [ ] Print Materials buttons visible (per-day + All Week)
+    - [ ] "Redo Plan" button available
+11. **Check Today page** — daily checklist should have items from the plan
+
+### Step-by-step (First-Time User)
+
+1. **Navigate** to Plan My Week
+2. **Full setup wizard** should show (no saved routine/workbooks):
+   - [ ] Energy selector
+   - [ ] Workbook add fields with subject selector
+   - [ ] Read-aloud text field
+   - [ ] Daily routine 6-line text field with placeholder example
+   - [ ] Special notes
+3. **Complete wizard** → follow steps 5-11 from Returning User flow
 
 ### What to Watch For
 
-- Plan respects hours budget (doesn't exceed daily limit)
-- MVD items are the core 3-4 (formation, math, reading, speech if applicable)
-- Skip suggestions populated if AI sees redundancy
-- Recent evaluation context is injected (check that recommendations appear)
-- Enriched context loads: workbook pace, recent sessions, hours progress
+- **No raw JSON** — plan should always render as visual day cards, never as JSON text
+- Plan respects hours budget and subject default times
+- MVD week generates only must-do items
+- "Repeat Last Week" creates a plan without AI call
+- Feature flag defaults to ON (no need to toggle in Settings)
+- If AI fails, error message explains why (not just "used local planner")
+- Chat typing "generate a plan" redirects to proper generate flow
+- Adjustment chips apply immediately (single tap, no send button)
+- Plan preview is full-width on mobile (readable, not cramped in chat bubble)
+
+### Per-Subject Default Times
+
+- [ ] Configurable in setup wizard (stepper: 10-60m in 5m increments)
+- [ ] Saved to Firestore per child
+- [ ] Loaded and pre-filled on return visits
+- [ ] AI uses defaults as baseline for estimatedMinutes
+- [ ] Changing defaults and regenerating shows updated times
 
 ---
 
