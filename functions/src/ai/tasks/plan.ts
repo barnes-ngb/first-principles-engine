@@ -58,7 +58,7 @@ export const handlePlan = async (
   const result = await callClaude({
     apiKey,
     model,
-    maxTokens: 4096,
+    maxTokens: 8192,
     systemPrompt,
     messages,
   });

@@ -543,6 +543,14 @@ export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
     minimumWin: 'string',
   }))
 
+  lines.push('')
+  lines.push('CRITICAL SIZE CONSTRAINTS:')
+  lines.push('- Keep item titles SHORT (max 6 words). Example: "GATB Reading Lesson 21" not "Good and the Beautiful Reading — Lesson 21: Short vowel review with comprehension questions"')
+  lines.push('- Keep skillTags to max 1 tag per item (the most relevant one)')
+  lines.push('- Keep skipGuidance to max 15 words or omit if not needed')
+  lines.push('- Do NOT include explanations, descriptions, or commentary in the JSON')
+  lines.push('- Total response must be under 4000 tokens. Be concise.')
+
   return lines.join('\n')
 }
 
@@ -573,7 +581,14 @@ function extractJsonObject(text: string): string | null {
   const firstBrace = candidate.indexOf('{')
   if (firstBrace === -1) return null
   const lastBrace = candidate.lastIndexOf('}')
-  if (lastBrace <= firstBrace) return null
+
+  if (lastBrace <= firstBrace) {
+    // No closing brace — likely truncated. Extract from first brace to end
+    // and let forgivingJsonParse attempt repair.
+    const truncated = candidate.slice(firstBrace)
+    console.log('[extractJsonObject] No closing brace found — extracted truncated JSON:', truncated.length, 'chars')
+    return truncated
+  }
 
   const extracted = candidate.slice(firstBrace, lastBrace + 1)
   console.log('[extractJsonObject] Extracted', extracted.length, 'chars')
@@ -639,6 +654,77 @@ function guessSubjectFromTitle(title: string): SubjectBucket {
 }
 
 /**
+ * Attempt to repair truncated JSON by closing open brackets/braces.
+ * Tracks nesting with a stack, trims any incomplete trailing value,
+ * and appends the missing closers. Returns null if already balanced.
+ */
+function repairTruncatedJson(text: string): string | null {
+  const stack: string[] = []
+  let inString = false
+  let escaped = false
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+
+    if (escaped) {
+      escaped = false
+      continue
+    }
+
+    if (ch === '\\' && inString) {
+      escaped = true
+      continue
+    }
+
+    if (ch === '"') {
+      inString = !inString
+      continue
+    }
+
+    if (inString) continue
+
+    if (ch === '{' || ch === '[') {
+      stack.push(ch)
+    } else if (ch === '}') {
+      if (stack.length > 0 && stack[stack.length - 1] === '{') {
+        stack.pop()
+      }
+    } else if (ch === ']') {
+      if (stack.length > 0 && stack[stack.length - 1] === '[') {
+        stack.pop()
+      }
+    }
+  }
+
+  if (stack.length === 0) return null // Already balanced, parse error is something else
+
+  let suffix = ''
+  // If we're in the middle of a string, close it
+  if (inString) {
+    suffix += '"'
+  }
+
+  // Remove trailing partial value (incomplete string, number, etc.)
+  let base = text.trimEnd()
+
+  // Remove trailing comma if present
+  if (base.endsWith(',')) {
+    base = base.slice(0, -1)
+  }
+
+  // Close all open brackets/braces in reverse order
+  const closers: Record<string, string> = { '{': '}', '[': ']' }
+  for (let i = stack.length - 1; i >= 0; i--) {
+    suffix += closers[stack[i]] || ''
+  }
+
+  const repaired = base + suffix
+  console.log(`[repairTruncatedJson] Added ${suffix.length} closing chars. Stack depth was ${stack.length}`)
+
+  return repaired
+}
+
+/**
  * Attempt to fix common JSON issues from LLM output:
  * - Trailing commas before ] or }
  * - Single-quoted strings
@@ -673,35 +759,19 @@ function forgivingJsonParse(text: string): Record<string, unknown> | null {
   }
 
   // Try to repair truncated JSON by closing open brackets/braces
-  let openBraces = 0
-  let openBrackets = 0
-  let inString = false
-  let escaped = false
-  for (const ch of fixed) {
-    if (escaped) { escaped = false; continue }
-    if (ch === '\\') { escaped = true; continue }
-    if (ch === '"') { inString = !inString; continue }
-    if (inString) continue
-    if (ch === '{') openBraces++
-    else if (ch === '}') openBraces--
-    else if (ch === '[') openBrackets++
-    else if (ch === ']') openBrackets--
+  const repaired = repairTruncatedJson(fixed)
+  if (repaired) {
+    try {
+      const result = JSON.parse(repaired) as Record<string, unknown>
+      console.log('[forgivingJsonParse] Truncation repair succeeded')
+      return result
+    } catch (err) {
+      console.error('[forgivingJsonParse] Repair parse failed:', (err as Error).message)
+    }
   }
 
-  // Close any unclosed strings, remove trailing comma, then close brackets/braces
-  if (inString) fixed += '"'
-  fixed = fixed.replace(/,\s*$/, '')
-  while (openBrackets > 0) { fixed += ']'; openBrackets-- }
-  while (openBraces > 0) { fixed += '}'; openBraces-- }
-
-  try {
-    const result = JSON.parse(fixed) as Record<string, unknown>
-    console.log('[forgivingJsonParse] Truncation repair succeeded')
-    return result
-  } catch (err) {
-    console.error('[forgivingJsonParse] All recovery attempts failed:', (err as Error).message)
-    return null
-  }
+  console.error('[forgivingJsonParse] All recovery attempts failed')
+  return null
 }
 
 /** Parse and validate an AI response into a DraftWeeklyPlan. Returns null if malformed. */
@@ -872,4 +942,85 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
     // Last-resort: try to extract structured day data from free text
     return extractDaysFromText(response.message)
   }
+}
+
+/**
+ * If a parsed plan has fewer than 5 days (e.g., due to truncation repair),
+ * fill missing days using items parsed from the daily routine text.
+ */
+export function fillMissingDaysFromRoutine(
+  plan: DraftWeeklyPlan,
+  dailyRoutine: string | undefined,
+  hoursPerDay: number,
+): DraftWeeklyPlan {
+  if (plan.days.length >= 5 || !dailyRoutine) return plan
+
+  const existingDayNames = new Set(plan.days.map(d => d.day))
+  const missingDays = WEEK_DAYS.filter(d => !existingDayNames.has(d))
+
+  if (missingDays.length === 0) return plan
+
+  // Parse routine items from the text (reuse the same parsing as generateDraftPlanFromInputs)
+  const routineItems = parseRoutineText(dailyRoutine)
+  if (routineItems.length === 0) return plan
+
+  const filledDays = [...plan.days]
+  for (const day of missingDays) {
+    filledDays.push({
+      day,
+      timeBudgetMinutes: hoursPerDay * 60,
+      items: routineItems.map(item => ({ ...item, id: generateItemId() })),
+    })
+  }
+
+  // Sort days in weekday order
+  const dayOrder = new Map(WEEK_DAYS.map((d, i) => [d, i]))
+  filledDays.sort((a, b) => (dayOrder.get(a.day as WeekDay) ?? 99) - (dayOrder.get(b.day as WeekDay) ?? 99))
+
+  console.log(`[fillMissingDaysFromRoutine] Added ${missingDays.length} days from routine (AI provided ${plan.days.length})`)
+
+  return { ...plan, days: filledDays }
+}
+
+/** Parse daily routine text into DraftPlanItems (shared helper). */
+function parseRoutineText(dailyRoutine: string): DraftPlanItem[] {
+  const items: DraftPlanItem[] = []
+  const lines = dailyRoutine.split('\n').filter(l => l.trim())
+
+  for (const line of lines) {
+    const dashMatch = line.match(/^(.+?)\s*[—–-]\s*(\d+)\s*min\s*(?:[—–-]\s*(.+?))?(?:\s*[—–-]\s*(.+?))?$/)
+    const parenMatch = line.match(/^(.+?)\s*\((\d+)\s*min\)\s*(?:[—–-]\s*(.+?))?$/)
+
+    const match = dashMatch || parenMatch
+    if (!match) continue
+
+    const name = match[1].trim()
+    const minutes = parseInt(match[2])
+    let subject: SubjectBucket = SubjectBucket.Other
+    const remaining = [match[3], match[4]].filter(Boolean).join(' ').trim().toLowerCase()
+
+    if (remaining.includes('reading') || remaining.includes('phonics')) subject = SubjectBucket.Reading
+    else if (remaining.includes('math')) subject = SubjectBucket.Math
+    else if (remaining.includes('language') || remaining.includes('handwriting') || remaining.includes('writing')) subject = SubjectBucket.LanguageArts
+    else if (remaining.includes('science')) subject = SubjectBucket.Science
+    else if (remaining.includes('social')) subject = SubjectBucket.SocialStudies
+    else subject = guessSubjectFromTitle(name)
+
+    const isApp = remaining.includes('app') || remaining.includes('tablet') ||
+                   name.toLowerCase().includes('reading eggs') || name.toLowerCase().includes('math app')
+
+    items.push({
+      id: generateItemId(),
+      title: name,
+      subjectBucket: subject,
+      estimatedMinutes: minutes,
+      skillTags: [],
+      isAppBlock: isApp,
+      accepted: true,
+      category: 'must-do',
+      mvdEssential: minutes >= 15,
+    })
+  }
+
+  return items
 }
