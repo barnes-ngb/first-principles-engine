@@ -440,7 +440,7 @@ export const handleWorkshop = async (
   const result = await callClaude({
     apiKey,
     model,
-    maxTokens: isCards ? 6144 : isAdventure ? 8192 : 4096,
+    maxTokens: isCards ? 8192 : isAdventure ? 16384 : 4096,
     systemPrompt,
     messages: [
       {
