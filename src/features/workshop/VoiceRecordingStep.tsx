@@ -14,6 +14,7 @@ import { doc, updateDoc } from 'firebase/firestore'
 import { db } from '../../core/firebase/firestore'
 import { useAudioRecorder } from '../../core/hooks/useAudioRecorder'
 import type {
+  AdventureTree,
   BoardSpace,
   ChallengeCard,
   GeneratedGame,
@@ -31,7 +32,7 @@ interface RecordableItem {
 }
 
 interface VoiceRecordingStepProps {
-  game: GeneratedGame
+  game: GeneratedGame | AdventureTree
   gameId: string
   familyId: string
   childId: string
@@ -46,8 +47,19 @@ interface VoiceRecordingStepProps {
 
 // ── Helpers ───────────────────────────────────────────────────────
 
+function isAdventureTree(game: GeneratedGame | AdventureTree): game is AdventureTree {
+  return 'nodes' in game && 'rootNodeId' in game
+}
+
 /** Build the list of recordable items from game data */
-function buildRecordableItems(game: GeneratedGame): RecordableItem[] {
+function buildRecordableItems(game: GeneratedGame | AdventureTree): RecordableItem[] {
+  if (isAdventureTree(game)) {
+    return buildAdventureRecordableItems(game)
+  }
+  return buildBoardRecordableItems(game)
+}
+
+function buildBoardRecordableItems(game: GeneratedGame): RecordableItem[] {
   const items: RecordableItem[] = []
 
   // Challenge cards
@@ -67,6 +79,34 @@ function buildRecordableItems(game: GeneratedGame): RecordableItem[] {
         text: space.label,
         label: spaceTypeLabel(space.type),
       })
+    }
+  }
+
+  return items
+}
+
+function buildAdventureRecordableItems(adventure: AdventureTree): RecordableItem[] {
+  const items: RecordableItem[] = []
+
+  for (const node of Object.values(adventure.nodes)) {
+    // Narrative nodes
+    items.push({
+      id: `node-${node.id}`,
+      text: node.spokenText,
+      label: node.isEnding
+        ? `\u2B50 ${node.endingType === 'victory' ? 'Victory' : 'Ending'}`
+        : '\uD83D\uDCD6 Scene',
+    })
+
+    // Choice labels
+    if (node.choices) {
+      for (const choice of node.choices) {
+        items.push({
+          id: `choice-${choice.id}`,
+          text: choice.spokenText,
+          label: '\u2934\uFE0F Choice',
+        })
+      }
     }
   }
 

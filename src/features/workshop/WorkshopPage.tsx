@@ -7,8 +7,19 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import Typography from '@mui/material/Typography'
 import { addDoc, deleteField, doc, updateDoc } from 'firebase/firestore'
-import type { ChallengeCard, GeneratedArt, GeneratedGame, PlaytestFeedback, PlaytestSession, StoryGame, StoryInputs, VoiceRecordingMap } from '../../core/types'
-import { GamePhase, PlaytestStatus, WorkshopStatus } from '../../core/types/workshop'
+import type {
+  ActiveAdventureSession,
+  AdventureTree,
+  ChallengeCard,
+  GeneratedArt,
+  GeneratedGame,
+  PlaytestFeedback,
+  PlaytestSession,
+  StoryGame,
+  StoryInputs,
+  VoiceRecordingMap,
+} from '../../core/types'
+import { GamePhase, GameType, PlaytestStatus, WorkshopStatus } from '../../core/types/workshop'
 import type { CardRevision } from '../../core/types/workshop'
 import type { WizardState } from './useWorkshopWizard'
 import { useAI, TaskType } from '../../core/ai/useAI'
@@ -18,11 +29,21 @@ import { db, storyGamesCollection } from '../../core/firebase/firestore'
 import WorkshopWizard from './WorkshopWizard'
 import GamePlayView from './GamePlayView'
 import type { GamePlayResult } from './GamePlayView'
-import { logWorkshopHours, logPlaytestHours, createGameArtifact, recordPlaySession } from './workshopUtils'
+import AdventurePlayView from './AdventurePlayView'
+import type { AdventurePlayResult } from './AdventurePlayView'
+import {
+  logWorkshopHours,
+  logAdventureHours,
+  logPlaytestHours,
+  createGameArtifact,
+  createAdventureArtifact,
+  recordPlaySession,
+  recordAdventurePlaySession,
+} from './workshopUtils'
 import MyGamesGallery from './MyGamesGallery'
 import GameCreationScreen from './GameCreationScreen'
 import VoiceRecordingStep from './VoiceRecordingStep'
-import { generateAllArt } from './workshopArt'
+import { generateAllArt, generateAdventureArt } from './workshopArt'
 import PlaytestView from './PlaytestView'
 import PlaytestSummaryView from './PlaytestSummaryView'
 import { computeSummary } from './playtestUtils'
@@ -34,6 +55,17 @@ function extractGameJson(text: string): GeneratedGame | null {
   if (!match) return null
   try {
     return JSON.parse(match[1].trim()) as GeneratedGame
+  } catch {
+    return null
+  }
+}
+
+/** Extract JSON from <adventure> tags in AI response */
+function extractAdventureJson(text: string): AdventureTree | null {
+  const match = text.match(/<adventure>\s*([\s\S]*?)\s*<\/adventure>/)
+  if (!match) return null
+  try {
+    return JSON.parse(match[1].trim()) as AdventureTree
   } catch {
     return null
   }
@@ -57,6 +89,8 @@ export default function WorkshopPage() {
   const familyId = useFamilyId()
   const { activeChildId, children } = useActiveChild()
 
+  const isAdventure = currentGame?.gameType === GameType.Adventure
+
   // ── Draft auto-save helpers ──────────────────────────────────────
 
   const saveDraftStep = useCallback(
@@ -71,6 +105,9 @@ export default function WorkshopPage() {
         challenges: wizardState.challenges,
         boardStyle: wizardState.boardStyle || '',
         boardLength: wizardState.boardLength || '',
+        storySetup: wizardState.storySetup || '',
+        choiceSeeds: wizardState.choiceSeeds,
+        adventureLength: wizardState.adventureLength || '',
       } as StoryInputs
 
       if (draftDocId) {
@@ -80,6 +117,7 @@ export default function WorkshopPage() {
             doc(db, `families/${familyId}/storyGames/${draftDocId}`),
             {
               storyInputs: partialInputs,
+              gameType: wizardState.gameType || undefined,
               currentWizardStep: step,
               updatedAt: now,
             },
@@ -96,6 +134,7 @@ export default function WorkshopPage() {
             createdAt: now,
             updatedAt: now,
             status: WorkshopStatus.Draft,
+            gameType: (wizardState.gameType as GameType) || undefined,
             storyInputs: partialInputs,
             currentWizardStep: step,
           }
@@ -127,7 +166,7 @@ export default function WorkshopPage() {
   }, [])
 
   const handleWizardComplete = useCallback(
-    async (inputs: StoryInputs) => {
+    async (inputs: StoryInputs, gameType: GameType) => {
       setPhase(GamePhase.Generating)
       setGenerateError(null)
 
@@ -137,105 +176,198 @@ export default function WorkshopPage() {
         return
       }
 
-      // Fire game generation and initial art generation in parallel
-      const [response, artResult] = await Promise.all([
-        chat({
+      if (gameType === GameType.Adventure) {
+        // ── Adventure generation ───────────────────────────────
+        const response = await chat({
           familyId,
           childId: activeChildId,
           taskType: TaskType.Workshop,
-          messages: [{ role: 'user', content: JSON.stringify(inputs) }],
-        }),
-        // Start art generation without title (we don't have it yet)
-        generateAllArt(generateImage, familyId, inputs).catch((err) => {
-          console.warn('Art generation batch failed:', err)
-          return null
-        }),
-      ])
-
-      if (!response) {
-        setGenerateError('Failed to generate game. Please try again.')
-        setPhase(GamePhase.Wizard)
-        return
-      }
-
-      const generatedGame = extractGameJson(response.message)
-      if (!generatedGame) {
-        setGenerateError('The AI response could not be parsed. Please try again.')
-        setPhase(GamePhase.Wizard)
-        return
-      }
-
-      // Build generatedArt from the parallel result
-      let generatedArt: GeneratedArt | undefined
-      if (artResult) {
-        generatedArt = artResult.art
-      }
-
-      // Now generate the title screen with the actual game title
-      try {
-        const titleResult = await generateImage({
-          familyId,
-          prompt: `A title card illustration for a children's board game called '${generatedGame.title}', ${inputs.theme} themed, exciting, colorful, storybook illustration style, centered composition, no text`,
-          style: 'general',
-          size: '1024x1024',
-        })
-        if (titleResult?.url) {
-          generatedArt = { ...generatedArt, titleScreen: titleResult.url }
-        }
-      } catch (err) {
-        console.warn('Title screen generation failed:', err)
-      }
-
-      const now = new Date().toISOString()
-
-      if (draftDocId) {
-        // Upgrade existing draft to ready
-        try {
-          await updateDoc(
-            doc(db, `families/${familyId}/storyGames/${draftDocId}`),
+          messages: [
             {
-              status: WorkshopStatus.Ready,
-              storyInputs: inputs,
-              generatedGame,
-              generatedArt: generatedArt ?? null,
-              playSessions: [],
-              updatedAt: now,
-              currentWizardStep: deleteField(),
+              role: 'user',
+              content: JSON.stringify({ ...inputs, gameType: 'adventure' }),
             },
+          ],
+        })
+
+        if (!response) {
+          setGenerateError('Failed to generate adventure. Please try again.')
+          setPhase(GamePhase.Wizard)
+          return
+        }
+
+        const adventureTree = extractAdventureJson(response.message)
+        if (!adventureTree) {
+          setGenerateError('The AI response could not be parsed. Please try again.')
+          setPhase(GamePhase.Wizard)
+          return
+        }
+
+        // Generate art for adventure
+        let generatedArt: GeneratedArt | undefined
+        try {
+          const artResult = await generateAdventureArt(
+            generateImage,
+            familyId,
+            inputs,
+            adventureTree,
           )
-          setCurrentGame({
-            id: draftDocId,
+          if (artResult) {
+            generatedArt = artResult.art
+          }
+        } catch (err) {
+          console.warn('Adventure art generation failed:', err)
+        }
+
+        const now = new Date().toISOString()
+
+        if (draftDocId) {
+          try {
+            await updateDoc(
+              doc(db, `families/${familyId}/storyGames/${draftDocId}`),
+              {
+                status: WorkshopStatus.Ready,
+                gameType: GameType.Adventure,
+                storyInputs: inputs,
+                adventureTree,
+                generatedArt: generatedArt ?? null,
+                playSessions: [],
+                updatedAt: now,
+                currentWizardStep: deleteField(),
+              },
+            )
+            setCurrentGame({
+              id: draftDocId,
+              childId: activeChildId,
+              createdAt: now,
+              updatedAt: now,
+              status: WorkshopStatus.Ready,
+              gameType: GameType.Adventure,
+              storyInputs: inputs,
+              adventureTree,
+              playSessions: [],
+              generatedArt,
+            })
+          } catch (err) {
+            console.warn('Failed to upgrade draft:', err)
+          }
+        } else {
+          const gameDoc: Omit<StoryGame, 'id'> = {
             childId: activeChildId,
             createdAt: now,
             updatedAt: now,
             status: WorkshopStatus.Ready,
+            gameType: GameType.Adventure,
+            storyInputs: inputs,
+            adventureTree,
+            playSessions: [],
+            generatedArt,
+          }
+          const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
+          setCurrentGame({ ...gameDoc, id: docRef.id })
+        }
+
+        setDraftDocId(null)
+        setPhase(GamePhase.Recording)
+      } else {
+        // ── Board game generation (existing flow) ──────────────
+        const [response, artResult] = await Promise.all([
+          chat({
+            familyId,
+            childId: activeChildId,
+            taskType: TaskType.Workshop,
+            messages: [{ role: 'user', content: JSON.stringify(inputs) }],
+          }),
+          generateAllArt(generateImage, familyId, inputs).catch((err) => {
+            console.warn('Art generation batch failed:', err)
+            return null
+          }),
+        ])
+
+        if (!response) {
+          setGenerateError('Failed to generate game. Please try again.')
+          setPhase(GamePhase.Wizard)
+          return
+        }
+
+        const generatedGame = extractGameJson(response.message)
+        if (!generatedGame) {
+          setGenerateError('The AI response could not be parsed. Please try again.')
+          setPhase(GamePhase.Wizard)
+          return
+        }
+
+        let generatedArt: GeneratedArt | undefined
+        if (artResult) {
+          generatedArt = artResult.art
+        }
+
+        // Generate title screen with the actual game title
+        try {
+          const titleResult = await generateImage({
+            familyId,
+            prompt: `A title card illustration for a children's board game called '${generatedGame.title}', ${inputs.theme} themed, exciting, colorful, storybook illustration style, centered composition, no text`,
+            style: 'general',
+            size: '1024x1024',
+          })
+          if (titleResult?.url) {
+            generatedArt = { ...generatedArt, titleScreen: titleResult.url }
+          }
+        } catch (err) {
+          console.warn('Title screen generation failed:', err)
+        }
+
+        const now = new Date().toISOString()
+
+        if (draftDocId) {
+          try {
+            await updateDoc(
+              doc(db, `families/${familyId}/storyGames/${draftDocId}`),
+              {
+                status: WorkshopStatus.Ready,
+                gameType: GameType.Board,
+                storyInputs: inputs,
+                generatedGame,
+                generatedArt: generatedArt ?? null,
+                playSessions: [],
+                updatedAt: now,
+                currentWizardStep: deleteField(),
+              },
+            )
+            setCurrentGame({
+              id: draftDocId,
+              childId: activeChildId,
+              createdAt: now,
+              updatedAt: now,
+              status: WorkshopStatus.Ready,
+              gameType: GameType.Board,
+              storyInputs: inputs,
+              generatedGame,
+              playSessions: [],
+              generatedArt,
+            })
+          } catch (err) {
+            console.warn('Failed to upgrade draft:', err)
+          }
+        } else {
+          const gameDoc: Omit<StoryGame, 'id'> = {
+            childId: activeChildId,
+            createdAt: now,
+            updatedAt: now,
+            status: WorkshopStatus.Ready,
+            gameType: GameType.Board,
             storyInputs: inputs,
             generatedGame,
             playSessions: [],
             generatedArt,
-          })
-        } catch (err) {
-          console.warn('Failed to upgrade draft:', err)
+          }
+          const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
+          setCurrentGame({ ...gameDoc, id: docRef.id })
         }
-      } else {
-        // Save as new doc
-        const gameDoc: Omit<StoryGame, 'id'> = {
-          childId: activeChildId,
-          createdAt: now,
-          updatedAt: now,
-          status: WorkshopStatus.Ready,
-          storyInputs: inputs,
-          generatedGame,
-          playSessions: [],
-          generatedArt,
-        }
-        const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
-        setCurrentGame({ ...gameDoc, id: docRef.id })
-      }
 
-      setDraftDocId(null)
-      // Go to recording step (optional — user can skip)
-      setPhase(GamePhase.Recording)
+        setDraftDocId(null)
+        setPhase(GamePhase.Recording)
+      }
     },
     [chat, generateImage, familyId, activeChildId, draftDocId],
   )
@@ -255,7 +387,6 @@ export default function WorkshopPage() {
   }, [])
 
   const handleWizardCancel = useCallback(() => {
-    // Draft stays in Firestore for later resume — just exit wizard
     setPhase(GamePhase.Idle)
     setCurrentGame(null)
     setDraftDocId(null)
@@ -266,8 +397,10 @@ export default function WorkshopPage() {
 
   const handleSelectExistingGame = useCallback((game: StoryGame) => {
     setCurrentGame(game)
-    if (game.activeSession?.status === 'playing') {
-      // Show resume dialog
+    const isAdv = game.gameType === GameType.Adventure
+    if (isAdv && game.activeAdventureSession?.status === 'playing') {
+      setResumeDialogOpen(true)
+    } else if (!isAdv && game.activeSession?.status === 'playing') {
       setResumeDialogOpen(true)
     } else {
       setPhase(GamePhase.Ready)
@@ -287,12 +420,19 @@ export default function WorkshopPage() {
   const handleConfirmRestart = useCallback(async () => {
     setConfirmRestartOpen(false)
     if (currentGame?.id && familyId) {
+      const isAdv = currentGame.gameType === GameType.Adventure
       try {
         await updateDoc(
           doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-          { activeSession: null, updatedAt: new Date().toISOString() },
+          {
+            ...(isAdv ? { activeAdventureSession: null } : { activeSession: null }),
+            updatedAt: new Date().toISOString(),
+          },
         )
-        setCurrentGame({ ...currentGame, activeSession: null })
+        setCurrentGame({
+          ...currentGame,
+          ...(isAdv ? { activeAdventureSession: null } : { activeSession: null }),
+        })
       } catch (err) {
         console.warn('Failed to clear active session:', err)
       }
@@ -317,7 +457,6 @@ export default function WorkshopPage() {
 
       if (!familyId || !activeChildId || !currentGame?.generatedGame || !currentGame.id) return
 
-      // Clear activeSession and log results
       try {
         await Promise.all([
           updateDoc(
@@ -349,6 +488,65 @@ export default function WorkshopPage() {
     [familyId, activeChildId, currentGame],
   )
 
+  const handleAdventureFinished = useCallback(
+    async (result: AdventurePlayResult) => {
+      setPhase(GamePhase.Finished)
+
+      if (!familyId || !activeChildId || !currentGame?.adventureTree || !currentGame.id) return
+
+      try {
+        await Promise.all([
+          updateDoc(
+            doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
+            { activeAdventureSession: null, updatedAt: new Date().toISOString() },
+          ),
+          logAdventureHours(
+            familyId,
+            activeChildId,
+            currentGame.adventureTree,
+            result.durationMinutes,
+            result.challengeResults,
+          ),
+          createAdventureArtifact(
+            familyId,
+            activeChildId,
+            currentGame.adventureTree,
+            currentGame.storyInputs.theme,
+            result.pathTaken,
+          ),
+          recordAdventurePlaySession(
+            familyId,
+            currentGame.id,
+            result.playerIds,
+            result.durationMinutes,
+            result.pathTaken,
+            result.choicesMade,
+            result.challengeResults,
+          ),
+        ])
+        setCurrentGame({ ...currentGame, activeAdventureSession: null })
+      } catch (err) {
+        console.warn('Failed to log adventure results:', err)
+      }
+    },
+    [familyId, activeChildId, currentGame],
+  )
+
+  const handleSaveAdventureSession = useCallback(
+    async (session: ActiveAdventureSession) => {
+      if (!currentGame?.id || !familyId) return
+      try {
+        await updateDoc(
+          doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
+          { activeAdventureSession: session, updatedAt: new Date().toISOString() },
+        )
+      } catch (err) {
+        console.warn('Failed to save adventure session:', err)
+      }
+    },
+    [currentGame?.id, familyId],
+  )
+
   // ── Playtest flow ───────────────────────────────────────────────
 
   const handleStartPlaytest = useCallback((game: StoryGame) => {
@@ -362,13 +560,13 @@ export default function WorkshopPage() {
     async (feedback: PlaytestFeedback[], durationMinutes: number) => {
       setPlaytestFeedback(feedback)
       setPlaytestDuration(durationMinutes)
-      // Stay on the summary screen (rendered below)
     },
     [],
   )
 
   const handleSendPlaytest = useCallback(async () => {
-    if (!familyId || !activeChildId || !currentGame?.id || !currentGame.generatedGame || !playtestFeedback) return
+    if (!familyId || !activeChildId || !currentGame?.id || !playtestFeedback) return
+    if (!currentGame.generatedGame && !currentGame.adventureTree) return
 
     const childName = children.find((c) => c.id === activeChildId)?.name ?? 'Tester'
     const summary = computeSummary(playtestFeedback)
@@ -394,15 +592,17 @@ export default function WorkshopPage() {
         },
       )
 
-      // Log hours for Lincoln
-      const hasAudio = playtestFeedback.some((f) => !!f.audioUrl)
-      await logPlaytestHours(
-        familyId,
-        activeChildId,
-        currentGame.generatedGame,
-        playtestDuration,
-        hasAudio,
-      )
+      // Log hours for tester
+      if (currentGame.generatedGame) {
+        const hasAudio = playtestFeedback.some((f) => !!f.audioUrl)
+        await logPlaytestHours(
+          familyId,
+          activeChildId,
+          currentGame.generatedGame,
+          playtestDuration,
+          hasAudio,
+        )
+      }
 
       setCurrentGame({
         ...currentGame,
@@ -449,7 +649,6 @@ export default function WorkshopPage() {
           }
         : null
 
-      // Mark the playtest session as reviewed
       const updatedSessions = (currentGame.playtestSessions ?? []).map((s) =>
         s.id === playtestId ? { ...s, status: PlaytestStatus.Reviewed as const } : s,
       )
@@ -496,7 +695,6 @@ export default function WorkshopPage() {
   )
 
   const handleRequestRetest = useCallback(() => {
-    // Just go back — Lincoln will see the Playtest button again
     setPhase(GamePhase.Idle)
     setCurrentGame(null)
     setActivePlaytestSession(null)
@@ -540,10 +738,14 @@ export default function WorkshopPage() {
   const titleArt = currentGame?.generatedArt?.titleScreen
 
   // Build current player name for resume dialog
-  const resumePlayerName = currentGame?.activeSession
-    ? currentGame.activeSession.players[currentGame.activeSession.currentTurnIndex]?.name ?? 'someone'
-    : ''
-  const resumePlayerNames = currentGame?.activeSession?.players.map((p) => p.name).join(', ') ?? ''
+  const resumePlayerNames = isAdventure
+    ? currentGame?.storyInputs.players.map((p) => p.name).join(', ') ?? ''
+    : currentGame?.activeSession?.players.map((p) => p.name).join(', ') ?? ''
+
+  // Get the game title for display
+  const gameTitle = isAdventure
+    ? (currentGame?.adventureTree ? `${currentGame.storyInputs.theme} Adventure` : currentGame?.storyInputs.theme)
+    : currentGame?.generatedGame?.title ?? currentGame?.storyInputs.theme
 
   return (
     <Box sx={{ p: 2, maxWidth: 700, mx: 'auto' }}>
@@ -553,7 +755,7 @@ export default function WorkshopPage() {
             Game Workshop
           </Typography>
           <Typography color="text.secondary" sx={{ mb: 4, fontSize: '1.1rem' }}>
-            Create your own board games! Tell a story and turn it into a game the whole family can
+            Create your own games! Tell a story and turn it into a game the whole family can
             play.
           </Typography>
           <Button
@@ -600,12 +802,16 @@ export default function WorkshopPage() {
             onStepSave={saveDraftStep}
             initialState={currentGame?.status === WorkshopStatus.Draft ? {
               step: currentGame.currentWizardStep ?? 0,
+              gameType: (currentGame.gameType ?? '') as GameType | '',
               theme: currentGame.storyInputs.theme ?? '',
               players: currentGame.storyInputs.players ?? [],
               goal: currentGame.storyInputs.goal ?? '',
               challenges: currentGame.storyInputs.challenges ?? [],
               boardStyle: currentGame.storyInputs.boardStyle ?? '',
               boardLength: currentGame.storyInputs.boardLength ?? '',
+              storySetup: currentGame.storyInputs.storySetup ?? '',
+              choiceSeeds: currentGame.storyInputs.choiceSeeds ?? [],
+              adventureLength: currentGame.storyInputs.adventureLength ?? '',
             } : undefined}
           />
         </>
@@ -613,20 +819,36 @@ export default function WorkshopPage() {
 
       {phase === GamePhase.Generating && <GameCreationScreen />}
 
-      {phase === GamePhase.Recording && currentGame?.generatedGame && currentGame.id && activeChildId && familyId && (
-        <VoiceRecordingStep
-          game={currentGame.generatedGame}
-          gameId={currentGame.id}
-          familyId={familyId}
-          childId={activeChildId}
-          childName={children.find((c) => c.id === activeChildId)?.name ?? 'You'}
-          existingRecordings={currentGame.voiceRecordings}
-          onDone={handleRecordingDone}
-          onSkip={handleRecordingSkip}
-        />
+      {phase === GamePhase.Recording && currentGame?.id && activeChildId && familyId && (
+        <>
+          {currentGame.generatedGame && (
+            <VoiceRecordingStep
+              game={currentGame.generatedGame}
+              gameId={currentGame.id}
+              familyId={familyId}
+              childId={activeChildId}
+              childName={children.find((c) => c.id === activeChildId)?.name ?? 'You'}
+              existingRecordings={currentGame.voiceRecordings}
+              onDone={handleRecordingDone}
+              onSkip={handleRecordingSkip}
+            />
+          )}
+          {currentGame.adventureTree && (
+            <VoiceRecordingStep
+              game={currentGame.adventureTree}
+              gameId={currentGame.id}
+              familyId={familyId}
+              childId={activeChildId}
+              childName={children.find((c) => c.id === activeChildId)?.name ?? 'You'}
+              existingRecordings={currentGame.voiceRecordings}
+              onDone={handleRecordingDone}
+              onSkip={handleRecordingSkip}
+            />
+          )}
+        </>
       )}
 
-      {phase === GamePhase.Ready && currentGame?.generatedGame && (
+      {phase === GamePhase.Ready && (currentGame?.generatedGame || currentGame?.adventureTree) && (
         <Box sx={{ textAlign: 'center', py: 4 }}>
           {/* Title screen hero image */}
           {titleArt ? (
@@ -644,14 +866,13 @@ export default function WorkshopPage() {
               <Box
                 component="img"
                 src={titleArt}
-                alt={currentGame.generatedGame.title}
+                alt={gameTitle}
                 sx={{
                   width: '100%',
                   height: 'auto',
                   display: 'block',
                 }}
               />
-              {/* Overlay with game info */}
               <Box
                 sx={{
                   position: 'absolute',
@@ -664,39 +885,50 @@ export default function WorkshopPage() {
                 }}
               >
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>
-                  {currentGame.generatedGame.title}
+                  {gameTitle}
                 </Typography>
                 <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                  {currentGame.generatedGame.board.totalSpaces} spaces
-                  {' \u2022 '}
-                  {currentGame.generatedGame.challengeCards.length} cards
-                  {' \u2022 '}
-                  {currentGame.generatedGame.metadata.estimatedMinutes} min
+                  {isAdventure
+                    ? `${currentGame.adventureTree!.totalNodes} scenes \u2022 ${currentGame.adventureTree!.totalEndings} endings`
+                    : `${currentGame.generatedGame!.board.totalSpaces} spaces \u2022 ${currentGame.generatedGame!.challengeCards.length} cards \u2022 ${currentGame.generatedGame!.metadata.estimatedMinutes} min`}
                 </Typography>
               </Box>
             </Box>
           ) : (
             <>
               <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
-                {currentGame.generatedGame.title}
+                {gameTitle}
               </Typography>
-              <Typography color="text.secondary" sx={{ mb: 1 }}>
-                {currentGame.generatedGame.board.totalSpaces} spaces
-                {' \u2022 '}
-                {currentGame.generatedGame.challengeCards.length} challenge cards
-                {' \u2022 '}
-                {currentGame.generatedGame.rules.length} rules
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                {currentGame.generatedGame.metadata.estimatedMinutes} min
-                {' \u2022 '}
-                {currentGame.generatedGame.metadata.playerCount.min}-
-                {currentGame.generatedGame.metadata.playerCount.max} players
-              </Typography>
+              {isAdventure ? (
+                <Typography color="text.secondary" sx={{ mb: 3 }}>
+                  {currentGame.adventureTree!.totalNodes} scenes
+                  {' \u2022 '}
+                  {currentGame.adventureTree!.totalEndings} endings
+                  {currentGame.adventureTree!.challengeCount > 0
+                    ? ` \u2022 ${currentGame.adventureTree!.challengeCount} challenges`
+                    : ''}
+                </Typography>
+              ) : (
+                <>
+                  <Typography color="text.secondary" sx={{ mb: 1 }}>
+                    {currentGame.generatedGame!.board.totalSpaces} spaces
+                    {' \u2022 '}
+                    {currentGame.generatedGame!.challengeCards.length} challenge cards
+                    {' \u2022 '}
+                    {currentGame.generatedGame!.rules.length} rules
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                    {currentGame.generatedGame!.metadata.estimatedMinutes} min
+                    {' \u2022 '}
+                    {currentGame.generatedGame!.metadata.playerCount.min}-
+                    {currentGame.generatedGame!.metadata.playerCount.max} players
+                  </Typography>
+                </>
+              )}
             </>
           )}
 
-          {currentGame.generatedGame.storyIntro && (
+          {!isAdventure && currentGame.generatedGame?.storyIntro && (
             <Typography color="text.secondary" sx={{ mb: 2, fontStyle: 'italic' }}>
               {currentGame.generatedGame.storyIntro}
             </Typography>
@@ -709,7 +941,7 @@ export default function WorkshopPage() {
               onClick={handlePlay}
               sx={{ py: 1.5, px: 4, fontSize: '1.1rem', fontWeight: 700, borderRadius: 3 }}
             >
-              Play Now!
+              {isAdventure ? 'Start Adventure!' : 'Play Now!'}
             </Button>
             {currentGame.id && familyId && activeChildId && (
               <Button
@@ -726,7 +958,7 @@ export default function WorkshopPage() {
         </Box>
       )}
 
-      {phase === GamePhase.Playing && currentGame?.generatedGame && (
+      {phase === GamePhase.Playing && !isAdventure && currentGame?.generatedGame && (
         <GamePlayView
           game={currentGame.generatedGame}
           gameId={currentGame.id}
@@ -736,6 +968,21 @@ export default function WorkshopPage() {
           activeSession={currentGame.activeSession}
           voiceRecordings={currentGame.voiceRecordings}
           onFinished={handleGameFinished}
+        />
+      )}
+
+      {phase === GamePhase.Playing && isAdventure && currentGame?.adventureTree && (
+        <AdventurePlayView
+          adventure={currentGame.adventureTree}
+          gameTitle={gameTitle ?? 'Adventure'}
+          gameId={currentGame.id}
+          familyId={familyId ?? ''}
+          storyPlayers={currentGame.storyInputs.players}
+          generatedArt={currentGame.generatedArt}
+          activeAdventureSession={currentGame.activeAdventureSession}
+          voiceRecordings={currentGame.voiceRecordings}
+          onFinished={handleAdventureFinished}
+          onSaveSession={handleSaveAdventureSession}
         />
       )}
 
@@ -777,13 +1024,13 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Finished && currentGame?.generatedGame && (
+      {phase === GamePhase.Finished && (currentGame?.generatedGame || currentGame?.adventureTree) && (
         <Box sx={{ textAlign: 'center', py: 6 }}>
           <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
-            Game Over!
+            {isAdventure ? 'Adventure Complete!' : 'Game Over!'}
           </Typography>
           <Typography variant="h6" color="text.secondary" sx={{ mb: 3 }}>
-            {currentGame.generatedGame.title} — Played by the Barnes Family!
+            {gameTitle} — Played by the Barnes Family!
           </Typography>
           <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
             <Button variant="contained" onClick={handlePlay}>
@@ -801,14 +1048,14 @@ export default function WorkshopPage() {
         <DialogTitle>Pick up where you left off?</DialogTitle>
         <DialogContent>
           <Typography>
-            You were playing <strong>{currentGame?.generatedGame?.title}</strong> with{' '}
-            {resumePlayerNames}. It&apos;s {resumePlayerName}&apos;s turn!
+            You were playing <strong>{gameTitle}</strong> with{' '}
+            {resumePlayerNames}.
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleStartOver}>Start Over</Button>
           <Button variant="contained" onClick={handleContinueGame}>
-            Continue Game
+            Continue {isAdventure ? 'Adventure' : 'Game'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -818,7 +1065,7 @@ export default function WorkshopPage() {
         <DialogTitle>Start Over?</DialogTitle>
         <DialogContent>
           <Typography>
-            Start a brand new game? The old one won&apos;t be saved.
+            Start a brand new {isAdventure ? 'adventure' : 'game'}? The old one won&apos;t be saved.
           </Typography>
         </DialogContent>
         <DialogActions>
