@@ -140,7 +140,7 @@ export function applySnapshotSuggestions(
 // ── Core Draft Plan Generator ──────────────────────────────────
 
 export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftWeeklyPlan {
-  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [] } = inputs
+  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], subjectTimeDefaults } = inputs
   const minutesPerDay = hoursPerDay * 60
 
   // Apply snapshot suggestions
@@ -222,10 +222,12 @@ export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftW
 
   // Distribute remaining assignments
   for (const assignment of activeAssignments) {
+    // Use subject time defaults as baseline, fall back to assignment's own estimate
+    const baseMinutes = subjectTimeDefaults?.[assignment.subjectBucket] ?? assignment.estimatedMinutes
     const effectiveMinutes =
       assignment.action === AssignmentAction.Modify
-        ? Math.ceil(assignment.estimatedMinutes * 0.6)
-        : assignment.estimatedMinutes
+        ? Math.ceil(baseMinutes * 0.6)
+        : baseMinutes
 
     // Find day with most remaining budget
     let bestDay: WeekDay = WEEK_DAYS[0]
@@ -607,13 +609,15 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
   try {
     const jsonText = extractJsonObject(response.message)
     if (!jsonText) {
-      console.warn('[parseAIResponse] No JSON object found in response, trying text extraction:', response.message.substring(0, 200))
+      console.warn('[parseAIResponse] No JSON found. Response starts with:', response.message.substring(0, 200))
+      console.warn('[parseAIResponse] Response length:', response.message.length)
       // Last-resort: try to extract structured day data from free text
       return extractDaysFromText(response.message)
     }
     const parsed = forgivingJsonParse(jsonText)
     if (!parsed) {
-      console.warn('[parseAIResponse] Failed to parse JSON (even with forgiving parser), trying text extraction:', jsonText.substring(0, 200))
+      console.warn('[parseAIResponse] JSON parse failed. Extracted text starts with:', jsonText.substring(0, 200))
+      console.warn('[parseAIResponse] Extracted text length:', jsonText.length)
       // Last-resort: try to extract structured day data from free text
       return extractDaysFromText(response.message)
     }
@@ -693,7 +697,8 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
     }
 
     if (days.length === 0) {
-      console.warn('[parseAIResponse] No valid days parsed')
+      console.warn('[parseAIResponse] No valid days parsed. Raw days array length:', (planData.days as unknown[]).length)
+      console.warn('[parseAIResponse] First raw day sample:', JSON.stringify((planData.days as unknown[])[0]).substring(0, 200))
       return null
     }
 

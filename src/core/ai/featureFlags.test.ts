@@ -33,8 +33,9 @@ describe('AI feature flags', () => {
   })
 
   describe('getAIFeatureFlag', () => {
-    it('returns false when flag is not set', () => {
-      expect(getAIFeatureFlag(AIFeatureFlag.AiPlanning)).toBe(false)
+    it('returns default-enabled value when flag is not set', () => {
+      // AiPlanning defaults to true (core feature that should work out of the box)
+      expect(getAIFeatureFlag(AIFeatureFlag.AiPlanning)).toBe(true)
     })
 
     it('returns false when flag is set to "false"', () => {

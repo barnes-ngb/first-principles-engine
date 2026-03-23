@@ -201,7 +201,7 @@ export default function PlannerChatPage() {
   const [showPhotos, setShowPhotos] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [applied, setApplied] = useState(false)
-  const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' } | null>(null)
+  const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' | 'warning' } | null>(null)
 
   // Week plan state (theme/virtue/scripture/heartQuestion)
   const [weekPlan, setWeekPlan] = useState<WeekPlan | null>(null)
@@ -651,7 +651,8 @@ Return as JSON:
       createdAt: new Date().toISOString(),
     }
 
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine }
+    const mergedPhotoDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
+    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine, subjectTimeDefaults: mergedPhotoDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -703,7 +704,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -719,7 +720,8 @@ Return as JSON:
       createdAt: new Date().toISOString(),
     }
 
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine }
+    const mergedDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
+    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine, subjectTimeDefaults: mergedDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -734,12 +736,21 @@ Return as JSON:
         })),
         { role: 'user' as const, content: fullPrompt },
       ]
-      const response = await aiChat({
-        familyId,
-        childId: activeChildId,
-        taskType: TaskType.Plan,
-        messages: aiMessages,
-      })
+      let response: Awaited<ReturnType<typeof aiChat>> | null = null
+      try {
+        response = await aiChat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.Plan,
+          messages: aiMessages,
+        })
+      } catch (err) {
+        console.error('[handleGeneratePlan] AI call failed:', err)
+        setSnack({
+          text: `AI planning error: ${err instanceof Error ? err.message : 'Unknown error'}. Using local planner.`,
+          severity: 'warning' as const,
+        })
+      }
 
       const aiDraft = response ? parseAIResponse(response) : null
       if (aiDraft) {
@@ -747,7 +758,11 @@ Return as JSON:
         usedAI = true
       } else {
         draft = generateDraftPlanFromInputs(inputs)
-        setSnack({ text: 'AI planning unavailable — used local planner.', severity: 'info' })
+        if (!response) {
+          // AI call threw — snack already set above
+        } else {
+          setSnack({ text: 'AI response could not be parsed — used local planner.', severity: 'info' })
+        }
       }
     } else {
       draft = generateDraftPlanFromInputs(inputs)
@@ -773,12 +788,31 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
     const text = (overrideText ?? inputText).trim()
     if (!text) return
+
+    // ── Detect plan-generation intent and redirect ──
+    // If the user types something like "generate a plan" or "build my schedule"
+    // and no draft exists yet, route through handleGeneratePlan for full context.
+    const isPlanRequest = /\b(generate|create|build|make)\b.*\b(plan|schedule|week)\b/i.test(text)
+    if (isPlanRequest && !currentDraft) {
+      setInputText('')
+      // Add the user message to chat for visual continuity
+      const userMsg: ChatMessage = {
+        id: generateItemId(),
+        role: ChatMessageRole.User,
+        text,
+        createdAt: new Date().toISOString(),
+      }
+      setMessages(prev => [...prev, userMsg])
+      // Trigger the real plan generation flow with full context
+      await handleGeneratePlan()
+      return
+    }
 
     const userMsg: ChatMessage = {
       id: generateItemId(),
@@ -834,21 +868,45 @@ Return as JSON:
           createdAt: new Date().toISOString(),
         }
       } else if (response?.message && looksLikePlanJson(response.message)) {
-        // AI returned plan-like JSON but parseAIResponse failed — fall back to local planner
-        const assignments = photoLabelsToAssignments(photoLabels)
-        const localDraft = generateDraftPlanFromInputs({
-          snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine,
-        })
-        setCurrentDraft(localDraft)
-        if (applied) setApplied(false)
-        assistantMsg = {
-          id: generateItemId(),
-          role: ChatMessageRole.Assistant,
-          text: 'The AI plan had formatting issues — here\'s a plan from the local planner instead. You can adjust it or try "Generate Plan" again.',
-          draftPlan: localDraft,
-          createdAt: new Date().toISOString(),
+        // AI returned plan-like JSON but parseAIResponse failed — try aggressive recovery
+        let recovered: DraftWeeklyPlan | null = null
+        try {
+          const msg = response.message.trim()
+          const stripped = msg.replace(/```(?:json)?\s*/g, '').replace(/\s*```/g, '').trim()
+          const directParse = JSON.parse(stripped)
+          if (directParse.days && Array.isArray(directParse.days)) {
+            recovered = parseAIResponse({ ...response, message: JSON.stringify(directParse) })
+          }
+        } catch { /* fall through to local planner */ }
+
+        if (recovered) {
+          setCurrentDraft(recovered)
+          if (applied) setApplied(false)
+          assistantMsg = {
+            id: generateItemId(),
+            role: ChatMessageRole.Assistant,
+            text: 'Here\'s your draft plan. You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".',
+            draftPlan: recovered,
+            createdAt: new Date().toISOString(),
+          }
+        } else {
+          // Recovery failed — fall back to local planner
+          const assignments = photoLabelsToAssignments(photoLabels)
+          const localDraft = generateDraftPlanFromInputs({
+            snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine,
+            subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
+          })
+          setCurrentDraft(localDraft)
+          if (applied) setApplied(false)
+          assistantMsg = {
+            id: generateItemId(),
+            role: ChatMessageRole.Assistant,
+            text: 'The AI plan had formatting issues — here\'s a plan from the local planner instead. You can adjust it or try "Generate Plan" again.',
+            draftPlan: localDraft,
+            createdAt: new Date().toISOString(),
+          }
+          setSnack({ text: 'AI response had formatting issues — used local planner.', severity: 'info' })
         }
-        setSnack({ text: 'AI response had formatting issues — used local planner.', severity: 'info' })
       } else {
         // Non-plan text response (conversational reply) or service unavailable
         assistantMsg = {
@@ -896,6 +954,7 @@ Return as JSON:
         appBlocks,
         assignments,
         adjustments: newAdjustments,
+        subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
       })
 
       setCurrentDraft(draft)
@@ -944,7 +1003,7 @@ Return as JSON:
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, dailyRoutine])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, dailyRoutine, handleGeneratePlan, subjectTimeDefaults])
 
   // Toggle workbook selection in setup wizard
   const handleWorkbookToggle = useCallback((wbId: string, checked: boolean) => {
@@ -1334,6 +1393,7 @@ Generate a plan for Monday through Friday.`.trim()
         appBlocks,
         assignments,
         adjustments: newAdjustments,
+        subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
       })
       setCurrentDraft(draft)
       setAdjustments(newAdjustments)
@@ -1362,7 +1422,7 @@ Generate a plan for Monday through Friday.`.trim()
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
     })
-  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied])
+  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied, subjectTimeDefaults])
 
   // Generate printable materials for a day
   const handleGenerateMaterials = useCallback(async (day: DraftDayPlan) => {
@@ -2008,7 +2068,7 @@ Generate a plan for Monday through Friday.`.trim()
           </Stack>
 
           {/* Generate Plan button — visible after chat exchange or photo labels, before a draft exists */}
-          {!currentDraft && !applied && (messages.length >= 2 || photoLabels.length > 0) && (
+          {!currentDraft && !applied && (
             <Button
               variant="contained"
               color="primary"

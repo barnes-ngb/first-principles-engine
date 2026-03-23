@@ -24,8 +24,15 @@ function storageKey(flag: AIFeatureFlag): string {
   return `${STORAGE_PREFIX}${flag}`
 }
 
+/** Flags that default to enabled (core features that should work out of the box). */
+const DEFAULT_ENABLED_FLAGS: ReadonlySet<AIFeatureFlag> = new Set([
+  AIFeatureFlag.AiPlanning,
+])
+
 export function getAIFeatureFlag(flag: AIFeatureFlag): boolean {
-  return localStorage.getItem(storageKey(flag)) === 'true'
+  const stored = localStorage.getItem(storageKey(flag))
+  if (stored === null) return DEFAULT_ENABLED_FLAGS.has(flag)
+  return stored === 'true'
 }
 
 export function setAIFeatureFlag(flag: AIFeatureFlag, enabled: boolean): void {
@@ -48,7 +55,7 @@ function subscribe(callback: () => void): () => void {
 
 function getSnapshot(): string {
   return Object.values(AIFeatureFlag)
-    .map((flag) => `${flag}:${localStorage.getItem(storageKey(flag)) ?? 'false'}`)
+    .map((flag) => `${flag}:${localStorage.getItem(storageKey(flag)) ?? (DEFAULT_ENABLED_FLAGS.has(flag) ? 'true' : 'false')}`)
     .join(',')
 }
 
