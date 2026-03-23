@@ -108,7 +108,7 @@ export default function ChallengesStep({ value, onChange, stepRef }: ChallengesS
           return (
             <Box
               key={option.type}
-              onClick={() => tap.handleTileTap(option.type, option.label)}
+              onClick={() => tap.handleTileTap(option.type, `${option.label}. ${option.description}`)}
               sx={{
                 position: 'relative',
                 display: 'flex',
@@ -153,7 +153,7 @@ export default function ChallengesStep({ value, onChange, stepRef }: ChallengesS
                   size="small"
                   onClick={(e) => {
                     e.stopPropagation()
-                    tap.replayTTS(option.label)
+                    tap.replayTTS(`${option.label}. ${option.description}`)
                   }}
                   sx={{
                     position: 'absolute',

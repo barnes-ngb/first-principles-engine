@@ -1251,7 +1251,7 @@ export async function loadSightWordSummary(
 // ── Callable Cloud Function ─────────────────────────────────────
 
 export const chat = onCall(
-  { secrets: [claudeApiKey] },
+  { secrets: [claudeApiKey], timeoutSeconds: 300 },
   async (request): Promise<ChatResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
     if (!request.auth) {

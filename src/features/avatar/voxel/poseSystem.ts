@@ -139,9 +139,9 @@ export const POSES: Pose[] = [
       // Phase 2 (0.1-0.2): arm goes UP from side position
       // Phase 3 (0.2-0.8): wave back and forth via rotY
       // Phase 4 (0.8-1): return to rest
-      rotZ: [-0.05, -1.0, -2.5, -2.5, -2.5, -2.5, -2.5, -0.05],
+      rotZ: [-0.05, -1.2, -2.5, -2.5, -2.5, -2.5, -2.5, -0.05],
       rotX: [0, -0.15, -0.2, -0.2, -0.2, -0.2, -0.2, 0],
-      rotY: [0, 0, 0, 0.4, -0.4, 0.4, -0.4, 0],  // Wave motion!
+      rotY: [0, 0, 0, -0.4, 0.4, -0.4, 0.4, 0],  // Wave motion (outward)!
       times: [0, 0.1, 0.2, 0.35, 0.5, 0.65, 0.8, 1],
     },
     head: {

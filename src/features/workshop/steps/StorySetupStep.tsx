@@ -2,6 +2,7 @@ import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
+import { useTTS } from '../../../core/hooks/useTTS'
 
 const STORY_SUGGESTIONS = [
   'Lost in a mysterious place',
@@ -17,6 +18,14 @@ interface StorySetupStepProps {
 }
 
 export default function StorySetupStep({ value, onChange }: StorySetupStepProps) {
+  const tts = useTTS({ rate: 0.85 })
+
+  const handleChipTap = (suggestion: string) => {
+    tts.cancel()
+    tts.speak(suggestion)
+    onChange(suggestion)
+  }
+
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
@@ -49,7 +58,7 @@ export default function StorySetupStep({ value, onChange }: StorySetupStepProps)
           <Chip
             key={suggestion}
             label={suggestion}
-            onClick={() => onChange(suggestion)}
+            onClick={() => handleChipTap(suggestion)}
             variant={value === suggestion ? 'filled' : 'outlined'}
             color={value === suggestion ? 'primary' : 'default'}
             sx={{ cursor: 'pointer' }}

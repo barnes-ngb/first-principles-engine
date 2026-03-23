@@ -25,6 +25,7 @@ import { GamePhase, GameType, PlaytestStatus, WorkshopStatus } from '../../core/
 import type { CardRevision } from '../../core/types/workshop'
 import type { WizardState } from './useWorkshopWizard'
 import { useAI, TaskType } from '../../core/ai/useAI'
+import type { ChatResponse } from '../../core/ai/useAI'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { db, storyGamesCollection } from '../../core/firebase/firestore'
@@ -111,6 +112,8 @@ export default function WorkshopPage() {
   const [playtestFeedback, setPlaytestFeedback] = useState<PlaytestFeedback[] | null>(null)
   const [playtestDuration, setPlaytestDuration] = useState(0)
   const [activePlaytestSession, setActivePlaytestSession] = useState<PlaytestSession | null>(null)
+  // Retry state: preserve last wizard inputs for retry on generation failure
+  const [lastWizardInputs, setLastWizardInputs] = useState<{ inputs: StoryInputs; gameType: GameType } | null>(null)
 
   const { chat, generateImage } = useAI()
   const familyId = useFamilyId()
@@ -201,10 +204,11 @@ export default function WorkshopPage() {
     async (inputs: StoryInputs, gameType: GameType) => {
       setPhase(GamePhase.Generating)
       setGenerateError(null)
+      setLastWizardInputs({ inputs, gameType })
 
       if (!familyId || !activeChildId) {
         setGenerateError('Missing family or child context.')
-        setPhase(GamePhase.Wizard)
+        setPhase(GamePhase.Generating)
         return
       }
 
@@ -223,15 +227,16 @@ export default function WorkshopPage() {
         })
 
         if (!response) {
+          console.error('[Workshop] Card game generation failed: no response from AI')
           setGenerateError('Failed to generate card game. Please try again.')
-          setPhase(GamePhase.Wizard)
           return
         }
 
+        console.log('[Workshop] AI response received, length:', response.message?.length)
         const cardGameData = extractCardGameJson(response.message)
         if (!cardGameData) {
-          setGenerateError('The AI response could not be parsed. Please try again.')
-          setPhase(GamePhase.Wizard)
+          console.error('[Workshop] Failed to parse card game response. Raw:', response.message?.substring(0, 500))
+          setGenerateError('The AI generated something unexpected. Please try again.')
           return
         }
 
@@ -303,28 +308,34 @@ export default function WorkshopPage() {
         setPhase(GamePhase.Recording)
       } else if (gameType === GameType.Adventure) {
         // ── Adventure generation ───────────────────────────────
-        const response = await chat({
-          familyId,
-          childId: activeChildId,
-          taskType: TaskType.Workshop,
-          messages: [
-            {
-              role: 'user',
-              content: JSON.stringify({ ...inputs, gameType: 'adventure' }),
-            },
-          ],
-        })
+        let response: ChatResponse | null = null
+        try {
+          response = await chat({
+            familyId,
+            childId: activeChildId,
+            taskType: TaskType.Workshop,
+            messages: [
+              {
+                role: 'user',
+                content: JSON.stringify({ ...inputs, gameType: 'adventure' }),
+              },
+            ],
+          })
+        } catch (err) {
+          console.error('[Workshop] Adventure generation threw:', err)
+        }
 
         if (!response) {
+          console.error('[Workshop] Adventure generation failed: no response from AI')
           setGenerateError('Failed to generate adventure. Please try again.')
-          setPhase(GamePhase.Wizard)
           return
         }
 
+        console.log('[Workshop] AI response received, length:', response.message?.length)
         const adventureTree = extractAdventureJson(response.message)
         if (!adventureTree) {
-          setGenerateError('The AI response could not be parsed. Please try again.')
-          setPhase(GamePhase.Wizard)
+          console.error('[Workshop] Failed to parse adventure response. Raw:', response.message?.substring(0, 500))
+          setGenerateError('The AI generated something unexpected. Please try again.')
           return
         }
 
@@ -410,15 +421,16 @@ export default function WorkshopPage() {
         ])
 
         if (!response) {
+          console.error('[Workshop] Board game generation failed: no response from AI')
           setGenerateError('Failed to generate game. Please try again.')
-          setPhase(GamePhase.Wizard)
           return
         }
 
+        console.log('[Workshop] AI response received, length:', response.message?.length)
         const generatedGame = extractGameJson(response.message)
         if (!generatedGame) {
-          setGenerateError('The AI response could not be parsed. Please try again.')
-          setPhase(GamePhase.Wizard)
+          console.error('[Workshop] Failed to parse board game response. Raw:', response.message?.substring(0, 500))
+          setGenerateError('The AI generated something unexpected. Please try again.')
           return
         }
 
@@ -1038,7 +1050,43 @@ export default function WorkshopPage() {
         </>
       )}
 
-      {phase === GamePhase.Generating && <GameCreationScreen />}
+      {phase === GamePhase.Generating && (
+        generateError ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <Typography variant="h5" gutterBottom sx={{ fontWeight: 700 }}>
+              Oops!
+            </Typography>
+            <Typography color="error" sx={{ mb: 3 }}>
+              {generateError}
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+              {lastWizardInputs && (
+                <Button
+                  variant="contained"
+                  size="large"
+                  onClick={() => handleWizardComplete(lastWizardInputs.inputs, lastWizardInputs.gameType)}
+                  sx={{ fontWeight: 700, borderRadius: 3 }}
+                >
+                  Try Again
+                </Button>
+              )}
+              <Button
+                variant="outlined"
+                size="large"
+                onClick={() => {
+                  setPhase(GamePhase.Wizard)
+                  setGenerateError(null)
+                }}
+                sx={{ borderRadius: 3 }}
+              >
+                Back to Wizard
+              </Button>
+            </Box>
+          </Box>
+        ) : (
+          <GameCreationScreen />
+        )
+      )}
 
       {phase === GamePhase.Recording && currentGame?.id && activeChildId && familyId && (
         <>

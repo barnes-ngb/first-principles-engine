@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v8 **Version:** v8 — March 22, 2026 **Status:** Living document — updated after architecture cleanup sprint Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: 52k+ lines TypeScript, 30+ test files, 600+ tests, 32+ Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v9 **Version:** v9 — March 23, 2026 **Status:** Living document — updated after Plan My Week UX rewrite Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: 52k+ lines TypeScript, 30+ test files, 600+ tests, 32+ Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -9,12 +9,21 @@ Barnes Family Homeschool — Master Project Outline v8 **Version:** v8 — March
 * Quick Capture section (note, photo, audio)
 * MVD mode (shows only essential items)
 * XP awarded on all Must-Do completion (10 XP, once/day) Plan My Week
-* Guided setup wizard (energy, workbooks, read-aloud, notes)
-* AI-powered plan generation (Sonnet)
-* Plan preview with per-item details, quick adjustment chips, chat-based adjustments
+* Page title "Plan My Week" with subtitle "Set up your week, review the plan, and you're done."
+* **Auto-suggested Week Focus** — AI pre-fills theme, virtue, scripture, heart question on page load (editable)
+* **Compact setup for returning users** — energy selector, routine shown read-only with Edit option, workbooks as chips, special notes field. Full wizard only on first visit.
+* **Per-subject default times** — configurable minutes per subject (Reading: 30m, Math: 30m, etc.), saved per child, used as AI baseline
+* AI-powered plan generation (Sonnet) with full enriched context (snapshot, workbooks, evaluation findings, engagement data, subject defaults)
+* **Full-width plan preview** — renders outside chat area, day cards with Must-Do / Choose sections clearly labeled
+* Single set of quick adjustment chips (tap to apply immediately) + chat-based free-form adjustments
 * Skip guidance per item from evaluation data + week skip summary
-* Apply plan → daily checklists with subjectBucket tagging + auto-generate lesson cards
-* Print Materials — per-day or all-week Minecraft-themed worksheet generation Evaluation Chat
+* Plan generation intent detection — typing "generate a plan" in chat redirects to proper generation path
+* Robust JSON parsing — handles code-fenced responses, truncated JSON, fallback recovery
+* "Lock In This Plan" button → daily checklists with subjectBucket tagging + auto-generate lesson cards
+* "Go to Today →" shortcut after applying
+* Print Materials — per-day or all-week Minecraft-themed worksheet generation
+* "Repeat Last Week" shortcut for low-energy weeks
+* AI feature flag defaults to ON (no manual Settings toggle needed) Evaluation Chat
 * Shelly-guided reading diagnostic, AI walks through structured assessment levels
 * Live findings panel, <finding> and <complete> block extraction
 * Report view: skill map, frontier, recommendations, what to skip
@@ -221,7 +230,7 @@ Progress
 * Parent XP management UI
 * Auto-XP from checklist/quest/book completion What's Not Built Yet Priority Queue (ready to prompt)
 * Lincoln Development Chat — dedicated AI chat mode reviewing evaluations, skill snapshot, recent progress → recommends what to work on this week
-* Planning improvements — activity ideas mode, engagement-based suggestions, individual time adjustments, better day generation
+* Planning improvements — activity ideas mode, engagement-based suggestions (PARTIALLY DONE: per-subject defaults and must-do/choose now built; engagement-based suggestions and activity ideas still TODO)
 * Docs update — this outline (v6) needs to go into the repo as docs/MASTER_OUTLINE.md Story Game Workshop — Future
 * Print & Draw (printable board PDF, cut-out cards, London's hand-drawn art)
 * Open Creator (freeform + AI chat helper + game remix)
@@ -284,7 +293,8 @@ Mine/Eval Engine Mar 22 Quest display fixes (word stimulus, text-only, question 
 Workshop P1 Mar 22 Voice-first story game wizard, board game play, reusable TTS/speech hooks, read-aloud tiles
 Workshop P1.5 Mar 22 Player selection with avatars, DALL-E art generation (boards, titles, cards, tokens), saving/cross-device/resume, Today page cards, draft auto-save
 Workshop P2 Mar 22 Play polish (animations, sound effects, confetti), London voice recording for cards, Lincoln playtester feedback loop with AI card fixes, version tracking
-Workshop P3 Mar 22 Choose-your-adventure game type (branching story tree, scene art, retry endings), Card game type (Matching/Collecting/Battle mechanics) Key Design Decisions
+Workshop P3 Mar 22 Choose-your-adventure game type (branching story tree, scene art, retry endings), Card game type (Matching/Collecting/Battle mechanics)
+Plan My Week Fix Mar 23 Critical bug fixes (handleSetupComplete routing, JSON parsing, feature flag default), UX rewrite (auto-suggest focus, compact setup, full-width plan preview, must-do/choose sections, per-subject default times, renamed UI, combined adjustment chips) Key Design Decisions
 1. Portfolio over grades — no scores, no rankings, evidence-based assessment
 2. No shame rule — MVD is real school, bad days count, app never makes Shelly feel like failing
 3. Formation first — prayer/scripture before academics every day
@@ -312,7 +322,8 @@ Workshop P3 Mar 22 Choose-your-adventure game type (branching story tree, scene 
 25. Poses are formation moments — Prayer pose (arms together, head bowed, eyes closed) is intentionally included. The armor is spiritual, not violent.
 26. Voice-first for London — he talks, the app listens; he listens, the app talks. Reading/typing are fallbacks, not primary input
 27. London creates, Lincoln refines — Story Keeper / Playtester roles give both boys meaningful work from one feature
-28. Players ARE the family — game tokens are real people with real avatars, not fictional characters Key Files Reference src/app/AppShell.tsx — nav structure (parent + kid) src/app/router.tsx — all routes src/core/types/domain.ts — ALL data types src/core/firebase/firestore.ts — ALL collection references src/core/ai/useAI.ts — chat + generateImage hooks src/core/xp/addXpEvent.ts — XP writer with dedup guards src/core/xp/checkAndUnlockArmor.ts — tier unlock + sheet generation trigger src/core/avatar/getDailyArmorSession.ts — daily reset logic src/core/avatar/cropArmorSheet.ts — client-side 3x2 sheet cropper functions/src/ai/chat.ts — AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) functions/src/ai/imageGen.ts — DALL-E 3 + gpt-image-1 + Haiku rewriter src/features/avatar/ — My Armor (MyAvatarPage, VerseCard, ArmorIcons, AttachAnimation, CharacterDisplay, Particles) src/features/books/ — My Books (22+ files, 6500+ lines) src/features/quest/ — Knowledge Mine (7 files) src/features/today/ — Today page src/features/records/ — Records + compliance src/features/settings/ — Settings (AvatarAdminTab, StickerLibraryTab) src/core/types/                         — split type files (common, family, planning, evaluation, xp, books, compliance, dadlab)
+28. Players ARE the family — game tokens are real people with real avatars, not fictional characters
+29. **Setup once, confirm weekly** — Shelly configures routine and subject times once. Weekly planning is: pick energy, note exceptions, generate, lock in. Under 2 minutes. Key Files Reference src/app/AppShell.tsx — nav structure (parent + kid) src/app/router.tsx — all routes src/core/types/domain.ts — ALL data types src/core/firebase/firestore.ts — ALL collection references src/core/ai/useAI.ts — chat + generateImage hooks src/core/xp/addXpEvent.ts — XP writer with dedup guards src/core/xp/checkAndUnlockArmor.ts — tier unlock + sheet generation trigger src/core/avatar/getDailyArmorSession.ts — daily reset logic src/core/avatar/cropArmorSheet.ts — client-side 3x2 sheet cropper functions/src/ai/chat.ts — AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) functions/src/ai/imageGen.ts — DALL-E 3 + gpt-image-1 + Haiku rewriter src/features/avatar/ — My Armor (MyAvatarPage, VerseCard, ArmorIcons, AttachAnimation, CharacterDisplay, Particles) src/features/books/ — My Books (22+ files, 6500+ lines) src/features/quest/ — Knowledge Mine (7 files) src/features/today/ — Today page src/features/records/ — Records + compliance src/features/settings/ — Settings (AvatarAdminTab, StickerLibraryTab) src/core/types/                         — split type files (common, family, planning, evaluation, xp, books, compliance, dadlab)
 src/core/types/index.ts                 — barrel re-export (replaces old domain.ts)
 src/core/utils/perf.ts                  — performance measurement helpers
 functions/src/ai/tasks/                 — chat task registry (plan, chat, evaluate, quest, generateStory, analyzePatterns)

@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
+import { useTTS } from '../../../core/hooks/useTTS'
 
 const CHOICE_TEMPLATES = [
   'Go left or go right',
@@ -22,6 +23,8 @@ interface ChoicesStepProps {
 }
 
 export default function ChoicesStep({ value, onChange }: ChoicesStepProps) {
+  const tts = useTTS({ rate: 0.85 })
+
   const handleAdd = useCallback(() => {
     onChange([...value, ''])
   }, [value, onChange])
@@ -45,10 +48,12 @@ export default function ChoicesStep({ value, onChange }: ChoicesStepProps) {
   const handleTemplateAdd = useCallback(
     (template: string) => {
       if (!value.includes(template)) {
+        tts.cancel()
+        tts.speak(template)
         onChange([...value, template])
       }
     },
-    [value, onChange],
+    [value, onChange, tts],
   )
 
   return (

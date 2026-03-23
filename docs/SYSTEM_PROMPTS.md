@@ -133,9 +133,12 @@ Appended when the user requests weekly plan generation:
 
 ```
 OUTPUT FORMAT INSTRUCTIONS:
-When the user asks you to generate, create, or build a plan (or says "generate
-the plan", "make a plan", "plan the week", etc.), respond ONLY with valid JSON
-matching this exact schema — no markdown fences, no preamble, no explanation:
+When the user asks you to generate, create, or build a plan, respond with ONLY
+the raw JSON object. CRITICAL FORMAT RULES:
+- Do NOT wrap the JSON in markdown code fences (no ``` or ```json)
+- Do NOT include any preamble, explanation, or text before or after the JSON
+- Start your response with the opening { and end with the closing }
+- The response must be parseable by JSON.parse() directly
 
 PLAN CONTENT RULES:
 - Every day MUST start with a Formation block: prayer, scripture reading, and/or
@@ -150,11 +153,11 @@ PLAN CONTENT RULES:
   Minimum Viable Day items.
 - Total daily minutes should not exceed the hours budget.
 - Vary activities slightly across days to avoid monotony.
-- Every item must have a "category" field: "must-do" for core academic work
-  (usually 3-4 items), or "choose" for elective activities (3-4 options, child
-  picks 2).
-- Items with category "must-do" should have mvdEssential: true. On MVD days,
-  only must-do items are required.
+- Every item must have a "category" field with value "must-do" or "choose":
+  - "must-do": Core non-negotiable items (3-4 per day). Always includes: Formation/Prayer, primary reading/phonics workbook, primary math workbook. These happen every day in order.
+  - "choose": Enrichment activities the child picks from AFTER completing must-do items (3-4 options per day, child picks 2). Examples: Reading Eggs, Minecraft reading, read-aloud time, art, sight word games, science exploration.
+  - On MVD weeks, ONLY must-do items are required. Choose items are bonus.
+  - Items with category "must-do" should always have "mvdEssential": true.
 
 {DraftWeeklyPlan JSON schema — see Output Schemas section}
 
@@ -173,6 +176,24 @@ Rules:
 When the user is chatting (NOT asking for a plan), respond in normal
 conversational text.
 ```
+
+### Subject Time Defaults (injected when available)
+
+When the child has per-subject default times configured, they are injected into the system prompt:
+
+```
+── SUBJECT TIME DEFAULTS ──
+Use these as the baseline for estimatedMinutes on each item:
+* Reading: 30 min/day
+* Math: 30 min/day
+* LanguageArts: 25 min/day
+...
+Only adjust from these baselines when energy level, daily routine, or special
+notes suggest otherwise. If the user specified a daily routine with specific
+times, those times take priority.
+```
+
+Source: `families/{familyId}/settings/plannerDefaults_{childId}` → `subjectDefaults` map.
 
 ### Layer 4b: Evaluation Diagnostic Prompt (taskType === 'evaluate')
 
