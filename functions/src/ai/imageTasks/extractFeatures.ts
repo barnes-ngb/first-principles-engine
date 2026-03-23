@@ -195,6 +195,8 @@ export const extractFeatures = onCall(
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "feature-extraction",
       model: "claude-sonnet-4-20250514",
+      inputTokens: 0,
+      outputTokens: 0,
       childId,
       createdAt: new Date().toISOString(),
     });

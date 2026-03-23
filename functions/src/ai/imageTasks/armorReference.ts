@@ -216,6 +216,8 @@ RULES:
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "armor-reference-generation",
       model: "gpt-image-1",
+      inputTokens: 0,
+      outputTokens: 0,
       childId,
       themeStyle,
       tier,

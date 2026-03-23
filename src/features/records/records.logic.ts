@@ -461,3 +461,179 @@ export async function buildComplianceZip(
 
   return zip.generateAsync({ type: 'blob' })
 }
+
+// ─── Printable Compliance Report (HTML) ──────────────────────────────────────
+
+const CORE_SUBJECT_LABELS: Record<string, string> = {
+  Reading: 'Reading',
+  LanguageArts: 'Language Arts',
+  Math: 'Math',
+  Science: 'Science',
+  SocialStudies: 'Social Studies',
+}
+
+export function generateComplianceReportHtml(
+  input: CompliancePackInput,
+): string {
+  const { summary, evaluations, artifacts, children, startDate, endDate, childName } = input
+
+  const totalHours = (summary.totalMinutes / 60).toFixed(1)
+  const coreHours = (summary.coreMinutes / 60).toFixed(1)
+  const coreHomeHours = (summary.coreHomeMinutes / 60).toFixed(1)
+
+  const subjectRows = summary.bySubject
+    .map(
+      (row) =>
+        `<tr>
+          <td>${CORE_SUBJECT_LABELS[row.subjectBucket] ?? row.subjectBucket}</td>
+          <td class="num">${(row.totalMinutes / 60).toFixed(1)}</td>
+          <td class="num">${(row.homeMinutes / 60).toFixed(1)}</td>
+          <td class="num">${coreBuckets.has(row.subjectBucket as SubjectBucket) ? 'Core' : ''}</td>
+        </tr>`,
+    )
+    .join('\n')
+
+  // Daily breakdown: aggregate by date
+  const sortedDates = Object.entries(summary.byDate)
+    .sort(([a], [b]) => a.localeCompare(b))
+  const dailyRows = sortedDates
+    .map(
+      ([date, minutes]) =>
+        `<tr><td>${date}</td><td class="num">${(minutes / 60).toFixed(1)}</td></tr>`,
+    )
+    .join('\n')
+
+  // Evaluation summaries
+  const evalSection =
+    evaluations.length > 0
+      ? evaluations
+          .map((ev) => {
+            const child = children.find((c) => c.id === ev.childId)
+            return `
+              <div class="eval">
+                <h4>${child?.name ?? ev.childId} — ${ev.monthStart} to ${ev.monthEnd}</h4>
+                ${ev.wins.length > 0 ? `<p><strong>Wins:</strong> ${ev.wins.join('; ')}</p>` : ''}
+                ${ev.struggles.length > 0 ? `<p><strong>Struggles:</strong> ${ev.struggles.join('; ')}</p>` : ''}
+                ${ev.nextSteps.length > 0 ? `<p><strong>Next Steps:</strong> ${ev.nextSteps.join('; ')}</p>` : ''}
+              </div>`
+          })
+          .join('\n')
+      : '<p class="muted">No evaluations recorded for this period.</p>'
+
+  // Portfolio sample (top 10 artifacts)
+  const topArtifacts = artifacts.slice(0, 10)
+  const portfolioRows = topArtifacts
+    .map(
+      (art) =>
+        `<tr>
+          <td>${art.createdAt ? new Date(art.createdAt).toLocaleDateString() : ''}</td>
+          <td>${art.title}</td>
+          <td>${art.type}</td>
+          <td>${art.tags?.subjectBucket ?? ''}</td>
+        </tr>`,
+    )
+    .join('\n')
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Missouri Homeschool Compliance Report — ${childName}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Georgia, serif; font-size: 12pt; line-height: 1.5; padding: 0.75in; color: #222; }
+    h1 { font-size: 18pt; margin-bottom: 4pt; }
+    h2 { font-size: 14pt; margin-top: 18pt; margin-bottom: 6pt; border-bottom: 1px solid #999; padding-bottom: 2pt; }
+    h3 { font-size: 12pt; margin-top: 12pt; margin-bottom: 4pt; }
+    h4 { font-size: 11pt; margin-top: 8pt; }
+    p { margin-bottom: 6pt; }
+    .muted { color: #666; }
+    .summary-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12pt; margin: 12pt 0; }
+    .summary-box { border: 1px solid #ccc; border-radius: 4pt; padding: 8pt; text-align: center; }
+    .summary-box .label { font-size: 9pt; color: #666; text-transform: uppercase; }
+    .summary-box .value { font-size: 20pt; font-weight: bold; }
+    table { width: 100%; border-collapse: collapse; margin: 8pt 0; font-size: 10pt; }
+    th, td { border: 1px solid #ccc; padding: 4pt 8pt; text-align: left; }
+    th { background: #f5f5f5; font-weight: bold; }
+    .num { text-align: right; }
+    .eval { margin-bottom: 8pt; padding-left: 8pt; border-left: 3px solid #4caf50; }
+    .footer { margin-top: 24pt; padding-top: 8pt; border-top: 1px solid #999; font-size: 9pt; color: #666; }
+    @media print {
+      body { padding: 0; }
+      .no-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Missouri Homeschool Compliance Report</h1>
+  <p><strong>Student:</strong> ${childName} &nbsp; | &nbsp; <strong>Period:</strong> ${startDate} to ${endDate}</p>
+  <p class="muted">MO RSMo 167.031 requires 1,000 hours of instruction (600 in core subjects: Reading, Language Arts, Math, Science, Social Studies). At least 600 hours must occur at the regular place of instruction.</p>
+
+  <h2>Hours Summary</h2>
+  <div class="summary-grid">
+    <div class="summary-box">
+      <div class="label">Total Hours</div>
+      <div class="value">${totalHours}</div>
+      <div class="muted">of 1,000 required</div>
+    </div>
+    <div class="summary-box">
+      <div class="label">Core Hours</div>
+      <div class="value">${coreHours}</div>
+      <div class="muted">of 600 required</div>
+    </div>
+    <div class="summary-box">
+      <div class="label">Core at Home</div>
+      <div class="value">${coreHomeHours}</div>
+      <div class="muted">of 600 required</div>
+    </div>
+  </div>
+
+  <h2>Hours by Subject</h2>
+  <table>
+    <thead>
+      <tr><th>Subject</th><th class="num">Total Hours</th><th class="num">Home Hours</th><th>Category</th></tr>
+    </thead>
+    <tbody>
+      ${subjectRows}
+      <tr style="font-weight:bold">
+        <td>TOTAL</td>
+        <td class="num">${totalHours}</td>
+        <td class="num">${coreHomeHours}</td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Daily Instruction Log</h2>
+  <p class="muted">${sortedDates.length} school days logged</p>
+  <table>
+    <thead>
+      <tr><th>Date</th><th class="num">Hours</th></tr>
+    </thead>
+    <tbody>
+      ${dailyRows}
+    </tbody>
+  </table>
+
+  <h2>Evaluation Summaries</h2>
+  ${evalSection}
+
+  <h2>Portfolio Samples</h2>
+  ${topArtifacts.length > 0
+    ? `<table>
+        <thead>
+          <tr><th>Date</th><th>Title</th><th>Type</th><th>Subject</th></tr>
+        </thead>
+        <tbody>
+          ${portfolioRows}
+        </tbody>
+      </table>
+      ${artifacts.length > 10 ? `<p class="muted">${artifacts.length - 10} additional artifacts not shown.</p>` : ''}`
+    : '<p class="muted">No artifacts recorded for this period.</p>'}
+
+  <div class="footer">
+    <p>Generated by First Principles Engine on ${new Date().toLocaleDateString()}. This document is intended for Missouri homeschool record-keeping purposes.</p>
+  </div>
+</body>
+</html>`
+}

@@ -121,6 +121,8 @@ RULES:
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "starter-avatar-generation",
       model: "dall-e-3",
+      inputTokens: 0,
+      outputTokens: 0,
       childId,
       themeStyle,
       storagePath,
