@@ -211,7 +211,6 @@ export default function VoxelCharacter({
   animateUnequipPiece,
   onEquipAnimDone,
   onUnequipAnimDone,
-  photoUrl,
   activePoseId,
   onPoseComplete,
   onSwipePose,
@@ -542,7 +541,7 @@ export default function VoxelCharacter({
       const skinHex = new THREE.Color(resolvedFeatures.skinTone ?? '#F5D6B8').getHex()
       applyPaintedFace(headMesh, character, resolvedFeatures, skinHex)
     }
-  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, photoUrl])
+  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
@@ -716,7 +715,7 @@ export default function VoxelCharacter({
     equipPoseRef.current?.(equippedPieces)
 
     prevEquippedRef.current = current
-  }, [equippedPieces, currentTier, totalXp, onPoseComplete])
+  }, [equippedPieces, currentTier, totalXp, onPoseComplete, resolvedFeatures])
 
   // ── Handle explicit pose trigger (from PoseButtons) ────────────
   useEffect(() => {
