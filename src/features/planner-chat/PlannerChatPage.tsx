@@ -30,6 +30,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import { addDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
+import { useNavigate } from 'react-router-dom'
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import { AIFeatureFlag, useAIFeatureFlags } from '../../core/ai/featureFlags'
@@ -185,6 +186,7 @@ export default function PlannerChatPage() {
     addChild,
   } = useActiveChild()
 
+  const navigate = useNavigate()
   const weekRange = useMemo(() => getWeekRange(new Date()), [])
   const chatEndRef = useRef<HTMLDivElement>(null)
 
@@ -238,11 +240,18 @@ export default function PlannerChatPage() {
   // Per-subject default time overrides (minutes per day)
   const [subjectTimeDefaults, setSubjectTimeDefaults] = useState<SubjectTimeDefaults>({})
 
+  // Returning-user compact setup toggles
+  const [showRoutineEdit, setShowRoutineEdit] = useState(false)
+  const [showWorkbookEdit, setShowWorkbookEdit] = useState(false)
+  const [showTimeEdit, setShowTimeEdit] = useState(false)
+
   // Daily routine state — initialized with default template
   const [dailyRoutine, setDailyRoutine] = useState(defaultDailyRoutine)
 
   // Suggest focus state
   const [suggestingFocus, setSuggestingFocus] = useState(false)
+  const [focusWasSuggested, setFocusWasSuggested] = useState(false)
+  const autoSuggestTriggered = useRef(false)
 
   const conversationDocId = useMemo(
     () => (activeChildId ? plannerConversationDocId(weekRange.start, activeChildId) : ''),
@@ -1063,6 +1072,20 @@ Return ONLY valid JSON, no markdown.`,
     }
   }, [activeChildId, familyId, aiChat, updateWeekField])
 
+  // Auto-suggest week focus when fields are empty on first visit
+  useEffect(() => {
+    if (!weekPlan || !activeChildId || conversationLoaded || setupComplete) return
+    if (autoSuggestTriggered.current) return
+    const isEmpty = !weekPlan.theme && !weekPlan.virtue && !weekPlan.scriptureRef && !weekPlan.heartQuestion
+    if (isEmpty) {
+      autoSuggestTriggered.current = true
+      const timer = setTimeout(() => {
+        void handleSuggestFocus().then(() => setFocusWasSuggested(true))
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [weekPlan, activeChildId, conversationLoaded, setupComplete, handleSuggestFocus])
+
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
     const energyLabel =
@@ -1381,10 +1404,15 @@ Generate a plan for Monday through Friday.`.trim()
 
   const minimumWin = buildMinimumWinText(snapshot)
 
-  // Quick suggestion handler - sends the text as if the user typed it
+  // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
-    setInputText(text)
-    // Trigger send immediately
+    // If AI is enabled, route through handleSend for full AI support
+    if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
+      void handleSend(text)
+      return
+    }
+
+    // Local logic path: apply adjustment immediately
     const userMsg: ChatMessage = {
       id: generateItemId(),
       role: ChatMessageRole.User,
@@ -1432,7 +1460,7 @@ Generate a plan for Monday through Friday.`.trim()
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
     })
-  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied, subjectTimeDefaults])
+  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied, subjectTimeDefaults, isEnabled, activeChildId, handleSend])
 
   // Generate printable materials for a day
   const handleGenerateMaterials = useCallback(async (day: DraftDayPlan) => {
@@ -1667,9 +1695,9 @@ Generate a plan for Monday through Friday.`.trim()
     <Page>
       <Stack direction="row" justifyContent="space-between" alignItems="center">
         <Box>
-          <Typography variant="h4" component="h1">Planner Chat</Typography>
+          <Typography variant="h4" component="h1">Plan My Week</Typography>
           <Typography color="text.secondary" variant="body2">
-            Upload photos, chat to adjust, apply your week plan.
+            Set up your week, review the plan, and you&apos;re done.
           </Typography>
         </Box>
         <IconButton onClick={() => setDrawerOpen(true)} title="View context">
@@ -1721,6 +1749,17 @@ Generate a plan for Monday through Friday.`.trim()
                   {suggestingFocus ? 'Generating...' : 'Suggest'}
                 </Button>
               </Stack>
+              {suggestingFocus && (
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                  <CircularProgress size={16} />
+                  <Typography variant="caption" color="text.secondary">Generating suggestions...</Typography>
+                </Stack>
+              )}
+              {focusWasSuggested && !suggestingFocus && (
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+                  AI suggested — tap to edit
+                </Typography>
+              )}
               <Stack spacing={1.5}>
                 <TextField
                   label="Theme"
@@ -1753,46 +1792,169 @@ Generate a plan for Monday through Friday.`.trim()
           )}
 
           {/* Setup wizard — shown when no conversation exists for this week */}
-          {messages.length === 0 && !setupComplete && !conversationLoaded && (
-            <Stack spacing={3} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
-              <Typography variant="h6">Plan {activeChild?.name ?? 'your child'}&apos;s Week</Typography>
+          {messages.length === 0 && !setupComplete && !conversationLoaded && (() => {
+            const isReturningUser = workbookConfigs.length > 0 || dailyRoutine !== defaultDailyRoutine
 
-              {/* Step 1: Energy */}
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  How&apos;s your week looking?
-                </Typography>
-                <ToggleButtonGroup
-                  value={weekEnergy}
-                  exclusive
-                  onChange={(_, v) => { if (v) setWeekEnergy(v) }}
-                  size="small"
-                >
-                  <ToggleButton value="full">Full Week</ToggleButton>
-                  <ToggleButton value="lighter">Lighter Week</ToggleButton>
-                  <ToggleButton value="mvd">Tough Week (MVD)</ToggleButton>
-                </ToggleButtonGroup>
-              </Box>
+            return isReturningUser ? (
+              /* ── Compact returning-user setup ── */
+              <Stack spacing={2} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+                <Typography variant="h6">Plan {activeChild?.name ?? 'your child'}&apos;s Week</Typography>
 
-              {/* Step 2: Workbooks (pre-filled from workbookConfigs) */}
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  This week&apos;s workbooks
-                </Typography>
-                {workbookConfigs.length > 0 ? (
-                  workbookConfigs.map((wb) => (
-                    <FormControlLabel
-                      key={wb.id ?? wb.name}
-                      control={
-                        <Checkbox
-                          checked={selectedWorkbookIds.has(wb.id ?? '')}
-                          onChange={(e) => handleWorkbookToggle(wb.id ?? '', e.target.checked)}
-                        />
-                      }
-                      label={`${wb.name} — next: ${wb.unitLabel} ${wb.currentPosition + 1}`}
+                {/* Energy — always show, it's the main weekly decision */}
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>How&apos;s your week looking?</Typography>
+                  <ToggleButtonGroup value={weekEnergy} exclusive onChange={(_, v) => { if (v) setWeekEnergy(v) }} size="small">
+                    <ToggleButton value="full">Full Week</ToggleButton>
+                    <ToggleButton value="lighter">Lighter Week</ToggleButton>
+                    <ToggleButton value="mvd">Tough Week (MVD)</ToggleButton>
+                  </ToggleButtonGroup>
+                </Box>
+
+                {/* Routine — show as read-only summary with edit button */}
+                <Box>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="subtitle2">Your usual routine</Typography>
+                    <Button size="small" onClick={() => setShowRoutineEdit(!showRoutineEdit)}>
+                      {showRoutineEdit ? 'Done' : 'Edit'}
+                    </Button>
+                  </Stack>
+                  {!showRoutineEdit ? (
+                    <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-line', mt: 0.5 }}>
+                      {dailyRoutine || 'No routine saved yet'}
+                    </Typography>
+                  ) : (
+                    <TextField
+                      size="small"
+                      value={dailyRoutine}
+                      onChange={e => setDailyRoutine(e.target.value)}
+                      fullWidth
+                      multiline
+                      rows={4}
+                      sx={{ mt: 0.5 }}
                     />
-                  ))
-                ) : (
+                  )}
+                </Box>
+
+                {/* Workbooks — show as chips, not checkboxes */}
+                <Box>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="subtitle2">Workbooks</Typography>
+                    <Button size="small" onClick={() => setShowWorkbookEdit(!showWorkbookEdit)}>
+                      {showWorkbookEdit ? 'Done' : 'Edit'}
+                    </Button>
+                  </Stack>
+                  {!showWorkbookEdit ? (
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                      {workbookConfigs.map(wb => (
+                        <Chip key={wb.id} label={`${wb.name} — ${wb.unitLabel} ${wb.currentPosition + 1}`} size="small" />
+                      ))}
+                    </Stack>
+                  ) : (
+                    <Box sx={{ mt: 0.5 }}>
+                      {workbookConfigs.map((wb) => (
+                        <FormControlLabel
+                          key={wb.id ?? wb.name}
+                          control={
+                            <Checkbox
+                              checked={selectedWorkbookIds.has(wb.id ?? '')}
+                              onChange={(e) => handleWorkbookToggle(wb.id ?? '', e.target.checked)}
+                            />
+                          }
+                          label={`${wb.name} — next: ${wb.unitLabel} ${wb.currentPosition + 1}`}
+                        />
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Subject times — compact with edit toggle */}
+                <Box>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="subtitle2">Subject times (per day)</Typography>
+                    <Button size="small" onClick={() => setShowTimeEdit(!showTimeEdit)}>
+                      {showTimeEdit ? 'Done' : 'Edit'}
+                    </Button>
+                  </Stack>
+                  {showTimeEdit && (
+                    <Stack spacing={1} sx={{ mt: 1 }}>
+                      {Object.entries(DEFAULT_SUBJECT_MINUTES).map(([subject, fallback]) => {
+                        const current = subjectTimeDefaults[subject] ?? fallback
+                        return (
+                          <Stack key={subject} direction="row" spacing={1} alignItems="center">
+                            <Typography variant="body2" sx={{ flex: 1 }}>
+                              {subject === 'Other' ? 'Formation' : subject === 'LanguageArts' ? 'Language Arts' : subject === 'SocialStudies' ? 'Social Studies' : subject}
+                            </Typography>
+                            <Stack direction="row" spacing={0.5} alignItems="center">
+                              <IconButton size="small" onClick={() => setSubjectTimeDefaults(prev => ({ ...prev, [subject]: Math.max(5, (prev[subject] ?? fallback) - 5) }))}>
+                                <Typography variant="body2">-</Typography>
+                              </IconButton>
+                              <Typography variant="body2" sx={{ minWidth: 40, textAlign: 'center' }}>{current}m</Typography>
+                              <IconButton size="small" onClick={() => setSubjectTimeDefaults(prev => ({ ...prev, [subject]: Math.min(60, (prev[subject] ?? fallback) + 5) }))}>
+                                <Typography variant="body2">+</Typography>
+                              </IconButton>
+                            </Stack>
+                          </Stack>
+                        )
+                      })}
+                    </Stack>
+                  )}
+                </Box>
+
+                {/* Special notes — always show, it changes weekly */}
+                <TextField
+                  size="small"
+                  label="Anything special this week?"
+                  placeholder="Field trip Tuesday, appointment Thursday..."
+                  value={weekNotes}
+                  onChange={(e) => setWeekNotes(e.target.value)}
+                  fullWidth
+                  multiline
+                  rows={2}
+                />
+
+                {/* Generate button — big and primary */}
+                <Button
+                  variant="contained"
+                  size="large"
+                  onClick={handleSetupComplete}
+                  fullWidth
+                  startIcon={<AutoAwesomeIcon />}
+                  sx={{ py: 1.5, fontWeight: 'bold', fontSize: '1rem' }}
+                >
+                  Generate Plan
+                </Button>
+
+                <Button variant="outlined" size="small" onClick={handleRepeatLastWeek}>
+                  Or repeat last week&apos;s plan
+                </Button>
+              </Stack>
+            ) : (
+              /* ── Full first-time user setup ── */
+              <Stack spacing={3} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+                <Typography variant="h6">Plan {activeChild?.name ?? 'your child'}&apos;s Week</Typography>
+
+                {/* Step 1: Energy */}
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>
+                    How&apos;s your week looking?
+                  </Typography>
+                  <ToggleButtonGroup
+                    value={weekEnergy}
+                    exclusive
+                    onChange={(_, v) => { if (v) setWeekEnergy(v) }}
+                    size="small"
+                  >
+                    <ToggleButton value="full">Full Week</ToggleButton>
+                    <ToggleButton value="lighter">Lighter Week</ToggleButton>
+                    <ToggleButton value="mvd">Tough Week (MVD)</ToggleButton>
+                  </ToggleButtonGroup>
+                </Box>
+
+                {/* Step 2: Workbooks */}
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>
+                    This week&apos;s workbooks
+                  </Typography>
                   <Box>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                       No workbooks yet. Add your curricula:
@@ -1836,104 +1998,105 @@ Generate a plan for Monday through Friday.`.trim()
                       </Button>
                     </Stack>
                   </Box>
-                )}
-                <TextField
-                  size="small"
-                  placeholder="Read-aloud book + chapter (e.g., Charlotte's Web Ch 5)"
-                  value={readAloud}
-                  onChange={(e) => setReadAloud(e.target.value)}
+                  <TextField
+                    size="small"
+                    placeholder="Read-aloud book + chapter (e.g., Charlotte's Web Ch 5)"
+                    value={readAloud}
+                    onChange={(e) => setReadAloud(e.target.value)}
+                    fullWidth
+                    sx={{ mt: 1 }}
+                  />
+                </Box>
+
+                {/* Per-subject default times */}
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>
+                    How long does each subject usually take?
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Set per-day defaults so the AI knows your family&apos;s pace.
+                  </Typography>
+                  <Stack spacing={1}>
+                    {Object.entries(DEFAULT_SUBJECT_MINUTES).map(([subject, fallback]) => {
+                      const current = subjectTimeDefaults[subject] ?? fallback
+                      return (
+                        <Stack key={subject} direction="row" spacing={1} alignItems="center">
+                          <Typography variant="body2" sx={{ width: 120 }}>
+                            {subject === 'Other' ? 'Formation' : subject === 'LanguageArts' ? 'Language Arts' : subject === 'SocialStudies' ? 'Social Studies' : subject}
+                          </Typography>
+                          <Select
+                            size="small"
+                            value={current}
+                            onChange={(e) => {
+                              const val = Number(e.target.value)
+                              setSubjectTimeDefaults((prev) => ({ ...prev, [subject]: val }))
+                            }}
+                            sx={{ minWidth: 90 }}
+                          >
+                            {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60].map((m) => (
+                              <MenuItem key={m} value={m}>{m} min</MenuItem>
+                            ))}
+                          </Select>
+                        </Stack>
+                      )
+                    })}
+                  </Stack>
+                </Box>
+
+                {/* Daily Routine */}
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>
+                    What does a typical school day look like?
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    List the activities and approximate times. The AI will use this as the starting template.
+                  </Typography>
+                  <TextField
+                    size="small"
+                    placeholder={`Example:\nHandwriting while I read aloud (20 min)\nBooster cards (15 min)\nGood and the Beautiful reading (30 min)\nSight word games (15 min)\nReading Eggs on tablet (45 min)\nMath workbook (30 min)`}
+                    value={dailyRoutine}
+                    onChange={e => setDailyRoutine(e.target.value)}
+                    fullWidth
+                    multiline
+                    rows={6}
+                  />
+                </Box>
+
+                {/* Special notes */}
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Anything special this week?
+                  </Typography>
+                  <TextField
+                    size="small"
+                    placeholder="Field trip Tuesday, appointment Thursday, etc."
+                    value={weekNotes}
+                    onChange={(e) => setWeekNotes(e.target.value)}
+                    fullWidth
+                    multiline
+                    rows={2}
+                  />
+                </Box>
+
+                {/* Generate button */}
+                <Button
+                  variant="contained"
+                  size="large"
+                  onClick={handleSetupComplete}
                   fullWidth
-                  sx={{ mt: 1 }}
-                />
-              </Box>
+                  startIcon={<AutoAwesomeIcon />}
+                  sx={{ py: 1.5, fontWeight: 'bold', fontSize: '1rem' }}
+                >
+                  Generate Plan
+                </Button>
 
-              {/* Step 2.5: Per-subject default times */}
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  How long does each subject usually take?
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  Set per-day defaults so the AI knows your family&apos;s pace.
-                </Typography>
-                <Stack spacing={1}>
-                  {Object.entries(DEFAULT_SUBJECT_MINUTES).map(([subject, fallback]) => {
-                    const current = subjectTimeDefaults[subject] ?? fallback
-                    return (
-                      <Stack key={subject} direction="row" spacing={1} alignItems="center">
-                        <Typography variant="body2" sx={{ width: 120 }}>
-                          {subject === 'Other' ? 'Formation' : subject === 'LanguageArts' ? 'Language Arts' : subject === 'SocialStudies' ? 'Social Studies' : subject}
-                        </Typography>
-                        <Select
-                          size="small"
-                          value={current}
-                          onChange={(e) => {
-                            const val = Number(e.target.value)
-                            setSubjectTimeDefaults((prev) => ({ ...prev, [subject]: val }))
-                          }}
-                          sx={{ minWidth: 90 }}
-                        >
-                          {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60].map((m) => (
-                            <MenuItem key={m} value={m}>{m} min</MenuItem>
-                          ))}
-                        </Select>
-                      </Stack>
-                    )
-                  })}
-                </Stack>
-              </Box>
-
-              {/* Step 3: Daily Routine */}
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  What does a typical school day look like?
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  List the activities and approximate times. The AI will use this as the starting template.
-                </Typography>
-                <TextField
-                  size="small"
-                  placeholder={`Example:\nHandwriting while I read aloud (20 min)\nBooster cards (15 min)\nGood and the Beautiful reading (30 min)\nSight word games (15 min)\nReading Eggs on tablet (45 min)\nMath workbook (30 min)`}
-                  value={dailyRoutine}
-                  onChange={e => setDailyRoutine(e.target.value)}
-                  fullWidth
-                  multiline
-                  rows={6}
-                />
-              </Box>
-
-              {/* Step 3: Special notes */}
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  Anything special this week?
-                </Typography>
-                <TextField
-                  size="small"
-                  placeholder="Field trip Tuesday, appointment Thursday, etc."
-                  value={weekNotes}
-                  onChange={(e) => setWeekNotes(e.target.value)}
-                  fullWidth
-                  multiline
-                  rows={2}
-                />
-              </Box>
-
-              {/* Generate button */}
-              <Button
-                variant="contained"
-                size="large"
-                onClick={handleSetupComplete}
-                fullWidth
-                startIcon={<AutoAwesomeIcon />}
-              >
-                Generate Plan
-              </Button>
-
-              {/* Repeat last week shortcut */}
-              <Button variant="outlined" size="small" onClick={handleRepeatLastWeek}>
-                Or repeat last week&apos;s plan
-              </Button>
-            </Stack>
-          )}
+                {/* Repeat last week shortcut */}
+                <Button variant="outlined" size="small" onClick={handleRepeatLastWeek}>
+                  Or repeat last week&apos;s plan
+                </Button>
+              </Stack>
+            )
+          })()}
 
           {/* Quick Start buttons — shown when no conversation yet (only welcome message) */}
           {setupComplete && messages.length <= 1 && !currentDraft && !applied && (
@@ -1952,64 +2115,80 @@ Generate a plan for Monday through Friday.`.trim()
             </Stack>
           )}
 
-          {/* Chat messages */}
-          <Box
-            sx={{
-              flex: 1,
-              overflowY: 'auto',
-              maxHeight: { xs: '50vh', md: '60vh' },
+          {/* Plan Preview — full width, outside chat */}
+          {currentDraft && !applied && (
+            <Box sx={{
               border: '1px solid',
               borderColor: 'divider',
               borderRadius: 2,
+              bgcolor: 'background.paper',
               p: 2,
-              bgcolor: 'grey.50',
-            }}
-          >
-            <Stack spacing={1.5}>
-              {messages.map((msg) => (
-                <Box
-                  key={msg.id}
-                  sx={{
-                    alignSelf: msg.role === ChatMessageRole.User ? 'flex-end' : 'flex-start',
-                    maxWidth: '85%',
-                    bgcolor: msg.role === ChatMessageRole.User ? 'primary.main' : 'background.paper',
-                    color: msg.role === ChatMessageRole.User ? 'primary.contrastText' : 'text.primary',
-                    px: 2,
-                    py: 1,
-                    borderRadius: 2,
-                    boxShadow: 1,
-                  }}
-                >
-                  {msg.text && (
-                    <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
-                      {fixUnicodeEscapes(msg.text)}
-                    </Typography>
-                  )}
-                  {msg.photoLabels && msg.photoLabels.length > 0 && (
-                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
-                      {msg.photoLabels.map((label, i) => (
-                        <Typography key={i} variant="caption">
-                          {label.subjectBucket}: {label.lessonOrPages || 'page'} ({label.estimatedMinutes}m)
-                        </Typography>
-                      ))}
-                    </Stack>
-                  )}
-                  {msg.draftPlan && (
-                    <Box sx={{ mt: 1 }}>
-                      <PlanPreviewCard
-                        plan={msg.draftPlan}
-                        hoursPerDay={hoursPerDay}
-                        onToggleItem={msg === messages[messages.length - 1] ? handleToggleItem : undefined}
-                        onGenerateActivity={msg === messages[messages.length - 1] && !applied ? handleGenerateActivity : undefined}
-                        generatingItemId={generatingItemId ?? undefined}
-                      />
-                    </Box>
-                  )}
-                </Box>
-              ))}
-              <div ref={chatEndRef} />
-            </Stack>
-          </Box>
+            }}>
+              <Typography variant="h6" gutterBottom>Your Week Plan</Typography>
+              <PlanPreviewCard
+                plan={currentDraft}
+                hoursPerDay={hoursPerDay}
+                onToggleItem={handleToggleItem}
+                onGenerateActivity={!applied ? handleGenerateActivity : undefined}
+                generatingItemId={generatingItemId ?? undefined}
+              />
+            </Box>
+          )}
+
+          {/* Chat area — shown below plan for adjustments, or as main area before plan exists */}
+          {(setupComplete || conversationLoaded) && (
+            <Box
+              sx={{
+                overflowY: 'auto',
+                maxHeight: currentDraft ? '30vh' : '50vh',
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 2,
+                p: 2,
+                bgcolor: 'grey.50',
+              }}
+            >
+              {/* Adjustment label when plan exists */}
+              {currentDraft && (
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+                  Need changes? Type below or tap a quick tweak.
+                </Typography>
+              )}
+              <Stack spacing={1.5}>
+                {messages.map((msg) => (
+                  <Box
+                    key={msg.id}
+                    sx={{
+                      alignSelf: msg.role === ChatMessageRole.User ? 'flex-end' : 'flex-start',
+                      maxWidth: '85%',
+                      bgcolor: msg.role === ChatMessageRole.User ? 'primary.main' : 'background.paper',
+                      color: msg.role === ChatMessageRole.User ? 'primary.contrastText' : 'text.primary',
+                      px: 2,
+                      py: 1,
+                      borderRadius: 2,
+                      boxShadow: 1,
+                    }}
+                  >
+                    {msg.text && (
+                      <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
+                        {fixUnicodeEscapes(msg.text)}
+                      </Typography>
+                    )}
+                    {msg.photoLabels && msg.photoLabels.length > 0 && (
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                        {msg.photoLabels.map((label, i) => (
+                          <Typography key={i} variant="caption">
+                            {label.subjectBucket}: {label.lessonOrPages || 'page'} ({label.estimatedMinutes}m)
+                          </Typography>
+                        ))}
+                      </Stack>
+                    )}
+                  </Box>
+                ))}
+                <div ref={chatEndRef} />
+              </Stack>
+            </Box>
+          )}
 
           {/* Photo upload area */}
           {showPhotos && (
@@ -2099,16 +2278,6 @@ Generate a plan for Monday through Friday.`.trim()
             visible={currentDraft !== null && !applied}
           />
 
-          {/* Suggestion chips for quick adjustments */}
-          {currentDraft && !applied && (
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-              <Chip label="Make Wednesday lighter" onClick={() => setInputText('Make Wednesday lighter')} clickable size="small" />
-              <Chip label="Add more reading time" onClick={() => setInputText('Add more reading time')} clickable size="small" />
-              <Chip label="Swap Thursday and Friday" onClick={() => setInputText('Swap Thursday and Friday')} clickable size="small" />
-              <Chip label="Remove speech this week" onClick={() => setInputText('Remove speech this week')} clickable size="small" />
-            </Stack>
-          )}
-
           {/* Apply plan button */}
           {currentDraft && !applied && (
             <Button
@@ -2118,15 +2287,25 @@ Generate a plan for Monday through Friday.`.trim()
               onClick={handleApplyPlan}
               fullWidth
             >
-              Apply Plan to Week + Today
+              Lock In This Plan
             </Button>
           )}
 
           {applied && (
             <>
-              <Alert severity="success">
-                Plan applied. Check This Week and Today pages for your generated
-                checklists and day blocks.
+              <Alert severity="success" sx={{ display: 'flex', alignItems: 'center' }}>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="body2" fontWeight={600}>Plan locked in!</Typography>
+                  <Typography variant="body2">Head to Today to start your week.</Typography>
+                </Box>
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={() => navigate('/today')}
+                  sx={{ ml: 2, whiteSpace: 'nowrap' }}
+                >
+                  Go to Today →
+                </Button>
               </Alert>
 
               {currentDraft && (
