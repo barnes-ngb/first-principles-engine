@@ -13,9 +13,16 @@ export function buildMaterialsPrompt(
 ): string {
   const items = day.items.filter((i) => i.accepted && !i.isAppBlock)
 
+  const childContext = childName === 'Lincoln'
+    ? `Lincoln (10): Speech + neurodivergence. ~3rd grade math, ~1st grade reading. Phonics recently clicking. Motivators: Minecraft, Lego, Art. Short routines, frequent wins.`
+    : childName === 'London'
+      ? `London (6): Kindergarten. Story-driven, creates own books. Knows most letter sounds. Motivators: Stories, drawing, book-making.`
+      : `${childName}: elementary-level student`
+
   return `Generate printable Minecraft-themed worksheets for ${childName}'s ${day.day} activities.
 
 CHILD CONTEXT:
+${childContext}
 ${snapshot?.prioritySkills?.length ? `Skill focus: ${snapshot.prioritySkills.map((s) => `${s.label} (${s.level})`).join(', ')}` : ''}
 ${theme ? `Week theme: ${theme}` : ''}
 

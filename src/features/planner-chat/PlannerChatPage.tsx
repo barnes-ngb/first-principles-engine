@@ -80,7 +80,7 @@ import {
 import { fixUnicodeEscapes, formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
-import { defaultAppBlocks } from '../planner/planner.logic'
+import { defaultAppBlocks, defaultDailyRoutine } from '../planner/planner.logic'
 import {
   buildMinimumWinText,
   buildPlannerPrompt,
@@ -228,8 +228,8 @@ export default function PlannerChatPage() {
     { name: '', subject: 'Reading' },
   ])
 
-  // Daily routine state
-  const [dailyRoutine, setDailyRoutine] = useState('')
+  // Daily routine state — initialized with default template
+  const [dailyRoutine, setDailyRoutine] = useState(defaultDailyRoutine)
 
   // Suggest focus state
   const [suggestingFocus, setSuggestingFocus] = useState(false)
@@ -250,19 +250,34 @@ export default function PlannerChatPage() {
     setQuickWorkbooks(prev => [...prev, { name: '', subject: 'Reading' }])
   }, [])
 
-  // Load planner defaults (daily routine, hoursPerDay, readAloud)
+  // Load planner defaults (hoursPerDay, readAloud — family-level)
   useEffect(() => {
     if (!familyId) return
     const settingsRef = doc(db, `families/${familyId}/settings/plannerDefaults`)
     void getDoc(settingsRef).then((snap) => {
       if (snap.exists()) {
         const data = snap.data()
-        if (data.dailyRoutine) setDailyRoutine(data.dailyRoutine)
         if (data.hoursPerDay) setHoursPerDay(data.hoursPerDay)
         if (data.readAloud) setReadAloud(data.readAloud)
       }
     })
   }, [familyId])
+
+  // Load per-child daily routine (falls back to default template)
+  useEffect(() => {
+    if (!familyId || !activeChildId) {
+      setDailyRoutine(defaultDailyRoutine)
+      return
+    }
+    const childSettingsRef = doc(db, `families/${familyId}/settings/plannerDefaults_${activeChildId}`)
+    void getDoc(childSettingsRef).then((snap) => {
+      if (snap.exists() && snap.data().dailyRoutine) {
+        setDailyRoutine(snap.data().dailyRoutine)
+      } else {
+        setDailyRoutine(defaultDailyRoutine)
+      }
+    })
+  }, [familyId, activeChildId])
 
   // Load existing conversation
   useEffect(() => {
@@ -550,7 +565,7 @@ Return as JSON:
       createdAt: new Date().toISOString(),
     }
 
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments }
+    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -618,7 +633,7 @@ Return as JSON:
       createdAt: new Date().toISOString(),
     }
 
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments }
+    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -925,13 +940,20 @@ Return ONLY valid JSON, no markdown.`,
         .map((qw) => `- ${qw.name} (${qw.subject})`),
     ].join('\n')
 
-    // Save planner defaults so daily routine persists across weeks
+    // Save family-level planner defaults (hoursPerDay, readAloud)
     void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
-      dailyRoutine,
       hoursPerDay,
       readAloud,
       updatedAt: new Date().toISOString(),
     }, { merge: true })
+
+    // Save per-child daily routine
+    if (activeChildId) {
+      void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults_${activeChildId}`), {
+        dailyRoutine,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true })
+    }
 
     const contextMessage = `Plan ${activeChild?.name ?? 'my child'}'s week.
 
@@ -1243,7 +1265,7 @@ Generate a plan for Monday through Friday.`.trim()
       const response = await aiChat({
         familyId,
         childId: activeChildId,
-        taskType: TaskType.Chat,
+        taskType: TaskType.Workshop,
         messages: [{ role: 'user', content: prompt }],
       })
 

@@ -13,6 +13,19 @@ export const defaultAppBlocks: AppBlock[] = [
   { label: 'Math app / Typing', defaultMinutes: 15 },
 ]
 
+/**
+ * Shelly's real daily routine template — used as default when no custom routine is set.
+ * Each line is an activity with approximate time and curriculum source.
+ */
+export const defaultDailyRoutine = `Handwriting (while read-aloud) — 20 min — LanguageArts
+Booster cards — 15 min — Reading
+Good and the Beautiful reading — 30 min — GATB — Reading
+Sight word games — 15 min — Reading
+Memory card — 10 min — Reading
+Language arts workbook — 20 min — LanguageArts
+Reading Eggs (tablet) — 45 min — Reading Eggs (app) — Reading
+Good and the Beautiful Math — 30 min — GATB — Math`
+
 /** Day labels for Mon–Fri + optional weekend */
 export const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as const
 
