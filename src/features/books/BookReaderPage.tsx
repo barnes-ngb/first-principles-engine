@@ -27,6 +27,8 @@ import type { PrintSettings } from './PrintSettingsDialog'
 import { TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
 import { renderInteractiveText } from './highlightSightWords'
 import { useSightWordProgress } from './useSightWordProgress'
+import { useComprehensionQuestions } from './useComprehensionQuestions'
+import ComprehensionQuestions from './ComprehensionQuestions'
 
 // ── Reading session helpers ──────────────────────────────────────
 
@@ -103,6 +105,14 @@ export default function BookReaderPage() {
     isSightWordBook ? familyId : '',
     isSightWordBook ? childId : '',
   )
+
+  const childAge = isLincoln ? 10 : 6
+  const {
+    questions: comprehensionQuestions,
+    loading: comprehensionLoading,
+    error: comprehensionError,
+    generateQuestions,
+  } = useComprehensionQuestions(familyId, childId)
 
   const [currentPage, setCurrentPage] = useState(0)
   const [touchStart, setTouchStart] = useState<number | null>(null)
@@ -497,6 +507,17 @@ export default function BookReaderPage() {
               >
                 First Principles Engine
               </Typography>
+
+              {/* Comprehension questions */}
+              <ComprehensionQuestions
+                questions={comprehensionQuestions}
+                loading={comprehensionLoading}
+                error={comprehensionError}
+                onGenerate={() => {
+                  if (book) void generateQuestions(book, childName, childAge)
+                }}
+                isLincoln={isLincoln}
+              />
             </Stack>
           )}
         </Box>

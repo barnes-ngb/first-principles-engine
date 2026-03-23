@@ -1216,7 +1216,22 @@ export async function loadSightWordSummary(
     .slice(0, 15)
     .join(", ");
 
-  return `SIGHT WORD PROGRESS: ${mastered} mastered, ${familiar} familiar, ${practicing} practicing, ${new_} new (${progress.length} total tracked).${weakWords ? ` Words needing work: ${weakWords}` : ""}`;
+  const masteredWords = progress
+    .filter(p => p.masteryLevel === "mastered")
+    .map(p => p.word)
+    .slice(0, 15)
+    .join(", ");
+
+  const lines = [
+    `SIGHT WORD PROGRESS: ${mastered} mastered, ${familiar} familiar, ${practicing} practicing, ${new_} new (${progress.length} total tracked).`,
+  ];
+  if (weakWords) {
+    lines.push(`Words needing work (prioritize in reading activities): ${weakWords}`);
+  }
+  if (masteredWords) {
+    lines.push(`Mastered words (skip or reduce practice): ${masteredWords}`);
+  }
+  return lines.join(" ");
 }
 
 // ── Callable Cloud Function ─────────────────────────────────────
