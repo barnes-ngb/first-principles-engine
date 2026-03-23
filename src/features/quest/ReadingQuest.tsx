@@ -182,10 +182,14 @@ function OpenResponseInput({ onSubmit, disabled, questionId }: OpenResponseInput
   if (prevQuestionId !== questionId) {
     setPrevQuestionId(questionId)
     setTypedValue('')
-    submittedRef.current = false
     if (speech.isListening) speech.stop()
     speech.reset()
   }
+
+  // Reset submitted flag when question changes (must be in effect, not during render)
+  useEffect(() => {
+    submittedRef.current = false
+  }, [questionId])
 
   // Auto-submit when voice produces a final word
   useEffect(() => {
