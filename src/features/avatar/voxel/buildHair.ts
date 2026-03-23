@@ -81,6 +81,31 @@ export function buildHair(
       hair.add(backExt)
     }
 
+    // Short style: shorter sides, no extensions, messy tousled chunks on top (kid hair)
+    if (style === 'short') {
+      // Trim side panels shorter (override the default ones above)
+      sideL.scale.y = 0.6
+      sideL.position.y = headY + U * 2.0
+      sideR.scale.y = 0.6
+      sideR.position.y = headY + U * 2.0
+
+      // Messy chunks on top — kids' hair is rarely neat
+      const chunk1 = box(U * 2.0, U * 1.5, U * 2.5, material)
+      chunk1.position.set(-U * 2, headY + U * 5.5, U * 1.5)
+      hair.add(chunk1)
+      const chunk2 = box(U * 1.8, U * 1.2, U * 2.2, material)
+      chunk2.position.set(U * 2.5, headY + U * 5.3, -U * 1)
+      hair.add(chunk2)
+      const chunk3 = box(U * 1.5, U * 1.8, U * 2.0, material)
+      chunk3.position.set(0, headY + U * 5.8, U * 0.5)
+      hair.add(chunk3)
+
+      // Short bangs — doesn't hang over eyes
+      const bangs = box(U * 5, U * 1.2, U * 1.4, material)
+      bangs.position.set(0, headY + U * 3.0, U * 3.8)
+      hair.add(bangs)
+    }
+
     // Curly: add extra small cubes for texture
     if (style === 'curly') {
       for (let i = 0; i < 8; i++) {
