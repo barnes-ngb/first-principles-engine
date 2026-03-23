@@ -29,6 +29,7 @@ export const ContextSlice = {
   RecentEval: "recentEval",
   WordMastery: "wordMastery",
   GeneratedContent: "generatedContent",
+  WorkshopGames: "workshopGames",
 } as const;
 export type ContextSlice = (typeof ContextSlice)[keyof typeof ContextSlice];
 
@@ -39,6 +40,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
     "charter", "childProfile", "recentSessions", "workbookPaces",
     "weekFocus", "hoursProgress", "engagement", "gradeResults",
     "bookStatus", "sightWords", "recentEval", "wordMastery", "generatedContent",
+    "workshopGames",
   ],
   chat: ["charter", "childProfile"],
   generate: ["charter", "childProfile"],
@@ -46,6 +48,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   quest: ["childProfile", "sightWords", "recentEval", "wordMastery"],
   generateStory: ["childProfile", "sightWords", "wordMastery"],
   analyzePatterns: ["childProfile"],
+  workshop: ["charter", "childProfile", "workshopGames"],
 };
 
 // ── Charter preamble (shared constant) ──────────────────────────
@@ -249,6 +252,9 @@ export async function buildContextForTask(
   if (slices.includes("generatedContent")) {
     fetches.push({ slice: "generatedContent", promise: loadGeneratedContent(db, familyId, childId) });
   }
+  if (slices.includes("workshopGames")) {
+    fetches.push({ slice: "workshopGames", promise: loadWorkshopGames(db, familyId, childId) });
+  }
 
   // Await all in parallel
   const results = await Promise.allSettled(fetches.map((f) => f.promise));
@@ -379,6 +385,12 @@ export async function buildContextForTask(
     if (generatedContent) sections.push(generatedContent);
   }
 
+  // Workshop games (available for plan activities)
+  if (sliceData.has("workshopGames")) {
+    const workshopGames = sliceData.get("workshopGames") as string;
+    if (workshopGames) sections.push(workshopGames);
+  }
+
   return sections;
 }
 
@@ -410,6 +422,66 @@ async function loadGeneratedContent(
     lines.push(`- Reading book: "${book.title}" (targets: ${tags}${book.status === "draft" ? ", in progress" : ""})`);
   }
   lines.push('Include 1-2 of these as "choose" activities in the plan, like "Read: [title]".');
+
+  return lines.join("\n");
+}
+
+// ── Workshop games loader ─────────────────────────────────────
+
+/** Load recently created workshop games that can be included as plan activities. */
+async function loadWorkshopGames(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<string> {
+  const snap = await db
+    .collection(`families/${familyId}/storyGames`)
+    .where("childId", "==", childId)
+    .where("status", "in", ["ready", "played"])
+    .orderBy("updatedAt", "desc")
+    .limit(5)
+    .get();
+
+  if (snap.empty) return "";
+
+  const gameTypeLabel: Record<string, string> = {
+    board: "Board game",
+    adventure: "Choose-your-adventure",
+    cards: "Card game",
+  };
+
+  const lines = ["AVAILABLE WORKSHOP GAMES:"];
+  for (const gameDoc of snap.docs) {
+    const game = gameDoc.data() as {
+      gameType?: string;
+      generatedGame?: { title?: string; challengeCards?: Array<{ type: string }> };
+      adventureTree?: { totalNodes?: number; challengeCount?: number };
+      cardGame?: { mechanic?: string; metadata?: { deckSize?: number } };
+      storyInputs?: { theme?: string };
+      playSessions?: unknown[];
+      status?: string;
+    };
+
+    const type = gameTypeLabel[game.gameType ?? "board"] ?? "Game";
+    const theme = game.storyInputs?.theme ?? "unknown theme";
+    const playCount = game.playSessions?.length ?? 0;
+    const title = game.generatedGame?.title ?? `${theme} game`;
+
+    // Summarize challenge types for the planner
+    let challengeInfo = "";
+    if (game.generatedGame?.challengeCards?.length) {
+      const types = new Set(game.generatedGame.challengeCards.map((c) => c.type));
+      challengeInfo = ` (${[...types].join(", ")} challenges)`;
+    } else if (game.adventureTree?.challengeCount) {
+      challengeInfo = ` (${game.adventureTree.challengeCount} embedded challenges)`;
+    } else if (game.cardGame?.metadata?.deckSize) {
+      challengeInfo = ` (${game.cardGame.metadata.deckSize} cards, ${game.cardGame.mechanic})`;
+    }
+
+    const played = playCount > 0 ? `, played ${playCount}x` : ", not yet played";
+    lines.push(`- ${type}: "${title}" — ${theme}${challengeInfo}${played}`);
+  }
+  lines.push('Include 1-2 of these as "choose" activities in the plan, like "Play: [title]" or "Workshop: create a new game".');
 
   return lines.join("\n");
 }

@@ -143,6 +143,7 @@ export interface DayLog {
   together?: { done: boolean; note?: string; mediaUrl?: string }
   movement?: { done: boolean; note?: string }
   project?: { done: boolean; note?: string; mediaUrl?: string }
+  workshop?: { done: boolean; gamesPlayed?: number; note?: string }
   xpTotal?: number
   retro?: string
   checklist?: ChecklistItem[]
