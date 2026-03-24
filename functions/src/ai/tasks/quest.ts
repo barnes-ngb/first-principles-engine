@@ -12,6 +12,8 @@ export const handleQuest = async (
   const { db, familyId, childId, childData, snapshotData, messages, domain, apiKey } = ctx;
 
   // Quest only needs childProfile + sightWords + recentEval (no charter, no enriched)
+  console.log(`[quest] Starting quest for child=${childId}, domain=${domain}`);
+
   const sections = await buildContextForTask("quest", {
     db, familyId, childId, childData, snapshotData,
   });
@@ -64,19 +66,27 @@ export const handleQuest = async (
   const systemPrompt = sections.join("\n\n");
   const model = modelForTask("quest");
 
-  const result = await callClaude({
-    apiKey,
-    model,
-    maxTokens: 1024,
-    systemPrompt,
-    messages,
-  });
+  console.log(`[quest] System prompt: ${systemPrompt.length} chars, model: ${model}, messages: ${messages.length}`);
 
-  if (!result.text) {
-    console.warn("Claude returned empty response", { model, taskType: "quest" });
+  let result;
+  try {
+    result = await callClaude({
+      apiKey,
+      model,
+      maxTokens: 1024,
+      systemPrompt,
+      messages,
+    });
+  } catch (err) {
+    console.error(`[quest] Claude API call FAILED:`, err);
+    throw err;
   }
 
-  console.log(`[AI] taskType=quest inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`);
+  if (!result.text) {
+    console.warn("[quest] Claude returned empty response", { model, taskType: "quest" });
+  }
+
+  console.log(`[quest] Response: ${result.text.length} chars, inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`);
 
   await logAiUsage(db, familyId, {
     childId,
