@@ -28,13 +28,50 @@ import {
 // ── Helpers ─────────────────────────────────────────────────────
 
 function parseQuestBlock(text: string): QuestQuestion | null {
-  // Try <quest>...</quest> block first
-  const regex = /<quest>([\s\S]*?)<\/quest>/
-  const match = regex.exec(text)
-  const jsonStr = match ? match[1] : text
+  let jsonStr: string | null = null
+
+  // Attempt 1: <quest>...</quest> tags
+  const questMatch = /<quest>([\s\S]*?)<\/quest>/.exec(text)
+  if (questMatch) {
+    jsonStr = questMatch[1].trim()
+  }
+
+  // Attempt 2: ```json ... ``` fences
+  if (!jsonStr) {
+    const fenceMatch = /```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/.exec(text)
+    if (fenceMatch) {
+      jsonStr = fenceMatch[1].trim()
+    }
+  }
+
+  // Attempt 3: Find first { ... } in the text
+  if (!jsonStr) {
+    const firstBrace = text.indexOf('{')
+    const lastBrace = text.lastIndexOf('}')
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      jsonStr = text.slice(firstBrace, lastBrace + 1)
+    }
+  }
+
+  // Attempt 4: Raw text (maybe it IS just JSON)
+  if (!jsonStr) {
+    jsonStr = text.trim()
+  }
 
   try {
-    const parsed = JSON.parse(jsonStr.trim())
+    // Clean up common issues
+    jsonStr = jsonStr
+      .replace(/,\s*}/g, '}')   // trailing commas
+      .replace(/,\s*\]/g, ']')  // trailing commas in arrays
+
+    const parsed = JSON.parse(jsonStr)
+
+    // Validate minimum required fields
+    if (!parsed.prompt && !parsed.options) {
+      console.warn('[parseQuestBlock] Parsed JSON but missing prompt/options:', Object.keys(parsed))
+      return null
+    }
+
     return {
       id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       type: 'multiple-choice',
@@ -49,7 +86,9 @@ function parseQuestBlock(text: string): QuestQuestion | null {
       isBonusRound: parsed.bonusRound ?? undefined,
       allowOpenResponse: parsed.allowOpenResponse ?? undefined,
     }
-  } catch {
+  } catch (err) {
+    console.error('[parseQuestBlock] JSON parse failed:', (err as Error).message)
+    console.error('[parseQuestBlock] Attempted to parse:', jsonStr?.substring(0, 300))
     return null
   }
 }
@@ -209,6 +248,7 @@ export function useQuestSession() {
   const [lastAnswer, setLastAnswer] = useState<{ correct: boolean; correctAnswer: string; encouragement?: string } | null>(null)
   const [sessionSaved, setSessionSaved] = useState(false)
   const [summarizing, setSummarizing] = useState(false)
+  const [startQuestError, setStartQuestError] = useState<string | null>(null)
   const [previousSessions, setPreviousSessions] = useState<Array<{ evaluatedAt: string }>>([])
   const activeDomainRef = useRef<EvaluationDomain>('reading')
 
@@ -279,6 +319,7 @@ export function useQuestSession() {
       }
 
       activeDomainRef.current = domain
+      setStartQuestError(null)
       setQuestState(initialState)
       setAnsweredQuestions([])
       setFindings([])
@@ -315,24 +356,53 @@ export function useQuestSession() {
       }
       conversationRef.current = [userMessage]
 
-      const response = await chat({
-        familyId,
-        childId: activeChildId,
-        taskType: TaskType.Quest,
-        messages: [userMessage],
-        domain,
-      })
+      // Timeout: if AI takes >30s, bail out with a message
+      let timedOut = false
+      const timeoutId = setTimeout(() => {
+        timedOut = true
+      }, 30_000)
 
-      if (!response) {
+      let response: Awaited<ReturnType<typeof chat>>
+      try {
+        response = await chat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.Quest,
+          messages: [userMessage],
+          domain,
+        })
+      } catch (err) {
+        clearTimeout(timeoutId)
+        console.error('[startQuest] AI call threw:', err)
+        // aiError is set by useAI, but won't show on Intro screen without startQuestError
+        setStartQuestError('Could not reach the quest server. Tap to try again!')
         setScreen(QuestScreen.Intro)
         if (timerRef.current) clearInterval(timerRef.current)
         return
       }
 
+      clearTimeout(timeoutId)
+
+      if (!response || timedOut) {
+        console.error('[startQuest] AI call returned null or timed out — no response')
+        setStartQuestError(
+          timedOut
+            ? 'Quest is taking too long… Tap to try again.'
+            : 'Could not start quest. Check your connection and try again.',
+        )
+        setScreen(QuestScreen.Intro)
+        if (timerRef.current) clearInterval(timerRef.current)
+        return
+      }
+
+      console.log('[startQuest] AI response received:', response.message.substring(0, 300))
+
       conversationRef.current.push({ role: 'assistant', content: response.message })
 
       const question = parseQuestBlock(response.message)
       if (!question) {
+        console.error('[startQuest] parseQuestBlock returned null. Response:', response.message.substring(0, 500))
+        setStartQuestError('Quest response was unreadable. Tap to try again!')
         setScreen(QuestScreen.Intro)
         if (timerRef.current) clearInterval(timerRef.current)
         return
@@ -850,6 +920,7 @@ export function useQuestSession() {
     setLastAnswer(null)
     setSessionSaved(false)
     setSummarizing(false)
+    setStartQuestError(null)
     conversationRef.current = []
     bonusRoundUsedRef.current = false
   }, [])
@@ -866,6 +937,7 @@ export function useQuestSession() {
     summarizing,
     aiLoading,
     aiError,
+    startQuestError,
     startQuest,
     submitAnswer,
     handleSkip,
