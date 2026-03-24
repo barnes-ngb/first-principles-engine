@@ -740,7 +740,7 @@ function forgivingJsonParse(text: string): Record<string, unknown> | null {
     console.warn('[forgivingJsonParse] Strict parse failed:', (err as Error).message)
   }
 
-  let fixed = text
+  const fixed = text
     // Remove trailing commas before } or ]
     .replace(/,\s*([}\]])/g, '$1')
     // Replace single-quoted string values with double-quoted (simple cases)
