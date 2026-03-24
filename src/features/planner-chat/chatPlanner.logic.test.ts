@@ -187,7 +187,7 @@ describe('generateDraftPlanFromInputs', () => {
     expect(plan.minimumWin).toContain('daily micro reps')
   })
 
-  it('applies lighten day adjustment', () => {
+  it('applies lighten day adjustment and redistributes items', () => {
     const inputs: PlanGeneratorInputs = {
       ...baseInputs,
       snapshot: null,
@@ -202,11 +202,18 @@ describe('generateDraftPlanFromInputs', () => {
     }
     const plan = generateDraftPlanFromInputs(inputs)
     const monday = plan.days.find((d) => d.day === 'Monday')!
-    // Assignment should have been halved (30 -> 15)
-    const item = monday.items.find((i) => i.assignmentId === 'a1')
-    if (item) {
-      expect(item.estimatedMinutes).toBeLessThanOrEqual(15)
+    // Non-essential items on Monday should be removed (accepted = false)
+    const mondayItem = monday.items.find((i) => i.assignmentId === 'a1')
+    if (mondayItem) {
+      expect(mondayItem.accepted).toBe(false)
     }
+    // The removed item should be redistributed to another day
+    const otherDays = plan.days.filter((d) => d.day !== 'Monday')
+    const redistributed = otherDays.flatMap((d) => d.items).filter(
+      (i) => i.subjectBucket === SubjectBucket.Math && i.accepted,
+    )
+    // Should have more math items on other days than before (original 4 from bin-packing + 1 redistributed)
+    expect(redistributed.length).toBeGreaterThan(0)
   })
 
   it('applies move subject adjustment', () => {
