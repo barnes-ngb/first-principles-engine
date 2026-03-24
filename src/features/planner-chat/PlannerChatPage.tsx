@@ -87,6 +87,7 @@ import { defaultAppBlocks, defaultDailyRoutine } from '../planner/planner.logic'
 import {
   buildMinimumWinText,
   buildPlannerPrompt,
+  fillMissingDaysFromRoutine,
   generateDraftPlanFromInputs,
   generateItemId,
   parseAIResponse,
@@ -678,7 +679,8 @@ Return as JSON:
         messages: aiMessages,
       })
 
-      const aiDraft = response ? parseAIResponse(response) : null
+      const rawAiDraft = response ? parseAIResponse(response) : null
+      const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, dailyRoutine, hoursPerDay) : null
       if (aiDraft) {
         draft = aiDraft
         usedAI = true
@@ -761,7 +763,8 @@ Return as JSON:
         })
       }
 
-      const aiDraft = response ? parseAIResponse(response) : null
+      const rawAiDraft = response ? parseAIResponse(response) : null
+      const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, dailyRoutine, hoursPerDay) : null
       if (aiDraft) {
         draft = aiDraft
         usedAI = true
@@ -847,6 +850,11 @@ Return as JSON:
           'Current plan:',
           JSON.stringify(currentDraft, null, 2),
           `User adjustment: "${text}"`,
+          '',
+          'IMPORTANT: When removing items from one day, redistribute those minutes to other days.',
+          'Move the removed activities to Tue-Fri so the weekly total stays the same.',
+          'Do NOT just delete activities — move them to days with remaining capacity.',
+          '',
           `Apply the adjustment and return the COMPLETE updated plan as valid JSON with this schema:`,
           `{ "days": [{ "day": "Monday", "timeBudgetMinutes": 150, "items": [{ "title": "string", "subjectBucket": "Reading|Math|LanguageArts|Science|SocialStudies|Other", "estimatedMinutes": 15, "skillTags": [], "isAppBlock": false, "accepted": true }] }], "skipSuggestions": [], "minimumWin": "string" }`,
           `Respect hours budget of ${hoursPerDay} hours/day. No markdown, no preamble — only valid JSON.`,

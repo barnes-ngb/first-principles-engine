@@ -701,6 +701,13 @@ Rules:
 
 When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.
 
+CRITICAL SIZE CONSTRAINTS:
+- Keep item titles SHORT (max 6 words). Example: "GATB Reading Lesson 21" not "Good and the Beautiful Reading — Lesson 21: Short vowel review with comprehension questions"
+- Keep skillTags to max 1 tag per item (the most relevant one)
+- Keep skipGuidance to max 15 words or omit if not needed
+- Do NOT include explanations, descriptions, or commentary in the JSON
+- Total response must be under 4000 tokens. Be concise.
+
 REMINDER: Your entire response must be ONLY the JSON object. No markdown, no code fences, no text outside the JSON. Start with { and end with }.`;
 
 // ── Evaluation diagnostic prompt ─────────────────────────────

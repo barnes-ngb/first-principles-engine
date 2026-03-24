@@ -5,6 +5,8 @@ import AddIcon from '@mui/icons-material/Add'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import CheckIcon from '@mui/icons-material/Check'
 import ChecklistIcon from '@mui/icons-material/Checklist'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -149,10 +151,59 @@ function formatTime12h(date: Date): string {
 export default function TodayPage() {
   const [searchParams] = useSearchParams()
   const dateParam = searchParams.get('date')
-  const today = useMemo(() => {
+  const initialDate = useMemo(() => {
     if (dateParam && parseDateYmd(dateParam)) return dateParam
     return formatDateYmd(new Date())
-  }, [dateParam])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const [selectedDate, setSelectedDate] = useState(initialDate)
+  const today = selectedDate
+  const realToday = useMemo(() => formatDateYmd(new Date()), [])
+  const isToday = selectedDate === realToday
+
+  const handlePrevDay = useCallback(() => {
+    setSelectedDate((prev) => {
+      const d = new Date(prev + 'T00:00:00')
+      d.setDate(d.getDate() - 1)
+      return formatDateYmd(d)
+    })
+  }, [])
+
+  const handleNextDay = useCallback(() => {
+    setSelectedDate((prev) => {
+      const d = new Date(prev + 'T00:00:00')
+      d.setDate(d.getDate() + 1)
+      return formatDateYmd(d)
+    })
+  }, [])
+
+  const handleGoToToday = useCallback(() => {
+    setSelectedDate(formatDateYmd(new Date()))
+  }, [])
+
+  const selectedDayName = useMemo(
+    () =>
+      new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'short',
+        day: 'numeric',
+      }),
+    [selectedDate],
+  )
+
+  // Compute Mon-Fri dates for the week containing selectedDate
+  const weekDayDates = useMemo(() => {
+    const parsed = new Date(selectedDate + 'T00:00:00')
+    const range = getWeekRange(parsed)
+    const monday = new Date(range.start + 'T00:00:00')
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] as const
+    return labels.map((label, i) => {
+      const d = new Date(monday)
+      d.setDate(monday.getDate() + i)
+      return { label, dateKey: formatDateYmd(d) }
+    })
+  }, [selectedDate])
+
   const familyId = useFamilyId()
   const { profile } = useProfile()
   const isKidProfile =
@@ -767,6 +818,60 @@ export default function TodayPage() {
         onCaptureArtifact={scrollToArtifacts}
       />
       <Typography variant="h4" component="h1">Today</Typography>
+
+      {/* Day Switcher */}
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+        <IconButton size="small" onClick={handlePrevDay} aria-label="Previous day">
+          <ChevronLeftIcon />
+        </IconButton>
+
+        <Stack alignItems="center" spacing={0}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            {selectedDayName}
+          </Typography>
+          {!isToday && (
+            <Button size="small" variant="text" onClick={handleGoToToday} sx={{ py: 0, minHeight: 'auto' }}>
+              Back to today
+            </Button>
+          )}
+        </Stack>
+
+        <IconButton size="small" onClick={handleNextDay} aria-label="Next day">
+          <ChevronRightIcon />
+        </IconButton>
+      </Stack>
+
+      {/* Week-at-a-glance day chips */}
+      <Stack direction="row" spacing={0.5} justifyContent="center" sx={{ mb: 1 }}>
+        {weekDayDates.map(({ label, dateKey }) => {
+          const isSelected = dateKey === selectedDate
+          const isRealToday = dateKey === realToday
+          return (
+            <Chip
+              key={dateKey}
+              label={label}
+              size="small"
+              onClick={() => setSelectedDate(dateKey)}
+              color={isSelected ? 'primary' : 'default'}
+              variant={isSelected ? 'filled' : 'outlined'}
+              sx={{
+                minWidth: 48,
+                fontWeight: isSelected || isRealToday ? 700 : 400,
+                ...(isRealToday && !isSelected ? { borderColor: 'primary.main', borderWidth: 2 } : {}),
+              }}
+            />
+          )
+        })}
+      </Stack>
+
+      {!isToday && (
+        <Alert severity="info" sx={{ mb: 1 }}>
+          {new Date(selectedDate + 'T00:00:00') < new Date(realToday + 'T00:00:00')
+            ? `Viewing ${selectedDayName} (past). You can mark items complete or add notes.`
+            : `Viewing ${selectedDayName} (upcoming). Items will appear on this day.`}
+        </Alert>
+      )}
+
       <HelpStrip
         pageKey="today"
         text="This is today's checklist. Saving creates the Daily Log."
