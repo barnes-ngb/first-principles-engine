@@ -52,7 +52,7 @@ export function modelForTask(taskType: TaskType): string {
     case TaskType.GenerateStory:
     case TaskType.Workshop:
     case TaskType.AnalyzeWorkbook:
-      return "claude-sonnet-4-5-20250929";
+      return "claude-sonnet-4-5-20250514";
     case TaskType.Generate:
     case TaskType.Chat:
     default:
