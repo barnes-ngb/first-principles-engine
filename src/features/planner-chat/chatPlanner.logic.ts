@@ -461,7 +461,52 @@ export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
   const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], dailyRoutine, subjectTimeDefaults } = inputs
   const lines: string[] = []
 
-  lines.push(`Generate a weekly school plan (Monday–Friday) with ${hoursPerDay} hours/day budget.`)
+  // ── ROUTINE FIRST — this is the most important input ──
+  let routineMinutesTotal = 0
+  if (dailyRoutine) {
+    lines.push('═══════════════════════════════════════════════════')
+    lines.push('YOUR #1 JOB: Use mom\'s EXACT daily routine as the plan.')
+    lines.push('═══════════════════════════════════════════════════')
+    lines.push('')
+    lines.push('Mom\'s daily routine (COPY THESE EXACTLY as plan items):')
+    lines.push('')
+
+    // Parse routine into structured items for the AI
+    const routineLines = dailyRoutine.split('\n').filter(l => l.trim())
+    for (const line of routineLines) {
+      const dashMatch = line.match(/^(.+?)\s*[—–-]\s*(\d+)\s*min/)
+      const parenMatch = line.match(/^(.+?)\s*\((\d+)\s*min\)/)
+      const match = dashMatch || parenMatch
+      if (match) {
+        const mins = parseInt(match[2])
+        routineMinutesTotal += mins
+        lines.push(`  MUST-DO: "${match[1].trim()}" — ${mins} minutes`)
+      } else {
+        routineMinutesTotal += 15
+        lines.push(`  MUST-DO: "${line.trim()}"`)
+      }
+    }
+
+    lines.push('')
+    lines.push('RULES:')
+    lines.push('- Every day MUST include ALL of these activities with their EXACT names and times')
+    lines.push('- Use "category": "must-do" for all routine items')
+    lines.push('- Use the EXACT estimatedMinutes from the routine (20, 15, 30, 45, etc.) — do NOT default to 15')
+    lines.push('- Do NOT rename activities. "Good and the Beautiful reading" stays "Good and the Beautiful reading"')
+    lines.push('- Do NOT replace routine items with generic alternatives')
+    lines.push('- You MAY add 1-2 extra "choose" items per day (games, books, art) beyond the routine')
+    lines.push('- You MAY vary the lesson NUMBER or specific content within an activity across days')
+    lines.push('  (e.g., Monday: "GATB Math — Lesson 5", Tuesday: "GATB Math — Lesson 6")')
+    lines.push('')
+    lines.push(`Daily time budget: ${routineMinutesTotal} minutes (based on routine total)`)
+    lines.push('')
+    lines.push('═══════════════════════════════════════════════════')
+    lines.push('')
+  }
+
+  const timeBudgetMinutes = routineMinutesTotal > 0 ? routineMinutesTotal : hoursPerDay * 60
+
+  lines.push(`Generate a weekly school plan (Monday–Friday) with ${timeBudgetMinutes} minutes/day budget.`)
   lines.push('')
 
   if (subjectTimeDefaults && Object.keys(subjectTimeDefaults).length > 0) {
@@ -470,14 +515,6 @@ export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
       const label = subject === 'Other' ? 'Formation/Prayer' : subject === 'LanguageArts' ? 'Language Arts' : subject === 'SocialStudies' ? 'Social Studies' : subject
       lines.push(`- ${label}: ${minutes} min/day`)
     }
-    lines.push('')
-  }
-
-  if (dailyRoutine) {
-    lines.push('IMPORTANT — Mom\'s daily routine template (use these EXACT activities and times as the base for each day):')
-    lines.push(dailyRoutine)
-    lines.push('')
-    lines.push('Vary the specific content across days (different lessons, chapters, word lists) but keep the same activity structure and time blocks.')
     lines.push('')
   }
 
@@ -526,21 +563,33 @@ export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
     days: [
       {
         day: 'Monday',
-        timeBudgetMinutes: 150,
+        timeBudgetMinutes: Math.round(timeBudgetMinutes),
         items: [
           {
-            title: 'string',
-            subjectBucket: 'Reading|Math|LanguageArts|Science|SocialStudies|Other',
-            estimatedMinutes: 15,
-            skillTags: ['optional.skill.tag'],
+            title: 'Handwriting (while read-aloud)',
+            subjectBucket: 'LanguageArts',
+            estimatedMinutes: 20,
+            skillTags: [],
             isAppBlock: false,
             accepted: true,
+            mvdEssential: true,
+            category: 'must-do',
+          },
+          {
+            title: 'Reading Eggs',
+            subjectBucket: 'Reading',
+            estimatedMinutes: 45,
+            skillTags: [],
+            isAppBlock: true,
+            accepted: true,
+            mvdEssential: true,
+            category: 'must-do',
           },
         ],
       },
     ],
     skipSuggestions: [],
-    minimumWin: 'string',
+    minimumWin: 'Complete all must-do items.',
   }))
 
   return lines.join('\n')
@@ -788,7 +837,11 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
       const items: DraftPlanItem[] = []
       for (let itemIdx = 0; itemIdx < (rawDay.items as Array<Record<string, unknown>>).length; itemIdx++) {
         const rawItem = (rawDay.items as Array<Record<string, unknown>>)[itemIdx]
-        const title = typeof rawItem.title === 'string' ? rawItem.title : String(rawItem.title ?? '')
+        let title = typeof rawItem.title === 'string' ? rawItem.title : String(rawItem.title ?? '')
+        // Strip trailing JSON artifacts: quotes, commas, semicolons
+        title = title.replace(/[",;]+$/, '').trim()
+        // Strip leading quotes
+        title = title.replace(/^["']+/, '').trim()
         if (!title) {
           console.warn(`[parseAIResponse] Day ${dayIdx} item ${itemIdx}: empty title, skipping`)
           continue
@@ -820,7 +873,7 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
           isAppBlock: rawItem.isAppBlock === true,
           accepted: rawItem.accepted !== false,
           mvdEssential: rawItem.mvdEssential === true ? true : rawItem.category === 'must-do' ? true : undefined,
-          category: rawItem.category === 'must-do' || rawItem.category === 'choose' ? rawItem.category as 'must-do' | 'choose' : undefined,
+          category: rawItem.category === 'choose' ? 'choose' as const : 'must-do' as const,
           skipGuidance: typeof rawItem.skipGuidance === 'string' ? rawItem.skipGuidance : undefined,
         })
       }
