@@ -368,20 +368,35 @@ function applyLightenDay(days: DraftDayPlan[], intent: LightenDayIntent): void {
   const targetDay = days.find((d) => d.day === intent.day)
   if (!targetDay) return
 
-  // Non-essential = not an app block AND not a generated priority-skill item (has assignmentId)
-  // Priority-skill micro-reps (no assignmentId, not app blocks) are protected.
-  const nonEssential = targetDay.items.filter(
-    (item) => !item.isAppBlock && item.assignmentId != null,
-  )
-  for (const item of nonEssential) {
-    item.estimatedMinutes = Math.ceil(item.estimatedMinutes * 0.5)
-  }
-  // Remove up to half of non-essential items if still heavy
-  const totalMin = dayTotalMinutes(targetDay)
-  if (totalMin > targetDay.timeBudgetMinutes) {
-    const toRemove = nonEssential.slice(0, Math.ceil(nonEssential.length / 2))
-    for (const item of toRemove) {
+  // Non-essential = not an app block AND not mvdEssential.
+  // Priority-skill micro-reps (no assignmentId, not app blocks) are protected only if mvdEssential.
+  const removedItems: DraftPlanItem[] = []
+  const keptItems: DraftPlanItem[] = []
+  for (const item of targetDay.items) {
+    if (!item.isAppBlock && !item.mvdEssential && item.accepted) {
+      removedItems.push(item)
       item.accepted = false
+    } else {
+      keptItems.push(item)
+    }
+  }
+
+  // Redistribute removed items to other days (round-robin, prefer days with most remaining budget)
+  if (removedItems.length > 0) {
+    const otherDays = days.filter((d) => d.day !== intent.day)
+    // Sort by remaining budget descending so fuller days get fewer items
+    const sortedOthers = [...otherDays].sort(
+      (a, b) => (b.timeBudgetMinutes - dayTotalMinutes(b)) - (a.timeBudgetMinutes - dayTotalMinutes(a)),
+    )
+    for (let i = 0; i < removedItems.length; i++) {
+      const recipient = sortedOthers[i % sortedOthers.length]
+      if (recipient) {
+        recipient.items.push({
+          ...removedItems[i],
+          id: generateItemId(),
+          accepted: true,
+        })
+      }
     }
   }
 }
@@ -555,6 +570,13 @@ export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
     for (const adj of adjustments) {
       lines.push(`- ${JSON.stringify(adj)}`)
     }
+    lines.push('')
+    lines.push('REDISTRIBUTION RULE:')
+    lines.push('- When a day is made lighter or activities are removed, the WEEKLY total should stay the same')
+    lines.push('- Move skipped activities to other days that have capacity')
+    lines.push('- Example: If Monday drops 110 min of activities, spread ~28 min extra across Tue-Fri (4 days)')
+    lines.push('- Prioritize adding to days that are currently below the daily budget')
+    lines.push('- When redistributing, add the SAME activities (not new ones) — e.g., move Monday\'s "GATB Reading" to Tuesday')
     lines.push('')
   }
 
