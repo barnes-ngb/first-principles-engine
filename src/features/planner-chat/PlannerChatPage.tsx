@@ -87,6 +87,7 @@ import { defaultAppBlocks, defaultDailyRoutine } from '../planner/planner.logic'
 import {
   buildMinimumWinText,
   buildPlannerPrompt,
+  fillMissingDaysFromRoutine,
   generateDraftPlanFromInputs,
   generateItemId,
   parseAIResponse,
@@ -678,7 +679,8 @@ Return as JSON:
         messages: aiMessages,
       })
 
-      const aiDraft = response ? parseAIResponse(response) : null
+      const rawAiDraft = response ? parseAIResponse(response) : null
+      const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, dailyRoutine, hoursPerDay) : null
       if (aiDraft) {
         draft = aiDraft
         usedAI = true
@@ -761,7 +763,8 @@ Return as JSON:
         })
       }
 
-      const aiDraft = response ? parseAIResponse(response) : null
+      const rawAiDraft = response ? parseAIResponse(response) : null
+      const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, dailyRoutine, hoursPerDay) : null
       if (aiDraft) {
         draft = aiDraft
         usedAI = true

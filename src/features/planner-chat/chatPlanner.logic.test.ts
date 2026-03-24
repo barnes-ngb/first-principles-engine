@@ -8,6 +8,7 @@ import {
   buildMinimumWinText,
   buildPlannerPrompt,
   dayTotalMinutes,
+  fillMissingDaysFromRoutine,
   generateDraftPlanFromInputs,
   parseAIResponse,
   planTotalMinutes,
@@ -914,5 +915,128 @@ describe('buildPlannerPrompt with subjectTimeDefaults', () => {
     }
     const prompt = buildPlannerPrompt(inputs)
     expect(prompt).not.toContain('Subject time defaults')
+  })
+})
+
+describe('buildPlannerPrompt size constraints', () => {
+  it('includes critical size constraint instructions', () => {
+    const prompt = buildPlannerPrompt(baseInputs)
+    expect(prompt).toContain('CRITICAL SIZE CONSTRAINTS')
+    expect(prompt).toContain('max 6 words')
+    expect(prompt).toContain('under 4000 tokens')
+  })
+})
+
+describe('parseAIResponse — severely truncated JSON', () => {
+  const makeResponse = (message: string): ChatResponse => ({
+    message,
+    model: 'claude-sonnet-4-20250514',
+    usage: { inputTokens: 100, outputTokens: 200 },
+  })
+
+  it('recovers partial days from truncated mid-day JSON', () => {
+    // Simulates AI returning 2 complete days then truncating mid-Wednesday
+    const truncated = `{
+      "days": [
+        {
+          "day": "Monday",
+          "timeBudgetMinutes": 150,
+          "items": [
+            { "title": "Prayer", "estimatedMinutes": 10, "subjectBucket": "Other" },
+            { "title": "Reading", "estimatedMinutes": 20, "subjectBucket": "Reading" }
+          ]
+        },
+        {
+          "day": "Tuesday",
+          "timeBudgetMinutes": 150,
+          "items": [
+            { "title": "Math drills", "estimatedMinutes": 15, "subjectBucket": "Math" }
+          ]
+        },
+        {
+          "day": "Wednes`
+    const result = parseAIResponse(makeResponse(truncated))
+    expect(result).not.toBeNull()
+    // Should recover at least the 2 complete days
+    expect(result!.days.length).toBeGreaterThanOrEqual(1)
+    expect(result!.days[0].day).toBe('Monday')
+  })
+
+  it('handles JSON with no closing brace at all', () => {
+    const truncated = `{ "days": [ { "day": "Monday", "timeBudgetMinutes": 150, "items": [ { "title": "Formation", "estimatedMinutes": 10, "subjectBucket": "Other" } ] }`
+    const result = parseAIResponse(makeResponse(truncated))
+    expect(result).not.toBeNull()
+    expect(result!.days).toHaveLength(1)
+    expect(result!.days[0].day).toBe('Monday')
+  })
+})
+
+describe('fillMissingDaysFromRoutine', () => {
+  it('returns plan unchanged when all 5 days present', () => {
+    const plan = {
+      days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => ({
+        day,
+        timeBudgetMinutes: 150,
+        items: [{ id: 'x', title: 'Test', subjectBucket: SubjectBucket.Other, estimatedMinutes: 10, skillTags: [], accepted: true }],
+      })),
+      skipSuggestions: [],
+      minimumWin: 'test',
+    }
+    const result = fillMissingDaysFromRoutine(plan, 'Handwriting — 20 min — LanguageArts', 2.5)
+    expect(result.days).toHaveLength(5)
+  })
+
+  it('fills missing days from routine text', () => {
+    const plan = {
+      days: [
+        {
+          day: 'Monday',
+          timeBudgetMinutes: 150,
+          items: [{ id: 'x', title: 'AI item', subjectBucket: SubjectBucket.Reading, estimatedMinutes: 20, skillTags: [], accepted: true }],
+        },
+        {
+          day: 'Tuesday',
+          timeBudgetMinutes: 150,
+          items: [{ id: 'y', title: 'AI item 2', subjectBucket: SubjectBucket.Math, estimatedMinutes: 15, skillTags: [], accepted: true }],
+        },
+      ],
+      skipSuggestions: [],
+      minimumWin: 'test',
+    }
+    const result = fillMissingDaysFromRoutine(plan, 'Handwriting — 20 min — LanguageArts', 2.5)
+    expect(result.days).toHaveLength(5)
+    // Monday/Tuesday should keep AI items
+    expect(result.days[0].items[0].title).toBe('AI item')
+    expect(result.days[1].items[0].title).toBe('AI item 2')
+    // Wed/Thu/Fri should have routine items
+    expect(result.days[2].day).toBe('Wednesday')
+    expect(result.days[2].items[0].title).toBe('Handwriting')
+    expect(result.days[3].day).toBe('Thursday')
+    expect(result.days[4].day).toBe('Friday')
+  })
+
+  it('returns plan unchanged when no routine provided', () => {
+    const plan = {
+      days: [{ day: 'Monday', timeBudgetMinutes: 150, items: [] }],
+      skipSuggestions: [],
+      minimumWin: 'test',
+    }
+    const result = fillMissingDaysFromRoutine(plan, undefined, 2.5)
+    expect(result.days).toHaveLength(1)
+  })
+
+  it('maintains weekday order after filling', () => {
+    const plan = {
+      days: [
+        { day: 'Friday', timeBudgetMinutes: 150, items: [{ id: 'x', title: 'Friday item', subjectBucket: SubjectBucket.Other, estimatedMinutes: 10, skillTags: [], accepted: true }] },
+      ],
+      skipSuggestions: [],
+      minimumWin: 'test',
+    }
+    const result = fillMissingDaysFromRoutine(plan, 'Math — 30 min — Math', 2.5)
+    expect(result.days).toHaveLength(5)
+    expect(result.days.map(d => d.day)).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])
+    // Friday should still have the AI item
+    expect(result.days[4].items[0].title).toBe('Friday item')
   })
 })
