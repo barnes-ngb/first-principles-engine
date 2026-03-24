@@ -204,6 +204,28 @@ export default function KnowledgeMinePage() {
             ))}
           </Stack>
 
+          {/* Error display with retry */}
+          {(quest.startQuestError || quest.aiError) && (
+            <Alert
+              severity="error"
+              sx={{ mb: 2, fontFamily: MC.font, fontSize: '0.4rem' }}
+              action={
+                activeDomain ? (
+                  <Button
+                    color="inherit"
+                    size="small"
+                    sx={{ fontFamily: MC.font, fontSize: '0.35rem' }}
+                    onClick={() => void quest.startQuest(activeDomain.domain)}
+                  >
+                    Try Again
+                  </Button>
+                ) : undefined
+              }
+            >
+              {quest.startQuestError || quest.aiError?.message || 'Something went wrong'}
+            </Alert>
+          )}
+
           {/* Streak display */}
           <Box sx={{ mb: 2 }}>
             {quest.streak.currentStreak > 0 && (
