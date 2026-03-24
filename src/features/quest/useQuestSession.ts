@@ -373,9 +373,9 @@ export function useQuestSession() {
         })
       } catch (err) {
         clearTimeout(timeoutId)
+        const errMsg = err instanceof Error ? err.message : String(err)
         console.error('[startQuest] AI call threw:', err)
-        // aiError is set by useAI, but won't show on Intro screen without startQuestError
-        setStartQuestError('Could not reach the quest server. Tap to try again!')
+        setStartQuestError(`Quest failed: ${errMsg}`)
         setScreen(QuestScreen.Intro)
         if (timerRef.current) clearInterval(timerRef.current)
         return
@@ -384,12 +384,10 @@ export function useQuestSession() {
       clearTimeout(timeoutId)
 
       if (!response || timedOut) {
-        console.error('[startQuest] AI call returned null or timed out — no response')
-        setStartQuestError(
-          timedOut
-            ? 'Quest is taking too long… Tap to try again.'
-            : 'Could not start quest. Check your connection and try again.',
-        )
+        // aiError from useAI contains the real Cloud Function error
+        const realError = aiError?.message || (timedOut ? 'Request timed out' : 'No response from AI service')
+        console.error('[startQuest] AI call returned null or timed out. aiError:', aiError)
+        setStartQuestError(`Quest failed: ${realError}`)
         setScreen(QuestScreen.Intro)
         if (timerRef.current) clearInterval(timerRef.current)
         return
@@ -417,7 +415,7 @@ export function useQuestSession() {
       questionStartRef.current = Date.now()
       setScreen(QuestScreen.Question)
     },
-    [activeChildId, activeChild, familyId, chat],
+    [activeChildId, activeChild, familyId, chat, aiError],
   )
 
   // ── End session ───────────────────────────────────────────────
