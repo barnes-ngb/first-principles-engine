@@ -868,14 +868,17 @@ describe('buildPlannerPrompt with dailyRoutine', () => {
       dailyRoutine: 'Handwriting (20 min)\nReading Eggs (45 min)',
     }
     const prompt = buildPlannerPrompt(inputs)
-    expect(prompt).toContain('Handwriting (20 min)')
-    expect(prompt).toContain('Reading Eggs (45 min)')
-    expect(prompt).toContain('EXACT activities and times')
+    expect(prompt).toContain('MUST-DO: "Handwriting"')
+    expect(prompt).toContain('20 minutes')
+    expect(prompt).toContain('MUST-DO: "Reading Eggs"')
+    expect(prompt).toContain('45 minutes')
+    expect(prompt).toContain('YOUR #1 JOB')
+    expect(prompt).toContain('EXACT names and times')
   })
 
   it('excludes daily routine section when not provided', () => {
     const prompt = buildPlannerPrompt(baseInputs)
-    expect(prompt).not.toContain('daily routine template')
+    expect(prompt).not.toContain('YOUR #1 JOB')
   })
 })
 
