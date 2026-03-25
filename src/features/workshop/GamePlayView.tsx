@@ -221,8 +221,10 @@ export default function GamePlayView({
     [session],
   )
 
-  const handleDismissCard = useCallback(() => {
-    sounds.playSuccess()
+  const handleDismissCard = useCallback((correct?: boolean) => {
+    if (correct) {
+      sounds.playSuccess()
+    }
     session.dismissCard()
   }, [session, sounds])
 
@@ -532,6 +534,8 @@ export default function GamePlayView({
         voiceRecordings={voiceRecordings}
         onFlipStart={sounds.playCardFlip}
         onBossReveal={sounds.playBossReveal}
+        onCorrectAnswer={sounds.playSuccess}
+        onWrongAnswer={sounds.playSetbackSlide}
         muted={sounds.muted}
       />
     </Box>
