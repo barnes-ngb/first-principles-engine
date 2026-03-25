@@ -10,8 +10,10 @@ import type {
   PlannerConversationStatus,
   PlanType,
   ReviewStatus,
+  SessionResult,
   StreamId,
   SubjectBucket,
+  SupportTag,
   TrackType,
 } from './enums'
 import type { SkillTag } from './common'
@@ -203,6 +205,20 @@ export interface ChecklistItem {
   gradeResult?: string
   /** Guidance note when an item is skipped. */
   skipGuidance?: string
+}
+
+export interface Session {
+  id?: string
+  childId: string
+  date: string
+  streamId: StreamId
+  ladderId: string
+  targetRungOrder: number
+  result: SessionResult
+  durationSeconds?: number
+  notes?: string
+  supports?: SupportTag[]
+  createdAt?: string
 }
 
 export interface PlannedSession {
