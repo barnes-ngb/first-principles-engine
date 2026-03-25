@@ -245,6 +245,10 @@ export interface AvatarProfile {
   equippedPieces?: string[]
   /** Last piece animated (to not re-animate on page load) */
   lastEquipAnimation?: string
+  /** AI-generated Minecraft skin face URL (cached to avoid regenerating) */
+  skinTextureUrl?: string
+  /** Timestamp when skin texture was last generated */
+  skinTextureGeneratedAt?: string
 
   // ── Legacy 2D fields (kept for migration, may be undefined) ───
   /** @deprecated Use characterFeatures + 3D voxel renderer instead */

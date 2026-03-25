@@ -78,56 +78,64 @@ export function buildCharacter(
   // Colors from features (with fallbacks) — skin & hair from photo, clothes are child-specific
   const skinColor = new THREE.Color(features.skinTone ?? '#F5D6B8')
   const hairColor = new THREE.Color(features.hairColor ?? '#6B4C32')
-  // Lincoln: gray Minecraft tee; London: bright blue (his favorite color)
-  const shirtColor = new THREE.Color(ageGroup === 'younger' ? '#4A90C2' : '#B0B0B0')
-  const pantsColor = new THREE.Color('#2A3A52') // Dark navy blue
-  const shoeColor = new THREE.Color('#3D3D3D')
+  // Lincoln: light heather gray Minecraft creeper tee; London: bright blue (his favorite)
+  const shirtColor = new THREE.Color(ageGroup === 'younger' ? '#4A90C2' : '#BBBBBB')
+  const pantsColor = new THREE.Color('#2A3A52') // Dark navy shorts
+  // Lincoln is barefoot — shoe color matches skin; London gets sneakers
+  const shoeColor = new THREE.Color(ageGroup === 'younger' ? '#444444' : features.skinTone ?? '#F5D6B8')
 
-  // --- HEAD (8×8×8 = 1×1×1) ---
-  const head = texturedBox(U * 8, U * 8, U * 8, skinColor, 'head')
-  head.position.y = U * 28 // Top of body + half head
-  character.add(head)
+  // --- HEAD GROUP (contains head mesh + face features + hair) ---
+  // Everything attached to the head is a child of headGroup so it all
+  // moves together during poses (nod, look-up, dab tilt, etc.).
+  const headGroup = new THREE.Group()
+  headGroup.name = 'headGroup'
+  headGroup.position.y = U * 28 // Top of body + half head
+  character.add(headGroup)
 
-  // Face details (on the front of the head)
+  const headMesh = texturedBox(U * 8, U * 8, U * 8, skinColor, 'head')
+  // headMesh at (0,0,0) within headGroup
+  headGroup.add(headMesh)
+
+  // Face details — positions RELATIVE to headGroup center (0,0,0)
   // Eyes — white sclera with dark pupils
   const eyeWhiteL = box(U * 2, U * 1, U * 0.5, 0xffffff, 'eyeWhiteL')
-  eyeWhiteL.position.set(-U * 1.5, U * 28.5, U * 4.1)
-  character.add(eyeWhiteL)
+  eyeWhiteL.position.set(-U * 1.5, U * 0.5, U * 4.1)
+  headGroup.add(eyeWhiteL)
   const eyeColor = features.eyeColor ? new THREE.Color(features.eyeColor) : new THREE.Color(0x4a6b7a)
   const pupilL = box(U * 1, U * 1, U * 0.3, eyeColor, 'pupilL')
-  pupilL.position.set(-U * 1.2, U * 28.5, U * 4.3) // Slightly offset for personality
-  character.add(pupilL)
+  pupilL.position.set(-U * 1.2, U * 0.5, U * 4.3) // Slightly offset for personality
+  headGroup.add(pupilL)
 
   const eyeWhiteR = box(U * 2, U * 1, U * 0.5, 0xffffff, 'eyeWhiteR')
-  eyeWhiteR.position.set(U * 1.5, U * 28.5, U * 4.1)
-  character.add(eyeWhiteR)
+  eyeWhiteR.position.set(U * 1.5, U * 0.5, U * 4.1)
+  headGroup.add(eyeWhiteR)
   const pupilR = box(U * 1, U * 1, U * 0.3, eyeColor, 'pupilR')
-  pupilR.position.set(U * 1.8, U * 28.5, U * 4.3) // Slightly offset for personality
-  character.add(pupilR)
+  pupilR.position.set(U * 1.8, U * 0.5, U * 4.3) // Slightly offset for personality
+  headGroup.add(pupilR)
 
   // Eyebrows — gives expression
   const eyebrowColor = 0x5A3E28
   const eyebrowL = box(U * 1.8, U * 0.4, U * 0.3, eyebrowColor, 'eyebrowL')
-  eyebrowL.position.set(-U * 1.5, U * 29.4, U * 4.15)
-  character.add(eyebrowL)
+  eyebrowL.position.set(-U * 1.5, U * 1.4, U * 4.15)
+  headGroup.add(eyebrowL)
   const eyebrowR = box(U * 1.8, U * 0.4, U * 0.3, eyebrowColor, 'eyebrowR')
-  eyebrowR.position.set(U * 1.5, U * 29.4, U * 4.15)
-  character.add(eyebrowR)
+  eyebrowR.position.set(U * 1.5, U * 1.4, U * 4.15)
+  headGroup.add(eyebrowR)
 
   // Nose — tiny bump
   const nose = box(U * 0.8, U * 0.8, U * 0.3, 0xe8c8a8, 'nose')
-  nose.position.set(0, U * 27.5, U * 4.15)
-  character.add(nose)
+  nose.position.set(0, -U * 0.5, U * 4.15)
+  headGroup.add(nose)
 
   // Mouth — subtle, slightly darker skin tone (not black)
   const mouth = box(U * 2, U * 0.5, U * 0.3, 0xD4A088, 'mouth')
-  mouth.position.set(0, U * 26.2, U * 4.2)
-  character.add(mouth)
+  mouth.position.set(0, -U * 1.8, U * 4.2)
+  headGroup.add(mouth)
 
-  // Hair — built from the hair module
+  // Hair — built from the hair module, child of headGroup (headY = 0 in local space)
   const hairMat = new THREE.MeshLambertMaterial({ color: hairColor })
-  const hairGroup = buildHair(features.hairStyle, features.hairLength, hairMat, U * 28, U)
-  character.add(hairGroup)
+  const hairGroup = buildHair(features.hairStyle, features.hairLength, hairMat, 0, U)
+  headGroup.add(hairGroup)
 
   // --- BODY (8×12×4 = 1×1.5×0.5) ---
   const torso = texturedBox(U * 8, U * 12, U * 4, shirtColor, 'torso')
@@ -237,19 +245,20 @@ export function applyFeatures(
     }
   }
 
-  // Remove old hair, add new
-  const oldHair = character.getObjectByName('hairGroup')
-  if (oldHair) character.remove(oldHair)
+  // Remove old hair from headGroup, add new
+  const headGroup = character.getObjectByName('headGroup') as THREE.Group | undefined
+  const headMesh = character.getObjectByName('head') as THREE.Mesh | undefined
 
-  const head = character.getObjectByName('head') as THREE.Mesh | undefined
-  if (head) {
+  if (headGroup && headMesh) {
+    const oldHair = headGroup.getObjectByName('hairGroup')
+    if (oldHair) headGroup.remove(oldHair)
+
     const hairMat = new THREE.MeshLambertMaterial({ color: features.hairColor })
-    // Infer U from the head geometry width (head is 8U wide)
-    const headGeo = head.geometry as THREE.BoxGeometry
-    const headWidth = headGeo.parameters.width
-    const U = headWidth / 8
-    const hairGroup = buildHair(features.hairStyle, features.hairLength, hairMat, head.position.y, U)
-    character.add(hairGroup)
+    const headGeo = headMesh.geometry as THREE.BoxGeometry
+    const U = headGeo.parameters.width / 8
+    // headY = 0 because hair is a child of headGroup (local space)
+    const hairGroup = buildHair(features.hairStyle, features.hairLength, hairMat, 0, U)
+    headGroup.add(hairGroup)
   }
 
   // Update eye color

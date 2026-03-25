@@ -106,7 +106,7 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
           }
         })
 
-        // Attach sword/shield to arms; move breastplate arm covers to arms
+        // Attach sword/shield to arms; helmet to headGroup; breastplate arm covers to arms
         const attachTo = piece.userData.attachToArm as string | undefined
         if (attachTo === 'R') {
           const armR = character.getObjectByName('armR')
@@ -115,6 +115,11 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
         } else if (attachTo === 'L') {
           const armL = character.getObjectByName('armL')
           if (armL) armL.add(piece)
+          else character.add(piece)
+        } else if (pieceId === 'helmet') {
+          // Helmet is child of headGroup — head-local coordinates
+          const headGrp = character.getObjectByName('headGroup')
+          if (headGrp) headGrp.add(piece)
           else character.add(piece)
         } else {
           const armChildren: THREE.Object3D[] = []

@@ -9,9 +9,17 @@ function box(
   return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material)
 }
 
+/** Linearly interpolate between two hex colors */
+function lerpColor(a: number, b: number, t: number): number {
+  const ca = new THREE.Color(a)
+  const cb = new THREE.Color(b)
+  ca.lerp(cb, t)
+  return ca.getHex()
+}
+
 /**
  * Build hair geometry.
- * @param headY  – Y position of the head center
+ * @param headY  – Y position of the head center (0 when hair is a child of headGroup)
  * @param U      – pixel unit (0.125 * scale). If omitted, uses legacy absolute sizes.
  */
 export function buildHair(
@@ -27,6 +35,89 @@ export function buildHair(
   // If U is provided, use pixel-unit based sizing (new Steve proportions)
   // Head is 8U×8U×8U, centered at headY
   if (U) {
+    // Extract base color for shade variations
+    const baseMat = material as THREE.MeshLambertMaterial
+    const baseHex = baseMat.color.getHex()
+    const lightMat = new THREE.MeshLambertMaterial({ color: lerpColor(baseHex, 0xFFFFFF, 0.1) })
+    const darkMat = new THREE.MeshLambertMaterial({ color: lerpColor(baseHex, 0x000000, 0.12) })
+
+    // ── Lincoln-specific hair: medium style + ear_length ────────────
+    // Parted on the LEFT, falls well past ears, thicker on the right
+    // side (hair sweeps from part toward the right), slight wave.
+    if (style === 'medium' && length === 'ear_length') {
+      // Head block is 8U×8U×8U, centered at headY (typically 0 in local space)
+      // Head spans from headY-4U to headY+4U on all axes
+
+      // === TOP COVERAGE — thick, slightly off-center (parted left) ===
+      const topRight = box(U * 11.2, U * 3.2, U * 8.4, material)
+      topRight.position.set(U * 2.4, headY + U * 4.4, 0)
+      hair.add(topRight)
+
+      const topLeft = box(U * 5.6, U * 2.4, U * 8.4, darkMat)
+      topLeft.position.set(-U * 5.6, headY + U * 4.2, 0)
+      hair.add(topLeft)
+
+      // === BANGS — sweep across forehead from left to right ===
+      const bangsMain = box(U * 7.2, U * 2.0, U * 2.0, material)
+      bangsMain.position.set(U * 0.8, headY + U * 2.6, U * 3.4)
+      hair.add(bangsMain)
+
+      // Extra bang chunk sweeping right (following the part direction)
+      const bangSweep = box(U * 2.4, U * 1.4, U * 1.6, lightMat)
+      bangSweep.position.set(U * 5.6, headY + U * 3.0, U * 3.6)
+      hair.add(bangSweep)
+
+      // === LEFT SIDE — falls past the ear to jawline (part side, thinner) ===
+      const sideL_upper = box(U * 1.4, U * 4.0, U * 6.4, material)
+      sideL_upper.position.set(-U * 4.2, headY + U * 1.2, U * 0)
+      hair.add(sideL_upper)
+
+      const sideL_lower = box(U * 1.2, U * 4.0, U * 5.2, darkMat)
+      sideL_lower.position.set(-U * 4.32, headY - U * 2.4, U * 0.4)
+      hair.add(sideL_lower)
+
+      // Wispy end — left
+      const sideL_tip = box(U * 1.0, U * 2.0, U * 3.2, material)
+      sideL_tip.position.set(-U * 4.0, headY - U * 4.8, U * 0.6)
+      hair.add(sideL_tip)
+
+      // === RIGHT SIDE — thicker (hair sweeps this way from the part) ===
+      const sideR_upper = box(U * 1.8, U * 4.4, U * 7.2, material)
+      sideR_upper.position.set(U * 4.2, headY + U * 1.0, U * 0)
+      hair.add(sideR_upper)
+
+      const sideR_lower = box(U * 1.6, U * 4.4, U * 6.0, lightMat)
+      sideR_lower.position.set(U * 4.32, headY - U * 2.6, U * 0.2)
+      hair.add(sideR_lower)
+
+      // Wispy end — right side is slightly longer
+      const sideR_tip = box(U * 1.2, U * 2.4, U * 4.0, material)
+      sideR_tip.position.set(U * 4.08, headY - U * 5.4, U * 0.4)
+      hair.add(sideR_tip)
+
+      // === BACK — falls to neck/collar area ===
+      const backMain = box(U * 8.2, U * 7.2, U * 1.6, material)
+      backMain.position.set(0, headY - U * 0.4, -U * 4.2)
+      hair.add(backMain)
+
+      const backLower = box(U * 6.8, U * 3.2, U * 1.4, darkMat)
+      backLower.position.set(U * 0.2, headY - U * 4.4, -U * 4.32)
+      hair.add(backLower)
+
+      // === SUBTLE WAVE — offset chunks to break up straight lines ===
+      const waveChunkR = box(U * 1.2, U * 1.6, U * 2.0, lightMat)
+      waveChunkR.position.set(U * 4.6, headY - U * 0.8, U * 1.6)
+      hair.add(waveChunkR)
+
+      const waveChunkL = box(U * 1.0, U * 1.4, U * 1.6, material)
+      waveChunkL.position.set(-U * 4.48, headY - U * 1.2, U * 1.4)
+      hair.add(waveChunkL)
+
+      return hair
+    }
+
+    // ── Generic hair (other style/length combos) ────────────────────
+
     // Top cap — thick layer covering entire top of head
     const top = box(U * 8.6, U * 2.5, U * 8.6, material)
     top.position.y = headY + U * 3.8
@@ -59,7 +150,6 @@ export function buildHair(
       hair.add(backExt)
 
       // Side panels — extend PAST the ears (head bottom at headY - U*4)
-      // These are thick and voluminous, not thin strips
       const sideExtL = box(U * 1.6, U * 8, U * 7, material)
       sideExtL.position.set(-U * 4.4, headY - U * 2, U * 0.3)
       hair.add(sideExtL)
@@ -67,7 +157,7 @@ export function buildHair(
       sideExtR.position.set(U * 4.4, headY - U * 2, U * 0.3)
       hair.add(sideExtR)
 
-      // Bangs — hangs over forehead, partially covering eyes area
+      // Bangs — hangs over forehead
       const bangs = box(U * 7, U * 2.5, U * 1.6, material)
       bangs.position.set(0, headY + U * 2, U * 3.8)
       hair.add(bangs)
@@ -120,8 +210,8 @@ export function buildHair(
       }
     }
 
-    // Medium style: thicker sides with more volume, extending below head
-    if (style === 'medium') {
+    // Medium style (non-ear_length): thicker sides with more volume
+    if (style === 'medium' && length !== 'ear_length') {
       const extraL = box(U * 1.6, U * 7, U * 8.4, material)
       extraL.position.set(-U * 4.8, headY - U * 1, 0)
       hair.add(extraL)
@@ -215,7 +305,7 @@ export function buildHair(
 /**
  * Build trimmed hair strands that peek from under a helmet.
  * Only shows hair at the edges where it would naturally stick out.
- * @param headY  – Y position of the head center
+ * @param headY  – Y position of the head center (0 when child of headGroup)
  * @param U      – pixel unit (0.125 * scale)
  */
 export function buildHelmHair(
