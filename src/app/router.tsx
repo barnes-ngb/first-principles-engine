@@ -4,7 +4,6 @@ import RequireParent from '../components/RequireParent'
 import EvaluateChatPage from '../features/evaluate/EvaluateChatPage'
 import NotFoundPage from '../features/not-found/NotFoundPage'
 import PlannerChatPage from '../features/planner-chat/PlannerChatPage'
-import PlannerPage from '../features/planner/PlannerPage'
 import ProgressPage from '../features/progress/ProgressPage'
 import EvaluationsPage from '../features/records/EvaluationsPage'
 import PortfolioPage from '../features/records/PortfolioPage'
@@ -45,7 +44,7 @@ const routes = [
         ],
       },
       { path: '/planner/chat', element: <PlannerChatPage /> },
-      { path: '/planner/legacy', element: <PlannerPage /> },
+      { path: '/planner/legacy', element: <Navigate to="/planner/chat" replace /> },
       { path: '/evaluate', element: <EvaluateChatPage /> },
       { path: '/books', element: <BookshelfPage /> },
       { path: '/books/story-guide', element: <StoryGuidePage /> },

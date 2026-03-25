@@ -83,7 +83,7 @@ import {
 import { fixUnicodeEscapes, formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
-import { defaultAppBlocks, defaultDailyRoutine } from '../planner/planner.logic'
+import { defaultAppBlocks, defaultDailyRoutine } from './chatPlanner.logic'
 import {
   buildMinimumWinText,
   buildPlannerPrompt,

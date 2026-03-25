@@ -52,7 +52,7 @@ export function modelForTask(taskType: TaskType): string {
     case TaskType.GenerateStory:
     case TaskType.Workshop:
     case TaskType.AnalyzeWorkbook:
-      return "claude-sonnet-4-5-20250514";
+      return "claude-sonnet-4-6";
     case TaskType.Generate:
     case TaskType.Chat:
     default:
@@ -98,16 +98,6 @@ interface GradeResult {
   date: string;
 }
 
-interface EnrichedContext {
-  sessions: SessionSummary[];
-  workbookPaces: WorkbookPace[];
-  week: WeekContext | null;
-  hoursTotalMinutes: number;
-  hoursTarget: number;
-  engagementSummaries: EngagementSummary[];
-  gradeResults: GradeResult[];
-  draftBookCount: number;
-}
 
 // ── Date helpers ────────────────────────────────────────────────
 
@@ -442,47 +432,8 @@ export async function loadWordMasterySummary(
   return lines.join("\n");
 }
 
-/** Load all enriched context in parallel. Only called for plan/evaluate. */
-export async function loadEnrichedContext(
-  db: Firestore,
-  familyId: string,
-  childId: string,
-): Promise<EnrichedContext> {
-  const [sessions, workbookPaces, week, hours, engagementSummaries, gradeResults, draftBookCount] = await Promise.all([
-    loadRecentSessions(db, familyId, childId),
-    loadWorkbookPaces(db, familyId, childId),
-    loadWeekContext(db, familyId),
-    loadHoursSummary(db, familyId, childId),
-    loadEngagementSummary(db, familyId, childId),
-    loadGradeResults(db, familyId, childId),
-    loadDraftBookCount(db, familyId, childId),
-  ]);
 
-  return {
-    sessions,
-    workbookPaces,
-    week,
-    hoursTotalMinutes: hours.totalMinutes,
-    hoursTarget: 1000, // MO target hours
-    engagementSummaries,
-    gradeResults,
-    draftBookCount,
-  };
-}
-
-// ── System prompt assembly ──────────────────────────────────────
-
-const CHARTER_PREAMBLE = `You are an AI assistant for the First Principles Engine, a family homeschool learning platform.
-
-Core family values (Charter):
-- Formation first: character and virtue before academics.
-- Both kids count: Lincoln (10, neurodivergent, speech challenges) and London (6, story-driven).
-- Narration counts: oral evidence is first-class, especially for Lincoln.
-- Small artifacts > perfect documentation: capture evidence quickly.
-- No heroics: simple routines, minimum viable days are real school.
-- Shelly's direct attention is the primary schedulable resource — split-block scheduling is required.
-
-Always align recommendations with these values. Be concise, practical, and encouraging.`;
+// ── Types ───────────────────────────────────────────────────────
 
 interface ChildContext {
   name: string;
@@ -492,142 +443,6 @@ interface ChildContext {
   stopRules?: Array<{ label: string; trigger: string; action: string }>;
 }
 
-export function buildSystemPrompt(
-  child: ChildContext,
-  taskType: TaskType,
-  enriched?: EnrichedContext,
-  domain?: string,
-): string {
-  const lines = [CHARTER_PREAMBLE];
-
-  // ── CHILD PROFILE ─────────────────────────────────────────────
-  lines.push("", "CHILD PROFILE:");
-  lines.push(`Name: ${child.name}`);
-  if (child.grade) {
-    lines.push(`Grade: ${child.grade}`);
-  }
-
-  if (child.prioritySkills?.length) {
-    lines.push("Priority skills:");
-    for (const s of child.prioritySkills) {
-      lines.push(`- ${s.label} (${s.tag}): ${s.level}`);
-    }
-  }
-
-  if (child.supports?.length) {
-    lines.push("Available supports:");
-    for (const s of child.supports) {
-      lines.push(`- ${s.label}: ${s.description}`);
-    }
-  }
-
-  if (child.stopRules?.length) {
-    lines.push("Stop rules:");
-    for (const r of child.stopRules) {
-      lines.push(`- ${r.label}: when "${r.trigger}" → ${r.action}`);
-    }
-  }
-
-  // ── Enriched context (only present for plan/evaluate) ─────────
-  if (enriched) {
-    // RECENT PERFORMANCE
-    lines.push("", "RECENT PERFORMANCE (last 14 days):");
-    if (enriched.sessions.length === 0) {
-      lines.push("No recent session data available.");
-    } else {
-      for (const s of enriched.sessions) {
-        lines.push(
-          `- ${s.streamId}: ${s.hits} hits, ${s.nears} nears, ${s.misses} misses`,
-        );
-      }
-    }
-
-    // WORKBOOK PACE
-    lines.push("", "WORKBOOK PACE:");
-    if (enriched.workbookPaces.length === 0) {
-      lines.push("No workbook data available.");
-    } else {
-      for (const w of enriched.workbookPaces) {
-        lines.push(
-          `- ${w.name} — ${w.unitLabel} ${w.currentPosition} of ${w.totalUnits}, ${w.unitsPerDayNeeded} ${w.unitLabel}s/day needed to finish by ${w.targetFinishDate}. Status: ${w.status}`,
-        );
-      }
-    }
-
-    // THIS WEEK
-    lines.push("", "THIS WEEK:");
-    if (enriched.week) {
-      if (enriched.week.theme) {
-        lines.push(`Theme: ${enriched.week.theme}`);
-      }
-      if (enriched.week.virtue) {
-        lines.push(`Virtue: ${enriched.week.virtue}`);
-      }
-      if (enriched.week.scriptureRef) {
-        lines.push(`Scripture: ${enriched.week.scriptureRef}`);
-      }
-      if (enriched.week.heartQuestion) {
-        lines.push(`Heart question: ${enriched.week.heartQuestion}`);
-      }
-    } else {
-      lines.push("No weekly plan set yet.");
-    }
-
-    // HOURS PROGRESS
-    lines.push("", "HOURS PROGRESS:");
-    const totalHours = Math.round(enriched.hoursTotalMinutes / 60);
-    const pct = Math.round(
-      (enriched.hoursTotalMinutes / (enriched.hoursTarget * 60)) * 100,
-    );
-    lines.push(
-      `Hours logged this year: ${totalHours} hours of ${enriched.hoursTarget} target (${pct}% complete)`,
-    );
-
-    // ACTIVITY ENGAGEMENT
-    if (enriched.engagementSummaries.length > 0) {
-      lines.push("", "ACTIVITY ENGAGEMENT (recent):");
-      for (const { activity, counts } of enriched.engagementSummaries) {
-        const total = Object.values(counts).reduce((s, n) => s + n, 0);
-        const primary = Object.entries(counts).sort(([, a], [, b]) => b - a)[0];
-        lines.push(`- ${activity}: ${primary[0]} (${primary[1]}/${total} sessions)`);
-      }
-    }
-
-    // BOOK STATUS
-    lines.push("", "BOOK STATUS:");
-    if (enriched.draftBookCount > 0) {
-      lines.push(`Draft books in progress: ${enriched.draftBookCount}. Suggest "Continue your book" as a choose activity instead of "Make a Book".`);
-    } else {
-      lines.push(`No draft books. "Make a Book" is available as a choose activity.`);
-    }
-
-    // WORK REVIEW RESULTS
-    if (enriched.gradeResults.length > 0) {
-      lines.push("", "WORK REVIEW RESULTS (this period):");
-      lines.push("Use these results to adjust upcoming plans — reinforce weak areas, advance strong ones.");
-      for (const { activity, result, date } of enriched.gradeResults) {
-        lines.push(`- ${activity} (${date}): ${result}`);
-      }
-    }
-  }
-
-  // ── Plan output format (always last) ──────────────────────────
-  if (taskType === TaskType.Plan) {
-    lines.push("", PLAN_OUTPUT_INSTRUCTIONS);
-  }
-
-  // ── Evaluation diagnostic prompt ──────────────────────────────
-  if (taskType === TaskType.Evaluate) {
-    lines.push("", buildEvaluationPrompt(domain || "reading"));
-  }
-
-  // ── Quest interactive prompt ────────────────────────────────
-  if (taskType === TaskType.Quest) {
-    lines.push("", buildQuestPrompt(domain || "reading"));
-  }
-
-  return lines.join("\n");
-}
 
 // ── Plan output format instructions ─────────────────────────────
 
@@ -666,12 +481,12 @@ PLAN CONTENT RULES:
   "days": [
     {
       "day": "Monday",
-      "timeBudgetMinutes": 150,
+      "timeBudgetMinutes": 185,
       "items": [
         {
           "title": "Activity name",
           "subjectBucket": "Reading",
-          "estimatedMinutes": 15,
+          "estimatedMinutes": 30,
           "skillTags": ["optional.dot.delimited.tag"],
           "isAppBlock": false,
           "accepted": true,
@@ -684,6 +499,12 @@ PLAN CONTENT RULES:
   "skipSuggestions": [],
   "minimumWin": "One sentence describing the minimum viable accomplishment for the week."
 }
+
+NOTE: The timeBudgetMinutes (185) and estimatedMinutes (30) in the example above are PLACEHOLDERS. Always use the ACTUAL values from:
+- Mom's daily routine (exact names and exact times)
+- Subject time defaults (if provided)
+- The hours/day budget the user specified
+Never default items to 15 minutes unless the routine explicitly says 15 minutes for that item.
 
 Rules:
 - Days must be Monday through Friday (5 days).
@@ -706,7 +527,7 @@ CRITICAL SIZE CONSTRAINTS:
 - Keep skillTags to max 1 tag per item (the most relevant one)
 - Keep skipGuidance to max 15 words or omit if not needed
 - Do NOT include explanations, descriptions, or commentary in the JSON
-- Total response must be under 4000 tokens. Be concise.
+- Total response must be under 6000 tokens. Be concise.
 
 REMINDER: Your entire response must be ONLY the JSON object. No markdown, no code fences, no text outside the JSON. Start with { and end with }.`;
 

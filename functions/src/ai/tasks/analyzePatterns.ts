@@ -196,7 +196,7 @@ ${historicalContext}
 Please identify any conceptual blocks in the pattern above.`;
 
     const systemPrompt = buildPatternAnalysisPrompt(childName, childAge, neurodivergentDesc);
-    const model = "claude-sonnet-4-5-20250929";
+    const model = "claude-sonnet-4-6";
 
     const apiKey = claudeApiKey.value();
     if (!apiKey) {
