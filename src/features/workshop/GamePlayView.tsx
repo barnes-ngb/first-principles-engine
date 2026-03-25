@@ -5,6 +5,7 @@ import Chip from '@mui/material/Chip'
 import IconButton from '@mui/material/IconButton'
 import Typography from '@mui/material/Typography'
 import { doc, updateDoc } from 'firebase/firestore'
+import { stripUndefined } from '../../core/firebase/firestore'
 import VolumeOffIcon from '@mui/icons-material/VolumeOff'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents'
@@ -77,7 +78,7 @@ export default function GamePlayView({
       try {
         await updateDoc(
           doc(db, `families/${familyId}/storyGames/${gameId}`),
-          { activeSession: sessionData, updatedAt: new Date().toISOString() },
+          stripUndefined({ activeSession: sessionData, updatedAt: new Date().toISOString() }),
         )
       } catch (err) {
         console.warn('Failed to save active session:', err)

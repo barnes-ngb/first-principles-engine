@@ -11,7 +11,7 @@ import MicIcon from '@mui/icons-material/Mic'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import StopIcon from '@mui/icons-material/Stop'
 import { doc, updateDoc } from 'firebase/firestore'
-import { db } from '../../core/firebase/firestore'
+import { db, stripUndefined } from '../../core/firebase/firestore'
 import { useAudioRecorder } from '../../core/hooks/useAudioRecorder'
 import type {
   AdventureTree,
@@ -214,10 +214,10 @@ export default function VoiceRecordingStep({
     // Save recordings to Firestore
     if (Object.keys(recordings).length > 0) {
       try {
-        await updateDoc(doc(db, `families/${familyId}/storyGames/${gameId}`), {
+        await updateDoc(doc(db, `families/${familyId}/storyGames/${gameId}`), stripUndefined({
           voiceRecordings: recordings,
           updatedAt: new Date().toISOString(),
-        })
+        }))
       } catch (err) {
         console.warn('Failed to save voice recordings:', err)
       }
