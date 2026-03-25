@@ -382,12 +382,20 @@ export default function VoiceRecordingStep({
 
       {/* Actions */}
       <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-        <Button variant="outlined" onClick={onSkip}>
-          Skip
-        </Button>
-        <Button variant="contained" onClick={handleDone} disabled={recorder.isRecording}>
-          {recordedCount > 0 ? 'Done' : 'Skip'}
-        </Button>
+        {recordedCount === 0 ? (
+          <Button variant="contained" onClick={onSkip}>
+            Skip Recording
+          </Button>
+        ) : (
+          <>
+            <Button variant="outlined" onClick={onSkip}>
+              Skip
+            </Button>
+            <Button variant="contained" onClick={handleDone} disabled={recorder.isRecording}>
+              Done
+            </Button>
+          </>
+        )}
       </Box>
     </Box>
   )
