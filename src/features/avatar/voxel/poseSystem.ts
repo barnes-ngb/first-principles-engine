@@ -39,7 +39,7 @@ export const POSES: Pose[] = [
     icon: '\u{1F9CD}',
     duration: 0,
     armL: { rotZ: [0.05], rotX: [0] },      // Very slight outward at rest
-    armR: { rotZ: [-0.05], rotX: [0] },
+    armR: { rotZ: [0.05], rotX: [0] },
     head: { rotX: [0], rotY: [0] },
     body: { posY: [0] },
   },
@@ -58,8 +58,8 @@ export const POSES: Pose[] = [
       times: [0, 0.3, 0.7, 1],
     },
     armR: {
-      // Go OUT first (rotZ -0.8 ~45°), THEN up (rotZ -3.0 overhead)
-      rotZ: [-0.05, -0.8, -2.8, -2.8, -0.55],
+      // Go OUT first (rotZ 0.8 ~45°), THEN up (rotZ 2.8 overhead)
+      rotZ: [0.05, 0.8, 2.8, 2.8, 0.55],
       rotX: [0, -0.1, -0.2, -0.2, -0.1],    // Slight forward through the arc
       times: [0, 0.15, 0.4, 0.7, 1],
     },
@@ -87,7 +87,7 @@ export const POSES: Pose[] = [
       times: [0, 0.3, 0.7, 1],
     },
     armR: {
-      rotZ: [-0.05, -0.3, -0.3, -0.55],     // Sword arm slightly out
+      rotZ: [0.05, 0.3, 0.3, 0.55],         // Sword arm slightly out
       rotX: [0, -0.2, -0.2, -0.1],
       times: [0, 0.3, 0.7, 1],
     },
@@ -114,7 +114,7 @@ export const POSES: Pose[] = [
       times: [0, 0.3, 0.85, 1],
     },
     armR: {
-      rotZ: [-0.05, -0.05, -0.05, -0.05],
+      rotZ: [0.05, 0.05, 0.05, 0.05],
       rotX: [0, -1.3, -1.3, 0],
       times: [0, 0.3, 0.85, 1],
     },
@@ -136,16 +136,16 @@ export const POSES: Pose[] = [
     duration: 2200,
     armL: { rotZ: [0.05], rotX: [0] },
     armR: {
-      // Arm extends sideways (rotZ=-1.4 ≈ 80°) and stays there; wave is rotX only
+      // Arm extends sideways (rotZ=1.4 ≈ 80°) and stays there; wave is rotX only
       rotZ: [
-        -0.05,  // rest
-        -1.4,   // extend OUT to side (80°, fully clear of body)
-        -1.4,   // hold
-        -1.4,   // hold (waving happens on rotX)
-        -1.4,   // hold
-        -1.4,   // hold
-        -1.4,   // hold
-        -0.05,  // return to rest
+        0.05,   // rest
+        1.4,    // extend OUT to side (80°, fully clear of body)
+        1.4,    // hold
+        1.4,    // hold (waving happens on rotX)
+        1.4,    // hold
+        1.4,    // hold
+        1.4,    // hold
+        0.05,   // return to rest
       ],
       rotX: [
         0,      // rest
@@ -179,7 +179,7 @@ export const POSES: Pose[] = [
       times: [0, 0.3, 0.7, 1],
     },
     armR: {
-      rotZ: [-0.05, -0.5, -0.5, -0.55],     // Sword arm out to side
+      rotZ: [0.05, 0.5, 0.5, 0.55],         // Sword arm out to side
       rotX: [0, -0.7, -0.7, -0.15],          // Forward thrust, then relax
       times: [0, 0.3, 0.7, 1],
     },
@@ -206,7 +206,7 @@ export const POSES: Pose[] = [
       times: [0, 0.2, 0.7, 1],
     },
     armR: {
-      rotZ: [-0.05, -1.8, -1.8, -0.05],     // Up and slightly across
+      rotZ: [0.05, 1.8, 1.8, 0.05],         // Up and out to side
       rotX: [0, -0.6, -0.6, 0],              // Forward — arm in front of face, not through it
       times: [0, 0.2, 0.7, 1],
     },
@@ -389,7 +389,7 @@ export function getEquipmentIdlePose(equipped: string[]): Pose {
       rotX: [hasShield ? -0.3 : 0],       // And slightly forward
     },
     armR: {
-      rotZ: [hasSword ? -0.35 : -0.05],   // Sword arm slightly out
+      rotZ: [hasSword ? 0.35 : 0.05],     // Sword arm slightly out
       rotX: [hasSword ? -0.1 : 0],        // Barely forward
     },
     head: { rotX: [0], rotY: [0] },

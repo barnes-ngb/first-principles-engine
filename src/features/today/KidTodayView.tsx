@@ -345,16 +345,17 @@ export default function KidTodayView({
 
       await addDoc(artifactsCollection(familyId), {
         childId: child.id,
+        title: `Teach-back: ${teachSubject}`,
         type: EvidenceType.Audio,
-        date: today,
+        dayLogId: today,
         tags: {
           engineStage: EngineStage.Explain,
           subjectBucket: (teachSubject as SubjectBucket) ?? SubjectBucket.Other,
           domain: 'speech',
-          location: 'Home',
+          location: 'home',
         },
         ...(mediaUrl ? { mediaUrl } : {}),
-        note: `Lincoln taught London about ${teachSubject}`,
+        notes: `Lincoln taught London about ${teachSubject}`,
         createdAt: new Date().toISOString(),
       })
 
