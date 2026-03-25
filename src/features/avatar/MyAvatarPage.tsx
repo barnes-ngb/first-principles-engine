@@ -10,6 +10,7 @@ import LinearProgress from '@mui/material/LinearProgress'
 import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
 
+import { useNavigate } from 'react-router-dom'
 import Page from '../../components/Page'
 import { app } from '../../core/firebase/firebase'
 import {
@@ -122,6 +123,7 @@ function speakVerse(pieceName: string, verseText: string) {
 // ── Component ─────────────────────────────────────────────────────
 
 export default function MyAvatarPage() {
+  const navigate = useNavigate()
   const familyId = useFamilyId()
   const { activeChild, children, setActiveChildId, isChildProfile } = useActiveChild()
   const childId = activeChild?.id ?? ''
@@ -452,6 +454,16 @@ export default function MyAvatarPage() {
 
       if (allApplied) {
         playArmorFanfare(1.5)
+        // TTS "Ready for battle!" announcement
+        if ('speechSynthesis' in window) {
+          setTimeout(() => {
+            const utterance = new SpeechSynthesisUtterance(
+              "Full armor on! You're ready for battle, warrior!",
+            )
+            utterance.rate = 0.85
+            window.speechSynthesis.speak(utterance)
+          }, 1800) // After fanfare completes
+        }
       }
 
       // Remove from manuallyUnequipped if re-equipping
@@ -825,6 +837,33 @@ export default function MyAvatarPage() {
               >
                 {profile.armorStreak}-day armor streak
               </Typography>
+            )}
+            {/* Start Your Day button — navigates to Today after full equip */}
+            {isChildProfile && (
+              <Box
+                component="button"
+                onClick={() => navigate('/today')}
+                sx={{
+                  mt: 1.5,
+                  px: '32px',
+                  py: '14px',
+                  borderRadius: isLincoln ? '2px' : '24px',
+                  border: 'none',
+                  background: isLincoln ? '#7EFC20' : '#4caf50',
+                  color: isLincoln ? '#000' : '#fff',
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
+                  fontSize: isLincoln ? '0.4rem' : '16px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  animation: 'pulse 1.5s ease-in-out infinite',
+                  '@keyframes pulse': {
+                    '0%, 100%': { transform: 'scale(1)' },
+                    '50%': { transform: 'scale(1.05)' },
+                  },
+                }}
+              >
+                Start Your Day →
+              </Box>
             )}
           </Box>
         ) : unlockedVoxel.length > 0 && appliedVoxel.length < unlockedVoxel.length ? (
