@@ -351,6 +351,7 @@ export default function KidTodayView({
           engineStage: EngineStage.Explain,
           subjectBucket: (teachSubject as SubjectBucket) ?? SubjectBucket.Other,
           domain: 'speech',
+          location: 'home',
         },
         ...(mediaUrl ? { mediaUrl } : {}),
         notes: `Lincoln taught London about ${teachSubject}`,
