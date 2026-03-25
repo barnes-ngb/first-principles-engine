@@ -280,6 +280,13 @@ export interface AvatarProfile {
   /** Armor pieces unlocked by XP (voxel piece IDs) */
   unlockedPieces?: string[]
 
+  /** Date string (YYYY-MM-DD) when armor was last equipped — for daily reset */
+  lastArmorEquipDate?: string
+  /** Consecutive days with all earned pieces equipped */
+  armorStreak?: number
+  /** Date string (YYYY-MM-DD) of last day all pieces were equipped */
+  lastFullArmorDate?: string
+
   totalXp: number   // cached from xpLedger for quick reads
   updatedAt: string
 }
