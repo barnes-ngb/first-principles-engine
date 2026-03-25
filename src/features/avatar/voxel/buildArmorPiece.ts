@@ -261,6 +261,13 @@ function buildBreastplate(U: number): THREE.Group {
   trim.position.set(0, U * 12.5, 0)
   group.add(trim)
 
+  // Horizontal plate lines across the chest (layered armor plates)
+  for (let i = 0; i < 3; i++) {
+    const plateLine = taggedFlatBox(U * 8.5, U * 0.2, U * 6.1, W, 'accent', `plate_line_${i}`)
+    plateLine.position.set(0, U * (22 - i * 3), 0)
+    group.add(plateLine)
+  }
+
   return group
 }
 
@@ -281,6 +288,14 @@ function buildBelt(U: number): THREE.Group {
   const inner = taggedFlatBox(U * 1.5, U * 1.2, U * 0.3, 0x111111, 'detail', 'belt_inner')
   inner.position.set(0, U * 12, U * 3.5)
   group.add(inner)
+
+  // Rivets along the belt — small raised dots for leather detail
+  for (let i = -3; i <= 3; i++) {
+    if (i === 0) continue // Skip center (buckle is there)
+    const rivet = taggedFlatBox(U * 0.4, U * 0.4, U * 0.4, W, 'accent', `belt_rivet_${i}`)
+    rivet.position.set(i * U * 2.5, U * 12, U * 2.9)
+    group.add(rivet)
+  }
 
   return group
 }
@@ -371,6 +386,13 @@ function buildShield(U: number): THREE.Group {
   boss.position.set(shX - U * 1.1, -U * 7, shZ)
   group.add(boss)
 
+  // Vertical grain lines on shield face (wood grain / material detail)
+  for (let i = -2; i <= 2; i++) {
+    const grain = taggedFlatBox(U * 0.15, U * 9.6, U * 0.15, W, 'detail', `shield_grain_${i}`)
+    grain.position.set(shX - U * 0.9, -U * 7, shZ + i * U * 1.5)
+    group.add(grain)
+  }
+
   return group
 }
 
@@ -401,7 +423,7 @@ function buildSword(U: number): THREE.Group {
   const bladeMat = new THREE.MeshLambertMaterial({
     color: 0x87ceeb,
     emissive: new THREE.Color(0x2196f3),
-    emissiveIntensity: 0.3,
+    emissiveIntensity: 0.35,
   })
   const blade = new THREE.Mesh(
     new THREE.BoxGeometry(U * 1, U * 16, U * 2),
