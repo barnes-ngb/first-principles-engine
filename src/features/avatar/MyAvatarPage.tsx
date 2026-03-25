@@ -66,6 +66,14 @@ function sessionToVoxelPieces(appliedPieces: ArmorPiece[]): string[] {
   return appliedPieces.map((p) => ARMOR_PIECE_TO_VOXEL[p])
 }
 
+/** Check if yesterday's date string is exactly one day before today */
+function isConsecutiveDay(prev: string, current: string): boolean {
+  const prevDate = new Date(prev + 'T00:00:00')
+  const currentDate = new Date(current + 'T00:00:00')
+  const diffMs = currentDate.getTime() - prevDate.getTime()
+  return Math.round(diffMs / (1000 * 60 * 60 * 24)) === 1
+}
+
 // ── Fanfare (Web Audio API) ────────────────────────────────────────
 
 function playArmorFanfare(delaySeconds = 0) {
@@ -261,50 +269,53 @@ export default function MyAvatarPage() {
     return unsub
   }, [familyId, childId, today])
 
-  // ── Auto-equip unlocked pieces on page load ────────────────────
-  // Only runs once per child on initial load — does NOT re-fire on every session change.
-  const autoEquipRanRef = useRef(false)
-  const autoEquipChildRef = useRef(childId)
+  // ── Daily armor reset — armor unequips each morning ────────────
+  // "Put on the full armor of God" — Ephesians 6:11
+  // Each day is a fresh opportunity to suit up.
+  const resetRanRef = useRef(false)
+  const resetChildRef = useRef(childId)
+  const [morningReset, setMorningReset] = useState(false)
 
-  // Reset auto-equip when switching children
-  if (autoEquipChildRef.current !== childId) {
-    autoEquipRanRef.current = false
-    autoEquipChildRef.current = childId
+  // Reset flag when switching children
+  if (resetChildRef.current !== childId) {
+    resetRanRef.current = false
+    resetChildRef.current = childId
+    setMorningReset(false)
   }
 
   useEffect(() => {
     if (!profile || !session || !familyId || !childId) return
-    if (autoEquipRanRef.current) return
-    autoEquipRanRef.current = true
+    if (resetRanRef.current) return
+    resetRanRef.current = true
 
-    const unlockedVoxel = getUnlockedVoxelPieces(profile)
-    const currentApplied = session.appliedPieces ?? []
-    const currentAppliedVoxel = sessionToVoxelPieces(currentApplied)
-    const manuallyRemoved = new Set(session.manuallyUnequipped ?? [])
+    const isNewDay = profile.lastArmorEquipDate !== today
 
-    // Find pieces that are unlocked but not in today's session and not manually removed
-    const missingVoxel = unlockedVoxel.filter(
-      (vid) => !currentAppliedVoxel.includes(vid) && !manuallyRemoved.has(vid),
-    )
-    if (missingVoxel.length === 0) return
+    if (isNewDay && (profile.equippedPieces?.length ?? 0) > 0) {
+      // New day — reset armor so child can intentionally put it on
+      setMorningReset(true)
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      void updateDoc(profileRef, {
+        equippedPieces: [],
+        lastArmorEquipDate: today,
+        updatedAt: new Date().toISOString(),
+      })
 
-    // Map voxel IDs back to ArmorPiece IDs for the session
-    const missingArmor = missingVoxel
-      .map((vid) => ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id)
-      .filter((id): id is ArmorPiece => !!id)
-
-    if (missingArmor.length === 0) return
-
-    const updatedApplied = [...currentApplied, ...missingArmor]
-    const docId = dailyArmorSessionDocId(childId, today)
-    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
-    void setDoc(sessionRef, { ...session, appliedPieces: updatedApplied })
-    // Also update equippedPieces on avatar profile
-    const profileRef = doc(avatarProfilesCollection(familyId), childId)
-    void updateDoc(profileRef, {
-      equippedPieces: [...new Set([...sessionToVoxelPieces(updatedApplied)])],
-      updatedAt: new Date().toISOString(),
-    })
+      // Morning TTS greeting
+      if ('speechSynthesis' in window) {
+        setTimeout(() => {
+          const utterance = new SpeechSynthesisUtterance(
+            'Good morning warrior! Time to put on the armor of God.',
+          )
+          utterance.rate = 0.85
+          const voices = window.speechSynthesis.getVoices()
+          const preferred = voices.find((v) =>
+            v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Moira'),
+          ) || voices.find((v) => v.lang.startsWith('en-US')) || voices[0]
+          if (preferred) utterance.voice = preferred
+          window.speechSynthesis.speak(utterance)
+        }, 1000)
+      }
+    }
   }, [profile, session, familyId, childId, today])
 
   // ── Photo select ───────────────────────────────────────────────
@@ -397,6 +408,27 @@ export default function MyAvatarPage() {
     [familyId, childId, profile],
   )
 
+  // ── Streak tracking ─────────────────────────────────────────────
+  const checkArmorStreak = useCallback(async (prof: AvatarProfile) => {
+    if (!familyId || !childId) return
+    const lastFull = prof.lastFullArmorDate
+    let newStreak = 1
+    if (lastFull) {
+      if (lastFull === today) {
+        newStreak = prof.armorStreak ?? 1 // Same day, keep streak
+      } else if (isConsecutiveDay(lastFull, today)) {
+        newStreak = (prof.armorStreak ?? 0) + 1 // Consecutive day
+      }
+      // else streak broken, reset to 1
+    }
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    await updateDoc(profileRef, {
+      armorStreak: newStreak,
+      lastFullArmorDate: today,
+      updatedAt: new Date().toISOString(),
+    })
+  }, [familyId, childId, today])
+
   // ── Apply a piece (equip) ───────────────────────────────────────
   const handleApplyPiece = useCallback(
     async (voxelPieceId: VoxelArmorPieceId) => {
@@ -442,14 +474,19 @@ export default function MyAvatarPage() {
       await updateDoc(profileRef, {
         equippedPieces: equippedVoxel,
         lastEquipAnimation: voxelPieceId,
+        lastArmorEquipDate: today,
         updatedAt: new Date().toISOString(),
       })
 
       if (allApplied) {
         void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
+        void checkArmorStreak(profile)
       }
+
+      // Clear morning reset message once a piece is equipped
+      setMorningReset(false)
     },
-    [profile, familyId, childId, session, today],
+    [profile, familyId, childId, session, today, checkArmorStreak],
   )
 
   // ── Unequip a piece (direct — no dialog) ──────────────────────
@@ -520,6 +557,24 @@ export default function MyAvatarPage() {
     },
     [profile, session, ceremonyActive, handleApplyPiece, handleUnequipDirect],
   )
+
+  // ── Suit Up! — equip all unlocked pieces with staggered animation ──
+  const suitUpAll = useCallback(() => {
+    if (!profile || !session || !familyId || !childId) return
+    const unlockedIds = getUnlockedVoxelPieces(profile)
+    const currentApplied = session.appliedPieces ?? []
+    const currentVoxel = sessionToVoxelPieces(currentApplied)
+    const toEquip = unlockedIds.filter((vid) => !currentVoxel.includes(vid))
+    if (toEquip.length === 0) return
+
+    toEquip.forEach((voxelId, i) => {
+      setTimeout(() => {
+        const meta = VOXEL_ARMOR_PIECES.find((p) => p.id === voxelId)
+        if (meta) speakVerse(meta.name, meta.verseText)
+        void handleApplyPiece(voxelId as VoxelArmorPieceId)
+      }, i * 1500) // 1.5s between each piece — time to hear the verse
+    })
+  }, [profile, session, familyId, childId, handleApplyPiece])
 
   // ── Screen flash on equip ──────────────────────────────────────
   const flashContainerRef = useRef<HTMLDivElement>(null)
@@ -727,6 +782,22 @@ export default function MyAvatarPage() {
           />
         </Box>
 
+        {/* ── Morning reset message ────────────────────────────── */}
+        {morningReset && unlockedVoxel.length > 0 && appliedVoxel.length === 0 && (
+          <Box sx={{ textAlign: 'center', py: 1, mb: 0.5 }}>
+            <Typography
+              sx={{
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '0.5rem' : '16px',
+                fontWeight: 600,
+                color: isLincoln ? '#FFD700' : '#9C27B0',
+              }}
+            >
+              Good morning! Put on the armor of God today.
+            </Typography>
+          </Box>
+        )}
+
         {/* ── Armor status text ────────────────────────────────── */}
         {allEarnedApplied && unlockedVoxel.length > 0 ? (
           <Box sx={{ textAlign: 'center', py: 1, mb: 1 }}>
@@ -742,6 +813,19 @@ export default function MyAvatarPage() {
                 ? 'Full armor on! Ready for today.'
                 : `${unlockedVoxel.length} of 6 ${currentTierName.toLowerCase()} pieces equipped — keep going!`}
             </Typography>
+            {/* Streak display */}
+            {(profile.armorStreak ?? 0) > 1 && (
+              <Typography
+                sx={{
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  color: '#FFA726',
+                  mt: 0.5,
+                }}
+              >
+                {profile.armorStreak}-day armor streak
+              </Typography>
+            )}
           </Box>
         ) : unlockedVoxel.length > 0 && appliedVoxel.length < unlockedVoxel.length ? (
           <Box sx={{ textAlign: 'center', py: 1, mb: 1 }}>
@@ -755,6 +839,28 @@ export default function MyAvatarPage() {
             >
               {`${appliedVoxel.length} of 6 ${currentTierName.toLowerCase()} pieces`}
             </Typography>
+            {/* Suit Up! button — equip all at once */}
+            {appliedVoxel.length < unlockedVoxel.length && (
+              <Box
+                component="button"
+                onClick={suitUpAll}
+                sx={{
+                  mt: 1,
+                  px: '24px',
+                  py: '10px',
+                  borderRadius: isLincoln ? '2px' : '20px',
+                  border: `1.5px solid ${isLincoln ? '#7EFC20' : '#4caf50'}`,
+                  background: isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(76,175,80,0.15)',
+                  color: isLincoln ? '#7EFC20' : '#4caf50',
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
+                  fontSize: isLincoln ? '0.38rem' : '14px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                Suit Up!
+              </Box>
+            )}
           </Box>
         ) : (
           <Box sx={{ mb: 2, px: 1 }}>
