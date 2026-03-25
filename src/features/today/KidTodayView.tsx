@@ -200,16 +200,6 @@ export default function KidTodayView({
   const armorGateStatus = avatarProfile ? getArmorGateStatus(avatarProfile) : null
   const armorReady = armorGateStatus?.complete ?? false
 
-  if (avatarProfile && !armorReady && armorGateStatus) {
-    return (
-      <ArmorGateScreen
-        gateStatus={armorGateStatus}
-        avatarProfile={avatarProfile}
-        childName={child.name}
-      />
-    )
-  }
-
   // Award XP when all must-do items are completed (once per day per child)
   const prevMustDoDoneRef = useRef(false)
   useEffect(() => {
@@ -466,6 +456,17 @@ export default function KidTodayView({
     }
     setSaving(false)
   }, [teachSubject, child.id, familyId, audioBlob, today, dayLog, persistDayLogImmediate])
+
+  // ── Armor Gate early return (after all hooks) ──
+  if (avatarProfile && !armorReady && armorGateStatus) {
+    return (
+      <ArmorGateScreen
+        gateStatus={armorGateStatus}
+        avatarProfile={avatarProfile}
+        childName={child.name}
+      />
+    )
+  }
 
   // No plan state
   if (checklist.length === 0) {
