@@ -148,7 +148,6 @@ export default function KidTodayView({
   const [extraActivity, setExtraActivity] = useState<{ label: string; subject: string } | null>(null)
   const [extraMinutes, setExtraMinutes] = useState<number | null>(null)
   const [savingExtra, setSavingExtra] = useState(false)
-  const [extraItems, setExtraItems] = useState<Array<{ label: string; minutes: number }>>([])
 
   // Teach-back state (Lincoln only)
   const [showTeachBack, setShowTeachBack] = useState(false)
@@ -222,16 +221,15 @@ export default function KidTodayView({
     loadArtifacts()
   }, [loadArtifacts])
 
-  // Populate extra activity items from existing dayLog on load
-  useEffect(() => {
-    if (!dayLog?.checklist) return
-    const extras = dayLog.checklist
+  // Derive extra activity items from dayLog checklist
+  const extraItems = useMemo(() => {
+    if (!dayLog?.checklist) return []
+    return dayLog.checklist
       .filter((item) => item.source === 'manual' && item.completed)
       .map((item) => ({
         label: item.label.replace(/\s*\(\d+m\)\s*$/, ''),
         minutes: item.estimatedMinutes ?? 0,
       }))
-    setExtraItems(extras)
   }, [dayLog?.checklist])
 
   const handleSaveExtra = useCallback(async () => {
