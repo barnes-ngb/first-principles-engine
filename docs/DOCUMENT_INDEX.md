@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-03-22.
+> Where everything lives. Updated 2026-03-25.
 
 ---
 
@@ -8,10 +8,16 @@
 
 | Document | Status | Notes |
 |---|---|---|
-| `MASTER_OUTLINE.md` | **CURRENT** | Single source of truth for project status, feature inventory, sprint history |
+| `MASTER_OUTLINE.md` | **CURRENT** (v9) | Single source of truth: features, status, sprint history. Update to v10 after cleanup. |
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
-| `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped, implementation status added Mar 22 |
+| `PARENT_EXPERIENCE_AUDIT.md` | **NEW** | Full code-level trace of every parent screen, all findings |
+| `PARENT_EXPERIENCE_ALIGNMENT_PLAN.md` | **NEW** | Active punch list: dead code cleanup, model fixes, plan quality, hours fix |
+| `FIRESTORE_AUDIT.md` | **CURRENT** (Mar 21) | Data model, indexes, collections audit |
+| `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
+| `ENGINE_V2.md` | **CURRENT** | Engine framework (flywheel, stages, scoring) |
+| `SYSTEM_PROMPTS.md` | **STALE** (Mar 7) | Needs regeneration — quest prompt added, evaluation prompt significantly expanded |
+| `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books coverage |
 | `00_MASTER_SCOPE.md` | HISTORICAL | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `01_MVP_V0_1.md` | HISTORICAL | Phase 1 — MVP (Today, artifacts, engine, records) |
 | `02_ENGINE_LADDERS.md` | HISTORICAL | Phase 2 — Engine + Ladders |
@@ -21,10 +27,31 @@
 | `06_TESTING_PLAN.md` | HISTORICAL | Phase testing plan |
 | `07_SATURDAY_LAB_RUNBOOK.md` | HISTORICAL | Saturday lab runbook |
 | `08_RUNBOOK.md` | HISTORICAL | Operational runbook |
-| `ENGINE_V2.md` | **CURRENT** | Engine framework (flywheel, stages, scoring) |
-| `SYSTEM_PROMPTS.md` | STALE | Needs update — quest prompt added, evaluation prompt significantly expanded since Mar 7 |
-| `barnes-testing-guide-v2.md` | STALE | Needs update — Knowledge Mine, engagement, print materials, skip guidance untested |
 | `archive/` | HISTORICAL | Old reference docs |
+
+---
+
+## Which Docs to Include — Context Guide
+
+### Always Include (Core Reference)
+
+| Document | Why |
+|----------|-----|
+| `MASTER_OUTLINE.md` | Single source of truth: features, status, sprint history |
+| `PARENT_EXPERIENCE_ALIGNMENT_PLAN.md` | Active punch list: dead code cleanup, model fixes, plan quality, hours fix |
+| `PARENT_EXPERIENCE_AUDIT.md` | Full code-level trace of every parent screen, all findings |
+| `CLAUDE.md` | Build commands, constraints, conventions, project structure |
+
+### Include When Working on Specific Areas
+
+| Document | Use When |
+|----------|----------|
+| `SYSTEM_PROMPTS.md` | Working on AI prompts, task handlers, context slices |
+| `KNOWLEDGE_MINE_BRIEF.md` | Working on quest/interactive evaluation |
+| `barnes-story-game-workshop-design.md` | Working on workshop feature |
+| `ENGINE_V2.md` | Working on engine/flywheel framework |
+| `FIRESTORE_AUDIT.md` | Working on data model, indexes, collections |
+| `barnes-testing-guide-v2.md` | Working on tests |
 
 ---
 
@@ -32,14 +59,14 @@
 
 These are family/values documents maintained outside the repo. They inform AI prompts and project direction but are not code artifacts.
 
-| Document | Purpose |
-|---|---|
-| Barnes Family Learning Charter | Values, culture code, north star. System prompts reference this. |
-| Learner Profiles | Lincoln + London: levels, strengths, challenges, motivators, supports |
-| Shelly Feedback Action Plan | User requirements, build priorities, what Shelly wants next |
-| Dad Lab Charter | Saturday lab vision, engineering + wonder philosophy |
-| Kid Experience Design | Philosophy: acknowledgment not reward, diamonds not scores |
-| State Compliance Guide | MO/TX requirements for homeschool reporting |
+| Document | Purpose | When |
+|---|---|---|
+| Barnes Family Learning Charter | Values, culture code, north star. System prompts reference this. | Always |
+| Learner Profiles | Lincoln + London: levels, strengths, challenges, motivators, supports | When working on child context, evaluation |
+| Shelly Feedback Action Plan | User requirements, build priorities, what Shelly wants next | When prioritizing features |
+| Dad Lab Charter | Saturday lab vision, engineering + wonder philosophy | When working on Dad Lab |
+| Kid Experience Design | Philosophy: acknowledgment not reward, diamonds not scores | When working on kid-facing UI |
+| State Compliance Guide | MO/TX requirements for homeschool reporting | When working on hours/records |
 
 ---
 
