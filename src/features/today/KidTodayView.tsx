@@ -346,7 +346,7 @@ export default function KidTodayView({
       await addDoc(artifactsCollection(familyId), {
         childId: child.id,
         type: EvidenceType.Audio,
-        date: today,
+        dayLogId: today,
         tags: {
           engineStage: EngineStage.Explain,
           subjectBucket: (teachSubject as SubjectBucket) ?? SubjectBucket.Other,
