@@ -17,6 +17,7 @@ import {
   avatarProfilesCollection,
   dailyArmorSessionsCollection,
   dailyArmorSessionDocId,
+  stripUndefined,
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -205,7 +206,7 @@ export default function MyAvatarPage() {
           totalXp: 0,
           updatedAt: new Date().toISOString(),
         }
-        await setDoc(profileRef, newProfile)
+        await setDoc(profileRef, stripUndefined(newProfile as unknown as Record<string, unknown>) as unknown as AvatarProfile)
       }
     }
     void ensureProfile()
@@ -264,7 +265,7 @@ export default function MyAvatarPage() {
           date: today,
           appliedPieces: [],
         }
-        await setDoc(sessionRef, newSession)
+        await setDoc(sessionRef, stripUndefined(newSession as unknown as Record<string, unknown>) as unknown as DailyArmorSession)
         setSession(newSession)
       }
     })
@@ -296,11 +297,11 @@ export default function MyAvatarPage() {
       // New day — reset armor so child can intentionally put it on
       setMorningReset(true)
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
-      void updateDoc(profileRef, {
+      void updateDoc(profileRef, stripUndefined({
         equippedPieces: [],
         lastArmorEquipDate: today,
         updatedAt: new Date().toISOString(),
-      })
+      }))
 
       // Morning TTS greeting
       if ('speechSynthesis' in window) {
@@ -375,12 +376,12 @@ export default function MyAvatarPage() {
       const { getDoc } = await import('firebase/firestore')
       const snap = await getDoc(profileRef)
       const current = snap.exists() ? (snap.data() as AvatarProfile) : profile
-      await setDoc(profileRef, {
+      await setDoc(profileRef, stripUndefined({
         ...current,
         characterFeatures: result.data.features,
         photoUrl: photoPreviewUrl,
         updatedAt: new Date().toISOString(),
-      })
+      }) as unknown as AvatarProfile)
 
       setPhotoPreviewUrl(null)
     } catch (err: unknown) {
@@ -402,10 +403,10 @@ export default function MyAvatarPage() {
         case 'shoes': customization.shoeColor = hexColor; break
       }
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
-      await updateDoc(profileRef, {
+      await updateDoc(profileRef, stripUndefined({
         customization,
         updatedAt: new Date().toISOString(),
-      })
+      }))
     },
     [familyId, childId, profile],
   )
@@ -424,11 +425,11 @@ export default function MyAvatarPage() {
       // else streak broken, reset to 1
     }
     const profileRef = doc(avatarProfilesCollection(familyId), childId)
-    await updateDoc(profileRef, {
+    await updateDoc(profileRef, stripUndefined({
       armorStreak: newStreak,
       lastFullArmorDate: today,
       updatedAt: new Date().toISOString(),
-    })
+    }))
   }, [familyId, childId, today])
 
   // ── Apply a piece (equip) ───────────────────────────────────────
@@ -473,22 +474,22 @@ export default function MyAvatarPage() {
       // Write to Firestore
       const docId = dailyArmorSessionDocId(childId, today)
       const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
-      await setDoc(sessionRef, {
+      await setDoc(sessionRef, stripUndefined({
         ...session,
         appliedPieces: updatedApplied,
         manuallyUnequipped: updatedManual,
         ...(allApplied ? { completedAt: new Date().toISOString() } : {}),
-      })
+      }) as unknown as DailyArmorSession)
 
       // Also update equippedPieces on avatar profile
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
       const equippedVoxel = [...sessionToVoxelPieces(updatedApplied)]
-      await updateDoc(profileRef, {
+      await updateDoc(profileRef, stripUndefined({
         equippedPieces: equippedVoxel,
         lastEquipAnimation: voxelPieceId,
         lastArmorEquipDate: today,
         updatedAt: new Date().toISOString(),
-      })
+      }))
 
       if (allApplied) {
         void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
@@ -519,21 +520,21 @@ export default function MyAvatarPage() {
 
     const docId = dailyArmorSessionDocId(childId, today)
     const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
-    await updateDoc(sessionRef, {
+    await updateDoc(sessionRef, stripUndefined({
       appliedPieces: arrayRemove(armorPieceId),
       manuallyUnequipped: updatedManual,
       completedAt: deleteField(),
-    })
+    }))
 
     // Also update equippedPieces on avatar profile
     const profileRef = doc(avatarProfilesCollection(familyId), childId)
     const remainingVoxel = sessionToVoxelPieces(
       (session.appliedPieces ?? []).filter((p) => p !== armorPieceId),
     )
-    await updateDoc(profileRef, {
+    await updateDoc(profileRef, stripUndefined({
       equippedPieces: remainingVoxel,
       updatedAt: new Date().toISOString(),
-    })
+    }))
 
     setUnequipPiece(null)
   }, [familyId, childId, session, today])
