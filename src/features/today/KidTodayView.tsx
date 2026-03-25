@@ -345,6 +345,7 @@ export default function KidTodayView({
 
       await addDoc(artifactsCollection(familyId), {
         childId: child.id,
+        title: `Teach-back: ${teachSubject}`,
         type: EvidenceType.Audio,
         dayLogId: today,
         tags: {
