@@ -542,12 +542,22 @@ export function useQuestSession() {
       }
 
       // Award XP via addXpEvent (handles dedup, avatar profile update, armor unlocks)
+      // 1) Quest completion bonus (flat 15 XP)
+      addXpEvent(
+        familyId,
+        activeChildId,
+        'QUEST_COMPLETE',
+        15,
+        `quest-complete_${docId}`,
+        { domain },
+      ).catch((err) => console.warn('Failed to award quest completion XP', err))
+
+      // 2) Diamond bonus (2 XP per diamond mined)
       const XP_PER_DIAMOND = 2
       const questXp = finalState.totalCorrect * XP_PER_DIAMOND
 
       if (questXp > 0) {
         const dedupKey = `quest_${docId}`
-        // Fire-and-forget: session is already saved, don't block on XP write
         addXpEvent(
           familyId,
           activeChildId,
@@ -560,7 +570,7 @@ export function useQuestSession() {
             questionsTotal: String(finalState.totalQuestions),
             finalLevel: String(finalState.currentLevel),
           },
-        ).catch((err) => console.warn('Failed to award quest XP', err))
+        ).catch((err) => console.warn('Failed to award quest diamond XP', err))
       }
 
       // Auto-apply findings to skill snapshot

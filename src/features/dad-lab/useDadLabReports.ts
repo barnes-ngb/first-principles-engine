@@ -17,6 +17,7 @@ import { dadLabReportsCollection, hoursCollection } from '../../core/firebase/fi
 import { useChildren } from '../../core/hooks/useChildren'
 import type { DadLabReport } from '../../core/types'
 import type { DadLabStatus } from '../../core/types/enums'
+import { addXpEvent } from '../../core/xp/addXpEvent'
 
 export function useDadLabReports() {
   const familyId = useFamilyId()
@@ -97,13 +98,19 @@ export function useDadLabReports() {
       // Only sync compliance hours for completed labs
       if (report.status === 'complete') {
         await syncComplianceHours(reportId, report)
+        // Award XP to each child for Dad Lab completion
+        for (const child of children) {
+          void addXpEvent(familyId, child.id, 'DAD_LAB_COMPLETE', 20, `dadlab-${reportId}`, {
+            reason: `Dad Lab: ${report.title || 'experiment'}`,
+          })
+        }
       }
 
       // Reload list
       await load()
       return reportId
     },
-    [familyId, syncComplianceHours, load],
+    [familyId, children, syncComplianceHours, load],
   )
 
   const updateStatus = useCallback(
@@ -111,17 +118,22 @@ export function useDadLabReports() {
       const ref = doc(dadLabReportsCollection(familyId), reportId)
       await updateDoc(ref, { status, updatedAt: new Date().toISOString() })
 
-      // If completing, sync compliance hours
+      // If completing, sync compliance hours and award XP
       if (status === 'complete') {
         const report = reports.find((r) => r.id === reportId)
         if (report) {
           await syncComplianceHours(reportId, { ...report, status })
+          for (const child of children) {
+            void addXpEvent(familyId, child.id, 'DAD_LAB_COMPLETE', 20, `dadlab-${reportId}`, {
+              reason: `Dad Lab: ${report.title || 'experiment'}`,
+            })
+          }
         }
       }
 
       await load()
     },
-    [familyId, reports, syncComplianceHours, load],
+    [familyId, reports, children, syncComplianceHours, load],
   )
 
   const deleteReport = useCallback(
