@@ -17,6 +17,7 @@ import type { Pose } from './voxel/poseSystem'
 import { applyPaintedFace, applyFaceWithAIFallback } from './voxel/pixelFace'
 import { buildHelmHair } from './voxel/buildHair'
 import { frameCameraToCharacter } from './voxel/cameraUtils'
+import { playEquipSound } from './voxel/equipSound'
 
 interface VoxelCharacterProps {
   features: CharacterFeatures | undefined
@@ -135,75 +136,120 @@ function enforceArmorOpacity(
   }
 }
 
-/** Build a Minecraft-block-style platform at the character's feet */
+/** Lerp between two hex colors */
+function lerpPlatformColor(a: number, b: number, t: number): number {
+  const ca = new THREE.Color(a)
+  const cb = new THREE.Color(b)
+  ca.lerp(cb, t)
+  return ca.getHex()
+}
+
+/** Build a 3-step Minecraft-style platform at the character's feet */
 function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): THREE.Group {
   const scale = ageGroup === 'younger' ? 0.88 : 1.0
-  const U = 0.125 * scale
-  const blockSize = U * 8 // One Minecraft block = 8 pixels
+  const s = scale
   const platform = new THREE.Group()
   platform.name = 'platform'
 
+  const mainColor = tierBaseColor ?? 0x555555
+  const darkColor = lerpPlatformColor(mainColor, 0x000000, 0.2)
+  const lightColor = lerpPlatformColor(mainColor, 0xFFFFFF, 0.15)
+
+  function makeBox(w: number, h: number, d: number, color: number): THREE.Mesh {
+    const geo = new THREE.BoxGeometry(w, h, d)
+    const mats: THREE.MeshLambertMaterial[] = []
+    const base = new THREE.Color(color)
+    for (let i = 0; i < 6; i++) {
+      const variation = 0.92 + Math.random() * 0.16
+      mats.push(new THREE.MeshLambertMaterial({ color: base.clone().multiplyScalar(variation) }))
+    }
+    return new THREE.Mesh(geo, mats)
+  }
+
+  // Bottom step — widest
+  const step1 = makeBox(3.6 * s, 0.25 * s, 2.4 * s, darkColor)
+  step1.position.y = -0.125 * s
+  platform.add(step1)
+
+  // Middle step
+  const step2 = makeBox(3.0 * s, 0.25 * s, 2.0 * s, mainColor)
+  step2.position.y = 0.125 * s
+  platform.add(step2)
+
+  // Top step — where character stands
+  const step3 = makeBox(2.4 * s, 0.2 * s, 1.6 * s, lightColor)
+  step3.position.y = 0.35 * s
+  platform.add(step3)
+
+  // Individual blocks on top surface for Minecraft feel
   for (let x = -1; x <= 1; x++) {
     for (let z = -1; z <= 0; z++) {
-      const block = new THREE.Group()
-
-      // Main block body — tinted toward tier color
-      const baseHex = tierBaseColor ?? 0x555555
-      const sideColor = new THREE.Color(baseHex).multiplyScalar(0.7 + Math.random() * 0.15)
-      const mainGeo = new THREE.BoxGeometry(
-        blockSize * 0.98,
-        blockSize * 0.98,
-        blockSize * 0.98,
-      )
-      const mainMats: THREE.MeshLambertMaterial[] = []
-      for (let i = 0; i < 6; i++) {
-        const variation = 0.9 + Math.random() * 0.2
-        mainMats.push(
-          new THREE.MeshLambertMaterial({
-            color: sideColor.clone().multiplyScalar(variation),
-          }),
-        )
-      }
-      const main = new THREE.Mesh(mainGeo, mainMats)
-      block.add(main)
-
-      // Slightly lighter top face
-      const topGeo = new THREE.BoxGeometry(
-        blockSize * 0.98,
-        blockSize * 0.1,
-        blockSize * 0.98,
-      )
-      const topMat = new THREE.MeshLambertMaterial({
-        color: sideColor.clone().multiplyScalar(1.3),
-      })
-      const top = new THREE.Mesh(topGeo, topMat)
-      top.position.y = blockSize * 0.45
-      block.add(top)
-
-      block.position.set(
-        x * blockSize,
-        -blockSize * 0.5, // Below Y=0 (character feet)
-        z * blockSize + blockSize * 0.3,
-      )
+      const blockColor = Math.random() > 0.5 ? mainColor : lightColor
+      const block = makeBox(0.75 * s, 0.21 * s, 0.75 * s, blockColor)
+      block.position.set(x * 0.8 * s, 0.35 * s, z * 0.8 * s + 0.2 * s)
       platform.add(block)
     }
   }
 
+  // Shift the whole platform down so character feet still at Y=0
+  platform.position.y = -0.35 * s
+
   return platform
 }
 
-/** Add subtle background star particles */
-function addBackgroundParticles(scene: THREE.Scene): THREE.Points {
-  const particleCount = 30
+/** Add Minecraft-themed background: terrain silhouette, moon, star cubes */
+function addBackgroundElements(scene: THREE.Scene) {
+  // Distant terrain silhouette — dark blocks along the horizon
+  const terrainColor = 0x0D0D1A
+  for (let i = 0; i < 12; i++) {
+    const w = 1 + Math.random() * 2
+    const h = 0.5 + Math.random() * 2
+    const hillGeo = new THREE.BoxGeometry(w, h, 0.5)
+    const hillMat = new THREE.MeshLambertMaterial({ color: terrainColor })
+    const hill = new THREE.Mesh(hillGeo, hillMat)
+    hill.position.set(
+      (Math.random() - 0.5) * 15,
+      h / 2 - 2,
+      -8 - Math.random() * 4,
+    )
+    scene.add(hill)
+  }
+
+  // Moon — octagonal (Minecraft-ish) in the corner
+  const moonGeo = new THREE.CircleGeometry(0.6, 8)
+  const moonMat = new THREE.MeshBasicMaterial({
+    color: 0xFFFFCC,
+    transparent: true,
+    opacity: 0.15,
+  })
+  const moon = new THREE.Mesh(moonGeo, moonMat)
+  moon.position.set(5, 6, -6)
+  scene.add(moon)
+
+  // Stars — small white cubes scattered in the sky
+  for (let i = 0; i < 20; i++) {
+    const starGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04)
+    const starMat = new THREE.MeshBasicMaterial({
+      color: 0xFFFFFF,
+    })
+    const star = new THREE.Mesh(starGeo, starMat)
+    star.position.set(
+      (Math.random() - 0.5) * 14,
+      3 + Math.random() * 5,
+      -7 - Math.random() * 3,
+    )
+    scene.add(star)
+  }
+
+  // Also keep some particle-style stars for depth
+  const particleCount = 20
   const geo = new THREE.BufferGeometry()
   const positions = new Float32Array(particleCount * 3)
-
   for (let i = 0; i < particleCount; i++) {
     positions[i * 3] = (Math.random() - 0.5) * 15
     positions[i * 3 + 1] = Math.random() * 8 - 1
     positions[i * 3 + 2] = -3 - Math.random() * 5
   }
-
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
   const mat = new THREE.PointsMaterial({
     color: 0x88aaff,
@@ -211,9 +257,7 @@ function addBackgroundParticles(scene: THREE.Scene): THREE.Points {
     transparent: true,
     opacity: 0.4,
   })
-  const points = new THREE.Points(geo, mat)
-  scene.add(points)
-  return points
+  scene.add(new THREE.Points(geo, mat))
 }
 
 export default function VoxelCharacter({
@@ -283,8 +327,8 @@ export default function VoxelCharacter({
     scene.background = new THREE.Color(0x1a1a2e)
     sceneRef.current = scene
 
-    // Background particles (stars)
-    addBackgroundParticles(scene)
+    // Background elements (terrain silhouette, moon, stars)
+    addBackgroundElements(scene)
 
     // Camera — auto-framed to fit character
     const camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 100)
@@ -423,15 +467,17 @@ export default function VoxelCharacter({
     // Auto-frame camera to fit the fully-built character with armor
     frameCameraToCharacter(camera, character, 1.35)
 
-    // Shadow on platform surface
-    const scale = ageGroup === 'younger' ? 0.88 : 1.0
-    const shadowGeo = new THREE.PlaneGeometry(2.5 * scale, 1.5 * scale)
+    // Shadow on platform surface — named for animation loop
+    const scaleVal = ageGroup === 'younger' ? 0.88 : 1.0
+    const shadowGeo = new THREE.PlaneGeometry(2.5 * scaleVal, 1.5 * scaleVal)
     const shadowMat = new THREE.MeshBasicMaterial({
       color: 0x000000,
       transparent: true,
-      opacity: 0.15,
+      opacity: 0.2,
+      depthWrite: false,
     })
     const shadow = new THREE.Mesh(shadowGeo, shadowMat)
+    shadow.name = 'groundShadow'
     shadow.rotation.x = -Math.PI / 2
     shadow.position.y = 0.01
     scene.add(shadow)
@@ -508,6 +554,13 @@ export default function VoxelCharacter({
         // Gentle bob (freeze during ceremony so character stays still)
         if (!ceremonyActiveRef.current) {
           characterRef.current.position.y = baseY + Math.sin(time * 1.2) * 0.03
+
+          // Animate ground shadow scale with character bob
+          const shadowMesh = scene.getObjectByName('groundShadow')
+          if (shadowMesh) {
+            const bobScale = 1 + Math.sin(time * 1.2) * 0.02
+            shadowMesh.scale.set(bobScale, 1, bobScale)
+          }
         }
 
         // Idle blink — every 3-6 seconds, close eyes briefly
@@ -709,6 +762,9 @@ export default function VoxelCharacter({
           group.scale.set(1, 1, 1)
         }
         applyTierToArmor(armorGroupsRef.current, currentTier, [pieceId])
+
+        // Play equip sound effect
+        playEquipSound(pieceId)
 
         // Play equip ceremony + auto-pose
         if (characterRef.current) {
