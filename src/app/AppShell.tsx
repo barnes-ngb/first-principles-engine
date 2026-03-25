@@ -42,9 +42,13 @@ type AppShellProps = {
 function NavContent({
   isParent,
   onNavigate,
+  activeChild,
+  avatarProfile,
 }: {
   isParent: boolean
   onNavigate?: () => void
+  activeChild?: { id: string; name: string } | null
+  avatarProfile?: import('../core/types').AvatarProfile | null
 }) {
   const items = isParent ? navItems : kidNavItems
   return (
@@ -52,6 +56,34 @@ function NavContent({
       <div className="app-shell__profile-row">
         <ProfileMenu />
       </div>
+      {activeChild && (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            px: 1,
+            py: 1,
+            mb: 0.5,
+          }}
+        >
+          {avatarProfile && (
+            <AvatarThumbnail
+              features={avatarProfile.characterFeatures}
+              ageGroup={avatarProfile.ageGroup}
+              equippedPieces={avatarProfile.equippedPieces}
+              totalXp={avatarProfile.totalXp}
+              size={32}
+            />
+          )}
+          <Chip
+            label={activeChild.name}
+            size="small"
+            variant="outlined"
+            color="primary"
+          />
+        </Box>
+      )}
       <nav>
         <ul>
           {items.map((item) => (
@@ -93,7 +125,7 @@ export function AppShell({ children }: AppShellProps) {
     <div className="app-shell">
       {/* Desktop sidebar (hidden on mobile via CSS) */}
       <aside className="app-shell__nav">
-        <NavContent isParent={isParent} />
+        <NavContent isParent={isParent} activeChild={activeChild} avatarProfile={avatarProfile} />
       </aside>
 
       {/* Mobile header + drawer (hidden on desktop via CSS) */}
@@ -159,6 +191,8 @@ export function AppShell({ children }: AppShellProps) {
         <NavContent
           isParent={isParent}
           onNavigate={closeDrawer}
+          activeChild={activeChild}
+          avatarProfile={avatarProfile}
         />
       </Drawer>
 
