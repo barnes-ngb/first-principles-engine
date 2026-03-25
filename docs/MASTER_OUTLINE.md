@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v10 **Version:** v10 — March 25, 2026 **Status:** Living document — updated after parent experience audit + dead code cleanup Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~73k lines TypeScript (down from ~78k after cleanup), 30+ test files, 600+ tests, 28 Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v11 **Version:** v11 — March 25, 2026 **Status:** Updated after first principles alignment sprint Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~73k lines TypeScript (reduced from ~78k after cleanup, grew with new features), 30+ test files, 600+ tests, 28 Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -9,7 +9,9 @@ Barnes Family Homeschool — Master Project Outline v10 **Version:** v10 — Mar
 * Quick Capture section (note, photo, audio)
 * MVD mode (shows only essential items)
 * XP awarded on all Must-Do completion (10 XP, once/day)
-* Teach-Back prompt — "Tell London one thing" after 50%+ must-do completion (Lincoln only)
+* Teach-Back prompt (parent view) — "Teach London" card appears after 3+ items completed or 50% must-do. Text capture, tags as Explain engine stage.
+* Teach-Back prompt (kid view) — Lincoln gets "I Taught London!" button with subject chips + audio recording. No text input — respects speech/writing challenges.
+* Extra Activity Logger (kid view) — "I Did More Mining!" lets Lincoln log tablet time (Reading Eggs, Math App, etc.) with activity + duration chips. All taps, no typing. Adds to checklist as completed item, counts toward hours and teach-back trigger.
 * Weekly Conundrum card — expandable discussion scenario from week plan Plan My Week
 * Page title "Plan My Week" with subtitle "Set up your week, review the plan, and you're done."
 * **Auto-suggested Week Focus** — AI pre-fills theme, virtue, scripture, heart question on page load (editable)
@@ -26,7 +28,7 @@ Barnes Family Homeschool — Master Project Outline v10 **Version:** v10 — Mar
 * Print Materials — per-day or all-week Minecraft-themed worksheet generation
 * "Repeat Last Week" shortcut for low-energy weeks
 * AI feature flag defaults to ON (no manual Settings toggle needed)
-* Weekly Conundrum — AI-generated discussion scenario tied to week theme/subjects Evaluation Chat
+* Weekly Conundrum — AI-generated open-ended discussion scenario tied to week theme/virtue/subjects. No right answer. Separate prompts for Lincoln (deeper) and London (simpler). Saved to week plan, visible on Today. Evaluation Chat
 * Shelly-guided reading diagnostic, AI walks through structured assessment levels
 * Live findings panel, <finding> and <complete> block extraction
 * Report view: skill map, frontier, recommendations, what to skip
@@ -177,7 +179,9 @@ My Books (Book Builder + AI Story Generator)
 
 Progress
 * Tabs: Learning Profile (default), Skill Snapshot, Ladders, Word Wall, Engine, Milestones, Armor
-* Learning Profile — AI-generated disposition narrative from 4 weeks of day log data (curiosity, persistence, articulation, self-awareness, ownership)
+* **Learning Profile** — AI-generated disposition narrative (Curiosity, Persistence, Articulation, Self-Awareness, Ownership) from 4 weeks of day log data, evaluations, and Dad Lab reports. First tab in Progress.
+  * Dispositions mapped to Wonder→Build→Explain→Reflect→Share learning loop
+  * Replaces manual ladder logging as the primary growth visibility tool
 * Skill Snapshot — priority skills, supports, stop rules, evidence definitions, workbook configs
 * Conceptual Blocks — conceptualBlocks[] on Skill Snapshot from pattern detection; ADDRESS_NOW vs DEFER; plain language rationale + strategies
 * "Evaluate Skills" button → evaluation chat Records
@@ -192,12 +196,12 @@ Progress
 * Artifact gallery, compliance hours auto-logged on completion Settings
 * General family profile, AI usage dashboard
 * Avatar & XP tab — parent XP controls, piece management, force tier upgrade
-* Sticker Library tab — all generated stickers, tag editing, child profile assignment Cloud Functions (6 deployed, task registry pattern)
-1. `chat` — Task registry routing to: plan, chat, evaluate, quest, generateStory, workshop
-2. `analyzePatterns` — Standalone evaluation pattern analysis (extracted from chat)
-3. `generateActivity` — Lesson card generation
-4. `generateImage` — Task registry routing to: scene, armorSheet, sticker, photoTransform, avatarPiece, baseCharacter, starterAvatar
-5. `weeklyReview` — Scheduled Sunday 7pm CT
+* Sticker Library tab — all generated stickers, tag editing, child profile assignment Cloud Functions (5 deployed, 10 task types)
+1. `chat` — Task dispatch: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, chat, analyzePatterns
+2. `weeklyReview` — Scheduled Sunday 7pm CT
+3. `generateWeeklyReviewNow` — Manual trigger
+4. `generateActivity` — Lesson card generation
+5. `generateImage` — DALL-E / gpt-image-1
 6. `healthCheck` — Diagnostic AI Context Pipeline (task-specific slicing)
 - Each task type receives only the context slices it needs (defined in contextSlices.ts)
 - Plan/chat: full context (charter, child profile, skill snapshot, workbook configs, eval findings, compressed engagement, week focus)
@@ -299,7 +303,8 @@ Workshop P1.5 Mar 22 Player selection with avatars, DALL-E art generation (board
 Workshop P2 Mar 22 Play polish (animations, sound effects, confetti), London voice recording for cards, Lincoln playtester feedback loop with AI card fixes, version tracking
 Workshop P3 Mar 22 Choose-your-adventure game type (branching story tree, scene art, retry endings), Card game type (Matching/Collecting/Battle mechanics)
 Plan My Week Fix Mar 23 Critical bug fixes (handleSetupComplete routing, JSON parsing, feature flag default), UX rewrite (auto-suggest focus, compact setup, full-width plan preview, must-do/choose sections, per-subject default times, renamed UI, combined adjustment chips)
-Cleanup Mar 24-25 Parent experience audit, dead code removal (5.6k+ lines), model unification (all Sonnet → claude-sonnet-4-6), plan quality fixes (timeBudget 185m, estimatedMinutes 30m, routine promotion, must-do default), hours computation fix, AI Usage panel model labels, docs refresh, orphaned collections/types/seed cleanup, CHARTER_PREAMBLE dedup, Progress tab reorder
+Cleanup Mar 24 Parent experience audit, dead code removal (5.6k+ lines), model unification (all Sonnet → claude-sonnet-4-6), plan quality fixes (timeBudget 185m, estimatedMinutes 30m, routine promotion, must-do default), hours computation fix, AI Usage panel model labels, docs refresh, orphaned collections/types/seed cleanup, CHARTER_PREAMBLE dedup, Progress tab reorder
+First Principles Mar 25 Weekly review rewrite (day logs + type alignment), disposition profile, teach-back (parent + kid), conundrum generation, extra activity logger, Firestore indexes, first principles alignment
 
 Removed Features (Cleanup Sprint, Mar 24-25)
 * Sessions (1,720 lines) — orphaned feature with no nav links; sessionsCollection removed
@@ -346,7 +351,9 @@ Key Design Decisions
 30. **Disposition over content mastery** — track how a child approaches learning (curiosity, persistence, articulation, self-awareness, ownership), not what they can pass
 31. **Teach-back is evidence** — Lincoln explaining to London is the richest learning signal
 32. **AI synthesizes growth narrative from existing data** — no additional tracking burden on Shelly
-33. **Conundrums build ethical reasoning** — weekly open-ended scenarios with no right answer, connected to what they're studying Key Files Reference src/app/AppShell.tsx — nav structure (parent + kid) src/app/router.tsx — all routes src/core/types/domain.ts — ALL data types src/core/firebase/firestore.ts — ALL collection references src/core/ai/useAI.ts — chat + generateImage hooks src/core/xp/addXpEvent.ts — XP writer with dedup guards src/core/xp/checkAndUnlockArmor.ts — tier unlock + sheet generation trigger src/core/avatar/getDailyArmorSession.ts — daily reset logic src/core/avatar/cropArmorSheet.ts — client-side 3x2 sheet cropper functions/src/ai/chat.ts — AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) functions/src/ai/imageGen.ts — DALL-E 3 + gpt-image-1 + Haiku rewriter src/features/avatar/ — My Armor (MyAvatarPage, VerseCard, ArmorIcons, AttachAnimation, CharacterDisplay, Particles) src/features/books/ — My Books (22+ files, 6500+ lines) src/features/quest/ — Knowledge Mine (7 files) src/features/today/ — Today page src/features/records/ — Records + compliance src/features/settings/ — Settings (AvatarAdminTab, StickerLibraryTab) src/core/types/                         — split type files (common, family, planning, evaluation, xp, books, compliance, dadlab)
+33. **Conundrums build ethical reasoning** — weekly open-ended scenarios with no right answer, connected to what they're studying
+34. **Kid-initiated logging** — Lincoln logs his own extra tablet time and teach-back moments. All taps, no typing. Respects his speech/writing challenges.
+35. **Flexible triggers** — features activate based on meaningful work done (3+ items OR 50% must-do), not rigid thresholds. Lincoln's day isn't always linear. Key Files Reference src/app/AppShell.tsx — nav structure (parent + kid) src/app/router.tsx — all routes src/core/types/domain.ts — ALL data types src/core/firebase/firestore.ts — ALL collection references src/core/ai/useAI.ts — chat + generateImage hooks src/core/xp/addXpEvent.ts — XP writer with dedup guards src/core/xp/checkAndUnlockArmor.ts — tier unlock + sheet generation trigger src/core/avatar/getDailyArmorSession.ts — daily reset logic src/core/avatar/cropArmorSheet.ts — client-side 3x2 sheet cropper functions/src/ai/chat.ts — AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) functions/src/ai/imageGen.ts — DALL-E 3 + gpt-image-1 + Haiku rewriter src/features/avatar/ — My Armor (MyAvatarPage, VerseCard, ArmorIcons, AttachAnimation, CharacterDisplay, Particles) src/features/books/ — My Books (22+ files, 6500+ lines) src/features/quest/ — Knowledge Mine (7 files) src/features/today/ — Today page src/features/records/ — Records + compliance src/features/settings/ — Settings (AvatarAdminTab, StickerLibraryTab) src/core/types/                         — split type files (common, family, planning, evaluation, xp, books, compliance, dadlab)
 src/core/types/index.ts                 — barrel re-export (replaces old domain.ts)
 src/core/utils/perf.ts                  — performance measurement helpers
 functions/src/ai/tasks/                 — chat task registry (plan, chat, evaluate, quest, generateStory, analyzePatterns, disposition, conundrum)
