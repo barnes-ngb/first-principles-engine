@@ -193,7 +193,7 @@ export default function WorkshopPage() {
             storyInputs: partialInputs,
             currentWizardStep: step,
           } as Omit<StoryGame, 'id'>
-          const docRef = await addDoc(storyGamesCollection(familyId), draftDoc)
+          const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(draftDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
           setDraftDocId(docRef.id)
           return docRef.id
         } catch (err) {
@@ -328,7 +328,7 @@ export default function WorkshopPage() {
             playSessions: [],
             generatedArt,
           }
-          const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
+          const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(gameDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
           setCurrentGame({ ...gameDoc, id: docRef.id })
         }
 
@@ -430,7 +430,7 @@ export default function WorkshopPage() {
             playSessions: [],
             generatedArt,
           }
-          const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
+          const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(gameDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
           setCurrentGame({ ...gameDoc, id: docRef.id })
         }
 
@@ -538,7 +538,7 @@ export default function WorkshopPage() {
             playSessions: [],
             generatedArt,
           }
-          const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
+          const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(gameDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
           setCurrentGame({ ...gameDoc, id: docRef.id })
         }
 

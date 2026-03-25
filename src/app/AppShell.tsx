@@ -14,6 +14,7 @@ import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
 import AvatarThumbnail from '../features/avatar/AvatarThumbnail'
 import { useAvatarProfile } from '../features/avatar/useAvatarProfile'
+import { isArmorComplete } from '../features/avatar/armorGate'
 
 const navItems = [
   { label: 'Today', to: '/today' },
@@ -44,11 +45,13 @@ function NavContent({
   onNavigate,
   activeChild,
   avatarProfile,
+  armorReady,
 }: {
   isParent: boolean
   onNavigate?: () => void
   activeChild?: { id: string; name: string } | null
   avatarProfile?: import('../core/types').AvatarProfile | null
+  armorReady?: boolean
 }) {
   const items = isParent ? navItems : kidNavItems
   return (
@@ -92,7 +95,35 @@ function NavContent({
                 to={item.to}
                 onClick={onNavigate}
               >
-                {item.label}
+                <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  {item.label}
+                  {/* Orange dot on Today when armor gate is active */}
+                  {!isParent && item.to === '/today' && armorReady === false && (
+                    <Box
+                      component="span"
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        bgcolor: '#FF9800',
+                        flexShrink: 0,
+                      }}
+                    />
+                  )}
+                  {/* Highlight My Armor when gate is active */}
+                  {!isParent && item.to === '/avatar' && armorReady === false && (
+                    <Box
+                      component="span"
+                      sx={{
+                        fontSize: '10px',
+                        color: '#FF9800',
+                        fontWeight: 700,
+                      }}
+                    >
+                      !
+                    </Box>
+                  )}
+                </Box>
               </NavLink>
             </li>
           ))}
@@ -111,6 +142,7 @@ export function AppShell({ children }: AppShellProps) {
   const location = useLocation()
 
   const isParent = profile === UserProfile.Parents
+  const armorReady = !isParent && avatarProfile ? isArmorComplete(avatarProfile) : undefined
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
 
@@ -125,7 +157,7 @@ export function AppShell({ children }: AppShellProps) {
     <div className="app-shell">
       {/* Desktop sidebar (hidden on mobile via CSS) */}
       <aside className="app-shell__nav">
-        <NavContent isParent={isParent} activeChild={activeChild} avatarProfile={avatarProfile} />
+        <NavContent isParent={isParent} activeChild={activeChild} avatarProfile={avatarProfile} armorReady={armorReady} />
       </aside>
 
       {/* Mobile header + drawer (hidden on desktop via CSS) */}
@@ -193,6 +225,7 @@ export function AppShell({ children }: AppShellProps) {
           onNavigate={closeDrawer}
           activeChild={activeChild}
           avatarProfile={avatarProfile}
+          armorReady={armorReady}
         />
       </Drawer>
 

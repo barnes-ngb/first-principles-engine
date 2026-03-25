@@ -41,7 +41,22 @@ export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecor
   const tts = useTTS()
   const [flipped, setFlipped] = useState(false)
   const [contentVisible, setContentVisible] = useState(false)
+  const [selectedOption, setSelectedOption] = useState<string | null>(null)
   const audioElRef = useRef<HTMLAudioElement | null>(null)
+
+  /** Whether this card type has a quiz (options + answer) */
+  const isQuizCard = card?.options && card.options.length > 0 && card?.answer
+
+  /** Whether this card type is action/story (no right answer, just "Done!") */
+  const isPromptCard = card?.type === 'story' || card?.type === 'action'
+
+  const handleOptionSelect = useCallback((option: string) => {
+    if (selectedOption || !card) return // already answered
+    setSelectedOption(option)
+    const correct = option === card.answer
+    // Auto-close after feedback delay
+    setTimeout(() => onClose(), correct ? 1500 : 2000)
+  }, [selectedOption, card, onClose])
 
   /** Play voice recording for a card, returns true if recording exists */
   const playVoiceRecording = useCallback(
@@ -92,6 +107,7 @@ export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecor
     if (open && card) {
       setFlipped(false)
       setContentVisible(false)
+      setSelectedOption(null)
       onFlipStart?.()
 
       const isStretch = card.difficulty === 'stretch'
@@ -233,6 +249,19 @@ export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecor
             </Typography>
           )}
 
+          {isQuizCard && (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{
+                mb: 0.5,
+                opacity: contentVisible ? 1 : 0,
+                transition: 'opacity 0.3s ease-in 0.1s',
+              }}
+            >
+              {card.type === 'reading' ? 'Listen and tap the right word!' : 'Tap the right answer!'}
+            </Typography>
+          )}
           <Typography
             variant="h6"
             gutterBottom
@@ -240,6 +269,7 @@ export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecor
               opacity: contentVisible ? 1 : 0,
               transform: contentVisible ? 'translateY(0)' : 'translateY(10px)',
               transition: 'all 0.4s ease-out 0.1s',
+              ...(isQuizCard ? { fontSize: '1.4rem', fontWeight: 700 } : {}),
             }}
           >
             {card.content}
@@ -256,11 +286,46 @@ export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecor
                 transition: 'opacity 0.4s ease-in 0.2s',
               }}
             >
-              {card.options.map((option, i) => (
-                <Button key={i} variant="outlined" fullWidth>
-                  {option}
-                </Button>
-              ))}
+              {isQuizCard && !selectedOption && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                  Tap the right answer!
+                </Typography>
+              )}
+              {selectedOption && selectedOption === card.answer && (
+                <Typography variant="body2" sx={{ mb: 0.5, color: 'success.main', fontWeight: 700 }}>
+                  Nice!
+                </Typography>
+              )}
+              {selectedOption && selectedOption !== card.answer && (
+                <Typography variant="body2" sx={{ mb: 0.5, color: 'error.main', fontWeight: 600 }}>
+                  Almost!
+                </Typography>
+              )}
+              {card.options.map((option, i) => {
+                const isSelected = selectedOption === option
+                const isCorrect = option === card.answer
+                const showCorrectHighlight = selectedOption !== null && isCorrect
+                const showWrongHighlight = isSelected && !isCorrect
+
+                return (
+                  <Button
+                    key={i}
+                    variant={showCorrectHighlight ? 'contained' : isSelected ? 'contained' : 'outlined'}
+                    color={showCorrectHighlight ? 'success' : showWrongHighlight ? 'error' : 'inherit'}
+                    onClick={() => handleOptionSelect(option)}
+                    fullWidth
+                    disabled={!!selectedOption && !isQuizCard}
+                    sx={{
+                      py: 1.5,
+                      fontSize: '1.1rem',
+                      pointerEvents: selectedOption ? 'none' : 'auto',
+                      transition: 'all 0.3s ease',
+                    }}
+                  >
+                    {option}
+                  </Button>
+                )
+              })}
             </Box>
           )}
 
@@ -307,9 +372,12 @@ export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecor
             >
               Read Again
             </Button>
-            <Button variant="contained" onClick={onClose}>
-              Done!
-            </Button>
+            {/* Quiz cards auto-close on answer; prompt/action cards need a Done button */}
+            {(!isQuizCard || isPromptCard) && (
+              <Button variant="contained" onClick={onClose} size="large" sx={{ minWidth: 100 }}>
+                Done!
+              </Button>
+            )}
           </Box>
         </DialogContent>
       </Box>

@@ -93,6 +93,16 @@ const items = snapshot.docs.map((doc) => ({
 - exports records (MO-friendly: logs + hours + portfolio + eval)
 - adapts weekly via AI-powered evaluation loop
 
+## First Principles Alignment
+
+The app's growth tracking follows the Ad Astra / Astra Nova pedagogy:
+- **Disposition over content mastery**: curiosity, persistence, articulation, self-awareness, ownership
+- **Wonder→Build→Explain→Reflect→Share** is the philosophical framework, not a counting system
+- **AI synthesizes** growth narratives from data Shelly already captures
+- **Conundrums** build ethical reasoning through weekly open-ended scenarios
+- **Teach-back** (Lincoln teaches London) is the richest learning evidence
+- **No grades, no shame**: "growing" not "passing", struggles are data not failure
+
 ## Project Principles
 
 1. **Frictionless daily use**: "Today" must be usable in under 60 seconds.
@@ -142,11 +152,7 @@ All under `families/{familyId}/`:
 | `ladders` | Skill ladder definitions |
 | `ladderProgress` | Per-child ladder progression |
 | `milestoneProgress` | Milestone achievement tracking |
-| `sessions` | Skill practice sessions |
 | `dailyPlans` | Daily session plans |
-| `projects` | Long-form projects |
-| `weeklyScores` | Weekly score summaries |
-| `labSessions` | Saturday lab sessions |
 | `dadLab` | Dad lab weeks |
 | `skillSnapshots` | Per-child skill snapshots |
 | `plannerSessions` | Planner workflow sessions |
@@ -191,7 +197,7 @@ All under `families/{familyId}/`:
 - `functions/src/ai/chat.ts` — Main chat CF, task type routing, prompt builders
 - `functions/src/ai/chatTypes.ts` — callClaude helper, task handler types
 - `functions/src/ai/contextSlices.ts` — Per-task context loading (charter, child, engagement, etc.)
-- `functions/src/ai/tasks/` — Task handlers (plan, evaluate, quest, workshop, story, chat, analyzeWorkbook, analyzePatterns, disposition, conundrum)
+- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, chat, analyzePatterns
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/imageGen.ts` — Image generation routing

@@ -3,7 +3,7 @@ import type { GeneratedGame } from '../../core/types'
 import type { BoardSpaceType } from '../../core/types/workshop'
 import BoardSpace from './BoardSpace'
 
-const COLUMNS = 6
+const COLUMNS = 5
 
 interface PlayerToken {
   name: string
@@ -51,16 +51,17 @@ export default function GameBoard({
       sx={{
         position: 'relative',
         width: '100%',
-        maxWidth: 400,
+        maxWidth: { xs: '100%', sm: 600, md: 750 },
         mx: 'auto',
         borderRadius: 2,
-        overflow: 'hidden',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'touch',
         ...(boardBackground
           ? {
               backgroundImage: `url(${boardBackground})`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
-              p: '4px',
+              p: '6px',
             }
           : {}),
       }}
@@ -77,15 +78,15 @@ export default function GameBoard({
           }}
         />
       )}
-      <Box sx={{ position: 'relative', zIndex: 1 }}>
+      <Box sx={{ position: 'relative', zIndex: 1, minWidth: { xs: 360, sm: 'auto' } }}>
         {rows.map((row, rowIndex) => (
           <Box
             key={rowIndex}
             sx={{
               display: 'grid',
-              gridTemplateColumns: `repeat(${COLUMNS}, 1fr)`,
-              gap: '3px',
-              mb: '3px',
+              gridTemplateColumns: `repeat(${COLUMNS}, minmax(70px, 1fr))`,
+              gap: '4px',
+              mb: '4px',
             }}
           >
             {row.map((space) => {
