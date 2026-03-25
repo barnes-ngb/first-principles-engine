@@ -4,6 +4,7 @@ import Container from '@mui/material/Container'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 
+import DispositionProfile from './DispositionProfile'
 import LaddersPage from '../ladders/LaddersPage'
 import EnginePage from '../engine/EnginePage'
 import SkillSnapshotPage from '../evaluation/SkillSnapshotPage'
@@ -28,6 +29,7 @@ export default function ProgressPage() {
             variant="scrollable"
             scrollButtons="auto"
           >
+            <Tab label="Learning Profile" />
             <Tab label="Skill Snapshot" />
             <Tab label="Ladders" />
             <Tab label="Word Wall" />
@@ -37,12 +39,13 @@ export default function ProgressPage() {
           </Tabs>
         </Box>
       </Container>
-      {tab === 0 && <SkillSnapshotPage />}
-      {tab === 1 && <LaddersPage />}
-      {tab === 2 && <WordWall />}
-      {tab === 3 && <EnginePage />}
-      {tab === 4 && <KidsPage />}
-      {tab === 5 && <ArmorTab />}
+      {tab === 0 && <DispositionProfile />}
+      {tab === 1 && <SkillSnapshotPage />}
+      {tab === 2 && <LaddersPage />}
+      {tab === 3 && <WordWall />}
+      {tab === 4 && <EnginePage />}
+      {tab === 5 && <KidsPage />}
+      {tab === 6 && <ArmorTab />}
     </>
   )
 }

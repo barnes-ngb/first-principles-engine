@@ -6,30 +6,23 @@ import { sanitizeAndParseJson } from "./sanitizeJson.js";
 
 // ── Types ───────────────────────────────────────────────────────
 
-export interface WeeklyReview {
+export interface WeeklyReviewDoc {
   childId: string;
   weekKey: string;
-  status: "draft" | "approved";
-  progressSummary: string;
-  paceAdjustments: PaceAdjustment[];
-  planModifications: PlanModification[];
-  energyPattern: string;
+  status: string;
   celebration: string;
+  summary: string;
+  wins: string[];
+  growthAreas: string[];
+  paceAdjustments: Array<{
+    id: string; area: string; currentPace: string;
+    suggestedPace: string; rationale: string; decision: string;
+  }>;
+  recommendations: string[];
+  energyPattern: string;
   model: string;
   usage: { inputTokens: number; outputTokens: number };
   createdAt: string;
-}
-
-export interface PaceAdjustment {
-  subject: string;
-  currentPace: string;
-  suggestedChange: string;
-}
-
-export interface PlanModification {
-  area: string;
-  observation: string;
-  recommendation: string;
 }
 
 interface ChildProfile {
@@ -38,12 +31,14 @@ interface ChildProfile {
   grade?: string;
 }
 
-interface SessionRecord {
-  streamId: string;
-  result: string;
+interface DayLogSummary {
   date: string;
-  durationSeconds?: number;
-  supports?: string[];
+  totalItems: number;
+  completedItems: number;
+  engagement: Record<string, number>;
+  minutesBySubject: Record<string, number>;
+  gradeResults: string[];
+  evidenceCount: number;
 }
 
 interface HoursRecord {
@@ -96,7 +91,7 @@ function addDays(dateStr: string, n: number): string {
 export interface WeekContext {
   child: ChildProfile;
   weekKey: string;
-  sessions: SessionRecord[];
+  dayLogs: DayLogSummary[];
   hours: HoursRecord[];
   dailyPlans: DailyPlanRecord[];
   missedDays: number;
@@ -124,24 +119,47 @@ export async function assembleWeekContext(
     grade: childData.grade,
   };
 
-  // Load sessions for the week
-  const sessionsSnap = await familyRef
-    .collection("sessions")
-    .where("childId", "==", childId)
+  // Load day logs for the week
+  const daysSnap = await familyRef
+    .collection("days")
     .where("date", ">=", weekKey)
     .where("date", "<=", weekEnd)
     .get();
 
-  const sessions: SessionRecord[] = sessionsSnap.docs.map((doc) => {
-    const d = doc.data();
-    return {
-      streamId: d.streamId,
-      result: d.result,
-      date: d.date,
-      durationSeconds: d.durationSeconds,
-      supports: d.supports,
-    };
-  });
+  const dayLogs: DayLogSummary[] = daysSnap.docs
+    .map((doc) => {
+      const d = doc.data();
+      if (d.childId !== childId) return null;
+      const checklist = (d.checklist ?? []) as Array<{
+        label: string; completed: boolean; engagement?: string;
+        subjectBucket?: string; estimatedMinutes?: number;
+        plannedMinutes?: number; gradeResult?: string;
+        evidenceArtifactId?: string;
+      }>;
+
+      const engagement: Record<string, number> = {};
+      const minutesBySubject: Record<string, number> = {};
+      const gradeResults: string[] = [];
+      let evidenceCount = 0;
+
+      for (const item of checklist) {
+        if (item.engagement) engagement[item.engagement] = (engagement[item.engagement] ?? 0) + 1;
+        if (item.completed) {
+          const mins = item.estimatedMinutes ?? item.plannedMinutes ?? 0;
+          const bucket = item.subjectBucket ?? "Other";
+          minutesBySubject[bucket] = (minutesBySubject[bucket] ?? 0) + mins;
+        }
+        if (item.gradeResult) gradeResults.push(item.label + ": " + item.gradeResult);
+        if (item.evidenceArtifactId) evidenceCount++;
+      }
+
+      return {
+        date: d.date as string, totalItems: checklist.length,
+        completedItems: checklist.filter((i) => i.completed).length,
+        engagement, minutesBySubject, gradeResults, evidenceCount,
+      } as DayLogSummary;
+    })
+    .filter((d): d is DayLogSummary => d !== null);
 
   // Load hours for the week
   const hoursSnap = await familyRef
@@ -178,9 +196,9 @@ export async function assembleWeekContext(
     };
   });
 
-  // Count school days (Mon–Fri) with no sessions and no daily plan
+  // Count school days (Mon–Fri) with no day logs and no daily plan
   const activeDates = new Set([
-    ...sessions.map((s) => s.date),
+    ...dayLogs.map((d) => d.date),
     ...dailyPlans.map((p) => p.date),
   ]);
   let missedDays = 0;
@@ -191,7 +209,7 @@ export async function assembleWeekContext(
     }
   }
 
-  return { child, weekKey, sessions, hours, dailyPlans, missedDays };
+  return { child, weekKey, dayLogs, hours, dailyPlans, missedDays };
 }
 
 // ── Prompt building ─────────────────────────────────────────────
@@ -224,21 +242,34 @@ TONE:
 - Default to "both modes count as real school" framing.`;
 
 export function buildEvaluationPrompt(ctx: WeekContext): string {
-  // Summarize sessions by stream
-  const streamResults: Record<string, { hits: number; nears: number; misses: number }> = {};
-  for (const s of ctx.sessions) {
-    if (!streamResults[s.streamId]) {
-      streamResults[s.streamId] = { hits: 0, nears: 0, misses: 0 };
-    }
-    const bucket = streamResults[s.streamId];
-    if (s.result === "hit") bucket.hits++;
-    else if (s.result === "near") bucket.nears++;
-    else if (s.result === "miss") bucket.misses++;
-  }
+  // Compute week totals from dayLogs
+  let totalItems = 0;
+  let completedItems = 0;
+  let totalEvidence = 0;
+  const engagementTotals: Record<string, number> = {};
+  const subjectMinutes: Record<string, number> = {};
+  const allGradeResults: string[] = [];
 
-  const sessionSummary = Object.entries(streamResults)
-    .map(([stream, r]) => `  - ${stream}: ${r.hits} hits, ${r.nears} nears, ${r.misses} misses`)
-    .join("\n");
+  const perDayBreakdown: string[] = [];
+  for (const day of ctx.dayLogs) {
+    totalItems += day.totalItems;
+    completedItems += day.completedItems;
+    totalEvidence += day.evidenceCount;
+    for (const [eng, count] of Object.entries(day.engagement)) {
+      engagementTotals[eng] = (engagementTotals[eng] ?? 0) + count;
+    }
+    for (const [subj, mins] of Object.entries(day.minutesBySubject)) {
+      subjectMinutes[subj] = (subjectMinutes[subj] ?? 0) + mins;
+    }
+    allGradeResults.push(...day.gradeResults);
+
+    const completionPct = day.totalItems > 0
+      ? Math.round((day.completedItems / day.totalItems) * 100) : 0;
+    const engStr = Object.entries(day.engagement).map(([k, v]) => `${k}:${v}`).join(", ");
+    perDayBreakdown.push(
+      `  ${day.date}: ${day.completedItems}/${day.totalItems} items (${completionPct}%)${engStr ? `, engagement: ${engStr}` : ""}${day.evidenceCount > 0 ? `, ${day.evidenceCount} evidence` : ""}`
+    );
+  }
 
   // Summarize hours by subject
   const hoursBySubject: Record<string, number> = {};
@@ -252,45 +283,63 @@ export function buildEvaluationPrompt(ctx: WeekContext): string {
     .map(([subject, mins]) => `  - ${subject}: ${mins} min`)
     .join("\n");
 
-  // Summarize energy states
+  // Energy data from daily plans
   const energyCounts: Record<string, number> = {};
+  const planTypeCounts: Record<string, number> = {};
   for (const p of ctx.dailyPlans) {
     energyCounts[p.energy] = (energyCounts[p.energy] ?? 0) + 1;
+    planTypeCounts[p.planType] = (planTypeCounts[p.planType] ?? 0) + 1;
   }
   const energySummary = Object.entries(energyCounts)
     .map(([level, count]) => `${level}: ${count} days`)
     .join(", ");
-
-  // Summarize plan types
-  const planTypeCounts: Record<string, number> = {};
-  for (const p of ctx.dailyPlans) {
-    planTypeCounts[p.planType] = (planTypeCounts[p.planType] ?? 0) + 1;
-  }
   const planTypeSummary = Object.entries(planTypeCounts)
     .map(([pt, count]) => `${pt}: ${count} days`)
+    .join(", ");
+
+  const subjectSummary = Object.entries(subjectMinutes)
+    .map(([subj, mins]) => `  - ${subj}: ${mins} min`)
+    .join("\n");
+
+  const engagementSummary = Object.entries(engagementTotals)
+    .map(([eng, count]) => `${eng}: ${count}`)
     .join(", ");
 
   return `Generate a weekly review for ${ctx.child.name} for the week of ${ctx.weekKey}.
 
 DATA PROVIDED:
-- Sessions completed: ${ctx.sessions.length}
-${sessionSummary || "  (none)"}
-- Total hours logged: ${Math.round(totalMinutes / 60 * 10) / 10} hours (${totalMinutes} min)
+- Day logs recorded: ${ctx.dayLogs.length}
+- Checklist completion: ${completedItems}/${totalItems} items
+- Evidence artifacts captured: ${totalEvidence}
+- Subject time from checklists:
+${subjectSummary || "  (none)"}
+- Engagement feedback: ${engagementSummary || "no data"}
+${allGradeResults.length > 0 ? `- Grade results:\n${allGradeResults.map((r) => `  - ${r}`).join("\n")}` : ""}
+- Hours logged: ${Math.round(totalMinutes / 60 * 10) / 10} hours (${totalMinutes} min)
 ${hoursSummary || "  (none)"}
 - Energy states: ${energySummary || "no data"}
 - Plan types: ${planTypeSummary || "no data"}
 - Missed school days (Mon–Fri): ${ctx.missedDays}
-- Daily plans recorded: ${ctx.dailyPlans.length}
 
-GENERATE a JSON object with these fields:
-1. "progressSummary": 2-3 sentence narrative of the week (warm, encouraging tone). Be specific about what ${ctx.child.name} actually did.
-2. "paceAdjustments": array of objects { "subject", "currentPace", "suggestedChange" } for any subject off-pace. Empty array if all on track.
-3. "planModifications": array of objects { "area", "observation", "recommendation" } if patterns suggest a change. Empty array if none.
-4. "energyPattern": one sentence noting energy trends and proactive suggestions. If energy data is sparse, note that.
-5. "celebration": one specific thing to celebrate with ${ctx.child.name} this week.
+Per-day breakdown:
+${perDayBreakdown.join("\n") || "  (no day logs)"}
 
-TONE: Speak to the parent as a trusted partner. Frame everything constructively.
-Never use language that implies failure. "We might try..." not "You should..."
+GENERATE a JSON object with EXACTLY these fields:
+{
+  "celebration": "one specific thing to celebrate with ${ctx.child.name} this week",
+  "summary": "2-3 sentence narrative of the week (warm, encouraging tone). Be specific about what ${ctx.child.name} actually did.",
+  "wins": ["array of 2-4 specific wins from the data"],
+  "growthAreas": ["array of 1-3 areas where gentle growth is emerging"],
+  "paceAdjustments": [{"id": "unique-id", "area": "subject or skill area", "currentPace": "what's happening now", "suggestedPace": "what we might try", "rationale": "why this change makes sense"}],
+  "recommendations": ["array of 1-3 practical next-week suggestions"],
+  "energyPattern": "one sentence noting energy trends and proactive suggestions"
+}
+
+TONE:
+- Warm partner, not authority. "We might try..." not "You should..."
+- No shame. Rest by design. MVD is real school.
+- Portfolio over grades — evidence of growth matters more than scores.
+- If data is thin, say so honestly and keep recommendations light.
 
 Respond ONLY with valid JSON. No markdown, no preamble, no explanation outside the JSON structure.`;
 }
@@ -298,34 +347,43 @@ Respond ONLY with valid JSON. No markdown, no preamble, no explanation outside t
 // ── Parse AI response ───────────────────────────────────────────
 
 interface ReviewPayload {
-  progressSummary: string;
-  paceAdjustments: PaceAdjustment[];
-  planModifications: PlanModification[];
-  energyPattern: string;
   celebration: string;
+  summary: string;
+  wins: string[];
+  growthAreas: string[];
+  paceAdjustments: Array<{
+    id: string; area: string; currentPace: string;
+    suggestedPace: string; rationale: string;
+  }>;
+  recommendations: string[];
+  energyPattern: string;
 }
 
 export function parseReviewResponse(text: string): ReviewPayload {
   const parsed = sanitizeAndParseJson<Record<string, unknown>>(text);
 
   return {
-    progressSummary: String(parsed.progressSummary ?? ""),
+    celebration: String(parsed.celebration ?? ""),
+    summary: String(parsed.summary ?? parsed.progressSummary ?? ""),
+    wins: Array.isArray(parsed.wins)
+      ? parsed.wins.map((w: unknown) => String(w))
+      : [],
+    growthAreas: Array.isArray(parsed.growthAreas)
+      ? parsed.growthAreas.map((g: unknown) => String(g))
+      : [],
     paceAdjustments: Array.isArray(parsed.paceAdjustments)
-      ? parsed.paceAdjustments.map((a: Record<string, unknown>) => ({
-          subject: String(a.subject ?? ""),
+      ? parsed.paceAdjustments.map((a: Record<string, unknown>, i: number) => ({
+          id: String(a.id ?? `adj-${i}`),
+          area: String(a.area ?? a.subject ?? ""),
           currentPace: String(a.currentPace ?? ""),
-          suggestedChange: String(a.suggestedChange ?? ""),
+          suggestedPace: String(a.suggestedPace ?? a.suggestedChange ?? ""),
+          rationale: String(a.rationale ?? ""),
         }))
       : [],
-    planModifications: Array.isArray(parsed.planModifications)
-      ? parsed.planModifications.map((m: Record<string, unknown>) => ({
-          area: String(m.area ?? ""),
-          observation: String(m.observation ?? ""),
-          recommendation: String(m.recommendation ?? ""),
-        }))
+    recommendations: Array.isArray(parsed.recommendations)
+      ? parsed.recommendations.map((r: unknown) => String(r))
       : [],
     energyPattern: String(parsed.energyPattern ?? ""),
-    celebration: String(parsed.celebration ?? ""),
   };
 }
 
@@ -335,7 +393,7 @@ export async function generateReviewForChild(
   familyId: string,
   ctx: WeekContext,
   apiKey: string,
-): Promise<WeeklyReview> {
+): Promise<WeeklyReviewDoc> {
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey });
   const model = "claude-sonnet-4-6";
@@ -361,15 +419,19 @@ export async function generateReviewForChild(
 
   // Store review in Firestore
   const db = getFirestore();
-  const reviewData: WeeklyReview = {
+  const reviewData: WeeklyReviewDoc = {
     childId: ctx.child.id,
     weekKey: ctx.weekKey,
     status: "draft",
-    progressSummary: payload.progressSummary,
-    paceAdjustments: payload.paceAdjustments,
-    planModifications: payload.planModifications,
-    energyPattern: payload.energyPattern,
     celebration: payload.celebration,
+    summary: payload.summary,
+    wins: payload.wins,
+    growthAreas: payload.growthAreas,
+    paceAdjustments: payload.paceAdjustments.map((a, i) => ({
+      ...a, id: a.id || `adj-${i}`, decision: "pending",
+    })),
+    recommendations: payload.recommendations,
+    energyPattern: payload.energyPattern,
     model,
     usage,
     createdAt: new Date().toISOString(),

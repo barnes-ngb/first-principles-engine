@@ -37,6 +37,16 @@ export interface WeekPlan {
     childId: string
     goals: string[]
   }>
+  conundrum?: {
+    title: string
+    scenario: string
+    question: string
+    angles: string[]
+    lincolnPrompt: string
+    londonPrompt: string
+    virtueConnection: string
+    subjectConnection: string
+  }
 }
 
 export interface RoutineItem {
@@ -146,6 +156,7 @@ export interface DayLog {
   xpTotal?: number
   retro?: string
   checklist?: ChecklistItem[]
+  teachBackDone?: boolean
   createdAt?: string
   updatedAt?: string
 }

@@ -252,6 +252,8 @@ export default function PlannerChatPage() {
   // Suggest focus state
   const [suggestingFocus, setSuggestingFocus] = useState(false)
   const [focusWasSuggested, setFocusWasSuggested] = useState(false)
+  // Conundrum state
+  const [generatingConundrum, setGeneratingConundrum] = useState(false)
   const autoSuggestTriggered = useRef(false)
 
   const conversationDocId = useMemo(
@@ -1800,6 +1802,82 @@ Generate a plan for Monday through Friday.`.trim()
                   onChange={(e) => updateWeekField('heartQuestion', e.target.value)}
                 />
               </Stack>
+            </Box>
+          )}
+
+          {/* Weekly Conundrum */}
+          {weekPlan && (
+            <Box
+              sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 2,
+                p: 2,
+                bgcolor: 'background.paper',
+              }}
+            >
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                <Typography variant="subtitle2">Weekly Conundrum</Typography>
+                <Button
+                  size="small"
+                  variant="text"
+                  startIcon={generatingConundrum ? <CircularProgress size={14} /> : <AutoAwesomeIcon />}
+                  disabled={generatingConundrum}
+                  onClick={async () => {
+                    if (!activeChildId) return
+                    setGeneratingConundrum(true)
+                    try {
+                      const response = await aiChat({
+                        familyId,
+                        childId: activeChildId,
+                        taskType: TaskType.Conundrum,
+                        messages: [{ role: 'user', content: 'Generate a conundrum.' }],
+                      })
+                      if (response?.message) {
+                        const jsonMatch = response.message.match(/\{[\s\S]*\}/)
+                        if (jsonMatch) {
+                          const conundrum = JSON.parse(jsonMatch[0])
+                          await updateDoc(weekPlanRef, { conundrum })
+                        }
+                      }
+                    } catch (err) {
+                      console.error('Conundrum generation failed:', err)
+                    } finally {
+                      setGeneratingConundrum(false)
+                    }
+                  }}
+                >
+                  {generatingConundrum ? 'Generating...' : weekPlan.conundrum ? 'Regenerate' : 'Generate'}
+                </Button>
+              </Stack>
+
+              {weekPlan.conundrum ? (
+                <Stack spacing={1.5}>
+                  <Typography variant="h6" sx={{ fontSize: '1rem' }}>{weekPlan.conundrum.title}</Typography>
+                  <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
+                    {weekPlan.conundrum.scenario}
+                  </Typography>
+                  <Box sx={{ p: 1.5, bgcolor: 'primary.50', borderRadius: 1, border: '1px solid', borderColor: 'primary.100' }}>
+                    <Typography variant="subtitle2" color="primary.main">
+                      {weekPlan.conundrum.question}
+                    </Typography>
+                  </Box>
+                  <Stack spacing={0.5}>
+                    {weekPlan.conundrum.angles.map((angle, i) => (
+                      <Chip key={i} label={angle} variant="outlined" size="small" sx={{ height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.5 } }} />
+                    ))}
+                  </Stack>
+                  <Typography variant="body2"><strong>Lincoln:</strong> {weekPlan.conundrum.lincolnPrompt}</Typography>
+                  <Typography variant="body2"><strong>London:</strong> {weekPlan.conundrum.londonPrompt}</Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                    {weekPlan.conundrum.virtueConnection}
+                  </Typography>
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  Generate an open-ended discussion scenario for family time.
+                </Typography>
+              )}
             </Box>
           )}
 

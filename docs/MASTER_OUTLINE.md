@@ -8,7 +8,9 @@ Barnes Family Homeschool — Master Project Outline v10 **Version:** v10 — Mar
 * Quick review/grading (manual note: "5/6 correct, missed #4")
 * Quick Capture section (note, photo, audio)
 * MVD mode (shows only essential items)
-* XP awarded on all Must-Do completion (10 XP, once/day) Plan My Week
+* XP awarded on all Must-Do completion (10 XP, once/day)
+* Teach-Back prompt — "Tell London one thing" after 50%+ must-do completion (Lincoln only)
+* Weekly Conundrum card — expandable discussion scenario from week plan Plan My Week
 * Page title "Plan My Week" with subtitle "Set up your week, review the plan, and you're done."
 * **Auto-suggested Week Focus** — AI pre-fills theme, virtue, scripture, heart question on page load (editable)
 * **Compact setup for returning users** — energy selector, routine shown read-only with Edit option, workbooks as chips, special notes field. Full wizard only on first visit.
@@ -23,7 +25,8 @@ Barnes Family Homeschool — Master Project Outline v10 **Version:** v10 — Mar
 * "Go to Today →" shortcut after applying
 * Print Materials — per-day or all-week Minecraft-themed worksheet generation
 * "Repeat Last Week" shortcut for low-energy weeks
-* AI feature flag defaults to ON (no manual Settings toggle needed) Evaluation Chat
+* AI feature flag defaults to ON (no manual Settings toggle needed)
+* Weekly Conundrum — AI-generated discussion scenario tied to week theme/subjects Evaluation Chat
 * Shelly-guided reading diagnostic, AI walks through structured assessment levels
 * Live findings panel, <finding> and <complete> block extraction
 * Report view: skill map, frontier, recommendations, what to skip
@@ -173,7 +176,8 @@ My Books (Book Builder + AI Story Generator)
 **XP System:** xpLedger collection, separate tracks per child, checkAndUnlockArmor on XP change
 
 Progress
-* Tabs: Skill Snapshot (default), Ladders, Word Wall, Engine, Milestones, Armor
+* Tabs: Learning Profile (default), Skill Snapshot, Ladders, Word Wall, Engine, Milestones, Armor
+* Learning Profile — AI-generated disposition narrative from 4 weeks of day log data (curiosity, persistence, articulation, self-awareness, ownership)
 * Skill Snapshot — priority skills, supports, stop rules, evidence definitions, workbook configs
 * Conceptual Blocks — conceptualBlocks[] on Skill Snapshot from pattern detection; ADDRESS_NOW vs DEFER; plain language rationale + strategies
 * "Evaluate Skills" button → evaluation chat Records
@@ -338,10 +342,14 @@ Key Design Decisions
 26. Voice-first for London — he talks, the app listens; he listens, the app talks. Reading/typing are fallbacks, not primary input
 27. London creates, Lincoln refines — Story Keeper / Playtester roles give both boys meaningful work from one feature
 28. Players ARE the family — game tokens are real people with real avatars, not fictional characters
-29. **Setup once, confirm weekly** — Shelly configures routine and subject times once. Weekly planning is: pick energy, note exceptions, generate, lock in. Under 2 minutes. Key Files Reference src/app/AppShell.tsx — nav structure (parent + kid) src/app/router.tsx — all routes src/core/types/domain.ts — ALL data types src/core/firebase/firestore.ts — ALL collection references src/core/ai/useAI.ts — chat + generateImage hooks src/core/xp/addXpEvent.ts — XP writer with dedup guards src/core/xp/checkAndUnlockArmor.ts — tier unlock + sheet generation trigger src/core/avatar/getDailyArmorSession.ts — daily reset logic src/core/avatar/cropArmorSheet.ts — client-side 3x2 sheet cropper functions/src/ai/chat.ts — AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) functions/src/ai/imageGen.ts — DALL-E 3 + gpt-image-1 + Haiku rewriter src/features/avatar/ — My Armor (MyAvatarPage, VerseCard, ArmorIcons, AttachAnimation, CharacterDisplay, Particles) src/features/books/ — My Books (22+ files, 6500+ lines) src/features/quest/ — Knowledge Mine (7 files) src/features/today/ — Today page src/features/records/ — Records + compliance src/features/settings/ — Settings (AvatarAdminTab, StickerLibraryTab) src/core/types/                         — split type files (common, family, planning, evaluation, xp, books, compliance, dadlab)
+29. **Setup once, confirm weekly** — Shelly configures routine and subject times once. Weekly planning is: pick energy, note exceptions, generate, lock in. Under 2 minutes.
+30. **Disposition over content mastery** — track how a child approaches learning (curiosity, persistence, articulation, self-awareness, ownership), not what they can pass
+31. **Teach-back is evidence** — Lincoln explaining to London is the richest learning signal
+32. **AI synthesizes growth narrative from existing data** — no additional tracking burden on Shelly
+33. **Conundrums build ethical reasoning** — weekly open-ended scenarios with no right answer, connected to what they're studying Key Files Reference src/app/AppShell.tsx — nav structure (parent + kid) src/app/router.tsx — all routes src/core/types/domain.ts — ALL data types src/core/firebase/firestore.ts — ALL collection references src/core/ai/useAI.ts — chat + generateImage hooks src/core/xp/addXpEvent.ts — XP writer with dedup guards src/core/xp/checkAndUnlockArmor.ts — tier unlock + sheet generation trigger src/core/avatar/getDailyArmorSession.ts — daily reset logic src/core/avatar/cropArmorSheet.ts — client-side 3x2 sheet cropper functions/src/ai/chat.ts — AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) functions/src/ai/imageGen.ts — DALL-E 3 + gpt-image-1 + Haiku rewriter src/features/avatar/ — My Armor (MyAvatarPage, VerseCard, ArmorIcons, AttachAnimation, CharacterDisplay, Particles) src/features/books/ — My Books (22+ files, 6500+ lines) src/features/quest/ — Knowledge Mine (7 files) src/features/today/ — Today page src/features/records/ — Records + compliance src/features/settings/ — Settings (AvatarAdminTab, StickerLibraryTab) src/core/types/                         — split type files (common, family, planning, evaluation, xp, books, compliance, dadlab)
 src/core/types/index.ts                 — barrel re-export (replaces old domain.ts)
 src/core/utils/perf.ts                  — performance measurement helpers
-functions/src/ai/tasks/                 — chat task registry (plan, chat, evaluate, quest, generateStory, analyzePatterns)
+functions/src/ai/tasks/                 — chat task registry (plan, chat, evaluate, quest, generateStory, analyzePatterns, disposition, conundrum)
 functions/src/ai/imageTasks/            — image task registry (7 handlers)
 functions/src/ai/contextSlices.ts       — task-specific context assembly + engagement compression
 docs/FIRESTORE_AUDIT.md                — Firestore collection + index audit (March 21, 2026)

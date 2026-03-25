@@ -240,6 +240,9 @@ export default function TodayPage() {
   const [captureNote, setCaptureNote] = useState('')
   // Grade/review state (Approach A — manual input)
   const [gradeNote, setGradeNote] = useState<{ index: number; text: string } | null>(null)
+  // Teach-back state
+  const [teachBackText, setTeachBackText] = useState('')
+  const [teachBackSaved, setTeachBackSaved] = useState(false)
 
   const [artifactForm, setArtifactForm] = useState({
     childId: selectedChildId,
@@ -313,6 +316,12 @@ export default function TodayPage() {
   }, [dailyPlan])
 
   const { chat: aiChat } = useAI()
+
+  // Sync teachBackSaved from dayLog on load
+  useEffect(() => {
+    if (dayLog?.teachBackDone) setTeachBackSaved(true)
+    else setTeachBackSaved(false)
+  }, [dayLog?.teachBackDone])
 
   // Load skill snapshot for print materials
   useEffect(() => {
@@ -974,6 +983,62 @@ export default function TodayPage() {
         </Box>
       )}
 
+      {/* --- This Week's Conundrum --- */}
+      {weekFocus?.conundrum && (
+        <Accordion>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Typography variant="subtitle2">
+              This Week&apos;s Conundrum: {weekFocus.conundrum.title}
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Stack spacing={1.5}>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
+                {weekFocus.conundrum.scenario}
+              </Typography>
+              <Box sx={{ p: 1.5, bgcolor: 'primary.50', borderRadius: 1, border: '1px solid', borderColor: 'primary.100' }}>
+                <Typography variant="subtitle2" color="primary.main">
+                  {weekFocus.conundrum.question}
+                </Typography>
+              </Box>
+              <Stack spacing={0.5}>
+                {weekFocus.conundrum.angles.map((angle: string, i: number) => (
+                  <Chip key={i} label={angle} variant="outlined" size="small" sx={{ height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.5 } }} />
+                ))}
+              </Stack>
+              <Typography variant="body2"><strong>Lincoln:</strong> {weekFocus.conundrum.lincolnPrompt}</Typography>
+              <Typography variant="body2"><strong>London:</strong> {weekFocus.conundrum.londonPrompt}</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                {weekFocus.conundrum.virtueConnection}
+              </Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={async () => {
+                  try {
+                    await addDoc(artifactsCollection(familyId), {
+                      childId: selectedChildId,
+                      title: `Conundrum: ${weekFocus.conundrum!.title}`,
+                      type: EvidenceType.Note,
+                      tags: { engineStage: EngineStage.Wonder, subjectBucket: SubjectBucket.Other, domain: '', location: LearningLocation.Home },
+                      content: `Discussed conundrum: ${weekFocus.conundrum!.title}`,
+                      createdAt: new Date().toISOString(),
+                    })
+                    setSnackMessage({ text: 'Conundrum discussion recorded!', severity: 'success' })
+                  } catch (err) {
+                    console.error('Failed to record conundrum:', err)
+                    setSnackMessage({ text: 'Failed to save.', severity: 'error' })
+                  }
+                }}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                We discussed this!
+              </Button>
+            </Stack>
+          </AccordionDetails>
+        </Accordion>
+      )}
+
       {/* --- Workshop Game Cards --- */}
       {familyId && children.length > 0 && (
         <WorkshopGameCards familyId={familyId} children={children} />
@@ -1522,6 +1587,59 @@ export default function TodayPage() {
           </Stack>
         </DialogContent>
       </Dialog>
+
+      {/* --- Teach-Back (Lincoln only, after 50%+ must-do completion) --- */}
+      {(() => {
+        const isLincolnChild = selectedChild?.name?.toLowerCase() === 'lincoln'
+        const checklist = dayLog?.checklist ?? []
+        const mustDoItems = checklist.filter((i) => i.mvdEssential)
+        const mustDoCompleted = mustDoItems.filter((i) => i.completed).length
+        const halfDone = mustDoItems.length > 0 && mustDoCompleted >= Math.ceil(mustDoItems.length / 2)
+        if (!isLincolnChild || checklist.length === 0 || !halfDone || teachBackSaved) return null
+        return (
+          <SectionCard title="Teach London">
+            <Stack spacing={1.5}>
+              <Typography variant="body2" color="text.secondary">
+                Tell London one thing you learned today!
+              </Typography>
+              <TextField
+                multiline
+                rows={2}
+                placeholder="What did you explain to London?"
+                value={teachBackText}
+                onChange={(e) => setTeachBackText(e.target.value)}
+                size="small"
+              />
+              <Button
+                variant="contained"
+                size="small"
+                disabled={!teachBackText.trim()}
+                onClick={async () => {
+                  try {
+                    await addDoc(artifactsCollection(familyId), {
+                      childId: selectedChildId,
+                      title: `Teach-back ${today}`,
+                      type: EvidenceType.Note,
+                      tags: { engineStage: EngineStage.Explain, subjectBucket: SubjectBucket.Other, domain: 'speech', location: LearningLocation.Home },
+                      content: `Teach-back: ${teachBackText.trim()}`,
+                      createdAt: new Date().toISOString(),
+                    })
+                    persistDayLogImmediate({ ...dayLog, teachBackDone: true })
+                    setTeachBackSaved(true)
+                    setSnackMessage({ text: 'Lincoln explained something to London!', severity: 'success' })
+                  } catch (err) {
+                    console.error('Teach-back save failed:', err)
+                    setSnackMessage({ text: 'Failed to save. Try again.', severity: 'error' })
+                  }
+                }}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                Save
+              </Button>
+            </Stack>
+          </SectionCard>
+        )
+      })()}
 
       {/* --- Quick Capture --- */}
       <div ref={artifactSectionRef} />
