@@ -13,6 +13,8 @@ export const TaskType = {
   GenerateStory: 'generateStory',
   Workshop: 'workshop',
   AnalyzeWorkbook: 'analyzeWorkbook',
+  Disposition: 'disposition',
+  Conundrum: 'conundrum',
 } as const
 export type TaskType = (typeof TaskType)[keyof typeof TaskType]
 

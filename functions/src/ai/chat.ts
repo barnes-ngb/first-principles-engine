@@ -24,6 +24,8 @@ export const TaskType = {
   GenerateStory: "generateStory",
   Workshop: "workshop",
   AnalyzeWorkbook: "analyzeWorkbook",
+  Disposition: "disposition",
+  Conundrum: "conundrum",
 } as const;
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
 
@@ -52,6 +54,8 @@ export function modelForTask(taskType: TaskType): string {
     case TaskType.GenerateStory:
     case TaskType.Workshop:
     case TaskType.AnalyzeWorkbook:
+    case TaskType.Disposition:
+    case TaskType.Conundrum:
       return "claude-sonnet-4-6";
     case TaskType.Generate:
     case TaskType.Chat:

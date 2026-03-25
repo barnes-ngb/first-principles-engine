@@ -30,6 +30,16 @@ interface UseDayLogResult {
     virtue?: string
     scriptureRef?: string
     heartQuestion?: string
+    conundrum?: {
+      title: string
+      scenario: string
+      question: string
+      angles: string[]
+      lincolnPrompt: string
+      londonPrompt: string
+      virtueConnection: string
+      subjectConnection: string
+    }
   } | null
   snackMessage: { text: string; severity: 'success' | 'error' } | null
   setSnackMessage: React.Dispatch<
@@ -61,6 +71,16 @@ export function useDayLog({
     virtue?: string
     scriptureRef?: string
     heartQuestion?: string
+    conundrum?: {
+      title: string
+      scenario: string
+      question: string
+      angles: string[]
+      lincolnPrompt: string
+      londonPrompt: string
+      virtueConnection: string
+      subjectConnection: string
+    }
   } | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
@@ -228,6 +248,7 @@ export function useDayLog({
             virtue: data.virtue || undefined,
             scriptureRef: data.scriptureRef || undefined,
             heartQuestion: data.heartQuestion || undefined,
+            conundrum: data.conundrum || undefined,
           })
         } else {
           setWeekPlanId(undefined)
