@@ -17,9 +17,9 @@ import { calculateTier } from '../../features/avatar/voxel/tierMaterials'
 
 /** Map XP event types to XpLedger source buckets. */
 function mapTypeToSource(type: keyof typeof XP_EVENTS): 'routines' | 'quests' | 'books' {
-  if (type === 'QUEST_DIAMOND') return 'quests'
-  if (type === 'BOOK_READ') return 'books'
-  return 'routines'  // CHECKLIST_DAY_COMPLETE, EVALUATION_COMPLETE, ARMOR_DAILY_COMPLETE, MANUAL_AWARD → routines
+  if (type === 'QUEST_DIAMOND' || type === 'QUEST_COMPLETE') return 'quests'
+  if (type === 'BOOK_READ' || type === 'BOOK_PAGE_READ') return 'books'
+  return 'routines'
 }
 
 /**
@@ -39,15 +39,15 @@ export async function addXpEvent(
   amount: number,
   dedupKey: string,
   meta?: Record<string, string>,
-): Promise<void> {
-  if (!familyId || !childId || amount <= 0) return
+): Promise<number> {
+  if (!familyId || !childId || amount <= 0) return 0
   console.log(`[XP] Awarding ${amount} XP to ${childId} for ${type}`)
 
   // ── Dedup check (per-event doc in xpLedger) ────────────────
   const eventDocId = xpLedgerDocId(childId, dedupKey)
   const eventRef = doc(xpLedgerCollection(familyId), eventDocId)
   const eventSnap = await getDoc(eventRef)
-  if (eventSnap.exists()) return // already awarded
+  if (eventSnap.exists()) return 0 // already awarded
 
   // ── Write per-event entry to xpLedger ──────────────────────
   const sourceKey = mapTypeToSource(type)
@@ -122,4 +122,6 @@ export async function addXpEvent(
 
   // ── Check for armor unlocks ────────────────────────────────
   await checkAndUnlockArmor(familyId, childId, realTotal)
+
+  return amount
 }

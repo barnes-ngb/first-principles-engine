@@ -20,6 +20,8 @@ import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import { useNavigate } from 'react-router-dom'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 
+import Alert from '@mui/material/Alert'
+import Snackbar from '@mui/material/Snackbar'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
@@ -29,6 +31,7 @@ import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload
 import type { Artifact, ChecklistItem, Child, DayLog } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
 import { useAvatarProfile } from '../avatar/useAvatarProfile'
 import MinecraftXpBar from '../avatar/MinecraftXpBar'
@@ -158,6 +161,9 @@ export default function KidTodayView({
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
 
+  // XP toast state
+  const [xpToast, setXpToast] = useState<{ amount: number; reason: string } | null>(null)
+
   // Draft book for "Continue your book" card
   const { draftBook } = useDraftBook(familyId, child.id)
   const { children: allChildren } = useActiveChild()
@@ -198,10 +204,31 @@ export default function KidTodayView({
         'CHECKLIST_DAY_COMPLETE',
         10,
         `checklist_${today}`,
-      )
+      ).then((awarded) => {
+        if (awarded > 0) setXpToast({ amount: awarded, reason: 'All must-do items complete!' })
+      })
     }
     prevMustDoDoneRef.current = mustDoDone
   }, [mustDoDone, child.id, familyId, today])
+
+  // Bonus XP when ALL items (must-do + choose) are completed
+  const prevAllDoneRef = useRef(false)
+  useEffect(() => {
+    const totalItems = checklist.length
+    if (allDone && !prevAllDoneRef.current && child.id && familyId && totalItems >= 3) {
+      void addXpEvent(
+        familyId,
+        child.id,
+        'DAILY_ALL_COMPLETE',
+        XP_AWARDS.dailyAllComplete,
+        `daily-bonus-${today}`,
+        { reason: `All ${totalItems} items completed today!` },
+      ).then((awarded) => {
+        if (awarded > 0) setXpToast({ amount: awarded, reason: `All ${totalItems} items done — bonus!` })
+      })
+    }
+    prevAllDoneRef.current = allDone
+  }, [allDone, child.id, familyId, today, checklist.length])
 
   // Load artifacts for today
   const loadArtifacts = useCallback(() => {
@@ -265,13 +292,25 @@ export default function KidTodayView({
       const updated = { ...dayLog }
       const updatedChecklist = [...(updated.checklist ?? [])]
       if (itemIndex < 0 || itemIndex >= updatedChecklist.length) return
-      updatedChecklist[itemIndex] = {
-        ...updatedChecklist[itemIndex],
-        completed: !updatedChecklist[itemIndex].completed,
-      }
+      const item = updatedChecklist[itemIndex]
+      const nowComplete = !item.completed
+      updatedChecklist[itemIndex] = { ...item, completed: nowComplete }
       persistDayLogImmediate({ ...updated, checklist: updatedChecklist })
+
+      // Award per-item XP when checked (not unchecked)
+      if (nowComplete && child.id && familyId) {
+        const label = (item.label ?? '').toLowerCase()
+        const isPrayer = label.includes('prayer') || label.includes('formation') || label.includes('scripture') || label.includes('devotion')
+        const xpAmount = isPrayer ? XP_AWARDS.checklistPrayer : XP_AWARDS.checklistItem
+        const dedupKey = `item-${item.id ?? itemIndex}-${today}`
+        void addXpEvent(familyId, child.id, isPrayer ? 'CHECKLIST_PRAYER' : 'CHECKLIST_ITEM', xpAmount, dedupKey, {
+          reason: item.label ?? 'checklist item',
+        }).then((awarded) => {
+          if (awarded > 0) setXpToast({ amount: awarded, reason: item.label ?? 'checklist item' })
+        })
+      }
     },
-    [dayLog, persistDayLogImmediate],
+    [dayLog, persistDayLogImmediate, child.id, familyId, today],
   )
 
   const handleToggleChoice = useCallback(
@@ -1212,6 +1251,21 @@ export default function KidTodayView({
           </Stack>
         </DialogContent>
       </Dialog>
+      <Snackbar
+        open={xpToast !== null}
+        autoHideDuration={2000}
+        onClose={() => setXpToast(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setXpToast(null)}
+          severity="success"
+          variant="filled"
+          sx={{ width: '100%', fontWeight: 'bold' }}
+        >
+          +{xpToast?.amount} XP — {xpToast?.reason}
+        </Alert>
+      </Snackbar>
     </Page>
   )
 }
