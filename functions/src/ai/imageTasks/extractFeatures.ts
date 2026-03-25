@@ -91,7 +91,7 @@ export const extractFeatures = onCall(
         : "image/jpeg";
 
       const result = await claude.messages.create({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 500,
         messages: [
           {
@@ -194,7 +194,7 @@ export const extractFeatures = onCall(
     // ── Log usage ─────────────────────────────────────────────────
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "feature-extraction",
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       inputTokens: 0,
       outputTokens: 0,
       childId,

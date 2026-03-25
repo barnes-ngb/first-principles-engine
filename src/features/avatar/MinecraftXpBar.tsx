@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { getNextTierProgress } from './armorTiers'
+import { getNextTierProgress } from '../../core/xp/armorTiers'
 
 /**
  * Minecraft-style experience bar.

@@ -52,6 +52,28 @@ export const handlePlan = async (
   // Append plan-specific output format instructions
   sections.push(buildPlanOutputInstructions());
 
+  // Promote daily routine from user message into system prompt for emphasis
+  const lastUserContent = messages[messages.length - 1]?.content ?? "";
+  const routineMatch = lastUserContent.match(
+    /Daily routine[^:]*:\n([\s\S]*?)(?=\n\n(?:Subject time|Notes:|Generate|$))/i
+  );
+  if (routineMatch) {
+    const routineSection = [
+      "═══════════════════════════════════════════════════",
+      "CRITICAL INSTRUCTION: USE MOM'S EXACT DAILY ROUTINE",
+      "═══════════════════════════════════════════════════",
+      "",
+      "The following routine items MUST appear on EVERY day with their EXACT names and times.",
+      'Use category "must-do" for all routine items. Do NOT rename, merge, or skip any.',
+      "",
+      routineMatch[1].trim(),
+      "",
+      "═══════════════════════════════════════════════════",
+    ].join("\n");
+    // Insert before the last section (plan output instructions)
+    sections.splice(sections.length - 1, 0, routineSection);
+  }
+
   const systemPrompt = sections.join("\n\n");
   const model = modelForTask("plan");
 

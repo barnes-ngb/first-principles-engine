@@ -60,7 +60,25 @@ const items = snapshot.docs.map((doc) => ({
 - `src/core/types/` — Domain types (`domain.ts`) and enum-like constants (`enums.ts`)
 - `src/core/utils/` — Date/time utilities, formatting, doc ID parsing
 - `src/core/ai/` — AI service layer, provider adapters, prompt templates
-- `src/features/` — Feature modules (engine, today, week, ladders, sessions, planner-chat, etc.)
+- `src/features/avatar/` — Voxel avatar, armor, tier celebrations
+- `src/features/books/` — Bookshelf, book editor/reader, sight word dashboard, story guide
+- `src/features/dad-lab/` — Dad Lab lifecycle (plan, start, contribute, complete)
+- `src/features/engine/` — Engine page and engine logic
+- `src/features/evaluate/` — Reading evaluation chat, findings extraction
+- `src/features/evaluation/` — Skill snapshot page, quick check panel
+- `src/features/kids/` — Kids page, ladder logic
+- `src/features/ladders/` — Skill progression ladders
+- `src/features/login/` — Profile selection
+- `src/features/not-found/` — 404 page
+- `src/features/planner/` — TeachHelperDialog (shared)
+- `src/features/planner-chat/` — Plan My Week (AI chat planner, main planning flow)
+- `src/features/progress/` — Progress tabs (ladders, engine, snapshot, milestones, word wall, armor)
+- `src/features/quest/` — Knowledge Mine (interactive reading quest)
+- `src/features/records/` — Hours, compliance, evaluations, portfolio
+- `src/features/settings/` — AI usage, account, avatar admin, sticker library
+- `src/features/today/` — Parent Today + Kid Today views, routine sync, XP
+- `src/features/weekly-review/` — Weekly review page
+- `src/features/workshop/` — Story Game Workshop (board/adventure/card games)
 - `functions/src/` — Firebase Cloud Functions (AI endpoints)
 
 ## North Star
@@ -169,18 +187,15 @@ All under `families/{familyId}/`:
 - `src/core/ai/prompts/tutorPrompts.ts` — Kid-facing interactions (future)
 
 ### Cloud Functions Structure
-```
-functions/
-  src/
-    ai/
-      chat.ts        — Chat/planning completion endpoint
-      generate.ts    — Content generation (worksheets, prompts)
-      evaluate.ts    — Weekly adaptive review generation
-      imageGen.ts    — Image generation proxy (OpenAI DALL-E)
-    index.ts         — Function exports
-  package.json
-  tsconfig.json
-```
+- `functions/src/ai/chat.ts` — Main chat CF, task type routing, prompt builders
+- `functions/src/ai/chatTypes.ts` — callClaude helper, task handler types
+- `functions/src/ai/contextSlices.ts` — Per-task context loading (charter, child, engagement, etc.)
+- `functions/src/ai/tasks/` — Task handlers (plan, evaluate, quest, workshop, story, chat, analyzeWorkbook, analyzePatterns)
+- `functions/src/ai/generate.ts` — Activity/lesson card generation
+- `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
+- `functions/src/ai/imageGen.ts` — Image generation routing
+- `functions/src/ai/imageTasks/` — DALL-E/gpt-image-1 task handlers
+- `functions/src/ai/providers/` — Claude + OpenAI provider adapters
 
 ## Family Context (for AI prompt reference)
 

@@ -4,9 +4,9 @@ import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import type { EvaluationFinding } from '../../core/types'
-import type { ArmorTierInfo } from '../minecraft/armorTiers'
-import { getArmorTier, getNextTierProgress } from '../minecraft/armorTiers'
-import MinecraftAvatar from '../minecraft/MinecraftAvatar'
+import type { ArmorTierInfo } from '../../core/xp/armorTiers'
+import { getArmorTier, getNextTierProgress } from '../../core/xp/armorTiers'
+import MinecraftAvatar from '../avatar/MinecraftAvatar'
 import type { QuestStreak } from './questTypes'
 
 const MC = {

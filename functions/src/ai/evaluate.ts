@@ -338,7 +338,7 @@ export async function generateReviewForChild(
 ): Promise<WeeklyReview> {
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey });
-  const model = "claude-sonnet-4-20250514";
+  const model = "claude-sonnet-4-6";
 
   const userPrompt = buildEvaluationPrompt(ctx);
 
