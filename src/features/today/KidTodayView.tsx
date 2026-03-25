@@ -34,6 +34,8 @@ import { addXpEvent } from '../../core/xp/addXpEvent'
 import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
 import { useAvatarProfile } from '../avatar/useAvatarProfile'
+import { getArmorGateStatus } from '../avatar/armorGate'
+import ArmorGateScreen from '../avatar/ArmorGateScreen'
 import MinecraftXpBar from '../avatar/MinecraftXpBar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
 import { useDraftBook } from '../books/useBook'
@@ -193,6 +195,20 @@ export default function KidTodayView({
 
   const greeting = useMemo(() => getGreeting(child.name, isLincoln), [child.name, isLincoln])
   const celebrationMessage = useMemo(() => getCelebration(today, isLincoln), [today, isLincoln])
+
+  // ── Armor Gate: block Today until all unlocked pieces are equipped ──
+  const armorGateStatus = avatarProfile ? getArmorGateStatus(avatarProfile) : null
+  const armorReady = armorGateStatus?.complete ?? false
+
+  if (avatarProfile && !armorReady && armorGateStatus) {
+    return (
+      <ArmorGateScreen
+        gateStatus={armorGateStatus}
+        avatarProfile={avatarProfile}
+        childName={child.name}
+      />
+    )
+  }
 
   // Award XP when all must-do items are completed (once per day per child)
   const prevMustDoDoneRef = useRef(false)
@@ -492,8 +508,19 @@ export default function KidTodayView({
         )}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
-            {greeting}
+            {armorReady ? `Ready for battle, ${child.name}!` : greeting}
           </Typography>
+          {armorReady && (
+            <Typography
+              sx={{
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
+                fontSize: isLincoln ? '0.4rem' : '12px',
+                color: 'text.secondary',
+              }}
+            >
+              Full armor on. Let's go!
+            </Typography>
+          )}
           {todayXp > 0 && (
             <Typography
               sx={{
