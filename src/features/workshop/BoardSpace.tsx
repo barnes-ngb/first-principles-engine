@@ -57,15 +57,15 @@ export default function BoardSpace({
         width: '100%',
         aspectRatio: '1',
         bgcolor: bgColor,
-        borderRadius: 1,
+        borderRadius: 1.5,
         border: isActive ? '3px solid' : '1px solid',
         borderColor: isActive ? 'primary.main' : 'divider',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: '0.75rem',
-        p: '2px',
+        fontSize: '0.8rem',
+        p: '4px',
         overflow: 'hidden',
         transition: 'border-color 0.2s',
         // Landing pulse animation
@@ -89,20 +89,21 @@ export default function BoardSpace({
         variant="caption"
         sx={{
           position: 'absolute',
-          top: 1,
-          left: 3,
-          fontSize: '0.6rem',
+          top: 2,
+          left: 4,
+          fontSize: '0.65rem',
           color: 'text.secondary',
+          fontWeight: 500,
         }}
       >
         {index + 1}
       </Typography>
 
       {/* Space indicator */}
-      {isFirst && <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>START</Typography>}
-      {isLast && <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>FINISH</Typography>}
+      {isFirst && <Typography sx={{ fontSize: '0.85rem', fontWeight: 700 }}>START</Typography>}
+      {isLast && <Typography sx={{ fontSize: '0.85rem', fontWeight: 700 }}>FINISH</Typography>}
       {!isFirst && !isLast && SPACE_EMOJI[type] && (
-        <Typography sx={{ fontSize: '1.15rem' }}>{SPACE_EMOJI[type]}</Typography>
+        <Typography sx={{ fontSize: type === 'challenge' ? '1.4rem' : '1.25rem' }}>{SPACE_EMOJI[type]}</Typography>
       )}
 
       {/* Label */}
@@ -110,9 +111,9 @@ export default function BoardSpace({
         <Typography
           title={label}
           sx={{
-            fontSize: '0.65rem',
+            fontSize: '0.7rem',
             textAlign: 'center',
-            lineHeight: 1.15,
+            lineHeight: 1.2,
             px: 0.5,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -225,11 +226,11 @@ export default function BoardSpace({
         <Box
           sx={{
             position: 'absolute',
-            bottom: 2,
+            bottom: 3,
             display: 'flex',
             // Offset-stack when multiple players share a space
             '& > *:not(:first-of-type)': {
-              ml: players.length > 2 ? '-6px' : '-4px',
+              ml: players.length > 2 ? '-7px' : '-5px',
             },
           }}
         >
@@ -237,8 +238,8 @@ export default function BoardSpace({
             <Box
               key={player.name}
               sx={{
-                width: 18,
-                height: 18,
+                width: 22,
+                height: 22,
                 borderRadius: '50%',
                 bgcolor: player.avatarUrl ? 'transparent' : player.color,
                 border: '2px solid white',
@@ -246,11 +247,11 @@ export default function BoardSpace({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '0.5rem',
+                fontSize: '0.55rem',
                 fontWeight: 700,
                 color: 'white',
                 zIndex: pi,
-                boxShadow: '0 1px 2px rgba(0,0,0,0.3)',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.35)',
                 // Bounce animation when landing
                 ...(isLanding
                   ? {

@@ -172,10 +172,12 @@ export default function AdventurePlayView({
     [currentNode, currentNodeId, voiceRecordings, sounds.muted],
   )
 
-  const handleChallengeDismiss = useCallback(() => {
-    setChallengeResults((prev) => [...prev, { nodeId: currentNodeId, passed: true }])
+  const handleChallengeDismiss = useCallback((correct?: boolean) => {
+    setChallengeResults((prev) => [...prev, { nodeId: currentNodeId, passed: correct !== false }])
     setShowChallenge(false)
-    sounds.playSuccess()
+    if (correct !== false) {
+      sounds.playSuccess()
+    }
     setShowChoices(true)
   }, [currentNodeId, sounds])
 

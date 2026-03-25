@@ -24,7 +24,7 @@ const DIFFICULTY_LABEL: Record<string, string> = {
 interface ChallengeCardProps {
   card: ChallengeCardType | null
   open: boolean
-  onClose: () => void
+  onClose: (correct?: boolean) => void
   /** DALL-E generated card art keyed by card type */
   cardArt?: { reading?: string; math?: string; story?: string; action?: string }
   /** Voice recordings map — if card ID has a recording, play it instead of TTS */
@@ -33,11 +33,15 @@ interface ChallengeCardProps {
   onFlipStart?: () => void
   /** Called when boss challenge is revealed (for sound sync) */
   onBossReveal?: () => void
+  /** Called on correct answer (for success sound) */
+  onCorrectAnswer?: () => void
+  /** Called on wrong answer (for gentle miss sound) */
+  onWrongAnswer?: () => void
   /** Whether game sounds are muted */
   muted?: boolean
 }
 
-export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecordings, onFlipStart, onBossReveal, muted }: ChallengeCardProps) {
+export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecordings, onFlipStart, onBossReveal, onCorrectAnswer, onWrongAnswer, muted }: ChallengeCardProps) {
   const tts = useTTS()
   const [flipped, setFlipped] = useState(false)
   const [contentVisible, setContentVisible] = useState(false)
@@ -54,9 +58,14 @@ export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecor
     if (selectedOption || !card) return // already answered
     setSelectedOption(option)
     const correct = option === card.answer
-    // Auto-close after feedback delay
-    setTimeout(() => onClose(), correct ? 1500 : 2000)
-  }, [selectedOption, card, onClose])
+    if (correct) {
+      onCorrectAnswer?.()
+    } else {
+      onWrongAnswer?.()
+    }
+    // Auto-close after feedback delay, passing correctness for bonus moves
+    setTimeout(() => onClose(correct), correct ? 1500 : 2000)
+  }, [selectedOption, card, onClose, onCorrectAnswer, onWrongAnswer])
 
   /** Play voice recording for a card, returns true if recording exists */
   const playVoiceRecording = useCallback(
@@ -158,7 +167,7 @@ export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecor
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={() => onClose()}
       maxWidth="xs"
       fullWidth
       slotProps={{
@@ -374,7 +383,7 @@ export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecor
             </Button>
             {/* Quiz cards auto-close on answer; prompt/action cards need a Done button */}
             {(!isQuizCard || isPromptCard) && (
-              <Button variant="contained" onClick={onClose} size="large" sx={{ minWidth: 100 }}>
+              <Button variant="contained" onClick={() => onClose(true)} size="large" sx={{ minWidth: 100 }}>
                 Done!
               </Button>
             )}
