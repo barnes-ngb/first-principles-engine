@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { CharacterFeatures } from '../../../core/types'
+import type { CharacterFeatures, OutfitCustomization } from '../../../core/types'
 import { buildHair } from './buildHair'
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -219,6 +219,73 @@ export function buildCharacter(
 
   // Character feet sit at Y=0
   return character
+}
+
+/** Helper: recolor a mesh (handles both single material and material array) */
+function recolorMesh(mesh: THREE.Mesh, color: THREE.Color): void {
+  if (Array.isArray(mesh.material)) {
+    for (let i = 0; i < mesh.material.length; i++) {
+      const variation = 0.95 + Math.random() * 0.1
+      mesh.material[i] = new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(variation) })
+    }
+  } else {
+    mesh.material = new THREE.MeshLambertMaterial({ color })
+  }
+}
+
+/** Apply a color to a specific outfit slot on the 3D character */
+export function applyOutfitColor(
+  character: THREE.Group,
+  slot: 'shirt' | 'pants' | 'shoes',
+  hexColor: string,
+): void {
+  const color = new THREE.Color(hexColor)
+
+  switch (slot) {
+    case 'shirt': {
+      const torso = character.getObjectByName('torso')
+      if (torso instanceof THREE.Mesh) recolorMesh(torso, color)
+      character.traverse((child) => {
+        if (child.name?.startsWith('sleeve') && child instanceof THREE.Mesh) {
+          recolorMesh(child, color)
+        }
+      })
+      // Adjust creeper face contrast against new shirt color
+      const brightness = color.r * 0.299 + color.g * 0.587 + color.b * 0.114
+      const creeperColor = brightness > 0.5 ? 0x2E7D32 : 0x4CAF50
+      character.traverse((child) => {
+        if (child.name?.startsWith('creeper') && child instanceof THREE.Mesh) {
+          child.material = new THREE.MeshLambertMaterial({ color: creeperColor })
+        }
+      })
+      break
+    }
+    case 'pants': {
+      for (const name of ['legL', 'legR']) {
+        const leg = character.getObjectByName(name)
+        if (leg instanceof THREE.Mesh) recolorMesh(leg, color)
+      }
+      break
+    }
+    case 'shoes': {
+      for (const name of ['footL', 'footR']) {
+        const foot = character.getObjectByName(name)
+        if (foot instanceof THREE.Mesh) recolorMesh(foot, color)
+      }
+      break
+    }
+  }
+}
+
+/** Apply all saved outfit colors from a profile's customization */
+export function applyProfileOutfit(
+  character: THREE.Group,
+  customization: OutfitCustomization | undefined,
+): void {
+  if (!customization) return
+  if (customization.shirtColor) applyOutfitColor(character, 'shirt', customization.shirtColor)
+  if (customization.pantsColor) applyOutfitColor(character, 'pants', customization.pantsColor)
+  if (customization.shoeColor) applyOutfitColor(character, 'shoes', customization.shoeColor)
 }
 
 /** Apply new features to an existing character group (re-color skin, hair, etc.) */

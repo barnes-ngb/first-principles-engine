@@ -20,6 +20,8 @@ import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import { useNavigate } from 'react-router-dom'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 
+import Alert from '@mui/material/Alert'
+import Snackbar from '@mui/material/Snackbar'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
@@ -29,6 +31,7 @@ import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload
 import type { Artifact, ChecklistItem, Child, DayLog } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
 import { useAvatarProfile } from '../avatar/useAvatarProfile'
 import MinecraftXpBar from '../avatar/MinecraftXpBar'
@@ -143,6 +146,12 @@ export default function KidTodayView({
   const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
   const [captureReflection, setCaptureReflection] = useState('')
 
+  // "I Did More Mining!" extra activity logger state
+  const [showExtraLog, setShowExtraLog] = useState(false)
+  const [extraActivity, setExtraActivity] = useState<{ label: string; subject: string } | null>(null)
+  const [extraMinutes, setExtraMinutes] = useState<number | null>(null)
+  const [savingExtra, setSavingExtra] = useState(false)
+
   // Teach-back state (Lincoln only)
   const [showTeachBack, setShowTeachBack] = useState(false)
   const [teachSubject, setTeachSubject] = useState<string | null>(null)
@@ -151,6 +160,9 @@ export default function KidTodayView({
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+
+  // XP toast state
+  const [xpToast, setXpToast] = useState<{ amount: number; reason: string } | null>(null)
 
   // Draft book for "Continue your book" card
   const { draftBook } = useDraftBook(familyId, child.id)
@@ -192,10 +204,31 @@ export default function KidTodayView({
         'CHECKLIST_DAY_COMPLETE',
         10,
         `checklist_${today}`,
-      )
+      ).then((awarded) => {
+        if (awarded > 0) setXpToast({ amount: awarded, reason: 'All must-do items complete!' })
+      })
     }
     prevMustDoDoneRef.current = mustDoDone
   }, [mustDoDone, child.id, familyId, today])
+
+  // Bonus XP when ALL items (must-do + choose) are completed
+  const prevAllDoneRef = useRef(false)
+  useEffect(() => {
+    const totalItems = checklist.length
+    if (allDone && !prevAllDoneRef.current && child.id && familyId && totalItems >= 3) {
+      void addXpEvent(
+        familyId,
+        child.id,
+        'DAILY_ALL_COMPLETE',
+        XP_AWARDS.dailyAllComplete,
+        `daily-bonus-${today}`,
+        { reason: `All ${totalItems} items completed today!` },
+      ).then((awarded) => {
+        if (awarded > 0) setXpToast({ amount: awarded, reason: `All ${totalItems} items done — bonus!` })
+      })
+    }
+    prevAllDoneRef.current = allDone
+  }, [allDone, child.id, familyId, today, checklist.length])
 
   // Load artifacts for today
   const loadArtifacts = useCallback(() => {
@@ -215,18 +248,69 @@ export default function KidTodayView({
     loadArtifacts()
   }, [loadArtifacts])
 
+  // Derive extra activity items from dayLog checklist
+  const extraItems = useMemo(() => {
+    const items = dayLog.checklist
+    if (!items) return []
+    return items
+      .filter((item) => item.source === 'manual' && item.completed)
+      .map((item) => ({
+        label: item.label.replace(/\s*\(\d+m\)\s*$/, ''),
+        minutes: item.estimatedMinutes ?? 0,
+      }))
+  }, [dayLog.checklist])
+
+  const handleSaveExtra = useCallback(async () => {
+    if (!extraActivity || !extraMinutes || !dayLog) return
+    setSavingExtra(true)
+    try {
+      const newItem: ChecklistItem = {
+        label: `${extraActivity.label} (${extraMinutes}m)`,
+        completed: true,
+        estimatedMinutes: extraMinutes,
+        subjectBucket: extraActivity.subject as SubjectBucket,
+        source: 'manual' as const,
+        category: 'choose' as const,
+        mvdEssential: false,
+        engagement: 'engaged' as const,
+      }
+
+      const updatedChecklist = [...(dayLog.checklist ?? []), newItem]
+      persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+
+      setShowExtraLog(false)
+      setExtraActivity(null)
+      setExtraMinutes(null)
+    } catch (err) {
+      console.error('Extra activity save failed:', err)
+    }
+    setSavingExtra(false)
+  }, [extraActivity, extraMinutes, dayLog, persistDayLogImmediate])
+
   const handleToggleItem = useCallback(
     (itemIndex: number) => {
       const updated = { ...dayLog }
       const updatedChecklist = [...(updated.checklist ?? [])]
       if (itemIndex < 0 || itemIndex >= updatedChecklist.length) return
-      updatedChecklist[itemIndex] = {
-        ...updatedChecklist[itemIndex],
-        completed: !updatedChecklist[itemIndex].completed,
-      }
+      const item = updatedChecklist[itemIndex]
+      const nowComplete = !item.completed
+      updatedChecklist[itemIndex] = { ...item, completed: nowComplete }
       persistDayLogImmediate({ ...updated, checklist: updatedChecklist })
+
+      // Award per-item XP when checked (not unchecked)
+      if (nowComplete && child.id && familyId) {
+        const label = (item.label ?? '').toLowerCase()
+        const isPrayer = label.includes('prayer') || label.includes('formation') || label.includes('scripture') || label.includes('devotion')
+        const xpAmount = isPrayer ? XP_AWARDS.checklistPrayer : XP_AWARDS.checklistItem
+        const dedupKey = `item-${item.id ?? itemIndex}-${today}`
+        void addXpEvent(familyId, child.id, isPrayer ? 'CHECKLIST_PRAYER' : 'CHECKLIST_ITEM', xpAmount, dedupKey, {
+          reason: item.label ?? 'checklist item',
+        }).then((awarded) => {
+          if (awarded > 0) setXpToast({ amount: awarded, reason: item.label ?? 'checklist item' })
+        })
+      }
     },
-    [dayLog, persistDayLogImmediate],
+    [dayLog, persistDayLogImmediate, child.id, familyId, today],
   )
 
   const handleToggleChoice = useCallback(
@@ -450,6 +534,108 @@ export default function KidTodayView({
         <Typography variant="body1" color="text.secondary" sx={{ mt: -1 }}>
           Light day today. Just these {mustDo.length}!
         </Typography>
+      )}
+
+      {/* ── I DID MORE MINING! (Lincoln only) ── */}
+      {isLincoln && (
+        <SectionCard title="⛏️ I Did More Mining!">
+          <Stack spacing={2} sx={{ py: 1 }}>
+            <Typography variant="body2" sx={{ textAlign: 'center' }}>
+              Did extra work on your tablet or on your own? Log it here!
+            </Typography>
+
+            {!showExtraLog ? (
+              <Button
+                variant="outlined"
+                color="primary"
+                size="large"
+                onClick={() => setShowExtraLog(true)}
+                sx={{ alignSelf: 'center' }}
+              >
+                ⛏️ I Did More!
+              </Button>
+            ) : (
+              <Stack spacing={2}>
+                {/* What did you do? — single tap */}
+                <Typography variant="subtitle2">What did you work on?</Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  {[
+                    { label: '📖 Reading Eggs', subject: 'Reading' },
+                    { label: '🔢 Math App', subject: 'Math' },
+                    { label: '📚 Reading', subject: 'Reading' },
+                    { label: '✏️ Writing', subject: 'LanguageArts' },
+                    { label: '🔬 Science', subject: 'Science' },
+                    { label: '🎮 Other', subject: 'Other' },
+                  ].map((opt) => (
+                    <Chip
+                      key={opt.label}
+                      label={opt.label}
+                      onClick={() => setExtraActivity(opt)}
+                      color={extraActivity?.label === opt.label ? 'primary' : 'default'}
+                      variant={extraActivity?.label === opt.label ? 'filled' : 'outlined'}
+                      sx={{ fontSize: '0.95rem', py: 2.5 }}
+                    />
+                  ))}
+                </Stack>
+
+                {/* How long? — single tap */}
+                <Typography variant="subtitle2">How long?</Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  {[
+                    { label: '15 min', minutes: 15 },
+                    { label: '30 min', minutes: 30 },
+                    { label: '45 min', minutes: 45 },
+                    { label: '1 hour', minutes: 60 },
+                  ].map((opt) => (
+                    <Chip
+                      key={opt.label}
+                      label={opt.label}
+                      onClick={() => setExtraMinutes(opt.minutes)}
+                      color={extraMinutes === opt.minutes ? 'primary' : 'default'}
+                      variant={extraMinutes === opt.minutes ? 'filled' : 'outlined'}
+                      sx={{ fontSize: '0.95rem', py: 2.5 }}
+                    />
+                  ))}
+                </Stack>
+
+                {/* Save */}
+                <Button
+                  variant="contained"
+                  color="success"
+                  disabled={!extraActivity || !extraMinutes || savingExtra}
+                  onClick={handleSaveExtra}
+                  size="large"
+                >
+                  {savingExtra ? 'Saving...' : '💎 Log It!'}
+                </Button>
+
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => { setShowExtraLog(false); setExtraActivity(null); setExtraMinutes(null) }}
+                >
+                  Cancel
+                </Button>
+              </Stack>
+            )}
+
+            {/* Show already-logged extras for today */}
+            {extraItems.length > 0 && (
+              <Stack spacing={0.5}>
+                <Typography variant="caption" color="text.secondary">Logged today:</Typography>
+                {extraItems.map((item, i) => (
+                  <Chip
+                    key={i}
+                    label={`${item.label} — ${item.minutes}m`}
+                    size="small"
+                    color="success"
+                    variant="outlined"
+                  />
+                ))}
+              </Stack>
+            )}
+          </Stack>
+        </SectionCard>
       )}
 
       {/* ── MUST DO ── */}
@@ -1065,6 +1251,21 @@ export default function KidTodayView({
           </Stack>
         </DialogContent>
       </Dialog>
+      <Snackbar
+        open={xpToast !== null}
+        autoHideDuration={2000}
+        onClose={() => setXpToast(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setXpToast(null)}
+          severity="success"
+          variant="filled"
+          sx={{ width: '100%', fontWeight: 'bold' }}
+        >
+          +{xpToast?.amount} XP — {xpToast?.reason}
+        </Alert>
+      </Snackbar>
     </Page>
   )
 }

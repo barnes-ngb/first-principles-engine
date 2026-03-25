@@ -2,10 +2,10 @@ import { useEffect, useRef, useCallback } from 'react'
 import * as THREE from 'three'
 import Box from '@mui/material/Box'
 
-import type { CharacterFeatures, VoxelArmorPieceId } from '../../core/types'
+import type { CharacterFeatures, OutfitCustomization, VoxelArmorPieceId } from '../../core/types'
 import { DEFAULT_CHARACTER_FEATURES } from '../../core/types'
 import { XP_THRESHOLDS } from './voxel/buildArmorPiece'
-import { buildCharacter } from './voxel/buildCharacter'
+import { buildCharacter, applyProfileOutfit } from './voxel/buildCharacter'
 import { buildArmorPiece, VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import { animateEquip, animateUnequip, animateJump, animateNod, animateSwordFlourish, animateHipTurn, animateTorsoPuff } from './voxel/equipAnimation'
 import { createTouchControls, updateRotation, destroyTouchControls } from './voxel/touchControls'
@@ -40,6 +40,8 @@ interface VoxelCharacterProps {
   onPoseComplete?: () => void
   /** Callback when swipe cycles to a new pose */
   onSwipePose?: (poseId: string) => void
+  /** Outfit color customization */
+  customization?: OutfitCustomization
   /** Callback when tier-up ceremony starts (block UI interactions) */
   onTierUpStart?: () => void
   /** Callback when tier-up ceremony completes (equipped pieces reset, new tier set) */
@@ -229,6 +231,7 @@ export default function VoxelCharacter({
   onTierUpStart,
   onTierUp,
   skinTextureUrl,
+  customization,
 }: VoxelCharacterProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -401,6 +404,9 @@ export default function VoxelCharacter({
     applyTierToArmor(armorGroupsRef.current, currentTier, equippedPieces)
     prevEquippedRef.current = new Set(equippedPieces)
     prevTierRef.current = currentTier
+
+    // Apply saved outfit colors
+    applyProfileOutfit(character, customization)
 
     // Apply helmet hair if helmet is initially equipped
     if (equippedPieces.includes('helmet')) {
@@ -579,7 +585,7 @@ export default function VoxelCharacter({
         applyPaintedFace(headMesh, character, resolvedFeatures, skinHex)
       }
     }
-  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, skinTextureUrl])
+  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, skinTextureUrl, customization])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
@@ -637,6 +643,13 @@ export default function VoxelCharacter({
     observer.observe(container)
     return () => observer.disconnect()
   }, [])
+
+  // ── Apply outfit colors when customization changes ──────────────
+  useEffect(() => {
+    const character = characterRef.current
+    if (!character) return
+    applyProfileOutfit(character, customization)
+  }, [customization?.shirtColor, customization?.pantsColor, customization?.shoeColor])
 
   // ── Tier upgrade ceremony when XP changes tier ─────────────────
   useEffect(() => {

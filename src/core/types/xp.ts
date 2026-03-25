@@ -203,10 +203,17 @@ export const ARMOR_PIECES: {
 ]
 
 export const XP_EVENTS = {
-  QUEST_DIAMOND: 2,             // already wired in quest system
+  QUEST_DIAMOND: 2,             // per diamond mined in a quest
+  QUEST_COMPLETE: 15,           // quest session finished
+  CHECKLIST_ITEM: 3,            // per completed checklist item
+  CHECKLIST_PRAYER: 5,          // formation/prayer item (worth more)
   CHECKLIST_DAY_COMPLETE: 10,   // all must-do items checked off
-  BOOK_READ: 15,                // reading session logged on book close
+  DAILY_ALL_COMPLETE: 15,       // bonus: ALL items for the day finished
+  WEEKLY_ALL_COMPLETE: 50,      // bonus: all 5 days completed
+  BOOK_READ: 15,                // finished reading a book
+  BOOK_PAGE_READ: 1,            // per page read (partial progress)
   EVALUATION_COMPLETE: 25,      // full evaluation chat completed
+  DAD_LAB_COMPLETE: 20,         // finished a Dad Lab
   ARMOR_DAILY_COMPLETE: 5,      // all earned pieces applied today
   MANUAL_AWARD: 0,              // parent-awarded XP (amount varies)
 } as const
@@ -227,6 +234,12 @@ export interface ArmorPieceProgress {
   }
 }
 
+export interface OutfitCustomization {
+  shirtColor?: string   // Hex
+  pantsColor?: string   // Hex
+  shoeColor?: string    // Hex
+}
+
 export interface AvatarProfile {
   childId: string
   themeStyle: 'minecraft' | 'platformer'
@@ -245,6 +258,8 @@ export interface AvatarProfile {
   equippedPieces?: string[]
   /** Last piece animated (to not re-animate on page load) */
   lastEquipAnimation?: string
+  /** Outfit color customization (shirt, pants, shoes) */
+  customization?: OutfitCustomization
   /** AI-generated Minecraft skin face URL (cached to avoid regenerating) */
   skinTextureUrl?: string
   /** Timestamp when skin texture was last generated */
@@ -264,6 +279,13 @@ export interface AvatarProfile {
 
   /** Armor pieces unlocked by XP (voxel piece IDs) */
   unlockedPieces?: string[]
+
+  /** Date string (YYYY-MM-DD) when armor was last equipped — for daily reset */
+  lastArmorEquipDate?: string
+  /** Consecutive days with all earned pieces equipped */
+  armorStreak?: number
+  /** Date string (YYYY-MM-DD) of last day all pieces were equipped */
+  lastFullArmorDate?: string
 
   totalXp: number   // cached from xpLedger for quick reads
   updatedAt: string

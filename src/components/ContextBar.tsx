@@ -10,6 +10,9 @@ import ScienceIcon from '@mui/icons-material/Science'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import type { Child } from '../core/types'
 import { formatDateShort, formatWeekShort, navTo, weekRangeFromDateKey } from '../core/utils/dateKey'
+import { useAuth } from '../core/auth/useAuth'
+import AvatarThumbnail from '../features/avatar/AvatarThumbnail'
+import { useAvatarProfile } from '../features/avatar/useAvatarProfile'
 
 export type ContextBarPage = 'today' | 'week' | 'artifacts'
 
@@ -32,6 +35,8 @@ export default function ContextBar({
   onCaptureArtifact,
 }: ContextBarProps) {
   const navigate = useNavigate()
+  const { familyId } = useAuth()
+  const avatarProfile = useAvatarProfile(familyId ?? undefined, activeChild?.id)
 
   // Derive week from dateKey if weekStart not provided
   const resolvedWeekStart = weekStart ?? (dateKey ? weekRangeFromDateKey(dateKey).start : undefined)
@@ -52,14 +57,25 @@ export default function ContextBar({
         minHeight: 44,
       }}
     >
-      {/* Child chip */}
+      {/* Child chip with avatar */}
       {activeChild && (
-        <Chip
-          label={activeChild.name}
-          size="small"
-          color="primary"
-          variant="outlined"
-        />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          {avatarProfile && (
+            <AvatarThumbnail
+              features={avatarProfile.characterFeatures}
+              ageGroup={avatarProfile.ageGroup}
+              equippedPieces={avatarProfile.equippedPieces}
+              totalXp={avatarProfile.totalXp}
+              size={28}
+            />
+          )}
+          <Chip
+            label={activeChild.name}
+            size="small"
+            color="primary"
+            variant="outlined"
+          />
+        </Box>
       )}
 
       {/* Date or Week chip */}
