@@ -23,7 +23,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { db } from '../../core/firebase/firestore'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { checkAndUnlockArmor } from '../../core/xp/checkAndUnlockArmor'
-import { useXpLedger } from '../minecraft/useXpLedger'
+import { useXpLedger } from '../../core/xp/useXpLedger'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../avatar/voxel/buildArmorPiece'
 import {
   calculateTier,
