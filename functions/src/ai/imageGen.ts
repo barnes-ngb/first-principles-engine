@@ -58,3 +58,9 @@ export type {
   ExtractFeaturesRequest,
   ExtractFeaturesResponse,
 } from "./imageTasks/extractFeatures.js";
+
+export { generateMinecraftSkin } from "./imageTasks/minecraftSkin.js";
+export type {
+  MinecraftSkinRequest,
+  MinecraftSkinResponse,
+} from "./imageTasks/minecraftSkin.js";

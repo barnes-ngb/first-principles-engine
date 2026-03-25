@@ -172,30 +172,31 @@ const W = 0xffffff
 function buildHelmet(U: number): THREE.Group {
   const group = new THREE.Group()
 
-  // Head is 8U × 8U × 8U centered at Y = U*28 (spans Y=24 to Y=32).
+  // Helmet uses HEAD-LOCAL coordinates (headGroup center = 0,0,0).
+  // Head is 8U × 8U × 8U spanning from -4U to +4U on all axes.
   // Open-face helmet: covers top + sides + back, face fully exposed.
 
   // Main shell — covers only the top half of the head (forehead/crown)
   const shellTop = taggedBox(U * 9.2, U * 4.8, U * 9.2, W, 'primary', 'helmet_dome')
-  shellTop.position.set(0, U * 31.0, 0)
+  shellTop.position.set(0, U * 3.0, 0)
   group.add(shellTop)
 
   // Side guards — extend down past ears but pulled back so they don't block the front face
   const guardL = taggedBox(U * 1.2, U * 7.2, U * 7.2, W, 'primary', 'helmet_guardL')
-  guardL.position.set(-U * 4.4, U * 28.0, -U * 0.8)
+  guardL.position.set(-U * 4.4, 0, -U * 0.8)
   group.add(guardL)
   const guardR = taggedBox(U * 1.2, U * 7.2, U * 7.2, W, 'primary', 'helmet_guardR')
-  guardR.position.set(U * 4.4, U * 28.0, -U * 0.8)
+  guardR.position.set(U * 4.4, 0, -U * 0.8)
   group.add(guardR)
 
   // Back plate — covers back of head down to neck
   const backPlate = taggedBox(U * 9.2, U * 8.0, U * 1.2, W, 'primary', 'helmet_back')
-  backPlate.position.set(0, U * 28.0, -U * 4.4)
+  backPlate.position.set(0, 0, -U * 4.4)
   group.add(backPlate)
 
-  // Brow ridge — sits ABOVE the eyes (eyes are at ~Y=27.4, brow at Y=29.6+)
+  // Brow ridge — sits ABOVE the eyes (eyes are at ~local Y=0.5, brow at Y=1.6+)
   const brow = taggedBox(U * 8.0, U * 0.8, U * 1.6, W, 'accent', 'helmet_brow')
-  brow.position.set(0, U * 29.6, U * 4.0)
+  brow.position.set(0, U * 1.6, U * 4.0)
   group.add(brow)
 
   // NO nose guard — open face design, like a Viking helm
@@ -203,17 +204,17 @@ function buildHelmet(U: number): THREE.Group {
   // Top crest — accent ridge running front to back
   const crest = taggedBox(U * 1.0, U * 1.4, U * 8.0, W, 'accent', 'helmet_crest')
   crest.userData.isAccent = true
-  crest.position.set(0, U * 33.8, 0)
+  crest.position.set(0, U * 5.8, 0)
   group.add(crest)
 
   // Chin strap — thin bar under the chin connecting the side guards, frames face from below
   const chinStrap = taggedFlatBox(U * 6.4, U * 0.5, U * 0.6, W, 'accent', 'helmet_chinstrap')
-  chinStrap.position.set(0, U * 24.2, U * 3.2)
+  chinStrap.position.set(0, -U * 3.8, U * 3.2)
   group.add(chinStrap)
 
   // Neck guard — extends below head at the back
   const neckGuard = taggedBox(U * 8.0, U * 2.0, U * 1.2, W, 'primary', 'helmet_neckguard')
-  neckGuard.position.set(0, U * 24.4, -U * 4.2)
+  neckGuard.position.set(0, -U * 3.6, -U * 4.2)
   group.add(neckGuard)
 
   return group

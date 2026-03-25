@@ -21,3 +21,6 @@ export type { ArmorSheetRequest, ArmorSheetResponse } from "./armorSheet.js";
 
 export { extractFeatures } from "./extractFeatures.js";
 export type { ExtractFeaturesRequest, ExtractFeaturesResponse } from "./extractFeatures.js";
+
+export { generateMinecraftSkin } from "./minecraftSkin.js";
+export type { MinecraftSkinRequest, MinecraftSkinResponse } from "./minecraftSkin.js";
