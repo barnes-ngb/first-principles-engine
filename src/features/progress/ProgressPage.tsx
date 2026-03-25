@@ -28,20 +28,20 @@ export default function ProgressPage() {
             variant="scrollable"
             scrollButtons="auto"
           >
-            <Tab label="Ladders" />
-            <Tab label="Engine" />
             <Tab label="Skill Snapshot" />
-            <Tab label="Milestones" />
+            <Tab label="Ladders" />
             <Tab label="Word Wall" />
+            <Tab label="Engine" />
+            <Tab label="Milestones" />
             <Tab label="Armor" />
           </Tabs>
         </Box>
       </Container>
-      {tab === 0 && <LaddersPage />}
-      {tab === 1 && <EnginePage />}
-      {tab === 2 && <SkillSnapshotPage />}
-      {tab === 3 && <KidsPage />}
-      {tab === 4 && <WordWall />}
+      {tab === 0 && <SkillSnapshotPage />}
+      {tab === 1 && <LaddersPage />}
+      {tab === 2 && <WordWall />}
+      {tab === 3 && <EnginePage />}
+      {tab === 4 && <KidsPage />}
       {tab === 5 && <ArmorTab />}
     </>
   )

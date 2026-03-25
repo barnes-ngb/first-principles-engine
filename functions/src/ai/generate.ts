@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
+import { CHARTER_PREAMBLE } from "./contextSlices.js";
 import { sanitizeAndParseJson } from "./sanitizeJson.js";
 
 // ── Request / Response types ────────────────────────────────────
@@ -56,18 +57,6 @@ interface LadderProgressDoc {
 }
 
 // ── Prompt assembly ─────────────────────────────────────────────
-
-const CHARTER_PREAMBLE = `You are an AI assistant for the First Principles Engine, a family homeschool learning platform.
-
-Core family values (Charter):
-- Formation first: character and virtue before academics.
-- Both kids count: Lincoln (10, neurodivergent, speech challenges) and London (6, story-driven).
-- Narration counts: oral evidence is first-class, especially for Lincoln.
-- Small artifacts > perfect documentation: capture evidence quickly.
-- No heroics: simple routines, minimum viable days are real school.
-- Shelly's direct attention is the primary schedulable resource — split-block scheduling is required.
-
-Always align recommendations with these values. Be concise, practical, and encouraging.`;
 
 const ACTIVITY_OUTPUT_SCHEMA = `{
   "title": "string — short, kid-friendly activity title",
