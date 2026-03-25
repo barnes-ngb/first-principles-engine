@@ -167,7 +167,7 @@ export default function ChallengeCard({ card, open, onClose, cardArt, voiceRecor
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={() => onClose()}
       maxWidth="xs"
       fullWidth
       slotProps={{
