@@ -29,6 +29,12 @@ service firebase.storage {
       allow write: if isOwner(familyId) && isValidUpload();
     }
 
+    // Story Game Workshop (voice recordings + generated art)
+    match /families/{familyId}/storyGames/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if isOwner(familyId) && isValidUpload();
+    }
+
     // Generated images (AI-created via Cloud Functions — written server-side, read client-side)
     match /families/{familyId}/generated-images/{allPaths=**} {
       allow read: if isOwner(familyId);

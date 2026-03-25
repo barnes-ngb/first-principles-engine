@@ -434,14 +434,28 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   }
 }
 
-export function useBookshelf(familyId: string, childId: string): UseBookshelfResult {
+export function useBookshelf(familyId: string, childId: string, loadAll?: boolean): UseBookshelfResult {
   const [books, setBooks] = useState<Book[]>([])
-  const [loading, setLoading] = useState(!!familyId && !!childId)
+  const [loading, setLoading] = useState(!!familyId && (!!childId || !!loadAll))
 
   useEffect(() => {
-    if (!familyId || !childId) return
+    if (!familyId || (!childId && !loadAll)) return
     let cancelled = false
     const load = async () => {
+      if (loadAll) {
+        // Parent view: load ALL books for the family
+        const allQ = query(
+          booksCollection(familyId),
+          orderBy('updatedAt', 'desc'),
+        )
+        const snap = await getDocs(allQ)
+        if (cancelled) return
+        const all = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
+        setBooks(all)
+        setLoading(false)
+        return
+      }
+
       // Load books where childId matches OR child is a contributor (Together Books)
       const ownQ = query(
         booksCollection(familyId),
@@ -473,7 +487,7 @@ export function useBookshelf(familyId: string, childId: string): UseBookshelfRes
     }
     void load()
     return () => { cancelled = true }
-  }, [familyId, childId])
+  }, [familyId, childId, loadAll])
 
   const createBook = useCallback(
     async (title: string, coverStyle: Book['coverStyle'], isTogetherBook?: boolean, contributorIds?: string[]): Promise<string> => {

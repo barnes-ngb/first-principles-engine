@@ -54,7 +54,7 @@ type BookFilter = 'all' | 'creative' | 'generated' | 'sight-word'
 export default function BookshelfPage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild } = useActiveChild()
+  const { activeChild, children: allChildren } = useActiveChild()
   const childName = activeChild?.name ?? ''
   const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
@@ -62,7 +62,8 @@ export default function BookshelfPage() {
   const { profile } = useProfile()
   const isParent = profile === UserProfile.Parents
 
-  const { books, loading, createBook, deleteBook } = useBookshelf(familyId, childId)
+  const { books, loading, createBook, deleteBook } = useBookshelf(familyId, childId, isParent)
+  const [childFilter, setChildFilter] = useState<string>('all')
   const { generateBook, progress, generating, resetProgress } = useBookGenerator()
   const { suggestions: evalSuggestions } = useEvaluationBookSuggestions(
     isParent ? familyId : '',
@@ -219,12 +220,15 @@ export default function BookshelfPage() {
     if (themeFilter !== 'all') {
       filtered = filtered.filter((b) => b.theme === themeFilter)
     }
+    if (childFilter !== 'all') {
+      filtered = filtered.filter((b) => b.childId === childFilter)
+    }
     return [...filtered].sort((a, b) => {
       if (a.status === 'draft' && b.status !== 'draft') return -1
       if (a.status !== 'draft' && b.status === 'draft') return 1
       return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
     })
-  }, [books, bookFilter, themeFilter])
+  }, [books, bookFilter, themeFilter, childFilter])
 
   if (loading) {
     return (
@@ -341,6 +345,23 @@ export default function BookshelfPage() {
           </>
         )}
       </Stack>
+
+      {/* Child filter (parent view only) */}
+      {isParent && allChildren.length > 1 && (
+        <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+          <ToggleButtonGroup
+            value={childFilter}
+            exclusive
+            onChange={(_, val) => { if (val) setChildFilter(val) }}
+            size="small"
+          >
+            <ToggleButton value="all" sx={{ textTransform: 'none', minHeight: 36 }}>All</ToggleButton>
+            {allChildren.map((c) => (
+              <ToggleButton key={c.id} value={c.id} sx={{ textTransform: 'none', minHeight: 36 }}>{c.name}</ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+        </Box>
+      )}
 
       {/* Theme filter chips — only show when there are themed books */}
       {availableThemes.length > 0 && (
