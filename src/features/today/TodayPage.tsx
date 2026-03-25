@@ -1598,10 +1598,11 @@ export default function TodayPage() {
           ? essentialItems
           : rawItems.slice(0, 3)
         const mustDoCompleted = mustDoItems.filter((i) => i.completed).length
-        const mustDoTotal = mustDoItems.length
-        const halfDone = mustDoTotal > 0 && mustDoCompleted >= Math.ceil(mustDoTotal / 2)
-        console.log('[TeachBack] guard:', { childName: selectedChild?.name, isLincolnChild, checklistLen: checklist.length, mustDoCompleted, mustDoTotal, halfDone, teachBackDone: dayLog?.teachBackDone, teachBackSaved })
-        if (!isLincolnChild || checklist.length === 0 || !halfDone || teachBackSaved) return null
+        const totalCompleted = checklist.filter((i) => i.completed).length
+        const halfMustDoDone = mustDoItems.length > 0 && mustDoCompleted >= Math.ceil(mustDoItems.length / 2)
+        const enoughDone = totalCompleted >= 3 || halfMustDoDone
+        console.log('[TeachBack] guard:', { childName: selectedChild?.name, isLincolnChild, checklistLen: checklist.length, totalCompleted, mustDoCompleted, halfMustDoDone, enoughDone, teachBackDone: dayLog?.teachBackDone, teachBackSaved })
+        if (!isLincolnChild || checklist.length === 0 || !enoughDone || teachBackSaved) return null
         return (
           <SectionCard title="Teach London">
             <Stack spacing={1.5}>
