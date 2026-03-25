@@ -28,6 +28,7 @@ import type {
   AvatarProfile,
   CharacterFeatures,
   DailyArmorSession,
+  OutfitCustomization,
   VoxelArmorPieceId,
 } from '../../core/types'
 
@@ -41,6 +42,7 @@ import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
+import OutfitCustomizer from './OutfitCustomizer'
 import { calculateTier, getTierBadgeColor, getTierTextColor, TIERS } from './voxel/tierMaterials'
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -376,6 +378,25 @@ export default function MyAvatarPage() {
     }
   }, [familyId, childId, photoPreviewUrl, profile])
 
+  // ── Outfit color change ──────────────────────────────────────────
+  const handleOutfitColorChange = useCallback(
+    async (slot: 'shirt' | 'pants' | 'shoes', hexColor: string) => {
+      if (!familyId || !childId || !profile) return
+      const customization: OutfitCustomization = { ...profile.customization }
+      switch (slot) {
+        case 'shirt': customization.shirtColor = hexColor; break
+        case 'pants': customization.pantsColor = hexColor; break
+        case 'shoes': customization.shoeColor = hexColor; break
+      }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await updateDoc(profileRef, {
+        customization,
+        updatedAt: new Date().toISOString(),
+      })
+    },
+    [familyId, childId, profile],
+  )
+
   // ── Apply a piece (equip) ───────────────────────────────────────
   const handleApplyPiece = useCallback(
     async (voxelPieceId: VoxelArmorPieceId) => {
@@ -674,6 +695,7 @@ export default function MyAvatarPage() {
             onEquipAnimDone={handleEquipAnimDone}
             onUnequipAnimDone={handleUnequipAnimDone}
             photoUrl={profile.photoUrl}
+            customization={profile.customization}
             activePoseId={activePoseId}
             onPoseComplete={() => setActivePoseId(null)}
             onSwipePose={(poseId) => setActivePoseId(poseId)}
@@ -1020,6 +1042,13 @@ export default function MyAvatarPage() {
             )}
           </Box>
         )}
+
+        {/* ── Outfit Customizer ─────────────────────────────────── */}
+        <OutfitCustomizer
+          customization={profile.customization}
+          ageGroup={ageGroup}
+          onColorChange={(slot, hex) => void handleOutfitColorChange(slot, hex)}
+        />
 
         {/* ── Photo Upload Section ──────────────────────────────── */}
         <Box

@@ -227,6 +227,12 @@ export interface ArmorPieceProgress {
   }
 }
 
+export interface OutfitCustomization {
+  shirtColor?: string   // Hex
+  pantsColor?: string   // Hex
+  shoeColor?: string    // Hex
+}
+
 export interface AvatarProfile {
   childId: string
   themeStyle: 'minecraft' | 'platformer'
@@ -245,6 +251,8 @@ export interface AvatarProfile {
   equippedPieces?: string[]
   /** Last piece animated (to not re-animate on page load) */
   lastEquipAnimation?: string
+  /** Outfit color customization (shirt, pants, shoes) */
+  customization?: OutfitCustomization
   /** AI-generated Minecraft skin face URL (cached to avoid regenerating) */
   skinTextureUrl?: string
   /** Timestamp when skin texture was last generated */
