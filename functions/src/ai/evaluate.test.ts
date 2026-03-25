@@ -42,12 +42,25 @@ function makeContext(overrides?: Partial<WeekContext>): WeekContext {
   return {
     child: { id: "child-1", name: "Lincoln", grade: "3rd" },
     weekKey: "2026-02-23",
-    sessions: [
-      { streamId: "reading", result: "hit", date: "2026-02-23" },
-      { streamId: "reading", result: "near", date: "2026-02-24" },
-      { streamId: "math", result: "hit", date: "2026-02-23" },
-      { streamId: "math", result: "hit", date: "2026-02-24" },
-      { streamId: "math", result: "miss", date: "2026-02-25" },
+    dayLogs: [
+      {
+        date: "2026-02-23",
+        totalItems: 5,
+        completedItems: 4,
+        engagement: { engaged: 3, okay: 1 },
+        minutesBySubject: { Reading: 60, Math: 45 },
+        gradeResults: ["Phonics: 5/6 correct"],
+        evidenceCount: 1,
+      },
+      {
+        date: "2026-02-24",
+        totalItems: 4,
+        completedItems: 3,
+        engagement: { engaged: 2, struggled: 1 },
+        minutesBySubject: { Reading: 30 },
+        gradeResults: [],
+        evidenceCount: 0,
+      },
     ],
     hours: [
       { minutes: 60, subjectBucket: "Reading", date: "2026-02-23" },
@@ -86,10 +99,9 @@ describe("buildEvaluationPrompt", () => {
     expect(prompt).toContain("2026-02-23");
   });
 
-  it("includes session summary by stream", () => {
+  it("includes day log completion data", () => {
     const prompt = buildEvaluationPrompt(makeContext());
-    expect(prompt).toContain("reading: 1 hits, 1 nears, 0 misses");
-    expect(prompt).toContain("math: 2 hits, 0 nears, 1 misses");
+    expect(prompt).toContain("7/9 items");
   });
 
   it("includes total hours logged", () => {
@@ -124,9 +136,9 @@ describe("buildEvaluationPrompt", () => {
   it("requests JSON output format", () => {
     const prompt = buildEvaluationPrompt(makeContext());
     expect(prompt).toContain("Respond ONLY with valid JSON");
-    expect(prompt).toContain("progressSummary");
+    expect(prompt).toContain("summary");
     expect(prompt).toContain("paceAdjustments");
-    expect(prompt).toContain("planModifications");
+    expect(prompt).toContain("wins");
     expect(prompt).toContain("energyPattern");
     expect(prompt).toContain("celebration");
   });
@@ -134,13 +146,13 @@ describe("buildEvaluationPrompt", () => {
   it("handles empty data gracefully", () => {
     const prompt = buildEvaluationPrompt(
       makeContext({
-        sessions: [],
+        dayLogs: [],
         hours: [],
         dailyPlans: [],
         missedDays: 5,
       }),
     );
-    expect(prompt).toContain("Sessions completed: 0");
+    expect(prompt).toContain("Day logs recorded: 0");
     expect(prompt).toContain("(none)");
     expect(prompt).toContain("Missed school days (Mon–Fri): 5");
   });
@@ -150,57 +162,69 @@ describe("buildEvaluationPrompt", () => {
 
 describe("parseReviewResponse", () => {
   const validPayload = {
-    progressSummary:
-      "Lincoln had a solid week with consistent math work and growing reading confidence.",
-    paceAdjustments: [
-      {
-        subject: "Reading",
-        currentPace: "2 sessions/week",
-        suggestedChange: "We might try adding a short third session.",
-      },
-    ],
-    planModifications: [
-      {
-        area: "Math block length",
-        observation: "One miss after 20-min sessions",
-        recommendation: "Keep math blocks under 15 minutes.",
-      },
-    ],
-    energyPattern:
-      "Energy dipped mid-week; consider scheduling lighter tasks on Wednesdays.",
     celebration:
       "Lincoln decoded two new CVC words without prompting on Tuesday!",
+    summary:
+      "Lincoln had a solid week with consistent math work and growing reading confidence.",
+    wins: ["Decoded two new CVC words", "Completed all math sessions"],
+    growthAreas: ["Reading stamina could use a gentle push"],
+    paceAdjustments: [
+      {
+        id: "adj-0",
+        area: "Reading",
+        currentPace: "2 sessions/week",
+        suggestedPace: "We might try adding a short third session.",
+        rationale: "His confidence is growing and he seems ready.",
+      },
+    ],
+    recommendations: ["Keep math blocks under 15 minutes"],
+    energyPattern:
+      "Energy dipped mid-week; consider scheduling lighter tasks on Wednesdays.",
   };
 
   it("parses a valid JSON response", () => {
     const result = parseReviewResponse(JSON.stringify(validPayload));
-    expect(result.progressSummary).toBe(validPayload.progressSummary);
-    expect(result.paceAdjustments).toEqual(validPayload.paceAdjustments);
-    expect(result.planModifications).toEqual(validPayload.planModifications);
-    expect(result.energyPattern).toBe(validPayload.energyPattern);
+    expect(result.summary).toBe(validPayload.summary);
     expect(result.celebration).toBe(validPayload.celebration);
+    expect(result.wins).toEqual(validPayload.wins);
+    expect(result.growthAreas).toEqual(validPayload.growthAreas);
+    expect(result.paceAdjustments).toHaveLength(1);
+    expect(result.recommendations).toEqual(validPayload.recommendations);
+    expect(result.energyPattern).toBe(validPayload.energyPattern);
   });
 
   it("strips markdown code fences", () => {
     const wrapped = "```json\n" + JSON.stringify(validPayload) + "\n```";
     const result = parseReviewResponse(wrapped);
-    expect(result.progressSummary).toBe(validPayload.progressSummary);
+    expect(result.summary).toBe(validPayload.summary);
+  });
+
+  it("falls back to progressSummary for old data", () => {
+    const old = JSON.stringify({
+      progressSummary: "Good week.",
+      energyPattern: "Stable.",
+      celebration: "Great job!",
+    });
+    const result = parseReviewResponse(old);
+    expect(result.summary).toBe("Good week.");
   });
 
   it("defaults missing arrays to empty arrays", () => {
     const minimal = JSON.stringify({
-      progressSummary: "Good week.",
+      summary: "Good week.",
       energyPattern: "Stable.",
       celebration: "Great job!",
     });
     const result = parseReviewResponse(minimal);
     expect(result.paceAdjustments).toEqual([]);
-    expect(result.planModifications).toEqual([]);
+    expect(result.wins).toEqual([]);
+    expect(result.growthAreas).toEqual([]);
+    expect(result.recommendations).toEqual([]);
   });
 
   it("coerces missing string fields to empty strings", () => {
     const result = parseReviewResponse("{}");
-    expect(result.progressSummary).toBe("");
+    expect(result.summary).toBe("");
     expect(result.energyPattern).toBe("");
     expect(result.celebration).toBe("");
   });

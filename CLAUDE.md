@@ -72,7 +72,8 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/not-found/` — 404 page
 - `src/features/planner/` — TeachHelperDialog (shared)
 - `src/features/planner-chat/` — Plan My Week (AI chat planner, main planning flow)
-- `src/features/progress/` — Progress tabs (ladders, engine, snapshot, milestones, word wall, armor)
+- `src/features/progress/` — Progress tabs (learning profile, ladders, engine, snapshot, milestones, word wall, armor)
+- `src/features/progress/DispositionProfile.tsx` — AI disposition narrative from day log data
 - `src/features/quest/` — Knowledge Mine (interactive reading quest)
 - `src/features/records/` — Hours, compliance, evaluations, portfolio
 - `src/features/settings/` — AI usage, account, avatar admin, sticker library
@@ -190,7 +191,7 @@ All under `families/{familyId}/`:
 - `functions/src/ai/chat.ts` — Main chat CF, task type routing, prompt builders
 - `functions/src/ai/chatTypes.ts` — callClaude helper, task handler types
 - `functions/src/ai/contextSlices.ts` — Per-task context loading (charter, child, engagement, etc.)
-- `functions/src/ai/tasks/` — Task handlers (plan, evaluate, quest, workshop, story, chat, analyzeWorkbook, analyzePatterns)
+- `functions/src/ai/tasks/` — Task handlers (plan, evaluate, quest, workshop, story, chat, analyzeWorkbook, analyzePatterns, disposition, conundrum)
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/imageGen.ts` — Image generation routing

@@ -21,23 +21,17 @@ import type {
   EvaluationSession,
   HoursAdjustment,
   HoursEntry,
-  LabSession,
   Ladder,
   LadderProgress,
   LessonCard,
   MilestoneProgress,
   PlannerConversation,
-  PlannerSession,
-  Project,
-  Session,
-  SightWordList,
   SightWordProgress,
   SkillSnapshot,
   Sticker,
   StoryGame,
   WeekPlan,
   WeeklyReview,
-  WeeklyScore,
   WorkbookConfig,
   XpLedger,
 } from '../types'
@@ -143,9 +137,6 @@ export const hoursAdjustmentsCollection = (
     `families/${familyId}/hoursAdjustments`,
   ) as CollectionReference<HoursAdjustment>
 
-export const sessionsCollection = (familyId: string): CollectionReference<Session> =>
-  collection(db, `families/${familyId}/sessions`) as CollectionReference<Session>
-
 /** Normalize legacy planType values: 'A' → 'normal', 'B' → 'mvd'. */
 function normalizePlanType(raw: string): DailyPlan['planType'] {
   if (raw === 'A' || raw === 'normal') return 'normal'
@@ -175,36 +166,6 @@ export const dailyPlansCollection = (
 /** Daily plan doc ID: {date}_{childId} */
 export const dailyPlanDocId = (date: string, childId: string): string =>
   `${date}_${childId}`
-
-export const projectsCollection = (familyId: string): CollectionReference<Project> =>
-  collection(db, `families/${familyId}/projects`) as CollectionReference<Project>
-
-export const weeklyScoresCollection = (
-  familyId: string,
-): CollectionReference<WeeklyScore> =>
-  collection(db, `families/${familyId}/weeklyScores`) as CollectionReference<WeeklyScore>
-
-const labSessionConverter: FirestoreDataConverter<LabSession> = {
-  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
-  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
-    const data = snapshot.data(options) as LabSession
-    return {
-      ...data,
-      id: snapshot.id,
-    }
-  },
-}
-
-/** Lab session doc ID: {weekKey}_{childId}_{projectId} (or {weekKey}_{childId} for legacy sessions). */
-export const labSessionDocId = (weekKey: string, childId: string, projectId?: string): string =>
-  projectId ? `${weekKey}_${childId}_${projectId}` : `${weekKey}_${childId}`
-
-export const labSessionsCollection = (
-  familyId: string,
-): CollectionReference<LabSession> =>
-  collection(db, `families/${familyId}/labSessions`).withConverter(
-    labSessionConverter,
-  ) as CollectionReference<LabSession>
 
 const dadLabReportConverter: FirestoreDataConverter<DadLabReport> = {
   toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
@@ -250,30 +211,6 @@ export const skillSnapshotsCollection = (
   collection(db, `families/${familyId}/skillSnapshots`).withConverter(
     skillSnapshotConverter,
   ) as CollectionReference<SkillSnapshot>
-
-// ── Planner Sessions (Shelly Planner) ───────────────────────────
-
-const plannerSessionConverter: FirestoreDataConverter<PlannerSession> = {
-  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
-  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
-    const data = snapshot.data(options) as PlannerSession
-    return {
-      ...data,
-      id: snapshot.id,
-    }
-  },
-}
-
-export const plannerSessionsCollection = (
-  familyId: string,
-): CollectionReference<PlannerSession> =>
-  collection(db, `families/${familyId}/plannerSessions`).withConverter(
-    plannerSessionConverter,
-  ) as CollectionReference<PlannerSession>
-
-/** Planner session doc ID: {weekKey}_{childId} */
-export const plannerSessionDocId = (weekKey: string, childId: string): string =>
-  `${weekKey}_${childId}`
 
 // ── Lesson Cards ────────────────────────────────────────────────
 
@@ -363,10 +300,6 @@ export const sightWordProgressCollection = (familyId: string) =>
 /** Doc ID format: {childId}_{word} (e.g., "lincoln123_the") */
 export const sightWordProgressDocId = (childId: string, word: string): string =>
   `${childId}_${word.toLowerCase().replace(/\s+/g, '-')}`
-
-/** Sight word lists: families/{familyId}/sightWordLists/{listId} */
-export const sightWordListsCollection = (familyId: string) =>
-  collection(db, `families/${familyId}/sightWordLists`) as CollectionReference<SightWordList>
 
 // ── AI Usage ────────────────────────────────────────────────────
 

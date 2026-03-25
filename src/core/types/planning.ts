@@ -8,7 +8,6 @@ import type {
   MasteryGate,
   PaceStatus,
   PlannerConversationStatus,
-  PlannerSessionStatus,
   PlanType,
   ReviewStatus,
   SessionResult,
@@ -38,6 +37,16 @@ export interface WeekPlan {
     childId: string
     goals: string[]
   }>
+  conundrum?: {
+    title: string
+    scenario: string
+    question: string
+    angles: string[]
+    lincolnPrompt: string
+    londonPrompt: string
+    virtueConnection: string
+    subjectConnection: string
+  }
 }
 
 export interface RoutineItem {
@@ -147,6 +156,7 @@ export interface DayLog {
   xpTotal?: number
   retro?: string
   checklist?: ChecklistItem[]
+  teachBackDone?: boolean
   createdAt?: string
   updatedAt?: string
 }
@@ -240,50 +250,12 @@ export interface DailyPlan {
   completedSessionIds?: string[]
 }
 
-export interface GoalResult {
-  goal: string
-  result: SessionResult | 'na'
-}
-
-export interface WeeklyScore {
-  id?: string
-  childId: string
-  weekStart: string
-  metrics: ScoreMetric[]
-  goalResults?: GoalResult[]
-  reflectionWorked?: string
-  reflectionFriction?: string
-  reflectionTweak?: string
-  createdAt?: string
-}
-
-export interface ScoreMetric {
-  label: string
-  result: SessionResult | 'na'
-}
-
 // ── Shelly Planner ─────────────────────────────────────────────
 
 export interface AppBlock {
   label: string
   defaultMinutes: number
   notes?: string
-}
-
-export interface PlannerSession {
-  id?: string
-  childId: string
-  weekKey: string
-  status: PlannerSessionStatus
-  availableHoursPerDay: number
-  appBlocks: AppBlock[]
-  /** Photo artifact IDs uploaded for extraction */
-  photoIds: string[]
-  assignments: AssignmentCandidate[]
-  /** The generated draft weekly plan items */
-  draftPlan: WeeklyPlanItem[]
-  createdAt?: string
-  updatedAt?: string
 }
 
 export interface AssignmentCandidate {
