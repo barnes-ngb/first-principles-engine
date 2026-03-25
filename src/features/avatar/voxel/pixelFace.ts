@@ -158,6 +158,44 @@ export function showFaceMeshes(character: THREE.Group) {
   })
 }
 
+// ── Apply AI-generated skin texture from URL ────────────────────────
+
+/**
+ * Load an AI-generated skin texture from a URL and apply it to the head mesh.
+ * Uses NearestFilter for crisp Minecraft-style pixels.
+ */
+export async function applyAISkinToHead(
+  headMesh: THREE.Mesh,
+  skinImageUrl: string,
+  skinColor: number,
+): Promise<boolean> {
+  try {
+    const loader = new THREE.TextureLoader()
+    const texture = await new Promise<THREE.Texture>((resolve, reject) => {
+      loader.load(skinImageUrl, resolve, undefined, reject)
+    })
+
+    texture.magFilter = THREE.NearestFilter
+    texture.minFilter = THREE.NearestFilter
+
+    const skinMat = new THREE.MeshLambertMaterial({ color: skinColor })
+    const faceMat = new THREE.MeshLambertMaterial({ map: texture })
+
+    // [+X right, -X left, +Y top, -Y bottom, +Z front, -Z back]
+    headMesh.material = [
+      skinMat, // right
+      skinMat, // left
+      skinMat, // top (hair covers)
+      skinMat, // bottom
+      faceMat, // front — THE FACE
+      skinMat, // back
+    ]
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ── Face generation strategy ────────────────────────────────────────
 
 /**
@@ -174,4 +212,28 @@ export function applyPaintedFace(
   const faceCanvas = buildPaintedFace(features)
   applyCanvasToHead(headMesh, faceCanvas, skinColor)
   hideFaceMeshes(character)
+}
+
+/**
+ * Apply face texture to head mesh, trying AI skin first, then painted fallback.
+ * Hides 3D face meshes when any texture is applied to prevent Z-fighting.
+ */
+export async function applyFaceWithAIFallback(
+  headMesh: THREE.Mesh,
+  character: THREE.Group,
+  features: Partial<CharacterFeatures>,
+  skinColor: number,
+  skinTextureUrl?: string,
+): Promise<void> {
+  // Try AI skin texture first
+  if (skinTextureUrl) {
+    const applied = await applyAISkinToHead(headMesh, skinTextureUrl, skinColor)
+    if (applied) {
+      hideFaceMeshes(character)
+      return
+    }
+  }
+
+  // Fallback: painted face from features
+  applyPaintedFace(headMesh, character, features, skinColor)
 }

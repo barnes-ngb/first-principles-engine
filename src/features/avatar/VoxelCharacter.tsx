@@ -14,7 +14,7 @@ import { applyTierToArmor, calculateTier, getTierTint, TIER_MATERIALS } from './
 import { triggerTierUpCeremony } from './voxel/tierUpCeremony'
 import { PoseAnimator, POSES, POSE_EXPRESSIONS, applyExpression, getEquipmentIdlePose } from './voxel/poseSystem'
 import type { Pose } from './voxel/poseSystem'
-import { applyPaintedFace } from './voxel/pixelFace'
+import { applyPaintedFace, applyFaceWithAIFallback } from './voxel/pixelFace'
 import { buildHelmHair } from './voxel/buildHair'
 import { frameCameraToCharacter } from './voxel/cameraUtils'
 
@@ -32,6 +32,8 @@ interface VoxelCharacterProps {
   height?: string | number
   /** Photo URL for pixel face generation */
   photoUrl?: string
+  /** AI-generated Minecraft skin texture URL (cached) */
+  skinTextureUrl?: string
   /** Triggered pose ID (from PoseButtons or swipe) */
   activePoseId?: string | null
   /** Callback when a pose completes */
@@ -51,22 +53,27 @@ function applyHelmHairStyle(
   isHelmetEquipped: boolean,
   features: CharacterFeatures,
 ) {
-  const fullHair = character.getObjectByName('hairGroup')
-  let helmHair = character.getObjectByName('helmHairGroup')
-  const head = character.getObjectByName('head') as THREE.Mesh | undefined
+  const headGroup = character.getObjectByName('headGroup') as THREE.Group | undefined
+  if (!headGroup) return
+
+  const fullHair = headGroup.getObjectByName('hairGroup')
+  let helmHair = headGroup.getObjectByName('helmHairGroup')
+  const headMesh = headGroup.getObjectByName('head') as THREE.Mesh | undefined
 
   if (isHelmetEquipped) {
     // Hide full hair
     if (fullHair) fullHair.visible = false
 
     // Show helmet-compatible hair — only parts that peek from under helmet
-    if (!helmHair && head) {
-      const headGeo = head.geometry as THREE.BoxGeometry
+    // Hair is child of headGroup so it moves with head rotations
+    if (!helmHair && headMesh) {
+      const headGeo = headMesh.geometry as THREE.BoxGeometry
       const headWidth = headGeo.parameters.width
       const U = headWidth / 8
       const hairMat = new THREE.MeshLambertMaterial({ color: features.hairColor ?? '#6B4C32' })
-      helmHair = buildHelmHair(hairMat, head.position.y, U)
-      character.add(helmHair)
+      // headY = 0 in headGroup local space
+      helmHair = buildHelmHair(hairMat, 0, U)
+      headGroup.add(helmHair)
     }
     if (helmHair) helmHair.visible = true
   } else {
@@ -221,6 +228,7 @@ export default function VoxelCharacter({
   onSwipePose,
   onTierUpStart,
   onTierUp,
+  skinTextureUrl,
 }: VoxelCharacterProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -308,10 +316,12 @@ export default function VoxelCharacter({
     characterRef.current = character
     scene.add(character)
 
-    // Build armor pieces — sword/shield attach to arms, breastplate arm covers attach to arms
+    // Build armor pieces — sword/shield attach to arms, helmet to headGroup,
+    // breastplate arm covers attach to arms
     armorGroupsRef.current.clear()
     const armL = character.getObjectByName('armL')
     const armR = character.getObjectByName('armR')
+    const headGroup = character.getObjectByName('headGroup')
 
     for (const pieceMeta of VOXEL_ARMOR_PIECES) {
       const pieceGroup = buildArmorPiece(pieceMeta.id, ageGroup)
@@ -323,6 +333,11 @@ export default function VoxelCharacter({
         else character.add(pieceGroup)
       } else if (attachTo === 'L') {
         if (armL) armL.add(pieceGroup)
+        else character.add(pieceGroup)
+      } else if (pieceMeta.id === 'helmet') {
+        // Helmet is child of headGroup — moves with head during poses
+        // Helmet coordinates are already in head-local space
+        if (headGroup) headGroup.add(pieceGroup)
         else character.add(pieceGroup)
       } else {
         // For breastplate, move arm-cover children to their respective arms
@@ -504,7 +519,7 @@ export default function VoxelCharacter({
 
         const armLObj = characterRef.current.getObjectByName('armL')
         const armRObj = characterRef.current.getObjectByName('armR')
-        const headObj = characterRef.current.getObjectByName('head')
+        const headObj = characterRef.current.getObjectByName('headGroup')
 
         // Check if pose animator is actively playing (skip during ceremony)
         const poseActive = !ceremonyActiveRef.current && armLObj && armRObj && headObj && poseAnimator.update(
@@ -553,13 +568,18 @@ export default function VoxelCharacter({
     }
     animate()
 
-    // Apply painted pixel face from extracted features (clean Minecraft style)
+    // Apply face texture — try AI skin first, then painted fallback
     const headMesh = character.getObjectByName('head') as THREE.Mesh | undefined
     if (headMesh) {
       const skinHex = new THREE.Color(resolvedFeatures.skinTone ?? '#F5D6B8').getHex()
-      applyPaintedFace(headMesh, character, resolvedFeatures, skinHex)
+      if (skinTextureUrl) {
+        // Async: try AI skin, fall back to painted
+        void applyFaceWithAIFallback(headMesh, character, resolvedFeatures, skinHex, skinTextureUrl)
+      } else {
+        applyPaintedFace(headMesh, character, resolvedFeatures, skinHex)
+      }
     }
-  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier])
+  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, skinTextureUrl])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
@@ -685,8 +705,8 @@ export default function VoxelCharacter({
               animateJump(character, 0.5, 400)
               break
             case 'helmet': {
-              const head = character.getObjectByName('head')
-              if (head) animateNod(head, 300)
+              const headGrp = character.getObjectByName('headGroup')
+              if (headGrp) animateNod(headGrp, 300)
               // Swap to helmet-compatible hair
               applyHelmHairStyle(character, true, resolvedFeatures)
               break

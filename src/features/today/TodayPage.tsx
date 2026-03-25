@@ -1592,7 +1592,11 @@ export default function TodayPage() {
       {(() => {
         const isLincolnChild = selectedChild?.name?.toLowerCase() === 'lincoln'
         const checklist = dayLog?.checklist ?? []
-        const mustDoItems = checklist.filter((i) => i.mvdEssential)
+        const rawItems = dayLog?.checklist ?? []
+        const essentialItems = rawItems.filter((i) => i.category === 'must-do' || i.mvdEssential)
+        const mustDoItems = essentialItems.length > 0
+          ? essentialItems
+          : rawItems.slice(0, 3)
         const mustDoCompleted = mustDoItems.filter((i) => i.completed).length
         const halfDone = mustDoItems.length > 0 && mustDoCompleted >= Math.ceil(mustDoItems.length / 2)
         if (!isLincolnChild || checklist.length === 0 || !halfDone || teachBackSaved) return null

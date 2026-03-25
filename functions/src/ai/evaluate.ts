@@ -437,9 +437,11 @@ export async function generateReviewForChild(
     createdAt: new Date().toISOString(),
   };
 
+  const reviewDocId = `${ctx.weekKey}_${ctx.child.id}`;
   await db
     .collection(`families/${familyId}/weeklyReviews`)
-    .add(reviewData);
+    .doc(reviewDocId)
+    .set(reviewData);
 
   // Log AI usage
   await db.collection(`families/${familyId}/aiUsage`).add({
