@@ -475,8 +475,27 @@ export const generateWeeklyReviewNow = onCall(
     }
 
     const apiKey = claudeApiKey.value();
-    const ctx = await assembleWeekContext(familyId, childId, weekKey);
-    await generateReviewForChild(familyId, ctx, apiKey);
+    if (!apiKey) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Missing CLAUDE_API_KEY secret.",
+      );
+    }
+
+    try {
+      const ctx = await assembleWeekContext(familyId, childId, weekKey);
+      await generateReviewForChild(familyId, ctx, apiKey);
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      const errMsg = err instanceof Error ? err.message : "Unknown error";
+      console.error("generateWeeklyReviewNow failed:", {
+        familyId,
+        childId,
+        weekKey,
+        error: errMsg,
+      });
+      throw new HttpsError("internal", `Weekly review failed: ${errMsg}`);
+    }
 
     return { success: true };
   },
