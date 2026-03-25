@@ -127,10 +127,8 @@ export const POSES: Pose[] = [
   },
 
   // WAVE — arm extends OUT to the character's right side, then waves forward/back via rotX
-  // In Three.js Euler XYZ, the rotation matrix is R = Rz * Ry * Rx.
-  // For the right arm, POSITIVE rotZ swings the arm outward (to character's right).
-  // NEGATIVE rotZ swings it inward (across body/through the head).
-  // Previous fixes used negative rotZ which sent the arm LEFT into the head.
+  // For the right arm (positioned at +X), NEGATIVE rotZ = outward, POSITIVE = inward.
+  // This matches victory (-0.8, -2.8) and dab (-1.8) which all use negative rotZ for outward.
   {
     id: 'wave',
     name: 'Wave',
@@ -142,13 +140,13 @@ export const POSES: Pose[] = [
       // Phase 2 (0.12-0.77): hold at side, wave via rotX oscillation
       // Phase 3 (0.77-1): return to rest
       rotZ: [
-        -0.05,  // rest (slight inward lean)
-        1.3,    // extend OUT to character's right (~75° outward)
-        1.3,    // hold at side — this is the wave position
-        1.3,
-        1.3,
-        1.3,
-        1.3,
+        -0.05,  // rest (slight outward lean)
+        -1.3,   // extend OUT to character's right (~75° outward)
+        -1.3,   // hold at side — this is the wave position
+        -1.3,
+        -1.3,
+        -1.3,
+        -1.3,
         -0.05,  // return to rest
       ],
       rotX: [
@@ -164,7 +162,7 @@ export const POSES: Pose[] = [
       times: [0, 0.12, 0.25, 0.38, 0.51, 0.64, 0.77, 1],
     },
     head: {
-      rotY: [0, -0.15, -0.15, -0.15, -0.15, -0.15, -0.15, 0],
+      rotY: [0, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0],
       times: [0, 0.12, 0.25, 0.38, 0.51, 0.64, 0.77, 1],
     },
     body: { posY: [0] },
