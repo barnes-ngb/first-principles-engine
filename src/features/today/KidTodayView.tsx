@@ -223,14 +223,15 @@ export default function KidTodayView({
 
   // Derive extra activity items from dayLog checklist
   const extraItems = useMemo(() => {
-    if (!dayLog?.checklist) return []
-    return dayLog.checklist
+    const items = dayLog.checklist
+    if (!items) return []
+    return items
       .filter((item) => item.source === 'manual' && item.completed)
       .map((item) => ({
         label: item.label.replace(/\s*\(\d+m\)\s*$/, ''),
         minutes: item.estimatedMinutes ?? 0,
       }))
-  }, [dayLog?.checklist])
+  }, [dayLog.checklist])
 
   const handleSaveExtra = useCallback(async () => {
     if (!extraActivity || !extraMinutes || !dayLog) return
