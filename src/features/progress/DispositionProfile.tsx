@@ -75,7 +75,7 @@ export default function DispositionProfile() {
     isLoading: isLoadingChildren,
     addChild,
   } = useActiveChild()
-  const { chat } = useAI()
+  const { chat, error: aiError } = useAI()
 
   const [result, setResult] = useState<DispositionResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -95,7 +95,7 @@ export default function DispositionProfile() {
       })
 
       if (!response?.message) {
-        setError('No response from AI. Please try again.')
+        setError(aiError?.message ?? 'No response from AI. Please try again.')
         return
       }
 
