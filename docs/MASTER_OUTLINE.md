@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v9 **Version:** v9 — March 23, 2026 **Status:** Living document — updated after Plan My Week UX rewrite Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: 52k+ lines TypeScript, 30+ test files, 600+ tests, 32+ Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v10 **Version:** v10 — March 25, 2026 **Status:** Living document — updated after parent experience audit + dead code cleanup Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~73k lines TypeScript (down from ~78k after cleanup), 30+ test files, 600+ tests, 28 Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -173,7 +173,7 @@ My Books (Book Builder + AI Story Generator)
 **XP System:** xpLedger collection, separate tracks per child, checkAndUnlockArmor on XP change
 
 Progress
-* Ladders tab (skill progression), Engine tab, Milestones tab
+* Tabs: Skill Snapshot (default), Ladders, Word Wall, Engine, Milestones, Armor
 * Skill Snapshot — priority skills, supports, stop rules, evidence definitions, workbook configs
 * Conceptual Blocks — conceptualBlocks[] on Skill Snapshot from pattern detection; ADDRESS_NOW vs DEFER; plain language rationale + strategies
 * "Evaluate Skills" button → evaluation chat Records
@@ -204,7 +204,7 @@ Progress
 - Workshop: story inputs + skill snapshot for challenge calibration + game structure constraints + adventure tree generation + card game generation + card fix suggestions
 - Pattern analysis: child profile + skill snapshot + eval findings + conceptual blocks
 - Engagement data compressed to summary format (reduces tokens ~60%)
-- Token usage logged per task type to aiUsage collection Firestore Collections (32) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, sessions, projects, labSessions, weeklyScores, dadLabReports, books, bookPages, sightWordProgress, xpLedger, readingSessions, dailyArmorSessions, stickerLibrary, weeklyScores, storyGames
+- Token usage logged per task type to aiUsage collection Firestore Collections (28) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, dadLabReports, books, bookPages, sightWordProgress, xpLedger, readingSessions, dailyArmorSessions, stickerLibrary, storyGames, evaluations
 
 * `avatarProfiles` — per-child avatar data (features, XP, tier, equipped pieces, customization)
 * `xpLedger` — append-only XP event history per child
@@ -294,7 +294,22 @@ Workshop P1 Mar 22 Voice-first story game wizard, board game play, reusable TTS/
 Workshop P1.5 Mar 22 Player selection with avatars, DALL-E art generation (boards, titles, cards, tokens), saving/cross-device/resume, Today page cards, draft auto-save
 Workshop P2 Mar 22 Play polish (animations, sound effects, confetti), London voice recording for cards, Lincoln playtester feedback loop with AI card fixes, version tracking
 Workshop P3 Mar 22 Choose-your-adventure game type (branching story tree, scene art, retry endings), Card game type (Matching/Collecting/Battle mechanics)
-Plan My Week Fix Mar 23 Critical bug fixes (handleSetupComplete routing, JSON parsing, feature flag default), UX rewrite (auto-suggest focus, compact setup, full-width plan preview, must-do/choose sections, per-subject default times, renamed UI, combined adjustment chips) Key Design Decisions
+Plan My Week Fix Mar 23 Critical bug fixes (handleSetupComplete routing, JSON parsing, feature flag default), UX rewrite (auto-suggest focus, compact setup, full-width plan preview, must-do/choose sections, per-subject default times, renamed UI, combined adjustment chips)
+Cleanup Mar 24-25 Parent experience audit, dead code removal (5.6k+ lines), model unification (all Sonnet → claude-sonnet-4-6), plan quality fixes (timeBudget 185m, estimatedMinutes 30m, routine promotion, must-do default), hours computation fix, AI Usage panel model labels, docs refresh, orphaned collections/types/seed cleanup, CHARTER_PREAMBLE dedup, Progress tab reorder
+
+Removed Features (Cleanup Sprint, Mar 24-25)
+* Sessions (1,720 lines) — orphaned feature with no nav links; sessionsCollection removed
+* Scoreboard (736 lines) — orphaned; weeklyScoresCollection + WeeklyScore type removed
+* Projects (858 lines) — orphaned; projectsCollection removed
+* WeekPage (628 lines) — replaced by Weekly Review
+* Legacy Planner (863 lines) — superseded by PlannerChatPage
+* Minecraft XP components — relocated to core/xp/ and features/avatar/
+* Dead CF code (buildSystemPrompt, loadEnrichedContext) — replaced by contextSlices.ts task-specific slicing
+* Orphaned collection helpers: labSessionsCollection, plannerSessionsCollection, sightWordListsCollection
+* Orphaned types: Session, PlannerSession, WeeklyScore, ScoreMetric, GoalResult
+* Seed data for deleted features (sessions + projects blocks)
+
+Key Design Decisions
 1. Portfolio over grades — no scores, no rankings, evidence-based assessment
 2. No shame rule — MVD is real school, bad days count, app never makes Shelly feel like failing
 3. Formation first — prayer/scripture before academics every day
@@ -350,4 +365,4 @@ Architecture Review Notes (March 21, 2026) The following areas are flagged for a
 * Firestore collection count — 32+ collections; some may be better as subcollections; composite index requirements growing
 * Client-side image processing — cropArmorSheet, sketch cleanup, and print PDF all do heavy canvas work client-side; perf on low-end devices
 * AI context pipeline size — system prompt includes many data sources; token cost and latency implications
-* Type safety — domain.ts is the single source of truth; growing large; worth splitting by feature domain? Last updated: March 22, 2026
+* Type safety — types split across 8 files (common, family, planning, evaluation, xp, books, compliance, dadlab) with barrel re-export via index.ts Last updated: March 25, 2026

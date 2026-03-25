@@ -8,13 +8,10 @@ import type {
   MasteryGate,
   PaceStatus,
   PlannerConversationStatus,
-  PlannerSessionStatus,
   PlanType,
   ReviewStatus,
-  SessionResult,
   StreamId,
   SubjectBucket,
-  SupportTag,
   TrackType,
 } from './enums'
 import type { SkillTag } from './common'
@@ -208,20 +205,6 @@ export interface ChecklistItem {
   skipGuidance?: string
 }
 
-export interface Session {
-  id?: string
-  childId: string
-  date: string
-  streamId: StreamId
-  ladderId: string
-  targetRungOrder: number
-  result: SessionResult
-  durationSeconds?: number
-  notes?: string
-  supports?: SupportTag[]
-  createdAt?: string
-}
-
 export interface PlannedSession {
   streamId: StreamId
   ladderId: string
@@ -240,50 +223,12 @@ export interface DailyPlan {
   completedSessionIds?: string[]
 }
 
-export interface GoalResult {
-  goal: string
-  result: SessionResult | 'na'
-}
-
-export interface WeeklyScore {
-  id?: string
-  childId: string
-  weekStart: string
-  metrics: ScoreMetric[]
-  goalResults?: GoalResult[]
-  reflectionWorked?: string
-  reflectionFriction?: string
-  reflectionTweak?: string
-  createdAt?: string
-}
-
-export interface ScoreMetric {
-  label: string
-  result: SessionResult | 'na'
-}
-
 // ── Shelly Planner ─────────────────────────────────────────────
 
 export interface AppBlock {
   label: string
   defaultMinutes: number
   notes?: string
-}
-
-export interface PlannerSession {
-  id?: string
-  childId: string
-  weekKey: string
-  status: PlannerSessionStatus
-  availableHoursPerDay: number
-  appBlocks: AppBlock[]
-  /** Photo artifact IDs uploaded for extraction */
-  photoIds: string[]
-  assignments: AssignmentCandidate[]
-  /** The generated draft weekly plan items */
-  draftPlan: WeeklyPlanItem[]
-  createdAt?: string
-  updatedAt?: string
 }
 
 export interface AssignmentCandidate {
