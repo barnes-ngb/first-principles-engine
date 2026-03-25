@@ -64,7 +64,8 @@ export default function BoardSpace({
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: '0.7rem',
+        fontSize: '0.75rem',
+        p: '2px',
         overflow: 'hidden',
         transition: 'border-color 0.2s',
         // Landing pulse animation
@@ -90,7 +91,7 @@ export default function BoardSpace({
           position: 'absolute',
           top: 1,
           left: 3,
-          fontSize: '0.55rem',
+          fontSize: '0.6rem',
           color: 'text.secondary',
         }}
       >
@@ -98,23 +99,28 @@ export default function BoardSpace({
       </Typography>
 
       {/* Space indicator */}
-      {isFirst && <Typography sx={{ fontSize: '0.65rem', fontWeight: 700 }}>START</Typography>}
-      {isLast && <Typography sx={{ fontSize: '0.65rem', fontWeight: 700 }}>FINISH</Typography>}
+      {isFirst && <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>START</Typography>}
+      {isLast && <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>FINISH</Typography>}
       {!isFirst && !isLast && SPACE_EMOJI[type] && (
-        <Typography sx={{ fontSize: '1rem' }}>{SPACE_EMOJI[type]}</Typography>
+        <Typography sx={{ fontSize: '1.15rem' }}>{SPACE_EMOJI[type]}</Typography>
       )}
 
       {/* Label */}
       {label && !isFirst && !isLast && (
         <Typography
+          title={label}
           sx={{
-            fontSize: '0.5rem',
+            fontSize: '0.65rem',
             textAlign: 'center',
-            lineHeight: 1.1,
-            px: 0.25,
+            lineHeight: 1.15,
+            px: 0.5,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
             maxWidth: '100%',
+            wordBreak: 'break-word',
           }}
         >
           {label}
@@ -219,27 +225,32 @@ export default function BoardSpace({
         <Box
           sx={{
             position: 'absolute',
-            bottom: 1,
+            bottom: 2,
             display: 'flex',
-            gap: '2px',
+            // Offset-stack when multiple players share a space
+            '& > *:not(:first-of-type)': {
+              ml: players.length > 2 ? '-6px' : '-4px',
+            },
           }}
         >
-          {players.map((player) => (
+          {players.map((player, pi) => (
             <Box
               key={player.name}
               sx={{
-                width: 14,
-                height: 14,
+                width: 18,
+                height: 18,
                 borderRadius: '50%',
                 bgcolor: player.avatarUrl ? 'transparent' : player.color,
-                border: '1px solid white',
+                border: '2px solid white',
                 overflow: 'hidden',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '0.45rem',
+                fontSize: '0.5rem',
                 fontWeight: 700,
                 color: 'white',
+                zIndex: pi,
+                boxShadow: '0 1px 2px rgba(0,0,0,0.3)',
                 // Bounce animation when landing
                 ...(isLanding
                   ? {
