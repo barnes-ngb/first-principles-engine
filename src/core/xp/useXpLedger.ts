@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { doc, onSnapshot } from 'firebase/firestore'
 
-import { xpLedgerCollection } from '../../core/firebase/firestore'
-import type { XpLedger } from '../../core/types'
+import { xpLedgerCollection } from '../firebase/firestore'
+import type { XpLedger } from '../types'
 import type { ArmorTierInfo } from './armorTiers'
 import { getArmorTier, getNextTierProgress } from './armorTiers'
 

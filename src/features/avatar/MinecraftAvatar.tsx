@@ -1,6 +1,6 @@
 import Box from '@mui/material/Box'
-import type { ArmorTierInfo } from './armorTiers'
-import { ArmorTier, getArmorTier } from './armorTiers'
+import type { ArmorTierInfo } from '../../core/xp/armorTiers'
+import { ArmorTier, getArmorTier } from '../../core/xp/armorTiers'
 
 /**
  * A CSS pixel-art Minecraft character (Steve) that displays armor
