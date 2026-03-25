@@ -353,7 +353,7 @@ export default function KidTodayView({
           domain: 'speech',
         },
         ...(mediaUrl ? { mediaUrl } : {}),
-        note: `Lincoln taught London about ${teachSubject}`,
+        notes: `Lincoln taught London about ${teachSubject}`,
         createdAt: new Date().toISOString(),
       })
 
