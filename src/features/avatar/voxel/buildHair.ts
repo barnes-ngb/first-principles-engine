@@ -42,76 +42,50 @@ export function buildHair(
     const darkMat = new THREE.MeshLambertMaterial({ color: lerpColor(baseHex, 0x000000, 0.12) })
 
     // ── Lincoln-specific hair: medium style + ear_length ────────────
-    // Parted on the LEFT, falls well past ears, thicker on the right
-    // side (hair sweeps from part toward the right), slight wave.
+    // Parted on the LEFT, covers ears but stops there, thicker on the
+    // right side (hair sweeps from part toward the right).
     if (style === 'medium' && length === 'ear_length') {
       // Head block is 8U×8U×8U, centered at headY (typically 0 in local space)
-      // Head spans from headY-4U to headY+4U on all axes
+      // Head top = headY+4U, head bottom = headY-4U
+      // Head sides = ±4U, head front = +4U Z, head back = -4U Z
+      // Ear level ≈ headY-2U (midpoint of head height)
 
-      // === TOP COVERAGE — thick, slightly off-center (parted left) ===
-      const topRight = box(U * 11.2, U * 3.2, U * 8.4, material)
-      topRight.position.set(U * 2.4, headY + U * 4.4, 0)
-      hair.add(topRight)
+      // === TOP CAP — flush against head top, NOT floating above ===
+      // Bottom of cap = head top (headY+4U), so center = headY+4U + half_height
+      const top = box(U * 8.2, U * 1.0, U * 8.2, material)
+      top.position.set(0, headY + U * 4.5, 0)
+      hair.add(top)
 
-      const topLeft = box(U * 5.6, U * 2.4, U * 8.4, darkMat)
-      topLeft.position.set(-U * 5.6, headY + U * 4.2, 0)
-      hair.add(topLeft)
+      // Part detail — darker strip on left where the part is
+      const partGap = box(U * 1.2, U * 1.05, U * 6.0, darkMat)
+      partGap.position.set(-U * 1.6, headY + U * 4.55, 0)
+      hair.add(partGap)
 
-      // === BANGS — sweep across forehead from left to right ===
-      const bangsMain = box(U * 7.2, U * 2.0, U * 2.0, material)
-      bangsMain.position.set(U * 0.8, headY + U * 2.6, U * 3.4)
-      hair.add(bangsMain)
+      // === BANGS — hang over forehead, above the eyes ===
+      const bangs = box(U * 6.4, U * 1.6, U * 1.4, material)
+      bangs.position.set(U * 0.4, headY + U * 2.8, U * 4.2)
+      hair.add(bangs)
 
-      // Extra bang chunk sweeping right (following the part direction)
-      const bangSweep = box(U * 2.4, U * 1.4, U * 1.6, lightMat)
-      bangSweep.position.set(U * 5.6, headY + U * 3.0, U * 3.6)
-      hair.add(bangSweep)
+      // === LEFT SIDE — covers ear area, stops at ear level (~headY-2U) ===
+      // Height 4.8U: from headY+3.8U down to headY-1.0U (ear level)
+      const sideL = box(U * 1.2, U * 4.8, U * 6.4, material)
+      sideL.position.set(-U * 4.2, headY + U * 1.4, 0)
+      hair.add(sideL)
 
-      // === LEFT SIDE — falls past the ear to jawline (part side, thinner) ===
-      const sideL_upper = box(U * 1.4, U * 4.0, U * 6.4, material)
-      sideL_upper.position.set(-U * 4.2, headY + U * 1.2, U * 0)
-      hair.add(sideL_upper)
+      // === RIGHT SIDE — slightly thicker (hair sweeps this way from part) ===
+      const sideR = box(U * 1.4, U * 5.2, U * 6.8, material)
+      sideR.position.set(U * 4.2, headY + U * 1.2, 0)
+      hair.add(sideR)
 
-      const sideL_lower = box(U * 1.2, U * 4.0, U * 5.2, darkMat)
-      sideL_lower.position.set(-U * 4.32, headY - U * 2.4, U * 0.4)
-      hair.add(sideL_lower)
+      // Extra volume on right (part sweeps hair right)
+      const sideR_extra = box(U * 0.8, U * 3.2, U * 4.0, lightMat)
+      sideR_extra.position.set(U * 4.6, headY + U * 0.8, U * 0.8)
+      hair.add(sideR_extra)
 
-      // Wispy end — left
-      const sideL_tip = box(U * 1.0, U * 2.0, U * 3.2, material)
-      sideL_tip.position.set(-U * 4.0, headY - U * 4.8, U * 0.6)
-      hair.add(sideL_tip)
-
-      // === RIGHT SIDE — thicker (hair sweeps this way from the part) ===
-      const sideR_upper = box(U * 1.8, U * 4.4, U * 7.2, material)
-      sideR_upper.position.set(U * 4.2, headY + U * 1.0, U * 0)
-      hair.add(sideR_upper)
-
-      const sideR_lower = box(U * 1.6, U * 4.4, U * 6.0, lightMat)
-      sideR_lower.position.set(U * 4.32, headY - U * 2.6, U * 0.2)
-      hair.add(sideR_lower)
-
-      // Wispy end — right side is slightly longer
-      const sideR_tip = box(U * 1.2, U * 2.4, U * 4.0, material)
-      sideR_tip.position.set(U * 4.08, headY - U * 5.4, U * 0.4)
-      hair.add(sideR_tip)
-
-      // === BACK — falls to neck/collar area ===
-      const backMain = box(U * 8.2, U * 7.2, U * 1.6, material)
-      backMain.position.set(0, headY - U * 0.4, -U * 4.2)
-      hair.add(backMain)
-
-      const backLower = box(U * 6.8, U * 3.2, U * 1.4, darkMat)
-      backLower.position.set(U * 0.2, headY - U * 4.4, -U * 4.32)
-      hair.add(backLower)
-
-      // === SUBTLE WAVE — offset chunks to break up straight lines ===
-      const waveChunkR = box(U * 1.2, U * 1.6, U * 2.0, lightMat)
-      waveChunkR.position.set(U * 4.6, headY - U * 0.8, U * 1.6)
-      hair.add(waveChunkR)
-
-      const waveChunkL = box(U * 1.0, U * 1.4, U * 1.6, material)
-      waveChunkL.position.set(-U * 4.48, headY - U * 1.2, U * 1.4)
-      hair.add(waveChunkL)
+      // === BACK — covers back of head down to neck ===
+      const back = box(U * 8.2, U * 6.0, U * 1.2, material)
+      back.position.set(0, headY + U * 0.8, -U * 4.2)
+      hair.add(back)
 
       return hair
     }
