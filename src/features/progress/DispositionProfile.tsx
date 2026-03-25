@@ -69,10 +69,10 @@ export default function DispositionProfile() {
   const familyId = useFamilyId()
   const {
     children,
-    selectedChildId,
-    setSelectedChildId,
+    activeChildId,
+    setActiveChildId,
     activeChild,
-    isLoadingChildren,
+    isLoading: isLoadingChildren,
     addChild,
   } = useActiveChild()
   const { chat } = useAI()
@@ -82,14 +82,14 @@ export default function DispositionProfile() {
   const [error, setError] = useState<string | null>(null)
 
   const handleGenerate = useCallback(async () => {
-    if (!familyId || !selectedChildId) return
+    if (!familyId || !activeChildId) return
     setLoading(true)
     setError(null)
 
     try {
       const response = await chat({
         familyId,
-        childId: selectedChildId,
+        childId: activeChildId,
         taskType: TaskType.Disposition,
         messages: [{ role: 'user', content: 'Generate the profile.' }],
       })
@@ -113,14 +113,14 @@ export default function DispositionProfile() {
     } finally {
       setLoading(false)
     }
-  }, [familyId, selectedChildId, chat])
+  }, [familyId, activeChildId, chat])
 
   return (
     <Box sx={{ px: { xs: 2, md: 3 }, py: 2, maxWidth: 800, mx: 'auto' }}>
       <ChildSelector
         children={children}
-        selectedChildId={selectedChildId}
-        onSelect={setSelectedChildId}
+        activeChildId={activeChildId}
+        onSelect={setActiveChildId}
         onChildAdded={addChild}
         isLoading={isLoadingChildren}
         emptyMessage="Add a child to view their learning profile."
@@ -134,7 +134,7 @@ export default function DispositionProfile() {
           <Button
             variant="contained"
             onClick={handleGenerate}
-            disabled={!selectedChildId}
+            disabled={!activeChildId}
             size="large"
           >
             Generate Learning Profile

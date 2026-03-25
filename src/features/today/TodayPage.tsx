@@ -1018,10 +1018,11 @@ export default function TodayPage() {
                   try {
                     await addDoc(artifactsCollection(familyId), {
                       childId: selectedChildId,
-                      type: 'conundrum',
+                      title: `Conundrum: ${weekFocus.conundrum!.title}`,
+                      type: EvidenceType.Note,
                       date: today,
-                      tags: { engineStage: EngineStage.Wonder, subjectBucket: SubjectBucket.Other, domain: '' },
-                      note: `Discussed: ${weekFocus.conundrum!.title}`,
+                      tags: { engineStage: EngineStage.Wonder, subjectBucket: SubjectBucket.Other, domain: '', location: LearningLocation.Home },
+                      content: `Discussed conundrum: ${weekFocus.conundrum!.title}`,
                       createdAt: new Date().toISOString(),
                     })
                     setSnackMessage({ text: 'Conundrum discussion recorded!', severity: 'success' })
@@ -1618,10 +1619,11 @@ export default function TodayPage() {
                   try {
                     await addDoc(artifactsCollection(familyId), {
                       childId: selectedChildId,
-                      type: 'teachBack',
+                      title: `Teach-back ${today}`,
+                      type: EvidenceType.Note,
                       date: today,
-                      tags: { engineStage: EngineStage.Explain, subjectBucket: SubjectBucket.Other, domain: 'speech' },
-                      note: teachBackText.trim(),
+                      tags: { engineStage: EngineStage.Explain, subjectBucket: SubjectBucket.Other, domain: 'speech', location: LearningLocation.Home },
+                      content: `Teach-back: ${teachBackText.trim()}`,
                       createdAt: new Date().toISOString(),
                     })
                     persistDayLogImmediate({ ...dayLog, teachBackDone: true })
