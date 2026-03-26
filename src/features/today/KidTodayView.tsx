@@ -500,7 +500,7 @@ export default function KidTodayView({
             <AvatarThumbnail
               features={avatarProfile.characterFeatures}
               ageGroup={avatarProfile.ageGroup}
-              equippedPieces={avatarProfile.equippedPieces}
+              equippedPieces={avatarProfile.equippedPieces ?? []}
               totalXp={avatarProfile.totalXp}
               size={64}
               animated

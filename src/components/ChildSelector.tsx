@@ -28,7 +28,7 @@ function ChildAvatarIcon({ childId }: { childId: string }) {
     <AvatarThumbnail
       features={avatarProfile.characterFeatures}
       ageGroup={avatarProfile.ageGroup}
-      equippedPieces={avatarProfile.equippedPieces}
+      equippedPieces={avatarProfile.equippedPieces ?? []}
       totalXp={avatarProfile.totalXp}
       size={28}
     />

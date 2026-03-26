@@ -37,7 +37,7 @@ export default function ArmorGateScreen({ gateStatus, avatarProfile, childName }
           <AvatarThumbnail
             features={avatarProfile.characterFeatures}
             ageGroup={avatarProfile.ageGroup}
-            equippedPieces={avatarProfile.equippedPieces}
+            equippedPieces={avatarProfile.equippedPieces ?? []}
             totalXp={avatarProfile.totalXp}
             size={120}
             animated

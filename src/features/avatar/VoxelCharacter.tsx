@@ -263,7 +263,7 @@ function addBackgroundElements(scene: THREE.Scene) {
 export default function VoxelCharacter({
   features,
   ageGroup,
-  equippedPieces,
+  equippedPieces: equippedPiecesRaw,
   totalXp = 0,
   animateEquipPiece,
   animateUnequipPiece,
@@ -297,6 +297,7 @@ export default function VoxelCharacter({
   const onTierUpRef = useRef(onTierUp)
   const ceremonyActiveRef = useRef(false)
 
+  const equippedPieces = Array.isArray(equippedPiecesRaw) ? equippedPiecesRaw : []
   const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
   const currentTier = calculateTier(totalXp)
 
