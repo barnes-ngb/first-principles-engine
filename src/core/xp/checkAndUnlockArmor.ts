@@ -40,7 +40,23 @@ export function ensureNewProfileStructure(raw: Record<string, unknown>): AvatarP
     // Ensure ALL array fields are never null/undefined from Firestore
     if (!Array.isArray(profile.equippedPieces)) profile.equippedPieces = []
     if (!Array.isArray(profile.pieces)) profile.pieces = []
+    // Guard sub-arrays inside each piece
+    profile.pieces = profile.pieces.map((p) => {
+      if (!p) return { pieceId: 'unknown' as ArmorPiece, unlockedTiers: [] as ArmorTier[], generatedImageUrls: {} }
+      return {
+        ...p,
+        unlockedTiers: Array.isArray(p.unlockedTiers) ? p.unlockedTiers : [],
+        unlockedTiersPlatformer: p.unlockedTiersPlatformer != null
+          ? (Array.isArray(p.unlockedTiersPlatformer) ? p.unlockedTiersPlatformer : [])
+          : undefined,
+      }
+    })
     return profile
+  }
+
+  // pieces exists but is not an array (e.g. Firestore map) — treat as missing
+  if (raw.pieces != null && !Array.isArray(raw.pieces)) {
+    raw.pieces = undefined
   }
 
   // Legacy migration: convert unlockedPieces + generatedImageUrls → pieces

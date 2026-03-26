@@ -114,7 +114,11 @@ export default function AvatarAdminTab() {
     const docId = dailyArmorSessionDocId(activeChildId, today)
     const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
     const unsub = onSnapshot(sessionRef, (snap) => {
-      setTodaySession(snap.exists() ? snap.data() : null)
+      setTodaySession(snap.exists() ? {
+        ...snap.data(),
+        appliedPieces: Array.isArray(snap.data().appliedPieces) ? snap.data().appliedPieces : [],
+        manuallyUnequipped: Array.isArray(snap.data().manuallyUnequipped) ? snap.data().manuallyUnequipped : [],
+      } : null)
     })
     return unsub
   }, [familyId, activeChildId, today])
