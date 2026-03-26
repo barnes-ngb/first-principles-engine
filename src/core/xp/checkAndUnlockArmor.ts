@@ -56,8 +56,8 @@ export function ensureNewProfileStructure(raw: Record<string, unknown>): AvatarP
     themeStyle,
     pieces,
     currentTier: themeStyle === 'minecraft' ? 'stone' : 'basic',
-    baseCharacterUrl: (raw.starterImageUrl as string | undefined),
-    photoTransformUrl: (raw.photoTransformUrl as string | undefined),
+    ...(raw.starterImageUrl ? { baseCharacterUrl: raw.starterImageUrl as string } : {}),
+    ...(raw.photoTransformUrl ? { photoTransformUrl: raw.photoTransformUrl as string } : {}),
     totalXp: (raw.totalXp as number) ?? 0,
     updatedAt: (raw.updatedAt as string) ?? new Date().toISOString(),
   }
@@ -129,7 +129,7 @@ export async function checkAndUnlockArmor(
         pieces.push({
           pieceId: pieceDef.id,
           unlockedTiers: themeStyle === 'minecraft' ? ['stone'] : [],
-          unlockedTiersPlatformer: themeStyle === 'platformer' ? ['basic'] : undefined,
+          ...(themeStyle === 'platformer' ? { unlockedTiersPlatformer: ['basic'] as PlatformerTier[] } : {}),
           generatedImageUrls: {},
         })
       }
