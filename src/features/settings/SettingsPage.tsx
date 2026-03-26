@@ -165,14 +165,16 @@ export default function SettingsPage() {
 
             <Divider />
 
-            <Stack spacing={1}>
-              <Typography color="text.secondary">
-                Use the button below to seed demo data for your family.
-              </Typography>
-              <Button variant="contained" onClick={handleSeedDemoData}>
-                Seed Demo Data
-              </Button>
-            </Stack>
+            {import.meta.env.DEV && (
+              <Stack spacing={1}>
+                <Typography color="text.secondary">
+                  Developer tool: seed demo data.
+                </Typography>
+                <Button variant="contained" onClick={handleSeedDemoData}>
+                  Seed Demo Data
+                </Button>
+              </Stack>
+            )}
           </Stack>
         )}
 

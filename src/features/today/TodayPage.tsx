@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink, useSearchParams } from 'react-router-dom'
-import AccessTimeIcon from '@mui/icons-material/AccessTime'
 import AddIcon from '@mui/icons-material/Add'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
@@ -8,7 +7,6 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import CheckIcon from '@mui/icons-material/Check'
-import ChecklistIcon from '@mui/icons-material/Checklist'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -21,13 +19,11 @@ import DialogTitle from '@mui/material/DialogTitle'
 import AccordionDetails from '@mui/material/AccordionDetails'
 import AccordionSummary from '@mui/material/AccordionSummary'
 import Alert from '@mui/material/Alert'
-import Avatar from '@mui/material/Avatar'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
-import FormControlLabel from '@mui/material/FormControlLabel'
 import IconButton from '@mui/material/IconButton'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
@@ -74,7 +70,6 @@ import type { Artifact, ChecklistItem as ChecklistItemType, DayLog, DraftDayPlan
 import { getLaddersForChild } from '../ladders/laddersCatalog'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
-  DayBlockType,
   EnergyLevel,
   EnergyLevelLabel,
   EngineStage,
@@ -86,13 +81,10 @@ import {
   UserProfile,
 } from '../../core/types/enums'
 import { getWeekRange } from '../../core/utils/time'
-import { blockMeta } from './blockMeta'
 import { getTemplateForChild } from './dailyPlanTemplates'
 import { autoFillBlockMinutes } from './daylog.model'
 import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
-import LadderQuickLog from './LadderQuickLog'
-import RoutineSection from './RoutineSection'
 import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
@@ -219,13 +211,9 @@ export default function TodayPage() {
   const artifactSectionRef = useRef<HTMLDivElement>(null)
 
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
-  const [linkingArtifactId, setLinkingArtifactId] = useState<string | null>(null)
-  const [linkingLadderId, setLinkingLadderId] = useState('')
-  const [linkingRungId, setLinkingRungId] = useState('')
   const [mediaUploading, setMediaUploading] = useState(false)
   const [energy, setEnergy] = useState<EnergyLevel>(EnergyLevel.Normal)
   const [planType, setPlanType] = useState<PlanType>(PlanType.Normal)
-  const [showAllBlocks, setShowAllBlocks] = useState(false)
   const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
   const [teachHelperOpen, setTeachHelperOpen] = useState(false)
   const [editingPlan, setEditingPlan] = useState(false)
@@ -247,13 +235,8 @@ export default function TodayPage() {
   const [artifactForm, setArtifactForm] = useState({
     childId: selectedChildId,
     evidenceType: EvidenceType.Note as EvidenceType,
-    engineStage: EngineStage.Wonder,
     subjectBucket: SubjectBucket.Reading,
-    location: LearningLocation.Home,
-    domain: '',
     content: '',
-    ladderId: '',
-    rungId: '',
   })
 
   // Keep artifact form childId in sync with active child
@@ -382,69 +365,6 @@ export default function TodayPage() {
     }
   }, [familyId, today, selectedChildId, setSnackMessage])
 
-  const selectedLadder = useMemo(
-    () => cardLadders.find((l) => l.ladderKey === artifactForm.ladderId),
-    [artifactForm.ladderId, cardLadders],
-  )
-
-  const linkingLadder = useMemo(
-    () => cardLadders.find((l) => l.ladderKey === linkingLadderId),
-    [cardLadders, linkingLadderId],
-  )
-
-  // --- Block field handlers ---
-
-  const handleBlockFieldChange = useCallback(
-    (index: number, field: keyof DayLog['blocks'][number], value: unknown) => {
-      if (!dayLog) return
-      const updatedBlocks = (dayLog.blocks ?? []).map((block, blockIndex) =>
-        blockIndex === index ? { ...block, [field]: value } : block,
-      )
-      const updated = { ...dayLog, blocks: updatedBlocks }
-      // Debounce text fields; persist selects/numbers immediately
-      if (field === 'notes') {
-        persistDayLog(updated)
-      } else {
-        persistDayLogImmediate(updated)
-      }
-    },
-    [dayLog, persistDayLog, persistDayLogImmediate],
-  )
-
-  const handleChecklistToggle = useCallback(
-    (blockIndex: number, itemIndex: number) => {
-      if (!dayLog) return
-      const updatedBlocks = (dayLog.blocks ?? []).map((block, currentIndex) => {
-        if (currentIndex !== blockIndex || !block.checklist) {
-          return block
-        }
-        const updatedChecklist = block.checklist.map((item, checklistIndex) =>
-          checklistIndex === itemIndex
-            ? { ...item, completed: !item.completed }
-            : item,
-        )
-        const allCompleted = updatedChecklist.every((item) => item.completed)
-        // Auto-populate actualMinutes from plannedMinutes when all items are
-        // checked, but only if the user hasn't manually set a different value.
-        let { actualMinutes } = block
-        if (allCompleted && block.plannedMinutes != null) {
-          if (actualMinutes == null || actualMinutes === 0) {
-            actualMinutes = block.plannedMinutes
-          }
-        } else if (!allCompleted) {
-          // Clear auto-populated value when unchecking — only if it still
-          // matches plannedMinutes (meaning the user didn't manually edit it).
-          if (actualMinutes != null && actualMinutes === block.plannedMinutes) {
-            actualMinutes = undefined
-          }
-        }
-        return { ...block, checklist: updatedChecklist, actualMinutes }
-      })
-      persistDayLogImmediate({ ...dayLog, blocks: updatedBlocks })
-    },
-    [dayLog, persistDayLogImmediate],
-  )
-
   // --- Print materials handler ---
 
   const handlePrintTodayMaterials = useCallback(async () => {
@@ -513,10 +433,6 @@ export default function TodayPage() {
   const buildArtifactBase = useCallback(
     (title: string, evidenceType: EvidenceType) => {
       const createdAt = new Date().toISOString()
-      const ladderRef =
-        artifactForm.ladderId && artifactForm.rungId
-          ? { ladderId: artifactForm.ladderId, rungId: artifactForm.rungId }
-          : undefined
       return {
         title,
         type: evidenceType,
@@ -525,11 +441,8 @@ export default function TodayPage() {
         dayLogId: today,
         weekPlanId,
         tags: {
-          engineStage: artifactForm.engineStage,
-          domain: artifactForm.domain,
           subjectBucket: artifactForm.subjectBucket,
-          location: artifactForm.location,
-          ...(ladderRef ? { ladderRef } : {}),
+          location: LearningLocation.Home,
         },
         notes: '',
       }
@@ -539,9 +452,7 @@ export default function TodayPage() {
 
   const handleArtifactSave = useCallback(async () => {
     const content = artifactForm.content.trim()
-    const domain = artifactForm.domain.trim()
-    const title =
-      content.slice(0, 60) || domain || `Artifact for ${today}`
+    const title = content.slice(0, 60) || `Artifact for ${today}`
 
     const artifact = {
       ...buildArtifactBase(title, EvidenceType.Note),
@@ -551,7 +462,7 @@ export default function TodayPage() {
     try {
       const docRef = await addDoc(artifactsCollection(familyId), artifact)
       setTodayArtifacts((prev) => [{ ...artifact, id: docRef.id }, ...prev])
-      setArtifactForm((prev) => ({ ...prev, domain: '', content: '' }))
+      setArtifactForm((prev) => ({ ...prev, content: '' }))
       setSnackMessage({ text: 'Note saved.', severity: 'success' })
     } catch (err) {
       console.error('Failed to save artifact', err)
@@ -614,60 +525,6 @@ export default function TodayPage() {
     [artifactForm, buildArtifactBase, familyId, today, setSnackMessage],
   )
 
-  const handleStartLinking = useCallback((artifact: Artifact) => {
-    setLinkingArtifactId(artifact.id ?? null)
-    setLinkingLadderId(artifact.tags.ladderRef?.ladderId ?? '')
-    setLinkingRungId(artifact.tags.ladderRef?.rungId ?? '')
-  }, [])
-
-  const handleLinkingLadderChange = useCallback((value: string) => {
-    setLinkingLadderId(value)
-    setLinkingRungId('')
-  }, [])
-
-  const handleLinkingRungChange = useCallback(
-    async (value: string) => {
-      setLinkingRungId(value)
-      if (!linkingArtifactId || !linkingLadderId || !value) return
-      try {
-        await updateDoc(doc(artifactsCollection(familyId), linkingArtifactId), {
-          'tags.ladderRef': { ladderId: linkingLadderId, rungId: value },
-        })
-        setTodayArtifacts((prev) =>
-          prev.map((artifact) =>
-            artifact.id === linkingArtifactId
-              ? {
-                  ...artifact,
-                  tags: {
-                    ...artifact.tags,
-                    ladderRef: { ladderId: linkingLadderId, rungId: value },
-                  },
-                }
-              : artifact,
-          ),
-        )
-        setLinkingArtifactId(null)
-        setLinkingLadderId('')
-        setLinkingRungId('')
-      } catch (err) {
-        console.error('Failed to link artifact', err)
-        setSnackMessage({ text: 'Failed to link artifact.', severity: 'error' })
-      }
-    },
-    [familyId, linkingArtifactId, linkingLadderId, setSnackMessage],
-  )
-
-  const getArtifactLinkLabel = useCallback(
-    (artifact: Artifact) => {
-      const ladderRef = artifact.tags?.ladderRef
-      if (!ladderRef) return 'Unlinked'
-      const ladder = cardLadders.find((item) => item.ladderKey === ladderRef.ladderId)
-      const rung = ladder?.rungs.find((item) => item.rungId === ladderRef.rungId)
-      return `${ladder?.title ?? 'Ladder'} \u00b7 ${rung?.name ?? 'Rung'}`
-    },
-    [cardLadders],
-  )
-
   // --- Per-item capture handler (component-level for dialog access) ---
 
   const handleItemPhotoCapture = useCallback(
@@ -717,24 +574,6 @@ export default function TodayPage() {
   )
 
   // --- Loading state ---
-
-  const handleRoutineUpdate = useCallback(
-    (updated: DayLog) => {
-      const withMinutes = autoFillBlockMinutes(updated, activeRoutineItems)
-      const withXp = { ...withMinutes, xpTotal: calculateXp(withMinutes, activeRoutineItems) }
-      persistDayLog(withXp)
-    },
-    [persistDayLog, activeRoutineItems],
-  )
-
-  const handleRoutineUpdateImmediate = useCallback(
-    (updated: DayLog) => {
-      const withMinutes = autoFillBlockMinutes(updated, activeRoutineItems)
-      const withXp = { ...withMinutes, xpTotal: calculateXp(withMinutes, activeRoutineItems) }
-      persistDayLogImmediate(withXp)
-    },
-    [persistDayLogImmediate, activeRoutineItems],
-  )
 
   const scrollToArtifacts = useCallback(() => {
     artifactSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1680,101 +1519,23 @@ export default function TodayPage() {
               </MenuItem>
             ))}
           </TextField>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-            <TextField
-              label="Engine stage"
-              select
-              fullWidth
-              value={artifactForm.engineStage}
-              onChange={(event) =>
-                handleArtifactChange('engineStage', event.target.value as EngineStage)
-              }
-            >
-              {Object.values(EngineStage).map((stage) => (
-                <MenuItem key={stage} value={stage}>
-                  {stage}
-                </MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              label="Subject bucket"
-              select
-              fullWidth
-              value={artifactForm.subjectBucket}
-              onChange={(event) =>
-                handleArtifactChange(
-                  'subjectBucket',
-                  event.target.value as SubjectBucket,
-                )
-              }
-            >
-              {Object.values(SubjectBucket).map((bucket) => (
-                <MenuItem key={bucket} value={bucket}>
-                  {bucket}
-                </MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              label="Location"
-              select
-              fullWidth
-              value={artifactForm.location}
-              onChange={(event) =>
-                handleArtifactChange(
-                  'location',
-                  event.target.value as LearningLocation,
-                )
-              }
-            >
-              {Object.values(LearningLocation).map((location) => (
-                <MenuItem key={location} value={location}>
-                  {location}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Stack>
           <TextField
-            label="Domain"
-            value={artifactForm.domain}
-            onChange={(event) => handleArtifactChange('domain', event.target.value)}
-          />
-          <TextField
-            label="Ladder"
+            label="Subject bucket"
             select
-            value={artifactForm.ladderId}
-            onChange={(event) => {
-              const ladderId = event.target.value
-              setArtifactForm((prev) => ({
-                ...prev,
-                ladderId,
-                rungId: '',
-              }))
-            }}
+            value={artifactForm.subjectBucket}
+            onChange={(event) =>
+              handleArtifactChange(
+                'subjectBucket',
+                event.target.value as SubjectBucket,
+              )
+            }
           >
-            <MenuItem value="">No ladder</MenuItem>
-            {cardLadders.map((ladder) => (
-              <MenuItem key={ladder.ladderKey} value={ladder.ladderKey}>
-                {ladder.title}
+            {Object.values(SubjectBucket).map((bucket) => (
+              <MenuItem key={bucket} value={bucket}>
+                {bucket}
               </MenuItem>
             ))}
           </TextField>
-          {selectedLadder && selectedLadder.rungs.length > 0 && (
-            <TextField
-              label="Rung (optional)"
-              select
-              value={artifactForm.rungId}
-              onChange={(event) =>
-                handleArtifactChange('rungId', event.target.value)
-              }
-            >
-              <MenuItem value="">Select rung</MenuItem>
-              {selectedLadder.rungs.map((rung) => (
-                <MenuItem key={rung.rungId} value={rung.rungId}>
-                  {rung.rungId}: {rung.name}
-                </MenuItem>
-              ))}
-            </TextField>
-          )}
           {artifactForm.evidenceType === EvidenceType.Note && (
             <>
               <TextField
@@ -1808,21 +1569,11 @@ export default function TodayPage() {
               {todayArtifacts.map((artifact) => (
                 <ListItem key={artifact.id ?? artifact.title} disableGutters>
                   <Stack spacing={1} sx={{ width: '100%' }}>
-                    <Stack
-                      direction="row"
-                      spacing={1}
-                      alignItems="center"
-                      justifyContent="space-between"
-                    >
-                      <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: 1 }}>
-                        <Typography variant="body2">
-                          {artifact.title}
-                        </Typography>
-                        <Chip size="small" label={artifact.type} />
-                      </Stack>
-                      <Typography variant="caption" color="text.secondary">
-                        {getArtifactLinkLabel(artifact)}
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Typography variant="body2">
+                        {artifact.title}
                       </Typography>
+                      <Chip size="small" label={artifact.type} />
                     </Stack>
                     {artifact.type === EvidenceType.Photo && artifact.uri && (
                       <Box
@@ -1842,52 +1593,6 @@ export default function TodayPage() {
                     {artifact.type === EvidenceType.Audio && artifact.uri && (
                       <Box component="audio" controls src={artifact.uri} sx={{ width: '100%' }} />
                     )}
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={() => handleStartLinking(artifact)}
-                      disabled={!artifact.id}
-                      sx={{ alignSelf: 'flex-start' }}
-                    >
-                      Link to rung
-                    </Button>
-                    {linkingArtifactId === artifact.id && (
-                      <Stack spacing={1}>
-                        <TextField
-                          label="Ladder"
-                          select
-                          size="small"
-                          value={linkingLadderId}
-                          onChange={(event) =>
-                            handleLinkingLadderChange(event.target.value)
-                          }
-                        >
-                          <MenuItem value="">Select ladder</MenuItem>
-                          {cardLadders.map((ladder) => (
-                            <MenuItem key={ladder.ladderKey} value={ladder.ladderKey}>
-                              {ladder.title}
-                            </MenuItem>
-                          ))}
-                        </TextField>
-                        <TextField
-                          label="Rung"
-                          select
-                          size="small"
-                          disabled={!linkingLadder || linkingLadder.rungs.length === 0}
-                          value={linkingRungId}
-                          onChange={(event) =>
-                            void handleLinkingRungChange(event.target.value)
-                          }
-                        >
-                          <MenuItem value="">Select rung</MenuItem>
-                          {linkingLadder?.rungs.map((rung) => (
-                            <MenuItem key={rung.rungId} value={rung.rungId}>
-                              {rung.rungId}: {rung.name}
-                            </MenuItem>
-                          ))}
-                        </TextField>
-                      </Stack>
-                    )}
                   </Stack>
                 </ListItem>
               ))}
@@ -1895,276 +1600,6 @@ export default function TodayPage() {
           )}
         </Stack>
       </SectionCard>
-
-      {/* --- Detailed Tracking (collapsed legacy sections) --- */}
-      <Accordion defaultExpanded={(dayLog.checklist?.length ?? 0) === 0}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography variant="subtitle1" color="text.secondary">
-            Detailed Tracking (Routine, Ladders, Blocks)
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Stack spacing={2}>
-            <RoutineSection
-              key={`${selectedChildId}_${today}`}
-              dayLog={dayLog}
-              onUpdate={handleRoutineUpdate}
-              onUpdateImmediate={handleRoutineUpdateImmediate}
-              routineItems={activeRoutineItems}
-              childName={selectedChild?.name}
-            />
-
-            {cardLadders.length > 0 && selectedChildId && (
-              <LadderQuickLog
-                familyId={familyId}
-                childId={selectedChildId}
-                ladders={cardLadders}
-              />
-            )}
-
-            {/* DayLog Blocks */}
-            <SectionCard title="Day Blocks">
-              <Stack spacing={1}>
-                {(dayLog.blocks ?? [])
-                .map((block, originalIndex) => ({ block, originalIndex }))
-                .filter(({ block }) =>
-                  planType === PlanType.Mvd
-                    ? block.type === DayBlockType.Reading || block.type === DayBlockType.Math
-                    : true,
-                )
-                .filter((_entry, filteredIndex) =>
-                  planType === PlanType.Normal ? showAllBlocks || filteredIndex < 4 : true,
-                )
-                .map(({ block, originalIndex: index }) => {
-                  const meta = blockMeta[block.type]
-                  const checklistDone = block.checklist?.filter((i) => i.completed).length ?? 0
-                  const checklistTotal = block.checklist?.length ?? 0
-                  const hasTime = block.actualMinutes != null || block.plannedMinutes != null
-                  return (
-                    <Accordion
-                      key={`${block.type}-${index}`}
-                      disableGutters
-                      sx={{
-                        '&::before': { display: 'none' },
-                        borderLeft: `4px solid ${meta.color}`,
-                        borderRadius: 1,
-                      }}
-                    >
-                      <AccordionSummary
-                        expandIcon={<ExpandMoreIcon />}
-                        sx={{ px: 2, py: 0.5 }}
-                      >
-                        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ width: '100%' }}>
-                          <Avatar
-                            sx={{
-                              bgcolor: `${meta.color}20`,
-                              color: meta.color,
-                              width: 40,
-                              height: 40,
-                            }}
-                          >
-                            {meta.icon}
-                          </Avatar>
-                          <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1 }}>
-                            {meta.label}
-                          </Typography>
-                          {hasTime && (
-                            <Chip
-                              icon={<AccessTimeIcon />}
-                              size="small"
-                              label={
-                                block.actualMinutes != null
-                                  ? `${block.actualMinutes}m`
-                                  : `${block.plannedMinutes ?? 0}m planned`
-                              }
-                              variant="outlined"
-                              sx={{ borderColor: meta.color, color: meta.color }}
-                            />
-                          )}
-                          {checklistTotal > 0 && (
-                            <Chip
-                              icon={<ChecklistIcon />}
-                              size="small"
-                              label={`${checklistDone}/${checklistTotal}`}
-                              variant="outlined"
-                              color={checklistDone === checklistTotal ? 'success' : 'default'}
-                            />
-                          )}
-                        </Stack>
-                      </AccordionSummary>
-                      <AccordionDetails sx={{ px: 2, pb: 2 }}>
-                        <Stack spacing={2}>
-                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                            <TextField
-                              label="Subject bucket"
-                              select
-                              fullWidth
-                              size="small"
-                              value={block.subjectBucket ?? ''}
-                              onChange={(event) =>
-                                handleBlockFieldChange(
-                                  index,
-                                  'subjectBucket',
-                                  event.target.value || undefined,
-                                )
-                              }
-                            >
-                              <MenuItem value="">Unassigned</MenuItem>
-                              {Object.values(SubjectBucket).map((bucket) => (
-                                <MenuItem key={bucket} value={bucket}>
-                                  {bucket}
-                                </MenuItem>
-                              ))}
-                            </TextField>
-                            <TextField
-                              label="Location"
-                              select
-                              fullWidth
-                              size="small"
-                              value={block.location ?? ''}
-                              onChange={(event) =>
-                                handleBlockFieldChange(
-                                  index,
-                                  'location',
-                                  event.target.value || undefined,
-                                )
-                              }
-                            >
-                              <MenuItem value="">Unassigned</MenuItem>
-                              {Object.values(LearningLocation).map((location) => (
-                                <MenuItem key={location} value={location}>
-                                  {location}
-                                </MenuItem>
-                              ))}
-                            </TextField>
-                          </Stack>
-                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                            <TextField
-                              label="Planned minutes"
-                              type="number"
-                              size="small"
-                              value={block.plannedMinutes ?? ''}
-                              onChange={(event) =>
-                                handleBlockFieldChange(
-                                  index,
-                                  'plannedMinutes',
-                                  event.target.value === ''
-                                    ? undefined
-                                    : Number(event.target.value),
-                                )
-                              }
-                            />
-                            <TextField
-                              label="Actual minutes"
-                              type="number"
-                              size="small"
-                              value={block.actualMinutes ?? ''}
-                              onChange={(event) =>
-                                handleBlockFieldChange(
-                                  index,
-                                  'actualMinutes',
-                                  event.target.value === ''
-                                    ? undefined
-                                    : Number(event.target.value),
-                                )
-                              }
-                            />
-                          </Stack>
-                          <TextField
-                            label="Quick note"
-                            multiline
-                            minRows={2}
-                            size="small"
-                            value={block.notes ?? ''}
-                            onChange={(event) =>
-                              handleBlockFieldChange(index, 'notes', event.target.value)
-                            }
-                          />
-                          {block.checklist && block.checklist.length > 0 ? (
-                            <Stack spacing={0.5}>
-                              {block.checklist.map((item, itemIndex) => (
-                                <Stack key={`${item.label}-${itemIndex}`} direction="row" spacing={0.5} alignItems="center">
-                                  <FormControlLabel
-                                    sx={{ flex: 1 }}
-                                    control={
-                                      <Checkbox
-                                        checked={item.completed}
-                                        size="small"
-                                        onChange={() =>
-                                          handleChecklistToggle(index, itemIndex)
-                                        }
-                                      />
-                                    }
-                                    label={
-                                      <Typography variant="body2">{item.label}</Typography>
-                                    }
-                                  />
-                                  <Button
-                                    size="small"
-                                    variant="text"
-                                    color={item.lessonCardId ? 'primary' : 'inherit'}
-                                    onClick={() => {
-                                      setTeachHelperItem(item)
-                                      setTeachHelperOpen(true)
-                                    }}
-                                    sx={{ fontSize: '0.7rem', minWidth: 'auto', px: 0.5, opacity: item.lessonCardId ? 1 : 0.6 }}
-                                  >
-                                    {item.lessonCardId ? 'Lesson' : 'Help'}
-                                  </Button>
-                                </Stack>
-                              ))}
-                            </Stack>
-                          ) : (
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={block.actualMinutes != null && block.actualMinutes > 0}
-                                  size="small"
-                                  onChange={(_e, checked) => {
-                                    const planned = block.plannedMinutes ?? 0
-                                    handleBlockFieldChange(
-                                      index,
-                                      'actualMinutes',
-                                      checked ? (planned > 0 ? planned : undefined) : undefined,
-                                    )
-                                  }}
-                                />
-                              }
-                              label={
-                                <Typography variant="body2" color="text.secondary">
-                                  Mark complete ({block.plannedMinutes ?? 0}m)
-                                </Typography>
-                              }
-                            />
-                          )}
-                        </Stack>
-                      </AccordionDetails>
-                    </Accordion>
-                  )
-                })}
-                {planType === PlanType.Normal && !showAllBlocks && dayLog.blocks.length > 4 && (
-                  <Button
-                    size="small"
-                    onClick={() => setShowAllBlocks(true)}
-                    sx={{ alignSelf: 'flex-start' }}
-                  >
-                    Show more ({dayLog.blocks.length - 4} more)
-                  </Button>
-                )}
-                {planType === PlanType.Normal && showAllBlocks && dayLog.blocks.length > 4 && (
-                  <Button
-                    size="small"
-                    onClick={() => setShowAllBlocks(false)}
-                    sx={{ alignSelf: 'flex-start' }}
-                  >
-                    Show less
-                  </Button>
-                )}
-              </Stack>
-            </SectionCard>
-          </Stack>
-        </AccordionDetails>
-      </Accordion>
 
       {selectedChildId && (
         <TeachHelperDialog
