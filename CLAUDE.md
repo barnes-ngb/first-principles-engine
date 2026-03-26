@@ -77,10 +77,14 @@ const items = snapshot.docs.map((doc) => ({
 - `src/components/` — Shared UI components
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
-- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useDebounce, useSaveState)
-- `src/core/types/` — Domain types (`domain.ts`) and enum-like constants (`enums.ts`)
-- `src/core/utils/` — Date/time utilities, formatting, doc ID parsing
-- `src/core/ai/` — AI service layer, provider adapters, prompt templates
+- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useDebounce, useSaveState, useAudioRecorder, useSpeechRecognition, useTTS)
+- `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`) and enum-like constants (`enums.ts`)
+- `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns
+- `src/core/ai/` — AI service layer, feature flags, useAI hook, prompt templates
+- `src/core/profile/` — Profile context provider and hook (family + children)
+- `src/core/xp/` — XP ledger, armor tiers, armor unlock logic
+- `src/core/avatar/` — Daily armor session management
+- `src/core/data/` — Database seed data
 - `src/features/avatar/` — Voxel avatar, armor, tier celebrations
 - `src/features/books/` — Bookshelf, book editor/reader, sight word dashboard, story guide
 - `src/features/dad-lab/` — Dad Lab lifecycle (plan, start, contribute, complete)
@@ -174,11 +178,21 @@ All under `families/{familyId}/`:
 | `ladderProgress` | Per-child ladder progression |
 | `milestoneProgress` | Milestone achievement tracking |
 | `dailyPlans` | Daily session plans |
-| `dadLab` | Dad lab weeks |
+| `dadLabReports` | Dad Lab session reports |
 | `skillSnapshots` | Per-child skill snapshots |
-| `plannerSessions` | Planner workflow sessions |
+| `plannerConversations` | Planner chat conversations |
 | `lessonCards` | Lesson card definitions |
 | `weeklyReviews` | AI-generated weekly adaptive reviews |
+| `workbookConfigs` | Workbook pace/config per child |
+| `xpLedger` | XP event log for armor progression |
+| `books` | Kid-authored books (My Books) |
+| `stickerLibrary` | Family sticker assets |
+| `sightWordProgress` | Per-child sight word mastery tracking |
+| `aiUsage` | AI token usage and cost tracking |
+| `avatarProfiles` | Per-child avatar customization |
+| `dailyArmorSessions` | Daily armor XP session tracking |
+| `evaluationSessions` | Interactive evaluation sessions (Knowledge Mine) |
+| `storyGames` | Story Game Workshop games |
 
 ## AI Integration
 
@@ -209,21 +223,24 @@ All under `families/{familyId}/`:
 - Snapshot test system prompts to catch unintended changes
 
 ### Prompt Files
-- `src/core/ai/prompts/systemPrompts.ts` — Base charter and family context
-- `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation
-- `src/core/ai/prompts/evaluationPrompts.ts` — Progress evaluation and adaptive loop
-- `src/core/ai/prompts/tutorPrompts.ts` — Kid-facing interactions (future)
+- `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
+- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, disposition, conundrum, etc.)
 
 ### Cloud Functions Structure
+- `functions/src/index.ts` — Main entry point, exports all Cloud Functions
 - `functions/src/ai/chat.ts` — Main chat CF, task type routing, prompt builders
 - `functions/src/ai/chatTypes.ts` — callClaude helper, task handler types
 - `functions/src/ai/contextSlices.ts` — Per-task context loading (charter, child, engagement, etc.)
+- `functions/src/ai/aiConfig.ts` — AI configuration (model selection, tokens, etc.)
+- `functions/src/ai/aiService.ts` — Core AI service orchestration
+- `functions/src/ai/sanitizeJson.ts` — JSON response sanitization
+- `functions/src/ai/health.ts` — Health check endpoint
 - `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, chat, analyzePatterns
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/imageGen.ts` — Image generation routing
-- `functions/src/ai/imageTasks/` — DALL-E/gpt-image-1 task handlers
-- `functions/src/ai/providers/` — Claude + OpenAI provider adapters
+- `functions/src/ai/imageTasks/` — 11 image task handlers (armor, avatar, character, skin, photo transform, etc.)
+- `functions/src/ai/providers/` — Claude + OpenAI provider adapters (with `__stubs__/` for test mocking)
 
 ## Family Context (for AI prompt reference)
 
