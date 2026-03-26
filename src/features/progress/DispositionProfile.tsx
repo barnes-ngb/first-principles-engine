@@ -113,7 +113,7 @@ export default function DispositionProfile() {
     } finally {
       setLoading(false)
     }
-  }, [familyId, activeChildId, chat])
+  }, [familyId, activeChildId, chat, aiError?.message])
 
   return (
     <Box sx={{ px: { xs: 2, md: 3 }, py: 2, maxWidth: 800, mx: 'auto' }}>

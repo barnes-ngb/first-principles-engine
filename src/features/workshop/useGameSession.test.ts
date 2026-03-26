@@ -363,7 +363,7 @@ describe('useGameSession', () => {
   })
 
   it('backward movement does not go below position 0', () => {
-    const { result } = renderHook(() => useGameSession(mockGame))
+    renderHook(() => useGameSession(mockGame))
 
     // Use a custom game where position 1 has a big setback
     const bigSetbackGame: GeneratedGame = {
