@@ -65,7 +65,7 @@ function getNextUnlock(profile: AvatarProfile): { piece: ArmorPieceMeta; xpNeede
 
 /** Map ArmorPiece IDs from daily session to VoxelArmorPieceId */
 function sessionToVoxelPieces(appliedPieces: ArmorPiece[]): string[] {
-  return appliedPieces.map((p) => ARMOR_PIECE_TO_VOXEL[p])
+  return (appliedPieces ?? []).map((p) => ARMOR_PIECE_TO_VOXEL[p])
 }
 
 /** Check if yesterday's date string is exactly one day before today */

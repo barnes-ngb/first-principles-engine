@@ -397,7 +397,7 @@ export default function TodayPage() {
   const handleBlockFieldChange = useCallback(
     (index: number, field: keyof DayLog['blocks'][number], value: unknown) => {
       if (!dayLog) return
-      const updatedBlocks = dayLog.blocks.map((block, blockIndex) =>
+      const updatedBlocks = (dayLog.blocks ?? []).map((block, blockIndex) =>
         blockIndex === index ? { ...block, [field]: value } : block,
       )
       const updated = { ...dayLog, blocks: updatedBlocks }
@@ -414,7 +414,7 @@ export default function TodayPage() {
   const handleChecklistToggle = useCallback(
     (blockIndex: number, itemIndex: number) => {
       if (!dayLog) return
-      const updatedBlocks = dayLog.blocks.map((block, currentIndex) => {
+      const updatedBlocks = (dayLog.blocks ?? []).map((block, currentIndex) => {
         if (currentIndex !== blockIndex || !block.checklist) {
           return block
         }
@@ -460,7 +460,7 @@ export default function TodayPage() {
       const todayPlan: DraftDayPlan = {
         day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
         timeBudgetMinutes: 150,
-        items: dayLog.checklist
+        items: (dayLog.checklist ?? [])
           .filter((i) => !i.completed)
           .map((i) => ({
             id: i.id ?? '',
@@ -697,7 +697,7 @@ export default function TodayPage() {
         await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
 
         // Link artifact to checklist item
-        const updatedChecklist = dayLog.checklist.map((ci, i) =>
+        const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
           i === captureItemIndex ? { ...ci, evidenceArtifactId: docRef.id } : ci
         )
         persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
@@ -1002,7 +1002,7 @@ export default function TodayPage() {
                 </Typography>
               </Box>
               <Stack spacing={0.5}>
-                {weekFocus.conundrum.angles.map((angle: string, i: number) => (
+                {(weekFocus.conundrum.angles ?? []).map((angle: string, i: number) => (
                   <Chip key={i} label={angle} variant="outlined" size="small" sx={{ height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.5 } }} />
                 ))}
               </Stack>
@@ -1086,9 +1086,9 @@ export default function TodayPage() {
           const item = rawChecklist[index]
           const updatedChecklist = rawChecklist.filter((_, i) => i !== index)
           // If planner-sourced, also remove matching block
-          let updatedBlocks = dayLog.blocks
+          let updatedBlocks = dayLog.blocks ?? []
           if (item.source === 'planner') {
-            updatedBlocks = dayLog.blocks.filter((block) => {
+            updatedBlocks = (dayLog.blocks ?? []).filter((block) => {
               const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
               return !matchesLabel
             })
@@ -1109,7 +1109,7 @@ export default function TodayPage() {
             i === index ? { ...ci, plannedMinutes: minutes } : ci
           )
           // Also update the corresponding block's plannedMinutes
-          const updatedBlocks = dayLog.blocks.map((block) => {
+          const updatedBlocks = (dayLog.blocks ?? []).map((block) => {
             const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
             if (matchesLabel) return { ...block, plannedMinutes: minutes }
             return block
@@ -1148,7 +1148,7 @@ export default function TodayPage() {
 
         const handleSaveGradeNote = (index: number, text: string) => {
           if (!dayLog?.checklist || !text.trim()) return
-          const updatedChecklist = dayLog.checklist.map((ci, i) =>
+          const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
             i === index ? { ...ci, gradeResult: text.trim() } : ci
           )
           persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
@@ -1290,14 +1290,14 @@ export default function TodayPage() {
                           checked={item.completed}
                           onChange={() => {
                             const newCompleted = !item.completed
-                            const updatedChecklist = dayLog.checklist!.map((ci, i) =>
+                            const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
                               i === index ? { ...ci, completed: newCompleted } : ci
                             )
                             // Auto-set actualMinutes on corresponding block when checking
                             const minutes = item.estimatedMinutes ?? item.plannedMinutes ?? 0
-                            let updatedBlocks = dayLog.blocks
+                            let updatedBlocks = dayLog.blocks ?? []
                             if (newCompleted && minutes > 0) {
-                              updatedBlocks = dayLog.blocks.map((block) => {
+                              updatedBlocks = (dayLog.blocks ?? []).map((block) => {
                                 const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
                                 const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
                                 const matchesTitle = block.title != null && (
@@ -1311,7 +1311,7 @@ export default function TodayPage() {
                               })
                             } else if (!newCompleted) {
                               // Clear auto-populated actualMinutes when unchecking
-                              updatedBlocks = dayLog.blocks.map((block) => {
+                              updatedBlocks = (dayLog.blocks ?? []).map((block) => {
                                 const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
                                 const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
                                 const matchesTitle = block.title != null && (
@@ -1925,7 +1925,7 @@ export default function TodayPage() {
             {/* DayLog Blocks */}
             <SectionCard title="Day Blocks">
               <Stack spacing={1}>
-                {dayLog.blocks
+                {(dayLog.blocks ?? [])
                 .map((block, originalIndex) => ({ block, originalIndex }))
                 .filter(({ block }) =>
                   planType === PlanType.Mvd
