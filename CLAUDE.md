@@ -32,6 +32,27 @@ Use `import type` for type-only imports:
 import type { SomeType } from './types'
 ```
 
+## Deploy
+
+### CI/CD (preferred method)
+- **Push to `main`**: CI runs tests. If `firestore.indexes.json` changed, indexes auto-deploy.
+- **Push to `deploy` branch**: Full deploy — hosting, functions (if changed), Firestore rules + indexes, Storage rules + CORS.
+
+### How indexes deploy
+Firestore indexes deploy automatically in three ways:
+1. When `firestore.indexes.json` changes on `main` (`.github/workflows/deploy-indexes.yml`)
+2. When functions change on `deploy` branch (deployed alongside functions)
+3. Unconditionally on every `deploy` branch push (`.github/workflows/deploy.yml` line 74)
+
+You should never need to manually run `firebase deploy --only firestore:indexes`.
+
+### Manual deploy (use sparingly, from Claude Code)
+If you must deploy manually, always include indexes:
+```
+firebase deploy --only functions,firestore:indexes
+```
+Never deploy functions without indexes — new queries may require new composite indexes.
+
 ## Common Patterns
 
 ### Firestore document mapping
