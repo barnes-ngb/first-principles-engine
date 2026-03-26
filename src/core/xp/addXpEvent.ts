@@ -1,17 +1,12 @@
 import { doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore'
 
-function stripUndefined<T extends object>(obj: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([, v]) => v !== undefined),
-  ) as Partial<T>
-}
-
 import {
   avatarProfilesCollection,
+  stripUndefined,
   xpLedgerCollection,
   xpLedgerDocId,
 } from '../firebase/firestore'
-import type { XP_EVENTS } from '../types'
+import type { AvatarProfile, XP_EVENTS } from '../types'
 import { checkAndUnlockArmor } from './checkAndUnlockArmor'
 import { calculateTier } from '../../features/avatar/voxel/tierMaterials'
 
@@ -117,7 +112,7 @@ export async function addXpEvent(
       totalXp: realTotal,
       ...tierUpdate,
       updatedAt: new Date().toISOString(),
-    }))
+    }) as unknown as AvatarProfile)
   }
 
   // ── Check for armor unlocks ────────────────────────────────

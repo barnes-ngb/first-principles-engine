@@ -30,6 +30,7 @@ import {
   childrenCollection,
   dailyArmorSessionsCollection,
   dailyArmorSessionDocId,
+  stripUndefined,
   xpLedgerCollection,
   xpLedgerDocId,
 } from '../../core/firebase/firestore'
@@ -48,12 +49,6 @@ import type {
 } from '../../core/types'
 
 // ── Helpers ──────────────────────────────────────────────────────
-
-function stripUndefined<T extends object>(obj: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([, v]) => v !== undefined),
-  ) as Partial<T>
-}
 
 function isPieceEarned(profile: AvatarProfile, pieceId: ArmorPiece): boolean {
   const entry = profile.pieces.find((p) => p.pieceId === pieceId)
@@ -175,7 +170,7 @@ export default function AvatarAdminTab() {
           totalXp: newXp,
           pieces: updatedPieces,
           updatedAt: new Date().toISOString(),
-        }))
+        }) as unknown as AvatarProfile)
 
         const adminDedupKey = `admin_${Date.now()}`
         const eventRef = doc(xpLedgerCollection(familyId), xpLedgerDocId(activeChildId, adminDedupKey))
@@ -247,7 +242,7 @@ export default function AvatarAdminTab() {
         pieces: updatedPieces,
         currentTier: nextTier,
         updatedAt: new Date().toISOString(),
-      }))
+      }) as unknown as AvatarProfile)
 
       // Generate images for the new tier in parallel
       const TIER_PROMPTS: Record<string, Record<string, string>> = {
@@ -292,7 +287,7 @@ export default function AvatarAdminTab() {
                     }
                   : p,
               )
-              await setDoc(profileRef, stripUndefined({ ...current, pieces: newPieces, updatedAt: new Date().toISOString() }))
+              await setDoc(profileRef, stripUndefined({ ...current, pieces: newPieces, updatedAt: new Date().toISOString() }) as unknown as AvatarProfile)
             } catch (err) {
               console.warn(`Force upgrade image gen failed for ${pieceDef.id}:`, err)
             }
@@ -319,7 +314,7 @@ export default function AvatarAdminTab() {
         ...profile,
         pieces: profile.pieces.filter((p) => p.pieceId !== deletePiece),
         updatedAt: new Date().toISOString(),
-      }))
+      }) as unknown as AvatarProfile)
       setFeedback({ severity: 'success', message: `Removed ${ARMOR_PIECES.find((p) => p.id === deletePiece)?.name ?? deletePiece}` })
     } catch (err) {
       console.error('Delete piece failed:', err)
@@ -426,7 +421,7 @@ export default function AvatarAdminTab() {
       const profileSnap = await (await import('firebase/firestore')).getDoc(profileRef)
       if (profileSnap.exists()) {
         const p = profileSnap.data() as AvatarProfile
-        await setDoc(profileRef, stripUndefined({ ...p, totalXp: realTotal, updatedAt: new Date().toISOString() }))
+        await setDoc(profileRef, stripUndefined({ ...p, totalXp: realTotal, updatedAt: new Date().toISOString() }) as unknown as AvatarProfile)
       }
 
       setFeedback({ severity: 'success', message: `Recalculated: ${realTotal} XP` })
@@ -537,7 +532,7 @@ export default function AvatarAdminTab() {
         ...profile,
         pieces: updatedPieces,
         updatedAt: new Date().toISOString(),
-      }))
+      }) as unknown as AvatarProfile)
       setFeedback({ severity: 'success', message: 'Piece image URLs cleared — will regenerate next time each piece is viewed.' })
     } catch (err) {
       console.error('Regen piece images failed:', err)
@@ -561,7 +556,7 @@ export default function AvatarAdminTab() {
         ...profile,
         armorSheetUrls: updatedSheetUrls,
         updatedAt: new Date().toISOString(),
-      }))
+      }) as unknown as AvatarProfile)
 
       // Call the generateArmorSheet cloud function
       const fns = getFunctions(app)
