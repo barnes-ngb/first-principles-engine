@@ -45,11 +45,13 @@ export function stripUndefined(obj: Record<string, unknown>): Record<string, unk
   for (const [key, value] of Object.entries(obj)) {
     if (value === undefined) continue
     if (Array.isArray(value)) {
-      result[key] = value.map((item) =>
-        typeof item === 'object' && item !== null
-          ? stripUndefined(item as Record<string, unknown>)
-          : item,
-      )
+      result[key] = value
+        .filter((item) => item !== undefined)
+        .map((item) =>
+          typeof item === 'object' && item !== null
+            ? stripUndefined(item as Record<string, unknown>)
+            : item,
+        )
     } else if (typeof value === 'object' && value !== null) {
       result[key] = stripUndefined(value as Record<string, unknown>)
     } else {
@@ -310,11 +312,19 @@ export const aiUsageCollection = (
 
 // ── Avatar Profiles ────────────────────────────────────────────
 
+const avatarProfileConverter: FirestoreDataConverter<AvatarProfile> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) =>
+    snapshot.data(options) as AvatarProfile,
+}
+
 /** Avatar profile per child. Doc ID: {childId} */
 export const avatarProfilesCollection = (
   familyId: string,
 ): CollectionReference<AvatarProfile> =>
-  collection(db, `families/${familyId}/avatarProfiles`) as CollectionReference<AvatarProfile>
+  collection(db, `families/${familyId}/avatarProfiles`).withConverter(
+    avatarProfileConverter,
+  ) as CollectionReference<AvatarProfile>
 
 /** Build a dedup doc ID for XP ledger event entries. */
 export const xpLedgerDocId = (childId: string, dedupKey: string): string =>
