@@ -619,7 +619,7 @@ export default function WorkshopPage() {
       try {
         await updateDoc(
           doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-          { ...clearField, updatedAt: new Date().toISOString() },
+          stripUndefined({ ...clearField, updatedAt: new Date().toISOString() }),
         )
         setCurrentGame({ ...currentGame, ...clearField })
       } catch (err) {
@@ -650,7 +650,7 @@ export default function WorkshopPage() {
         await Promise.all([
           updateDoc(
             doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-            { activeSession: null, updatedAt: new Date().toISOString() },
+            stripUndefined({ activeSession: null, updatedAt: new Date().toISOString() }),
           ),
           logWorkshopHours(
             familyId,
@@ -688,7 +688,7 @@ export default function WorkshopPage() {
         await Promise.all([
           updateDoc(
             doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-            { activeAdventureSession: null, updatedAt: new Date().toISOString() },
+            stripUndefined({ activeAdventureSession: null, updatedAt: new Date().toISOString() }),
           ),
           logAdventureHours(
             familyId,
@@ -729,7 +729,7 @@ export default function WorkshopPage() {
       try {
         await updateDoc(
           doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-          { activeAdventureSession: session, updatedAt: new Date().toISOString() },
+          stripUndefined({ activeAdventureSession: session, updatedAt: new Date().toISOString() }),
         )
       } catch (err) {
         console.warn('Failed to save adventure session:', err)
@@ -750,7 +750,7 @@ export default function WorkshopPage() {
         await Promise.all([
           updateDoc(
             doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-            { activeCardGameSession: null, updatedAt: new Date().toISOString() },
+            stripUndefined({ activeCardGameSession: null, updatedAt: new Date().toISOString() }),
           ),
           logCardGameHours(
             familyId,
@@ -787,7 +787,7 @@ export default function WorkshopPage() {
       try {
         await updateDoc(
           doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-          { activeCardGameSession: session, updatedAt: new Date().toISOString() },
+          stripUndefined({ activeCardGameSession: session, updatedAt: new Date().toISOString() }),
         )
       } catch (err) {
         console.warn('Failed to save card game session:', err)
@@ -835,10 +835,10 @@ export default function WorkshopPage() {
       const existingSessions = currentGame.playtestSessions ?? []
       await updateDoc(
         doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-        {
+        stripUndefined({
           playtestSessions: [...existingSessions, session],
           updatedAt: new Date().toISOString(),
-        },
+        }),
       )
 
       // Log hours for tester
@@ -987,7 +987,7 @@ export default function WorkshopPage() {
           const merged: GeneratedArt = { ...game.generatedArt, ...result.art }
           await updateDoc(
             doc(db, `families/${familyId}/storyGames/${game.id}`),
-            { generatedArt: merged, updatedAt: new Date().toISOString() },
+            stripUndefined({ generatedArt: merged, updatedAt: new Date().toISOString() }),
           )
           if (currentGame?.id === game.id) {
             setCurrentGame({ ...currentGame, generatedArt: merged })

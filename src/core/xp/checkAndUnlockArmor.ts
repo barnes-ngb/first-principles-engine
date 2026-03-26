@@ -1,6 +1,6 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 
-import { avatarProfilesCollection, xpLedgerCollection } from '../firebase/firestore'
+import { avatarProfilesCollection, stripUndefined, xpLedgerCollection } from '../firebase/firestore'
 import { ARMOR_PIECES } from '../types'
 import type {
   ArmorPiece,
@@ -152,14 +152,14 @@ export async function checkAndUnlockArmor(
   const newlyUnlockedVoxel = newlyUnlocked.map((id) => ARMOR_PIECE_TO_VOXEL[id])
 
   // ── Save updated profile (no image generation needed!) ────────
-  await setDoc(profileRef, {
+  await setDoc(profileRef, stripUndefined({
     ...profile,
     pieces,
     totalXp: xp,
     unlockedPieces: unlockedVoxelPieces,
     equippedPieces,
     updatedAt: new Date().toISOString(),
-  })
+  }) as unknown as AvatarProfile)
 
   return {
     newlyUnlockedPieces: newlyUnlocked,

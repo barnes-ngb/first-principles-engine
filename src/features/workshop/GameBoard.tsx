@@ -36,26 +36,34 @@ export default function GameBoard({
   theme,
 }: GameBoardProps) {
   const spaces = game.board.spaces
+  const totalSpaces = spaces.length
+
+  // Adaptive layout: use fewer columns for shorter boards
+  const columns = totalSpaces <= 15 ? COLUMNS : COLUMNS
 
   // Build a snaking grid: row 0 left→right, row 1 right→left, etc.
   const rows: typeof spaces[] = []
-  for (let i = 0; i < spaces.length; i += COLUMNS) {
-    const row = spaces.slice(i, i + COLUMNS)
-    const rowIndex = Math.floor(i / COLUMNS)
+  for (let i = 0; i < spaces.length; i += columns) {
+    const row = spaces.slice(i, i + columns)
+    const rowIndex = Math.floor(i / columns)
     // Even rows: left→right, odd rows: right→left
     rows.push(rowIndex % 2 === 0 ? row : [...row].reverse())
   }
+
+  // Space minimum size scales with board length for readability
+  const minSpaceSize = totalSpaces <= 15 ? 100 : totalSpaces <= 25 ? 90 : 80
 
   return (
     <Box
       sx={{
         position: 'relative',
         width: '100%',
-        maxWidth: { xs: '100%', sm: 600, md: 750 },
         mx: 'auto',
         borderRadius: 2,
         overflow: 'auto',
         WebkitOverflowScrolling: 'touch',
+        // Scrollable on mobile for larger boards
+        maxHeight: { xs: '70vh', sm: 'none' },
         ...(boardBackground
           ? {
               backgroundImage: `url(${boardBackground})`,
@@ -78,15 +86,23 @@ export default function GameBoard({
           }}
         />
       )}
-      <Box sx={{ position: 'relative', zIndex: 1, minWidth: { xs: 360, sm: 'auto' } }}>
+      <Box
+        sx={{
+          position: 'relative',
+          zIndex: 1,
+          minWidth: { xs: columns * minSpaceSize, sm: columns * minSpaceSize, md: 'auto' },
+          maxWidth: { md: 800 },
+          mx: 'auto',
+        }}
+      >
         {rows.map((row, rowIndex) => (
           <Box
             key={rowIndex}
             sx={{
               display: 'grid',
-              gridTemplateColumns: `repeat(${COLUMNS}, minmax(70px, 1fr))`,
-              gap: '4px',
-              mb: '4px',
+              gridTemplateColumns: `repeat(${columns}, minmax(${minSpaceSize}px, 1fr))`,
+              gap: '5px',
+              mb: '5px',
             }}
           >
             {row.map((space) => {
