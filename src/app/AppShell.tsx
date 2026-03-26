@@ -74,7 +74,7 @@ function NavContent({
             <AvatarThumbnail
               features={avatarProfile.characterFeatures}
               ageGroup={avatarProfile.ageGroup}
-              equippedPieces={avatarProfile.equippedPieces}
+              equippedPieces={avatarProfile.equippedPieces ?? []}
               totalXp={avatarProfile.totalXp}
               size={32}
             />
@@ -193,7 +193,7 @@ export function AppShell({ children }: AppShellProps) {
               <AvatarThumbnail
                 features={avatarProfile.characterFeatures}
                 ageGroup={avatarProfile.ageGroup}
-                equippedPieces={avatarProfile.equippedPieces}
+                equippedPieces={avatarProfile.equippedPieces ?? []}
                 totalXp={avatarProfile.totalXp}
                 size={32}
               />
