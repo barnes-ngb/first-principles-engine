@@ -64,7 +64,7 @@ export default function ContextBar({
             <AvatarThumbnail
               features={avatarProfile.characterFeatures}
               ageGroup={avatarProfile.ageGroup}
-              equippedPieces={avatarProfile.equippedPieces}
+              equippedPieces={avatarProfile.equippedPieces ?? []}
               totalXp={avatarProfile.totalXp}
               size={28}
             />
