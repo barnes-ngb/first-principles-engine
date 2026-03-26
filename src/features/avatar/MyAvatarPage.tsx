@@ -6,7 +6,6 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
-import LinearProgress from '@mui/material/LinearProgress'
 import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
 
@@ -667,11 +666,11 @@ export default function MyAvatarPage() {
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3 }}>
       <Page>
-        {/* ── Child Switcher + XP Subtitle with Tier Badge ────── */}
-        <Box sx={{ textAlign: 'center', py: 1 }}>
+        {/* ── Child Switcher + XP/Tier Header ────── */}
+        <Box sx={{ textAlign: 'center', pt: 1.5, pb: 0.5 }}>
           {/* Child switcher — only for parent profiles with multiple children */}
           {!isChildProfile && children.length > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', gap: '4px', mb: '6px' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', gap: '6px', mb: 1.5 }}>
               {children.map((child) => {
                 const isActive = child.id === childId
                 const childIsLincoln = child.name.toLowerCase() === 'lincoln'
@@ -681,24 +680,26 @@ export default function MyAvatarPage() {
                     component="button"
                     onClick={() => setActiveChildId(child.id)}
                     sx={{
-                      px: '14px',
-                      py: '5px',
+                      px: '18px',
+                      py: '8px',
                       border: isActive
                         ? `2px solid ${childIsLincoln ? '#7EFC20' : '#E8A0BF'}`
-                        : '2px solid transparent',
-                      borderRadius: childIsLincoln ? '2px' : '14px',
+                        : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`,
+                      borderRadius: childIsLincoln ? '4px' : '20px',
                       bgcolor: isActive
-                        ? (childIsLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.15)')
+                        ? (childIsLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
                         : 'transparent',
                       color: isActive
                         ? (childIsLincoln ? '#7EFC20' : '#E8A0BF')
-                        : (isLincoln ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'),
+                        : (isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)'),
                       fontFamily: childIsLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                      fontSize: childIsLincoln ? '0.4rem' : '14px',
+                      fontSize: childIsLincoln ? '0.42rem' : '14px',
                       fontWeight: isActive ? 700 : 400,
                       cursor: 'pointer',
                       transition: 'all 0.2s ease',
-                      background: 'none',
+                      background: isActive
+                        ? (childIsLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
+                        : 'none',
                     }}
                   >
                     {child.name}
@@ -707,46 +708,107 @@ export default function MyAvatarPage() {
               })}
             </Box>
           )}
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', mb: '4px' }}>
-            {/* Show name only when switcher is not visible (child profiles or single child) */}
-            {(isChildProfile || children.length <= 1) && (
-              <Typography
-                sx={{
-                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                  fontSize: isLincoln ? '0.45rem' : '14px',
-                  color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)',
-                }}
-              >
-                {activeChild?.name}
-              </Typography>
-            )}
+
+          {/* ── Tier + XP Hero Banner ────── */}
+          <Box
+            sx={{
+              mx: 1,
+              px: 2,
+              py: 1.5,
+              borderRadius: isLincoln ? '4px' : '16px',
+              background: isLincoln
+                ? 'linear-gradient(135deg, rgba(26,26,46,0.9) 0%, rgba(30,40,60,0.9) 100%)'
+                : 'linear-gradient(135deg, rgba(255,240,245,0.9) 0%, rgba(245,230,240,0.9) 100%)',
+              border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.2)'}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1.5,
+            }}
+          >
+            {/* Tier badge — prominent */}
             <Box
-              component="span"
               sx={{
-                fontFamily: 'monospace',
-                fontSize: '12px',
-                px: '8px',
-                py: '2px',
-                borderRadius: '4px',
+                px: 1.5,
+                py: 0.75,
+                borderRadius: isLincoln ? '3px' : '10px',
                 background: getTierBadgeColor(calculateTier(profile.totalXp)),
                 color: getTierTextColor(calculateTier(profile.totalXp)),
-                fontWeight: 500,
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                fontSize: isLincoln ? '0.45rem' : '14px',
+                fontWeight: 700,
                 textTransform: 'uppercase',
-                letterSpacing: '0.5px',
+                letterSpacing: '1px',
+                whiteSpace: 'nowrap',
+                textShadow: isLincoln ? '0 1px 2px rgba(0,0,0,0.3)' : 'none',
               }}
             >
               {calculateTier(profile.totalXp)}
             </Box>
-            <Typography
-              component="span"
-              sx={{
-                fontFamily: 'monospace',
-                fontSize: '13px',
-                color: '#4caf50',
-              }}
-            >
-              {profile.totalXp} XP
-            </Typography>
+
+            {/* XP info + progress bar */}
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', mb: 0.5 }}>
+                {(isChildProfile || children.length <= 1) && (
+                  <Typography
+                    sx={{
+                      fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                      fontSize: isLincoln ? '0.38rem' : '13px',
+                      color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)',
+                    }}
+                  >
+                    {activeChild?.name}
+                  </Typography>
+                )}
+                <Typography
+                  sx={{
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                    fontSize: isLincoln ? '0.42rem' : '15px',
+                    fontWeight: 600,
+                    color: accentColor,
+                    ml: 'auto',
+                  }}
+                >
+                  {profile.totalXp} XP
+                </Typography>
+              </Box>
+
+              {/* Mini tier progress bar */}
+              <Box
+                sx={{
+                  height: 6,
+                  borderRadius: isLincoln ? '1px' : '3px',
+                  bgcolor: isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                  overflow: 'hidden',
+                }}
+              >
+                <Box
+                  sx={{
+                    height: '100%',
+                    width: `${tierProgress}%`,
+                    borderRadius: 'inherit',
+                    background: isLincoln
+                      ? `linear-gradient(90deg, ${accentColor}88, ${accentColor})`
+                      : `linear-gradient(90deg, ${accentColor}88, ${accentColor})`,
+                    transition: 'width 0.6s ease-out',
+                  }}
+                />
+              </Box>
+
+              {/* Next tier hint */}
+              {nextTierEntry && (
+                <Typography
+                  sx={{
+                    fontFamily: 'monospace',
+                    fontSize: isLincoln ? '0.3rem' : '10px',
+                    color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)',
+                    mt: 0.25,
+                    textAlign: 'right',
+                  }}
+                >
+                  {tierMaxXp - (profile.totalXp)} XP to {nextTierEntry[0]}
+                </Typography>
+              )}
+            </Box>
           </Box>
         </Box>
 
@@ -806,11 +868,23 @@ export default function MyAvatarPage() {
 
         {/* ── Morning reset message ────────────────────────────── */}
         {morningReset && unlockedVoxel.length > 0 && appliedVoxel.length === 0 && (
-          <Box sx={{ textAlign: 'center', py: 1, mb: 0.5 }}>
+          <Box
+            sx={{
+              textAlign: 'center',
+              py: 1.5,
+              mx: 1,
+              mb: 0.5,
+              borderRadius: isLincoln ? '4px' : '12px',
+              background: isLincoln
+                ? 'rgba(255,215,0,0.08)'
+                : 'rgba(156,39,176,0.06)',
+              border: `1px solid ${isLincoln ? 'rgba(255,215,0,0.15)' : 'rgba(156,39,176,0.1)'}`,
+            }}
+          >
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.5rem' : '16px',
+                fontSize: isLincoln ? '0.45rem' : '15px',
                 fontWeight: 600,
                 color: isLincoln ? '#FFD700' : '#9C27B0',
               }}
@@ -822,53 +896,72 @@ export default function MyAvatarPage() {
 
         {/* ── Armor status text ────────────────────────────────── */}
         {allEarnedApplied && unlockedVoxel.length > 0 ? (
-          <Box sx={{ textAlign: 'center', py: 1, mb: 1 }}>
+          <Box sx={{ textAlign: 'center', py: 1.5, mb: 0.5 }}>
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.65rem' : '22px',
+                fontSize: isLincoln ? '0.55rem' : '18px',
                 fontWeight: 700,
                 color: isLincoln ? '#FFD700' : '#9C27B0',
               }}
             >
               {allSixUnlocked
-                ? 'Full armor on! Ready for today.'
-                : `${unlockedVoxel.length} of 6 ${currentTierName.toLowerCase()} pieces equipped — keep going!`}
+                ? 'Full armor equipped!'
+                : `${unlockedVoxel.length}/6 pieces on`}
             </Typography>
             {/* Streak display */}
             {(profile.armorStreak ?? 0) > 1 && (
-              <Typography
+              <Box
                 sx={{
-                  fontFamily: 'monospace',
-                  fontSize: '12px',
-                  color: '#FFA726',
-                  mt: 0.5,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  mt: 0.75,
+                  px: 1.5,
+                  py: 0.5,
+                  borderRadius: isLincoln ? '3px' : '10px',
+                  bgcolor: isLincoln ? 'rgba(255,167,38,0.12)' : 'rgba(255,167,38,0.1)',
+                  border: '1px solid rgba(255,167,38,0.2)',
                 }}
               >
-                {profile.armorStreak}-day armor streak
-              </Typography>
+                <Typography
+                  sx={{
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                    fontSize: isLincoln ? '0.32rem' : '12px',
+                    color: '#FFA726',
+                    fontWeight: 600,
+                  }}
+                >
+                  🔥 {profile.armorStreak}-day streak
+                </Typography>
+              </Box>
             )}
-            {/* Start Your Day button — navigates to Today after full equip */}
+            {/* Start Your Day button */}
             {isChildProfile && (
               <Box
                 component="button"
                 onClick={() => navigate('/today')}
                 sx={{
+                  display: 'block',
+                  mx: 'auto',
                   mt: 1.5,
-                  px: '32px',
-                  py: '14px',
-                  borderRadius: isLincoln ? '2px' : '24px',
+                  px: '28px',
+                  py: '12px',
+                  borderRadius: isLincoln ? '4px' : '24px',
                   border: 'none',
-                  background: isLincoln ? '#7EFC20' : '#4caf50',
+                  background: isLincoln
+                    ? 'linear-gradient(135deg, #7EFC20, #5BC010)'
+                    : 'linear-gradient(135deg, #4caf50, #388e3c)',
                   color: isLincoln ? '#000' : '#fff',
-                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
                   fontSize: isLincoln ? '0.4rem' : '16px',
-                  fontWeight: 500,
+                  fontWeight: 600,
                   cursor: 'pointer',
-                  animation: 'pulse 1.5s ease-in-out infinite',
+                  boxShadow: `0 4px 14px ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(76,175,80,0.3)'}`,
+                  animation: 'pulse 2s ease-in-out infinite',
                   '@keyframes pulse': {
-                    '0%, 100%': { transform: 'scale(1)' },
-                    '50%': { transform: 'scale(1.05)' },
+                    '0%, 100%': { transform: 'scale(1)', boxShadow: `0 4px 14px ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(76,175,80,0.3)'}` },
+                    '50%': { transform: 'scale(1.03)', boxShadow: `0 6px 20px ${isLincoln ? 'rgba(126,252,32,0.4)' : 'rgba(76,175,80,0.4)'}` },
                   },
                 }}
               >
@@ -877,76 +970,110 @@ export default function MyAvatarPage() {
             )}
           </Box>
         ) : unlockedVoxel.length > 0 && appliedVoxel.length < unlockedVoxel.length ? (
-          <Box sx={{ textAlign: 'center', py: 1, mb: 1 }}>
+          <Box sx={{ textAlign: 'center', py: 1, mb: 0.5 }}>
+            {/* Equipped count dots */}
+            <Box sx={{ display: 'flex', justifyContent: 'center', gap: '5px', mb: 1 }}>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Box
+                  key={i}
+                  sx={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    bgcolor: i < appliedVoxel.length
+                      ? accentColor
+                      : i < unlockedVoxel.length
+                        ? (isLincoln ? 'rgba(126,252,32,0.2)' : 'rgba(232,160,191,0.25)')
+                        : (isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'),
+                    transition: 'background-color 0.3s ease',
+                  }}
+                />
+              ))}
+            </Box>
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.5rem' : '18px',
-                fontWeight: 600,
-                color: isLincoln ? '#aaa' : 'text.secondary',
+                fontSize: isLincoln ? '0.42rem' : '14px',
+                fontWeight: 500,
+                color: isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)',
               }}
             >
-              {`${appliedVoxel.length} of 6 ${currentTierName.toLowerCase()} pieces`}
+              {appliedVoxel.length}/{unlockedVoxel.length} equipped
             </Typography>
-            {/* Suit Up! button — equip all at once */}
-            {appliedVoxel.length < unlockedVoxel.length && (
-              <Box
-                component="button"
-                onClick={suitUpAll}
-                sx={{
-                  mt: 1,
-                  px: '24px',
-                  py: '10px',
-                  borderRadius: isLincoln ? '2px' : '20px',
-                  border: `1.5px solid ${isLincoln ? '#7EFC20' : '#4caf50'}`,
-                  background: isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(76,175,80,0.15)',
-                  color: isLincoln ? '#7EFC20' : '#4caf50',
-                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
-                  fontSize: isLincoln ? '0.38rem' : '14px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                }}
-              >
-                Suit Up!
-              </Box>
-            )}
+            {/* Suit Up! button */}
+            <Box
+              component="button"
+              onClick={suitUpAll}
+              sx={{
+                mt: 1,
+                px: '24px',
+                py: '10px',
+                borderRadius: isLincoln ? '4px' : '20px',
+                border: `1.5px solid ${accentColor}`,
+                background: isLincoln ? 'rgba(126,252,32,0.1)' : 'rgba(232,160,191,0.1)',
+                color: accentColor,
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                fontSize: isLincoln ? '0.38rem' : '14px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  background: isLincoln ? 'rgba(126,252,32,0.18)' : 'rgba(232,160,191,0.18)',
+                },
+                '&:active': { transform: 'scale(0.96)' },
+              }}
+            >
+              ⚔️ Suit Up!
+            </Box>
           </Box>
         ) : (
-          <Box sx={{ mb: 2, px: 1 }}>
+          <Box sx={{ mb: 1.5, px: 1 }}>
             {!allSixUnlocked && nextUnlock ? (
-              <>
+              <Box
+                sx={{
+                  mx: 1,
+                  p: 1.5,
+                  borderRadius: isLincoln ? '4px' : '12px',
+                  background: isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                  border: `1px solid ${isLincoln ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`,
+                }}
+              >
                 <Typography
                   sx={{
-                    display: 'block',
                     mb: 0.75,
-                    color: isLincoln ? '#aaa' : 'text.primary',
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.38rem' : '15px',
+                    color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.primary',
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                    fontSize: isLincoln ? '0.35rem' : '13px',
                     fontWeight: 500,
                   }}
                 >
                   Next: {nextUnlock.piece.name} — {nextUnlock.xpNeeded} XP away
                 </Typography>
-                <LinearProgress
-                  variant="determinate"
-                  value={tierProgress}
+                <Box
                   sx={{
-                    height: 10,
-                    borderRadius: isLincoln ? 0 : 5,
-                    bgcolor: isLincoln ? '#222' : '#eee',
-                    '& .MuiLinearProgress-bar': {
-                      bgcolor: getTierTextColor(currentTierName),
-                      borderRadius: isLincoln ? 0 : 5,
-                    },
+                    height: 6,
+                    borderRadius: isLincoln ? '2px' : '3px',
+                    bgcolor: isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                    overflow: 'hidden',
                   }}
-                />
-              </>
+                >
+                  <Box
+                    sx={{
+                      height: '100%',
+                      width: `${tierProgress}%`,
+                      borderRadius: 'inherit',
+                      bgcolor: getTierTextColor(currentTierName),
+                      transition: 'width 0.5s ease-out',
+                    }}
+                  />
+                </Box>
+              </Box>
             ) : allSixUnlocked ? (
               <Typography
                 sx={{
                   textAlign: 'center',
                   fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.4rem' : '0.85rem',
+                  fontSize: isLincoln ? '0.4rem' : '14px',
                   color: accentColor,
                   fontWeight: 700,
                 }}
@@ -963,13 +1090,12 @@ export default function MyAvatarPage() {
           sx={{
             overflowX: 'auto',
             display: 'flex',
-            gap: '12px',
-            pb: 1,
+            gap: '10px',
+            pb: 1.5,
             px: '16px',
             scrollSnapType: 'x mandatory',
-            scrollbarWidth: 'thin',
-            '&::-webkit-scrollbar': { height: 4 },
-            '&::-webkit-scrollbar-thumb': { bgcolor: isLincoln ? '#333' : '#ddd', borderRadius: 2 },
+            scrollbarWidth: 'none',
+            '&::-webkit-scrollbar': { display: 'none' },
           }}
         >
           {VOXEL_ARMOR_PIECES.map((piece) => {
@@ -977,110 +1103,188 @@ export default function MyAvatarPage() {
             const armorPieceId = VOXEL_TO_ARMOR_PIECE[piece.id]
             const isApplied = armorPieceId ? appliedPieces.includes(armorPieceId) : false
             const isSelected = selectedPiece?.id === piece.id
+            const xpAway = XP_THRESHOLDS[piece.id] - profile.totalXp
+            const unlockProgress = isUnlocked ? 100 : Math.max(0, Math.min(100, (profile.totalXp / XP_THRESHOLDS[piece.id]) * 100))
 
             return (
               <Box
                 key={piece.id}
                 onClick={() => handlePieceTap(piece)}
                 sx={{
-                  minWidth: 130,
-                  maxWidth: 130,
-                  height: 160,
-                  scrollSnapAlign: 'start',
-                  p: '12px 8px',
-                  borderRadius: isLincoln ? '2px' : '12px',
-                  border: isSelected
+                  minWidth: 110,
+                  maxWidth: 110,
+                  scrollSnapAlign: 'center',
+                  p: '12px 10px 10px',
+                  borderRadius: isLincoln ? '6px' : '16px',
+                  border: isApplied
                     ? `2px solid ${accentColor}`
-                    : isApplied
-                      ? `2px solid ${accentColor}`
+                    : isSelected
+                      ? `2px solid ${accentColor}88`
                       : isUnlocked
-                        ? `1.5px solid ${isLincoln ? 'rgba(126,252,32,0.4)' : 'rgba(232,160,191,0.4)'}`
-                        : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
-                  bgcolor: isApplied
-                    ? (isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.15)')
+                        ? `1.5px solid ${isLincoln ? 'rgba(126,252,32,0.25)' : 'rgba(232,160,191,0.3)'}`
+                        : `1px solid ${isLincoln ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
+                  background: isApplied
+                    ? (isLincoln
+                        ? 'linear-gradient(180deg, rgba(126,252,32,0.15) 0%, rgba(126,252,32,0.05) 100%)'
+                        : 'linear-gradient(180deg, rgba(232,160,191,0.15) 0%, rgba(232,160,191,0.05) 100%)')
                     : isUnlocked
-                      ? (isLincoln ? 'rgba(126,252,32,0.06)' : 'rgba(232,160,191,0.06)')
-                      : (isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'),
+                      ? (isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)')
+                      : 'transparent',
                   cursor: 'pointer',
-                  opacity: isUnlocked ? 1 : 0.45,
-                  transition: 'all 0.2s ease',
+                  opacity: isUnlocked ? 1 : 0.5,
+                  transition: 'all 0.25s ease',
                   textAlign: 'center',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
+                  gap: '6px',
                   position: 'relative',
                   flexShrink: 0,
+                  '&:active': { transform: 'scale(0.96)' },
                 }}
               >
-                {/* Equipped badge */}
-                {isApplied && (
-                  <Box sx={{
-                    position: 'absolute', top: 8, right: 8,
-                    width: 22, height: 22, borderRadius: '50%',
-                    bgcolor: isLincoln ? '#7EFC20' : '#E8A0BF',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>
-                    <Typography sx={{ color: isLincoln ? '#000' : '#fff', fontSize: 14, fontWeight: 500, lineHeight: 1 }}>
-                      ✓
-                    </Typography>
-                  </Box>
-                )}
+                {/* Status indicator — top strip */}
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: 0,
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: isApplied ? '60%' : '0%',
+                    height: '2px',
+                    borderRadius: '0 0 2px 2px',
+                    bgcolor: accentColor,
+                    transition: 'width 0.3s ease',
+                  }}
+                />
 
-                {/* Lock badge */}
-                {!isUnlocked && (
-                  <Box sx={{
-                    position: 'absolute', top: 8, right: 8,
-                    fontSize: 16, opacity: 0.5,
-                  }}>
-                    🔒
-                  </Box>
-                )}
-
-                {/* SVG icon */}
-                <Box sx={{ width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {/* Icon container with glow for equipped */}
+                <Box
+                  sx={{
+                    width: 56,
+                    height: 56,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '50%',
+                    background: isApplied
+                      ? (isLincoln ? 'rgba(126,252,32,0.1)' : 'rgba(232,160,191,0.1)')
+                      : 'transparent',
+                    boxShadow: isApplied
+                      ? `0 0 12px ${accentColor}33`
+                      : 'none',
+                    transition: 'all 0.3s ease',
+                    position: 'relative',
+                  }}
+                >
                   <ArmorIcon
                     pieceId={armorPieceId}
-                    size={48}
+                    size={44}
                     tier={(profile.currentTier ?? 'stone') as ArmorTierColor}
                     locked={!isUnlocked}
                   />
+
+                  {/* Equipped check overlay */}
+                  {isApplied && (
+                    <Box sx={{
+                      position: 'absolute', bottom: -2, right: -2,
+                      width: 18, height: 18, borderRadius: '50%',
+                      bgcolor: '#4caf50',
+                      border: `2px solid ${bgColor}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Typography sx={{ color: '#fff', fontSize: 11, fontWeight: 700, lineHeight: 1 }}>
+                        ✓
+                      </Typography>
+                    </Box>
+                  )}
+
+                  {/* Lock overlay */}
+                  {!isUnlocked && (
+                    <Box sx={{
+                      position: 'absolute', bottom: -2, right: -2,
+                      width: 18, height: 18, borderRadius: '50%',
+                      bgcolor: isLincoln ? '#333' : '#ccc',
+                      border: `2px solid ${bgColor}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10,
+                    }}>
+                      🔒
+                    </Box>
+                  )}
                 </Box>
 
                 {/* Piece name */}
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.28rem' : '13px',
-                    fontWeight: 500,
-                    color: isUnlocked ? textColor : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'),
+                    fontSize: isLincoln ? '0.28rem' : '12px',
+                    fontWeight: 600,
+                    color: isApplied
+                      ? accentColor
+                      : isUnlocked
+                        ? textColor
+                        : (isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)'),
                     lineHeight: 1.2,
-                    textAlign: 'center',
                   }}
                 >
                   {piece.shortName}
                 </Typography>
 
-                {/* Status text */}
-                <Typography
-                  sx={{
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.22rem' : '11px',
-                    fontWeight: isApplied ? 600 : 400,
-                    color: isApplied
-                      ? '#4caf50'
-                      : isUnlocked
-                        ? '#FFA726'
-                        : (isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'),
-                  }}
-                >
-                  {isApplied
-                    ? '✓ Equipped'
-                    : isUnlocked
-                      ? 'Tap to equip'
-                      : `${XP_THRESHOLDS[piece.id] - profile.totalXp > 0 ? `${XP_THRESHOLDS[piece.id] - profile.totalXp} XP away` : `${XP_THRESHOLDS[piece.id]} XP`}`}
-                </Typography>
+                {/* Status / XP progress */}
+                {isApplied ? (
+                  <Typography
+                    sx={{
+                      fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                      fontSize: isLincoln ? '0.22rem' : '10px',
+                      color: '#4caf50',
+                      fontWeight: 600,
+                    }}
+                  >
+                    Equipped
+                  </Typography>
+                ) : isUnlocked ? (
+                  <Typography
+                    sx={{
+                      fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                      fontSize: isLincoln ? '0.22rem' : '10px',
+                      color: '#FFA726',
+                    }}
+                  >
+                    Tap to equip
+                  </Typography>
+                ) : (
+                  <Box sx={{ width: '80%' }}>
+                    <Box
+                      sx={{
+                        height: 3,
+                        borderRadius: '2px',
+                        bgcolor: isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          height: '100%',
+                          width: `${unlockProgress}%`,
+                          borderRadius: 'inherit',
+                          bgcolor: isLincoln ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.15)',
+                          transition: 'width 0.5s ease',
+                        }}
+                      />
+                    </Box>
+                    <Typography
+                      sx={{
+                        fontFamily: 'monospace',
+                        fontSize: isLincoln ? '0.2rem' : '9px',
+                        color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)',
+                        mt: 0.25,
+                      }}
+                    >
+                      {xpAway > 0 ? `${xpAway} XP` : `${XP_THRESHOLDS[piece.id]} XP`}
+                    </Typography>
+                  </Box>
+                )}
               </Box>
             )
           })}
@@ -1092,60 +1296,67 @@ export default function MyAvatarPage() {
             sx={{
               mt: 1.5,
               mx: 1,
-              p: '16px 20px',
-              bgcolor: isLincoln ? 'rgba(26, 26, 46, 0.95)' : 'rgba(255, 254, 249, 0.95)',
-              border: `1.5px solid ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(232,160,191,0.3)'}`,
-              borderRadius: '12px',
+              p: '20px',
+              background: isLincoln
+                ? 'linear-gradient(135deg, rgba(26,26,46,0.97) 0%, rgba(20,30,50,0.97) 100%)'
+                : 'linear-gradient(135deg, rgba(255,254,249,0.97) 0%, rgba(250,245,240,0.97) 100%)',
+              border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.2)' : 'rgba(232,160,191,0.25)'}`,
+              borderRadius: isLincoln ? '6px' : '16px',
               position: 'relative',
-              animation: 'slideUp 0.3s ease-out',
-              '@keyframes slideUp': {
+              animation: 'verseSlideUp 0.3s ease-out',
+              '@keyframes verseSlideUp': {
                 '0%': { opacity: 0, transform: 'translateY(8px)' },
                 '100%': { opacity: 1, transform: 'translateY(0)' },
               },
+              boxShadow: isLincoln
+                ? '0 4px 20px rgba(0,0,0,0.3)'
+                : '0 4px 20px rgba(0,0,0,0.06)',
             }}
           >
-            {/* Speaker button */}
-            <Box
-              component="button"
-              onClick={(e: React.MouseEvent) => {
-                e.stopPropagation()
-                speakVerse(selectedPiece.name, selectedPiece.verseText)
-              }}
-              sx={{
-                position: 'absolute', top: 8, left: 12,
-                background: isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.15)',
-                border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(232,160,191,0.3)'}`,
-                borderRadius: '50%',
-                width: 32, height: 32,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', p: 0, color: accentColor,
-              }}
-              aria-label="Read verse aloud"
-            >
-              <VolumeUpIcon sx={{ fontSize: 18 }} />
-            </Box>
+            {/* Top bar: speaker + close */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+              <Box
+                component="button"
+                onClick={(e: React.MouseEvent) => {
+                  e.stopPropagation()
+                  speakVerse(selectedPiece.name, selectedPiece.verseText)
+                }}
+                sx={{
+                  background: isLincoln ? 'rgba(126,252,32,0.1)' : 'rgba(232,160,191,0.1)',
+                  border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.2)' : 'rgba(232,160,191,0.2)'}`,
+                  borderRadius: isLincoln ? '4px' : '10px',
+                  width: 36, height: 36,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', p: 0, color: accentColor,
+                  transition: 'all 0.2s ease',
+                  '&:hover': { background: isLincoln ? 'rgba(126,252,32,0.18)' : 'rgba(232,160,191,0.18)' },
+                }}
+                aria-label="Read verse aloud"
+              >
+                <VolumeUpIcon sx={{ fontSize: 18 }} />
+              </Box>
 
-            {/* Close button */}
-            <Box
-              component="button"
-              onClick={(e: React.MouseEvent) => { e.stopPropagation(); setSelectedPiece(null) }}
-              sx={{
-                position: 'absolute', top: 8, right: 12,
-                background: 'none', border: 'none',
-                color: isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.3)',
-                fontSize: 18, cursor: 'pointer', p: '4px',
-              }}
-            >
-              ✕
+              <Box
+                component="button"
+                onClick={(e: React.MouseEvent) => { e.stopPropagation(); setSelectedPiece(null) }}
+                sx={{
+                  background: 'none', border: 'none',
+                  color: isLincoln ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.25)',
+                  fontSize: 20, cursor: 'pointer', p: '4px',
+                  '&:hover': { color: isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)' },
+                }}
+              >
+                ✕
+              </Box>
             </Box>
 
             {/* Piece name */}
             <Typography sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.55rem' : '16px',
-              fontWeight: 500,
+              fontSize: isLincoln ? '0.5rem' : '16px',
+              fontWeight: 600,
               color: accentColor,
-              mb: 0.5,
+              mb: 0.25,
             }}>
               {selectedPiece.name}
             </Typography>
@@ -1153,23 +1364,31 @@ export default function MyAvatarPage() {
             {/* Verse reference */}
             <Typography sx={{
               fontFamily: 'monospace',
-              fontSize: isLincoln ? '0.35rem' : '12px',
-              color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)',
-              mb: 1.25,
+              fontSize: isLincoln ? '0.32rem' : '11px',
+              color: isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)',
+              mb: 1.5,
             }}>
               {selectedPiece.verse}
             </Typography>
 
-            {/* Verse text */}
-            <Typography sx={{
-              fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-              fontSize: isLincoln ? '0.45rem' : '15px',
-              color: textColor,
-              lineHeight: 1.6,
-              fontStyle: 'italic',
-            }}>
-              &ldquo;{selectedPiece.verseText}&rdquo;
-            </Typography>
+            {/* Verse text with left accent bar */}
+            <Box
+              sx={{
+                borderLeft: `3px solid ${accentColor}33`,
+                pl: 1.5,
+                py: 0.5,
+              }}
+            >
+              <Typography sx={{
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                fontSize: isLincoln ? '0.42rem' : '14px',
+                color: textColor,
+                lineHeight: 1.7,
+                fontStyle: 'italic',
+              }}>
+                &ldquo;{selectedPiece.verseText}&rdquo;
+              </Typography>
+            </Box>
 
             {/* Equip button — only for unlocked, unequipped pieces */}
             {profile.totalXp >= XP_THRESHOLDS[selectedPiece.id] && (
@@ -1185,11 +1404,13 @@ export default function MyAvatarPage() {
                   bgcolor: accentColor,
                   color: isLincoln ? '#000' : '#fff',
                   fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.45rem' : '16px',
+                  fontSize: isLincoln ? '0.42rem' : '15px',
                   fontWeight: 700,
                   py: 1.25,
-                  borderRadius: isLincoln ? 0 : 3,
-                  '&:hover': { bgcolor: accentColor, opacity: 0.85 },
+                  borderRadius: isLincoln ? '4px' : '12px',
+                  textTransform: 'none',
+                  boxShadow: `0 2px 10px ${accentColor}33`,
+                  '&:hover': { bgcolor: accentColor, opacity: 0.9 },
                 }}
               >
                 Put it on!
@@ -1208,11 +1429,14 @@ export default function MyAvatarPage() {
         {/* ── Photo Upload Section ──────────────────────────────── */}
         <Box
           sx={{
-            mt: 3,
+            mt: 2,
+            mx: 1,
             p: 2,
-            borderRadius: isLincoln ? 0 : 3,
-            border: `2px solid ${isLincoln ? '#333' : '#e0d0f0'}`,
-            bgcolor: isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(232,160,191,0.06)',
+            borderRadius: isLincoln ? '6px' : '16px',
+            border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.2)'}`,
+            background: isLincoln
+              ? 'rgba(26,26,46,0.95)'
+              : 'rgba(255,254,249,0.95)',
           }}
         >
           <input
@@ -1228,7 +1452,7 @@ export default function MyAvatarPage() {
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.42rem' : '0.95rem',
+                fontSize: isLincoln ? '0.42rem' : '15px',
                 fontWeight: 600,
                 color: accentColor,
               }}
@@ -1238,36 +1462,48 @@ export default function MyAvatarPage() {
           </Box>
 
           {!photoPreviewUrl ? (
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<CameraAltIcon />}
+            <Box
+              component="button"
               onClick={() => photoInputRef.current?.click()}
               sx={{
-                borderColor: accentColor,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                px: 2,
+                py: 1.25,
+                borderRadius: isLincoln ? '4px' : '12px',
+                border: `1.5px dashed ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(232,160,191,0.4)'}`,
+                background: isLincoln ? 'rgba(126,252,32,0.05)' : 'rgba(232,160,191,0.05)',
                 color: accentColor,
-                borderRadius: isLincoln ? 0 : 2,
-                fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                fontSize: isLincoln ? '0.38rem' : '0.85rem',
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                fontSize: isLincoln ? '0.38rem' : '14px',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  background: isLincoln ? 'rgba(126,252,32,0.1)' : 'rgba(232,160,191,0.1)',
+                  borderColor: accentColor,
+                },
+                '&:active': { transform: 'scale(0.98)' },
               }}
             >
+              <CameraAltIcon sx={{ fontSize: 18 }} />
               {profile.photoUrl ? 'Change Photo' : 'Upload a Photo'}
-            </Button>
+            </Box>
           ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
               <Box
                 component="img"
                 src={photoPreviewUrl}
                 alt="Preview"
                 sx={{
-                  width: 120,
-                  height: 120,
+                  width: 80,
+                  height: 80,
                   objectFit: 'cover',
-                  borderRadius: isLincoln ? 0 : 2,
-                  border: `2px solid ${accentColor}`,
+                  borderRadius: isLincoln ? '4px' : '12px',
+                  border: `2px solid ${accentColor}44`,
                 }}
               />
-              <Box sx={{ display: 'flex', gap: 1 }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1 }}>
                 <Button
                   variant="contained"
                   size="small"
@@ -1276,9 +1512,11 @@ export default function MyAvatarPage() {
                   sx={{
                     bgcolor: accentColor,
                     color: isLincoln ? '#000' : '#fff',
-                    borderRadius: isLincoln ? 0 : 2,
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.35rem' : '0.85rem',
+                    borderRadius: isLincoln ? '4px' : '10px',
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                    fontSize: isLincoln ? '0.35rem' : '13px',
+                    textTransform: 'none',
+                    py: 1,
                     '&:hover': { bgcolor: accentColor, opacity: 0.85 },
                   }}
                 >
@@ -1289,9 +1527,10 @@ export default function MyAvatarPage() {
                   size="small"
                   onClick={() => { setPhotoPreviewUrl(null); setPhotoError(null) }}
                   sx={{
-                    color: isLincoln ? '#666' : '#aaa',
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.35rem' : '0.85rem',
+                    color: isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)',
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                    fontSize: isLincoln ? '0.32rem' : '12px',
+                    textTransform: 'none',
                   }}
                 >
                   Cancel
@@ -1301,17 +1540,22 @@ export default function MyAvatarPage() {
           )}
 
           {photoError && (
-            <Alert severity="error" sx={{ mt: 1, fontSize: '0.8rem' }}>
+            <Alert severity="error" sx={{ mt: 1, fontSize: '0.8rem', borderRadius: isLincoln ? '4px' : '10px' }}>
               {photoError}
             </Alert>
           )}
 
           {profile.characterFeatures && !photoPreviewUrl && (
             <Typography
-              variant="caption"
-              sx={{ display: 'block', mt: 0.5, color: isLincoln ? '#555' : '#aaa', fontSize: '12px' }}
+              sx={{
+                display: 'block',
+                mt: 0.75,
+                color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.35)',
+                fontSize: '11px',
+                fontFamily: 'monospace',
+              }}
             >
-              Character features extracted from photo — 3D character reflects your look
+              3D character reflects your look
             </Typography>
           )}
         </Box>

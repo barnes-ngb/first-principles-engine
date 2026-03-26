@@ -33,6 +33,12 @@ const DEFAULT_PANTS = '#2A3A52'
 const DEFAULT_SHOES_OLDER = '#F5D6B8' // barefoot (skin)
 const DEFAULT_SHOES_YOUNGER = '#444444'
 
+const SLOT_ICONS: Record<OutfitSlot, string> = {
+  shirt: '👕',
+  pants: '👖',
+  shoes: '👟',
+}
+
 export default function OutfitCustomizer({
   customization,
   ageGroup,
@@ -66,10 +72,10 @@ export default function OutfitCustomizer({
     <Box
       sx={{
         background: isLincoln ? 'rgba(26,26,46,0.95)' : 'rgba(255,254,249,0.95)',
-        border: `1px solid ${isLincoln ? 'rgba(76,175,80,0.2)' : 'rgba(232,160,191,0.3)'}`,
-        borderRadius: isLincoln ? '2px' : '12px',
+        border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.2)'}`,
+        borderRadius: isLincoln ? '6px' : '16px',
         p: 2,
-        mt: 1.5,
+        mt: 2,
         mx: 1,
       }}
     >
@@ -85,66 +91,77 @@ export default function OutfitCustomizer({
         Customize Outfit
       </Typography>
 
-      {/* Slot selector */}
-      <Box sx={{ display: 'flex', gap: 1, mb: 1.5 }}>
-        {slots.map((slot) => (
-          <Box
-            key={slot.id}
-            component="button"
-            onClick={() => setActiveSlot(slot.id === activeSlot ? null : slot.id)}
-            sx={{
-              flex: 1,
-              p: 1,
-              borderRadius: isLincoln ? '2px' : '8px',
-              border: activeSlot === slot.id
-                ? `2px solid ${accentColor}`
-                : `1px solid ${isLincoln ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'}`,
-              background: activeSlot === slot.id
-                ? (isLincoln ? 'rgba(76,175,80,0.15)' : 'rgba(232,160,191,0.15)')
-                : (isLincoln ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)'),
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              justifyContent: 'center',
-              minHeight: '44px',
-            }}
-          >
+      {/* Slot selector — pill buttons with color preview */}
+      <Box sx={{ display: 'flex', gap: '8px', mb: 1.5 }}>
+        {slots.map((slot) => {
+          const isActive = activeSlot === slot.id
+          return (
             <Box
+              key={slot.id}
+              component="button"
+              onClick={() => setActiveSlot(slot.id === activeSlot ? null : slot.id)}
               sx={{
-                width: 16,
-                height: 16,
-                borderRadius: '3px',
-                background: slot.current,
-                border: `1px solid ${isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)'}`,
-                flexShrink: 0,
-              }}
-            />
-            <Typography
-              sx={{
-                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                fontSize: isLincoln ? '0.3rem' : '13px',
-                color: activeSlot === slot.id
-                  ? accentColor
-                  : (isLincoln ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)'),
+                flex: 1,
+                py: 1,
+                px: 0.5,
+                borderRadius: isLincoln ? '4px' : '12px',
+                border: isActive
+                  ? `2px solid ${accentColor}`
+                  : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
+                background: isActive
+                  ? (isLincoln ? 'rgba(126,252,32,0.1)' : 'rgba(232,160,191,0.1)')
+                  : 'transparent',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '4px',
+                minHeight: '52px',
+                transition: 'all 0.2s ease',
+                '&:active': { transform: 'scale(0.96)' },
               }}
             >
-              {slot.label}
-            </Typography>
-          </Box>
-        ))}
+              {/* Color preview circle */}
+              <Box
+                sx={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: '50%',
+                  background: slot.current,
+                  border: `2px solid ${isActive ? accentColor : (isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)')}`,
+                  boxShadow: isActive ? `0 0 8px ${accentColor}44` : 'none',
+                  transition: 'all 0.2s ease',
+                }}
+              />
+              <Typography
+                sx={{
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                  fontSize: isLincoln ? '0.28rem' : '11px',
+                  color: isActive
+                    ? accentColor
+                    : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)'),
+                  lineHeight: 1,
+                }}
+              >
+                {SLOT_ICONS[slot.id]} {slot.label}
+              </Typography>
+            </Box>
+          )
+        })}
       </Box>
 
-      {/* Color palette */}
+      {/* Color palette — round swatches */}
       {activeSlot && (
         <Box
           sx={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(6, 1fr)',
-            gap: '6px',
-            animation: 'slideUp 0.2s ease-out',
-            '@keyframes slideUp': {
-              '0%': { opacity: 0, transform: 'translateY(8px)' },
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '8px',
+            justifyContent: 'center',
+            py: 1,
+            animation: 'outfitSlideUp 0.2s ease-out',
+            '@keyframes outfitSlideUp': {
+              '0%': { opacity: 0, transform: 'translateY(6px)' },
               '100%': { opacity: 1, transform: 'translateY(0)' },
             },
           }}
@@ -158,18 +175,24 @@ export default function OutfitCustomizer({
                 onClick={() => onColorChange(activeSlot, color.hex)}
                 title={color.name}
                 sx={{
-                  width: '100%',
-                  aspectRatio: '1',
-                  minHeight: '44px',
-                  borderRadius: isLincoln ? '2px' : '6px',
+                  width: 40,
+                  height: 40,
+                  borderRadius: '50%',
                   background: color.hex,
                   border: isSelected
                     ? `3px solid ${accentColor}`
-                    : `2px solid ${isLincoln ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`,
+                    : `2px solid ${isLincoln ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)'}`,
                   cursor: 'pointer',
-                  transition: 'transform 0.1s',
+                  transition: 'all 0.15s ease',
                   p: 0,
-                  '&:active': { transform: 'scale(0.92)' },
+                  boxShadow: isSelected
+                    ? `0 0 0 2px ${isLincoln ? '#0d1117' : '#faf5ef'}, 0 0 0 4px ${accentColor}`
+                    : 'none',
+                  transform: isSelected ? 'scale(1.1)' : 'scale(1)',
+                  '&:hover': {
+                    transform: 'scale(1.12)',
+                  },
+                  '&:active': { transform: 'scale(0.95)' },
                 }}
               />
             )
