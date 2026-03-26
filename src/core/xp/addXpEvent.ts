@@ -1,13 +1,8 @@
 import { doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore'
 
-function stripUndefined<T extends object>(obj: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([, v]) => v !== undefined),
-  ) as Partial<T>
-}
-
 import {
   avatarProfilesCollection,
+  stripUndefined,
   xpLedgerCollection,
   xpLedgerDocId,
 } from '../firebase/firestore'
@@ -117,7 +112,7 @@ export async function addXpEvent(
       totalXp: realTotal,
       ...tierUpdate,
       updatedAt: new Date().toISOString(),
-    }))
+    }) as unknown as typeof profile)
   }
 
   // ── Check for armor unlocks ────────────────────────────────
