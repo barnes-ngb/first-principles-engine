@@ -112,7 +112,7 @@ export async function addXpEvent(
       totalXp: realTotal,
       ...tierUpdate,
       updatedAt: new Date().toISOString(),
-    }))
+    }) as unknown as typeof profile)
   }
 
   // ── Check for armor unlocks ────────────────────────────────
