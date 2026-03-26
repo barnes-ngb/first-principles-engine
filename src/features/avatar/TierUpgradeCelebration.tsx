@@ -55,7 +55,7 @@ export default function TierUpgradeCelebration({
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
   const readyCount = ARMOR_PIECES.filter((pieceDef) => {
-    const entry = profile.pieces.find((p) => p.pieceId === pieceDef.id)
+    const entry = (profile.pieces ?? []).find((p) => p.pieceId === pieceDef.id)
     return entry && (entry.generatedImageUrls as Record<string, string | undefined>)[toTier]
   }).length
 
@@ -146,7 +146,7 @@ export default function TierUpgradeCelebration({
         {/* All 6 piece images grid */}
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1 }}>
           {ARMOR_PIECES.map((pieceDef, idx) => {
-            const entry = profile.pieces.find((p) => p.pieceId === pieceDef.id)
+            const entry = (profile.pieces ?? []).find((p) => p.pieceId === pieceDef.id)
             const url = entry
               ? (entry.generatedImageUrls as Record<string, string | undefined>)[toTier]
               : undefined

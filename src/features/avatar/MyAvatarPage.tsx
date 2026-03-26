@@ -441,12 +441,12 @@ export default function MyAvatarPage() {
         (p) => ARMOR_PIECE_TO_VOXEL[p.id] === voxelPieceId,
       )?.id
       if (!armorPieceId) return
-      if (session.appliedPieces.includes(armorPieceId)) return
+      if ((session.appliedPieces ?? []).includes(armorPieceId)) return
 
       // Trigger equip animation
       setAnimateEquipId(voxelPieceId)
 
-      const updatedApplied = [...session.appliedPieces, armorPieceId]
+      const updatedApplied = [...(session.appliedPieces ?? []), armorPieceId]
       const unlockedVoxel = getUnlockedVoxelPieces(profile)
       const allApplied = unlockedVoxel.every((vid) => {
         const aid = ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id
@@ -548,7 +548,7 @@ export default function MyAvatarPage() {
       )?.id
 
       const isUnlocked = profile.totalXp >= XP_THRESHOLDS[piece.id]
-      const isApplied = armorPieceId && session.appliedPieces.includes(armorPieceId)
+      const isApplied = armorPieceId && (session.appliedPieces ?? []).includes(armorPieceId)
 
       if (isApplied) {
         // Tap equipped piece → directly unequip (toggle off)
