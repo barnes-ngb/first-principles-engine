@@ -12,9 +12,22 @@ const SPACE_COLORS: Record<BoardSpaceType, string> = {
 
 const SPACE_EMOJI: Partial<Record<BoardSpaceType, string>> = {
   challenge: '?',
-  bonus: '\u2B50',
-  setback: '\u26A1',
-  special: '\u2728',
+  bonus: '\u2B06',    // ⬆ upward arrow for bonus
+  setback: '\u2B07',  // ⬇ downward arrow for setback
+  special: '\u2728',  // ✨ sparkle for shortcut/teleport
+}
+
+/** Extract movement delta from space label for display (e.g. "+2", "-3") */
+function parseMoveAmount(label?: string): string | null {
+  if (!label) return null
+  const lower = label.toLowerCase()
+  const fwd = lower.match(/forward\s+(\d+)|move\s+ahead\s+(\d+)|\+(\d+)/)
+  if (fwd) return `+${fwd[1] || fwd[2] || fwd[3]}`
+  const back = lower.match(/back\s+(\d+)|move\s+back\s+(\d+)|-(\d+)|slip\s+back\s+(\d+)/)
+  if (back) return `-${back[1] || back[2] || back[3] || back[4]}`
+  const tele = lower.match(/(?:jump|shortcut|teleport)\s+(?:to\s+)?(?:space\s+)?(\d+)/)
+  if (tele) return `\u2192${tele[1]}`
+  return null
 }
 
 interface BoardSpaceProps {
@@ -49,6 +62,7 @@ export default function BoardSpace({
   theme,
 }: BoardSpaceProps) {
   const bgColor = color || SPACE_COLORS[type] || SPACE_COLORS.normal
+  const moveAmount = parseMoveAmount(label)
 
   return (
     <Box
@@ -58,8 +72,20 @@ export default function BoardSpace({
         aspectRatio: '1',
         bgcolor: bgColor,
         borderRadius: 1.5,
-        border: isActive ? '3px solid' : '1px solid',
-        borderColor: isActive ? 'primary.main' : 'divider',
+        border: isLast
+          ? '3px solid #ffd700'
+          : isActive
+            ? '3px solid'
+            : type === 'challenge'
+              ? '2px solid #ff9800'
+              : '1px solid',
+        borderColor: isLast
+          ? '#ffd700'
+          : isActive
+            ? 'primary.main'
+            : type === 'challenge'
+              ? '#ff9800'
+              : 'divider',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -68,6 +94,10 @@ export default function BoardSpace({
         p: '4px',
         overflow: 'hidden',
         transition: 'border-color 0.2s',
+        // Challenge spaces get a subtle glow
+        ...(type === 'challenge'
+          ? { boxShadow: '0 0 4px rgba(255,152,0,0.25)' }
+          : {}),
         // Landing pulse animation
         ...(isLanding
           ? {
@@ -101,9 +131,31 @@ export default function BoardSpace({
 
       {/* Space indicator */}
       {isFirst && <Typography sx={{ fontSize: '0.85rem', fontWeight: 700 }}>START</Typography>}
-      {isLast && <Typography sx={{ fontSize: '0.85rem', fontWeight: 700 }}>FINISH</Typography>}
+      {isLast && (
+        <Box sx={{ textAlign: 'center' }}>
+          <Typography sx={{ fontSize: '1.1rem' }}>{'\uD83C\uDFC6'}</Typography>
+          <Typography sx={{ fontSize: '0.8rem', fontWeight: 700, color: '#b8860b' }}>FINISH</Typography>
+        </Box>
+      )}
       {!isFirst && !isLast && SPACE_EMOJI[type] && (
         <Typography sx={{ fontSize: type === 'challenge' ? '1.4rem' : '1.25rem' }}>{SPACE_EMOJI[type]}</Typography>
+      )}
+
+      {/* Movement amount badge for bonus/setback/special spaces */}
+      {!isFirst && !isLast && moveAmount && (
+        <Typography
+          sx={{
+            position: 'absolute',
+            top: 2,
+            right: 4,
+            fontSize: '0.75rem',
+            fontWeight: 800,
+            color: moveAmount.startsWith('+') ? '#2e7d32' : moveAmount.startsWith('-') ? '#c62828' : '#6a1b9a',
+            lineHeight: 1,
+          }}
+        >
+          {moveAmount}
+        </Typography>
       )}
 
       {/* Label */}
