@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-03-25.
+> Where everything lives. Updated 2026-03-26.
 
 ---
 
@@ -10,8 +10,8 @@
 |---|---|---|
 | `MASTER_OUTLINE.md` | **CURRENT** (v11) | Single source of truth: features, status, sprint history |
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
-| `PARENT_EXPERIENCE_AUDIT.md` | **NEW** | Full code-level trace of every parent screen, all findings |
-| `PARENT_EXPERIENCE_ALIGNMENT_PLAN.md` | **COMPLETED** | Punch list from parent experience audit — all items done Mar 25, 2026. Superseded by FIRST_PRINCIPLES_ALIGNMENT.md. |
+| ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
+| ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | `FIRESTORE_AUDIT.md` | **CURRENT** (Mar 21) | Data model, indexes, collections audit |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
@@ -40,7 +40,6 @@
 |----------|-----|
 | `MASTER_OUTLINE.md` | Single source of truth: features, status, sprint history |
 | `FIRST_PRINCIPLES_ALIGNMENT.md` | Architecture direction: disposition tracking, conundrums, teach-back philosophy |
-| `PARENT_EXPERIENCE_AUDIT.md` | Full code-level trace of every parent screen, all findings |
 | `CLAUDE.md` | Build commands, constraints, conventions, project structure |
 
 ### Include When Working on Specific Areas
@@ -76,7 +75,7 @@ These are family/values documents maintained outside the repo. They inform AI pr
 | File | Purpose |
 |---|---|
 | `CLAUDE.md` | AI assistant instructions: build commands, constraints, conventions, project context |
-| `src/core/types/domain.ts` | All TypeScript domain types (50+ interfaces) |
+| `src/core/types/` | Domain types split by area: `common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts` |
 | `src/core/types/enums.ts` | All enum-like `as const` objects and companion types |
 | `functions/src/ai/chat.ts` | Cloud Function: system prompt assembly, enriched context, quest prompt |
 | `src/features/quest/questTypes.ts` | Knowledge Mine types (QuestState, SessionQuestion, InteractiveSessionData) |
