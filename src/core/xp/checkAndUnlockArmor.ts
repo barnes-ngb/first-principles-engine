@@ -35,7 +35,12 @@ function hasStoneTier(
 
 /** Migrate a profile from the old unlockedPieces/generatedImageUrls shape if needed. */
 export function ensureNewProfileStructure(raw: Record<string, unknown>): AvatarProfile {
-  if (Array.isArray(raw.pieces)) return raw as unknown as AvatarProfile
+  if (Array.isArray(raw.pieces)) {
+    const profile = raw as unknown as AvatarProfile
+    // Ensure array fields are never null/undefined from Firestore
+    if (!Array.isArray(profile.equippedPieces)) profile.equippedPieces = []
+    return profile
+  }
 
   // Legacy migration: convert unlockedPieces + generatedImageUrls → pieces
   const unlockedPieces = (raw.unlockedPieces as ArmorPiece[] | undefined) ?? []

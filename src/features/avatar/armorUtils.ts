@@ -25,7 +25,7 @@ export const PIECE_OVERLAY_POSITIONS: Record<
 
 /** Check if a piece has been unlocked at any tier. */
 export function isPieceEarned(profile: AvatarProfile, pieceId: ArmorPiece): boolean {
-  const entry = profile.pieces.find((p) => p.pieceId === pieceId)
+  const entry = (profile.pieces ?? []).find((p) => p.pieceId === pieceId)
   if (!entry) return false
   if (profile.themeStyle === 'minecraft') return entry.unlockedTiers.length > 0
   return (entry.unlockedTiersPlatformer ?? []).length > 0
