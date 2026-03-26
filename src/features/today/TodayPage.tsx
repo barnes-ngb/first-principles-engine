@@ -237,6 +237,7 @@ export default function TodayPage() {
     evidenceType: EvidenceType.Note as EvidenceType,
     subjectBucket: SubjectBucket.Reading,
     content: '',
+    domain: '',
   })
 
   // Keep artifact form childId in sync with active child
@@ -440,6 +441,8 @@ export default function TodayPage() {
         dayLogId: today,
         weekPlanId,
         tags: {
+          engineStage: EngineStage.Build,
+          domain: '',
           subjectBucket: artifactForm.subjectBucket,
           location: LearningLocation.Home,
         },
