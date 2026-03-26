@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 import Box from '@mui/material/Box'
 
@@ -297,7 +297,10 @@ export default function VoxelCharacter({
   const onTierUpRef = useRef(onTierUp)
   const ceremonyActiveRef = useRef(false)
 
-  const equippedPieces = Array.isArray(equippedPiecesRaw) ? equippedPiecesRaw : []
+  const equippedPieces = useMemo(
+    () => (Array.isArray(equippedPiecesRaw) ? equippedPiecesRaw : []),
+    [equippedPiecesRaw],
+  )
   const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
   const currentTier = calculateTier(totalXp)
 
@@ -703,7 +706,7 @@ export default function VoxelCharacter({
     const character = characterRef.current
     if (!character) return
     applyProfileOutfit(character, customization)
-  }, [customization?.shirtColor, customization?.pantsColor, customization?.shoeColor])
+  }, [customization])
 
   // ── Tier upgrade ceremony when XP changes tier ─────────────────
   useEffect(() => {
