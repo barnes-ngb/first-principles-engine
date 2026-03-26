@@ -25,7 +25,7 @@ function getPieceImageUrl(
   profile: AvatarProfile,
   pieceId: ArmorPiece,
 ): string | undefined {
-  const entry = profile.pieces.find((p) => p.pieceId === pieceId)
+  const entry = (profile.pieces ?? []).find((p) => p.pieceId === pieceId)
   if (!entry) return undefined
   const tier = profile.currentTier
   return (entry.generatedImageUrls as Record<string, string | undefined>)[tier]

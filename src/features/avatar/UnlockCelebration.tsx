@@ -12,7 +12,7 @@ interface UnlockCelebrationProps {
 
 /** Get stone/basic tier image URL for the newly unlocked piece. */
 function getNewPieceImageUrl(profile: AvatarProfile, pieceId: ArmorPiece): string | undefined {
-  const entry = profile.pieces.find((p) => p.pieceId === pieceId)
+  const entry = (profile.pieces ?? []).find((p) => p.pieceId === pieceId)
   if (!entry) return undefined
   // Show stone/basic tier image since that's what just unlocked
   const stoneTier = profile.themeStyle === 'minecraft' ? 'stone' : 'basic'
