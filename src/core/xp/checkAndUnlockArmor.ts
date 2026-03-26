@@ -29,7 +29,7 @@ function hasStoneTier(
   themeStyle: 'minecraft' | 'platformer',
 ): boolean {
   if (!progress) return false
-  if (themeStyle === 'minecraft') return progress.unlockedTiers.includes('stone')
+  if (themeStyle === 'minecraft') return (progress.unlockedTiers ?? []).includes('stone')
   return (progress.unlockedTiersPlatformer ?? []).includes('basic')
 }
 
@@ -37,9 +37,26 @@ function hasStoneTier(
 export function ensureNewProfileStructure(raw: Record<string, unknown>): AvatarProfile {
   if (Array.isArray(raw.pieces)) {
     const profile = raw as unknown as AvatarProfile
-    // Ensure array fields are never null/undefined from Firestore
+    // Ensure ALL array fields are never null/undefined from Firestore
     if (!Array.isArray(profile.equippedPieces)) profile.equippedPieces = []
+    if (!Array.isArray(profile.pieces)) profile.pieces = []
+    // Guard sub-arrays inside each piece
+    profile.pieces = profile.pieces.map((p) => {
+      if (!p) return { pieceId: 'unknown' as ArmorPiece, unlockedTiers: [] as ArmorTier[], generatedImageUrls: {} }
+      return {
+        ...p,
+        unlockedTiers: Array.isArray(p.unlockedTiers) ? p.unlockedTiers : [],
+        unlockedTiersPlatformer: p.unlockedTiersPlatformer != null
+          ? (Array.isArray(p.unlockedTiersPlatformer) ? p.unlockedTiersPlatformer : [])
+          : undefined,
+      }
+    })
     return profile
+  }
+
+  // pieces exists but is not an array (e.g. Firestore map) — treat as missing
+  if (raw.pieces != null && !Array.isArray(raw.pieces)) {
+    raw.pieces = undefined
   }
 
   // Legacy migration: convert unlockedPieces + generatedImageUrls → pieces
@@ -123,7 +140,7 @@ export async function checkAndUnlockArmor(
       newlyUnlocked.push(pieceDef.id)
       if (existing) {
         if (themeStyle === 'minecraft') {
-          existing.unlockedTiers = [...existing.unlockedTiers, 'stone']
+          existing.unlockedTiers = [...(existing.unlockedTiers ?? []), 'stone']
         } else {
           existing.unlockedTiersPlatformer = [
             ...(existing.unlockedTiersPlatformer ?? []),

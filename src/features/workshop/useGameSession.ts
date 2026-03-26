@@ -1,5 +1,6 @@
 import { useCallback, useReducer } from 'react'
 import type { ChallengeCard, GeneratedGame } from '../../core/types'
+import type { BoardSpace, SpaceEffect } from '../../core/types/workshop'
 import { TurnPhase } from '../../core/types/workshop'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -27,6 +28,8 @@ export interface GameSessionState {
   previousPosition: number | null
   /** The target position after the current roll */
   targetPosition: number | null
+  /** Pending special space effect (bonus/setback/shortcut) */
+  pendingSpecialMove: SpaceEffect | null
 }
 
 const PLAYER_COLORS = ['#1976d2', '#d32f2f', '#388e3c', '#f57c00']
@@ -38,6 +41,35 @@ const DEFAULT_PLAYERS: Player[] = [
   { id: 'dad', name: 'Dad', color: PLAYER_COLORS[3], position: 0 },
 ]
 
+// ── Space Effect Parser ──────────────────────────────────────────
+
+export function parseSpaceEffect(space: BoardSpace): SpaceEffect | null {
+  if (!space.label) return null
+  const label = space.label.toLowerCase()
+
+  // Forward: "go forward 2", "move ahead 3", "+2"
+  const forwardMatch = label.match(/(?:go\s+)?forward\s+(\d+)|move\s+ahead\s+(\d+)|\+(\d+)/)
+  if (forwardMatch) {
+    const amount = parseInt(forwardMatch[1] || forwardMatch[2] || forwardMatch[3], 10)
+    return { type: 'forward', amount }
+  }
+
+  // Backward: "go back 2", "move back 3", "-2", "slip back"
+  const backMatch = label.match(/(?:go\s+)?back\s+(\d+)|move\s+back\s+(\d+)|-(\d+)|slip\s+back\s+(\d+)/)
+  if (backMatch) {
+    const amount = parseInt(backMatch[1] || backMatch[2] || backMatch[3] || backMatch[4], 10)
+    return { type: 'backward', amount }
+  }
+
+  // Shortcut/teleport: "jump to space 29", "shortcut to 15"
+  const teleportMatch = label.match(/(?:jump|shortcut|teleport)\s+(?:to\s+)?(?:space\s+)?(\d+)/)
+  if (teleportMatch) {
+    return { type: 'teleport', amount: parseInt(teleportMatch[1], 10) }
+  }
+
+  return null
+}
+
 // ── Actions ───────────────────────────────────────────────────────
 
 type GameAction =
@@ -45,6 +77,7 @@ type GameAction =
   | { type: 'RESTORE'; players: Player[]; currentPlayerIndex: number; usedCardIds: string[] }
   | { type: 'ROLL'; value: number; game: GeneratedGame }
   | { type: 'MOVE_COMPLETE'; game: GeneratedGame }
+  | { type: 'SPECIAL_MOVE'; delta: number; game: GeneratedGame }
   | { type: 'DISMISS_CARD' }
   | { type: 'NEXT_TURN' }
   | { type: 'RESET' }
@@ -65,6 +98,7 @@ function gameReducer(state: GameSessionState, action: GameAction): GameSessionSt
         startedAt: new Date().toISOString(),
         previousPosition: null,
         targetPosition: null,
+        pendingSpecialMove: null,
       }
 
     case 'RESTORE':
@@ -78,6 +112,7 @@ function gameReducer(state: GameSessionState, action: GameAction): GameSessionSt
         cardsEncountered: action.usedCardIds,
         winner: null,
         startedAt: state.startedAt ?? new Date().toISOString(),
+        pendingSpecialMove: null,
       }
 
     case 'ROLL': {
@@ -86,14 +121,13 @@ function gameReducer(state: GameSessionState, action: GameAction): GameSessionSt
       const maxPosition = game.board.totalSpaces - 1
       const newPosition = Math.min(player.position + value, maxPosition)
 
-      // Don't move player yet — go to Move phase for animation
       return {
         ...state,
         lastRoll: value,
         turnPhase: TurnPhase.Move,
         previousPosition: player.position,
         targetPosition: newPosition,
-        // Update position immediately so the board can animate
+        pendingSpecialMove: null,
         players: state.players.map((p, i) =>
           i === state.currentPlayerIndex ? { ...p, position: newPosition } : p,
         ),
@@ -107,7 +141,6 @@ function gameReducer(state: GameSessionState, action: GameAction): GameSessionSt
 
       // Check if player finished
       if (player.position >= maxPosition) {
-        const isFirstWinner = !state.winner
         const alreadyFinished = state.finishers.includes(player.name)
         return {
           ...state,
@@ -116,8 +149,24 @@ function gameReducer(state: GameSessionState, action: GameAction): GameSessionSt
           finishers: alreadyFinished ? state.finishers : [...state.finishers, player.name],
           previousPosition: null,
           targetPosition: null,
-          // If everyone has finished, mark that too
-          ...(isFirstWinner ? {} : {}),
+          pendingSpecialMove: null,
+        }
+      }
+
+      // Check for special space movement effect (only on first landing, not after a special move)
+      if (!state.pendingSpecialMove) {
+        const space = game.board.spaces[player.position]
+        if (space && (space.type === 'bonus' || space.type === 'setback' || space.type === 'special')) {
+          const effect = parseSpaceEffect(space)
+          if (effect) {
+            return {
+              ...state,
+              turnPhase: TurnPhase.SpecialMove,
+              pendingSpecialMove: effect,
+              previousPosition: null,
+              targetPosition: null,
+            }
+          }
         }
       }
 
@@ -134,6 +183,7 @@ function gameReducer(state: GameSessionState, action: GameAction): GameSessionSt
             : state.cardsEncountered,
           previousPosition: null,
           targetPosition: null,
+          pendingSpecialMove: null,
         }
       }
 
@@ -143,6 +193,26 @@ function gameReducer(state: GameSessionState, action: GameAction): GameSessionSt
         turnPhase: TurnPhase.Resolve,
         previousPosition: null,
         targetPosition: null,
+        pendingSpecialMove: null,
+      }
+    }
+
+    case 'SPECIAL_MOVE': {
+      const { delta, game } = action
+      const player = state.players[state.currentPlayerIndex]
+      const maxPosition = game.board.totalSpaces - 1
+      const newPosition = Math.max(0, Math.min(player.position + delta, maxPosition))
+
+      return {
+        ...state,
+        turnPhase: TurnPhase.Move,
+        previousPosition: player.position,
+        targetPosition: newPosition,
+        // Keep pendingSpecialMove set so MOVE_COMPLETE knows this was a special move
+        // and won't re-trigger another special move
+        players: state.players.map((p, i) =>
+          i === state.currentPlayerIndex ? { ...p, position: newPosition } : p,
+        ),
       }
     }
 
@@ -151,17 +221,36 @@ function gameReducer(state: GameSessionState, action: GameAction): GameSessionSt
         ...state,
         currentCard: null,
         turnPhase: TurnPhase.Resolve,
+        pendingSpecialMove: null,
       }
 
     case 'NEXT_TURN': {
-      if (state.winner) return state
-      const nextIndex = (state.currentPlayerIndex + 1) % state.players.length
+      // Find the next player who hasn't finished yet
+      const totalPlayers = state.players.length
+      let nextIndex = (state.currentPlayerIndex + 1) % totalPlayers
+      let checked = 0
+
+      while (checked < totalPlayers) {
+        const candidatePlayer = state.players[nextIndex]
+        if (!state.finishers.includes(candidatePlayer.name)) {
+          break
+        }
+        nextIndex = (nextIndex + 1) % totalPlayers
+        checked++
+      }
+
+      // If all players have finished, don't advance
+      if (checked >= totalPlayers) {
+        return state
+      }
+
       return {
         ...state,
         currentPlayerIndex: nextIndex,
         turnPhase: TurnPhase.Roll,
         lastRoll: null,
         currentCard: null,
+        pendingSpecialMove: null,
       }
     }
 
@@ -185,6 +274,7 @@ const initialState: GameSessionState = {
   startedAt: null,
   previousPosition: null,
   targetPosition: null,
+  pendingSpecialMove: null,
 }
 
 // ── Hook ──────────────────────────────────────────────────────────
@@ -213,6 +303,11 @@ export function useGameSession(game: GeneratedGame) {
     [game],
   )
 
+  const specialMove = useCallback(
+    (delta: number) => dispatch({ type: 'SPECIAL_MOVE', delta, game }),
+    [game],
+  )
+
   const dismissCard = useCallback(() => dispatch({ type: 'DISMISS_CARD' }), [])
   const nextTurn = useCallback(() => dispatch({ type: 'NEXT_TURN' }), [])
   const reset = useCallback(() => dispatch({ type: 'RESET' }), [])
@@ -231,6 +326,7 @@ export function useGameSession(game: GeneratedGame) {
     restore,
     roll,
     moveComplete,
+    specialMove,
     dismissCard,
     nextTurn,
     reset,

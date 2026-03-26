@@ -124,8 +124,9 @@ export function applyTierToArmor(
   const materials = TIER_MATERIALS[tint] ?? TIER_MATERIALS.wood
   const weathering = materials.weathering ?? 0
 
+  const safeEquipped = equippedPieces ?? []
   for (const [pieceId, mesh] of armorMeshes) {
-    if (!equippedPieces.includes(pieceId)) continue
+    if (!safeEquipped.includes(pieceId)) continue
 
     let meshIndex = 0
     mesh.traverse((child) => {
@@ -210,7 +211,7 @@ export function animateTierUpgrade(
   const tint = getTierTint(newTier)
   const materials = TIER_MATERIALS[tint] ?? TIER_MATERIALS.wood
 
-  equippedPieces.forEach((pieceId) => {
+  ;(equippedPieces ?? []).forEach((pieceId) => {
     const maybeMesh = armorMeshes.get(pieceId)
     if (!maybeMesh) return
     const mesh: THREE.Group = maybeMesh

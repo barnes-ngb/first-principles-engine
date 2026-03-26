@@ -58,7 +58,7 @@ function stripUndefined<T extends object>(obj: T): Partial<T> {
 function isPieceEarned(profile: AvatarProfile, pieceId: ArmorPiece): boolean {
   const entry = (profile.pieces ?? []).find((p) => p.pieceId === pieceId)
   if (!entry) return false
-  if (profile.themeStyle === 'minecraft') return entry.unlockedTiers.length > 0
+  if (profile.themeStyle === 'minecraft') return (entry.unlockedTiers ?? []).length > 0
   return (entry.unlockedTiersPlatformer ?? []).length > 0
 }
 
@@ -114,7 +114,11 @@ export default function AvatarAdminTab() {
     const docId = dailyArmorSessionDocId(activeChildId, today)
     const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
     const unsub = onSnapshot(sessionRef, (snap) => {
-      setTodaySession(snap.exists() ? snap.data() : null)
+      setTodaySession(snap.exists() ? {
+        ...snap.data(),
+        appliedPieces: Array.isArray(snap.data().appliedPieces) ? snap.data().appliedPieces : [],
+        manuallyUnequipped: Array.isArray(snap.data().manuallyUnequipped) ? snap.data().manuallyUnequipped : [],
+      } : null)
     })
     return unsub
   }, [familyId, activeChildId, today])
@@ -147,13 +151,13 @@ export default function AvatarAdminTab() {
         const existing = updatedPieces.find((p) => p.pieceId === pieceDef.id)
         const alreadyEarned = existing && (
           profile.themeStyle === 'minecraft'
-            ? existing.unlockedTiers.length > 0
+            ? (existing.unlockedTiers ?? []).length > 0
             : (existing.unlockedTiersPlatformer ?? []).length > 0
         )
         if (!alreadyEarned && newXp >= pieceDef.xpToUnlockStone) {
           if (existing) {
             if (profile.themeStyle === 'minecraft') {
-              existing.unlockedTiers = [...existing.unlockedTiers, 'stone']
+              existing.unlockedTiers = [...(existing.unlockedTiers ?? []), 'stone']
             } else {
               existing.unlockedTiersPlatformer = [...(existing.unlockedTiersPlatformer ?? []), 'basic']
             }
@@ -232,8 +236,8 @@ export default function AvatarAdminTab() {
             generatedImageUrls: {},
           })
         } else {
-          if (themeStyle === 'minecraft' && !existing.unlockedTiers.includes('stone')) {
-            existing.unlockedTiers = [...existing.unlockedTiers, 'stone']
+          if (themeStyle === 'minecraft' && !(existing.unlockedTiers ?? []).includes('stone')) {
+            existing.unlockedTiers = [...(existing.unlockedTiers ?? []), 'stone']
           }
           if (themeStyle === 'platformer' && !(existing.unlockedTiersPlatformer ?? []).includes('basic')) {
             existing.unlockedTiersPlatformer = [...(existing.unlockedTiersPlatformer ?? []), 'basic']
@@ -283,8 +287,8 @@ export default function AvatarAdminTab() {
                   ? {
                       ...p,
                       unlockedTiers: themeStyle === 'minecraft'
-                        ? [...new Set([...p.unlockedTiers, nextTier as ArmorTier])]
-                        : p.unlockedTiers,
+                        ? [...new Set([...(p.unlockedTiers ?? []), nextTier as ArmorTier])]
+                        : (p.unlockedTiers ?? []),
                       ...(themeStyle === 'platformer' ? {
                         unlockedTiersPlatformer: [...new Set([...(p.unlockedTiersPlatformer ?? []), nextTier as PlatformerTier])],
                       } : {}),
@@ -519,7 +523,7 @@ export default function AvatarAdminTab() {
     // For non-duplicates, check if active profile has 0 XP and 0 pieces
     if (childId === activeChildId && profile) {
       const earned = (profile.pieces ?? []).filter((p) =>
-        profile.themeStyle === 'minecraft' ? p.unlockedTiers.length > 0 : (p.unlockedTiersPlatformer ?? []).length > 0,
+        profile.themeStyle === 'minecraft' ? (p.unlockedTiers ?? []).length > 0 : (p.unlockedTiersPlatformer ?? []).length > 0,
       ).length
       return profile.totalXp === 0 && earned === 0
     }
@@ -590,7 +594,7 @@ export default function AvatarAdminTab() {
   const nextPiece = ARMOR_PIECES.find((p) => !profile || !isPieceEarned(profile, p.id))
   const xpToNext = nextPiece && profile ? Math.max(nextPiece.xpToUnlockStone - profile.totalXp, 0) : 0
   const earnedCount = profile ? (profile.pieces ?? []).filter((p) =>
-    profile.themeStyle === 'minecraft' ? p.unlockedTiers.length > 0 : (p.unlockedTiersPlatformer ?? []).length > 0
+    profile.themeStyle === 'minecraft' ? (p.unlockedTiers ?? []).length > 0 : (p.unlockedTiersPlatformer ?? []).length > 0
   ).length : 0
   const canUpgradeTier = profile && NEXT_TIER[profile.currentTier] !== null
 
@@ -825,7 +829,7 @@ export default function AvatarAdminTab() {
             {(profile?.pieces ?? [])
               .filter((entry) =>
                 profile!.themeStyle === 'minecraft'
-                  ? entry.unlockedTiers.length > 0
+                  ? (entry.unlockedTiers ?? []).length > 0
                   : (entry.unlockedTiersPlatformer ?? []).length > 0,
               )
               .map((entry) => {

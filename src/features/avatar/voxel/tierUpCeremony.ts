@@ -25,7 +25,7 @@ export function shatterArmor(
 ): void {
   const allFragments: THREE.Mesh[] = []
 
-  equippedPieces.forEach((pieceId) => {
+  ;(equippedPieces ?? []).forEach((pieceId) => {
     const mesh = armorMeshes.get(pieceId as VoxelArmorPieceId)
     if (!mesh?.visible) return
 

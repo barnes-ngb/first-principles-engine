@@ -49,6 +49,15 @@ import { calculateTier, getTierBadgeColor, getTierTextColor, TIERS } from './vox
 
 // ── Helpers ───────────────────────────────────────────────────────
 
+/** Normalize raw Firestore DailyArmorSession data — guards against non-array fields */
+function normalizeDailyArmorSession(raw: DailyArmorSession): DailyArmorSession {
+  return {
+    ...raw,
+    appliedPieces: Array.isArray(raw.appliedPieces) ? raw.appliedPieces : [],
+    manuallyUnequipped: Array.isArray(raw.manuallyUnequipped) ? raw.manuallyUnequipped : [],
+  }
+}
+
 function getUnlockedVoxelPieces(profile: AvatarProfile): VoxelArmorPieceId[] {
   const xp = profile.totalXp
   return VOXEL_ARMOR_PIECES
@@ -65,7 +74,7 @@ function getNextUnlock(profile: AvatarProfile): { piece: ArmorPieceMeta; xpNeede
 
 /** Map ArmorPiece IDs from daily session to VoxelArmorPieceId */
 function sessionToVoxelPieces(appliedPieces: ArmorPiece[]): string[] {
-  return appliedPieces.map((p) => ARMOR_PIECE_TO_VOXEL[p])
+  return (appliedPieces ?? []).map((p) => ARMOR_PIECE_TO_VOXEL[p])
 }
 
 /** Check if yesterday's date string is exactly one day before today */
@@ -257,7 +266,7 @@ export default function MyAvatarPage() {
 
     const unsub = onSnapshot(sessionRef, async (snap) => {
       if (snap.exists()) {
-        setSession(snap.data())
+        setSession(normalizeDailyArmorSession(snap.data()))
       } else {
         const newSession: DailyArmorSession = {
           familyId,
@@ -621,7 +630,7 @@ export default function MyAvatarPage() {
   }, [])
 
   // ── Computed values ────────────────────────────────────────────
-  const appliedPieces = session?.appliedPieces ?? []
+  const appliedPieces = Array.isArray(session?.appliedPieces) ? session.appliedPieces : []
   const appliedVoxel = sessionToVoxelPieces(appliedPieces)
   const unlockedVoxel = profile ? getUnlockedVoxelPieces(profile) : []
   const allEarnedApplied = unlockedVoxel.length > 0 && unlockedVoxel.every((v) => appliedVoxel.includes(v))
