@@ -123,7 +123,7 @@ My Books (Book Builder + AI Story Generator)
 * Tier system — Lincoln: Stone → Diamond → Netherite (all 6 stone → full set upgrades). London: Basic → Powerup → Champion
 * Cohesive set generation — DALL-E 3 generates all 6 pieces as a single 3×2 reference sheet; client-side cropping (cropArmorSheet) gives each piece its individual image; matching art style, lighting, proportions guaranteed
 * SVG icons — 6 hand-crafted vector icons (belt/buckle, breastplate/cross, boots/wing, shield/rays, helmet/visor, sword/crossguard); tier-colored variants (stone=brown/iron, diamond=blue/gold, netherite=dark/purple); locked state (30% opacity + padlock badge); applied state (green checkmark badge)
-* Base character — DALL-E 3 generates bare character (no gear) once on first visit, saved to Firebase; Lincoln: blocky pixel warrior; London: cute platformer girl
+* Base character — DALL-E 3 generates bare character (no gear) once on first visit, saved to Firebase; Lincoln: blocky pixel warrior; London: cute platformer boy
 * Verse card — full-screen card on piece tap; TTS auto-reads verse on open; word-by-word highlight synced to TTS via onboundary event; tap any word to hear/replay it; "Put it on!" button applies piece
 * Attachment animation — piece icon flies from card to character body via portal-rendered arc animation; landing bounce (scale 1.2 → 0.9 → 1.0); particle burst at landing (squares for Lincoln, stars for London); character white flash; pose shift nudge; progressive glow via drop-shadow filter on character silhouette
 * Full armor on! state — all earned pieces applied → maximum glow, idle sway animation, shimmer sweep, gold card borders, Web Audio fanfare (4-note chord, no audio files)
