@@ -65,6 +65,27 @@ function createTexturedMaterials(baseColor: THREE.Color | number): THREE.MeshLam
 //
 // 1 pixel = U = 0.125 units at scale 1.0
 
+// ── Body proportions per age group ──────────────────────────────────
+// Younger child: same-size head on a smaller body = reads as younger.
+// All multipliers are relative to the base 8-pixel Minecraft Steve anatomy.
+
+const BODY_PROPORTIONS = {
+  older: {
+    headSize: 1.0,
+    torsoHeight: 1.0,
+    torsoWidth: 1.0,
+    armLength: 1.0,
+    legLength: 1.0,
+  },
+  younger: {
+    headSize: 1.0,    // Same head size → bigger head-to-body ratio
+    torsoHeight: 0.75, // Shorter torso
+    torsoWidth: 0.9,   // Slightly narrower
+    armLength: 0.75,   // Shorter arms
+    legLength: 0.7,    // Shorter legs
+  },
+} as const
+
 export function buildCharacter(
   features: CharacterFeatures,
   ageGroup: 'older' | 'younger',
@@ -72,74 +93,92 @@ export function buildCharacter(
   const character = new THREE.Group()
   character.name = 'character'
 
-  const scale = ageGroup === 'younger' ? 0.88 : 1.0
-  const U = 0.125 * scale // 1 Minecraft pixel
+  const U = 0.125 // 1 Minecraft pixel (no uniform scale — proportions vary per body part)
+  const p = BODY_PROPORTIONS[ageGroup]
+
+  // Derived dimensions (in pixel-units)
+  const headPx = 8 * p.headSize
+  const torsoPxH = 12 * p.torsoHeight
+  const torsoPxW = 8 * p.torsoWidth
+  const armPxLen = 12 * p.armLength
+  const legPxLen = 12 * p.legLength
+
+  // Vertical layout: feet at Y=0, then legs, torso, head
+  const legTop = legPxLen * U
+  const torsoTop = legTop + torsoPxH * U
+  const headCenter = torsoTop + (headPx / 2) * U
 
   // Colors from features (with fallbacks) — skin & hair from photo, clothes are child-specific
   const skinColor = new THREE.Color(features.skinTone ?? '#F5D6B8')
   const hairColor = new THREE.Color(features.hairColor ?? '#6B4C32')
-  // Lincoln: light heather gray Minecraft creeper tee; London: bright blue (his favorite)
-  const shirtColor = new THREE.Color(ageGroup === 'younger' ? '#4A90C2' : '#BBBBBB')
-  const pantsColor = new THREE.Color('#2A3A52') // Dark navy shorts
-  // Lincoln is barefoot — shoe color matches skin; London gets sneakers
-  const shoeColor = new THREE.Color(ageGroup === 'younger' ? '#444444' : features.skinTone ?? '#F5D6B8')
+  // Lincoln: light heather gray Minecraft creeper tee; London: mustard yellow
+  const shirtColor = new THREE.Color(ageGroup === 'younger' ? '#E8A838' : '#BBBBBB')
+  // Lincoln: dark navy shorts; London: khaki/tan
+  const pantsColor = new THREE.Color(ageGroup === 'younger' ? '#C4B998' : '#2A3A52')
+  // Lincoln is barefoot — shoe color matches skin; London gets brown shoes
+  const shoeColor = new THREE.Color(ageGroup === 'younger' ? '#8B7355' : features.skinTone ?? '#F5D6B8')
 
   // --- HEAD GROUP (contains head mesh + face features + hair) ---
   // Everything attached to the head is a child of headGroup so it all
   // moves together during poses (nod, look-up, dab tilt, etc.).
   const headGroup = new THREE.Group()
   headGroup.name = 'headGroup'
-  headGroup.position.y = U * 28 // Top of body + half head
+  headGroup.position.y = headCenter
   character.add(headGroup)
 
-  const headMesh = texturedBox(U * 8, U * 8, U * 8, skinColor, 'head')
+  const headMesh = texturedBox(U * headPx, U * headPx, U * headPx, skinColor, 'head')
   // headMesh at (0,0,0) within headGroup
   headGroup.add(headMesh)
 
   // Face details — positions RELATIVE to headGroup center (0,0,0)
+  // All face features use headPx-based coords so they scale with head size
+  const hU = U * p.headSize // head pixel unit
   // Eyes — white sclera with dark pupils
-  const eyeWhiteL = box(U * 2, U * 1, U * 0.5, 0xffffff, 'eyeWhiteL')
-  eyeWhiteL.position.set(-U * 1.5, U * 0.5, U * 4.1)
+  const eyeWhiteL = box(hU * 2, hU * 1, hU * 0.5, 0xffffff, 'eyeWhiteL')
+  eyeWhiteL.position.set(-hU * 1.5, hU * 0.5, hU * 4.1)
   headGroup.add(eyeWhiteL)
   const eyeColor = features.eyeColor ? new THREE.Color(features.eyeColor) : new THREE.Color(0x4a6b7a)
-  const pupilL = box(U * 1, U * 1, U * 0.3, eyeColor, 'pupilL')
-  pupilL.position.set(-U * 1.2, U * 0.5, U * 4.3) // Slightly offset for personality
+  const pupilL = box(hU * 1, hU * 1, hU * 0.3, eyeColor, 'pupilL')
+  pupilL.position.set(-hU * 1.2, hU * 0.5, hU * 4.3) // Slightly offset for personality
   headGroup.add(pupilL)
 
-  const eyeWhiteR = box(U * 2, U * 1, U * 0.5, 0xffffff, 'eyeWhiteR')
-  eyeWhiteR.position.set(U * 1.5, U * 0.5, U * 4.1)
+  const eyeWhiteR = box(hU * 2, hU * 1, hU * 0.5, 0xffffff, 'eyeWhiteR')
+  eyeWhiteR.position.set(hU * 1.5, hU * 0.5, hU * 4.1)
   headGroup.add(eyeWhiteR)
-  const pupilR = box(U * 1, U * 1, U * 0.3, eyeColor, 'pupilR')
-  pupilR.position.set(U * 1.8, U * 0.5, U * 4.3) // Slightly offset for personality
+  const pupilR = box(hU * 1, hU * 1, hU * 0.3, eyeColor, 'pupilR')
+  pupilR.position.set(hU * 1.8, hU * 0.5, hU * 4.3) // Slightly offset for personality
   headGroup.add(pupilR)
 
   // Eyebrows — gives expression
-  const eyebrowColor = 0x5A3E28
-  const eyebrowL = box(U * 1.8, U * 0.4, U * 0.3, eyebrowColor, 'eyebrowL')
-  eyebrowL.position.set(-U * 1.5, U * 1.4, U * 4.15)
+  const eyebrowColor = ageGroup === 'younger' ? 0x9B7B3A : 0x5A3E28 // Lighter brows for blonde
+  const eyebrowL = box(hU * 1.8, hU * 0.4, hU * 0.3, eyebrowColor, 'eyebrowL')
+  eyebrowL.position.set(-hU * 1.5, hU * 1.4, hU * 4.15)
   headGroup.add(eyebrowL)
-  const eyebrowR = box(U * 1.8, U * 0.4, U * 0.3, eyebrowColor, 'eyebrowR')
-  eyebrowR.position.set(U * 1.5, U * 1.4, U * 4.15)
+  const eyebrowR = box(hU * 1.8, hU * 0.4, hU * 0.3, eyebrowColor, 'eyebrowR')
+  eyebrowR.position.set(hU * 1.5, hU * 1.4, hU * 4.15)
   headGroup.add(eyebrowR)
 
   // Nose — tiny bump
-  const nose = box(U * 0.8, U * 0.8, U * 0.3, 0xe8c8a8, 'nose')
-  nose.position.set(0, -U * 0.5, U * 4.15)
+  const noseColor = new THREE.Color(features.skinTone ?? '#F5D6B8').multiplyScalar(0.92)
+  const nose = box(hU * 0.8, hU * 0.8, hU * 0.3, noseColor, 'nose')
+  nose.position.set(0, -hU * 0.5, hU * 4.15)
   headGroup.add(nose)
 
   // Mouth — subtle, slightly darker skin tone (not black)
-  const mouth = box(U * 2, U * 0.5, U * 0.3, 0xD4A088, 'mouth')
-  mouth.position.set(0, -U * 1.8, U * 4.2)
+  const mouthColor = new THREE.Color(features.skinTone ?? '#F5D6B8').multiplyScalar(0.82)
+  const mouth = box(hU * 2, hU * 0.5, hU * 0.3, mouthColor, 'mouth')
+  mouth.position.set(0, -hU * 1.8, hU * 4.2)
   headGroup.add(mouth)
 
   // Hair — built from the hair module, child of headGroup (headY = 0 in local space)
   const hairMat = new THREE.MeshLambertMaterial({ color: hairColor })
-  const hairGroup = buildHair(features.hairStyle, features.hairLength, hairMat, 0, U)
+  const hairGroup = buildHair(features.hairStyle, features.hairLength, hairMat, 0, hU)
   headGroup.add(hairGroup)
 
-  // --- BODY (8×12×4 = 1×1.5×0.5) ---
-  const torso = texturedBox(U * 8, U * 12, U * 4, shirtColor, 'torso')
-  torso.position.y = U * 18 // Center of body
+  // --- BODY ---
+  const torsoCenter = legTop + (torsoPxH * U) / 2
+  const torso = texturedBox(U * torsoPxW, U * torsoPxH, U * 4, shirtColor, 'torso')
+  torso.position.y = torsoCenter
   character.add(torso)
 
   // Shirt design — Lincoln gets a creeper face, London gets a simple star
@@ -147,65 +186,69 @@ export function buildCharacter(
     // Creeper face on gray shirt — darker green to contrast against gray
     const creeperGreen = 0x3D8C35
     const cEyeL = box(U * 1.2, U * 1.2, U * 0.3, creeperGreen, 'creeperEyeL')
-    cEyeL.position.set(-U * 1.5, U * 20, U * 2.15)
+    cEyeL.position.set(-U * 1.5, torsoCenter + U * 2, U * 2.15)
     character.add(cEyeL)
     const cEyeR = box(U * 1.2, U * 1.2, U * 0.3, creeperGreen, 'creeperEyeR')
-    cEyeR.position.set(U * 1.5, U * 20, U * 2.15)
+    cEyeR.position.set(U * 1.5, torsoCenter + U * 2, U * 2.15)
     character.add(cEyeR)
     const cMouth = box(U * 2, U * 1, U * 0.3, creeperGreen, 'creeperMouth')
-    cMouth.position.set(0, U * 17.5, U * 2.15)
+    cMouth.position.set(0, torsoCenter - U * 0.5, U * 2.15)
     character.add(cMouth)
   } else {
-    // Simple yellow star on London's blue shirt
+    // Simple yellow star on London's mustard shirt
     const starColor = 0xFFD700
-    const starV = box(U * 1.2, U * 3, U * 0.3, starColor, 'starV')
-    starV.position.set(0, U * 19, U * 2.15)
+    const starV = box(U * 1.2, U * 2.5, U * 0.3, starColor, 'starV')
+    starV.position.set(0, torsoCenter + U * 1, U * 2.15)
     character.add(starV)
-    const starH = box(U * 3, U * 1.2, U * 0.3, starColor, 'starH')
-    starH.position.set(0, U * 19, U * 2.15)
+    const starH = box(U * 2.5, U * 1.2, U * 0.3, starColor, 'starH')
+    starH.position.set(0, torsoCenter + U * 1, U * 2.15)
     character.add(starH)
   }
 
-  // --- ARMS (4×12×4 each) ---
+  // --- ARMS ---
   // Geometry is shifted so pivot point is at the SHOULDER (top of arm),
   // enabling natural rotation from the shoulder joint.
-  // Arms positioned far enough out to prevent clipping during pose rotations.
-  // Arm inner edge at ±(7.2-2) = ±5.2U, torso edge at ±4U → 1.2U gap.
-  const armGap = U * 1.2 // Gap between arm and torso edge (was 0.6 — too tight)
-  const armGeoL = new THREE.BoxGeometry(U * 4, U * 12, U * 4)
-  armGeoL.translate(0, -U * 6, 0) // Shift so top of arm (shoulder) is at local Y=0
+  const armGap = U * 1.2 // Gap between arm and torso edge
+  const shoulderY = torsoTop
+  const armHalfW = U * 2 // arm is 4U wide
+  const torsoHalfW = (torsoPxW / 2) * U
+
+  const armGeoL = new THREE.BoxGeometry(U * 4, U * armPxLen, U * 4)
+  armGeoL.translate(0, -U * armPxLen / 2, 0) // Shift so top of arm (shoulder) is at local Y=0
   const armL = new THREE.Mesh(armGeoL, createTexturedMaterials(skinColor))
   armL.name = 'armL'
-  armL.position.set(-U * 6 - armGap, U * 24, 0) // Shoulder height, further out
+  armL.position.set(-torsoHalfW - armHalfW - armGap, shoulderY, 0)
   character.add(armL)
 
-  const armGeoR = new THREE.BoxGeometry(U * 4, U * 12, U * 4)
-  armGeoR.translate(0, -U * 6, 0)
+  const armGeoR = new THREE.BoxGeometry(U * 4, U * armPxLen, U * 4)
+  armGeoR.translate(0, -U * armPxLen / 2, 0)
   const armR = new THREE.Mesh(armGeoR, createTexturedMaterials(skinColor))
   armR.name = 'armR'
-  armR.position.set(U * 6 + armGap, U * 24, 0)
+  armR.position.set(torsoHalfW + armHalfW + armGap, shoulderY, 0)
   character.add(armR)
 
   // Shirt sleeves — children of arms so they rotate together
-  const sleeveGeoL = new THREE.BoxGeometry(U * 4.2, U * 5, U * 4.2)
-  sleeveGeoL.translate(0, -U * 2.5, 0) // Upper portion of arm relative to shoulder pivot
+  const sleeveLen = Math.min(5, armPxLen * 0.42) // Proportional sleeve length
+  const sleeveGeoL = new THREE.BoxGeometry(U * 4.2, U * sleeveLen, U * 4.2)
+  sleeveGeoL.translate(0, -U * sleeveLen / 2, 0) // Upper portion of arm relative to shoulder pivot
   const sleeveL = new THREE.Mesh(sleeveGeoL, createTexturedMaterials(shirtColor))
   sleeveL.name = 'sleeveL'
   armL.add(sleeveL) // Child of arm — rotates with it
 
-  const sleeveGeoR = new THREE.BoxGeometry(U * 4.2, U * 5, U * 4.2)
-  sleeveGeoR.translate(0, -U * 2.5, 0)
+  const sleeveGeoR = new THREE.BoxGeometry(U * 4.2, U * sleeveLen, U * 4.2)
+  sleeveGeoR.translate(0, -U * sleeveLen / 2, 0)
   const sleeveR = new THREE.Mesh(sleeveGeoR, createTexturedMaterials(shirtColor))
   sleeveR.name = 'sleeveR'
   armR.add(sleeveR) // Child of arm — rotates with it
 
-  // --- LEGS (4×12×4 each) ---
-  const legL = texturedBox(U * 4, U * 12, U * 4, pantsColor, 'legL')
-  legL.position.set(-U * 2, U * 6, 0)
+  // --- LEGS ---
+  const legCenter = (legPxLen * U) / 2
+  const legL = texturedBox(U * 4, U * legPxLen, U * 4, pantsColor, 'legL')
+  legL.position.set(-U * 2, legCenter, 0)
   character.add(legL)
 
-  const legR = texturedBox(U * 4, U * 12, U * 4, pantsColor, 'legR')
-  legR.position.set(U * 2, U * 6, 0)
+  const legR = texturedBox(U * 4, U * legPxLen, U * 4, pantsColor, 'legR')
+  legR.position.set(U * 2, legCenter, 0)
   character.add(legR)
 
   // Shoes (bottom 2px of legs)

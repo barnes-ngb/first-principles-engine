@@ -107,6 +107,81 @@ export function buildHair(
       return hair
     }
 
+    // ── London-specific hair: long_wavy + ear_length ────────────────
+    // Sandy blonde, longer than Lincoln's, wavy, past ears, center-parted / messy.
+    if (style === 'long_wavy') {
+      // === TOP — thicker cap, slight center-part feel (no hard part line) ===
+      const top = box(U * 8.4, U * 1.2, U * 8.4, material)
+      top.position.set(0, headY + U * 4.6, 0)
+      hair.add(top)
+
+      // Inner volume layer
+      const innerTop = box(U * 8.0, U * 0.8, U * 7.8, lightMat)
+      innerTop.position.set(0, headY + U * 5.3, U * 0.3)
+      hair.add(innerTop)
+
+      // === LEFT SIDE — wavy, past ears ===
+      const sideL = box(U * 1.4, U * 5.5, U * 6.4, material)
+      sideL.position.set(-U * 4.2, headY + U * 1.2, 0)
+      hair.add(sideL)
+      // Wave bump on left
+      const waveBumpL = box(U * 0.7, U * 2.5, U * 3.5, lightMat)
+      waveBumpL.position.set(-U * 4.7, headY + U * 0.5, U * 0.8)
+      hair.add(waveBumpL)
+      // Lower wisps past ears (1-2 blocks further down than Lincoln)
+      const sideL_tip = box(U * 1.0, U * 3.0, U * 4.5, material)
+      sideL_tip.position.set(-U * 4.2, headY - U * 1.8, U * 0.3)
+      hair.add(sideL_tip)
+      // Extra wisp below ear level
+      const sideL_low = box(U * 0.8, U * 1.5, U * 3.0, darkMat)
+      sideL_low.position.set(-U * 4.1, headY - U * 3.5, U * 0.5)
+      hair.add(sideL_low)
+
+      // === RIGHT SIDE — wavy, past ears (roughly symmetric, slightly messy) ===
+      const sideR = box(U * 1.4, U * 5.5, U * 6.4, material)
+      sideR.position.set(U * 4.2, headY + U * 1.2, 0)
+      hair.add(sideR)
+      // Wave bump on right
+      const waveBumpR = box(U * 0.7, U * 2.8, U * 3.8, lightMat)
+      waveBumpR.position.set(U * 4.7, headY + U * 0.2, U * 0.6)
+      hair.add(waveBumpR)
+      // Lower wisps past ears
+      const sideR_tip = box(U * 1.0, U * 3.0, U * 4.5, material)
+      sideR_tip.position.set(U * 4.2, headY - U * 1.8, U * 0.3)
+      hair.add(sideR_tip)
+      // Extra wisp below ear level
+      const sideR_low = box(U * 0.8, U * 1.8, U * 3.2, darkMat)
+      sideR_low.position.set(U * 4.1, headY - U * 3.6, U * 0.4)
+      hair.add(sideR_low)
+
+      // === BANGS — messy/natural, falls across forehead ===
+      const bangs = box(U * 6.5, U * 1.8, U * 1.4, material)
+      bangs.position.set(0, headY + U * 2.8, U * 3.8)
+      hair.add(bangs)
+      // Messy bang chunks (natural kid hair)
+      const bangChunkL = box(U * 1.5, U * 1.0, U * 1.0, lightMat)
+      bangChunkL.position.set(-U * 2.0, headY + U * 2.2, U * 3.9)
+      hair.add(bangChunkL)
+      const bangChunkR = box(U * 1.3, U * 1.2, U * 1.0, material)
+      bangChunkR.position.set(U * 1.8, headY + U * 2.4, U * 3.8)
+      hair.add(bangChunkR)
+
+      // === BACK — covers back of head, reaches below ears ===
+      const back = box(U * 8.4, U * 7.0, U * 1.3, material)
+      back.position.set(0, headY + U * 0.8, -U * 4.2)
+      hair.add(back)
+      // Lower back extension — wavy taper
+      const backLow = box(U * 7.0, U * 3.5, U * 1.1, darkMat)
+      backLow.position.set(0, headY - U * 2.8, -U * 4.2)
+      hair.add(backLow)
+      // Wave texture on back
+      const backWave = box(U * 5.0, U * 1.5, U * 0.6, lightMat)
+      backWave.position.set(U * 0.5, headY - U * 1.0, -U * 4.8)
+      hair.add(backWave)
+
+      return hair
+    }
+
     // ── Generic hair (other style/length combos) ────────────────────
 
     // Top cap — thick layer covering entire top of head
