@@ -105,7 +105,7 @@ export default function GamePlayView({
     })),
     currentTurnIndex: session.state.currentPlayerIndex,
     usedCardIds: session.state.cardsEncountered,
-    status: session.state.winner ? 'finished' : 'playing',
+    status: session.allFinished ? 'finished' : 'playing',
     startedAt: session.state.startedAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }), [session.state])
@@ -355,9 +355,11 @@ export default function GamePlayView({
 
   // Announce board events on landing — use voice recording if available
   useEffect(() => {
-    if (session.state.turnPhase === TurnPhase.Resolve && session.state.lastRoll && !session.isGameOver) {
+    if (session.state.turnPhase === TurnPhase.Resolve && session.state.lastRoll) {
       const player = session.currentPlayer
       if (!player) return
+      // Don't announce space effects for players who just finished
+      if (session.state.finishers.includes(player.name)) return
       const space = game.board.spaces[player.position]
       if ((space?.type === 'bonus' || space?.type === 'setback' || space?.type === 'special') && space.label) {
         const spaceRecKey = `space-${space.index}`
@@ -558,7 +560,7 @@ export default function GamePlayView({
 
       {/* Controls */}
       <Box sx={{ mt: 3, textAlign: 'center' }}>
-        {state.turnPhase === TurnPhase.Roll && !isGameOver && (
+        {state.turnPhase === TurnPhase.Roll && currentPlayer && !state.finishers.includes(currentPlayer.name) && (
           <>
             <Typography variant="body1" sx={{ mb: 1, fontWeight: 600 }}>
               {currentPlayer?.name}&apos;s turn!
@@ -648,7 +650,7 @@ export default function GamePlayView({
                   ))}
                 </Box>
                 <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
-                  <Button variant="outlined" onClick={() => { session.reset(); setShowFinalCelebration(false); setShowCelebration(false) }}>
+                  <Button variant="outlined" onClick={() => { session.startGame(session.state.players); setShowFinalCelebration(false); setShowCelebration(false) }}>
                     Play Again!
                   </Button>
                   <Button variant="contained" onClick={handleFinishGame}>
