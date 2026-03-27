@@ -257,15 +257,15 @@ export default function KidTodayView({
     prevAllDoneRef.current = allDone
   }, [allDone, child.id, familyId, today, checklist.length])
 
-  // Track gate unlock for celebration display
+  // Track gate unlock for celebration display (state-during-render pattern)
   const [justUnlockedGate, setJustUnlockedGate] = useState(false)
-  const prevGateUnlockedRef = useRef(gateUnlocked)
-  useEffect(() => {
-    if (gateUnlocked && !prevGateUnlockedRef.current) {
+  const [prevGateUnlocked, setPrevGateUnlocked] = useState(gateUnlocked)
+  if (gateUnlocked !== prevGateUnlocked) {
+    setPrevGateUnlocked(gateUnlocked)
+    if (gateUnlocked) {
       setJustUnlockedGate(true)
     }
-    prevGateUnlockedRef.current = gateUnlocked
-  }, [gateUnlocked])
+  }
 
   // Daily XP from checklist items
   const dailyXp = useMemo(
