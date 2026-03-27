@@ -42,48 +42,67 @@ export function buildHair(
     const darkMat = new THREE.MeshLambertMaterial({ color: lerpColor(baseHex, 0x000000, 0.12) })
 
     // ── Lincoln-specific hair: medium style + ear_length ────────────
-    // Parted on the LEFT, covers ears but stops there, thicker on the
-    // right side (hair sweeps from part toward the right).
+    // Parted on the LEFT, most volume sweeps to the RIGHT,
+    // falls to about ear level, slightly tousled, medium warm brown.
     if (style === 'medium' && length === 'ear_length') {
       // Head block is 8U×8U×8U, centered at headY (typically 0 in local space)
       // Head top = headY+4U, head bottom = headY-4U
       // Head sides = ±4U, head front = +4U Z, head back = -4U Z
-      // Lincoln's hair: parts on LEFT, most volume sweeps RIGHT
 
-      // === TOP CAP — shifted right (hair sweeps right from left part) ===
+      // === TOP — sits flush on head, offset RIGHT (hair parts left) ===
       const top = box(U * 8.2, U * 1.0, U * 8.2, material)
-      top.position.set(U * 0.6, headY + U * 4.5, 0) // Offset right 0.6
+      top.position.set(U * 0.5, headY + U * 4.5, 0)
       hair.add(top)
 
-      // Part detail — darker strip on left where the part is
-      const partGap = box(U * 1.4, U * 1.05, U * 6.0, darkMat)
-      partGap.position.set(-U * 2.0, headY + U * 4.55, 0)
-      hair.add(partGap)
+      // Part line — thin darker strip on the LEFT side of the top
+      const partLine = box(U * 0.8, U * 1.1, U * 6.0, darkMat)
+      partLine.position.set(-U * 2.5, headY + U * 4.55, 0)
+      hair.add(partLine)
 
-      // === BANGS — sweep from left to right across forehead ===
-      const bangs = box(U * 7.2, U * 1.6, U * 1.4, material)
-      bangs.position.set(U * 0.8, headY + U * 2.8, U * 4.2) // Offset right 0.8
-      hair.add(bangs)
-
-      // === LEFT SIDE (part side) — THIN, close to head ===
-      const sideL = box(U * 0.8, U * 4.0, U * 5.6, material)
-      sideL.position.set(-U * 4.1, headY + U * 1.6, 0) // Only 0.8 thick
+      // === LEFT SIDE — the PART side (thinner, less volume) ===
+      const sideL = box(U * 0.8, U * 4.5, U * 6.0, material)
+      sideL.position.set(-U * 4.1, headY + U * 1.8, 0)
       hair.add(sideL)
 
-      // === RIGHT SIDE (volume side) — THICK, stands out ===
-      const sideR = box(U * 2.0, U * 5.6, U * 7.2, material)
-      sideR.position.set(U * 4.6, headY + U * 1.0, 0) // 2.0 thick — much more volume
+      // Small wisp below — just reaches ear level (headY-4U = ear)
+      const sideL_tip = box(U * 0.7, U * 2.0, U * 4.0, darkMat)
+      sideL_tip.position.set(-U * 4.1, headY - U * 0.5, U * 0.4)
+      hair.add(sideL_tip)
+
+      // === RIGHT SIDE — the VOLUME side (thicker, hair sweeps this way) ===
+      const sideR = box(U * 1.6, U * 5.0, U * 6.8, material)
+      sideR.position.set(U * 4.2, headY + U * 1.6, 0)
       hair.add(sideR)
 
-      // Extra outer layer on right — even more volume sticking out
-      const sideR_extra = box(U * 1.0, U * 3.6, U * 4.8, lightMat)
-      sideR_extra.position.set(U * 5.4, headY + U * 0.4, U * 0.6) // Puffs outward
-      hair.add(sideR_extra)
+      // Extra volume layer — hair puffs out on this side
+      const sideR_vol = box(U * 0.8, U * 3.5, U * 4.8, lightMat)
+      sideR_vol.position.set(U * 4.8, headY + U * 1.2, U * 0.6)
+      hair.add(sideR_vol)
 
-      // === BACK — covers back of head down to neck ===
-      const back = box(U * 8.2, U * 6.0, U * 1.2, material)
-      back.position.set(U * 0.3, headY + U * 0.8, -U * 4.2) // Slight right offset
+      // Lower wisp — reaches ear level
+      const sideR_tip = box(U * 1.2, U * 2.5, U * 4.4, material)
+      sideR_tip.position.set(U * 4.3, headY - U * 0.8, U * 0.4)
+      hair.add(sideR_tip)
+
+      // === BANGS — sweep from left part across forehead toward right ===
+      const bangs = box(U * 6.0, U * 1.6, U * 1.4, material)
+      bangs.position.set(U * 0.6, headY + U * 3.0, U * 3.8)
+      hair.add(bangs)
+
+      // Extra bang chunk on right side (hair sweeps this way)
+      const bangTip = box(U * 1.6, U * 1.2, U * 1.2, lightMat)
+      bangTip.position.set(U * 2.8, headY + U * 2.8, U * 3.7)
+      hair.add(bangTip)
+
+      // === BACK — covers back of head, reaches to neck ===
+      const back = box(U * 8.2, U * 6.5, U * 1.2, material)
+      back.position.set(0, headY + U * 1.2, -U * 4.2)
       hair.add(back)
+
+      // Lower back — slight taper
+      const backLow = box(U * 6.4, U * 2.5, U * 1.0, darkMat)
+      backLow.position.set(0, headY - U * 2.2, -U * 4.2)
+      hair.add(backLow)
 
       return hair
     }

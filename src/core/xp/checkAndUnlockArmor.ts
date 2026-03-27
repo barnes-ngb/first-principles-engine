@@ -1,6 +1,6 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore'
 
-import { avatarProfilesCollection, stripUndefined, xpLedgerCollection } from '../firebase/firestore'
+import { avatarProfilesCollection, xpLedgerCollection } from '../firebase/firestore'
 import { ARMOR_PIECES } from '../types'
 import type {
   ArmorPiece,
@@ -12,6 +12,8 @@ import type {
 } from '../types'
 import { ARMOR_PIECE_TO_VOXEL } from '../types'
 import { XP_THRESHOLDS } from '../../features/avatar/voxel/buildArmorPiece'
+import { normalizeAvatarProfile } from '../../features/avatar/normalizeProfile'
+import { safeSetProfile } from '../../features/avatar/safeProfileWrite'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -116,19 +118,8 @@ export async function checkAndUnlockArmor(
   const profileSnap = await getDoc(profileRef)
 
   const profile: AvatarProfile = profileSnap.exists()
-    ? ensureNewProfileStructure(
-        profileSnap.data() as unknown as Record<string, unknown>,
-      )
-    : {
-        childId,
-        themeStyle: 'minecraft',
-        pieces: [],
-        currentTier: 'stone',
-        equippedPieces: [],
-        unlockedPieces: [],
-        totalXp: 0,
-        updatedAt: new Date().toISOString(),
-      }
+    ? normalizeAvatarProfile(profileSnap.data())
+    : normalizeAvatarProfile({ childId })
 
   // Read XP from xpLedger (source of truth) when not passed explicitly
   let xp = totalXp ?? 0
@@ -139,7 +130,7 @@ export async function checkAndUnlockArmor(
   }
 
   const { themeStyle } = profile
-  const pieces = [...profile.pieces]
+  const pieces = [...(profile.pieces ?? [])]
 
   // ── Find newly eligible stone/basic pieces ───────────────────
   const newlyUnlocked: ArmorPiece[] = []
@@ -183,14 +174,13 @@ export async function checkAndUnlockArmor(
   const newlyUnlockedVoxel = newlyUnlocked.map((id) => ARMOR_PIECE_TO_VOXEL[id])
 
   // ── Save updated profile (no image generation needed!) ────────
-  await setDoc(profileRef, stripUndefined({
+  await safeSetProfile(profileRef, {
     ...profile,
     pieces,
     totalXp: xp,
     unlockedPieces: unlockedVoxelPieces,
     equippedPieces,
-    updatedAt: new Date().toISOString(),
-  }) as unknown as AvatarProfile)
+  } as unknown as Record<string, unknown>)
 
   return {
     newlyUnlockedPieces: newlyUnlocked,
