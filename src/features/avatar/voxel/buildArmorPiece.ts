@@ -200,7 +200,7 @@ function buildHelmet(U: number): THREE.Group {
   group.add(brow)
 
   // Visor slit — thin dark bar across the front face
-  const visor = taggedFlatBox(U * 6.4, U * 0.8, U * 0.6, 0x222222, 'detail', 'helmet_visor')
+  const visor = taggedFlatBox(U * 7.4, U * 0.6, U * 0.6, 0x222222, 'detail', 'helmet_visor')
   visor.position.set(0, U * 0.6, U * 4.6)
   group.add(visor)
 
@@ -235,7 +235,7 @@ function buildBreastplate(U: number): THREE.Group {
   const crossV = taggedFlatBox(U * 1, U * 6, U * 0.5, W, 'detail', 'cross_v')
   crossV.position.set(0, U * 19, U * 3.3)
   group.add(crossV)
-  const crossH = taggedFlatBox(U * 4, U * 1, U * 0.5, W, 'detail', 'cross_h')
+  const crossH = taggedFlatBox(U * 5.4, U * 1, U * 0.5, W, 'detail', 'cross_h')
   crossH.position.set(0, U * 21, U * 3.3)
   group.add(crossH)
 
