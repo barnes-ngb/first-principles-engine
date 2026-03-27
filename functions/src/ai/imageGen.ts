@@ -64,3 +64,9 @@ export type {
   MinecraftSkinRequest,
   MinecraftSkinResponse,
 } from "./imageTasks/minecraftSkin.js";
+
+export { generateMinecraftFace } from "./imageTasks/minecraftFace.js";
+export type {
+  MinecraftFaceRequest,
+  MinecraftFaceResponse,
+} from "./imageTasks/minecraftFace.js";

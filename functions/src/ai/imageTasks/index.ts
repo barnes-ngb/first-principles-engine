@@ -24,3 +24,6 @@ export type { ExtractFeaturesRequest, ExtractFeaturesResponse } from "./extractF
 
 export { generateMinecraftSkin } from "./minecraftSkin.js";
 export type { MinecraftSkinRequest, MinecraftSkinResponse } from "./minecraftSkin.js";
+
+export { generateMinecraftFace } from "./minecraftFace.js";
+export type { MinecraftFaceRequest, MinecraftFaceResponse } from "./minecraftFace.js";

@@ -30,6 +30,9 @@ export function normalizeAvatarProfile(raw: unknown): AvatarProfile {
     photoUrl: (r.photoUrl as string) || undefined,
     skinTextureUrl: (r.skinTextureUrl as string) || undefined,
     skinTextureGeneratedAt: (r.skinTextureGeneratedAt as string) || undefined,
+    faceGrid: Array.isArray(r.faceGrid) && r.faceGrid.length === 64
+      ? (r.faceGrid as string[])
+      : undefined,
     lastArmorEquipDate: (r.lastArmorEquipDate as string) || undefined,
     lastEquipAnimation: (r.lastEquipAnimation as string) || undefined,
     lastFullArmorDate: (r.lastFullArmorDate as string) || undefined,
