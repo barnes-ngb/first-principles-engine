@@ -480,6 +480,8 @@ PLAN CONTENT RULES:
   - "choose": Enrichment activities the child picks from AFTER completing must-do items (3-4 options per day, child picks 2). Examples: Reading Eggs, Minecraft reading, read-aloud time, art, sight word games, science exploration.
   - On MVD (Minimum Viable Day) weeks, ONLY must-do items are required. Choose items are bonus.
   - Items with category "must-do" should always have "mvdEssential": true.
+- If the user specified a read-aloud book with chapters, include a "chapterQuestion" object on each day that has a reading assignment. Distribute chapters across the school days (Mon-Fri). Vary the questionType across days — never use the same type two days in a row.
+- "chapterQuestion" is optional — only include it when the user has specified a read-aloud book.
 
 {
   "days": [
@@ -497,7 +499,13 @@ PLAN CONTENT RULES:
           "mvdEssential": false,
           "category": "must-do"
         }
-      ]
+      ],
+      "chapterQuestion": {
+        "book": "Book title",
+        "chapter": "Chapter number or name",
+        "questionType": "comprehension|application|connection|opinion|prediction",
+        "question": "The discussion question for this chapter"
+      }
     }
   ],
   "skipSuggestions": [],

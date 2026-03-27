@@ -237,7 +237,6 @@ export default function TodayPage() {
     evidenceType: EvidenceType.Note as EvidenceType,
     subjectBucket: SubjectBucket.Reading,
     content: '',
-    domain: '',
   })
 
   // Keep artifact form childId in sync with active child
@@ -476,8 +475,7 @@ export default function TodayPage() {
     async (file: File) => {
       setMediaUploading(true)
       try {
-        const domain = artifactForm.domain.trim()
-        const title = domain || `Photo ${today}`
+        const title = `Photo ${today}`
         const artifact = buildArtifactBase(title, EvidenceType.Photo)
         const docRef = await addDoc(artifactsCollection(familyId), artifact)
         const ext = file.name.split('.').pop() ?? 'jpg'
@@ -488,7 +486,6 @@ export default function TodayPage() {
           { ...artifact, id: docRef.id, uri: downloadUrl },
           ...prev,
         ])
-        setArtifactForm((prev) => ({ ...prev, domain: '' }))
         setSnackMessage({ text: 'Photo uploaded.', severity: 'success' })
       } catch (err) {
         console.error('Photo upload failed', err)
@@ -504,8 +501,7 @@ export default function TodayPage() {
     async (blob: Blob) => {
       setMediaUploading(true)
       try {
-        const domain = artifactForm.domain.trim()
-        const title = domain || `Audio ${today}`
+        const title = `Audio ${today}`
         const artifact = buildArtifactBase(title, EvidenceType.Audio)
         const docRef = await addDoc(artifactsCollection(familyId), artifact)
         const filename = generateFilename('webm')
@@ -515,7 +511,6 @@ export default function TodayPage() {
           { ...artifact, id: docRef.id, uri: downloadUrl },
           ...prev,
         ])
-        setArtifactForm((prev) => ({ ...prev, domain: '' }))
         setSnackMessage({ text: 'Audio uploaded.', severity: 'success' })
       } catch (err) {
         console.error('Audio upload failed', err)
@@ -1428,6 +1423,48 @@ export default function TodayPage() {
           </Stack>
         </DialogContent>
       </Dialog>
+
+      {/* --- Chapter Question (read-aloud discussion) --- */}
+      {dayLog?.chapterQuestion && (
+        <SectionCard title={`\u{1F4D6} Reading: ${dayLog.chapterQuestion.book}`}>
+          <Stack spacing={1}>
+            <Typography variant="subtitle2" color="text.secondary">
+              {dayLog.chapterQuestion.chapter}
+            </Typography>
+            <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+              {dayLog.chapterQuestion.question}
+            </Typography>
+            {dayLog.chapterQuestion.responded ? (
+              <Stack spacing={1}>
+                <Chip label="Lincoln responded ✓" color="success" size="small" />
+                {dayLog.chapterQuestion.responseUrl && (
+                  <audio src={dayLog.chapterQuestion.responseUrl} controls style={{ width: '100%' }} />
+                )}
+              </Stack>
+            ) : (
+              <Typography variant="caption" color="text.secondary">
+                Waiting for Lincoln&apos;s response on his view.
+              </Typography>
+            )}
+            <TextField
+              label="Shelly's note (optional)"
+              placeholder="What did you notice about his response?"
+              size="small"
+              multiline
+              rows={2}
+              value={dayLog.chapterQuestion.responseNote ?? ''}
+              onBlur={(e) => {
+                if (e.target.value !== (dayLog.chapterQuestion?.responseNote ?? '')) {
+                  persistDayLogImmediate({
+                    ...dayLog,
+                    chapterQuestion: { ...dayLog.chapterQuestion!, responseNote: e.target.value },
+                  })
+                }
+              }}
+            />
+          </Stack>
+        </SectionCard>
+      )}
 
       {/* --- Teach-Back (Lincoln only, after 50%+ must-do completion) --- */}
       {(() => {

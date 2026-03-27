@@ -55,6 +55,7 @@ export default function WeeklyReviewPage() {
   const [review, setReview] = useState<WeeklyReview | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
 
   // Load weekly review for active child (real-time)
@@ -163,6 +164,24 @@ export default function WeeklyReviewPage() {
     }
     setIsSaving(false)
   }, [review, activeChildId, weekKey, familyId])
+
+  const handleRegenerateReview = useCallback(async () => {
+    if (!activeChildId) return
+    const confirmed = window.confirm(
+      'This will regenerate the weekly review from scratch. Any current review data will be replaced. Continue?',
+    )
+    if (!confirmed) return
+
+    setGenerating(true)
+    try {
+      await generateReviewFn({ familyId, childId: activeChildId, weekKey })
+      setSnack({ text: 'Review regenerated!', severity: 'success' })
+    } catch (err) {
+      console.error('Failed to regenerate review', err)
+      setSnack({ text: 'Failed to regenerate. Try again.', severity: 'error' })
+    }
+    setGenerating(false)
+  }, [activeChildId, familyId, weekKey])
 
   const acceptedCount = review?.paceAdjustments.filter(
     (a) => a.decision === AdjustmentDecision.Accepted,
@@ -327,6 +346,15 @@ export default function WeeklyReviewPage() {
                   : `Apply ${acceptedCount} Adjustment${acceptedCount !== 1 ? 's' : ''}`}
               </Button>
             )}
+            <Button
+              variant="outlined"
+              color="warning"
+              onClick={handleRegenerateReview}
+              disabled={generating || isSaving}
+              startIcon={generating ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
+            >
+              {generating ? 'Regenerating…' : 'Regenerate Review'}
+            </Button>
             {review.status === ReviewStatus.Applied && (
               <Alert severity="success" sx={{ flex: 1 }}>
                 Accepted adjustments have been applied. Changes will be visible in your next

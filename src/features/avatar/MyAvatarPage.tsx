@@ -21,8 +21,9 @@ import {
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { addXpEvent } from '../../core/xp/addXpEvent'
-import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
+import { normalizeAvatarProfile } from './normalizeProfile'
+import { safeUpdateProfile, safeSetProfile } from './safeProfileWrite'
 import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, VOXEL_TO_ARMOR_PIECE, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
 import type {
   ArmorPiece,
@@ -214,7 +215,7 @@ export default function MyAvatarPage() {
           totalXp: 0,
           updatedAt: new Date().toISOString(),
         }
-        await setDoc(profileRef, stripUndefined(newProfile as unknown as Record<string, unknown>) as unknown as AvatarProfile)
+        await safeSetProfile(profileRef, newProfile as unknown as Record<string, unknown>)
       }
     }
     void ensureProfile()
@@ -229,7 +230,7 @@ export default function MyAvatarPage() {
       profileRef,
       (snap) => {
         if (snap.exists()) {
-          const data = ensureNewProfileStructure(snap.data() as unknown as Record<string, unknown>)
+          const data = normalizeAvatarProfile(snap.data())
           setProfile(data)
 
           const unlockedCount = getUnlockedVoxelPieces(data).length
@@ -305,11 +306,10 @@ export default function MyAvatarPage() {
       // New day — reset armor so child can intentionally put it on
       setMorningReset(true)
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
-      void updateDoc(profileRef, stripUndefined({
+      void safeUpdateProfile(profileRef, {
         equippedPieces: [],
         lastArmorEquipDate: today,
-        updatedAt: new Date().toISOString(),
-      }))
+      })
 
       // Morning TTS greeting
       if ('speechSynthesis' in window) {
@@ -384,12 +384,11 @@ export default function MyAvatarPage() {
       const { getDoc } = await import('firebase/firestore')
       const snap = await getDoc(profileRef)
       const current = snap.exists() ? (snap.data() as AvatarProfile) : profile
-      await setDoc(profileRef, stripUndefined({
+      await safeSetProfile(profileRef, {
         ...current,
         characterFeatures: result.data.features,
         photoUrl: photoPreviewUrl,
-        updatedAt: new Date().toISOString(),
-      }) as unknown as AvatarProfile)
+      } as unknown as Record<string, unknown>)
 
       setPhotoPreviewUrl(null)
     } catch (err: unknown) {
@@ -411,10 +410,9 @@ export default function MyAvatarPage() {
         case 'shoes': customization.shoeColor = hexColor; break
       }
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
-      await updateDoc(profileRef, stripUndefined({
+      await safeUpdateProfile(profileRef, {
         customization,
-        updatedAt: new Date().toISOString(),
-      }))
+      })
     },
     [familyId, childId, profile],
   )
@@ -433,11 +431,10 @@ export default function MyAvatarPage() {
       // else streak broken, reset to 1
     }
     const profileRef = doc(avatarProfilesCollection(familyId), childId)
-    await updateDoc(profileRef, stripUndefined({
+    await safeUpdateProfile(profileRef, {
       armorStreak: newStreak,
       lastFullArmorDate: today,
-      updatedAt: new Date().toISOString(),
-    }))
+    })
   }, [familyId, childId, today])
 
   // ── Apply a piece (equip) ───────────────────────────────────────
@@ -492,12 +489,11 @@ export default function MyAvatarPage() {
       // Also update equippedPieces on avatar profile
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
       const equippedVoxel = [...sessionToVoxelPieces(updatedApplied)]
-      await updateDoc(profileRef, stripUndefined({
+      await safeUpdateProfile(profileRef, {
         equippedPieces: equippedVoxel,
         lastEquipAnimation: voxelPieceId,
         lastArmorEquipDate: today,
-        updatedAt: new Date().toISOString(),
-      }))
+      })
 
       if (allApplied) {
         void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
@@ -539,10 +535,9 @@ export default function MyAvatarPage() {
     const remainingVoxel = sessionToVoxelPieces(
       (session.appliedPieces ?? []).filter((p) => p !== armorPieceId),
     )
-    await updateDoc(profileRef, stripUndefined({
+    await safeUpdateProfile(profileRef, {
       equippedPieces: remainingVoxel,
-      updatedAt: new Date().toISOString(),
-    }))
+    })
 
     setUnequipPiece(null)
   }, [familyId, childId, session, today])
@@ -844,12 +839,11 @@ export default function MyAvatarPage() {
               if (!familyId || !childId) return
               // Reset equipped pieces for the new tier and clear pendingTierUpgrade
               const profileRef = doc(avatarProfilesCollection(familyId), childId)
-              await updateDoc(profileRef, {
+              await safeUpdateProfile(profileRef, {
                 equippedPieces: [],
                 currentTier: newTier.toLowerCase(),
                 pendingTierUpgrade: deleteField(),
-                updatedAt: new Date().toISOString(),
-              })
+              } as Record<string, unknown>)
               // Clear today's session applied pieces
               const docId = dailyArmorSessionDocId(childId, today)
               const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)

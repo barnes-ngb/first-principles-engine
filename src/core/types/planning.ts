@@ -157,6 +157,18 @@ export interface DayLog {
   retro?: string
   checklist?: ChecklistItem[]
   teachBackDone?: boolean
+  chapterQuestion?: {
+    book: string
+    chapter: string
+    questionType: string
+    question: string
+    /** Lincoln's audio response URL (set when he records) */
+    responseUrl?: string
+    /** Text summary of response (optional, Shelly can add) */
+    responseNote?: string
+    /** Whether Lincoln has responded */
+    responded?: boolean
+  }
   createdAt?: string
   updatedAt?: string
 }
@@ -216,6 +228,8 @@ export interface ChecklistItem {
   gradeResult?: string
   /** Guidance note when an item is skipped. */
   skipGuidance?: string
+  /** Whether this item was explicitly skipped by the child. */
+  skipped?: boolean
 }
 
 export interface Session {
@@ -349,6 +363,12 @@ export interface DraftDayPlan {
   day: string
   timeBudgetMinutes: number
   items: DraftPlanItem[]
+  chapterQuestion?: {
+    book: string
+    chapter: string
+    questionType: string
+    question: string
+  }
 }
 
 export interface DraftPlanItem {

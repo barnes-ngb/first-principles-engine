@@ -230,6 +230,8 @@ export default function PlannerChatPage() {
   const [setupComplete, setSetupComplete] = useState(false)
   const [weekEnergy, setWeekEnergy] = useState<'full' | 'lighter' | 'mvd'>('full')
   const [readAloud, setReadAloud] = useState('')
+  const [readAloudBook, setReadAloudBook] = useState('')
+  const [readAloudChapters, setReadAloudChapters] = useState('')
   const [weekNotes, setWeekNotes] = useState('')
   const [selectedWorkbookIds, setSelectedWorkbookIds] = useState<Set<string>>(new Set())
 
@@ -281,6 +283,8 @@ export default function PlannerChatPage() {
         const data = snap.data()
         if (data.hoursPerDay) setHoursPerDay(data.hoursPerDay)
         if (data.readAloud) setReadAloud(data.readAloud)
+        if (data.readAloudBook) setReadAloudBook(data.readAloudBook)
+        if (data.readAloudChapters) setReadAloudChapters(data.readAloudChapters)
       }
     })
   }, [familyId])
@@ -1142,6 +1146,8 @@ Return ONLY valid JSON, no markdown.`,
     void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
       hoursPerDay,
       readAloud,
+      readAloudBook,
+      readAloudChapters,
       updatedAt: new Date().toISOString(),
     }, { merge: true })
 
@@ -1171,6 +1177,8 @@ Hours/day: ${hoursPerDay}
 Workbooks:
 ${allWorkbookLines || '(none configured)'}
 ${readAloud ? `Read-aloud: ${readAloud}` : ''}
+${readAloudBook ? `\nRead-aloud book: ${readAloudBook}${readAloudChapters ? ` (${readAloudChapters})` : ''}` : ''}
+${readAloudBook && readAloudChapters ? `\nFor each day's chapter, generate ONE discussion question. Vary question types across the week:\n- Comprehension: "What happened? Why did the character do that?"\n- Application: "What would this look like in your life?"\n- Connection: "Does this remind you of anything?"\n- Opinion: "Do you agree with what the character did? Why?"\n- Prediction: "What do you think will happen next?"\nInclude the question in a "chapterQuestion" field on each day.` : ''}
 ${dailyRoutine ? `\nDaily routine (use this as the base template for each day — keep these activities and times, vary them across the week as appropriate):\n${dailyRoutine}` : ''}
 
 Subject time defaults (use these as the baseline for estimatedMinutes per item):
@@ -1194,7 +1202,7 @@ Generate a plan for Monday through Friday.`.trim()
     setTimeout(() => {
       void handleGeneratePlan()
     }, 100)
-  }, [weekEnergy, hoursPerDay, workbookConfigs, selectedWorkbookIds, readAloud, weekNotes, activeChild, handleGeneratePlan, quickWorkbooks, dailyRoutine, activeChildId, familyId, subjectTimeDefaults])
+  }, [weekEnergy, hoursPerDay, workbookConfigs, selectedWorkbookIds, readAloud, readAloudBook, readAloudChapters, weekNotes, activeChild, handleGeneratePlan, quickWorkbooks, dailyRoutine, activeChildId, familyId, subjectTimeDefaults])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -1377,6 +1385,7 @@ Generate a plan for Monday through Friday.`.trim()
             ...existing,
             checklist: [...existingChecklist, ...checklist],
             blocks: [...existingBlocks, ...blocks],
+            ...(dayPlan.chapterQuestion ? { chapterQuestion: dayPlan.chapterQuestion } : {}),
             updatedAt: new Date().toISOString(),
           })
         } else {
@@ -1385,6 +1394,7 @@ Generate a plan for Monday through Friday.`.trim()
             date: dateKey,
             blocks,
             checklist,
+            ...(dayPlan.chapterQuestion ? { chapterQuestion: dayPlan.chapterQuestion } : {}),
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }
@@ -2094,6 +2104,25 @@ Generate a plan for Monday through Friday.`.trim()
                     value={readAloud}
                     onChange={(e) => setReadAloud(e.target.value)}
                     fullWidth
+                    sx={{ mt: 1 }}
+                  />
+                  <TextField
+                    label="Read-aloud book"
+                    placeholder="e.g., Charlotte's Web"
+                    value={readAloudBook}
+                    onChange={(e) => setReadAloudBook(e.target.value)}
+                    size="small"
+                    fullWidth
+                    sx={{ mt: 1 }}
+                  />
+                  <TextField
+                    label="Chapters this week"
+                    placeholder="e.g., Chapters 3-7 or Ch 3 Mon, Ch 4 Tue..."
+                    value={readAloudChapters}
+                    onChange={(e) => setReadAloudChapters(e.target.value)}
+                    size="small"
+                    fullWidth
+                    helperText="The AI will generate a discussion question for each chapter"
                     sx={{ mt: 1 }}
                   />
                 </Box>

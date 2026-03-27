@@ -35,7 +35,7 @@ import {
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
-import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
+import { normalizeAvatarProfile } from '../../features/avatar/normalizeProfile'
 import { ARMOR_PIECES } from '../../core/types'
 import type {
   ArmorPiece,
@@ -103,7 +103,7 @@ export default function AvatarAdminTab() {
     if (!familyId || !activeChildId) return
     const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
     const unsub = onSnapshot(profileRef, (snap) => {
-      setProfile(snap.exists() ? ensureNewProfileStructure(snap.data() as unknown as Record<string, unknown>) : null)
+      setProfile(snap.exists() ? normalizeAvatarProfile(snap.data()) : null)
     })
     return unsub
   }, [familyId, activeChildId])
@@ -146,7 +146,7 @@ export default function AvatarAdminTab() {
       const newXp = Math.max(0, profile.totalXp + delta)
 
       // Recompute unlocked pieces — add newly eligible stone pieces
-      const updatedPieces: ArmorPieceProgress[] = [...profile.pieces]
+      const updatedPieces: ArmorPieceProgress[] = [...(profile.pieces ?? [])]
       for (const pieceDef of ARMOR_PIECES) {
         const existing = updatedPieces.find((p) => p.pieceId === pieceDef.id)
         const alreadyEarned = existing && (
@@ -224,7 +224,7 @@ export default function AvatarAdminTab() {
       const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
 
       // Make sure all 6 pieces exist with the stone/basic tier
-      const updatedPieces = [...profile.pieces]
+      const updatedPieces = [...(profile.pieces ?? [])]
       const themeStyle = profile.themeStyle
       for (const pieceDef of ARMOR_PIECES) {
         const existing = updatedPieces.find((p) => p.pieceId === pieceDef.id)
@@ -385,7 +385,7 @@ export default function AvatarAdminTab() {
       await setDoc(profileRef, {
         childId: profile.childId,
         themeStyle: profile.themeStyle,
-        pieces: profile.pieces,
+        pieces: profile.pieces ?? [],
         currentTier: profile.currentTier,
         totalXp: profile.totalXp,
         updatedAt: new Date().toISOString(),
@@ -451,10 +451,10 @@ export default function AvatarAdminTab() {
       const profileRef = doc(avatarProfilesCollection(familyId!), childDocId)
       const profileSnap = await getDoc(profileRef)
       if (profileSnap.exists()) {
-        const p = profileSnap.data() as AvatarProfile
-        const earned = p.pieces.filter((piece) =>
+        const p = normalizeAvatarProfile(profileSnap.data())
+        const earned = (p.pieces ?? []).filter((piece) =>
           p.themeStyle === 'minecraft'
-            ? piece.unlockedTiers.length > 0
+            ? (piece.unlockedTiers ?? []).length > 0
             : (piece.unlockedTiersPlatformer ?? []).length > 0,
         ).length
         setDeleteProfileInfo({ totalXp: p.totalXp, earnedPieces: earned })

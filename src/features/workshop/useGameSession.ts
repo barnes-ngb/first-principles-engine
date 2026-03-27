@@ -44,27 +44,37 @@ const DEFAULT_PLAYERS: Player[] = [
 // ── Space Effect Parser ──────────────────────────────────────────
 
 export function parseSpaceEffect(space: BoardSpace): SpaceEffect | null {
-  if (!space.label) return null
-  const label = space.label.toLowerCase()
+  const label = (space.label ?? '').toLowerCase()
 
-  // Forward: "go forward 2", "move ahead 3", "+2"
-  const forwardMatch = label.match(/(?:go\s+)?forward\s+(\d+)|move\s+ahead\s+(\d+)|\+(\d+)/)
+  // Try to extract specific numbers from the label first
+  const forwardMatch = label.match(/forward\s+(\d+)|ahead\s+(\d+)|\+(\d+)/)
   if (forwardMatch) {
     const amount = parseInt(forwardMatch[1] || forwardMatch[2] || forwardMatch[3], 10)
     return { type: 'forward', amount }
   }
 
-  // Backward: "go back 2", "move back 3", "-2", "slip back"
-  const backMatch = label.match(/(?:go\s+)?back\s+(\d+)|move\s+back\s+(\d+)|-(\d+)|slip\s+back\s+(\d+)/)
+  const backMatch = label.match(/back\s+(\d+)|slip\s+back\s+(\d+)|-(\d+)/)
   if (backMatch) {
-    const amount = parseInt(backMatch[1] || backMatch[2] || backMatch[3] || backMatch[4], 10)
+    const amount = parseInt(backMatch[1] || backMatch[2] || backMatch[3], 10)
     return { type: 'backward', amount }
   }
 
-  // Shortcut/teleport: "jump to space 29", "shortcut to 15"
   const teleportMatch = label.match(/(?:jump|shortcut|teleport)\s+(?:to\s+)?(?:space\s+)?(\d+)/)
   if (teleportMatch) {
     return { type: 'teleport', amount: parseInt(teleportMatch[1], 10) }
+  }
+
+  // Fallback: use space TYPE when label doesn't contain a specific number
+  if (space.type === 'bonus' || /forward|ahead|advance|boost|wind|push|fly|zoom|speed|fast/i.test(label)) {
+    return { type: 'forward', amount: 2 }
+  }
+
+  if (space.type === 'setback' || /back|slip|stumble|fall|oh no|oops|mud|stuck|trap|slide|lose|missed/i.test(label)) {
+    return { type: 'backward', amount: 2 }
+  }
+
+  if (space.type === 'special' || /shortcut|jump|teleport|warp|portal|skip|secret|hidden/i.test(label)) {
+    return { type: 'forward', amount: 3 }
   }
 
   return null
