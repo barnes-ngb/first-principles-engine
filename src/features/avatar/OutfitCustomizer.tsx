@@ -82,7 +82,7 @@ export default function OutfitCustomizer({
       <Typography
         sx={{
           fontFamily: titleFont,
-          fontSize: isLincoln ? '0.42rem' : '15px',
+          fontSize: isLincoln ? '0.6rem' : '15px',
           color: accentColor,
           mb: 1.5,
           fontWeight: 600,
@@ -116,7 +116,7 @@ export default function OutfitCustomizer({
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: '4px',
-                minHeight: '52px',
+                minHeight: '58px',
                 transition: 'all 0.2s ease',
                 '&:active': { transform: 'scale(0.96)' },
               }}
@@ -124,8 +124,8 @@ export default function OutfitCustomizer({
               {/* Color preview circle */}
               <Box
                 sx={{
-                  width: 20,
-                  height: 20,
+                  width: 24,
+                  height: 24,
                   borderRadius: '50%',
                   background: slot.current,
                   border: `2px solid ${isActive ? accentColor : (isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)')}`,
@@ -136,7 +136,7 @@ export default function OutfitCustomizer({
               <Typography
                 sx={{
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '0.28rem' : '11px',
+                  fontSize: isLincoln ? '0.45rem' : '11px',
                   color: isActive
                     ? accentColor
                     : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)'),
