@@ -35,6 +35,8 @@ import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
 import { useAvatarProfile } from '../avatar/useAvatarProfile'
 import { getArmorGateStatus } from '../avatar/armorGate'
+import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../avatar/voxel/buildArmorPiece'
+import { calculateTier } from '../avatar/voxel/tierMaterials'
 import ArmorGateScreen from '../avatar/ArmorGateScreen'
 import MinecraftXpBar from '../avatar/MinecraftXpBar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
@@ -95,6 +97,18 @@ function getGreeting(name: string, isLincoln: boolean): string {
   if (hour < 12) return `Good morning, ${name}!`
   if (hour < 17) return `Good afternoon, ${name}!`
   return `Nice work today, ${name}!`
+}
+
+function getMotivation(profile: import('../../core/types').AvatarProfile): string {
+  const xp = profile.totalXp
+  const unlocked = new Set(VOXEL_ARMOR_PIECES.filter((p) => xp >= XP_THRESHOLDS[p.id]).map((p) => p.id))
+  const next = VOXEL_ARMOR_PIECES.find((p) => !unlocked.has(p.id))
+  if (next) {
+    const xpAway = XP_THRESHOLDS[next.id] - xp
+    return `${xpAway} XP to ${next.name}!`
+  }
+  const tier = calculateTier(xp)
+  return `Full ${tier.charAt(0) + tier.slice(1).toLowerCase()} armor! Keep earning.`
 }
 
 function getTimeLabel(minutes?: number): string {
@@ -621,6 +635,7 @@ export default function KidTodayView({
               ageGroup={avatarProfile.ageGroup}
               equippedPieces={avatarProfile.equippedPieces ?? []}
               totalXp={avatarProfile.totalXp}
+              faceGrid={avatarProfile.faceGrid}
               size={64}
               animated
             />
@@ -639,6 +654,18 @@ export default function KidTodayView({
               }}
             >
               Full armor on. Let's go!
+            </Typography>
+          )}
+          {!armorReady && avatarProfile && (
+            <Typography
+              sx={{
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
+                fontSize: isLincoln ? '0.4rem' : '12px',
+                color: 'text.secondary',
+                mt: 0.25,
+              }}
+            >
+              {getMotivation(avatarProfile)}
             </Typography>
           )}
           {todayXp > 0 && (
