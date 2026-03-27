@@ -189,7 +189,13 @@ export default function KidTodayView({
   const { mustDo, choose } = useMemo(() => categorizeItems(checklist), [checklist])
 
   const mustDoDone = mustDo.length > 0 && mustDo.every((item) => item.completed)
-  const mustDoRemaining = mustDo.filter((item) => !item.completed).length
+  const mustDoRemaining = mustDo.filter((item) => !item.completed && !item.skipped).length
+
+  // Gate: 3+ must-do items completed unlocks Workshop and Books
+  const mustDoCompleted = mustDo.filter((i) => i.completed).length
+  const mustDoSkipped = mustDo.filter((i) => i.skipped).length
+  const gateThreshold = Math.min(3, mustDo.length)
+  const gateUnlocked = mustDoCompleted >= gateThreshold
 
   // Track which choose items have been selected (by their index in the choose array)
   const maxChoices = 2
@@ -250,6 +256,26 @@ export default function KidTodayView({
     }
     prevAllDoneRef.current = allDone
   }, [allDone, child.id, familyId, today, checklist.length])
+
+  // Track gate unlock for celebration display
+  const prevGateUnlockedRef = useRef(gateUnlocked)
+  useEffect(() => {
+    prevGateUnlockedRef.current = gateUnlocked
+  }, [gateUnlocked])
+
+  // Daily XP from checklist items
+  const dailyXp = useMemo(
+    () =>
+      checklist
+        .filter((i) => i.completed)
+        .reduce((sum, item) => {
+          const label = (item.label ?? '').toLowerCase()
+          const isPrayer =
+            label.includes('prayer') || label.includes('formation') || label.includes('scripture')
+          return sum + (isPrayer ? XP_AWARDS.checklistPrayer : XP_AWARDS.checklistItem)
+        }, 0),
+    [checklist],
+  )
 
   // Load artifacts for today
   const loadArtifacts = useCallback(() => {
@@ -347,6 +373,17 @@ export default function KidTodayView({
       })
     },
     [maxChoices],
+  )
+
+  const handleSkipItem = useCallback(
+    (itemIndex: number) => {
+      if (!dayLog?.checklist) return
+      const updated = dayLog.checklist.map((ci, i) =>
+        i === itemIndex ? { ...ci, skipped: true } : ci,
+      )
+      persistDayLogImmediate({ ...dayLog, checklist: updated })
+    },
+    [dayLog, persistDayLogImmediate],
   )
 
   /** Find the absolute index in the full checklist for a choose item. */
@@ -621,6 +658,38 @@ export default function KidTodayView({
         <MinecraftXpBar totalXp={xpLedger.totalXp} todayXp={todayXp} compact />
       )}
 
+      {/* Gate banner */}
+      {!gateUnlocked && checklist.length > 0 && (
+        <Stack
+          direction="row"
+          spacing={1}
+          alignItems="center"
+          justifyContent="center"
+          sx={{
+            py: 1,
+            px: 2,
+            bgcolor: 'warning.light',
+            borderRadius: 1,
+            opacity: 0.9,
+          }}
+        >
+          <Typography variant="body2" fontWeight={600}>
+            ⛏️ {mustDoCompleted}/{gateThreshold} quests done
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            — complete {gateThreshold - mustDoCompleted} more to unlock Workshop + Books!
+          </Typography>
+        </Stack>
+      )}
+
+      {gateUnlocked && !prevGateUnlockedRef.current && (
+        <Stack alignItems="center" sx={{ py: 1 }}>
+          <Typography variant="body1" fontWeight={700} color="success.main">
+            🔓 Workshop + Books unlocked! Great work!
+          </Typography>
+        </Stack>
+      )}
+
       {/* Morning verse */}
       {weekFocus?.scriptureRef && (
         <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: 'grey.50', mb: 2 }}>
@@ -630,9 +699,30 @@ export default function KidTodayView({
         </Box>
       )}
 
-      {/* Workshop game cards */}
+      {/* Workshop game cards — gated behind must-do progress */}
       {familyId && allChildren.length > 0 && (
-        <WorkshopGameCards familyId={familyId} childId={child.id} children={allChildren} />
+        gateUnlocked ? (
+          <WorkshopGameCards familyId={familyId} childId={child.id} children={allChildren} />
+        ) : (
+          <SectionCard title="🔒 Game Workshop">
+            <Stack spacing={1} alignItems="center" sx={{ py: 2 }}>
+              <Typography variant="body2" color="text.secondary" textAlign="center">
+                Complete {gateThreshold - mustDoCompleted} more quest{gateThreshold - mustDoCompleted !== 1 ? 's' : ''} to unlock!
+              </Typography>
+              <Stack direction="row" spacing={0.5}>
+                {Array.from({ length: gateThreshold }).map((_, i) => (
+                  <Box
+                    key={i}
+                    sx={{
+                      width: 16, height: 16, borderRadius: '50%',
+                      bgcolor: i < mustDoCompleted ? 'success.main' : 'action.disabledBackground',
+                    }}
+                  />
+                ))}
+              </Stack>
+            </Stack>
+          </SectionCard>
+        )
       )}
 
       {/* MVD warm message */}
@@ -750,6 +840,17 @@ export default function KidTodayView({
           {mustDo.map((item) => {
             const absIndex = checklist.indexOf(item)
             const isBookItem = /book/i.test(item.label)
+
+            if (item.skipped) {
+              return (
+                <Box key={absIndex} sx={{ p: 1, borderRadius: 2, bgcolor: 'action.hover', minHeight: 56, display: 'flex', alignItems: 'center' }}>
+                  <Typography variant="body2" sx={{ textDecoration: 'line-through', opacity: 0.4, flex: 1 }}>
+                    {item.label} — skipped
+                  </Typography>
+                </Box>
+              )
+            }
+
             return (
               <Box key={absIndex}>
                 <Stack
@@ -791,22 +892,39 @@ export default function KidTodayView({
                   <Typography variant="body2" color="text.secondary">
                     {item.completed ? '✓' : getTimeLabel(item.estimatedMinutes ?? item.plannedMinutes)}
                   </Typography>
+                  {!item.completed && (
+                    <Button
+                      size="small"
+                      variant="text"
+                      color="inherit"
+                      onClick={(e) => { e.stopPropagation(); handleSkipItem(absIndex) }}
+                      sx={{ opacity: 0.5, fontSize: '0.75rem', minWidth: 'auto', ml: 1 }}
+                    >
+                      Skip
+                    </Button>
+                  )}
                 </Stack>
                 {/* Book item quick link */}
                 {isBookItem && !item.completed && (
                   <Box sx={{ ml: 5, mt: 0.5 }}>
-                    <Button
-                      size="small"
-                      variant="text"
-                      startIcon={<MenuBookIcon />}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        navigate(item.bookId ? `/books/${item.bookId}` : '/books')
-                      }}
-                      sx={{ minHeight: 32, textTransform: 'none' }}
-                    >
-                      Go to My Books
-                    </Button>
+                    {gateUnlocked ? (
+                      <Button
+                        size="small"
+                        variant="text"
+                        startIcon={<MenuBookIcon />}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          navigate(item.bookId ? `/books/${item.bookId}` : '/books')
+                        }}
+                        sx={{ minHeight: 32, textTransform: 'none' }}
+                      >
+                        Go to My Books
+                      </Button>
+                    ) : (
+                      <Button size="small" variant="text" disabled sx={{ minHeight: 32, textTransform: 'none' }}>
+                        🔒 Complete {gateThreshold - mustDoCompleted} more quest{gateThreshold - mustDoCompleted !== 1 ? 's' : ''}
+                      </Button>
+                    )}
                   </Box>
                 )}
                 {/* Per-item capture for kids */}
@@ -834,18 +952,34 @@ export default function KidTodayView({
         </Stack>
 
         {/* Progress message */}
-        {!mustDoDone && (
-          <Typography
-            variant="body1"
-            color="text.secondary"
-            textAlign="center"
-            sx={{ mt: 1, fontWeight: 500 }}
-          >
-            {isLincoln
-              ? `${mustDoRemaining} quest${mustDoRemaining !== 1 ? 's' : ''} to go, then you craft!`
-              : `${mustDoRemaining} to go, then you choose!`}
-          </Typography>
-        )}
+        <Stack spacing={0.5} alignItems="center" sx={{ mt: 1 }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography variant="body2">
+              {mustDoCompleted} of {mustDo.length} quests done
+              {mustDoSkipped > 0 && `, ${mustDoSkipped} skipped`}
+            </Typography>
+            {dailyXp > 0 && (
+              <Chip
+                label={`💎 ${dailyXp} XP earned`}
+                size="small"
+                color="success"
+                variant="outlined"
+              />
+            )}
+          </Stack>
+          {!mustDoDone && mustDoRemaining > 0 && (
+            <Typography
+              variant="body1"
+              color="text.secondary"
+              textAlign="center"
+              sx={{ fontWeight: 500 }}
+            >
+              {isLincoln
+                ? `${mustDoRemaining} quest${mustDoRemaining !== 1 ? 's' : ''} to go, then you craft!`
+                : `${mustDoRemaining} to go, then you choose!`}
+            </Typography>
+          )}
+        </Stack>
         {mustDoDone && !isMvd && choose.length > 0 && (
           <Typography
             variant="body1"
@@ -936,18 +1070,24 @@ export default function KidTodayView({
                     {/* Book item quick link */}
                     {isChooseBookItem && !item.completed && (
                       <Box sx={{ ml: 5, mt: 0.5 }}>
-                        <Button
-                          size="small"
-                          variant="text"
-                          startIcon={<MenuBookIcon />}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            navigate(item.bookId ? `/books/${item.bookId}` : '/books')
-                          }}
-                          sx={{ minHeight: 32, textTransform: 'none' }}
-                        >
-                          Go to My Books
-                        </Button>
+                        {gateUnlocked ? (
+                          <Button
+                            size="small"
+                            variant="text"
+                            startIcon={<MenuBookIcon />}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              navigate(item.bookId ? `/books/${item.bookId}` : '/books')
+                            }}
+                            sx={{ minHeight: 32, textTransform: 'none' }}
+                          >
+                            Go to My Books
+                          </Button>
+                        ) : (
+                          <Button size="small" variant="text" disabled sx={{ minHeight: 32, textTransform: 'none' }}>
+                            🔒 Complete {gateThreshold - mustDoCompleted} more quest{gateThreshold - mustDoCompleted !== 1 ? 's' : ''}
+                          </Button>
+                        )}
                       </Box>
                     )}
                     {/* Per-item capture for kids */}
@@ -1151,59 +1291,63 @@ export default function KidTodayView({
         </SectionCard>
       )}
 
-      {/* ── CONTINUE YOUR BOOK ── */}
+      {/* ── CONTINUE YOUR BOOK (gated) ── */}
       {draftBook && (
-        <Box
-          onClick={() => navigate(`/books/${draftBook.id}`)}
-          sx={{
-            p: 2,
-            borderRadius: 2,
-            border: '1px solid',
-            borderColor: isLincoln ? 'grey.700' : 'info.200',
-            bgcolor: isLincoln ? 'rgba(0,0,0,0.6)' : 'info.50',
-            cursor: 'pointer',
-            '&:hover': { borderColor: 'primary.main' },
-          }}
-        >
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <MenuBookIcon sx={{ color: isLincoln ? '#FCDB5B' : 'info.main', fontSize: 28 }} />
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography
-                variant="body1"
-                sx={{
-                  fontWeight: 600,
-                  ...(isLincoln
-                    ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.55rem', color: '#FFFFFF' }
-                    : {}),
-                }}
-              >
-                {isLincoln ? 'Continue crafting your book' : 'Continue your book'}
-              </Typography>
+        gateUnlocked ? (
+          <Box
+            onClick={() => navigate(`/books/${draftBook.id}`)}
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              border: '1px solid',
+              borderColor: isLincoln ? 'grey.700' : 'info.200',
+              bgcolor: isLincoln ? 'rgba(0,0,0,0.6)' : 'info.50',
+              cursor: 'pointer',
+              '&:hover': { borderColor: 'primary.main' },
+            }}
+          >
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <MenuBookIcon sx={{ color: isLincoln ? '#FCDB5B' : 'info.main', fontSize: 28 }} />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography
+                  variant="body1"
+                  sx={{
+                    fontWeight: 600,
+                    ...(isLincoln
+                      ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.55rem', color: '#FFFFFF' }
+                      : {}),
+                  }}
+                >
+                  {isLincoln ? 'Continue crafting your book' : 'Continue your book'}
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.secondary',
+                    ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.4rem' } : {}),
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  &ldquo;{draftBook.title}&rdquo; — {draftBook.pages.length} page{draftBook.pages.length !== 1 ? 's' : ''}
+                </Typography>
+              </Box>
               <Typography
                 variant="body2"
                 sx={{
-                  color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.secondary',
-                  ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.4rem' } : {}),
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  color: isLincoln ? '#FCDB5B' : 'info.main',
+                  fontWeight: 600,
+                  ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.45rem' } : {}),
                 }}
               >
-                &ldquo;{draftBook.title}&rdquo; — {draftBook.pages.length} page{draftBook.pages.length !== 1 ? 's' : ''}
+                Open
               </Typography>
-            </Box>
-            <Typography
-              variant="body2"
-              sx={{
-                color: isLincoln ? '#FCDB5B' : 'info.main',
-                fontWeight: 600,
-                ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.45rem' } : {}),
-              }}
-            >
-              Open
-            </Typography>
-          </Stack>
-        </Box>
+            </Stack>
+          </Box>
+        ) : (
+          <Chip label="🔒 Finish quests first" variant="outlined" />
+        )
       )}
 
       {/* ── CELEBRATION ── */}
