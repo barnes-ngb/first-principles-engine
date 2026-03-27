@@ -422,7 +422,7 @@ export default function GamePlayView({
   const gameDurationMinutes = Math.max(1, Math.round((Date.now() - gameStartTime.current) / 60000))
 
   return (
-    <Box>
+    <Box sx={{ position: 'relative' }}>
       {/* Confetti overlays */}
       <Confetti active={showConfetti} />
       <Confetti active={showSmallConfetti} small />
@@ -430,19 +430,19 @@ export default function GamePlayView({
       {/* Exit button */}
       <IconButton
         onClick={() => setShowExitDialog(true)}
-        size="small"
+        size="medium"
         sx={{
           position: 'absolute',
           top: 8,
           left: 8,
-          zIndex: 10,
-          bgcolor: 'background.paper',
-          boxShadow: 1,
-          '&:hover': { bgcolor: 'background.paper' },
+          zIndex: 20,
+          bgcolor: 'rgba(255,255,255,0.9)',
+          boxShadow: 2,
+          '&:hover': { bgcolor: 'rgba(255,255,255,1)' },
         }}
         aria-label="Exit game"
       >
-        <ArrowBackIcon fontSize="small" />
+        <ArrowBackIcon />
       </IconButton>
 
       {/* Exit confirmation dialog */}
@@ -648,7 +648,7 @@ export default function GamePlayView({
                   ))}
                 </Box>
                 <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
-                  <Button variant="outlined" onClick={() => { session.reset(); setShowFinalCelebration(false); setShowCelebration(false) }}>
+                  <Button variant="outlined" onClick={() => { session.reset(); setShowFinalCelebration(false); setShowCelebration(false); setShowConfetti(false); setShowSmallConfetti(false); setHasStarted(false) }}>
                     Play Again!
                   </Button>
                   <Button variant="contained" onClick={handleFinishGame}>
@@ -675,11 +675,16 @@ export default function GamePlayView({
                   {state.winner} wins!
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Everyone keep going!
+                  {state.players.length - state.finishers.length} player{state.players.length - state.finishers.length !== 1 ? 's' : ''} still going!
                 </Typography>
-                <Button variant="contained" size="large" onClick={handleNextTurn}>
-                  Continue
-                </Button>
+                <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <Button variant="contained" size="large" onClick={handleNextTurn}>
+                    Keep Playing
+                  </Button>
+                  <Button variant="outlined" onClick={handleFinishGame}>
+                    End Game
+                  </Button>
+                </Box>
               </Box>
             ) : isGameOver && !showCelebration ? (
               // Game over for remaining players

@@ -414,8 +414,26 @@ describe('parseSpaceEffect', () => {
       .toEqual({ type: 'teleport', amount: 15 })
   })
 
-  it('returns null for spaces without movement effects', () => {
+  it('returns null for normal spaces without movement keywords', () => {
     expect(parseSpaceEffect({ index: 0, type: 'normal' })).toBeNull()
-    expect(parseSpaceEffect({ index: 0, type: 'bonus', label: 'You found a gem!' })).toBeNull()
+    expect(parseSpaceEffect({ index: 0, type: 'normal', label: 'Rest stop' })).toBeNull()
+  })
+
+  it('falls back to default movement for bonus/setback spaces without numbers', () => {
+    // Bonus space without a number → default forward 2
+    expect(parseSpaceEffect({ index: 0, type: 'bonus', label: 'You found a gem!' }))
+      .toEqual({ type: 'forward', amount: 2 })
+    expect(parseSpaceEffect({ index: 0, type: 'bonus', label: 'Magic Wind — Go forward!' }))
+      .toEqual({ type: 'forward', amount: 2 })
+
+    // Setback space without a number → default backward 2
+    expect(parseSpaceEffect({ index: 0, type: 'setback', label: 'Muddy Puddle — Slip back!' }))
+      .toEqual({ type: 'backward', amount: 2 })
+    expect(parseSpaceEffect({ index: 0, type: 'setback', label: 'Oh no!' }))
+      .toEqual({ type: 'backward', amount: 2 })
+
+    // Special space without a target → default forward 3
+    expect(parseSpaceEffect({ index: 0, type: 'special', label: 'Portal!' }))
+      .toEqual({ type: 'forward', amount: 3 })
   })
 })
