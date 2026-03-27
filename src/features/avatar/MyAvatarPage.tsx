@@ -219,6 +219,13 @@ export default function MyAvatarPage() {
           unlockedPieces: [],
           totalXp: 0,
           updatedAt: new Date().toISOString(),
+          ...(isLincoln ? {} : {
+            customization: {
+              shirtColor: '#E8A838',   // mustard yellow
+              pantsColor: '#C4B998',   // khaki/tan
+              shoeColor: '#8B7355',    // brown
+            },
+          }),
         }
         await safeSetProfile(profileRef, newProfile as unknown as Record<string, unknown>)
       }
