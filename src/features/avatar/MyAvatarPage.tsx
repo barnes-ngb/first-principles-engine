@@ -27,10 +27,12 @@ import { safeUpdateProfile, safeSetProfile } from './safeProfileWrite'
 import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, VOXEL_TO_ARMOR_PIECE, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
 import type {
   ArmorPiece,
+  ArmorTier,
   AvatarProfile,
   CharacterFeatures,
   DailyArmorSession,
   OutfitCustomization,
+  PlatformerTier,
   VoxelArmorPieceId,
 } from '../../core/types'
 
@@ -567,7 +569,7 @@ export default function MyAvatarPage() {
     if (!familyId || !childId || !profile) return
 
     const profileRef = doc(avatarProfilesCollection(familyId), childId)
-    const newTier = calculateTier(profile.totalXp).toLowerCase()
+    const newTier = calculateTier(profile.totalXp).toLowerCase() as ArmorTier | PlatformerTier
     await safeUpdateProfile(profileRef, {
       equippedPieces: [],
       currentTier: newTier,
