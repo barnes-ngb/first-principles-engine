@@ -44,6 +44,7 @@ import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
+import TierUpCeremony from '../../components/avatar/TierUpCeremony'
 import OutfitCustomizer from './OutfitCustomizer'
 import { calculateTier, getTierBadgeColor, getTierTextColor, TIERS } from './voxel/tierMaterials'
 
@@ -148,6 +149,7 @@ export default function MyAvatarPage() {
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
   const [ceremonyActive, setCeremonyActive] = useState(false)
+  const [ceremonyTier, setCeremonyTier] = useState<string | null>(null)
 
   // Card scroll ref — reset to start on load
   const cardScrollRef = useRef<HTMLDivElement>(null)
@@ -169,6 +171,7 @@ export default function MyAvatarPage() {
   // Track previous state for celebrations
   const prevPiecesCountRef = useRef(0)
   const prevTierRef = useRef<string | null>(null)
+  const prevXpRef = useRef(0)
 
   // Reset card scroll to start (Belt first) on load
   useEffect(() => {
@@ -257,6 +260,21 @@ export default function MyAvatarPage() {
     )
     return unsub
   }, [familyId, childId])
+
+  // ── Detect tier-up from XP changes ──────────────────────────────
+  useEffect(() => {
+    if (!profile) return
+    const oldTier = calculateTier(prevXpRef.current)
+    const newTier = calculateTier(profile.totalXp)
+    if (newTier !== oldTier && profile.totalXp > prevXpRef.current) {
+      const tierDef = TIERS[newTier]
+      if (tierDef) {
+        setCeremonyTier(tierDef.label)
+        setCeremonyActive(true)
+      }
+    }
+    prevXpRef.current = profile.totalXp
+  }, [profile?.totalXp])
 
   // ── Real-time session listener ─────────────────────────────────
   useEffect(() => {
@@ -541,6 +559,20 @@ export default function MyAvatarPage() {
 
     setUnequipPiece(null)
   }, [familyId, childId, session, today])
+
+  // ── Tier-up ceremony complete: reset equipped pieces ────────────
+  const handleCeremonyDone = useCallback(async () => {
+    setCeremonyTier(null)
+    setCeremonyActive(false)
+    if (!familyId || !childId || !profile) return
+
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    const newTier = calculateTier(profile.totalXp).toLowerCase()
+    await safeUpdateProfile(profileRef, {
+      equippedPieces: [],
+      currentTier: newTier,
+    })
+  }, [familyId, childId, profile])
 
   // ── Piece tap handler — single tap to equip/unequip ────────────
   const handlePieceTap = useCallback(
@@ -1581,6 +1613,13 @@ export default function MyAvatarPage() {
         upgrade={tierCelebration}
         profile={profile}
         onDismiss={() => setTierCelebration(null)}
+      />
+
+      {/* ── Tier-up ceremony (flash + banner + sound) ──────────── */}
+      <TierUpCeremony
+        active={!!ceremonyTier}
+        newTierName={ceremonyTier}
+        onComplete={handleCeremonyDone}
       />
     </Box>
   )
