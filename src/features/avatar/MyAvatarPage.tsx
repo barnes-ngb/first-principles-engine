@@ -228,6 +228,13 @@ export default function MyAvatarPage() {
           }),
         }
         await safeSetProfile(profileRef, newProfile as unknown as Record<string, unknown>)
+      } else {
+        // Backfill ageGroup on existing profiles that predate the field
+        const data = snap.data()
+        if (data && !data.ageGroup) {
+          const expectedAgeGroup = isLincoln ? 'older' : 'younger'
+          await safeUpdateProfile(profileRef, { ageGroup: expectedAgeGroup })
+        }
       }
     }
     void ensureProfile()
