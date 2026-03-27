@@ -258,8 +258,12 @@ export default function KidTodayView({
   }, [allDone, child.id, familyId, today, checklist.length])
 
   // Track gate unlock for celebration display
+  const [justUnlockedGate, setJustUnlockedGate] = useState(false)
   const prevGateUnlockedRef = useRef(gateUnlocked)
   useEffect(() => {
+    if (gateUnlocked && !prevGateUnlockedRef.current) {
+      setJustUnlockedGate(true)
+    }
     prevGateUnlockedRef.current = gateUnlocked
   }, [gateUnlocked])
 
@@ -570,7 +574,7 @@ export default function KidTodayView({
       console.error('Chapter response save failed:', err)
     }
     setSavingChapter(false)
-  }, [dayLog, child.id, familyId, chapterAudioBlob, today, persistDayLogImmediate])
+  }, [dayLog, child.id, familyId, chapterAudioBlob, persistDayLogImmediate])
 
   // ── Armor Gate early return (after all hooks) ──
   if (avatarProfile && !armorReady && armorGateStatus) {
@@ -682,7 +686,7 @@ export default function KidTodayView({
         </Stack>
       )}
 
-      {gateUnlocked && !prevGateUnlockedRef.current && (
+      {justUnlockedGate && (
         <Stack alignItems="center" sx={{ py: 1 }}>
           <Typography variant="body1" fontWeight={700} color="success.main">
             🔓 Workshop + Books unlocked! Great work!
