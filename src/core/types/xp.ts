@@ -264,6 +264,8 @@ export interface AvatarProfile {
   skinTextureUrl?: string
   /** Timestamp when skin texture was last generated */
   skinTextureGeneratedAt?: string
+  /** Cached 64-color hex array for pixel face (avoids regenerating each load) */
+  faceGrid?: string[]
 
   // ── Legacy 2D fields (kept for migration, may be undefined) ───
   /** @deprecated Use characterFeatures + 3D voxel renderer instead */

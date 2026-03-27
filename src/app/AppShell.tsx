@@ -77,6 +77,7 @@ function NavContent({
               ageGroup={avatarProfile.ageGroup}
               equippedPieces={avatarProfile.equippedPieces ?? []}
               totalXp={avatarProfile.totalXp}
+              faceGrid={avatarProfile.faceGrid}
               size={32}
             />
           )}

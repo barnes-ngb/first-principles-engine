@@ -7,7 +7,7 @@ import { buildCharacter } from './voxel/buildCharacter'
 import { buildArmorPiece } from './voxel/buildArmorPiece'
 import { frameCameraToCharacter } from './voxel/cameraUtils'
 import { applyTierToArmor, calculateTier } from './voxel/tierMaterials'
-import { buildPaintedFace, applyCanvasToHead } from './voxel/pixelFace'
+import { buildPaintedFace, renderColorArrayToCanvas, applyCanvasToHead } from './voxel/pixelFace'
 
 interface AvatarThumbnailProps {
   features?: CharacterFeatures
@@ -19,6 +19,8 @@ interface AvatarThumbnailProps {
   animated?: boolean
   className?: string
   style?: React.CSSProperties
+  /** Cached 64-color hex array for AI-generated pixel face */
+  faceGrid?: string[]
 }
 
 // Track active renderers to warn about performance
@@ -35,6 +37,7 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
   animated = false,
   className,
   style,
+  faceGrid,
 }: AvatarThumbnailProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
@@ -146,17 +149,30 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
       applyTierToArmor(armorMeshes, tier, equippedPieces)
     }
 
-    // Apply painted face for sizes >= 64
-    if (size >= 64 && resolvedFeatures) {
+    // Apply pixel face texture for sizes >= 64
+    if (size >= 64) {
       try {
-        const faceCanvas = buildPaintedFace(resolvedFeatures)
-        const headMesh = character.getObjectByName('head') as THREE.Mesh | undefined
-        if (headMesh) {
-          applyCanvasToHead(
-            headMesh,
-            faceCanvas,
-            new THREE.Color(resolvedFeatures.skinTone).getHex(),
-          )
+        let faceCanvas: HTMLCanvasElement | null = null
+
+        // Strategy 1: cached AI face grid
+        if (faceGrid && Array.isArray(faceGrid) && faceGrid.length === 64) {
+          faceCanvas = renderColorArrayToCanvas(faceGrid)
+        }
+
+        // Strategy 2: painted face from features
+        if (!faceCanvas && resolvedFeatures) {
+          faceCanvas = buildPaintedFace(resolvedFeatures)
+        }
+
+        if (faceCanvas) {
+          const headMesh = character.getObjectByName('head') as THREE.Mesh | undefined
+          if (headMesh) {
+            applyCanvasToHead(
+              headMesh,
+              faceCanvas,
+              new THREE.Color(resolvedFeatures.skinTone).getHex(),
+            )
+          }
         }
       } catch {
         // Fallback: solid color head is fine for thumbnails
@@ -202,7 +218,7 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
       cleanupRef.current?.()
       cleanupRef.current = null
     }
-  }, [features, ageGroup, equippedPieces, totalXp, size, showArmor, shouldAnimate])
+  }, [features, ageGroup, equippedPieces, totalXp, size, showArmor, shouldAnimate, faceGrid])
 
   return (
     <canvas
