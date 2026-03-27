@@ -115,11 +115,20 @@ export async function checkAndUnlockArmor(
   const profileRef = doc(avatarProfilesCollection(familyId), childId)
   const profileSnap = await getDoc(profileRef)
 
-  if (!profileSnap.exists()) return { newlyUnlockedPieces: [], newlyUnlockedVoxelPieces: [] }
-
-  const profile = ensureNewProfileStructure(
-    profileSnap.data() as unknown as Record<string, unknown>,
-  )
+  const profile: AvatarProfile = profileSnap.exists()
+    ? ensureNewProfileStructure(
+        profileSnap.data() as unknown as Record<string, unknown>,
+      )
+    : {
+        childId,
+        themeStyle: 'minecraft',
+        pieces: [],
+        currentTier: 'stone',
+        equippedPieces: [],
+        unlockedPieces: [],
+        totalXp: 0,
+        updatedAt: new Date().toISOString(),
+      }
 
   // Read XP from xpLedger (source of truth) when not passed explicitly
   let xp = totalXp ?? 0

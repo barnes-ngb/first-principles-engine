@@ -6,9 +6,23 @@ import {
   xpLedgerCollection,
   xpLedgerDocId,
 } from '../firebase/firestore'
-import type { XP_EVENTS } from '../types'
+import type { AvatarProfile, XP_EVENTS } from '../types'
 import { checkAndUnlockArmor } from './checkAndUnlockArmor'
 import { calculateTier } from '../../features/avatar/voxel/tierMaterials'
+
+/** Build a sensible default AvatarProfile for a child that has none yet. */
+function defaultAvatarProfile(childId: string): AvatarProfile {
+  return {
+    childId,
+    themeStyle: 'minecraft',
+    pieces: [],
+    currentTier: 'stone',
+    equippedPieces: [],
+    unlockedPieces: [],
+    totalXp: 0,
+    updatedAt: new Date().toISOString(),
+  }
+}
 
 /** Map XP event types to XpLedger source buckets. */
 function mapTypeToSource(type: keyof typeof XP_EVENTS): 'routines' | 'quests' | 'books' {
@@ -94,26 +108,27 @@ export async function addXpEvent(
   // ── Update cached totalXp on avatarProfile ─────────────────
   const profileRef = doc(avatarProfilesCollection(familyId), childId)
   const profileSnap = await getDoc(profileRef)
-  if (profileSnap.exists()) {
-    const profile = profileSnap.data()
-    const oldTier = calculateTier(profile.totalXp ?? 0)
-    const newTier = calculateTier(realTotal)
-    console.log(`[XP] New total: ${realTotal}, tier: ${newTier}`)
+  const profile: AvatarProfile = profileSnap.exists()
+    ? (profileSnap.data() as AvatarProfile)
+    : defaultAvatarProfile(childId)
 
-    const tierUpdate: Record<string, unknown> = {}
-    if (newTier !== oldTier) {
-      console.log(`[XP] TIER UPGRADE: ${oldTier} → ${newTier}`)
-      tierUpdate.currentTier = newTier.toLowerCase()
-      tierUpdate.pendingTierUpgrade = newTier
-    }
+  const oldTier = calculateTier(profile.totalXp ?? 0)
+  const newTier = calculateTier(realTotal)
+  console.log(`[XP] New total: ${realTotal}, tier: ${newTier}`)
 
-    await setDoc(profileRef, stripUndefined({
-      ...profile,
-      totalXp: realTotal,
-      ...tierUpdate,
-      updatedAt: new Date().toISOString(),
-    }) as unknown as typeof profile)
+  const tierUpdate: Record<string, unknown> = {}
+  if (newTier !== oldTier) {
+    console.log(`[XP] TIER UPGRADE: ${oldTier} → ${newTier}`)
+    tierUpdate.currentTier = newTier.toLowerCase()
+    tierUpdate.pendingTierUpgrade = newTier
   }
+
+  await setDoc(profileRef, stripUndefined({
+    ...profile,
+    totalXp: realTotal,
+    ...tierUpdate,
+    updatedAt: new Date().toISOString(),
+  }) as unknown as AvatarProfile)
 
   // ── Check for armor unlocks ────────────────────────────────
   await checkAndUnlockArmor(familyId, childId, realTotal)

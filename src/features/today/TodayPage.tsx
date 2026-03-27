@@ -237,7 +237,6 @@ export default function TodayPage() {
     evidenceType: EvidenceType.Note as EvidenceType,
     subjectBucket: SubjectBucket.Reading,
     content: '',
-    domain: '',
   })
 
   // Keep artifact form childId in sync with active child
@@ -476,8 +475,7 @@ export default function TodayPage() {
     async (file: File) => {
       setMediaUploading(true)
       try {
-        const domain = artifactForm.domain.trim()
-        const title = domain || `Photo ${today}`
+        const title = `Photo ${today}`
         const artifact = buildArtifactBase(title, EvidenceType.Photo)
         const docRef = await addDoc(artifactsCollection(familyId), artifact)
         const ext = file.name.split('.').pop() ?? 'jpg'
@@ -488,7 +486,6 @@ export default function TodayPage() {
           { ...artifact, id: docRef.id, uri: downloadUrl },
           ...prev,
         ])
-        setArtifactForm((prev) => ({ ...prev, domain: '' }))
         setSnackMessage({ text: 'Photo uploaded.', severity: 'success' })
       } catch (err) {
         console.error('Photo upload failed', err)
@@ -504,8 +501,7 @@ export default function TodayPage() {
     async (blob: Blob) => {
       setMediaUploading(true)
       try {
-        const domain = artifactForm.domain.trim()
-        const title = domain || `Audio ${today}`
+        const title = `Audio ${today}`
         const artifact = buildArtifactBase(title, EvidenceType.Audio)
         const docRef = await addDoc(artifactsCollection(familyId), artifact)
         const filename = generateFilename('webm')
@@ -515,7 +511,6 @@ export default function TodayPage() {
           { ...artifact, id: docRef.id, uri: downloadUrl },
           ...prev,
         ])
-        setArtifactForm((prev) => ({ ...prev, domain: '' }))
         setSnackMessage({ text: 'Audio uploaded.', severity: 'success' })
       } catch (err) {
         console.error('Audio upload failed', err)
