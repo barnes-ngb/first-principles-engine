@@ -65,15 +65,15 @@ export function parseSpaceEffect(space: BoardSpace): SpaceEffect | null {
   }
 
   // Fallback: use space TYPE when label doesn't contain a specific number
-  if (space.type === 'bonus' || /forward|ahead|advance|boost/i.test(label)) {
+  if (space.type === 'bonus' || /forward|ahead|advance|boost|wind|push|fly|zoom|speed|fast/i.test(label)) {
     return { type: 'forward', amount: 2 }
   }
 
-  if (space.type === 'setback' || /back|slip|stumble|fall|oh no|oops/i.test(label)) {
+  if (space.type === 'setback' || /back|slip|stumble|fall|oh no|oops|mud|stuck|trap|slide|lose|missed/i.test(label)) {
     return { type: 'backward', amount: 2 }
   }
 
-  if (space.type === 'special' || /shortcut|jump|teleport|warp|portal/i.test(label)) {
+  if (space.type === 'special' || /shortcut|jump|teleport|warp|portal|skip|secret|hidden/i.test(label)) {
     return { type: 'forward', amount: 3 }
   }
 
