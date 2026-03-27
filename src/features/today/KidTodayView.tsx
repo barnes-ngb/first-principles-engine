@@ -512,12 +512,13 @@ export default function KidTodayView({
 
       await addDoc(artifactsCollection(familyId), {
         childId: child.id,
-        type: 'chapterResponse',
+        type: EvidenceType.Audio,
         date: today,
         tags: {
           engineStage: EngineStage.Reflect,
           subjectBucket: SubjectBucket.Reading,
           domain: 'reading',
+          location: 'home',
         },
         title: `${dayLog.chapterQuestion.book} — ${dayLog.chapterQuestion.chapter}`,
         content: `Q: ${dayLog.chapterQuestion.question}`,
