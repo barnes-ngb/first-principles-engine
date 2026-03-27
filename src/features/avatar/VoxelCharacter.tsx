@@ -216,11 +216,11 @@ function addBackgroundElements(scene: THREE.Scene) {
   }
 
   // Moon — octagonal (Minecraft-ish) in the corner
-  const moonGeo = new THREE.CircleGeometry(0.6, 8)
+  const moonGeo = new THREE.CircleGeometry(0.8, 8)
   const moonMat = new THREE.MeshBasicMaterial({
     color: 0xFFFFDD,
     transparent: true,
-    opacity: 0.35,
+    opacity: 0.5,
   })
   const moon = new THREE.Mesh(moonGeo, moonMat)
   moon.position.set(5, 6, -6)
@@ -478,7 +478,7 @@ export default function VoxelCharacter({
 
     // Shadow on platform surface — named for animation loop
     const scaleVal = ageGroup === 'younger' ? 0.88 : 1.0
-    const shadowGeo = new THREE.PlaneGeometry(2.5 * scaleVal, 1.5 * scaleVal)
+    const shadowGeo = new THREE.CircleGeometry(0.8 * scaleVal, 16)
     const shadowMat = new THREE.MeshBasicMaterial({
       color: 0x000000,
       transparent: true,
