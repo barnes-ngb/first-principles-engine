@@ -199,7 +199,10 @@ function buildHelmet(U: number): THREE.Group {
   brow.position.set(0, U * 1.6, U * 4.0)
   group.add(brow)
 
-  // NO nose guard — open face design, like a Viking helm
+  // Visor slit — thin dark bar across the front face
+  const visor = taggedFlatBox(U * 6.4, U * 0.8, U * 0.6, 0x222222, 'detail', 'helmet_visor')
+  visor.position.set(0, U * 0.6, U * 4.6)
+  group.add(visor)
 
   // Top crest — accent ridge running front to back
   const crest = taggedBox(U * 1.0, U * 1.4, U * 8.0, W, 'accent', 'helmet_crest')
@@ -228,11 +231,11 @@ function buildBreastplate(U: number): THREE.Group {
   chest.position.y = U * 18
   group.add(chest)
 
-  // Cross emblem on front
-  const crossV = taggedFlatBox(U * 1, U * 6, U * 0.5, W, 'accent', 'cross_v')
+  // Cross emblem on front — darker shade of tier color
+  const crossV = taggedFlatBox(U * 1, U * 6, U * 0.5, W, 'detail', 'cross_v')
   crossV.position.set(0, U * 19, U * 3.3)
   group.add(crossV)
-  const crossH = taggedFlatBox(U * 4, U * 1, U * 0.5, W, 'accent', 'cross_h')
+  const crossH = taggedFlatBox(U * 4, U * 1, U * 0.5, W, 'detail', 'cross_h')
   crossH.position.set(0, U * 21, U * 3.3)
   group.add(crossH)
 
@@ -345,6 +348,14 @@ function buildShield(U: number): THREE.Group {
   const body = taggedBox(U * 1.4, U * 11.2, U * 8, W, 'primary', 'shield_body')
   body.position.set(shX, -U * 7, shZ)
   group.add(body)
+
+  // Bevel layers — stepped inward boxes for a rounded/beveled look
+  const bevel1 = taggedFlatBox(U * 0.3, U * 10, U * 7, W, 'primary', 'shield_bevel1')
+  bevel1.position.set(shX - U * 0.85, -U * 7, shZ)
+  group.add(bevel1)
+  const bevel2 = taggedFlatBox(U * 0.2, U * 8.8, U * 5.8, W, 'primary', 'shield_bevel2')
+  bevel2.position.set(shX - U * 0.95, -U * 7, shZ)
+  group.add(bevel2)
 
   // Front face panel — slightly lighter accent
   const face = taggedFlatBox(U * 0.3, U * 10.4, U * 7.2, W, 'accent', 'shield_face')
@@ -463,6 +474,23 @@ function buildSword(U: number): THREE.Group {
   tip.userData.materialRole = 'sword_blade' // Skip tier override
   tip.position.set(sX, U * 9, U * 1)
   group.add(tip)
+
+  // Enchantment glow — slightly larger semi-transparent mesh behind the blade
+  const glowMat = new THREE.MeshLambertMaterial({
+    color: 0x87ceeb,
+    emissive: new THREE.Color(0x2196f3),
+    emissiveIntensity: 0.3,
+    transparent: true,
+    opacity: 0.15,
+  })
+  const glow = new THREE.Mesh(
+    new THREE.BoxGeometry(U * 2.2, U * 18, U * 3.2),
+    glowMat,
+  )
+  glow.name = 'sword_glow'
+  glow.userData.materialRole = 'sword_blade' // Skip tier override
+  glow.position.set(sX, U * 0.5, U * 1)
+  group.add(glow)
 
   // Pommel — below grip, uses tier accent
   const pommel = taggedFlatBox(U * 1.5, U * 1.5, U * 1.5, W, 'accent', 'sword_pommel')
