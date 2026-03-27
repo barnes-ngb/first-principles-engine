@@ -4,8 +4,11 @@ import Button from '@mui/material/Button'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
 import DialogTitle from '@mui/material/DialogTitle'
+import IconButton from '@mui/material/IconButton'
 import Typography from '@mui/material/Typography'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import type {
   ActiveCardGameSession,
   CardGameCard,
@@ -63,6 +66,7 @@ export default function BattlePlayView({
   const [showChallenge, setShowChallenge] = useState<{ card: CardGameCard; playerId: string } | null>(null)
   const [challengeBonus, setChallengeBonus] = useState<Record<string, number>>({})
   const [gameOver, setGameOver] = useState(false)
+  const [showExitDialog, setShowExitDialog] = useState(false)
 
   const getCardById = useCallback(
     (id: string) => cardGame.cards.find((c) => c.id === id),
@@ -250,9 +254,54 @@ export default function BattlePlayView({
     }
   }
 
+  const handleExit = useCallback(() => {
+    const elapsed = Math.max(Math.round((Date.now() - startTime.current) / 60000), 1)
+    const best = players.reduce(
+      (a, b) => ((wonCards[a.id]?.length ?? 0) >= (wonCards[b.id]?.length ?? 0) ? a : b),
+      players[0],
+    )
+    onFinished({
+      durationMinutes: elapsed,
+      playerIds: players.map((p) => p.id),
+      winner: best?.id ?? null,
+    })
+  }, [wonCards, players, onFinished])
+
   return (
-    <Box sx={{ maxWidth: 600, mx: 'auto' }}>
+    <Box sx={{ maxWidth: 600, mx: 'auto', position: 'relative' }}>
       {gameOver && <Confetti active />}
+
+      {/* Exit button */}
+      <IconButton
+        onClick={() => setShowExitDialog(true)}
+        size="medium"
+        sx={{
+          position: 'absolute',
+          top: 8,
+          left: 8,
+          zIndex: 20,
+          bgcolor: 'rgba(255,255,255,0.9)',
+          boxShadow: 2,
+          '&:hover': { bgcolor: 'rgba(255,255,255,1)' },
+        }}
+        aria-label="Exit game"
+      >
+        <ArrowBackIcon />
+      </IconButton>
+
+      {/* Exit confirmation dialog */}
+      <Dialog open={showExitDialog} onClose={() => setShowExitDialog(false)}>
+        <DialogTitle>Leave game?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Your progress is saved. You can come back and continue later.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowExitDialog(false)}>Keep Playing</Button>
+          <Button onClick={handleExit} variant="contained">Leave Game</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Scoreboard */}
       <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>

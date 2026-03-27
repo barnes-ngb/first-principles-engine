@@ -16,6 +16,7 @@ import { useAudioRecorder } from '../../core/hooks/useAudioRecorder'
 import type {
   AdventureTree,
   BoardSpace,
+  CardGameData,
   GeneratedGame,
   VoiceRecording,
   VoiceRecordingMap,
@@ -31,7 +32,7 @@ interface RecordableItem {
 }
 
 interface VoiceRecordingStepProps {
-  game: GeneratedGame | AdventureTree
+  game: GeneratedGame | AdventureTree | CardGameData
   gameId: string
   familyId: string
   childId: string
@@ -46,14 +47,21 @@ interface VoiceRecordingStepProps {
 
 // ── Helpers ───────────────────────────────────────────────────────
 
-function isAdventureTree(game: GeneratedGame | AdventureTree): game is AdventureTree {
+function isAdventureTree(game: GeneratedGame | AdventureTree | CardGameData): game is AdventureTree {
   return 'nodes' in game && 'rootNodeId' in game
 }
 
+function isCardGameData(game: GeneratedGame | AdventureTree | CardGameData): game is CardGameData {
+  return 'mechanic' in game && 'cards' in game && !('board' in game)
+}
+
 /** Build the list of recordable items from game data */
-function buildRecordableItems(game: GeneratedGame | AdventureTree): RecordableItem[] {
+function buildRecordableItems(game: GeneratedGame | AdventureTree | CardGameData): RecordableItem[] {
   if (isAdventureTree(game)) {
     return buildAdventureRecordableItems(game)
+  }
+  if (isCardGameData(game)) {
+    return buildCardGameRecordableItems(game)
   }
   return buildBoardRecordableItems(game)
 }
@@ -106,6 +114,22 @@ function buildAdventureRecordableItems(adventure: AdventureTree): RecordableItem
           label: '\u2934\uFE0F Choice',
         })
       }
+    }
+  }
+
+  return items
+}
+
+function buildCardGameRecordableItems(cardGame: CardGameData): RecordableItem[] {
+  const items: RecordableItem[] = []
+
+  for (const card of cardGame.cards) {
+    if (card.spokenText) {
+      items.push({
+        id: card.id,
+        text: card.spokenText,
+        label: `\uD83C\uDCCF ${card.name}`,
+      })
     }
   }
 

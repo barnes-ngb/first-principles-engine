@@ -28,6 +28,8 @@ import { useAI, TaskType } from '../../core/ai/useAI'
 import type { ChatResponse } from '../../core/ai/useAI'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useProfile } from '../../core/profile/useProfile'
+import { UserProfile } from '../../core/types/enums'
 import { db, storyGamesCollection, stripUndefined } from '../../core/firebase/firestore'
 import WorkshopWizard from './WorkshopWizard'
 import GamePlayView from './GamePlayView'
@@ -114,10 +116,20 @@ export default function WorkshopPage() {
   const [activePlaytestSession, setActivePlaytestSession] = useState<PlaytestSession | null>(null)
   // Retry state: preserve last wizard inputs for retry on generation failure
   const [lastWizardInputs, setLastWizardInputs] = useState<{ inputs: StoryInputs; gameType: GameType } | null>(null)
+  // Last game result for finished screen stats
+  const [lastGameResult, setLastGameResult] = useState<{
+    winner?: string
+    durationMinutes?: number
+    cardsEncountered?: number
+    pathLength?: number
+    endingType?: string
+  } | null>(null)
 
   const { chat, generateImage } = useAI()
   const familyId = useFamilyId()
   const { activeChildId, children } = useActiveChild()
+  const { profile } = useProfile()
+  const isParent = profile === UserProfile.Parents
 
   const isAdventure = currentGame?.gameType === GameType.Adventure
   const isCards = currentGame?.gameType === GameType.Cards
@@ -211,6 +223,7 @@ export default function WorkshopPage() {
     setPhase(GamePhase.Wizard)
     setGenerateError(null)
     setDraftDocId(null)
+    setLastGameResult(null)
   }, [])
 
   const handleResumeDraft = useCallback((game: StoryGame) => {
@@ -637,12 +650,18 @@ export default function WorkshopPage() {
   // ── Play ─────────────────────────────────────────────────────────
 
   const handlePlay = useCallback(() => {
+    setLastGameResult(null)
     setPhase(GamePhase.Playing)
   }, [])
 
   const handleGameFinished = useCallback(
     async (result: GamePlayResult) => {
       setPhase(GamePhase.Finished)
+      setLastGameResult({
+        winner: result.winner ?? undefined,
+        durationMinutes: result.durationMinutes,
+        cardsEncountered: result.cardsEncountered.length,
+      })
 
       if (!familyId || !activeChildId || !currentGame?.generatedGame || !currentGame.id) return
 
@@ -681,6 +700,11 @@ export default function WorkshopPage() {
   const handleAdventureFinished = useCallback(
     async (result: AdventurePlayResult) => {
       setPhase(GamePhase.Finished)
+      setLastGameResult({
+        durationMinutes: result.durationMinutes,
+        pathLength: result.pathTaken.length,
+        endingType: result.endingType,
+      })
 
       if (!familyId || !activeChildId || !currentGame?.adventureTree || !currentGame.id) return
 
@@ -743,6 +767,10 @@ export default function WorkshopPage() {
   const handleCardGameFinished = useCallback(
     async (result: MatchingPlayResult | CollectingPlayResult | BattlePlayResult) => {
       setPhase(GamePhase.Finished)
+      setLastGameResult({
+        winner: result.winner ?? undefined,
+        durationMinutes: result.durationMinutes,
+      })
 
       if (!familyId || !activeChildId || !currentGame?.cardGame || !currentGame.id) return
 
@@ -1048,6 +1076,7 @@ export default function WorkshopPage() {
               familyId={familyId}
               childId={activeChildId}
               children={children}
+              isParent={isParent}
               onSelectGame={handleSelectExistingGame}
               onPlaytestGame={handleStartPlaytest}
               onReviewPlaytest={handleReviewPlaytest}
@@ -1155,13 +1184,16 @@ export default function WorkshopPage() {
             />
           )}
           {currentGame.cardGame && !currentGame.generatedGame && !currentGame.adventureTree && (
-            // Card games skip voice recording step for now — go straight to ready
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <Typography variant="h6" sx={{ mb: 2 }}>Your card game is ready!</Typography>
-              <Button variant="contained" onClick={handleRecordingSkip}>
-                Let&apos;s Play!
-              </Button>
-            </Box>
+            <VoiceRecordingStep
+              game={currentGame.cardGame}
+              gameId={currentGame.id}
+              familyId={familyId}
+              childId={activeChildId}
+              childName={children.find((c) => c.id === activeChildId)?.name ?? 'You'}
+              existingRecordings={currentGame.voiceRecordings}
+              onDone={handleRecordingDone}
+              onSkip={handleRecordingSkip}
+            />
           )}
         </>
       )}
@@ -1413,14 +1445,59 @@ export default function WorkshopPage() {
 
       {phase === GamePhase.Finished && (currentGame?.generatedGame || currentGame?.adventureTree || currentGame?.cardGame) && (
         <Box sx={{ textAlign: 'center', py: 6 }}>
+          {currentGame?.generatedArt?.titleScreen && (
+            <Box
+              component="img"
+              src={currentGame.generatedArt.titleScreen}
+              alt={gameTitle ?? ''}
+              sx={{ width: '100%', maxWidth: 300, borderRadius: 3, mb: 2, mx: 'auto', display: 'block' }}
+            />
+          )}
+
           <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
             {isCards ? 'Card Game Complete!' : isAdventure ? 'Adventure Complete!' : 'Game Over!'}
           </Typography>
-          <Typography variant="h6" color="text.secondary" sx={{ mb: 3 }}>
-            {gameTitle} — Played by the Barnes Family!
+
+          <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+            {gameTitle}
           </Typography>
-          <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-            <Button variant="contained" onClick={handlePlay}>
+
+          {lastGameResult && (
+            <Box sx={{ mb: 3 }}>
+              {lastGameResult.winner && (
+                <Typography variant="body1" sx={{ mb: 0.5 }}>
+                  Winner: <strong>{currentGame?.storyInputs.players.find((p) => p.id === lastGameResult.winner)?.name ?? lastGameResult.winner}</strong>
+                </Typography>
+              )}
+              {lastGameResult.durationMinutes != null && (
+                <Typography variant="body2" color="text.secondary">
+                  {lastGameResult.durationMinutes} minutes played
+                </Typography>
+              )}
+              {lastGameResult.cardsEncountered != null && lastGameResult.cardsEncountered > 0 && (
+                <Typography variant="body2" color="text.secondary">
+                  {lastGameResult.cardsEncountered} challenge cards faced
+                </Typography>
+              )}
+              {lastGameResult.pathLength != null && (
+                <Typography variant="body2" color="text.secondary">
+                  {lastGameResult.pathLength} story scenes explored
+                </Typography>
+              )}
+              {lastGameResult.endingType === 'victory' && (
+                <Typography variant="body2" color="success.main" sx={{ fontWeight: 600, mt: 0.5 }}>
+                  Victory ending!
+                </Typography>
+              )}
+            </Box>
+          )}
+
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Played by the Barnes Family!
+          </Typography>
+
+          <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <Button variant="contained" size="large" onClick={handlePlay}>
               Play Again
             </Button>
             <Button variant="outlined" onClick={handleBackToWorkshop}>
