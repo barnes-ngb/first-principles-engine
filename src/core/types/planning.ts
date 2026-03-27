@@ -228,6 +228,8 @@ export interface ChecklistItem {
   gradeResult?: string
   /** Guidance note when an item is skipped. */
   skipGuidance?: string
+  /** Whether this item was explicitly skipped by the child. */
+  skipped?: boolean
 }
 
 export interface Session {
