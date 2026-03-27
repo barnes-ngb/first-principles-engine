@@ -218,21 +218,26 @@ function addBackgroundElements(scene: THREE.Scene) {
   // Moon — octagonal (Minecraft-ish) in the corner
   const moonGeo = new THREE.CircleGeometry(0.6, 8)
   const moonMat = new THREE.MeshBasicMaterial({
-    color: 0xFFFFCC,
+    color: 0xFFFFDD,
     transparent: true,
-    opacity: 0.15,
+    opacity: 0.35,
   })
   const moon = new THREE.Mesh(moonGeo, moonMat)
   moon.position.set(5, 6, -6)
   scene.add(moon)
 
-  // Stars — small white cubes scattered in the sky
+  // Stars — small white cubes scattered in the sky, with phase offsets for twinkle
   for (let i = 0; i < 20; i++) {
     const starGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04)
     const starMat = new THREE.MeshBasicMaterial({
       color: 0xFFFFFF,
+      transparent: true,
+      opacity: 0.6 + Math.random() * 0.4,
     })
     const star = new THREE.Mesh(starGeo, starMat)
+    star.name = 'twinkleStar'
+    star.userData.twinklePhase = Math.random() * Math.PI * 2
+    star.userData.twinkleSpeed = 0.5 + Math.random() * 1.5
     star.position.set(
       (Math.random() - 0.5) * 14,
       3 + Math.random() * 5,
@@ -626,6 +631,17 @@ export default function VoxelCharacter({
           }
         })
       }
+
+      // Subtle star twinkle — sine wave on each star's opacity with unique phase
+      const twinkleTime = clock.getElapsedTime()
+      scene.traverse((obj) => {
+        if (obj.name === 'twinkleStar' && obj instanceof THREE.Mesh) {
+          const mat = obj.material as THREE.MeshBasicMaterial
+          const phase = obj.userData.twinklePhase as number
+          const speed = obj.userData.twinkleSpeed as number
+          mat.opacity = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(twinkleTime * speed + phase))
+        }
+      })
 
       renderer.render(scene, camera)
     }
