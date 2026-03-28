@@ -26,6 +26,7 @@ export interface TierMaterials {
   detail: number
   emissive: number
   emissiveIntensity: number
+  shininess: number
   roughnessHint: string
   rust?: number
   weathering?: number
@@ -33,11 +34,12 @@ export interface TierMaterials {
 
 export const TIER_MATERIALS: Record<string, TierMaterials> = {
   wood: {
-    primary: 0x8B6914,
-    accent: 0xA0824A,
-    detail: 0x6B4F12,
+    primary: 0x8B7332,       // Warm golden-brown (treated wood planks)
+    accent: 0xA08A4A,
+    detail: 0x6B5522,        // Darker wood grain
     emissive: 0x000000,
     emissiveIntensity: 0,
+    shininess: 10,
     roughnessHint: 'rough, natural wood planks',
     weathering: 0.05,
   },
@@ -47,6 +49,7 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     detail: 0x666666,
     emissive: 0x000000,
     emissiveIntensity: 0,
+    shininess: 15,
     roughnessHint: 'rough cobblestone',
     weathering: 0.1,
   },
@@ -56,6 +59,7 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     detail: 0x8A8A8A,       // Lighter spots — highlights, buckles
     emissive: 0x000000,
     emissiveIntensity: 0,
+    shininess: 40,
     roughnessHint: 'smooth metal',
     rust: 0x7A5C3C,         // Warm brown-gray for weathering spots
     weathering: 0.2,        // Moderate weathering
@@ -66,6 +70,7 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     detail: 0xB8860B,
     emissive: 0x332200,
     emissiveIntensity: 0.15,
+    shininess: 60,
     roughnessHint: 'polished, gleaming',
     weathering: 0.1,
   },
@@ -75,6 +80,7 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     detail: 0x2CB5C6,
     emissive: 0x114455,
     emissiveIntensity: 0.25,
+    shininess: 80,
     roughnessHint: 'crystalline, translucent edges',
     weathering: 0.0,     // Pristine, no weathering
   },
@@ -84,6 +90,7 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     detail: 0x2A2222,
     emissive: 0x331111,
     emissiveIntensity: 0.2,
+    shininess: 50,
     roughnessHint: 'ancient, dark, with ember glow',
     rust: 0x4A2020,
     weathering: 0.3,     // Heavy ancient wear
@@ -176,15 +183,18 @@ export function applyTierToArmor(
         baseColor = variations[meshIndex % variations.length]
       }
 
-      // Create per-face textured materials for visual depth
+      // Create per-face textured materials with Phong shading for armor shine
       const color = new THREE.Color(baseColor)
-      const faceMats: THREE.MeshLambertMaterial[] = []
+      const faceMats: THREE.MeshPhongMaterial[] = []
       for (let i = 0; i < 6; i++) {
         const variation = 0.95 + Math.random() * 0.1
-        faceMats.push(new THREE.MeshLambertMaterial({
+        faceMats.push(new THREE.MeshPhongMaterial({
           color: color.clone().multiplyScalar(variation),
+          specular: new THREE.Color(0x444444),
+          shininess: materials.shininess,
           emissive: new THREE.Color(materials.emissive),
           emissiveIntensity: materials.emissiveIntensity,
+          flatShading: true,
         }))
       }
       child.material = faceMats
@@ -238,7 +248,7 @@ export function animateTierUpgrade(
       if (child instanceof THREE.Mesh) {
         const mats = Array.isArray(child.material) ? child.material : [child.material]
         for (const m of mats) {
-          if (m instanceof THREE.MeshLambertMaterial) {
+          if (m instanceof THREE.MeshPhongMaterial || m instanceof THREE.MeshLambertMaterial) {
             m.emissive = new THREE.Color(0xffffff)
             m.emissiveIntensity = 1.0
           }
@@ -258,7 +268,7 @@ export function animateTierUpgrade(
           if (child instanceof THREE.Mesh) {
             const mats = Array.isArray(child.material) ? child.material : [child.material]
             for (const m of mats) {
-              if (m instanceof THREE.MeshLambertMaterial) {
+              if (m instanceof THREE.MeshPhongMaterial || m instanceof THREE.MeshLambertMaterial) {
                 m.emissiveIntensity =
                   materials.emissiveIntensity + (1 - t) * (0.8 - materials.emissiveIntensity)
               }
