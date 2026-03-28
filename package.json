@@ -22,7 +22,6 @@
     "@mui/material": "^7.3.7",
     "date-fns": "^4.1.0",
     "firebase": "^12.9.0",
-    "html2canvas": "^1.4.1",
     "jspdf": "^4.2.0",
     "jszip": "^3.10.1",
     "react": "^19.2.0",
