@@ -209,17 +209,17 @@ export default function MonthlyTrend({ dayLogs, hoursEntries, adjustments, start
           sx={{ pt: 1, borderTop: '1px solid', borderColor: 'divider' }}
         >
           <Typography variant="body2" fontWeight={600}>
-            Cumulative: {(months[months.length - 1]?.cumulativeTotal / 60 ?? 0).toFixed(0)}h total
+            Cumulative: {((months[months.length - 1]?.cumulativeTotal ?? 0) / 60).toFixed(0)}h total
           </Typography>
           <Stack direction="row" spacing={1}>
             <Chip
-              label={`${(months[months.length - 1]?.cumulativeCore / 60 ?? 0).toFixed(0)}h core`}
+              label={`${((months[months.length - 1]?.cumulativeCore ?? 0) / 60).toFixed(0)}h core`}
               size="small"
               color="success"
               variant="outlined"
             />
             <Chip
-              label={`${((months[months.length - 1]?.cumulativeTotal - months[months.length - 1]?.cumulativeCore) / 60 ?? 0).toFixed(0)}h non-core`}
+              label={`${(((months[months.length - 1]?.cumulativeTotal ?? 0) - (months[months.length - 1]?.cumulativeCore ?? 0)) / 60).toFixed(0)}h non-core`}
               size="small"
               color="info"
               variant="outlined"

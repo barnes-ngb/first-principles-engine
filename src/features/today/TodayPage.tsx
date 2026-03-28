@@ -496,7 +496,7 @@ export default function TodayPage() {
         setMediaUploading(false)
       }
     },
-    [artifactForm, buildArtifactBase, familyId, today, setSnackMessage],
+    [buildArtifactBase, familyId, today, setSnackMessage],
   )
 
   const handleAudioCapture = useCallback(
@@ -521,7 +521,7 @@ export default function TodayPage() {
         setMediaUploading(false)
       }
     },
-    [artifactForm, buildArtifactBase, familyId, today, setSnackMessage],
+    [buildArtifactBase, familyId, today, setSnackMessage],
   )
 
   // --- Per-item capture handler (component-level for dialog access) ---
