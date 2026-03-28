@@ -177,6 +177,28 @@ My Books (Book Builder + AI Story Generator)
 
 **XP System:** xpLedger collection, separate tracks per child, checkAndUnlockArmor on XP change
 
+### Creative Time Tracking
+- "Start creating" timer on Bookshelf, Book Editor, My Stuff pages
+- Auto-logs to hours system (Art, Language Arts, Math, Practical Arts subject buckets)
+- 5-minute minimum threshold
+- Persists across navigation via localStorage
+- Entries appear in Records with 'auto-tracked' indicator
+
+### Print-Ready Mini-Book PDF
+- Print options dialog: format (full page / mini-book), background color, cover options
+- Mini-book format: 5.5x8.5" staple-ready booklet with cover page
+- Fixed CORS image rendering (fetch as blob → base64 embed)
+- White background default (ink-saving for physical product printing)
+- jsPDF direct generation replaces html2canvas approach
+
+### Sketch-to-Story Pipeline
+- "Add my drawing" camera capture on book page editor
+- London photographs paper drawings → become page illustrations
+- "Make it fancy" AI enhancement via DALL-E (original + enhanced saved)
+- Side-by-side comparison — child picks which version
+- Standalone "Capture Drawing" on My Stuff for non-book sketches
+- Sketch artifacts in portfolio gallery
+
 Progress
 * Tabs: Learning Profile (default), Skill Snapshot, Ladders, Word Wall, Engine, Milestones, Armor
 * **Learning Profile** — AI-generated disposition narrative (Curiosity, Persistence, Articulation, Self-Awareness, Ownership) from 4 weeks of day log data, evaluations, and Dad Lab reports. First tab in Progress.
@@ -306,6 +328,7 @@ Workshop P3 Mar 22 Choose-your-adventure game type (branching story tree, scene 
 Plan My Week Fix Mar 23 Critical bug fixes (handleSetupComplete routing, JSON parsing, feature flag default), UX rewrite (auto-suggest focus, compact setup, full-width plan preview, must-do/choose sections, per-subject default times, renamed UI, combined adjustment chips)
 Cleanup Mar 24 Parent experience audit, dead code removal (5.6k+ lines), model unification (all Sonnet → claude-sonnet-4-6), plan quality fixes (timeBudget 185m, estimatedMinutes 30m, routine promotion, must-do default), hours computation fix, AI Usage panel model labels, docs refresh, orphaned collections/types/seed cleanup, CHARTER_PREAMBLE dedup, Progress tab reorder
 First Principles Mar 25 Weekly review rewrite (day logs + type alignment), disposition profile, teach-back (parent + kid), conundrum generation, extra activity logger, Firestore indexes, first principles alignment
+Business Prep Mar 28+ Creative timer, mini-book PDF, sketch-to-story pipeline
 
 Removed Features (Cleanup Sprint, Mar 24-25)
 * Sessions (1,720 lines) — orphaned feature with no nav links; sessionsCollection removed
@@ -355,6 +378,8 @@ Key Design Decisions
 33. **Conundrums build ethical reasoning** — weekly open-ended scenarios with no right answer, connected to what they're studying
 34. **Kid-initiated logging** — Lincoln logs his own extra tablet time and teach-back moments. All taps, no typing. Respects his speech/writing challenges.
 35. **Flexible triggers** — features activate based on meaningful work done (3+ items OR 50% must-do), not rigid thresholds. Lincoln's day isn't always linear.
+36. **School creates product** — London's books and art in the app ARE the business inventory
+37. **Sunny the brand** — family golden retriever is the mascot tying all products and content together
 
 ### Key Files Reference
 
@@ -395,6 +420,37 @@ Key Design Decisions
 - `equippedPieces` React state → `useEffect` syncs to Three.js mesh materials
 - Consider extracting Three.js lifecycle into custom `useThreeScene` hook
 - `DailyArmorSession` and `AvatarProfile` both track equipped pieces — potential drift
+
+## Barnes Bros Business Integration
+
+Family business workstream layered on top of the homeschool system. London (art/books) + Lincoln (operations/sales tracking) + Sunny the golden retriever (brand mascot).
+
+### What's Built
+- Creative time tracking (auto-logs art/writing/making hours as school)
+- Mini-book PDF export (London's AI books → printable physical products)
+- Sketch-to-story pipeline (paper drawings → book illustrations → sticker source material)
+
+### What's Planned
+- Barnes Bros Dashboard (kid nav page): sales log, earnings tracker, goal thermometer
+- Firestore collection: `families/{familyId}/businessLog`
+- Etsy product pipeline: London's sketches → stickers (raw) + prints (AI-enhanced)
+- YouTube channel content capture integration
+
+### Business ↔ School Mapping
+| Business Activity | School Subject | Hours Source |
+|---|---|---|
+| Drawing stickers / book art | Art | Creative timer |
+| Writing book stories / product descriptions | Language Arts | Creative timer |
+| Counting inventory / pricing / tracking sales | Math | Manual or timer |
+| Assembling products / craft fair setup | Practical Arts | Manual entry |
+| Filming / explaining experiments (YouTube) | Speech / Language Arts | Manual entry |
+
+### Key Design Decisions (Business)
+13. **School creates product** — London's books and art ARE the inventory
+14. **Sunny is the brand** — Golden retriever ties all products + content together
+15. **Lincoln's Xbox goal** — Real motivator, not manufactured. Business serves his goal.
+16. **No live selling pressure** — Nathan handles customer interactions. Lincoln grows into it.
+17. **Two product lines per drawing** — Raw sketch = authentic sticker, AI-enhanced = art print
 
 Architecture Review Notes (March 21, 2026) The following areas are flagged for architecture review in the next chat session:
 * XP system — xpLedger + xpEventLog as separate collections; dedup guard pattern; whether totalXp should be cached on avatarProfile or always summed from ledger
