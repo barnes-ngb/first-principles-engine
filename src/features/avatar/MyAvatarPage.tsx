@@ -23,6 +23,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
 import { normalizeAvatarProfile } from './normalizeProfile'
+import { useAvatarProfile } from './useAvatarProfile'
 import { safeUpdateProfile, safeSetProfile } from './safeProfileWrite'
 import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, VOXEL_TO_ARMOR_PIECE, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
 import type {
@@ -40,6 +41,7 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import { ArmorIcon } from './icons/ArmorIcons'
 import type { ArmorTierColor } from './icons/ArmorIcons'
 import VoxelCharacter from './VoxelCharacter'
+import BrothersVoxelScene from './BrothersVoxelScene'
 import PoseButtons from './PoseButtons'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
@@ -169,6 +171,12 @@ export default function MyAvatarPage() {
 
   // Pose state
   const [activePoseId, setActivePoseId] = useState<string | null>(null)
+
+  // Brothers mode state
+  const [brothersMode, setBrothersMode] = useState(false)
+  const siblingChild = children.find((c) => c.id !== childId)
+  const siblingId = brothersMode ? siblingChild?.id : undefined
+  const siblingProfile = useAvatarProfile(familyId, siblingId)
 
   // Track previous state for celebrations
   const prevPiecesCountRef = useRef(0)
@@ -756,6 +764,47 @@ export default function MyAvatarPage() {
             </Box>
           )}
 
+          {/* ── Brothers Toggle ────── */}
+          {children.length > 1 && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
+              <Box
+                component="button"
+                onClick={() => setBrothersMode((prev) => !prev)}
+                sx={{
+                  px: '16px',
+                  py: '8px',
+                  border: brothersMode
+                    ? `2px solid ${accentColor}`
+                    : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`,
+                  borderRadius: isLincoln ? '6px' : '18px',
+                  background: brothersMode
+                    ? (isLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
+                    : 'transparent',
+                  color: brothersMode
+                    ? accentColor
+                    : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'),
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                  fontSize: isLincoln ? '0.38rem' : '13px',
+                  fontWeight: brothersMode ? 700 : 400,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  boxShadow: brothersMode ? `0 0 10px ${accentColor}22` : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  '&:hover': {
+                    borderColor: accentColor,
+                    background: isLincoln ? 'rgba(126,252,32,0.06)' : 'rgba(232,160,191,0.06)',
+                  },
+                  '&:active': { transform: 'scale(0.96)' },
+                }}
+              >
+                <span style={{ fontSize: '16px' }}>👬</span>
+                Brothers
+              </Box>
+            </Box>
+          )}
+
           {/* ── Tier + XP Hero Banner ────── */}
           <Box
             sx={{
@@ -888,65 +937,121 @@ export default function MyAvatarPage() {
         </Box>
 
         {/* ── 3D Character Display ─────────────────────────────── */}
-        <Box
-          ref={flashContainerRef}
-          sx={{
-            mb: 1,
-            mx: 1,
-            position: 'relative',
-            borderRadius: isLincoln ? '8px' : '20px',
-            background: isLincoln
-              ? 'radial-gradient(ellipse at 50% 60%, rgba(126,252,32,0.06) 0%, rgba(13,17,23,0) 70%)'
-              : 'radial-gradient(ellipse at 50% 60%, rgba(232,160,191,0.08) 0%, rgba(250,245,239,0) 70%)',
-            border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.08)' : 'rgba(232,160,191,0.12)'}`,
-            overflow: 'hidden',
-            '@keyframes flashFade': {
-              '0%': { opacity: 1 },
-              '100%': { opacity: 0 },
-            },
-          }}
-        >
-          <VoxelCharacter
-            features={features}
-            ageGroup={ageGroup}
-            equippedPieces={appliedVoxel}
-            totalXp={profile.totalXp}
-            animateEquipPiece={animateEquipId}
-            animateUnequipPiece={animateUnequipId}
-            onEquipAnimDone={handleEquipAnimDone}
-            onUnequipAnimDone={handleUnequipAnimDone}
-            photoUrl={profile.photoUrl}
-            customization={profile.customization}
-            activePoseId={activePoseId}
-            onPoseComplete={() => setActivePoseId(null)}
-            onSwipePose={(poseId) => setActivePoseId(poseId)}
-            onTierUpStart={() => setCeremonyActive(true)}
-            onTierUp={async (_oldTier, newTier) => {
-              setCeremonyActive(false)
-              if (!familyId || !childId) return
-              // Reset equipped pieces for the new tier and clear pendingTierUpgrade
-              const profileRef = doc(avatarProfilesCollection(familyId), childId)
-              await safeUpdateProfile(profileRef, {
-                equippedPieces: [],
-                currentTier: newTier.toLowerCase(),
-                pendingTierUpgrade: deleteField(),
-              } as Record<string, unknown>)
-              // Clear today's session applied pieces
-              const docId = dailyArmorSessionDocId(childId, today)
-              const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
-              await updateDoc(sessionRef, {
-                appliedPieces: [],
-                manuallyUnequipped: [],
-                completedAt: deleteField(),
-              })
+        {brothersMode && children.length > 1 ? (
+          <Box
+            sx={{
+              mb: 1,
+              mx: 1,
+              position: 'relative',
+              borderRadius: isLincoln ? '8px' : '20px',
+              background: isLincoln
+                ? 'radial-gradient(ellipse at 50% 60%, rgba(126,252,32,0.06) 0%, rgba(13,17,23,0) 70%)'
+                : 'radial-gradient(ellipse at 50% 60%, rgba(232,160,191,0.08) 0%, rgba(250,245,239,0) 70%)',
+              border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.08)' : 'rgba(232,160,191,0.12)'}`,
+              overflow: 'hidden',
             }}
-          />
-          <PoseButtons
-            onPose={(poseId) => setActivePoseId(poseId)}
-            currentPose={activePoseId}
-            isLincoln={isLincoln}
-          />
-        </Box>
+          >
+            <BrothersVoxelScene
+              lincoln={(() => {
+                const lincolnChild = children.find((c) => c.name.toLowerCase() === 'lincoln')
+                if (!lincolnChild) return null
+                const isActive = lincolnChild.id === childId
+                const p = isActive ? profile : siblingProfile
+                if (!p) return null
+                return {
+                  name: lincolnChild.name,
+                  profile: p,
+                  features: p.characterFeatures ?? LINCOLN_FEATURES,
+                  ageGroup: p.ageGroup ?? 'older',
+                  equippedPieces: isActive ? appliedVoxel : (p.equippedPieces ?? []),
+                  totalXp: p.totalXp,
+                }
+              })()}
+              london={(() => {
+                const londonChild = children.find((c) => c.name.toLowerCase() === 'london')
+                if (!londonChild) return null
+                const isActive = londonChild.id === childId
+                const p = isActive ? profile : siblingProfile
+                if (!p) return null
+                return {
+                  name: londonChild.name,
+                  profile: p,
+                  features: p.characterFeatures ?? LONDON_FEATURES,
+                  ageGroup: p.ageGroup ?? 'younger',
+                  equippedPieces: isActive ? appliedVoxel : (p.equippedPieces ?? []),
+                  totalXp: p.totalXp,
+                }
+              })()}
+              activePoseId={activePoseId}
+              onPoseComplete={() => setActivePoseId(null)}
+            />
+            <PoseButtons
+              onPose={(poseId) => setActivePoseId(poseId)}
+              currentPose={activePoseId}
+              isLincoln={isLincoln}
+            />
+          </Box>
+        ) : (
+          <Box
+            ref={flashContainerRef}
+            sx={{
+              mb: 1,
+              mx: 1,
+              position: 'relative',
+              borderRadius: isLincoln ? '8px' : '20px',
+              background: isLincoln
+                ? 'radial-gradient(ellipse at 50% 60%, rgba(126,252,32,0.06) 0%, rgba(13,17,23,0) 70%)'
+                : 'radial-gradient(ellipse at 50% 60%, rgba(232,160,191,0.08) 0%, rgba(250,245,239,0) 70%)',
+              border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.08)' : 'rgba(232,160,191,0.12)'}`,
+              overflow: 'hidden',
+              '@keyframes flashFade': {
+                '0%': { opacity: 1 },
+                '100%': { opacity: 0 },
+              },
+            }}
+          >
+            <VoxelCharacter
+              features={features}
+              ageGroup={ageGroup}
+              equippedPieces={appliedVoxel}
+              totalXp={profile.totalXp}
+              animateEquipPiece={animateEquipId}
+              animateUnequipPiece={animateUnequipId}
+              onEquipAnimDone={handleEquipAnimDone}
+              onUnequipAnimDone={handleUnequipAnimDone}
+              photoUrl={profile.photoUrl}
+              customization={profile.customization}
+              activePoseId={activePoseId}
+              onPoseComplete={() => setActivePoseId(null)}
+              onSwipePose={(poseId) => setActivePoseId(poseId)}
+              onTierUpStart={() => setCeremonyActive(true)}
+              onTierUp={async (_oldTier, newTier) => {
+                setCeremonyActive(false)
+                if (!familyId || !childId) return
+                // Reset equipped pieces for the new tier and clear pendingTierUpgrade
+                const profileRef = doc(avatarProfilesCollection(familyId), childId)
+                await safeUpdateProfile(profileRef, {
+                  equippedPieces: [],
+                  currentTier: newTier.toLowerCase(),
+                  pendingTierUpgrade: deleteField(),
+                } as Record<string, unknown>)
+                // Clear today's session applied pieces
+                const docId = dailyArmorSessionDocId(childId, today)
+                const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+                await updateDoc(sessionRef, {
+                  appliedPieces: [],
+                  manuallyUnequipped: [],
+                  completedAt: deleteField(),
+                })
+              }}
+            />
+            <PoseButtons
+              onPose={(poseId) => setActivePoseId(poseId)}
+              currentPose={activePoseId}
+              isLincoln={isLincoln}
+            />
+          </Box>
+        )}
 
         {/* ── Morning reset message ────────────────────────────── */}
         {morningReset && unlockedVoxel.length > 0 && appliedVoxel.length === 0 && (
