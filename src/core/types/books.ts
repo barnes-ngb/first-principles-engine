@@ -40,6 +40,19 @@ export type StickerTag =
   | 'faith'
   | 'other'
 
+export const STICKER_TAG_LABELS: Record<StickerTag, string> = {
+  animal: 'Animal',
+  nature: 'Nature',
+  minecraft: 'Minecraft',
+  fantasy: 'Fantasy',
+  character: 'Character',
+  object: 'Object',
+  vehicle: 'Vehicle',
+  food: 'Food',
+  faith: 'Faith',
+  other: 'Other',
+}
+
 export interface Book {
   id?: string
   childId: string
@@ -115,6 +128,8 @@ export interface PageImage {
    *  x, y, width, height: 0–100, percentage of container dimensions.
    *  rotation: degrees (0–359). zIndex: stacking order integer. */
   position?: { x: number; y: number; width: number; height: number; rotation?: number; zIndex?: number }
+  /** Sticker tags (copied from sticker library when placed) */
+  tags?: StickerTag[]
 }
 
 export interface Sticker {

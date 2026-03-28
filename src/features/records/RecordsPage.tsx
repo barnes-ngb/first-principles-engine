@@ -167,6 +167,8 @@ function HoursComplianceTab() {
     { subject: SubjectBucket.SocialStudies, hours: 0 },
   ])
 
+  const [isClearing, setIsClearing] = useState(false)
+
   // Quick estimate state
   const [quickEstimateMode, setQuickEstimateMode] = useState(false)
   const [estimateStartMonth, setEstimateStartMonth] = useState('')
@@ -535,31 +537,46 @@ function HoursComplianceTab() {
   }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, activeChild, startDate, endDate])
 
   const handleClearHoursData = useCallback(async () => {
-    if (!window.confirm('This will delete manual hours entries and adjustments. Auto-generated hours (Dad Lab, etc.) will be kept. Continue?')) return
+    if (!window.confirm(
+      'This will delete ALL manual hours entries and backfill adjustments for ALL children. ' +
+      'Auto-generated hours (Dad Lab completions, checklist day logs) will be kept. Continue?'
+    )) return
 
+    setIsClearing(true)
     try {
       // Delete ONLY manual hours entries (no source tag or source === 'manual')
       const hoursSnap = await getDocs(hoursCollection(familyId))
-      for (const docSnap of hoursSnap.docs) {
-        const data = docSnap.data()
-        const source = (data as unknown as Record<string, unknown>).source as string | undefined
-        if (!source || source === 'manual') {
-          await deleteDoc(doc(hoursCollection(familyId), docSnap.id))
-        }
-      }
+      const hoursDeletes = hoursSnap.docs
+        .filter(docSnap => {
+          const data = docSnap.data() as Record<string, unknown>
+          const source = data.source as string | undefined
+          return !source || source === 'manual'
+        })
+        .map(docSnap => deleteDoc(doc(hoursCollection(familyId), docSnap.id)))
 
-      // Delete all adjustments (these are always manual)
+      // Delete ALL adjustments (backfills + manual adjustments)
       const adjSnap = await getDocs(hoursAdjustmentsCollection(familyId))
-      for (const docSnap of adjSnap.docs) {
-        await deleteDoc(doc(hoursAdjustmentsCollection(familyId), docSnap.id))
-      }
+      const adjDeletes = adjSnap.docs
+        .map(docSnap => deleteDoc(doc(hoursAdjustmentsCollection(familyId), docSnap.id)))
 
-      window.location.reload()
+      // Wait for ALL deletes to complete before refreshing
+      await Promise.all([...hoursDeletes, ...adjDeletes])
+
+      const totalDeleted = hoursDeletes.length + adjDeletes.length
+      setSnackMessage({
+        text: `Cleared ${totalDeleted} records (${hoursDeletes.length} hours entries, ${adjDeletes.length} adjustments)`,
+        severity: 'success',
+      })
+
+      // Refresh data instead of full page reload
+      const data = await fetchRecords()
+      applyRecords(data)
     } catch (err) {
       console.error('Failed to clear hours data:', err)
-      setSnackMessage({ text: `Failed to clear hours data: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+      setSnackMessage({ text: `Failed to clear: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
     }
-  }, [familyId])
+    setIsClearing(false)
+  }, [familyId, fetchRecords, applyRecords])
 
   const hasData = hasHoursEntries || dayLogs.length > 0
 
@@ -903,8 +920,9 @@ function HoursComplianceTab() {
               color="warning"
               size="small"
               onClick={handleClearHoursData}
+              disabled={isClearing}
             >
-              Clear All Hours Data
+              {isClearing ? 'Clearing...' : 'Clear All Hours Data'}
             </Button>
           </Box>
         </Box>
