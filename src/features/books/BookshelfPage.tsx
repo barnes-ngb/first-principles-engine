@@ -32,11 +32,12 @@ import MenuBookIcon from '@mui/icons-material/MenuBook'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import DownloadIcon from '@mui/icons-material/Download'
 
+import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
-import { UserProfile } from '../../core/types/enums'
+import { SubjectBucket, UserProfile } from '../../core/types/enums'
 import type { Book, BookTheme, StickerTag } from '../../core/types'
 import { BOOK_THEMES, STICKER_TAG_LABELS } from '../../core/types'
 import { COVER_STYLES, GENERATION_STYLES } from './bookTypes'
@@ -287,6 +288,10 @@ export default function BookshelfPage() {
 
   return (
     <Page>
+      <CreativeTimer
+        defaultSubject={SubjectBucket.Art}
+        defaultDescription="Book creation"
+      />
       <Typography
         variant="h4"
         component="h1"
