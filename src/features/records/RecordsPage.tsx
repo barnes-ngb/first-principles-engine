@@ -646,6 +646,11 @@ function HoursComplianceTab() {
                 Hours entries: {hoursEntries.length} | Day logs: {dayLogs.length}{' '}
                 | Adjustments: {adjustments.length}
               </Typography>
+              {hoursEntries.some((e) => e.source === 'creative-timer') && (
+                <Typography color="text.secondary" variant="body2">
+                  Includes {hoursEntries.filter((e) => e.source === 'creative-timer').length} auto-tracked creative session{hoursEntries.filter((e) => e.source === 'creative-timer').length === 1 ? '' : 's'} ({(hoursEntries.filter((e) => e.source === 'creative-timer').reduce((sum, e) => sum + e.minutes, 0) / 60).toFixed(1)}h)
+                </Typography>
+              )}
               {showGenerate && (
                 <Button
                   variant="contained"

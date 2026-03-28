@@ -30,12 +30,14 @@ import FormControlLabel from '@mui/material/FormControlLabel'
 import Switch from '@mui/material/Switch'
 
 import Alert from '@mui/material/Alert'
+import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { SubjectBucket } from '../../core/types/enums'
 import { useAI } from '../../core/ai/useAI'
 import type { BookPage, BookTheme, Sticker } from '../../core/types'
 import { BOOK_THEMES } from '../../core/types'
@@ -378,6 +380,10 @@ export default function BookEditorPage() {
 
   return (
     <Page>
+      <CreativeTimer
+        defaultSubject={SubjectBucket.LanguageArts}
+        defaultDescription="Book editing"
+      />
       {/* Header */}
       <Stack direction="row" alignItems="center" spacing={1}>
         <IconButton onClick={() => navigate('/books')} sx={{ minWidth: 48, minHeight: 48 }}>
