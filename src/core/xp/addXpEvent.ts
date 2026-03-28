@@ -49,7 +49,7 @@ export async function addXpEvent(
   dedupKey: string,
   meta?: Record<string, string>,
 ): Promise<number> {
-  if (!familyId || !childId || amount <= 0) return 0
+  if (!familyId || !childId || amount === 0) return 0
   console.log(`[XP] Awarding ${amount} XP to ${childId} for ${type}`)
 
   // ── Dedup check (per-event doc in xpLedger) ────────────────
@@ -83,7 +83,7 @@ export async function addXpEvent(
     ? ledgerSnap.data()
     : { totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }
 
-  const newTotal = (existing.totalXp ?? 0) + amount
+  const newTotal = Math.max(0, (existing.totalXp ?? 0) + amount)
 
   await setDoc(ledgerRef, {
     childId,
@@ -101,9 +101,9 @@ export async function addXpEvent(
   const eventDocsSnap = await getDocs(
     query(xpLedgerCollection(familyId), where('childId', '==', childId), where('dedupKey', '!=', null)),
   )
-  const realTotal = eventDocsSnap.docs
+  const realTotal = Math.max(0, eventDocsSnap.docs
     .filter((d) => !(d.data() as unknown as Record<string, unknown>)._deleted)
-    .reduce((sum, d) => sum + ((d.data().amount as number) ?? 0), 0)
+    .reduce((sum, d) => sum + ((d.data().amount as number) ?? 0), 0))
 
   // ── Update cached totalXp on avatarProfile ─────────────────
   const profileRef = doc(avatarProfilesCollection(familyId), childId)
