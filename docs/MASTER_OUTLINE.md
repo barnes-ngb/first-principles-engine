@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v11 **Version:** v11 — March 25, 2026 **Status:** Updated after first principles alignment sprint Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~73k lines TypeScript (reduced from ~78k after cleanup, grew with new features), 30+ test files, 600+ tests, 28 Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v12 **Version:** v12 — March 28, 2026 **Status:** Updated — docs alignment audit (collection count, CF count, key files reference, removed phantom collections) Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~73k lines TypeScript (reduced from ~78k after cleanup, grew with new features), 30+ test files, 600+ tests, 28 Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -196,13 +196,14 @@ Progress
 * Artifact gallery, compliance hours auto-logged on completion Settings
 * General family profile, AI usage dashboard
 * Avatar & XP tab — parent XP controls, piece management, force tier upgrade
-* Sticker Library tab — all generated stickers, tag editing, child profile assignment Cloud Functions (5 deployed, 10 task types)
+* Sticker Library tab — all generated stickers, tag editing, child profile assignment Cloud Functions (18 exported, 10 task types)
 1. `chat` — Task dispatch: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, chat, analyzePatterns
 2. `weeklyReview` — Scheduled Sunday 7pm CT
 3. `generateWeeklyReviewNow` — Manual trigger
 4. `generateActivity` — Lesson card generation
-5. `generateImage` — DALL-E / gpt-image-1
-6. `healthCheck` — Diagnostic AI Context Pipeline (task-specific slicing)
+5. `healthCheck` — Diagnostic
+6. `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
+7–17. Image functions (11): `generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace` AI Context Pipeline (task-specific slicing)
 - Each task type receives only the context slices it needs (defined in contextSlices.ts)
 - Plan/chat: full context (charter, child profile, skill snapshot, workbook configs, eval findings, compressed engagement, week focus)
 - Evaluate: charter + child profile + sight words only
@@ -212,7 +213,7 @@ Progress
 - Workshop: story inputs + skill snapshot for challenge calibration + game structure constraints + adventure tree generation + card game generation + card fix suggestions
 - Pattern analysis: child profile + skill snapshot + eval findings + conceptual blocks
 - Engagement data compressed to summary format (reduces tokens ~60%)
-- Token usage logged per task type to aiUsage collection Firestore Collections (28) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, dadLabReports, books, bookPages, sightWordProgress, xpLedger, readingSessions, dailyArmorSessions, stickerLibrary, storyGames, evaluations
+- Token usage logged per task type to aiUsage collection Firestore Collections (26 in firestore.ts) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, dadLabReports, books, sightWordProgress, xpLedger, dailyArmorSessions, stickerLibrary, storyGames, evaluations
 
 * `avatarProfiles` — per-child avatar data (features, XP, tier, equipped pieces, customization)
 * `xpLedger` — append-only XP event history per child
@@ -353,14 +354,36 @@ Key Design Decisions
 32. **AI synthesizes growth narrative from existing data** — no additional tracking burden on Shelly
 33. **Conundrums build ethical reasoning** — weekly open-ended scenarios with no right answer, connected to what they're studying
 34. **Kid-initiated logging** — Lincoln logs his own extra tablet time and teach-back moments. All taps, no typing. Respects his speech/writing challenges.
-35. **Flexible triggers** — features activate based on meaningful work done (3+ items OR 50% must-do), not rigid thresholds. Lincoln's day isn't always linear. Key Files Reference src/app/AppShell.tsx — nav structure (parent + kid) src/app/router.tsx — all routes src/core/types/domain.ts — ALL data types src/core/firebase/firestore.ts — ALL collection references src/core/ai/useAI.ts — chat + generateImage hooks src/core/xp/addXpEvent.ts — XP writer with dedup guards src/core/xp/checkAndUnlockArmor.ts — tier unlock + sheet generation trigger src/core/avatar/getDailyArmorSession.ts — daily reset logic src/core/avatar/cropArmorSheet.ts — client-side 3x2 sheet cropper functions/src/ai/chat.ts — AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) functions/src/ai/imageGen.ts — DALL-E 3 + gpt-image-1 + Haiku rewriter src/features/avatar/ — My Armor (MyAvatarPage, VerseCard, ArmorIcons, AttachAnimation, CharacterDisplay, Particles) src/features/books/ — My Books (22+ files, 6500+ lines) src/features/quest/ — Knowledge Mine (7 files) src/features/today/ — Today page src/features/records/ — Records + compliance src/features/settings/ — Settings (AvatarAdminTab, StickerLibraryTab) src/core/types/                         — split type files (common, family, planning, evaluation, xp, books, compliance, dadlab)
-src/core/types/index.ts                 — barrel re-export (replaces old domain.ts)
-src/core/utils/perf.ts                  — performance measurement helpers
-functions/src/ai/tasks/                 — chat task registry (plan, chat, evaluate, quest, generateStory, analyzePatterns, disposition, conundrum)
-functions/src/ai/imageTasks/            — image task registry (7 handlers)
-functions/src/ai/contextSlices.ts       — task-specific context assembly + engagement compression
-docs/FIRESTORE_AUDIT.md                — Firestore collection + index audit (March 21, 2026)
-docs/MASTER_OUTLINE.md — this file (update after each session) .github/workflows/deploy.yml — CI/CD pipeline
+35. **Flexible triggers** — features activate based on meaningful work done (3+ items OR 50% must-do), not rigid thresholds. Lincoln's day isn't always linear.
+
+### Key Files Reference
+
+| File | Purpose |
+|------|---------|
+| `src/app/AppShell.tsx` | Nav structure (parent + kid) |
+| `src/app/router.tsx` | All 26 routes |
+| `src/core/types/index.ts` | Barrel re-export of split type files (common, family, planning, evaluation, xp, books, compliance, dadlab, workshop, skillTags) |
+| `src/core/firebase/firestore.ts` | All 26 collection references |
+| `src/core/ai/useAI.ts` | Chat + generateImage hooks |
+| `src/core/xp/addXpEvent.ts` | XP writer with dedup guards |
+| `src/core/xp/checkAndUnlockArmor.ts` | Tier unlock + sheet generation trigger |
+| `src/core/avatar/getDailyArmorSession.ts` | Daily reset logic |
+| `src/core/utils/perf.ts` | Performance measurement helpers |
+| `functions/src/ai/chat.ts` | AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) |
+| `functions/src/ai/imageGen.ts` | DALL-E 3 + gpt-image-1 routing |
+| `functions/src/ai/tasks/` | Chat task registry (10 handlers: plan, chat, evaluate, quest, generateStory, analyzeWorkbook, analyzePatterns, disposition, conundrum, workshop) |
+| `functions/src/ai/imageTasks/` | Image task registry (11 handlers) |
+| `functions/src/ai/contextSlices.ts` | Task-specific context assembly + engagement compression |
+| `src/features/avatar/` | My Armor (VoxelCharacter, VerseCard, ArmorIcons, Particles, voxel/) |
+| `src/features/books/` | My Books |
+| `src/features/quest/` | Knowledge Mine |
+| `src/features/today/` | Today page |
+| `src/features/records/` | Records + compliance |
+| `src/features/workshop/` | Story Game Workshop |
+| `src/features/settings/` | Settings (AvatarAdminTab, StickerLibraryTab) |
+| `docs/FIRESTORE_AUDIT.md` | Firestore collection + index audit |
+| `docs/MASTER_OUTLINE.md` | This file (update after each session) |
+| `.github/workflows/deploy.yml` | CI/CD pipeline |
 
 ### Architecture Notes
 
@@ -377,7 +400,8 @@ Architecture Review Notes (March 21, 2026) The following areas are flagged for a
 * XP system — xpLedger + xpEventLog as separate collections; dedup guard pattern; whether totalXp should be cached on avatarProfile or always summed from ledger
 * Avatar generation costs — DALL-E 3 sheet generation per tier per child; when to generate vs cache; cost implications at scale
 * Cloud Function sprawl — chat function handles 6+ task types; generateImage handles 4+; whether these should be split into separate functions
-* Firestore collection count — 32+ collections; some may be better as subcollections; composite index requirements growing
+* Firestore collection count — 26 formal collections + orphaned raw references (sessions, wordProgress); composite index requirements growing
 * Client-side image processing — cropArmorSheet, sketch cleanup, and print PDF all do heavy canvas work client-side; perf on low-end devices
 * AI context pipeline size — system prompt includes many data sources; token cost and latency implications
-* Type safety — types split across 8 files (common, family, planning, evaluation, xp, books, compliance, dadlab) with barrel re-export via index.ts Last updated: March 25, 2026
+* Type safety — types split across 10 files (common, family, planning, evaluation, xp, books, compliance, dadlab, workshop, skillTags) with barrel re-export via index.ts
+* Orphaned collection references — `sessions` in chat.ts and `wordProgress` in quest.ts use raw Firestore paths, not the collection helpers in firestore.ts Last updated: March 28, 2026

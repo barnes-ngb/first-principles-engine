@@ -77,15 +77,15 @@ const items = snapshot.docs.map((doc) => ({
 - `src/components/` — Shared UI components
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
-- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useDebounce, useSaveState, useAudioRecorder, useSpeechRecognition, useTTS)
+- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useDebounce, useSaveState, useAudioRecorder, useSpeechRecognition, useTTS, useXpLedger)
 - `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`) and enum-like constants (`enums.ts`)
 - `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns
 - `src/core/ai/` — AI service layer, feature flags, useAI hook, prompt templates
 - `src/core/profile/` — Profile context provider and hook (family + children)
 - `src/core/xp/` — XP ledger, armor tiers, armor unlock logic
-- `src/core/avatar/` — Daily armor session management
+- `src/core/avatar/` — Daily armor session management (`getDailyArmorSession.ts`)
 - `src/core/data/` — Database seed data
-- `src/features/avatar/` — Voxel avatar, armor, tier celebrations
+- `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, `voxel/` sub-module (Three.js character, armor, poses, materials, camera)
 - `src/features/books/` — Bookshelf, book editor/reader, sight word dashboard, story guide
 - `src/features/dad-lab/` — Dad Lab lifecycle (plan, start, contribute, complete)
 - `src/features/engine/` — Engine page and engine logic
@@ -194,6 +194,8 @@ All under `families/{familyId}/`:
 | `evaluationSessions` | Interactive evaluation sessions (Knowledge Mine) |
 | `storyGames` | Story Game Workshop games |
 
+**Note:** Cloud Functions also reference `sessions` (in `chat.ts`) and `wordProgress` (in `tasks/quest.ts`) via raw Firestore paths — these have no collection reference helpers in `firestore.ts` and should be cleaned up or formalized. The `sessions` collection was removed in the Mar 24 cleanup sprint but its Cloud Function reference was not removed. `wordProgress` is a child subcollection (`children/{childId}/wordProgress`) used by Knowledge Mine.
+
 ## AI Integration
 
 ### Architecture
@@ -212,9 +214,8 @@ All under `families/{familyId}/`:
 4. **Child context is assembled per-request** from Firestore (skill snapshot, pace data, recent sessions).
 5. **Cost tracking:** Log token usage and model used to Firestore for monitoring.
 6. **Model selection by task:**
-   - Routine generation (worksheets, prompts): Claude Haiku / GPT-4o-mini
-   - Complex planning and evaluation: Claude Sonnet
-   - Image generation: DALL-E 3
+   - All text generation unified on Claude Sonnet (`claude-sonnet-4-6`) as of Mar 24 cleanup
+   - Image generation: DALL-E 3 (scenes, armor sheets) + gpt-image-1 (transparent stickers, photo transform)
 
 ### Testing AI Logic
 - Co-locate tests with logic files (e.g., `chatPlanner.logic.test.ts`)
@@ -225,6 +226,15 @@ All under `families/{familyId}/`:
 ### Prompt Files
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
 - `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, disposition, conundrum, etc.)
+
+### Cloud Functions (18 exported)
+- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, chat, analyzePatterns)
+- `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
+- `generateWeeklyReviewNow` — Manual review trigger
+- `generateActivity` — Lesson card generation
+- `healthCheck` — Diagnostic endpoint
+- 11 image functions: `generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`
+- `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 
 ### Cloud Functions Structure
 - `functions/src/index.ts` — Main entry point, exports all Cloud Functions
@@ -239,7 +249,7 @@ All under `families/{familyId}/`:
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/imageGen.ts` — Image generation routing
-- `functions/src/ai/imageTasks/` — 11 image task handlers (armor, avatar, character, skin, photo transform, etc.)
+- `functions/src/ai/imageTasks/` — 12 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar, + index)
 - `functions/src/ai/providers/` — Claude + OpenAI provider adapters (with `__stubs__/` for test mocking)
 
 ## Family Context (for AI prompt reference)
