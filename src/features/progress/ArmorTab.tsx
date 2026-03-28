@@ -15,7 +15,12 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import LinearProgress from '@mui/material/LinearProgress'
+import MenuItem from '@mui/material/MenuItem'
 import Snackbar from '@mui/material/Snackbar'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
@@ -83,7 +88,7 @@ function getEventIcon(type?: string): string {
 function getEventLabel(event: XpLedgerEvent): string {
   if (event.meta?.reason) return event.meta.reason
   switch (event.type) {
-    case 'MANUAL_AWARD': return 'Parent awarded XP'
+    case 'MANUAL_AWARD': return event.meta?.awardType ? `${event.meta.awardType} — parent` : 'Parent awarded XP'
     case 'CHECKLIST_ITEM': return 'Checklist item completed'
     case 'CHECKLIST_DAY_COMPLETE': return 'Completed daily checklist'
     case 'CHECKLIST_PRAYER': return 'Morning prayer'
@@ -212,12 +217,14 @@ function XpOverviewCard({
 
 // ── Quick Award XP ───────────────────────────────────────────────
 
-const PRESETS = [
-  { amount: 5, label: '+5', description: 'Completed an activity' },
-  { amount: 10, label: '+10', description: 'Great effort today' },
-  { amount: 25, label: '+25', description: 'Finished a quest' },
-  { amount: 50, label: '+50', description: 'Major milestone' },
-]
+const AWARD_TYPES = [
+  { value: 'Bonus', label: 'Bonus' },
+  { value: 'Kindness', label: 'Kindness' },
+  { value: 'Extra Effort', label: 'Extra Effort' },
+  { value: 'Correction', label: 'Correction' },
+] as const
+
+const MAX_AWARD = 50
 
 function QuickAwardXP({
   childId,
@@ -231,40 +238,66 @@ function QuickAwardXP({
   onAward: (amount: number, unlocks: string[], tierUp?: { from: string; to: string }) => void
 }) {
   const familyId = useFamilyId()
-  const [customAmount, setCustomAmount] = useState('')
+  const [open, setOpen] = useState(false)
+  const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
+  const [awardType, setAwardType] = useState<string>('Bonus')
   const [awarding, setAwarding] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
-  async function award(amount: number) {
-    if (amount <= 0 || awarding) return
+  const isCorrection = awardType === 'Correction'
+  const parsedAmount = parseInt(amount) || 0
+  const effectiveAmount = isCorrection ? -Math.abs(parsedAmount) : Math.abs(parsedAmount)
+  const canSubmit = parsedAmount > 0 && parsedAmount <= MAX_AWARD && reason.trim().length > 0
+
+  function resetForm() {
+    setAmount('')
+    setReason('')
+    setAwardType('Bonus')
+  }
+
+  function handleSubmit() {
+    if (!canSubmit) return
+    if (isCorrection) {
+      setConfirmOpen(true)
+    } else {
+      doAward()
+    }
+  }
+
+  async function doAward() {
+    if (awarding) return
+    setConfirmOpen(false)
     setAwarding(true)
 
     try {
       const dedupKey = `manual_${Date.now()}`
       const meta: Record<string, string> = {
         awardedBy: 'parent',
+        reason: reason.trim(),
+        awardType,
       }
-      if (reason) meta.reason = reason
 
-      // Detect tier change
       const oldTier = calculateTier(currentXp)
 
-      await addXpEvent(familyId, childId, 'MANUAL_AWARD', amount, dedupKey, meta)
+      await addXpEvent(familyId, childId, 'MANUAL_AWARD', effectiveAmount, dedupKey, meta)
 
-      // Check for new unlocks
-      const result = await checkAndUnlockArmor(familyId, childId)
-      const unlockNames = result.newlyUnlockedVoxelPieces.map((vId) => {
-        const piece = VOXEL_ARMOR_PIECES.find((p) => p.id === vId)
-        return piece ? piece.name : vId
-      })
+      // Check for new unlocks (only relevant for positive awards)
+      let unlockNames: string[] = []
+      if (effectiveAmount > 0) {
+        const result = await checkAndUnlockArmor(familyId, childId)
+        unlockNames = result.newlyUnlockedVoxelPieces.map((vId) => {
+          const piece = VOXEL_ARMOR_PIECES.find((p) => p.id === vId)
+          return piece ? piece.name : vId
+        })
+      }
 
-      // Check for tier-up
-      const newTier = calculateTier(currentXp + amount)
+      const newTier = calculateTier(Math.max(0, currentXp + effectiveAmount))
       const tierUp = newTier !== oldTier ? { from: oldTier, to: newTier } : undefined
 
-      onAward(amount, unlockNames, tierUp)
-      setReason('')
-      setCustomAmount('')
+      onAward(effectiveAmount, unlockNames, tierUp)
+      resetForm()
+      setOpen(false)
     } catch (err) {
       console.error('Failed to award XP:', err)
     } finally {
@@ -273,58 +306,128 @@ function QuickAwardXP({
   }
 
   return (
-    <Card sx={{ mb: 2 }}>
-      <CardContent>
-        <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
-          Award XP to {childName}
-        </Typography>
+    <Box sx={{ mb: 2 }}>
+      {/* Toggle button */}
+      <Button
+        variant="outlined"
+        onClick={() => setOpen(!open)}
+        fullWidth
+        sx={{
+          fontFamily: '"Press Start 2P", monospace',
+          fontSize: '0.75rem',
+          borderColor: '#d4a017',
+          color: '#d4a017',
+          '&:hover': { borderColor: '#b8860b', bgcolor: 'rgba(212,160,23,0.06)' },
+          py: 1.2,
+        }}
+      >
+        ⭐ {open ? 'Close' : 'Award XP'}
+      </Button>
 
-        {/* Preset buttons */}
-        <Box sx={{ display: 'flex', gap: 1, mb: 1.5 }}>
-          {PRESETS.map((p) => (
-            <Button
-              key={p.amount}
-              variant="outlined"
-              onClick={() => award(p.amount)}
-              disabled={awarding}
-              sx={{ flex: 1, fontFamily: 'monospace', minWidth: 0 }}
+      {/* Inline form */}
+      {open && (
+        <Card sx={{ mt: 1, border: '1px solid rgba(212,160,23,0.3)' }}>
+          <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            {/* Award type */}
+            <TextField
+              select
+              size="small"
+              label="Type"
+              value={awardType}
+              onChange={(e) => setAwardType(e.target.value)}
+              fullWidth
             >
-              {p.label}
-            </Button>
-          ))}
-        </Box>
+              {AWARD_TYPES.map((t) => (
+                <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>
+              ))}
+            </TextField>
 
-        {/* Custom amount */}
-        <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-          <TextField
-            size="small"
-            type="number"
-            placeholder="Custom XP"
-            value={customAmount}
-            onChange={(e) => setCustomAmount(e.target.value)}
-            sx={{ width: '120px' }}
-            slotProps={{ htmlInput: { min: 1 } }}
-          />
+            {/* Amount */}
+            <TextField
+              size="small"
+              type="number"
+              label={isCorrection ? 'Amount to remove' : 'Amount'}
+              placeholder="1–50"
+              value={amount}
+              onChange={(e) => {
+                const v = parseInt(e.target.value)
+                if (e.target.value === '' || (v >= 0 && v <= MAX_AWARD)) {
+                  setAmount(e.target.value)
+                }
+              }}
+              slotProps={{ htmlInput: { min: 1, max: MAX_AWARD } }}
+              fullWidth
+              helperText={isCorrection ? `Will remove XP from ${childName}` : undefined}
+            />
+
+            {/* Reason */}
+            <TextField
+              size="small"
+              label="Reason"
+              placeholder={isCorrection ? 'Why the adjustment?' : 'What did they do?'}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              fullWidth
+              required
+              error={reason.length > 0 && reason.trim().length === 0}
+            />
+
+            {/* Actions */}
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button
+                variant="contained"
+                onClick={handleSubmit}
+                disabled={!canSubmit || awarding}
+                fullWidth
+                sx={{
+                  fontFamily: 'monospace',
+                  fontWeight: 600,
+                  bgcolor: isCorrection ? '#e65100' : '#4caf50',
+                  '&:hover': { bgcolor: isCorrection ? '#bf360c' : '#388e3c' },
+                }}
+              >
+                {awarding
+                  ? 'Saving...'
+                  : isCorrection
+                    ? `Remove ${parsedAmount || '?'} XP from ${childName}`
+                    : `Award +${parsedAmount || '?'} XP to ${childName}`}
+              </Button>
+              <Button
+                variant="text"
+                onClick={() => { resetForm(); setOpen(false) }}
+                sx={{ minWidth: 'auto', color: 'text.secondary' }}
+              >
+                Cancel
+              </Button>
+            </Box>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Correction confirmation dialog */}
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
+        <DialogTitle>Confirm XP Correction</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Remove {parsedAmount} XP from {childName}?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Reason: {reason}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
           <Button
+            onClick={doAward}
             variant="contained"
-            onClick={() => award(parseInt(customAmount) || 0)}
-            disabled={awarding || !customAmount}
-            sx={{ fontFamily: 'monospace', bgcolor: '#4caf50', '&:hover': { bgcolor: '#388e3c' } }}
+            color="error"
+            disabled={awarding}
           >
-            Award
+            {awarding ? 'Removing...' : 'Yes, remove XP'}
           </Button>
-        </Box>
-
-        {/* Reason */}
-        <TextField
-          size="small"
-          fullWidth
-          placeholder="Reason (optional) — 'Great reading today'"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-        />
-      </CardContent>
-    </Card>
+        </DialogActions>
+      </Dialog>
+    </Box>
   )
 }
 
@@ -494,9 +597,15 @@ function XpHistory({
                   }}
                 >
                   <Typography
-                    sx={{ fontFamily: 'monospace', fontWeight: 600, color: '#4caf50', minWidth: 64, fontSize: '0.85rem' }}
+                    sx={{
+                      fontFamily: 'monospace',
+                      fontWeight: 600,
+                      color: (event.amount ?? 0) < 0 ? '#e53935' : '#4caf50',
+                      minWidth: 64,
+                      fontSize: '0.85rem',
+                    }}
                   >
-                    +{event.amount ?? 0} XP
+                    {(event.amount ?? 0) < 0 ? '' : '+'}{event.amount ?? 0} XP
                   </Typography>
                   <Typography sx={{ fontSize: '1rem', lineHeight: 1 }}>
                     {getEventIcon(event.type)}
@@ -571,9 +680,14 @@ export default function ArmorTab() {
         message: `${childName} unlocked ${unlocks.join(', ')}!`,
         severity: 'info',
       })
+    } else if (amount < 0) {
+      setSnack({
+        message: `Removed ${Math.abs(amount)} XP from ${childName}`,
+        severity: 'info',
+      })
     } else {
       setSnack({
-        message: `Awarded ${amount} XP to ${childName}`,
+        message: `Awarded +${amount} XP to ${childName}! ⭐`,
         severity: 'success',
       })
     }
