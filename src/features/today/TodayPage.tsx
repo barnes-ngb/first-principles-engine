@@ -88,6 +88,7 @@ import KidTodayView from './KidTodayView'
 import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
+import QuickAddHours from '../records/QuickAddHours'
 import CreativeTimeLog from './CreativeTimeLog'
 import WorkshopGameCards from './WorkshopGameCards'
 import { syncChecklistToRoutine } from './checklistRoutineSync'
@@ -1535,6 +1536,26 @@ export default function TodayPage() {
           </SectionCard>
         )
       })()}
+
+      {/* Quick non-core hours — collapsed by default */}
+      {selectedChildId && (
+        <Accordion>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Typography variant="subtitle1" color="text.secondary">
+              ⚡ Log Extra Activity (PE, art, cooking...)
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <QuickAddHours
+              familyId={familyId}
+              childId={selectedChildId}
+              childName={activeChild?.name ?? 'child'}
+              date={today}
+              onSaved={(msg) => setSnackMessage({ text: msg, severity: 'success' })}
+            />
+          </AccordionDetails>
+        </Accordion>
+      )}
 
       {/* --- Quick Capture --- */}
       <div ref={artifactSectionRef} />
