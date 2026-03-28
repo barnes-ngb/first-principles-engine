@@ -129,7 +129,7 @@ describe("formatChildProfile", () => {
 describe("CHARTER_PREAMBLE", () => {
   it("contains core values", () => {
     expect(CHARTER_PREAMBLE).toContain("Formation first");
-    expect(CHARTER_PREAMBLE).toContain("Both kids count");
+    expect(CHARTER_PREAMBLE).toContain("Lincoln teaches London");
     expect(CHARTER_PREAMBLE).toContain("First Principles Engine");
   });
 });

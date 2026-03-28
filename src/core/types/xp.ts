@@ -43,7 +43,7 @@ export type PlatformerTier = 'basic' | 'powerup' | 'champion'  // London
 export interface CharacterFeatures {
   skinTone: string       // Hex color extracted from photo
   hairColor: string      // Hex color extracted from photo
-  hairStyle: 'short' | 'medium' | 'long' | 'curly'
+  hairStyle: 'short' | 'medium' | 'long' | 'curly' | 'long_wavy'
   hairLength: 'above_ear' | 'ear_length' | 'shoulder' | 'below_shoulder'
   eyeColor?: string
   distinguishingFeatures?: string
@@ -66,13 +66,13 @@ export const LINCOLN_FEATURES: CharacterFeatures = {
   eyeColor: '#4A6B7A',    // Blue-gray
 }
 
-/** London-specific features */
+/** London-specific features (sandy blonde, brown eyes, fair skin, longer wavy hair) */
 export const LONDON_FEATURES: CharacterFeatures = {
-  skinTone: '#F0D0B0',
-  hairColor: '#8B6914',
-  hairStyle: 'short',
-  hairLength: 'above_ear',
-  eyeColor: '#5B7B8A',
+  skinTone: '#FDDCB5',       // Fair, slightly lighter than Lincoln
+  hairColor: '#D4B86A',      // Sandy blonde
+  hairStyle: 'long_wavy',    // Longer, past ears, wavy
+  hairLength: 'ear_length',  // Past ears
+  eyeColor: '#8B6914',       // Brown/hazel
 }
 
 /** Maps full ArmorPiece IDs to simplified voxel piece IDs */

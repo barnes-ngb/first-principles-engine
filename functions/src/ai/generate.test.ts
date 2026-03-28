@@ -64,7 +64,7 @@ describe("buildGenerateSystemPrompt", () => {
   it("includes charter preamble", () => {
     const prompt = buildGenerateSystemPrompt(lincolnCtx);
     expect(prompt).toContain("First Principles Engine");
-    expect(prompt).toContain("Core family values");
+    expect(prompt).toContain("CHARTER VALUES");
   });
 
   it("includes child name and activity type", () => {
