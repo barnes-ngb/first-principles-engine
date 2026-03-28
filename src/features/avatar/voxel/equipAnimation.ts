@@ -61,7 +61,7 @@ export function animateEquip(
   pieceGroup.traverse((child) => {
     if (child instanceof THREE.Mesh) {
       const mats = Array.isArray(child.material) ? child.material : [child.material]
-      if (mats[0] instanceof THREE.MeshLambertMaterial) {
+      if (mats[0] instanceof THREE.MeshLambertMaterial || mats[0] instanceof THREE.MeshPhongMaterial) {
         child.userData.originalColor = mats[0].color.clone()
       }
     }
@@ -81,7 +81,7 @@ export function animateEquip(
       const mat = Array.isArray(pieceGroup.children[0].material)
         ? pieceGroup.children[0].material[0]
         : pieceGroup.children[0].material
-      if (mat instanceof THREE.MeshLambertMaterial) {
+      if (mat instanceof THREE.MeshLambertMaterial || mat instanceof THREE.MeshPhongMaterial) {
         pieceColor = mat.color.getHex()
       }
     }
@@ -117,7 +117,7 @@ export function animateEquip(
           const emissive = origColor.clone().multiplyScalar(brightness * 0.6)
           const mats = Array.isArray(child.material) ? child.material : [child.material]
           for (const m of mats) {
-            if (m instanceof THREE.MeshLambertMaterial) {
+            if (m instanceof THREE.MeshLambertMaterial || m instanceof THREE.MeshPhongMaterial) {
               m.emissive = emissive.clone()
             }
           }
@@ -135,7 +135,7 @@ export function animateEquip(
         if (child instanceof THREE.Mesh) {
           const mats = Array.isArray(child.material) ? child.material : [child.material]
           for (const m of mats) {
-            if (m instanceof THREE.MeshLambertMaterial) {
+            if (m instanceof THREE.MeshLambertMaterial || m instanceof THREE.MeshPhongMaterial) {
               m.emissive = new THREE.Color(0x000000)
             }
           }

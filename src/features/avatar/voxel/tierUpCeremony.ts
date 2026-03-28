@@ -39,7 +39,7 @@ export function shatterArmor(
       let fragColor = oldTierMaterials.primary
       if (child.material) {
         const mat = Array.isArray(child.material) ? child.material[0] : child.material
-        if (mat instanceof THREE.MeshLambertMaterial && mat.color) {
+        if ((mat instanceof THREE.MeshLambertMaterial || mat instanceof THREE.MeshPhongMaterial) && mat.color) {
           fragColor = mat.color.getHex()
         }
       }
