@@ -50,6 +50,7 @@ import UnlockCelebration from './UnlockCelebration'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
 import TierUpCeremony from '../../components/avatar/TierUpCeremony'
 import OutfitCustomizer from './OutfitCustomizer'
+import ArmorDyePanel from './ArmorDyePanel'
 import { calculateTier, getTierBadgeColor, getTierTextColor, TIERS } from './voxel/tierMaterials'
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -458,6 +459,26 @@ export default function MyAvatarPage() {
     },
     [familyId, childId, profile],
   )
+
+  // ── Armor dye color change ──────────────────────────────────────
+  const handleArmorDyeChange = useCallback(
+    async (pieceId: VoxelArmorPieceId, hexColor: string) => {
+      if (!familyId || !childId || !profile) return
+      const customization: OutfitCustomization = { ...profile.customization }
+      customization.armorColors = { ...customization.armorColors, [pieceId]: hexColor }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile],
+  )
+
+  const handleArmorDyeReset = useCallback(async () => {
+    if (!familyId || !childId || !profile) return
+    const customization: OutfitCustomization = { ...profile.customization }
+    delete customization.armorColors
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    await safeUpdateProfile(profileRef, { customization })
+  }, [familyId, childId, profile])
 
   // ── Streak tracking ─────────────────────────────────────────────
   const checkArmorStreak = useCallback(async (prof: AvatarProfile) => {
@@ -1647,6 +1668,17 @@ export default function MyAvatarPage() {
           customization={profile.customization}
           ageGroup={ageGroup}
           onColorChange={(slot, hex) => void handleOutfitColorChange(slot, hex)}
+        />
+
+        {/* ── Armor Dye Panel ──────────────────────────────────── */}
+        <ArmorDyePanel
+          armorColors={profile.customization?.armorColors}
+          unlockedPieces={unlockedVoxel}
+          tierName={currentTierName}
+          isStoneOrAbove={currentTierName !== 'WOOD'}
+          isLincoln={isLincoln}
+          onColorChange={(pieceId, hex) => void handleArmorDyeChange(pieceId, hex)}
+          onReset={() => void handleArmorDyeReset()}
         />
 
         {/* ── Photo Upload Section ──────────────────────────────── */}

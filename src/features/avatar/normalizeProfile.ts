@@ -1,4 +1,5 @@
 import type {
+  ArmorColors,
   ArmorPieceProgress,
   ArmorTier,
   AvatarProfile,
@@ -82,13 +83,25 @@ function normalizePiece(raw: unknown): ArmorPieceProgress {
   }
 }
 
+function normalizeArmorColors(raw: unknown): ArmorColors | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const a = raw as Record<string, unknown>
+  const result: ArmorColors = {}
+  for (const key of ['belt', 'breastplate', 'shoes', 'shield', 'helmet', 'sword'] as const) {
+    if (typeof a[key] === 'string') result[key] = a[key] as string
+  }
+  return Object.keys(result).length > 0 ? result : undefined
+}
+
 function normalizeCustomization(raw: unknown): OutfitCustomization | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const c = raw as Record<string, unknown>
+  const armorColors = normalizeArmorColors(c.armorColors)
   return {
     ...(c.shirtColor ? { shirtColor: c.shirtColor as string } : {}),
     ...(c.pantsColor ? { pantsColor: c.pantsColor as string } : {}),
     ...(c.shoeColor ? { shoeColor: c.shoeColor as string } : {}),
+    ...(armorColors ? { armorColors } : {}),
   }
 }
 

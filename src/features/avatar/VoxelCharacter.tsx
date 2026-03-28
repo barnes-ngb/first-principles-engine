@@ -309,6 +309,7 @@ export default function VoxelCharacter({
   )
   const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
   const currentTier = calculateTier(totalXp)
+  const armorColors = customization?.armorColors
 
   // Keep refs in sync so animation loop always has current values
   equippedRef.current = equippedPieces
@@ -460,8 +461,8 @@ export default function VoxelCharacter({
         })
       }
     }
-    // Apply tier-based materials to all equipped pieces
-    applyTierToArmor(armorGroupsRef.current, currentTier, equippedPieces)
+    // Apply tier-based materials to all equipped pieces (with optional dye colors)
+    applyTierToArmor(armorGroupsRef.current, currentTier, equippedPieces, armorColors)
     prevEquippedRef.current = new Set(equippedPieces)
     prevTierRef.current = currentTier
 
@@ -668,7 +669,7 @@ export default function VoxelCharacter({
         applyPaintedFace(headMesh, character, resolvedFeatures, skinHex)
       }
     }
-  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, skinTextureUrl, customization])
+  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, skinTextureUrl, customization, armorColors])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
@@ -744,6 +745,13 @@ export default function VoxelCharacter({
     applyProfileOutfit(character, customization)
   }, [customization])
 
+  // ── Re-apply armor dye colors when armorColors change ──────────
+  useEffect(() => {
+    if (!armorColors || equippedPieces.length === 0) return
+    applyTierToArmor(armorGroupsRef.current, currentTier, equippedPieces, armorColors)
+    enforceArmorOpacity(armorGroupsRef.current, equippedPieces)
+  }, [armorColors, currentTier, equippedPieces])
+
   // ── Tier upgrade ceremony when XP changes tier ─────────────────
   useEffect(() => {
     if (!prevTierRef.current || prevTierRef.current === currentTier) {
@@ -801,7 +809,7 @@ export default function VoxelCharacter({
           group.visible = true
           group.scale.set(1, 1, 1)
         }
-        applyTierToArmor(armorGroupsRef.current, currentTier, [pieceId])
+        applyTierToArmor(armorGroupsRef.current, currentTier, [pieceId], armorColors)
 
         // Play equip sound effect
         playEquipSound(pieceId)
@@ -888,7 +896,7 @@ export default function VoxelCharacter({
 
     // Ensure ALL currently equipped pieces have solid tier materials
     if (current.size > 0) {
-      applyTierToArmor(armorGroupsRef.current, currentTier, equippedPieces)
+      applyTierToArmor(armorGroupsRef.current, currentTier, equippedPieces, armorColors)
       enforceArmorOpacity(armorGroupsRef.current, equippedPieces)
     }
 
@@ -896,7 +904,7 @@ export default function VoxelCharacter({
     equipPoseRef.current?.(equippedPieces)
 
     prevEquippedRef.current = current
-  }, [equippedPieces, currentTier, totalXp, onPoseComplete, resolvedFeatures])
+  }, [equippedPieces, currentTier, totalXp, onPoseComplete, resolvedFeatures, armorColors])
 
   // ── Handle explicit pose trigger (from PoseButtons) ────────────
   useEffect(() => {
