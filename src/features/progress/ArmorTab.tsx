@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import {
   collection,
+  doc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   where,
@@ -19,8 +21,8 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 
 import { useFamilyId } from '../../core/auth/useAuth'
+import { avatarProfilesCollection, db } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import { db } from '../../core/firebase/firestore'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { checkAndUnlockArmor } from '../../core/xp/checkAndUnlockArmor'
 import { useXpLedger } from '../../core/xp/useXpLedger'
@@ -34,28 +36,65 @@ import {
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-function formatRelativeTime(isoString: string): string {
-  const now = Date.now()
-  const then = new Date(isoString).getTime()
-  const diffMs = now - then
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHours = Math.floor(diffMin / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  const diffDays = Math.floor(diffHours / 24)
-  if (diffDays < 7) return `${diffDays}d ago`
-  return new Date(isoString).toLocaleDateString()
+function formatTime(isoString: string): string {
+  const d = new Date(isoString)
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+function getDayLabel(isoString: string): string {
+  const d = new Date(isoString)
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const eventDay = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const diffDays = Math.round((today.getTime() - eventDay.getTime()) / 86400000)
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  return eventDay.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
+}
+
+function getEventIcon(type?: string): string {
+  switch (type) {
+    case 'CHECKLIST_ITEM':
+    case 'CHECKLIST_DAY_COMPLETE':
+    case 'DAILY_ALL_COMPLETE':
+    case 'WEEKLY_ALL_COMPLETE':
+      return '⛏️'
+    case 'QUEST_DIAMOND':
+    case 'QUEST_COMPLETE':
+      return '💎'
+    case 'CHECKLIST_PRAYER':
+      return '🙏'
+    case 'DAD_LAB_COMPLETE':
+      return '🔬'
+    case 'BOOK_READ':
+    case 'BOOK_PAGE_READ':
+      return '📚'
+    case 'EVALUATION_COMPLETE':
+      return '📝'
+    case 'ARMOR_DAILY_COMPLETE':
+      return '🛡️'
+    case 'MANUAL_AWARD':
+      return '⭐'
+    default:
+      return '⭐'
+  }
 }
 
 function getEventLabel(event: XpLedgerEvent): string {
   if (event.meta?.reason) return event.meta.reason
   switch (event.type) {
     case 'MANUAL_AWARD': return 'Parent awarded XP'
+    case 'CHECKLIST_ITEM': return 'Checklist item completed'
     case 'CHECKLIST_DAY_COMPLETE': return 'Completed daily checklist'
+    case 'CHECKLIST_PRAYER': return 'Morning prayer'
+    case 'DAILY_ALL_COMPLETE': return 'Daily bonus — all items done'
+    case 'WEEKLY_ALL_COMPLETE': return 'Weekly bonus — all 5 days!'
     case 'QUEST_DIAMOND': return 'Knowledge Mine diamonds'
+    case 'QUEST_COMPLETE': return 'Quest completed'
     case 'BOOK_READ': return 'Book reading session'
+    case 'BOOK_PAGE_READ': return 'Read a page'
     case 'EVALUATION_COMPLETE': return 'Evaluation completed'
+    case 'DAD_LAB_COMPLETE': return 'Dad Lab completed'
     case 'ARMOR_DAILY_COMPLETE': return 'Daily armor equipped'
     default: return event.type ?? 'XP awarded'
   }
@@ -289,12 +328,80 @@ function QuickAwardXP({
   )
 }
 
+// ── XP Summary Stats ────────────────────────────────────────────
+
+function XpSummaryStats({
+  totalXp,
+  events,
+  armorStreak,
+  tierLabel,
+  xpToNext,
+}: {
+  totalXp: number
+  events: XpLedgerEvent[]
+  armorStreak: number
+  tierLabel: string
+  xpToNext: number
+}) {
+  // Compute XP earned this week (Mon–Sun)
+  const now = new Date()
+  const dayOfWeek = now.getDay()
+  const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+  const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset)
+  const xpThisWeek = events.reduce((sum, e) => {
+    if (!e.awardedAt) return sum
+    return new Date(e.awardedAt) >= weekStart ? sum + (e.amount ?? 0) : sum
+  }, 0)
+
+  const stats = [
+    { label: 'Total XP', value: `${totalXp}` },
+    { label: 'This week', value: `+${xpThisWeek}` },
+    { label: 'Tier', value: tierLabel },
+    ...(xpToNext > 0 ? [{ label: 'Next tier', value: `${xpToNext} XP` }] : []),
+    ...(armorStreak > 0 ? [{ label: 'Streak', value: `${armorStreak}d 🔥` }] : []),
+  ]
+
+  return (
+    <Card sx={{ mb: 2 }}>
+      <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'space-around' }}>
+          {stats.map((s) => (
+            <Box key={s.label} sx={{ textAlign: 'center', minWidth: 60 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>
+                {s.value}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {s.label}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
+      </CardContent>
+    </Card>
+  )
+}
+
 // ── XP History ───────────────────────────────────────────────────
 
-function XpHistory({ childId }: { childId: string }) {
+const PAGE_SIZE = 50
+
+function XpHistory({
+  childId,
+  totalXp,
+  tierLabel,
+  xpToNext,
+  armorStreak,
+}: {
+  childId: string
+  totalXp: number
+  tierLabel: string
+  xpToNext: number
+  armorStreak: number
+}) {
   const familyId = useFamilyId()
   const [events, setEvents] = useState<XpLedgerEvent[]>([])
   const [loading, setLoading] = useState(true)
+  const [visibleDays, setVisibleDays] = useState(7)
 
   useEffect(() => {
     if (!familyId || !childId) return
@@ -309,7 +416,7 @@ function XpHistory({ childId }: { childId: string }) {
           where('childId', '==', childId),
           where('dedupKey', '!=', null),
           orderBy('awardedAt', 'desc'),
-          limit(20),
+          limit(PAGE_SIZE),
         )
         const snap = await getDocs(q)
         if (cancelled) return
@@ -329,63 +436,134 @@ function XpHistory({ childId }: { childId: string }) {
     return () => { cancelled = true }
   }, [familyId, childId])
 
+  // Reset visible days when child changes
+  useEffect(() => { setVisibleDays(7) }, [childId])
+
+  // Group events by day
+  const groupedByDay: { label: string; events: XpLedgerEvent[] }[] = []
+  const dayMap = new Map<string, XpLedgerEvent[]>()
+  for (const event of events) {
+    const label = event.awardedAt ? getDayLabel(event.awardedAt) : 'Unknown'
+    if (!dayMap.has(label)) {
+      dayMap.set(label, [])
+      groupedByDay.push({ label, events: dayMap.get(label)! })
+    }
+    dayMap.get(label)!.push(event)
+  }
+
+  const visibleGroups = groupedByDay.slice(0, visibleDays)
+  const hasMore = groupedByDay.length > visibleDays
+
   return (
-    <Card sx={{ mb: 2 }}>
-      <CardContent>
-        <Typography variant="subtitle2" sx={{ mb: 1 }}>
-          Recent XP
-        </Typography>
-        {loading && (
-          <Typography variant="caption" color="text.secondary">Loading...</Typography>
-        )}
-        {!loading && events.length === 0 && (
-          <Typography variant="caption" color="text.secondary">No XP events yet</Typography>
-        )}
-        {events.map((event) => (
-          <Box
-            key={event.id}
-            sx={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              py: 1,
-              borderBottom: '1px solid rgba(0,0,0,0.06)',
-            }}
-          >
-            <Box>
-              <Typography variant="body2">{getEventLabel(event)}</Typography>
-              {event.awardedAt && (
-                <Typography variant="caption" color="text.secondary">
-                  {formatRelativeTime(event.awardedAt)}
-                </Typography>
-              )}
+    <>
+      <XpSummaryStats
+        totalXp={totalXp}
+        events={events}
+        armorStreak={armorStreak}
+        tierLabel={tierLabel}
+        xpToNext={xpToNext}
+      />
+      <Card sx={{ mb: 2 }}>
+        <CardContent>
+          <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
+            XP History
+          </Typography>
+          {loading && (
+            <Typography variant="caption" color="text.secondary">Loading...</Typography>
+          )}
+          {!loading && events.length === 0 && (
+            <Typography variant="caption" color="text.secondary">No XP events yet</Typography>
+          )}
+          {visibleGroups.map((group) => (
+            <Box key={group.label} sx={{ mb: 2 }}>
+              <Typography
+                variant="caption"
+                sx={{ fontWeight: 600, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5 }}
+              >
+                {group.label}
+              </Typography>
+              {group.events.map((event) => (
+                <Box
+                  key={event.id}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    py: 0.75,
+                    borderBottom: '1px solid rgba(0,0,0,0.06)',
+                    gap: 1.5,
+                  }}
+                >
+                  <Typography
+                    sx={{ fontFamily: 'monospace', fontWeight: 600, color: '#4caf50', minWidth: 64, fontSize: '0.85rem' }}
+                  >
+                    +{event.amount ?? 0} XP
+                  </Typography>
+                  <Typography sx={{ fontSize: '1rem', lineHeight: 1 }}>
+                    {getEventIcon(event.type)}
+                  </Typography>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="body2" noWrap>
+                      {getEventLabel(event)}
+                    </Typography>
+                  </Box>
+                  {event.awardedAt && (
+                    <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                      {formatTime(event.awardedAt)}
+                    </Typography>
+                  )}
+                </Box>
+              ))}
             </Box>
-            <Typography variant="body2" sx={{ color: '#4caf50', fontWeight: 500, fontFamily: 'monospace' }}>
-              +{event.amount ?? 0} XP
-            </Typography>
-          </Box>
-        ))}
-      </CardContent>
-    </Card>
+          ))}
+          {hasMore && (
+            <Button
+              size="small"
+              onClick={() => setVisibleDays((d) => d + 7)}
+              sx={{ mt: 1 }}
+            >
+              Show more
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    </>
   )
 }
 
 // ── Main ArmorTab ────────────────────────────────────────────────
 
+function useArmorStreak(familyId: string, childId: string): number {
+  const [streak, setStreak] = useState(0)
+
+  useEffect(() => {
+    if (!familyId || !childId) return
+    const ref = doc(avatarProfilesCollection(familyId), childId)
+    return onSnapshot(ref, (snap) => {
+      setStreak(snap.exists() ? (snap.data()?.armorStreak ?? 0) : 0)
+    })
+  }, [familyId, childId])
+
+  return streak
+}
+
 export default function ArmorTab() {
   const { activeChildId, activeChild, children, setActiveChildId } = useActiveChild()
   const familyId = useFamilyId()
   const xpData = useXpLedger(familyId, activeChildId)
+  const armorStreak = useArmorStreak(familyId, activeChildId)
   const [snack, setSnack] = useState<{ message: string; severity: 'success' | 'info' } | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
   const childName = activeChild?.name ?? 'Child'
+  const tierKey = calculateTier(xpData.totalXp)
+  const tierLabel = TIERS[tierKey]?.label ?? tierKey
+  const xpToNext = xpData.nextTierProgress.xpToNext
 
   function handleAward(amount: number, unlocks: string[], tierUp?: { from: string; to: string }) {
     if (tierUp) {
-      const tierLabel = TIERS[tierUp.to]?.label ?? tierUp.to
+      const label = TIERS[tierUp.to]?.label ?? tierUp.to
       setSnack({
-        message: `${childName} reached ${tierLabel} tier!`,
+        message: `${childName} reached ${label} tier!`,
         severity: 'info',
       })
     } else if (unlocks.length > 0) {
@@ -425,7 +603,14 @@ export default function ArmorTab() {
         <>
           <XpOverviewCard totalXp={xpData.totalXp} childName={childName} />
           <QuickAwardXP childId={activeChildId} childName={childName} currentXp={xpData.totalXp} onAward={handleAward} />
-          <XpHistory key={`${activeChildId}-${refreshKey}`} childId={activeChildId} />
+          <XpHistory
+            key={`${activeChildId}-${refreshKey}`}
+            childId={activeChildId}
+            totalXp={xpData.totalXp}
+            tierLabel={tierLabel}
+            xpToNext={xpToNext}
+            armorStreak={armorStreak}
+          />
         </>
       )}
 
