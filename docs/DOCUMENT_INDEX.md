@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-03-26.
+> Where everything lives. Updated 2026-03-28.
 
 ---
 
@@ -8,17 +8,17 @@
 
 | Document | Status | Notes |
 |---|---|---|
-| `MASTER_OUTLINE.md` | **CURRENT** (v11) | Single source of truth: features, status, sprint history |
+| `MASTER_OUTLINE.md` | **CURRENT** (v12) | Single source of truth: features, status, sprint history |
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
-| `FIRESTORE_AUDIT.md` | **CURRENT** (Mar 21) | Data model, indexes, collections audit |
+| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — lists 28 collections but code has 26; `bookPages`/`readingSessions` removed; orphaned `sessions`/`wordProgress` refs in Cloud Functions |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
 | `ENGINE_V2.md` | **CURRENT** | Engine framework (flywheel, stages, scoring) |
 | `FIRST_PRINCIPLES_ALIGNMENT.md` | **NEW** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
-| `SYSTEM_PROMPTS.md` | **STALE** | Needs disposition + conundrum task prompts added |
-| `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books coverage |
+| `SYSTEM_PROMPTS.md` | **STALE** | Needs disposition + conundrum task prompts added; model selection table outdated (all Sonnet now) |
+| `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
 | `00_MASTER_SCOPE.md` | HISTORICAL | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `01_MVP_V0_1.md` | HISTORICAL | Phase 1 — MVP (Today, artifacts, engine, records) |
 | `02_ENGINE_LADDERS.md` | HISTORICAL | Phase 2 — Engine + Ladders |
