@@ -88,6 +88,7 @@ import KidTodayView from './KidTodayView'
 import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
+import CreativeTimeLog from './CreativeTimeLog'
 import WorkshopGameCards from './WorkshopGameCards'
 import { syncChecklistToRoutine } from './checklistRoutineSync'
 import { calculateXp } from './xp'
@@ -878,6 +879,15 @@ export default function TodayPage() {
       {/* --- Workshop Game Cards --- */}
       {familyId && children.length > 0 && (
         <WorkshopGameCards familyId={familyId} children={children} />
+      )}
+
+      {/* --- Creative Time Log --- */}
+      {familyId && selectedChild && (
+        <CreativeTimeLog
+          familyId={familyId}
+          childId={selectedChild.id ?? ''}
+          childName={selectedChild.name}
+        />
       )}
 
       {/* --- Today's Plan checklist (PRIMARY) --- */}
