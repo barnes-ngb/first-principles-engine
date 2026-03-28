@@ -548,7 +548,7 @@ function HoursComplianceTab() {
       const hoursSnap = await getDocs(hoursCollection(familyId))
       const hoursDeletes = hoursSnap.docs
         .filter(docSnap => {
-          const data = docSnap.data() as Record<string, unknown>
+          const data = docSnap.data() as unknown as Record<string, unknown>
           const source = data.source as string | undefined
           return !source || source === 'manual'
         })

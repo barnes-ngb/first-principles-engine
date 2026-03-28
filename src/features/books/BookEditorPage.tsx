@@ -1063,7 +1063,7 @@ export default function BookEditorPage() {
         open={showSketchScanner}
         onClose={() => setShowSketchScanner(false)}
         familyId={familyId}
-        childId={selectedChild?.id ?? ''}
+        childId={activeChild?.id ?? ''}
         childName={childName}
         onAddToBook={(file) => {
           if (activePage) void addImageToPage(activePage.id, file)
