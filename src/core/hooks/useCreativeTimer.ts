@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { addDoc } from 'firebase/firestore'
 
@@ -66,21 +66,15 @@ export function useCreativeTimer(
     description: '',
   })
 
-  const [hasPersistedTimer, setHasPersistedTimer] = useState(false)
+  const [dismissed, setDismissed] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Check for persisted timer on mount
-  useEffect(() => {
+  // Derive whether a persisted timer exists (no effect needed)
+  const hasPersistedTimer = useMemo(() => {
+    if (dismissed || state.isRunning) return false
     const persisted = loadPersisted()
-    if (persisted && persisted.familyId === familyId && persisted.childId === childId) {
-      setHasPersistedTimer(true)
-    } else if (persisted && persisted.familyId === familyId) {
-      // Different child but same family — still offer resume
-      setHasPersistedTimer(true)
-    } else {
-      setHasPersistedTimer(false)
-    }
-  }, [familyId, childId])
+    return !!persisted && persisted.familyId === familyId
+  }, [familyId, dismissed, state.isRunning])
 
   // Tick interval
   useEffect(() => {
@@ -117,7 +111,7 @@ export function useCreativeTimer(
         childId,
         familyId,
       })
-      setHasPersistedTimer(false)
+      setDismissed(true)
     },
     [childId, familyId],
   )
@@ -162,13 +156,13 @@ export function useCreativeTimer(
   const cancelTimer = useCallback(() => {
     setState({ isRunning: false, startTime: null, elapsed: 0, subject: null, description: '' })
     clearPersisted()
-    setHasPersistedTimer(false)
+    setDismissed(true)
   }, [])
 
   const resumePersistedTimer = useCallback(() => {
     const persisted = loadPersisted()
     if (!persisted) {
-      setHasPersistedTimer(false)
+      setDismissed(true)
       return
     }
     setState({
@@ -178,12 +172,12 @@ export function useCreativeTimer(
       subject: persisted.subject,
       description: persisted.description,
     })
-    setHasPersistedTimer(false)
+    setDismissed(true)
   }, [])
 
   const dismissPersistedTimer = useCallback(() => {
     clearPersisted()
-    setHasPersistedTimer(false)
+    setDismissed(true)
   }, [])
 
   return {
