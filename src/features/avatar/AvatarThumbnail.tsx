@@ -190,9 +190,11 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
     if (shouldAnimate) {
       let animId: number
       let time = 0
+      let disposed = false
       const baseY = character.position.y
 
       function animate() {
+        if (disposed) return
         time += 0.016
         character.rotation.y = -0.35 + Math.sin(time * 0.5) * 0.15
         character.position.y = baseY + Math.sin(time * 1.2) * 0.03
@@ -202,6 +204,7 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
       animate()
 
       cleanupRef.current = () => {
+        disposed = true
         cancelAnimationFrame(animId)
         disposeScene(scene, renderer)
       }

@@ -301,6 +301,7 @@ export default function VoxelCharacter({
   const onTierUpStartRef = useRef(onTierUpStart)
   const onTierUpRef = useRef(onTierUp)
   const ceremonyActiveRef = useRef(false)
+  const sceneActiveRef = useRef(false)
 
   const equippedPieces = useMemo(
     () => (Array.isArray(equippedPiecesRaw) ? equippedPiecesRaw : []),
@@ -321,9 +322,15 @@ export default function VoxelCharacter({
     const container = containerRef.current
     if (!container) return
 
+    // Deactivate any running animation loop immediately
+    sceneActiveRef.current = false
+    cancelAnimationFrame(rafRef.current)
+    rafRef.current = 0
+
     // Clean up old renderer
     if (rendererRef.current) {
       rendererRef.current.dispose()
+      rendererRef.current = null
       const oldCanvas = container.querySelector('canvas')
       if (oldCanvas) container.removeChild(oldCanvas)
     }
@@ -544,7 +551,10 @@ export default function VoxelCharacter({
 
     const poseAnimator = poseAnimatorRef.current
 
+    sceneActiveRef.current = true
+
     function animate() {
+      if (!sceneActiveRef.current) return
       rafRef.current = requestAnimationFrame(animate)
 
       if (controlsRef.current && characterRef.current) {
@@ -665,11 +675,15 @@ export default function VoxelCharacter({
     initScene()
 
     return () => {
+      // Deactivate animation loop before any disposal
+      sceneActiveRef.current = false
       cancelAnimationFrame(rafRef.current)
+      rafRef.current = 0
 
       // Clean up touch control window event listeners
       if (controlsRef.current) {
         destroyTouchControls(controlsRef.current)
+        controlsRef.current = null
       }
 
       // Dispose all Three.js geometries and materials to prevent memory leaks
@@ -690,9 +704,15 @@ export default function VoxelCharacter({
             }
           }
         })
+        sceneRef.current = null
       }
 
-      rendererRef.current?.dispose()
+      if (rendererRef.current) {
+        rendererRef.current.dispose()
+        rendererRef.current = null
+      }
+      cameraRef.current = null
+      characterRef.current = null
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedFeatures.skinTone, resolvedFeatures.hairColor, resolvedFeatures.hairStyle, resolvedFeatures.hairLength, resolvedFeatures.eyeColor, ageGroup])
