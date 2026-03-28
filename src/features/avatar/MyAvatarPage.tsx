@@ -286,13 +286,14 @@ export default function MyAvatarPage() {
   }, [familyId, childId])
 
   // ── Detect tier-up from XP changes ──────────────────────────────
+  const totalXp = profile?.totalXp
   useEffect(() => {
-    if (!profile) return
+    if (totalXp === undefined) return
     // Skip detection on first load after child switch (sentinel = -1)
     if (prevXpRef.current >= 0) {
       const oldTier = calculateTier(prevXpRef.current)
-      const newTier = calculateTier(profile.totalXp)
-      if (newTier !== oldTier && profile.totalXp > prevXpRef.current) {
+      const newTier = calculateTier(totalXp)
+      if (newTier !== oldTier && totalXp > prevXpRef.current) {
         const tierDef = TIERS[newTier]
         if (tierDef) {
           setCeremonyTier(tierDef.label)
@@ -300,8 +301,8 @@ export default function MyAvatarPage() {
         }
       }
     }
-    prevXpRef.current = profile.totalXp
-  }, [profile?.totalXp])
+    prevXpRef.current = totalXp
+  }, [totalXp])
 
   // ── Real-time session listener ─────────────────────────────────
   useEffect(() => {
