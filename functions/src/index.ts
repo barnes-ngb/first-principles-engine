@@ -6,4 +6,4 @@ export { healthCheck } from "./ai/health.js";
 export { chat, analyzeEvaluationPatterns } from "./ai/chat.js";
 export { weeklyReview, generateWeeklyReviewNow } from "./ai/evaluate.js";
 export { generateActivity } from "./ai/generate.js";
-export { generateImage, generateAvatarPiece, generateStarterAvatar, transformAvatarPhoto, generateArmorPiece, generateBaseCharacter, generateArmorSheet, generateArmorReference, extractFeatures, generateMinecraftSkin, generateMinecraftFace } from "./ai/imageGen.js";
+export { generateImage, generateAvatarPiece, generateStarterAvatar, transformAvatarPhoto, generateArmorPiece, generateBaseCharacter, generateArmorSheet, generateArmorReference, extractFeatures, generateMinecraftSkin, generateMinecraftFace, enhanceSketch } from "./ai/imageGen.js";

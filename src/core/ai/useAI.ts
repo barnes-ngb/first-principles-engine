@@ -77,6 +77,19 @@ export interface ImageGenResponse {
   revisedPrompt?: string
 }
 
+// ── Sketch enhancement types (mirrored from functions/src/ai/imageTasks/enhanceSketch.ts) ──
+
+export interface EnhanceSketchRequest {
+  familyId: string
+  sketchStoragePath: string
+  style?: 'storybook' | 'comic' | 'realistic' | 'minecraft'
+}
+
+export interface EnhanceSketchResponse {
+  url: string
+  storagePath: string
+}
+
 // ── Pattern analysis types (mirrored from functions/src/ai/chat.ts) ──
 
 export interface AnalyzePatternsRequest {
@@ -115,6 +128,11 @@ const chatFn = httpsCallable<ChatRequest, ChatResponse>(functions, 'chat', {
 })
 const generateFn = httpsCallable<GenerateRequest, GenerateResponse>(functions, 'generateActivity')
 const imageGenFn = httpsCallable<ImageGenRequest, ImageGenResponse>(functions, 'generateImage')
+const enhanceSketchFn = httpsCallable<EnhanceSketchRequest, EnhanceSketchResponse>(
+  functions,
+  'enhanceSketch',
+  { timeout: 60_000 },
+)
 const analyzePatternsFn = httpsCallable<AnalyzePatternsRequest, AnalyzePatternsResponse>(
   functions,
   'analyzeEvaluationPatterns',
@@ -161,6 +179,24 @@ export function useAI() {
     [],
   )
 
+  const enhanceSketch = useCallback(
+    async (request: EnhanceSketchRequest): Promise<EnhanceSketchResponse | null> => {
+      setLoading(true)
+      setError(null)
+      try {
+        const result = await enhanceSketchFn(request)
+        return result.data
+      } catch (err) {
+        const e = err instanceof Error ? err : new Error(String(err))
+        setError(e)
+        return null
+      } finally {
+        setLoading(false)
+      }
+    },
+    [],
+  )
+
   const analyzePatterns = useCallback(
     async (request: AnalyzePatternsRequest): Promise<AnalyzePatternsResponse | null> => {
       setLoading(true)
@@ -181,7 +217,7 @@ export function useAI() {
     [],
   )
 
-  return { chat, generateImage, analyzePatterns, loading, error } as const
+  return { chat, generateImage, enhanceSketch, analyzePatterns, loading, error } as const
 }
 
 export function useGenerateActivity() {

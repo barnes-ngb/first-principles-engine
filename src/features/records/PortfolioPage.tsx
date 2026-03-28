@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
@@ -13,11 +13,13 @@ import Select from '@mui/material/Select'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { getDocs, query, where } from 'firebase/firestore'
+import { addDoc, getDocs, query, where } from 'firebase/firestore'
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
 import Alert from '@mui/material/Alert'
 import Snackbar from '@mui/material/Snackbar'
 
+import DrawIcon from '@mui/icons-material/Draw'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 
 import Page from '../../components/Page'
@@ -26,9 +28,10 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
 } from '../../core/firebase/firestore'
+import { storage } from '../../core/firebase/storage'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Artifact } from '../../core/types'
-import { EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import {
   generatePortfolioMarkdown,
   getMonthLabel,
@@ -50,6 +53,50 @@ export default function PortfolioPage() {
   const [showAutoSuggest, setShowAutoSuggest] = useState(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
+
+  // Sketch capture
+  const sketchInputRef = useRef<HTMLInputElement>(null)
+
+  const handleSketchFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    const child = activeChild
+    if (!file || !child) return
+
+    try {
+      const ts = new Date().toISOString().replace(/[:.]/g, '-')
+      const ext = file.name.split('.').pop() ?? 'jpg'
+      const storagePath = `families/${familyId}/sketches/${ts}_sketch.${ext}`
+      const storageRef = ref(storage, storagePath)
+      await uploadBytes(storageRef, file)
+      const url = await getDownloadURL(storageRef)
+
+      const artifact: Omit<Artifact, 'id'> = {
+        childId: child.id,
+        title: `${child.name}'s drawing`,
+        type: EvidenceType.Photo,
+        uri: url,
+        storagePath,
+        createdAt: new Date().toISOString(),
+        content: 'Hand-drawn sketch captured for portfolio',
+        tags: {
+          engineStage: EngineStage.Build,
+          domain: 'art',
+          subjectBucket: SubjectBucket.Art,
+          location: 'Home',
+        },
+      }
+      await addDoc(artifactsCollection(familyId), artifact)
+
+      // Add the new artifact to local state so it appears immediately
+      const newArt: Artifact = { ...artifact, id: 'pending' }
+      setAllArtifacts((prev) => [newArt, ...prev])
+      setSnackMessage({ text: 'Drawing saved to portfolio!', severity: 'success' })
+    } catch (err) {
+      setSnackMessage({ text: `Failed to save drawing: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+    }
+    // Reset input
+    e.target.value = ''
+  }, [familyId, activeChild])
 
   // Portfolio filters
   const [searchQuery, setSearchQuery] = useState('')
@@ -258,7 +305,25 @@ export default function PortfolioPage() {
           )}
 
           {activeChildId && <>
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Button
+              size="small"
+              variant="contained"
+              color="secondary"
+              startIcon={<DrawIcon />}
+              onClick={() => sketchInputRef.current?.click()}
+              sx={{ fontWeight: 600 }}
+            >
+              Capture Drawing
+            </Button>
+            <input
+              ref={sketchInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => { void handleSketchFile(e) }}
+              style={{ display: 'none' }}
+            />
             <Button size="small" variant="outlined" onClick={handleAutoSuggest}>
               Auto-Suggest Best
             </Button>

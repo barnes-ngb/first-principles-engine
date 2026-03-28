@@ -60,6 +60,14 @@ export interface ImageOptions {
   outputFormat?: "png" | "jpeg" | "webp";
 }
 
+/** Options for image editing (sketch enhancement). */
+export interface ImageEditOptions {
+  model?: string;
+  size?: string;
+  /** Output format: 'png' (default), 'jpeg', 'webp' */
+  outputFormat?: "png" | "jpeg" | "webp";
+}
+
 /** Response from image generation. */
 export interface ImageResponse {
   url: string;
