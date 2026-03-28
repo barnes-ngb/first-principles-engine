@@ -11,6 +11,8 @@ import { animateEquip, animateUnequip, animateJump, animateNod, animateSwordFlou
 import { createTouchControls, updateRotation, destroyTouchControls } from './voxel/touchControls'
 import type { TouchControlState } from './voxel/touchControls'
 import { applyTierToArmor, calculateTier, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
+import { addEnchantGlow, removeEnchantGlow, animateEnchantGlow, tierHasGlow } from './voxel/enchantmentGlow'
+import { buildCape, animateCape, tierHasCape } from './voxel/buildCape'
 import { triggerTierUpCeremony } from './voxel/tierUpCeremony'
 import { PoseAnimator, POSES, POSE_EXPRESSIONS, applyExpression, getEquipmentIdlePose } from './voxel/poseSystem'
 import type { Pose } from './voxel/poseSystem'
@@ -466,6 +468,21 @@ export default function VoxelCharacter({
     prevEquippedRef.current = new Set(equippedPieces)
     prevTierRef.current = currentTier
 
+    // Enchantment glow (Iron tier+) — add glow aura to equipped armor pieces
+    if (tierHasGlow(currentTier)) {
+      for (const pieceId of equippedPieces) {
+        const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
+        if (group) addEnchantGlow(group, currentTier)
+      }
+    }
+
+    // Cape (Gold tier+) — attach flowing cape behind torso
+    const torso = character.getObjectByName('torso')
+    if (tierHasCape(currentTier) && torso) {
+      const cape = buildCape(currentTier, ageGroup)
+      if (cape) torso.add(cape)
+    }
+
     // Apply saved outfit colors
     applyProfileOutfit(character, customization)
 
@@ -643,6 +660,12 @@ export default function VoxelCharacter({
         })
       }
 
+      // Enchantment glow pulse (Iron tier+)
+      animateEnchantGlow(scene, clock.getElapsedTime())
+
+      // Cape sway (Gold tier+)
+      animateCape(scene, clock.getElapsedTime())
+
       // Subtle star twinkle — sine wave on each star's opacity with unique phase
       const twinkleTime = clock.getElapsedTime()
       scene.traverse((obj) => {
@@ -811,6 +834,12 @@ export default function VoxelCharacter({
         }
         applyTierToArmor(armorGroupsRef.current, currentTier, [pieceId], armorColors)
 
+        // Add enchantment glow if tier qualifies (Iron+)
+        if (tierHasGlow(currentTier) && group) {
+          removeEnchantGlow(group) // clear any stale glow
+          addEnchantGlow(group, currentTier)
+        }
+
         // Play equip sound effect
         playEquipSound(pieceId)
 
@@ -873,6 +902,9 @@ export default function VoxelCharacter({
         }
         const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
         if (group) {
+          // Remove glow from unequipped piece
+          removeEnchantGlow(group)
+
           const isUnlocked = totalXp >= XP_THRESHOLDS[pieceId as VoxelArmorPieceId]
           const tierTint = getTierTint(currentTier)
           const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
@@ -881,7 +913,7 @@ export default function VoxelCharacter({
             group.scale.set(0.85, 0.85, 0.85)
           }
           group.traverse((child) => {
-            if (child instanceof THREE.Mesh) {
+            if (child instanceof THREE.Mesh && !child.userData.isGlow) {
               child.material = new THREE.MeshLambertMaterial({
                 color: tierMat.primary,
                 transparent: true,

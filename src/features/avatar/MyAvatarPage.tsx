@@ -52,6 +52,8 @@ import TierUpCeremony from '../../components/avatar/TierUpCeremony'
 import OutfitCustomizer from './OutfitCustomizer'
 import ArmorDyePanel from './ArmorDyePanel'
 import { calculateTier, getTierBadgeColor, getTierTextColor, TIERS } from './voxel/tierMaterials'
+import { tierHasGlow } from './voxel/enchantmentGlow'
+import { tierHasCape } from './voxel/buildCape'
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -951,6 +953,36 @@ export default function MyAvatarPage() {
                   }}
                 >
                   {tierMaxXp - (profile.totalXp)} XP to {nextTierEntry[0]}
+                </Typography>
+              )}
+
+              {/* Enchantment glow / cape unlock hints */}
+              {!tierHasGlow(currentTierName) && (
+                <Typography
+                  sx={{
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                    fontSize: isLincoln ? '0.28rem' : '10px',
+                    color: isLincoln ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)',
+                    mt: 0.5,
+                    textAlign: 'center',
+                  }}
+                >
+                  Enchantment glow unlocks at Iron tier
+                </Typography>
+              )}
+              {!tierHasCape(currentTierName) && (
+                <Typography
+                  sx={{
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                    fontSize: isLincoln ? '0.28rem' : '10px',
+                    color: isLincoln ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)',
+                    mt: 0.25,
+                    textAlign: 'center',
+                  }}
+                >
+                  {tierHasGlow(currentTierName)
+                    ? 'Cape unlocks at Gold tier (enchantment glow active!)'
+                    : 'Cape unlocks at Gold tier'}
                 </Typography>
               )}
             </Box>
