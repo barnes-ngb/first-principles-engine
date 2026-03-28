@@ -27,3 +27,6 @@ export type { MinecraftSkinRequest, MinecraftSkinResponse } from "./minecraftSki
 
 export { generateMinecraftFace } from "./minecraftFace.js";
 export type { MinecraftFaceRequest, MinecraftFaceResponse } from "./minecraftFace.js";
+
+export { enhanceSketch } from "./enhanceSketch.js";
+export type { EnhanceSketchRequest, EnhanceSketchResponse } from "./enhanceSketch.js";

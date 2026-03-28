@@ -56,6 +56,8 @@ import { formatDateForInput } from '../../core/utils/format'
 import { getSchoolYearRange } from '../../core/utils/time'
 import { parseDateFromDocId } from '../today/daylog.model'
 import ComplianceDashboard from './ComplianceDashboard'
+import MonthlyTrend from './MonthlyTrend'
+import QuickAddHours from './QuickAddHours'
 import EvaluationHistoryTab from './EvaluationHistoryTab'
 import PortfolioPage from './PortfolioPage'
 import {
@@ -689,6 +691,32 @@ function HoursComplianceTab() {
           summary={summary}
           startDate={startDate}
           endDate={endDate}
+        />
+      )}
+
+      {/* Quick Add Non-Core Hours */}
+      {activeChildId && !isLoading && (
+        <QuickAddHours
+          familyId={familyId}
+          childId={activeChildId}
+          childName={activeChild?.name ?? 'child'}
+          date={new Date().toISOString().slice(0, 10)}
+          onSaved={(msg) => {
+            setSnackMessage({ text: msg, severity: 'success' })
+            fetchRecords().then(applyRecords)
+          }}
+        />
+      )}
+
+      {/* Monthly Trend */}
+      {activeChildId && !isLoading && hasData && (
+        <MonthlyTrend
+          dayLogs={dayLogs}
+          hoursEntries={hoursEntries}
+          adjustments={adjustments}
+          startDate={startDate}
+          endDate={endDate}
+          childId={activeChildId}
         />
       )}
 

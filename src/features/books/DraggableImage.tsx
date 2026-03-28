@@ -33,6 +33,7 @@ const DEFAULT_POSITIONS: Record<PageImage['type'], { x: number; y: number; width
   'ai-generated': { x: 0, y: 0, width: 100, height: 100 },
   photo: { x: 10, y: 10, width: 40, height: 40 },
   sticker: { x: 25, y: 15, width: 30, height: 30 },
+  sketch: { x: 0, y: 0, width: 100, height: 100 },
 }
 
 /** Rotation increment per tap (degrees). */

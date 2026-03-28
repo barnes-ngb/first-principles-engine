@@ -36,6 +36,12 @@ interface UseBookResult {
   addAiImageToPage: (pageId: string, url: string, storagePath: string, prompt: string) => void
   addStickerToPage: (pageId: string, stickerUrl: string, storagePath: string, label: string, tags?: StickerTag[]) => void
   updateImagePosition: (pageId: string, imageId: string, position: PageImage['position']) => void
+  /** Add a hand-drawn sketch photo to a page. Returns the image ID for later enhancement. */
+  addSketchToPage: (pageId: string, file: File) => Promise<string | undefined>
+  /** Update a sketch PageImage after AI enhancement resolves. */
+  applySketchEnhancement: (pageId: string, imageId: string, enhancedUrl: string, enhancedStoragePath: string) => void
+  /** Switch which version (original vs enhanced) is the active URL for a sketch image. */
+  pickSketchVersion: (pageId: string, imageId: string, version: 'original' | 'enhanced') => void
   /** Whether this session used AI image generation (for Art hours) */
   usedAiGeneration: boolean
 }
@@ -394,6 +400,118 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     [applyUpdate],
   )
 
+  const addSketchToPage = useCallback(
+    async (pageId: string, file: File): Promise<string | undefined> => {
+      if (!familyId || !bookId) return undefined
+
+      const imageId = generateImageId()
+      const ext = file.name.split('.').pop() ?? 'jpg'
+      const ts = new Date().toISOString().replace(/[:.]/g, '-')
+      const filename = `${ts}_sketch.${ext}`
+      const storagePath = `families/${familyId}/sketches/${filename}`
+      const storageRef = ref(storage, storagePath)
+
+      setSaveState('saving')
+      try {
+        await uploadBytes(storageRef, file)
+        const url = await getDownloadURL(storageRef)
+
+        const image: PageImage = {
+          id: imageId,
+          url,
+          storagePath,
+          type: 'sketch',
+          style: 'sketch',
+          originalSketchUrl: url,
+          label: 'Hand-drawn sketch',
+        }
+        applyUpdate((prev) => ({
+          ...prev,
+          pages: prev.pages.map((p) =>
+            p.id === pageId
+              ? { ...p, images: [...p.images, image], updatedAt: new Date().toISOString() }
+              : p,
+          ),
+        }))
+
+        // Save as portfolio artifact
+        if (book) {
+          const artifact: Omit<Artifact, 'id'> = {
+            childId: book.childId,
+            title: 'Hand-drawn sketch',
+            type: EvidenceType.Photo,
+            uri: url,
+            storagePath,
+            createdAt: new Date().toISOString(),
+            content: `Sketch captured for book "${book.title}"`,
+            tags: {
+              engineStage: EngineStage.Build,
+              domain: 'art',
+              subjectBucket: SubjectBucket.Art,
+              location: 'Home',
+            },
+          }
+          void addDoc(artifactsCollection(familyId), artifact)
+        }
+
+        return imageId
+      } catch (err) {
+        console.error('Sketch upload failed:', err)
+        setSaveState('error')
+        return undefined
+      }
+    },
+    [familyId, bookId, applyUpdate, book],
+  )
+
+  const applySketchEnhancement = useCallback(
+    (pageId: string, imageId: string, enhancedUrl: string, enhancedStoragePath: string) => {
+      setUsedAiGeneration(true)
+      applyUpdate((prev) => ({
+        ...prev,
+        pages: prev.pages.map((p) =>
+          p.id === pageId
+            ? {
+                ...p,
+                images: p.images.map((img) =>
+                  img.id === imageId
+                    ? { ...img, enhancedUrl, enhancedStoragePath }
+                    : img,
+                ),
+                updatedAt: new Date().toISOString(),
+              }
+            : p,
+        ),
+      }))
+    },
+    [applyUpdate],
+  )
+
+  const pickSketchVersion = useCallback(
+    (pageId: string, imageId: string, version: 'original' | 'enhanced') => {
+      applyUpdate((prev) => ({
+        ...prev,
+        pages: prev.pages.map((p) =>
+          p.id === pageId
+            ? {
+                ...p,
+                images: p.images.map((img) => {
+                  if (img.id !== imageId) return img
+                  const newUrl = version === 'enhanced' && img.enhancedUrl
+                    ? img.enhancedUrl
+                    : img.originalSketchUrl ?? img.url
+                  const newStyle = version === 'enhanced' ? 'ai-enhanced' as const : 'sketch' as const
+                  return { ...img, url: newUrl, style: newStyle }
+                }),
+                updatedAt: new Date().toISOString(),
+              }
+            : p,
+        ),
+      }))
+    },
+    [applyUpdate],
+  )
+
   const addStickerToPage = useCallback(
     (pageId: string, stickerUrl: string, storagePath: string, label: string, tags?: StickerTag[]) => {
       const image: PageImage = {
@@ -431,6 +549,9 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     addAiImageToPage,
     addStickerToPage,
     updateImagePosition,
+    addSketchToPage,
+    applySketchEnhancement,
+    pickSketchVersion,
     usedAiGeneration,
   }
 }

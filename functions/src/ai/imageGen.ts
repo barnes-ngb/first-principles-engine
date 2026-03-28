@@ -70,3 +70,9 @@ export type {
   MinecraftFaceRequest,
   MinecraftFaceResponse,
 } from "./imageTasks/minecraftFace.js";
+
+export { enhanceSketch } from "./imageTasks/enhanceSketch.js";
+export type {
+  EnhanceSketchRequest,
+  EnhanceSketchResponse,
+} from "./imageTasks/enhanceSketch.js";

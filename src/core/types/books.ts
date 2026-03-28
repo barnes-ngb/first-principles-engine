@@ -119,7 +119,15 @@ export interface PageImage {
   id: string
   url: string
   storagePath?: string
-  type: 'photo' | 'ai-generated' | 'sticker'
+  type: 'photo' | 'ai-generated' | 'sticker' | 'sketch'
+  /** Image style variant */
+  style?: 'sketch' | 'ai-generated' | 'ai-enhanced' | 'photo'
+  /** Original hand-drawn sketch URL (always saved when type is 'sketch') */
+  originalSketchUrl?: string
+  /** AI-enhanced version URL (if generated via "Make it fancy") */
+  enhancedUrl?: string
+  /** Storage path for the enhanced version */
+  enhancedStoragePath?: string
   /** AI prompt used to generate this image */
   prompt?: string
   /** Label for accessibility and display */

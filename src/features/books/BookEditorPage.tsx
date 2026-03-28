@@ -22,6 +22,7 @@ import MicIcon from '@mui/icons-material/Mic'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import StarIcon from '@mui/icons-material/Star'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
+import DrawIcon from '@mui/icons-material/Draw'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import PrintIcon from '@mui/icons-material/Print'
 
@@ -41,7 +42,7 @@ import { SubjectBucket } from '../../core/types/enums'
 import { useAI } from '../../core/ai/useAI'
 import type { Book, BookPage, BookTheme, Sticker } from '../../core/types'
 import { BOOK_THEMES } from '../../core/types'
-import type { ImageGenRequest } from '../../core/ai/useAI'
+import type { EnhanceSketchRequest, ImageGenRequest } from '../../core/ai/useAI'
 import PageEditor from './PageEditor'
 import SketchScanner from './SketchScanner'
 import StickerPicker from './StickerPicker'
@@ -128,9 +129,12 @@ export default function BookEditorPage() {
     addStickerToPage,
     updateImagePosition,
     reorderPages,
+    addSketchToPage,
+    applySketchEnhancement,
+    pickSketchVersion,
   } = useBook(familyId, bookId)
 
-  const { generateImage, loading: aiLoading, error: aiError } = useAI()
+  const { generateImage, enhanceSketch, loading: aiLoading, error: aiError } = useAI()
 
   const [activePageIndex, setActivePageIndex] = useState(0)
   const [showPhotoCapture, setShowPhotoCapture] = useState(false)
@@ -152,6 +156,14 @@ export default function BookEditorPage() {
   // Sticker state
   const [showStickerPicker, setShowStickerPicker] = useState(false)
   const [showSketchScanner, setShowSketchScanner] = useState(false)
+
+  // Sketch capture + enhance state
+  const [showSketchCapture, setShowSketchCapture] = useState(false)
+  const [sketchImageId, setSketchImageId] = useState<string | null>(null)
+  const [sketchEnhancing, setSketchEnhancing] = useState(false)
+  const [sketchEnhanceStyle, setSketchEnhanceStyle] = useState<EnhanceSketchRequest['style']>('storybook')
+  const [showSketchCompare, setShowSketchCompare] = useState(false)
+  const [sketchComparePageId, setSketchComparePageId] = useState<string | null>(null)
 
   // Sketch background cleanup toggle (default ON when page has existing images)
   const [autoCleanSketch, setAutoCleanSketch] = useState(true)
@@ -224,6 +236,51 @@ export default function BookEditorPage() {
       void addImageToPage(activePage.id, file, { cleanBackground: autoCleanSketch })
     },
     [activePage, addImageToPage, autoCleanSketch],
+  )
+
+  // ── Sketch: capture + enhance ────────────────────────────────────
+  const handleSketchCapture = useCallback(
+    async (file: File) => {
+      if (!activePage) return
+      const imageId = await addSketchToPage(activePage.id, file)
+      if (imageId) {
+        setSketchImageId(imageId)
+        setSketchComparePageId(activePage.id)
+      }
+      setShowSketchCapture(false)
+    },
+    [activePage, addSketchToPage],
+  )
+
+  const handleEnhanceSketch = useCallback(async () => {
+    if (!sketchImageId || !sketchComparePageId || !book) return
+    const page = book.pages.find((p) => p.id === sketchComparePageId)
+    const img = page?.images.find((i) => i.id === sketchImageId)
+    if (!img?.storagePath) return
+
+    setSketchEnhancing(true)
+    const result = await enhanceSketch({
+      familyId,
+      sketchStoragePath: img.storagePath,
+      style: sketchEnhanceStyle,
+    })
+    setSketchEnhancing(false)
+
+    if (result) {
+      applySketchEnhancement(sketchComparePageId, sketchImageId, result.url, result.storagePath)
+      setShowSketchCompare(true)
+    }
+  }, [sketchImageId, sketchComparePageId, book, enhanceSketch, familyId, sketchEnhanceStyle, applySketchEnhancement])
+
+  const handlePickSketchVersion = useCallback(
+    (version: 'original' | 'enhanced') => {
+      if (!sketchImageId || !sketchComparePageId) return
+      pickSketchVersion(sketchComparePageId, sketchImageId, version)
+      setShowSketchCompare(false)
+      setSketchImageId(null)
+      setSketchComparePageId(null)
+    },
+    [sketchImageId, sketchComparePageId, pickSketchVersion],
   )
 
   // ── Voice: Audio recording ──────────────────────────────────────
@@ -642,6 +699,156 @@ export default function BookEditorPage() {
         </Box>
       )}
 
+      {/* Sketch capture panel */}
+      {showSketchCapture && (
+        <Box sx={{ mt: 1, p: 2, border: '2px solid', borderColor: 'secondary.main', borderRadius: 2, bgcolor: 'secondary.50' }}>
+          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
+            Photograph your drawing
+          </Typography>
+          <PhotoCapture onCapture={(file) => { void handleSketchCapture(file) }} />
+          <Button
+            size="small"
+            onClick={() => setShowSketchCapture(false)}
+            sx={{ mt: 1 }}
+          >
+            Cancel
+          </Button>
+        </Box>
+      )}
+
+      {/* Sketch: "Use my drawing" / "Make it fancy" choice */}
+      {sketchImageId && !showSketchCompare && !sketchEnhancing && (
+        <Box sx={{ mt: 1, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
+            Your drawing is on the page! What next?
+          </Typography>
+          <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+            <Button
+              variant="contained"
+              onClick={() => { setSketchImageId(null); setSketchComparePageId(null) }}
+              sx={{ minHeight: 48, fontWeight: 600 }}
+            >
+              Use my drawing
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<AutoAwesomeIcon />}
+              onClick={() => { void handleEnhanceSketch() }}
+              sx={{ minHeight: 48, fontWeight: 600 }}
+            >
+              Make it fancy
+            </Button>
+          </Stack>
+          <Box sx={{ mt: 1.5 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+              Enhancement style:
+            </Typography>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap">
+              {([
+                { value: 'storybook' as const, label: 'Storybook' },
+                { value: 'comic' as const, label: 'Comic' },
+                { value: 'realistic' as const, label: 'Realistic' },
+                { value: 'minecraft' as const, label: 'Pixel Art' },
+              ]).map((s) => (
+                <Chip
+                  key={s.value}
+                  label={s.label}
+                  size="small"
+                  variant={sketchEnhanceStyle === s.value ? 'filled' : 'outlined'}
+                  onClick={() => setSketchEnhanceStyle(s.value)}
+                />
+              ))}
+            </Stack>
+          </Box>
+        </Box>
+      )}
+
+      {/* Sketch: Enhancing loading state */}
+      {sketchEnhancing && (
+        <Box sx={{ mt: 1, p: 3, border: '1px solid', borderColor: 'divider', borderRadius: 2, textAlign: 'center' }}>
+          <CircularProgress size={36} sx={{ mb: 1 }} />
+          <Typography variant="body1" fontWeight={600}>
+            Making it fancy...
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            The AI is turning your drawing into a polished illustration
+          </Typography>
+        </Box>
+      )}
+
+      {/* Sketch: Side-by-side comparison after enhancement */}
+      {showSketchCompare && sketchImageId && sketchComparePageId && (() => {
+        const cmpPage = book?.pages.find((p) => p.id === sketchComparePageId)
+        const cmpImg = cmpPage?.images.find((i) => i.id === sketchImageId)
+        if (!cmpImg) return null
+        return (
+          <Box sx={{ mt: 1, p: 2, border: '2px solid', borderColor: 'secondary.main', borderRadius: 2 }}>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5, textAlign: 'center' }}>
+              Pick your favorite!
+            </Typography>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              {/* Original */}
+              <Box sx={{ flex: 1, textAlign: 'center' }}>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                  Your drawing
+                </Typography>
+                <Box
+                  component="img"
+                  src={cmpImg.originalSketchUrl}
+                  alt="Original sketch"
+                  sx={{
+                    width: '100%',
+                    maxHeight: 240,
+                    objectFit: 'contain',
+                    borderRadius: 1,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    mb: 1,
+                  }}
+                />
+                <Button
+                  variant="contained"
+                  fullWidth
+                  onClick={() => handlePickSketchVersion('original')}
+                  sx={{ minHeight: 44 }}
+                >
+                  Use this one
+                </Button>
+              </Box>
+              {/* Enhanced */}
+              <Box sx={{ flex: 1, textAlign: 'center' }}>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                  Fancy version
+                </Typography>
+                <Box
+                  component="img"
+                  src={cmpImg.enhancedUrl}
+                  alt="AI-enhanced version"
+                  sx={{
+                    width: '100%',
+                    maxHeight: 240,
+                    objectFit: 'contain',
+                    borderRadius: 1,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    mb: 1,
+                  }}
+                />
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  fullWidth
+                  onClick={() => handlePickSketchVersion('enhanced')}
+                  sx={{ minHeight: 44 }}
+                >
+                  Use this one
+                </Button>
+              </Box>
+            </Stack>
+          </Box>
+        )
+      })()}
+
       {/* Page strip */}
       <Box
         sx={{
@@ -767,6 +974,15 @@ export default function BookEditorPage() {
 
       {/* Action buttons */}
       <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+        <Button
+          variant="contained"
+          color="secondary"
+          startIcon={<DrawIcon />}
+          onClick={() => setShowSketchCapture(true)}
+          sx={{ minHeight: 48, fontWeight: 700, fontSize: '0.95rem' }}
+        >
+          Add My Drawing
+        </Button>
         <Button
           variant="outlined"
           startIcon={<PhotoCameraIcon />}
