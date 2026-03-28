@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import Button from '@mui/material/Button'
+import Checkbox from '@mui/material/Checkbox'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import FormControlLabel from '@mui/material/FormControlLabel'
 import Stack from '@mui/material/Stack'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
@@ -15,14 +17,22 @@ export interface PrintSettings {
   sightWordStyle: 'highlighted' | 'bold' | 'plain'
   quality: 'standard' | 'product'
   trimMarks: boolean
+  includeCover: boolean
+  includePageNumbers: boolean
+  includeAuthor: boolean
+  includeBackCover: boolean
 }
 
 const DEFAULT_SETTINGS: PrintSettings = {
-  pageSize: 'letter',
+  pageSize: 'half-letter',
   background: 'white',
   sightWordStyle: 'highlighted',
   quality: 'standard',
   trimMarks: false,
+  includeCover: true,
+  includePageNumbers: true,
+  includeAuthor: true,
+  includeBackCover: false,
 }
 
 interface PrintSettingsDialogProps {
@@ -42,13 +52,13 @@ export default function PrintSettingsDialog({
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Print Settings</DialogTitle>
+      <DialogTitle>Print Book</DialogTitle>
       <DialogContent>
         <Stack spacing={3} sx={{ pt: 1 }}>
-          {/* Page size */}
+          {/* Format / page size */}
           <div>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Page size
+              Format
             </Typography>
             <ToggleButtonGroup
               value={settings.pageSize}
@@ -60,16 +70,16 @@ export default function PrintSettingsDialog({
               sx={{ flexWrap: 'wrap' }}
             >
               <ToggleButton value="letter" sx={{ textTransform: 'none' }}>
-                Letter (8.5x11)
+                Full page (8.5x11)
               </ToggleButton>
               <ToggleButton value="half-letter" sx={{ textTransform: 'none' }}>
-                Half letter
-              </ToggleButton>
-              <ToggleButton value="a4" sx={{ textTransform: 'none' }}>
-                A4
+                Mini-book (5.5x8.5)
               </ToggleButton>
               <ToggleButton value="booklet" sx={{ textTransform: 'none' }}>
                 Booklet (fold & staple)
+              </ToggleButton>
+              <ToggleButton value="a4" sx={{ textTransform: 'none' }}>
+                A4
               </ToggleButton>
               <ToggleButton value="mini-5x7" sx={{ textTransform: 'none' }}>
                 Mini 5x7
@@ -78,8 +88,13 @@ export default function PrintSettingsDialog({
                 Square 6x6
               </ToggleButton>
             </ToggleButtonGroup>
+            {settings.pageSize === 'half-letter' && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                Print double-sided on letter paper, fold in half, staple for a mini book!
+              </Typography>
+            )}
             {settings.pageSize === 'booklet' && (
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
                 Prints 2 pages per sheet. Fold each sheet in half, stack, and staple the edge to
                 make a mini book!
               </Typography>
@@ -101,21 +116,70 @@ export default function PrintSettingsDialog({
               sx={{ flexWrap: 'wrap' }}
             >
               <ToggleButton value="white" sx={{ textTransform: 'none' }}>
-                White
+                White (saves ink)
               </ToggleButton>
               <ToggleButton value="cream" sx={{ textTransform: 'none' }}>
-                Cream
+                Light cream
               </ToggleButton>
               <ToggleButton value="dark" sx={{ textTransform: 'none' }}>
-                Dark (app theme)
+                Original (app colors)
               </ToggleButton>
             </ToggleButtonGroup>
+          </div>
+
+          {/* Include options */}
+          <div>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+              Include
+            </Typography>
+            <Stack>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={settings.includeCover}
+                    onChange={(_, checked) => setSettings((s) => ({ ...s, includeCover: checked }))}
+                    size="small"
+                  />
+                }
+                label="Cover page with title"
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={settings.includePageNumbers}
+                    onChange={(_, checked) => setSettings((s) => ({ ...s, includePageNumbers: checked }))}
+                    size="small"
+                  />
+                }
+                label="Page numbers"
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={settings.includeAuthor}
+                    onChange={(_, checked) => setSettings((s) => ({ ...s, includeAuthor: checked }))}
+                    size="small"
+                  />
+                }
+                label={`"by [child name]" on cover`}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={settings.includeBackCover}
+                    onChange={(_, checked) => setSettings((s) => ({ ...s, includeBackCover: checked }))}
+                    size="small"
+                  />
+                }
+                label="Back cover"
+              />
+            </Stack>
           </div>
 
           {/* Product Ready */}
           <div>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Product Ready
+              Quality
             </Typography>
             <Stack spacing={1}>
               <ToggleButtonGroup
@@ -152,7 +216,7 @@ export default function PrintSettingsDialog({
               </ToggleButtonGroup>
             </Stack>
             {settings.trimMarks && (
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
                 Adds corner crop marks and 6mm bleed for commercial printing/cutting.
               </Typography>
             )}
@@ -190,7 +254,7 @@ export default function PrintSettingsDialog({
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
         <Button variant="contained" onClick={() => onPrint(settings)}>
-          Print PDF
+          Download PDF
         </Button>
       </DialogActions>
     </Dialog>
