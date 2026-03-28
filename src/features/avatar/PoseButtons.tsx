@@ -5,19 +5,21 @@ import { POSES } from './voxel/poseSystem'
 interface PoseButtonsProps {
   onPose: (poseId: string) => void
   currentPose: string | null
+  isLincoln?: boolean
 }
 
-export default function PoseButtons({ onPose, currentPose }: PoseButtonsProps) {
+export default function PoseButtons({ onPose, currentPose, isLincoln = true }: PoseButtonsProps) {
   const visiblePoses = POSES.filter((p) => p.id !== 'idle')
+  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
 
   return (
     <Box
       sx={{
         display: 'flex',
         justifyContent: 'center',
-        gap: '6px',
-        py: 1,
-        px: 1,
+        gap: '8px',
+        py: 1.5,
+        px: 2,
       }}
     >
       {visiblePoses.map((pose) => {
@@ -28,16 +30,18 @@ export default function PoseButtons({ onPose, currentPose }: PoseButtonsProps) {
             component="button"
             onClick={() => onPose(pose.id)}
             sx={{
-              width: 48,
-              height: 48,
-              borderRadius: '50%',
+              width: 54,
+              height: 54,
+              borderRadius: isLincoln ? '8px' : '50%',
               border: isActive
-                ? '2px solid #4caf50'
-                : '1.5px solid rgba(255,255,255,0.1)',
+                ? `2px solid ${accentColor}`
+                : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
               background: isActive
-                ? 'rgba(76,175,80,0.18)'
-                : 'rgba(255,255,255,0.04)',
-              color: isActive ? '#4caf50' : 'rgba(255,255,255,0.6)',
+                ? (isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.15)')
+                : (isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'),
+              color: isActive
+                ? accentColor
+                : (isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)'),
               cursor: 'pointer',
               transition: 'all 0.2s ease',
               outline: 'none',
@@ -46,29 +50,35 @@ export default function PoseButtons({ onPose, currentPose }: PoseButtonsProps) {
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '1px',
+              gap: '2px',
               position: 'relative',
+              boxShadow: isActive
+                ? `0 0 12px ${accentColor}33`
+                : 'none',
               '&:hover': {
                 background: isActive
-                  ? 'rgba(76,175,80,0.25)'
-                  : 'rgba(255,255,255,0.08)',
-                borderColor: isActive ? '#4caf50' : 'rgba(255,255,255,0.2)',
+                  ? (isLincoln ? 'rgba(126,252,32,0.22)' : 'rgba(232,160,191,0.22)')
+                  : (isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)'),
+                borderColor: isActive ? accentColor : (isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)'),
+                transform: 'translateY(-1px)',
               },
               '&:active': {
-                transform: 'scale(0.9)',
+                transform: 'scale(0.92)',
               },
             }}
             title={pose.name}
           >
-            <Box sx={{ fontSize: '18px', lineHeight: 1 }}>{pose.icon}</Box>
+            <Box sx={{ fontSize: '20px', lineHeight: 1 }}>{pose.icon}</Box>
             <Typography
               sx={{
-                fontSize: '6px',
-                fontFamily: 'monospace',
-                letterSpacing: '-0.3px',
-                opacity: 0.7,
+                fontSize: isLincoln ? '0.22rem' : '8px',
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                letterSpacing: isLincoln ? '-0.3px' : '0',
+                opacity: isActive ? 1 : 0.7,
                 lineHeight: 1,
                 mt: '2px',
+                fontWeight: isActive ? 700 : 400,
+                color: 'inherit',
               }}
             >
               {pose.name}
