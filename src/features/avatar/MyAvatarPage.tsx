@@ -273,13 +273,16 @@ export default function MyAvatarPage() {
   // ── Detect tier-up from XP changes ──────────────────────────────
   useEffect(() => {
     if (!profile) return
-    const oldTier = calculateTier(prevXpRef.current)
-    const newTier = calculateTier(profile.totalXp)
-    if (newTier !== oldTier && profile.totalXp > prevXpRef.current) {
-      const tierDef = TIERS[newTier]
-      if (tierDef) {
-        setCeremonyTier(tierDef.label)
-        setCeremonyActive(true)
+    // Skip detection on first load after child switch (sentinel = -1)
+    if (prevXpRef.current >= 0) {
+      const oldTier = calculateTier(prevXpRef.current)
+      const newTier = calculateTier(profile.totalXp)
+      if (newTier !== oldTier && profile.totalXp > prevXpRef.current) {
+        const tierDef = TIERS[newTier]
+        if (tierDef) {
+          setCeremonyTier(tierDef.label)
+          setCeremonyActive(true)
+        }
       }
     }
     prevXpRef.current = profile.totalXp
@@ -315,11 +318,15 @@ export default function MyAvatarPage() {
   const resetChildRef = useRef(childId)
   const [morningReset, setMorningReset] = useState(false)
 
-  // Reset flag when switching children
+  // Reset flags when switching children
   if (resetChildRef.current !== childId) {
     resetRanRef.current = false
     resetChildRef.current = childId
     setMorningReset(false)
+    // Use -1 sentinel to skip tier-up detection on first profile load after switch
+    prevXpRef.current = -1
+    prevPiecesCountRef.current = 0
+    prevTierRef.current = null
   }
 
   useEffect(() => {
