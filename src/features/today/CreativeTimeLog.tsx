@@ -35,7 +35,7 @@ interface CreativeTimeLogProps {
 }
 
 export default function CreativeTimeLog({ familyId, childId, childName }: CreativeTimeLogProps) {
-  const [activityId, setActivityId] = useState(CREATIVE_ACTIVITIES[0].id)
+  const [activityId, setActivityId] = useState<string>(CREATIVE_ACTIVITIES[0].id)
   const [minutes, setMinutes] = useState(15)
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
