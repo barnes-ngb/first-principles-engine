@@ -1,10 +1,15 @@
-import type { ImageOptions, ImageResponse } from "../aiService.js";
+import type { ImageEditOptions, ImageOptions, ImageResponse } from "../aiService.js";
 
 /** OpenAI-specific image generation provider. */
 export interface OpenAiProvider {
   generateImage(
     prompt: string,
     options?: ImageOptions,
+  ): Promise<ImageResponse>;
+  editImage(
+    imageBuffer: Buffer,
+    prompt: string,
+    options?: ImageEditOptions,
   ): Promise<ImageResponse>;
 }
 
@@ -50,6 +55,34 @@ export function createOpenAiProvider(apiKey: string): OpenAiProvider {
       return {
         url: image?.url ?? "",
         revisedPrompt: image?.revised_prompt,
+      };
+    },
+
+    async editImage(imageBuffer, prompt, options) {
+      const { default: OpenAI } = await import("openai");
+      const { Blob } = await import("buffer");
+      const client = new OpenAI({ apiKey });
+
+      // Use gpt-image-1 for edit — it accepts image input with a prompt
+      // Convert Buffer to a File-like Blob that the OpenAI SDK accepts
+      const imageFile = new Blob([new Uint8Array(imageBuffer)], {
+        type: "image/png",
+      }) as unknown as File;
+      Object.defineProperty(imageFile, "name", { value: "sketch.png" });
+
+      const response = await client.images.edit({
+        model: "gpt-image-1",
+        image: imageFile,
+        prompt,
+        n: 1,
+        size: (options?.size as "1024x1024") ?? "1024x1024",
+      });
+
+      const result = response.data?.[0];
+      return {
+        url: "",
+        b64Data: result?.b64_json ?? undefined,
+        revisedPrompt: undefined,
       };
     },
   };
