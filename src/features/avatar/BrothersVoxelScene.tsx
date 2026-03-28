@@ -238,7 +238,9 @@ export default function BrothersVoxelScene({
   const charactersRef = useRef<THREE.Group[]>([])
   const poseAnimatorRef = useRef<PoseAnimator[]>([])
   const onPoseCompleteRef = useRef(onPoseComplete)
-  onPoseCompleteRef.current = onPoseComplete
+  useEffect(() => {
+    onPoseCompleteRef.current = onPoseComplete
+  }, [onPoseComplete])
 
   const initScene = useCallback(() => {
     const container = containerRef.current
