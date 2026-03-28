@@ -234,10 +234,21 @@ export interface ArmorPieceProgress {
   }
 }
 
+/** Per-piece armor dye colors (Stone tier+) */
+export interface ArmorColors {
+  belt?: string
+  breastplate?: string
+  shoes?: string
+  shield?: string
+  helmet?: string
+  sword?: string
+}
+
 export interface OutfitCustomization {
   shirtColor?: string   // Hex
   pantsColor?: string   // Hex
   shoeColor?: string    // Hex
+  armorColors?: ArmorColors  // Per-piece dye colors (Stone tier+)
 }
 
 export interface AvatarProfile {
