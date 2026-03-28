@@ -362,17 +362,12 @@ function buildShield(U: number): THREE.Group {
   face.position.set(shX - U * 0.8, -U * 7, shZ)
   group.add(face)
 
-  // Cross emblem on shield front — vertical bar
-  const crossV = taggedFlatBox(U * 0.2, U * 8.0, U * 1.0, W, 'accent', 'shield_cross_v')
-  crossV.userData.isAccent = true
-  crossV.position.set(shX - U * 1, -U * 7, shZ)
-  group.add(crossV)
-
-  // Cross emblem — horizontal bar
-  const crossH = taggedFlatBox(U * 0.2, U * 1.0, U * 5.6, W, 'accent', 'shield_cross_h')
-  crossH.userData.isAccent = true
-  crossH.position.set(shX - U * 1, -U * 5.6, shZ)
-  group.add(crossH)
+  // Emblem placeholder — cross is the default, dynamically replaced by buildShieldEmblem
+  // The emblem group is added as a child in VoxelCharacter after building the shield.
+  // Store emblem anchor position in userData for the emblem builder to use.
+  group.userData.emblemX = shX - U * 1
+  group.userData.emblemY = -U * 7
+  group.userData.emblemZ = shZ
 
   // Rim — top
   const rimTop = taggedBox(U * 1.5, U * 0.5, U * 8.2, W, 'accent', 'shield_rim_top')

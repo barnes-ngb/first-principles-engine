@@ -20,6 +20,8 @@ import { applyPaintedFace, applyFaceWithAIFallback } from './voxel/pixelFace'
 import { buildHelmHair } from './voxel/buildHair'
 import { frameCameraToCharacter } from './voxel/cameraUtils'
 import { playEquipSound } from './voxel/equipSound'
+import { buildShieldEmblem } from './voxel/buildShieldEmblem'
+import { buildHelmetCrest } from './voxel/buildHelmetCrest'
 
 interface VoxelCharacterProps {
   features: CharacterFeatures | undefined
@@ -467,6 +469,45 @@ export default function VoxelCharacter({
     applyTierToArmor(armorGroupsRef.current, currentTier, equippedPieces, armorColors)
     prevEquippedRef.current = new Set(equippedPieces)
     prevTierRef.current = currentTier
+
+    // Shield emblem — add selected emblem design to shield front face
+    const shieldGroup = armorGroupsRef.current.get('shield')
+    if (shieldGroup) {
+      const scale = ageGroup === 'younger' ? 0.88 : 1.0
+      const U = 0.125 * scale
+      const emblemType = customization?.shieldEmblem ?? 'cross'
+      // Get emblem color from tier accent (or dye if set)
+      const tierTintKey = getTierTint(currentTier)
+      const tierMatRef = TIER_MATERIALS[tierTintKey] ?? TIER_MATERIALS.wood
+      const dyeHex = armorColors?.shield
+      const emblemColor = dyeHex
+        ? new THREE.Color(dyeHex).multiplyScalar(0.85).getHex()
+        : tierMatRef.accent
+      const emblem = buildShieldEmblem(emblemType, U, emblemColor)
+      // Position at the shield's anchor point (stored in userData)
+      emblem.position.set(
+        shieldGroup.userData.emblemX as number,
+        shieldGroup.userData.emblemY as number,
+        shieldGroup.userData.emblemZ as number,
+      )
+      shieldGroup.add(emblem)
+    }
+
+    // Helmet crest — add selected crest to top of helmet
+    const helmetGroup = armorGroupsRef.current.get('helmet')
+    if (helmetGroup) {
+      const scale = ageGroup === 'younger' ? 0.88 : 1.0
+      const U = 0.125 * scale
+      const crestType = customization?.helmetCrest ?? 'none'
+      const tierTintKey = getTierTint(currentTier)
+      const tierMatRef = TIER_MATERIALS[tierTintKey] ?? TIER_MATERIALS.wood
+      const dyeHex = armorColors?.helmet
+      const crestColor = dyeHex
+        ? new THREE.Color(dyeHex).multiplyScalar(0.85).getHex()
+        : tierMatRef.accent
+      const crest = buildHelmetCrest(crestType, U, crestColor)
+      if (crest) helmetGroup.add(crest)
+    }
 
     // Enchantment glow (Iron tier+) — add glow aura to equipped armor pieces
     if (tierHasGlow(currentTier)) {

@@ -244,11 +244,36 @@ export interface ArmorColors {
   sword?: string
 }
 
+/** Shield emblem options (Iron tier+) */
+export const ShieldEmblem = {
+  Cross: 'cross',
+  Star: 'star',
+  Heart: 'heart',
+  Sword: 'sword',
+  Crown: 'crown',
+  Fish: 'fish',
+  Lion: 'lion',
+  Flame: 'flame',
+} as const
+export type ShieldEmblem = (typeof ShieldEmblem)[keyof typeof ShieldEmblem]
+
+/** Helmet crest options (Iron tier+) */
+export const HelmetCrest = {
+  None: 'none',
+  Fin: 'fin',
+  Plume: 'plume',
+  Horns: 'horns',
+  Crown: 'crown',
+} as const
+export type HelmetCrest = (typeof HelmetCrest)[keyof typeof HelmetCrest]
+
 export interface OutfitCustomization {
   shirtColor?: string   // Hex
   pantsColor?: string   // Hex
   shoeColor?: string    // Hex
   armorColors?: ArmorColors  // Per-piece dye colors (Stone tier+)
+  shieldEmblem?: ShieldEmblem  // Shield emblem design (Iron tier+)
+  helmetCrest?: HelmetCrest    // Helmet crest style (Iron tier+)
 }
 
 export interface AvatarProfile {
