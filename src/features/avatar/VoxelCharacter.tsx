@@ -128,7 +128,7 @@ function enforceArmorOpacity(
       if (child instanceof THREE.Mesh && child.material) {
         const mats = Array.isArray(child.material) ? child.material : [child.material]
         for (const mat of mats) {
-          if (mat instanceof THREE.MeshLambertMaterial && (mat.transparent || mat.opacity < 1)) {
+          if ((mat instanceof THREE.MeshLambertMaterial || mat instanceof THREE.MeshPhongMaterial) && (mat.transparent || mat.opacity < 1)) {
             mat.transparent = false
             mat.opacity = 1.0
             mat.depthWrite = true
@@ -437,7 +437,7 @@ export default function VoxelCharacter({
           if (child instanceof THREE.Mesh) {
             const mat = Array.isArray(child.material) ? child.material : [child.material]
             for (const m of mat) {
-              if (m instanceof THREE.MeshLambertMaterial) {
+              if (m instanceof THREE.MeshLambertMaterial || m instanceof THREE.MeshPhongMaterial) {
                 m.transparent = true
                 m.opacity = 0.3
                 m.depthWrite = false

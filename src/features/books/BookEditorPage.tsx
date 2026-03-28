@@ -30,17 +30,20 @@ import FormControlLabel from '@mui/material/FormControlLabel'
 import Switch from '@mui/material/Switch'
 
 import Alert from '@mui/material/Alert'
+import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { SubjectBucket } from '../../core/types/enums'
 import { useAI } from '../../core/ai/useAI'
-import type { BookPage, BookTheme, Sticker } from '../../core/types'
+import type { Book, BookPage, BookTheme, Sticker } from '../../core/types'
 import { BOOK_THEMES } from '../../core/types'
 import type { ImageGenRequest } from '../../core/ai/useAI'
 import PageEditor from './PageEditor'
+import SketchScanner from './SketchScanner'
 import StickerPicker from './StickerPicker'
 import type { ImagePosition } from './DraggableImage'
 import { useBook } from './useBook'
@@ -148,6 +151,7 @@ export default function BookEditorPage() {
 
   // Sticker state
   const [showStickerPicker, setShowStickerPicker] = useState(false)
+  const [showSketchScanner, setShowSketchScanner] = useState(false)
 
   // Sketch background cleanup toggle (default ON when page has existing images)
   const [autoCleanSketch, setAutoCleanSketch] = useState(true)
@@ -301,12 +305,53 @@ export default function BookEditorPage() {
   }, [activePage, aiResult, aiPrompt, addAiImageToPage])
 
   // ── Sticker ─────────────────────────────────────────────────────
+  const autoSuggestTheme = useCallback((updatedBook: Book): BookTheme | null => {
+    const allTags: string[] = []
+    for (const page of updatedBook.pages ?? []) {
+      for (const img of page.images ?? []) {
+        if (img.type === 'sticker' && img.tags) {
+          allTags.push(...img.tags)
+        }
+      }
+    }
+    const tagToTheme: Record<string, BookTheme> = {
+      minecraft: 'minecraft',
+      animal: 'animals',
+      fantasy: 'fantasy',
+      nature: 'science',
+      faith: 'faith',
+      vehicle: 'adventure',
+    }
+    const themeCounts: Record<string, number> = {}
+    for (const tag of allTags) {
+      const theme = tagToTheme[tag]
+      if (theme) {
+        themeCounts[theme] = (themeCounts[theme] ?? 0) + 1
+      }
+    }
+    const sorted = Object.entries(themeCounts).sort((a, b) => b[1] - a[1])
+    return sorted.length > 0 ? (sorted[0][0] as BookTheme) : null
+  }, [])
+
   const handleSelectSticker = useCallback(
     (sticker: Sticker) => {
       if (!activePage) return
-      addStickerToPage(activePage.id, sticker.url, sticker.storagePath, sticker.label)
+      addStickerToPage(activePage.id, sticker.url, sticker.storagePath, sticker.label, sticker.tags)
+      // Auto-suggest theme if book has none
+      if (book && !book.theme) {
+        // Build what the book will look like after sticker is added
+        const updatedPages = book.pages.map((p) =>
+          p.id === activePage.id
+            ? { ...p, images: [...p.images, { id: '', url: '', type: 'sticker' as const, tags: sticker.tags }] }
+            : p,
+        )
+        const suggested = autoSuggestTheme({ ...book, pages: updatedPages })
+        if (suggested) {
+          updateBookMeta({ theme: suggested })
+        }
+      }
     },
-    [activePage, addStickerToPage],
+    [activePage, addStickerToPage, book, autoSuggestTheme, updateBookMeta],
   )
 
   // ── Print ───────────────────────────────────────────────────────
@@ -376,6 +421,10 @@ export default function BookEditorPage() {
 
   return (
     <Page>
+      <CreativeTimer
+        defaultSubject={SubjectBucket.LanguageArts}
+        defaultDescription="Book editing"
+      />
       {/* Header */}
       <Stack direction="row" alignItems="center" spacing={1}>
         <IconButton onClick={() => navigate('/books')} sx={{ minWidth: 48, minHeight: 48 }}>
@@ -750,6 +799,14 @@ export default function BookEditorPage() {
         >
           Sticker
         </Button>
+        <Button
+          variant="outlined"
+          startIcon={<PhotoCameraIcon />}
+          onClick={() => setShowSketchScanner(true)}
+          sx={{ minHeight: 48 }}
+        >
+          Scan Drawing
+        </Button>
 
         {/* Delete page (only if > 1 page) */}
         {book.pages.length > 1 && (
@@ -1005,6 +1062,19 @@ export default function BookEditorPage() {
         childName={childName}
         childProfile={isLincoln ? 'lincoln' : 'london'}
         onSelectSticker={handleSelectSticker}
+      />
+
+      {/* Sketch scanner */}
+      <SketchScanner
+        open={showSketchScanner}
+        onClose={() => setShowSketchScanner(false)}
+        familyId={familyId}
+        childId={activeChild?.id ?? ''}
+        childName={childName}
+        onAddToBook={(file) => {
+          if (activePage) void addImageToPage(activePage.id, file)
+          setShowSketchScanner(false)
+        }}
       />
 
       {/* Finish dialog */}

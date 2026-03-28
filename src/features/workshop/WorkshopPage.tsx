@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import CreativeTimer from '../../components/CreativeTimer'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -29,7 +30,7 @@ import type { ChatResponse } from '../../core/ai/useAI'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useProfile } from '../../core/profile/useProfile'
-import { UserProfile } from '../../core/types/enums'
+import { SubjectBucket, UserProfile } from '../../core/types/enums'
 import { db, storyGamesCollection, stripUndefined } from '../../core/firebase/firestore'
 import WorkshopWizard from './WorkshopWizard'
 import GamePlayView from './GamePlayView'
@@ -1046,6 +1047,10 @@ export default function WorkshopPage() {
 
   return (
     <Box sx={{ p: 2, maxWidth: 700, mx: 'auto' }}>
+      <CreativeTimer
+        defaultSubject={SubjectBucket.Art}
+        defaultDescription="Game design"
+      />
       {phase === GamePhase.Idle && (
         <Box sx={{ textAlign: 'center', py: 6 }}>
           <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>

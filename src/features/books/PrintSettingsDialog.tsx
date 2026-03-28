@@ -10,15 +10,19 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 
 export interface PrintSettings {
-  pageSize: 'letter' | 'half-letter' | 'a4' | 'booklet'
+  pageSize: 'letter' | 'half-letter' | 'a4' | 'booklet' | 'mini-5x7' | 'square-6'
   background: 'white' | 'cream' | 'dark'
   sightWordStyle: 'highlighted' | 'bold' | 'plain'
+  quality: 'standard' | 'product'
+  trimMarks: boolean
 }
 
 const DEFAULT_SETTINGS: PrintSettings = {
   pageSize: 'letter',
   background: 'white',
   sightWordStyle: 'highlighted',
+  quality: 'standard',
+  trimMarks: false,
 }
 
 interface PrintSettingsDialogProps {
@@ -67,6 +71,12 @@ export default function PrintSettingsDialog({
               <ToggleButton value="booklet" sx={{ textTransform: 'none' }}>
                 Booklet (fold & staple)
               </ToggleButton>
+              <ToggleButton value="mini-5x7" sx={{ textTransform: 'none' }}>
+                Mini 5x7
+              </ToggleButton>
+              <ToggleButton value="square-6" sx={{ textTransform: 'none' }}>
+                Square 6x6
+              </ToggleButton>
             </ToggleButtonGroup>
             {settings.pageSize === 'booklet' && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -100,6 +110,52 @@ export default function PrintSettingsDialog({
                 Dark (app theme)
               </ToggleButton>
             </ToggleButtonGroup>
+          </div>
+
+          {/* Product Ready */}
+          <div>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Product Ready
+            </Typography>
+            <Stack spacing={1}>
+              <ToggleButtonGroup
+                value={settings.quality}
+                exclusive
+                onChange={(_, val) => {
+                  if (val) setSettings((s) => ({ ...s, quality: val }))
+                }}
+                size="small"
+                sx={{ flexWrap: 'wrap' }}
+              >
+                <ToggleButton value="standard" sx={{ textTransform: 'none' }}>
+                  Standard
+                </ToggleButton>
+                <ToggleButton value="product" sx={{ textTransform: 'none' }}>
+                  High quality (300 DPI)
+                </ToggleButton>
+              </ToggleButtonGroup>
+              <ToggleButtonGroup
+                value={settings.trimMarks ? 'on' : 'off'}
+                exclusive
+                onChange={(_, val) => {
+                  if (val) setSettings((s) => ({ ...s, trimMarks: val === 'on' }))
+                }}
+                size="small"
+                sx={{ flexWrap: 'wrap' }}
+              >
+                <ToggleButton value="off" sx={{ textTransform: 'none' }}>
+                  No trim marks
+                </ToggleButton>
+                <ToggleButton value="on" sx={{ textTransform: 'none' }}>
+                  Trim marks (for cutting)
+                </ToggleButton>
+              </ToggleButtonGroup>
+            </Stack>
+            {settings.trimMarks && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                Adds corner crop marks and 6mm bleed for commercial printing/cutting.
+              </Typography>
+            )}
           </div>
 
           {/* Sight words */}
