@@ -14,6 +14,8 @@ const PAGE_SIZES = {
   'half-letter': { widthMM: 139.7, heightMM: 215.9, widthPx: 528, heightPx: 816 },
   a4: { widthMM: 297, heightMM: 210, widthPx: 1122, heightPx: 794 },
   booklet: { widthMM: 279.4, heightMM: 215.9, widthPx: 1056, heightPx: 816 },
+  'mini-5x7': { widthMM: 177.8, heightMM: 127, widthPx: 1050, heightPx: 750 },
+  'square-6': { widthMM: 152.4, heightMM: 152.4, widthPx: 900, heightPx: 900 },
 } as const
 
 const BG_COLORS = {
@@ -26,6 +28,8 @@ const DEFAULT_SETTINGS: PrintSettings = {
   pageSize: 'letter',
   background: 'white',
   sightWordStyle: 'highlighted',
+  quality: 'standard',
+  trimMarks: false,
 }
 
 export interface PrintBookOptions {
@@ -127,7 +131,7 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
   const settings = opts.settings ?? DEFAULT_SETTINGS
   const colors = BG_COLORS[settings.background]
   const size = PAGE_SIZES[settings.pageSize]
-  const isLandscape = settings.pageSize !== 'half-letter'
+  const isLandscape = settings.pageSize !== 'half-letter' && settings.pageSize !== 'square-6'
 
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
   const sightWordSet = new Set((sightWords ?? []).map((w) => w.toLowerCase()))
@@ -140,21 +144,25 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
 
   const isBooklet = settings.pageSize === 'booklet'
 
+  // When trim marks are on, the PDF page must be larger to accommodate bleed + marks
+  const pdfWidth = settings.trimMarks ? size.widthMM + BLEED_MM * 2 : size.widthMM
+  const pdfHeight = settings.trimMarks ? size.heightMM + BLEED_MM * 2 : size.heightMM
+
   const pdf = new jsPDF({
     orientation: isLandscape || isBooklet ? 'landscape' : 'portrait',
     unit: 'mm',
-    format: [size.widthMM, size.heightMM],
+    format: [pdfWidth, pdfHeight],
   })
 
   const endRenderPages = startStep('printBook.renderPages')
   if (isBooklet) {
-    await renderBooklet(pdf, book, childName, isLincoln, colors, titleFont, sightWordSet, settings.sightWordStyle, size, resolveUrl)
+    await renderBooklet(pdf, book, childName, isLincoln, colors, titleFont, sightWordSet, settings.sightWordStyle, size, resolveUrl, settings)
   } else {
     // Cover page
     const coverDiv = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
     coverDiv.innerHTML = buildCoverHtml(book, childName, colors, titleFont, size, resolveUrl)
     document.body.appendChild(coverDiv)
-    await renderDivToPage(coverDiv, pdf, size)
+    await renderDivToPage(coverDiv, pdf, size, settings)
     document.body.removeChild(coverDiv)
 
     // Content pages
@@ -164,7 +172,7 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
       const div = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
       div.innerHTML = buildPageHtml(page, colors, sightWordSet, settings.sightWordStyle, titleFont, size, isLandscape, resolveUrl)
       document.body.appendChild(div)
-      await renderDivToPage(div, pdf, size)
+      await renderDivToPage(div, pdf, size, settings)
       document.body.removeChild(div)
     }
 
@@ -173,7 +181,7 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
     const backDiv = createHiddenDiv(colors.bg, size.widthPx, size.heightPx)
     backDiv.innerHTML = buildBackCoverHtml(book, childName, isLincoln, colors, titleFont, sightWordSet.size > 0)
     document.body.appendChild(backDiv)
-    await renderDivToPage(backDiv, pdf, size)
+    await renderDivToPage(backDiv, pdf, size, settings)
     document.body.removeChild(backDiv)
   }
   endRenderPages()
@@ -203,6 +211,7 @@ async function renderBooklet(
   sightWordStyle: PrintSettings['sightWordStyle'],
   size: Size,
   resolveUrl: (url: string) => string,
+  settings?: PrintSettings,
 ): Promise<void> {
   const halfSize = PAGE_SIZES['half-letter']
 
@@ -236,7 +245,7 @@ async function renderBooklet(
     `
 
     document.body.appendChild(sheetDiv)
-    await renderDivToPage(sheetDiv, pdf, size)
+    await renderDivToPage(sheetDiv, pdf, size, settings)
     document.body.removeChild(sheetDiv)
   }
 }
@@ -271,16 +280,63 @@ function createHiddenDiv(bgColor: string, widthPx: number, heightPx: number): HT
   return div
 }
 
-async function renderDivToPage(div: HTMLDivElement, pdf: jsPDF, size: Size): Promise<void> {
+const TRIM_MARK_LENGTH_MM = 3
+const BLEED_MM = 6
+
+async function renderDivToPage(
+  div: HTMLDivElement,
+  pdf: jsPDF,
+  size: Size,
+  settings?: PrintSettings,
+): Promise<void> {
+  const scale = settings?.quality === 'product' ? 4 : 2
   const canvas = await html2canvas(div, {
     width: size.widthPx,
     height: size.heightPx,
-    scale: 2,
+    scale,
     backgroundColor: null,
     logging: false,
   })
   const imgData = canvas.toDataURL('image/png')
-  pdf.addImage(imgData, 'PNG', 0, 0, size.widthMM, size.heightMM)
+
+  if (settings?.trimMarks) {
+    // Place page content offset by bleed, then draw trim marks
+    pdf.addImage(imgData, 'PNG', BLEED_MM, BLEED_MM, size.widthMM, size.heightMM)
+    drawTrimMarks(pdf, size)
+  } else {
+    pdf.addImage(imgData, 'PNG', 0, 0, size.widthMM, size.heightMM)
+  }
+}
+
+/**
+ * Draw trim marks (corner crop marks) around the page content area.
+ * Content sits at (BLEED_MM, BLEED_MM) with its normal dimensions.
+ * Marks extend TRIM_MARK_LENGTH_MM outside the content area.
+ */
+function drawTrimMarks(pdf: jsPDF, size: Size): void {
+  const left = BLEED_MM
+  const top = BLEED_MM
+  const right = BLEED_MM + size.widthMM
+  const bottom = BLEED_MM + size.heightMM
+
+  pdf.setDrawColor(0, 0, 0)
+  pdf.setLineWidth(0.25)
+
+  // Top-left corner
+  pdf.line(left - TRIM_MARK_LENGTH_MM, top, left, top) // horizontal
+  pdf.line(left, top - TRIM_MARK_LENGTH_MM, left, top) // vertical
+
+  // Top-right corner
+  pdf.line(right, top, right + TRIM_MARK_LENGTH_MM, top)
+  pdf.line(right, top - TRIM_MARK_LENGTH_MM, right, top)
+
+  // Bottom-left corner
+  pdf.line(left - TRIM_MARK_LENGTH_MM, bottom, left, bottom)
+  pdf.line(left, bottom, left, bottom + TRIM_MARK_LENGTH_MM)
+
+  // Bottom-right corner
+  pdf.line(right, bottom, right + TRIM_MARK_LENGTH_MM, bottom)
+  pdf.line(right, bottom, right, bottom + TRIM_MARK_LENGTH_MM)
 }
 
 /* ───────────────────── cover ───────────────────── */

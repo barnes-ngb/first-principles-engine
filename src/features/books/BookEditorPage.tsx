@@ -41,6 +41,7 @@ import type { BookPage, BookTheme, Sticker } from '../../core/types'
 import { BOOK_THEMES } from '../../core/types'
 import type { ImageGenRequest } from '../../core/ai/useAI'
 import PageEditor from './PageEditor'
+import SketchScanner from './SketchScanner'
 import StickerPicker from './StickerPicker'
 import type { ImagePosition } from './DraggableImage'
 import { useBook } from './useBook'
@@ -148,6 +149,7 @@ export default function BookEditorPage() {
 
   // Sticker state
   const [showStickerPicker, setShowStickerPicker] = useState(false)
+  const [showSketchScanner, setShowSketchScanner] = useState(false)
 
   // Sketch background cleanup toggle (default ON when page has existing images)
   const [autoCleanSketch, setAutoCleanSketch] = useState(true)
@@ -750,6 +752,14 @@ export default function BookEditorPage() {
         >
           Sticker
         </Button>
+        <Button
+          variant="outlined"
+          startIcon={<PhotoCameraIcon />}
+          onClick={() => setShowSketchScanner(true)}
+          sx={{ minHeight: 48 }}
+        >
+          Scan Drawing
+        </Button>
 
         {/* Delete page (only if > 1 page) */}
         {book.pages.length > 1 && (
@@ -1005,6 +1015,19 @@ export default function BookEditorPage() {
         childName={childName}
         childProfile={isLincoln ? 'lincoln' : 'london'}
         onSelectSticker={handleSelectSticker}
+      />
+
+      {/* Sketch scanner */}
+      <SketchScanner
+        open={showSketchScanner}
+        onClose={() => setShowSketchScanner(false)}
+        familyId={familyId}
+        childId={selectedChild?.id ?? ''}
+        childName={childName}
+        onAddToBook={(file) => {
+          if (activePage) void addImageToPage(activePage.id, file)
+          setShowSketchScanner(false)
+        }}
       />
 
       {/* Finish dialog */}
