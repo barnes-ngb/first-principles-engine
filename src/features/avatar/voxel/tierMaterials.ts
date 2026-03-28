@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { ArmorColors } from '../../../core/types'
 
 // ── Tier definitions ─────────────────────────────────────────────
 
@@ -119,6 +120,7 @@ export function applyTierToArmor(
   armorMeshes: Map<string, THREE.Group>,
   tier: string,
   equippedPieces: string[],
+  armorColors?: ArmorColors,
 ): void {
   const tint = getTierTint(tier)
   const materials = TIER_MATERIALS[tint] ?? TIER_MATERIALS.wood
@@ -127,6 +129,10 @@ export function applyTierToArmor(
   const safeEquipped = equippedPieces ?? []
   for (const [pieceId, mesh] of armorMeshes) {
     if (!safeEquipped.includes(pieceId)) continue
+
+    // Check for custom dye color for this piece
+    const dyeHex = armorColors?.[pieceId as keyof ArmorColors]
+    const dyeColor = dyeHex ? new THREE.Color(dyeHex) : null
 
     let meshIndex = 0
     mesh.traverse((child) => {
@@ -139,14 +145,25 @@ export function applyTierToArmor(
 
       meshIndex++
       let baseColor: number
-      switch (role) {
-        case 'accent': baseColor = materials.accent; break
-        case 'detail': baseColor = materials.detail; break
-        default: baseColor = materials.primary
+
+      if (dyeColor) {
+        // Custom dye: use dye color for primary, darker shade for accent/detail
+        switch (role) {
+          case 'accent': baseColor = dyeColor.clone().multiplyScalar(0.85).getHex(); break
+          case 'detail': baseColor = dyeColor.clone().multiplyScalar(0.65).getHex(); break
+          default: baseColor = dyeColor.getHex()
+        }
+      } else {
+        switch (role) {
+          case 'accent': baseColor = materials.accent; break
+          case 'detail': baseColor = materials.detail; break
+          default: baseColor = materials.primary
+        }
       }
 
       // Apply weathering — alternate between base, darker, and rust-tinted variations
-      if (weathering > 0 && role === 'primary' && !child.userData.isAccent) {
+      // Skip weathering on dyed pieces to keep colors clean
+      if (!dyeColor && weathering > 0 && role === 'primary' && !child.userData.isAccent) {
         const rustTarget = materials.rust ?? materials.accent
         const variations = [
           baseColor,
