@@ -37,8 +37,8 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
-import type { Book, BookTheme } from '../../core/types'
-import { BOOK_THEMES } from '../../core/types'
+import type { Book, BookTheme, StickerTag } from '../../core/types'
+import { BOOK_THEMES, STICKER_TAG_LABELS } from '../../core/types'
 import { COVER_STYLES, GENERATION_STYLES } from './bookTypes'
 import { useBookshelf } from './useBook'
 import { useBookGenerator } from './useBookGenerator'
@@ -72,6 +72,7 @@ export default function BookshelfPage() {
 
   const [bookFilter, setBookFilter] = useState<BookFilter>('all')
   const [themeFilter, setThemeFilter] = useState<BookTheme | 'all'>('all')
+  const [stickerTagFilter, setStickerTagFilter] = useState<StickerTag | 'all'>('all')
   const [showNewDialog, setShowNewDialog] = useState(false)
   const [dialogTab, setDialogTab] = useState(0) // 0 = Blank, 1 = Generate
 
@@ -207,6 +208,23 @@ export default function BookshelfPage() {
     return ordered
   }, [books, isLincoln])
 
+  // Sticker tags across all books (for filter chips)
+  const availableStickerTags = useMemo(() => {
+    const tags = new Set<StickerTag>()
+    for (const book of books) {
+      for (const page of book.pages ?? []) {
+        for (const img of page.images ?? []) {
+          if (img.type === 'sticker' && img.tags) {
+            for (const tag of img.tags) {
+              tags.add(tag as StickerTag)
+            }
+          }
+        }
+      }
+    }
+    return Array.from(tags).sort()
+  }, [books])
+
   // Sort: drafts first (most recently edited), then completed
   const sortedBooks = useMemo(() => {
     let filtered = books
@@ -220,15 +238,26 @@ export default function BookshelfPage() {
     if (themeFilter !== 'all') {
       filtered = filtered.filter((b) => b.theme === themeFilter)
     }
-    if (childFilter !== 'all') {
-      filtered = filtered.filter((b) => b.childId === childFilter)
+    if (childFilter === 'together') {
+      filtered = filtered.filter((b) => b.isTogetherBook)
+    } else if (childFilter !== 'all') {
+      filtered = filtered.filter((b) => b.childId === childFilter || (b.contributorIds ?? []).includes(childFilter))
+    }
+    if (stickerTagFilter !== 'all') {
+      filtered = filtered.filter((b) =>
+        (b.pages ?? []).some((page) =>
+          (page.images ?? []).some((img) =>
+            img.type === 'sticker' && (img.tags ?? []).includes(stickerTagFilter)
+          )
+        )
+      )
     }
     return [...filtered].sort((a, b) => {
       if (a.status === 'draft' && b.status !== 'draft') return -1
       if (a.status !== 'draft' && b.status === 'draft') return 1
       return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
     })
-  }, [books, bookFilter, themeFilter, childFilter])
+  }, [books, bookFilter, themeFilter, childFilter, stickerTagFilter])
 
   if (loading) {
     return (
@@ -309,16 +338,16 @@ export default function BookshelfPage() {
           size="small"
         >
           <ToggleButton value="all" sx={{ textTransform: 'none', minHeight: 36 }}>
-            All Books
+            All ({books.length})
           </ToggleButton>
           <ToggleButton value="creative" sx={{ textTransform: 'none', minHeight: 36 }}>
-            My Stories
+            My Stories ({books.filter((b) => b.bookType !== 'sight-word' && b.bookType !== 'generated').length})
           </ToggleButton>
           <ToggleButton value="generated" sx={{ textTransform: 'none', minHeight: 36 }}>
-            Generated
+            Generated ({books.filter((b) => b.bookType === 'generated').length})
           </ToggleButton>
           <ToggleButton value="sight-word" sx={{ textTransform: 'none', minHeight: 36 }}>
-            Sight Words
+            Sight Words ({books.filter((b) => b.bookType === 'sight-word').length})
           </ToggleButton>
         </ToggleButtonGroup>
         <Box sx={{ flex: 1 }} />
@@ -348,19 +377,29 @@ export default function BookshelfPage() {
 
       {/* Child filter (parent view only) */}
       {isParent && allChildren.length > 1 && (
-        <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-          <ToggleButtonGroup
-            value={childFilter}
-            exclusive
-            onChange={(_, val) => { if (val) setChildFilter(val) }}
-            size="small"
-          >
-            <ToggleButton value="all" sx={{ textTransform: 'none', minHeight: 36 }}>All</ToggleButton>
-            {allChildren.map((c) => (
-              <ToggleButton key={c.id} value={c.id} sx={{ textTransform: 'none', minHeight: 36 }}>{c.name}</ToggleButton>
-            ))}
-          </ToggleButtonGroup>
-        </Box>
+        <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+          <Chip
+            label="All"
+            onClick={() => setChildFilter('all')}
+            color={childFilter === 'all' ? 'primary' : 'default'}
+            variant={childFilter === 'all' ? 'filled' : 'outlined'}
+          />
+          {allChildren.map((child) => (
+            <Chip
+              key={child.id}
+              label={`${child.name} (${books.filter((b) => b.childId === child.id).length})`}
+              onClick={() => setChildFilter(child.id)}
+              color={childFilter === child.id ? 'primary' : 'default'}
+              variant={childFilter === child.id ? 'filled' : 'outlined'}
+            />
+          ))}
+          <Chip
+            label={`Together (${books.filter((b) => b.isTogetherBook).length})`}
+            onClick={() => setChildFilter('together')}
+            color={childFilter === 'together' ? 'primary' : 'default'}
+            variant={childFilter === 'together' ? 'filled' : 'outlined'}
+          />
+        </Stack>
       )}
 
       {/* Theme filter chips — only show when there are themed books */}
@@ -394,6 +433,32 @@ export default function BookshelfPage() {
             )
           })}
         </Box>
+      )}
+
+      {/* Sticker tag filter chips */}
+      {availableStickerTags.length > 0 && (
+        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+          <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', mr: 0.5 }}>
+            Stickers:
+          </Typography>
+          <Chip
+            label="Any"
+            size="small"
+            onClick={() => setStickerTagFilter('all')}
+            color={stickerTagFilter === 'all' ? 'primary' : 'default'}
+            variant={stickerTagFilter === 'all' ? 'filled' : 'outlined'}
+          />
+          {availableStickerTags.map((tag) => (
+            <Chip
+              key={tag}
+              label={STICKER_TAG_LABELS[tag] ?? tag}
+              size="small"
+              onClick={() => setStickerTagFilter(tag)}
+              color={stickerTagFilter === tag ? 'primary' : 'default'}
+              variant={stickerTagFilter === tag ? 'filled' : 'outlined'}
+            />
+          ))}
+        </Stack>
       )}
 
       {books.length === 0 ? (

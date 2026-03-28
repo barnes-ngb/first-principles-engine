@@ -15,7 +15,7 @@ import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import { artifactsCollection, booksCollection, hoursCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { useDebounce } from '../../core/hooks/useDebounce'
-import type { Artifact, Book, BookPage, PageImage } from '../../core/types'
+import type { Artifact, Book, BookPage, PageImage, StickerTag } from '../../core/types'
 import type { SaveState } from '../../components/SaveIndicator'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { createEmptyPage, generateImageId } from './bookTypes'
@@ -29,12 +29,12 @@ interface UseBookResult {
   addPage: () => void
   deletePage: (pageId: string) => void
   reorderPages: (fromIndex: number, toIndex: number) => void
-  updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds'>>) => void
+  updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme'>>) => void
   addImageToPage: (pageId: string, file: File, options?: { cleanBackground?: boolean }) => Promise<void>
   removeImageFromPage: (pageId: string, imageId: string) => void
   uploadAudio: (pageId: string, blob: Blob) => Promise<void>
   addAiImageToPage: (pageId: string, url: string, storagePath: string, prompt: string) => void
-  addStickerToPage: (pageId: string, stickerUrl: string, storagePath: string, label: string) => void
+  addStickerToPage: (pageId: string, stickerUrl: string, storagePath: string, label: string, tags?: StickerTag[]) => void
   updateImagePosition: (pageId: string, imageId: string, position: PageImage['position']) => void
   /** Whether this session used AI image generation (for Art hours) */
   usedAiGeneration: boolean
@@ -239,7 +239,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   )
 
   const updateBookMeta = useCallback(
-    (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds'>>) => {
+    (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme'>>) => {
       applyUpdate((prev) => {
         const next = { ...prev, ...changes }
         // If status changes to 'complete', create portfolio artifact
@@ -395,13 +395,14 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   )
 
   const addStickerToPage = useCallback(
-    (pageId: string, stickerUrl: string, storagePath: string, label: string) => {
+    (pageId: string, stickerUrl: string, storagePath: string, label: string, tags?: StickerTag[]) => {
       const image: PageImage = {
         id: generateImageId(),
         url: stickerUrl,
         storagePath,
         type: 'sticker',
         label,
+        ...(tags?.length ? { tags } : {}),
       }
       applyUpdate((prev) => ({
         ...prev,
