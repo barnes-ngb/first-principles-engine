@@ -32,8 +32,10 @@ import type {
   AvatarProfile,
   CharacterFeatures,
   DailyArmorSession,
+  HelmetCrest,
   OutfitCustomization,
   PlatformerTier,
+  ShieldEmblem,
   VoxelArmorPieceId,
 } from '../../core/types'
 
@@ -51,6 +53,8 @@ import TierUpgradeCelebration from './TierUpgradeCelebration'
 import TierUpCeremony from '../../components/avatar/TierUpCeremony'
 import OutfitCustomizer from './OutfitCustomizer'
 import ArmorDyePanel from './ArmorDyePanel'
+import ShieldEmblemPicker from './ShieldEmblemPicker'
+import HelmetCrestPicker from './HelmetCrestPicker'
 import { calculateTier, getTierBadgeColor, getTierTextColor, TIERS } from './voxel/tierMaterials'
 import { tierHasGlow } from './voxel/enchantmentGlow'
 import { tierHasCape } from './voxel/buildCape'
@@ -481,6 +485,28 @@ export default function MyAvatarPage() {
     const profileRef = doc(avatarProfilesCollection(familyId), childId)
     await safeUpdateProfile(profileRef, { customization })
   }, [familyId, childId, profile])
+
+  // ── Shield emblem change ────────────────────────────────────────────
+  const handleEmblemChange = useCallback(
+    async (emblem: ShieldEmblem) => {
+      if (!familyId || !childId || !profile) return
+      const customization: OutfitCustomization = { ...profile.customization, shieldEmblem: emblem }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile],
+  )
+
+  // ── Helmet crest change ─────────────────────────────────────────────
+  const handleCrestChange = useCallback(
+    async (crest: HelmetCrest) => {
+      if (!familyId || !childId || !profile) return
+      const customization: OutfitCustomization = { ...profile.customization, helmetCrest: crest }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile],
+  )
 
   // ── Streak tracking ─────────────────────────────────────────────
   const checkArmorStreak = useCallback(async (prof: AvatarProfile) => {
@@ -1559,6 +1585,28 @@ export default function MyAvatarPage() {
             )
           })}
         </Box>
+
+        {/* ── Shield Emblem & Helmet Crest Pickers ──────────────── */}
+        {(appliedPieces.includes('shield_of_faith' as ArmorPiece) || appliedPieces.includes('helmet_of_salvation' as ArmorPiece)) && (
+          <Box sx={{ display: 'flex', gap: 1.5, mt: 1, mx: 2, flexWrap: 'wrap' }}>
+            {appliedPieces.includes('shield_of_faith' as ArmorPiece) && (
+              <ShieldEmblemPicker
+                currentEmblem={profile.customization?.shieldEmblem}
+                isIronOrAbove={!['WOOD', 'STONE'].includes(currentTierName)}
+                isLincoln={isLincoln}
+                onSelect={(emblem) => void handleEmblemChange(emblem)}
+              />
+            )}
+            {appliedPieces.includes('helmet_of_salvation' as ArmorPiece) && (
+              <HelmetCrestPicker
+                currentCrest={profile.customization?.helmetCrest}
+                isIronOrAbove={!['WOOD', 'STONE'].includes(currentTierName)}
+                isLincoln={isLincoln}
+                onSelect={(crest) => void handleCrestChange(crest)}
+              />
+            )}
+          </Box>
+        )}
 
         {/* ── Verse Card (for selected piece) ──────────────────── */}
         {selectedPiece && (

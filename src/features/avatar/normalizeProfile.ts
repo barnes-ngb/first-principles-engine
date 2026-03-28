@@ -4,8 +4,11 @@ import type {
   ArmorTier,
   AvatarProfile,
   CharacterFeatures,
+  HelmetCrest,
   OutfitCustomization,
+  ShieldEmblem,
 } from '../../core/types'
+import { ShieldEmblem as ShieldEmblemValues, HelmetCrest as HelmetCrestValues } from '../../core/types'
 
 /**
  * Normalize raw Firestore data into a safe AvatarProfile.
@@ -93,15 +96,26 @@ function normalizeArmorColors(raw: unknown): ArmorColors | undefined {
   return Object.keys(result).length > 0 ? result : undefined
 }
 
+const VALID_EMBLEMS = new Set<string>(Object.values(ShieldEmblemValues))
+const VALID_CRESTS = new Set<string>(Object.values(HelmetCrestValues))
+
 function normalizeCustomization(raw: unknown): OutfitCustomization | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const c = raw as Record<string, unknown>
   const armorColors = normalizeArmorColors(c.armorColors)
+  const shieldEmblem = typeof c.shieldEmblem === 'string' && VALID_EMBLEMS.has(c.shieldEmblem)
+    ? (c.shieldEmblem as ShieldEmblem)
+    : undefined
+  const helmetCrest = typeof c.helmetCrest === 'string' && VALID_CRESTS.has(c.helmetCrest)
+    ? (c.helmetCrest as HelmetCrest)
+    : undefined
   return {
     ...(c.shirtColor ? { shirtColor: c.shirtColor as string } : {}),
     ...(c.pantsColor ? { pantsColor: c.pantsColor as string } : {}),
     ...(c.shoeColor ? { shoeColor: c.shoeColor as string } : {}),
     ...(armorColors ? { armorColors } : {}),
+    ...(shieldEmblem ? { shieldEmblem } : {}),
+    ...(helmetCrest ? { helmetCrest } : {}),
   }
 }
 
