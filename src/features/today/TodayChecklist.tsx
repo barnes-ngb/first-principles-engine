@@ -35,7 +35,7 @@ import {
   RoutineItemKey,
   SubjectBucket,
 } from '../../core/types/enums'
-import type { ScanResult } from '../../core/types/planning'
+import type { ScanRecord } from '../../core/types/planning'
 import { autoFillBlockMinutes } from './daylog.model'
 import { syncChecklistToRoutine } from './checklistRoutineSync'
 import { calculateXp } from './xp'
@@ -103,7 +103,7 @@ interface TodayChecklistProps {
   onScanCapture: (file: File, index: number) => void
   scanLoading: boolean
   scanItemIndex: number | null
-  scanResult: ScanResult | null
+  scanResult: ScanRecord | null
   scanError: string | null
   onScanAddToPlan: () => void
   onScanSkip: () => void
