@@ -13,7 +13,7 @@ export const handleWeeklyFocus = async (
   const userInput = messages?.[0]?.content ?? "";
 
   // Load previous weeks' themes/conundrums for continuity
-  let previousWeeks: string[] = [];
+  const previousWeeks: string[] = [];
   try {
     const weeksSnap = await db
       .collection(`families/${familyId}/weeks`)
