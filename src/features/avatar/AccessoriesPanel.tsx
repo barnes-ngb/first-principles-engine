@@ -2,7 +2,7 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
 import type { AccessoryId, AccessorySlot } from '../../core/types'
-import { ACCESSORIES, ACCESSORY_SLOTS, ACCESSORY_XP_THRESHOLDS } from '../../core/types'
+import { ACCESSORIES, ACCESSORY_SLOTS } from '../../core/types'
 
 interface AccessoriesPanelProps {
   totalXp: number
