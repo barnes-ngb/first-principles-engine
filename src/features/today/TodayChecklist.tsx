@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
@@ -137,6 +137,11 @@ export default function TodayChecklist({
   const [newItemMinutes, setNewItemMinutes] = useState(15)
   const [newItemSubject, setNewItemSubject] = useState<SubjectBucket>(SubjectBucket.Other)
   const [gradeNote, setGradeNote] = useState<{ index: number; text: string } | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(id)
+  }, [])
 
   const rawChecklist = dayLog.checklist ?? []
   const hasPlanItems = rawChecklist.length > 0
@@ -162,11 +167,11 @@ export default function TodayChecklist({
       .filter((ci) => !ci.completed)
       .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
     if (remainingMinutes > 0 && completedCount < checklist.length) {
-      const est = new Date(Date.now() + remainingMinutes * 60_000)
+      const est = new Date(now + remainingMinutes * 60_000)
       return ` \u00B7 Est. finish: ${formatTime12h(est)}`
     }
     return ''
-  }, [checklist, completedCount])
+  }, [checklist, completedCount, now])
 
   // Engagement pattern insights
   const itemsWithEngagement = checklist.filter((ci) => ci.engagement)
