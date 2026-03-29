@@ -1153,11 +1153,12 @@ Return as JSON:
             updateWeekField('conundrum', parsed.conundrum)
           }
 
-          // Log any missing fields for debugging
+          // Log any missing fields and notify user
           const required = ['theme', 'virtue', 'scriptureRef', 'scriptureText', 'heartQuestion', 'formationPrompt']
           const missing = required.filter(f => !parsed[f])
           if (missing.length > 0) {
             console.warn('[WeeklyFocus] Missing fields:', missing)
+            setSnack({ text: `Week focus generated, but ${missing.join(', ')} couldn't be filled. Tap 'Generate' again to retry.`, severity: 'warning' })
           }
         } catch (parseErr) {
           console.error('[WeeklyFocus] Failed to parse:', parseErr)

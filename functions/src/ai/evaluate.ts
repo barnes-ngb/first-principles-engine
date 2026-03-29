@@ -514,7 +514,18 @@ export const generateWeeklyReviewNow = onCall(
         weekKey,
         error: errMsg,
       });
-      throw new HttpsError("internal", `Weekly review failed: ${errMsg}`);
+
+      const lower = errMsg.toLowerCase();
+      let userMessage: string;
+      if (lower.includes("rate limit") || lower.includes("429")) {
+        userMessage = "AI is busy — please wait a moment and try again.";
+      } else if (lower.includes("context length") || lower.includes("too long")) {
+        userMessage = "The request was too large. Try with less context.";
+      } else {
+        userMessage = "Weekly review generation failed. Please try again.";
+      }
+
+      throw new HttpsError("internal", userMessage);
     }
 
     return { success: true };

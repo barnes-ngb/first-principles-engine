@@ -38,6 +38,7 @@ import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
+import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -645,12 +646,14 @@ export default function TodayPage() {
 
       {/* --- Week Focus + Conundrum --- */}
       {weekFocus && (
-        <WeekFocusCard
-          weekFocus={weekFocus}
-          familyId={familyId}
-          selectedChildId={selectedChildId}
-          onSnackMessage={handleSnackMessage}
-        />
+        <SectionErrorBoundary>
+          <WeekFocusCard
+            weekFocus={weekFocus}
+            familyId={familyId}
+            selectedChildId={selectedChildId}
+            onSnackMessage={handleSnackMessage}
+          />
+        </SectionErrorBoundary>
       )}
 
       {/* --- Workshop Game Cards --- */}
@@ -669,6 +672,7 @@ export default function TodayPage() {
 
       {/* --- Today's Plan checklist (PRIMARY) --- */}
       {selectedChild && (
+        <SectionErrorBoundary>
         <TodayChecklist
           dayLog={dayLog}
           selectedChild={selectedChild}
@@ -698,6 +702,7 @@ export default function TodayPage() {
           onPrintMaterials={handlePrintTodayMaterials}
           printingMaterials={printingMaterials}
         />
+        </SectionErrorBoundary>
       )}
 
       {/* --- Per-item capture dialog --- */}
@@ -729,15 +734,17 @@ export default function TodayPage() {
 
       {/* --- Teach-Back (Lincoln only, after 50%+ must-do completion) --- */}
       {selectedChild && (
-        <TeachBackSection
-          dayLog={dayLog}
-          selectedChild={selectedChild}
-          familyId={familyId}
-          selectedChildId={selectedChildId}
-          today={today}
-          persistDayLogImmediate={persistDayLogImmediate}
-          onSnackMessage={handleSnackMessage}
-        />
+        <SectionErrorBoundary>
+          <TeachBackSection
+            dayLog={dayLog}
+            selectedChild={selectedChild}
+            familyId={familyId}
+            selectedChildId={selectedChildId}
+            today={today}
+            persistDayLogImmediate={persistDayLogImmediate}
+            onSnackMessage={handleSnackMessage}
+          />
+        </SectionErrorBoundary>
       )}
 
       {/* Quick non-core hours — collapsed by default */}
@@ -762,16 +769,18 @@ export default function TodayPage() {
 
       {/* --- Quick Capture + Artifacts --- */}
       <div ref={artifactSectionRef} />
-      <QuickCaptureSection
-        familyId={familyId}
-        selectedChildId={selectedChildId}
-        today={today}
-        weekPlanId={weekPlanId}
-        selectableChildren={selectableChildren}
-        todayArtifacts={todayArtifacts}
-        setTodayArtifacts={setTodayArtifacts}
-        onSnackMessage={handleSnackMessage}
-      />
+      <SectionErrorBoundary>
+        <QuickCaptureSection
+          familyId={familyId}
+          selectedChildId={selectedChildId}
+          today={today}
+          weekPlanId={weekPlanId}
+          selectableChildren={selectableChildren}
+          todayArtifacts={todayArtifacts}
+          setTodayArtifacts={setTodayArtifacts}
+          onSnackMessage={handleSnackMessage}
+        />
+      </SectionErrorBoundary>
 
       {selectedChildId && (
         <TeachHelperDialog

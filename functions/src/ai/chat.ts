@@ -1151,10 +1151,17 @@ export const chat = onCall(
         error: errMsg,
       });
 
-      throw new HttpsError(
-        "unavailable",
-        `AI service error: ${errMsg}`,
-      );
+      const lower = errMsg.toLowerCase();
+      let userMessage: string;
+      if (lower.includes("rate limit") || lower.includes("429")) {
+        userMessage = "AI is busy — please wait a moment and try again.";
+      } else if (lower.includes("context length") || lower.includes("too long")) {
+        userMessage = "The request was too large. Try with less context.";
+      } else {
+        userMessage = "AI service is temporarily unavailable. Please try again.";
+      }
+
+      throw new HttpsError("unavailable", userMessage);
     }
   },
 );
