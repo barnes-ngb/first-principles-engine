@@ -1047,15 +1047,14 @@ Return as JSON:
     })
   }, [])
 
-  // Generate unified weekly focus (theme + conundrum + connections) via AI
-  const handleGenerateWeek = useCallback(async () => {
+  // Generate unified weekly focus (theme + story chapter + connections) via AI
+  const handleGenerateWeekStory = useCallback(async () => {
     if (!activeChildId) return
     setSuggestingFocus(true)
     try {
-      // Build context from planner state
       const contextParts: string[] = []
       if (readAloudBook) {
-        contextParts.push(`Read-aloud book: ${readAloudBook}${readAloudChapters ? ` (${readAloudChapters})` : ''}`)
+        contextParts.push(`Read-aloud book this week: ${readAloudBook}${readAloudChapters ? ` (${readAloudChapters})` : ''}. Connect the readingTieIn to this book's themes.`)
       }
       if (weekNotes) {
         contextParts.push(`Parent notes: ${weekNotes}`)
@@ -1078,6 +1077,7 @@ Return as JSON:
       if (response?.message) {
         try {
           let json = response.message.trim()
+          // Strip markdown fences if present
           const fenceMatch = json.match(/```(?:json)?\s*([\s\S]*?)```/)
           if (fenceMatch) json = fenceMatch[1].trim()
           const firstBrace = json.indexOf('{')
@@ -1086,7 +1086,7 @@ Return as JSON:
 
           const parsed = JSON.parse(json)
 
-          // Set week focus fields
+          // Validate required fields — don't set if empty
           if (parsed.theme) updateWeekField('theme', parsed.theme)
           if (parsed.virtue) updateWeekField('virtue', parsed.virtue)
           if (parsed.scriptureRef) updateWeekField('scriptureRef', parsed.scriptureRef)
@@ -1094,13 +1094,19 @@ Return as JSON:
           if (parsed.heartQuestion) updateWeekField('heartQuestion', parsed.heartQuestion)
           if (parsed.formationPrompt) updateWeekField('formationPrompt', parsed.formationPrompt)
 
-          // Set conundrum
-          if (parsed.conundrum) {
+          // Set conundrum (the story chapter)
+          if (parsed.conundrum && parsed.conundrum.title && parsed.conundrum.scenario) {
             updateWeekField('conundrum', parsed.conundrum)
           }
 
+          // Log any missing fields for debugging
+          const required = ['theme', 'virtue', 'scriptureRef', 'scriptureText', 'heartQuestion', 'formationPrompt']
+          const missing = required.filter(f => !parsed[f])
+          if (missing.length > 0) {
+            console.warn('[WeeklyFocus] Missing fields:', missing)
+          }
         } catch (parseErr) {
-          console.error('[WeeklyFocus] Failed to parse response:', parseErr)
+          console.error('[WeeklyFocus] Failed to parse:', parseErr)
         }
       }
     } finally {
@@ -1116,11 +1122,11 @@ Return as JSON:
     if (isEmpty) {
       autoSuggestTriggered.current = true
       const timer = setTimeout(() => {
-        void handleGenerateWeek()
+        void handleGenerateWeekStory()
       }, 500)
       return () => clearTimeout(timer)
     }
-  }, [weekPlan, activeChildId, conversationLoaded, setupComplete, handleGenerateWeek])
+  }, [weekPlan, activeChildId, conversationLoaded, setupComplete, handleGenerateWeekStory])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
@@ -1766,7 +1772,7 @@ Generate a plan for Monday through Friday.`.trim()
             currentDraft={currentDraft}
           />
 
-          {/* Week Focus — unified generation */}
+          {/* Week Focus — Story-driven unified generation */}
           {weekPlan && (
             <Box
               sx={{
@@ -1778,71 +1784,79 @@ Generate a plan for Monday through Friday.`.trim()
               }}
             >
               <Stack spacing={2}>
-                <Typography variant="subtitle2">This Week&apos;s Journey</Typography>
+                <Typography variant="subtitle2">This Week in Stonebridge</Typography>
 
-                {/* Generation button */}
+                {/* Generate button */}
                 <Button
                   variant="contained"
-                  onClick={handleGenerateWeek}
+                  onClick={handleGenerateWeekStory}
                   disabled={suggestingFocus}
                   startIcon={suggestingFocus ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
                   fullWidth
+                  size="large"
                 >
-                  {suggestingFocus ? 'Generating week...' : weekPlan.theme ? 'Regenerate Week Focus' : 'Generate Week Focus'}
+                  {suggestingFocus
+                    ? 'Writing this week\'s chapter...'
+                    : weekPlan.theme
+                      ? 'Generate New Story'
+                      : 'Generate This Week\'s Story'}
                 </Button>
 
-                {suggestingFocus && (
-                  <Typography variant="body2" color="text.secondary" textAlign="center">
-                    Building this week&apos;s journey for Stonebridge...
-                  </Typography>
-                )}
-
-                {/* Theme / Virtue / Scripture row */}
+                {/* Theme + Virtue + Scripture */}
                 {weekPlan.theme && (
                   <Stack spacing={1.5}>
                     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                      <Chip label={`Theme: ${weekPlan.theme}`} color="primary" />
-                      <Chip label={`Virtue: ${weekPlan.virtue}`} color="secondary" />
+                      <Chip label={weekPlan.theme} color="primary" />
+                      {weekPlan.virtue && <Chip label={weekPlan.virtue} color="secondary" variant="outlined" />}
                     </Stack>
 
                     {weekPlan.scriptureRef && (
                       <Typography variant="body2">
                         <strong>{weekPlan.scriptureRef}</strong>
-                        {weekPlan.scriptureText && ` — "${weekPlan.scriptureText}"`}
+                        {weekPlan.scriptureText && (
+                          <Typography component="span" variant="body2" sx={{ fontStyle: 'italic' }}>
+                            {' — "'}{weekPlan.scriptureText}{'"'}
+                          </Typography>
+                        )}
                       </Typography>
                     )}
 
                     {weekPlan.heartQuestion && (
-                      <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+                      <Typography variant="body2" color="text.secondary">
                         {weekPlan.heartQuestion}
                       </Typography>
                     )}
 
                     {weekPlan.formationPrompt && (
                       <Typography variant="body2" color="text.secondary">
-                        Daily prompt: {weekPlan.formationPrompt}
+                        {weekPlan.formationPrompt}
                       </Typography>
                     )}
                   </Stack>
                 )}
 
-                {/* Conundrum preview */}
+                {/* Story Chapter */}
                 {weekPlan.conundrum && (
-                  <Stack spacing={1} sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
-                    <Typography variant="subtitle2">
-                      Conundrum: {weekPlan.conundrum.title}
+                  <Stack spacing={1.5} sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 2 }}>
+                    <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                      {weekPlan.conundrum.title}
                     </Typography>
-                    <Typography variant="body2">
-                      {weekPlan.conundrum.scenario.length > 200
-                        ? `${weekPlan.conundrum.scenario.slice(0, 200)}...`
-                        : weekPlan.conundrum.scenario}
+
+                    <Typography
+                      variant="body1"
+                      sx={{ lineHeight: 1.8, whiteSpace: 'pre-line' }}
+                    >
+                      {weekPlan.conundrum.scenario}
                     </Typography>
-                    <Typography variant="body2" fontWeight={600}>
+
+                    <Typography variant="body1" fontWeight={700} sx={{ mt: 1 }}>
                       {weekPlan.conundrum.question}
                     </Typography>
 
-                    {/* Weekly connections preview */}
-                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                    {/* Connection badges */}
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                      <Chip label={`Lincoln: ${weekPlan.conundrum.lincolnPrompt?.slice(0, 40)}...`} size="small" variant="outlined" color="primary" />
+                      <Chip label={`London: ${weekPlan.conundrum.londonPrompt?.slice(0, 40)}...`} size="small" variant="outlined" color="secondary" />
                       {weekPlan.conundrum.readingTieIn && <Chip label="Reading" size="small" variant="outlined" />}
                       {weekPlan.conundrum.mathContext && <Chip label="Math" size="small" variant="outlined" />}
                       {weekPlan.conundrum.londonDrawingPrompt && <Chip label="Drawing" size="small" variant="outlined" />}
@@ -1851,7 +1865,8 @@ Generate a plan for Monday through Friday.`.trim()
                   </Stack>
                 )}
 
-                {/* Editable fields — collapsed for manual tweaks */}
+                {/* Manual edit — collapsed */}
+                {weekPlan.theme && (
                 <Accordion>
                   <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                     <Typography variant="caption" color="text.secondary">
@@ -1862,11 +1877,14 @@ Generate a plan for Monday through Friday.`.trim()
                     <Stack spacing={1}>
                       <TextField size="small" label="Theme" value={weekPlan.theme} onChange={(e) => updateWeekField('theme', e.target.value)} />
                       <TextField size="small" label="Virtue" value={weekPlan.virtue} onChange={(e) => updateWeekField('virtue', e.target.value)} />
-                      <TextField size="small" label="Scripture" value={weekPlan.scriptureRef} onChange={(e) => updateWeekField('scriptureRef', e.target.value)} />
-                      <TextField size="small" label="Heart Question" value={weekPlan.heartQuestion} onChange={(e) => updateWeekField('heartQuestion', e.target.value)} />
+                      <TextField size="small" label="Scripture Ref" value={weekPlan.scriptureRef} onChange={(e) => updateWeekField('scriptureRef', e.target.value)} />
+                      <TextField size="small" label="Scripture Text" value={weekPlan.scriptureText ?? ''} onChange={(e) => updateWeekField('scriptureText', e.target.value)} multiline />
+                      <TextField size="small" label="Heart Question" value={weekPlan.heartQuestion} onChange={(e) => updateWeekField('heartQuestion', e.target.value)} multiline />
+                      <TextField size="small" label="Formation Prompt" value={weekPlan.formationPrompt ?? ''} onChange={(e) => updateWeekField('formationPrompt', e.target.value)} multiline />
                     </Stack>
                   </AccordionDetails>
                 </Accordion>
+                )}
               </Stack>
             </Box>
           )}

@@ -9,11 +9,11 @@ export const handleWeeklyFocus = async (
   const { db, familyId, childId, apiKey, messages } = ctx;
   const model = modelForTask("weeklyFocus" as never);
 
-  // Extract user context from the message (read-aloud book, subjects, notes)
+  // Extract user context from the message
   const userInput = messages?.[0]?.content ?? "";
 
-  // Load previous weeks' themes/conundrums for continuity
-  const previousWeeks: string[] = [];
+  // Load previous weeks for story continuity
+  let previousChapters: string[] = [];
   try {
     const weeksSnap = await db
       .collection(`families/${familyId}/weeks`)
@@ -26,9 +26,13 @@ export const handleWeeklyFocus = async (
       const parts: string[] = [];
       if (d.theme) parts.push(`Theme: ${d.theme}`);
       if (d.virtue) parts.push(`Virtue: ${d.virtue}`);
-      if (d.conundrum?.title) parts.push(`Conundrum: ${d.conundrum.title}`);
+      if (d.conundrum?.title) parts.push(`Story: "${d.conundrum.title}"`);
+      if (d.conundrum?.scenario) {
+        // Include first 150 chars of scenario for continuity
+        parts.push(`Summary: ${d.conundrum.scenario.slice(0, 150)}...`);
+      }
       if (parts.length > 0) {
-        previousWeeks.push(`${d.startDate}: ${parts.join(", ")}`);
+        previousChapters.push(`Week of ${d.startDate}: ${parts.join(" | ")}`);
       }
     }
   } catch (err) {
@@ -60,71 +64,81 @@ export const handleWeeklyFocus = async (
 
   const systemPrompt = `${CHARTER_PREAMBLE}
 
-You generate a UNIFIED WEEKLY FOCUS for the Barnes family homeschool. Everything you produce must be cohesive — the theme drives the virtue, the virtue connects to the scripture, the conundrum explores the theme through a real-world scenario, and all the weekly connections tie back to the conundrum world.
+You generate a UNIFIED WEEKLY FOCUS for the Barnes family homeschool. Everything you produce must be cohesive — the theme drives the virtue, the scripture illuminates both, and the story chapter brings them to life through narrative.
 
 THE BARNES FAMILY:
-- Lincoln (10, boy, neurodivergent, speech challenges, loves Minecraft)
+- Lincoln (10, boy, neurodivergent, speech challenges, loves Minecraft and building)
 - London (6, boy, story-driven, creative, loves drawing and stories)
-- Shelly (parent, fibromyalgia, runs the weekday routine)
+- Shelly (parent, fibromyalgia, reads the story aloud)
 - Nathan (dad, runs Saturday Dad Lab experiments)
 
-RECURRING CHARACTERS:
-The conundrum scenarios should feature a recurring cast of characters that the kids recognize week to week. These characters live in a frontier village called "Stonebridge" — a place that's part Minecraft, part real-world, where the villagers face new challenges each week. The kids become invested in what happens to these people over time.
+THE WORLD OF STONEBRIDGE:
+Stonebridge is a frontier village where resourceful people build, create, and solve problems together. It's part Minecraft, part pioneer town — a place where things break down and need to be fixed, where neighbors disagree and have to figure it out, where kids have real responsibilities.
 
-Core characters:
-- **Mayor Oakley** — the village leader who has to make hard decisions
-- **Tinkerer Maple** — an inventor who builds things to solve problems (Lincoln's analog)
-- **Story Keeper Wren** — a young girl who draws and tells stories to help people understand (London's analog)
-- **Elder Ironroot** — the wise advisor who connects problems to bigger principles (faith/virtue voice)
+RECURRING CHARACTERS (use 2-3 per story, not all):
+- **Mayor Oakley** — the village leader. Steady, thoughtful, sometimes overwhelmed by decisions. Has to balance what different villagers want.
+- **Tinkerer Maple** — a young inventor who builds things to solve problems. His creations sometimes work brilliantly and sometimes fail spectacularly. He's Lincoln's mirror — persistent, hands-on, sometimes frustrated when things don't work.
+- **Wren** — a boy who draws and tells stories. He helps people see things differently by sketching what could be. He's London's mirror — creative, imaginative, sees the world through pictures.
+- **Elder Ironroot** — the village wise woman. Connects everyday problems to deeper principles. When someone asks "what should we do?", she asks "what kind of village do we want to be?"
+- **Flint** — a kid who's always in a rush, takes shortcuts, sometimes creates bigger problems. Not a villain — just impulsive. The kids recognize this behavior.
 
-Not every character appears every week. Pick 2-3 that fit the scenario. The kids should feel like they're advising Stonebridge — "What should Mayor Oakley do?"
+STORY CHAPTER FORMAT:
+The story is a NARRATIVE, not a case study. It reads like the opening of a children's book chapter. It must:
+- Be ~250-350 words (2-3 minutes read-aloud)
+- Open with a scene, not an explanation. Show, don't tell.
+- Feature 2-3 characters the kids already know
+- Build to a DECISION POINT — a moment where the characters don't know what to do
+- END at the decision point. Do NOT resolve it. Do NOT list perspectives or options.
+- The tension in the story creates the discussion. The family figures out the perspectives themselves.
+- Use sensory detail: what does it look like, sound like, feel like?
+- Include dialogue between characters
+- Be accessible to a 6-year-old when read aloud AND engaging for a 10-year-old
 
-OUTPUT FORMAT (JSON only):
+WRONG (analytical): "The village has three options: build a dam, move the village, or plant trees."
+RIGHT (narrative): Maple pulled the last nail from the broken fence and looked at the water creeping toward the garden. "We could build a wall," he said. "A big one." Wren shook his head slowly, sketching in the mud with a stick. "What if we moved the garden instead?" Mayor Oakley rubbed her forehead. "We only have enough wood for one plan. And the rain comes tomorrow."
+
+OUTPUT FORMAT (JSON only, every field required):
 {
-  "theme": "A one-word or short phrase theme (e.g., 'Stewardship', 'Courage Under Pressure', 'Building Together')",
-  "virtue": "The character virtue to focus on this week (e.g., 'perseverance', 'generosity', 'honesty')",
-  "scriptureRef": "A Bible verse reference connected to the theme/virtue (book chapter:verse)",
-  "scriptureText": "The actual verse text (keep short — 1-2 sentences max)",
-  "heartQuestion": "A family discussion question that connects the theme to the kids' own lives",
-  "formationPrompt": "A short daily prayer/reflection prompt connected to the theme (1-2 sentences, suitable for morning formation time)",
+  "theme": "A one-word or short phrase (e.g., 'Stewardship', 'When Plans Fail', 'Building Together')",
+  "virtue": "The character virtue (e.g., 'perseverance', 'generosity', 'patience', 'courage')",
+  "scriptureRef": "A Bible verse reference (e.g., 'Proverbs 11:25')",
+  "scriptureText": "The actual verse text, quoted accurately. Keep to 1-2 sentences. Use ESV or NIV wording.",
+  "heartQuestion": "A family discussion question connecting the theme to the kids' own lives (1-2 sentences)",
+  "formationPrompt": "A short morning prayer or reflection tied to the theme (1-2 sentences, for Shelly to read during formation time)",
 
   "conundrum": {
-    "title": "Short catchy title (4-6 words)",
-    "scenario": "2-3 paragraph scenario set in Stonebridge. Written at a level a 6-year-old can follow when read aloud. Feature 2-3 of the recurring characters facing a specific dilemma.",
-    "question": "The central question to discuss. One sentence.",
-    "angles": [
-      "Perspective 1 — a valid argument for one approach",
-      "Perspective 2 — a valid argument for a different approach",
-      "Perspective 3 — optional third perspective"
-    ],
-    "lincolnPrompt": "A follow-up question for Lincoln that pushes deeper thinking — connects to building/engineering/problem-solving",
-    "londonPrompt": "A simpler follow-up for London — connects to stories/drawing/feelings",
-    "virtueConnection": "How this conundrum connects to the week's virtue",
-    "readingTieIn": "A question connecting the family's read-aloud book to the conundrum theme (or a general reading connection if no book specified)",
-    "mathContext": "A word problem set in the Stonebridge world, with specific numbers, appropriate for a 10-year-old",
-    "londonDrawingPrompt": "A concrete drawing prompt for London connected to the scenario (e.g., 'Draw Stonebridge before and after the storm')",
-    "dadLabSuggestion": "A hands-on experiment or build for Saturday Dad Lab that tests the conundrum's central question. Include materials (household items), prediction, and what to test. 3-4 sentences."
+    "title": "The story chapter title (4-6 words, like a book chapter title)",
+    "scenario": "The full narrative story chapter. 250-350 words. Ends at a decision point. No resolution. See format rules above.",
+    "question": "The central question the story raises, stated simply. One sentence. (e.g., 'What should Maple build?')",
+    "lincolnPrompt": "A follow-up question for Lincoln after the family discusses. Pushes toward engineering/building thinking. (e.g., 'If you were Maple, what would you design differently?')",
+    "londonPrompt": "A follow-up for London. Connects to drawing/stories/feelings. (e.g., 'Draw what you think the village looks like after the storm.')",
+    "virtueConnection": "One sentence connecting the story to this week's virtue. Written as something Elder Ironroot might say.",
+    "readingTieIn": "If a read-aloud book is provided in context, a question connecting the book's themes to the Stonebridge story. Otherwise, a general prompt like 'Find a library book about [topic from story].' 1-2 sentences.",
+    "mathContext": "A word problem set in Stonebridge using specific numbers from the story. Solvable by a 10-year-old. Full problem statement with numbers. (e.g., 'Maple has 24 boards. The wall needs 8 boards per section. How many sections can he build? If the garden is 5 sections wide, does he have enough?')",
+    "londonDrawingPrompt": "A concrete drawing prompt for London connected to the story. Specific enough for a 6-year-old boy. (e.g., 'Draw Maple's invention. What does it look like? Does it have wheels?')",
+    "dadLabSuggestion": "A hands-on experiment or build for Saturday Dad Lab connected to the story. Include: what to build, materials (household items only), a prediction to make, and what to test. 3-4 sentences."
   }
 }
 
 CRITICAL RULES:
-- Everything connects. The theme → virtue → scripture → conundrum → connections must form ONE coherent thread.
-- DO NOT repeat themes/virtues from recent weeks (see history below).
-- The conundrum scenario must be set in Stonebridge with the recurring characters.
-- The math problem must use specific numbers and be solvable by a 10-year-old.
-- The Dad Lab must use household materials only.
-- The drawing prompt must be concrete enough for a 6-year-old boy.
-- Respond ONLY with valid JSON. No markdown, no preamble.`;
+1. EVERY field must be filled. No empty strings. No nulls. The current system has a bug where incomplete JSON causes blank fields — prevent this by ensuring every field has content.
+2. The scripture text must be an actual Bible verse, quoted accurately. Do not paraphrase or invent scripture.
+3. The story must END at the decision point. Do not resolve it. The family decides what happens.
+4. Do NOT include an "angles" array. The story creates the angles through character dialogue and tension.
+5. Do NOT repeat themes or virtues from the previous weeks (see history below).
+6. The math problem must include specific numbers and be solvable.
+7. The Dad Lab must use household materials only.
+8. Respond ONLY with valid JSON. No markdown fences, no preamble, no explanation.`;
 
-  const userMessage = `Generate a unified weekly focus for this week.
+  const userMessage = `Generate this week's story and focus.
 
-CONTEXT:
-${userInput}
+FAMILY CONTEXT:
+${userInput || "(no additional context provided)"}
 
 RECENT SUBJECTS: ${Array.from(recentSubjects).join(", ") || "(no data)"}
 
-PREVIOUS WEEKS (don't repeat these themes/virtues):
-${previousWeeks.length > 0 ? previousWeeks.join("\n") : "(first week)"}
+PREVIOUS CHAPTERS (maintain story continuity, don't repeat themes/virtues):
+${previousChapters.length > 0 ? previousChapters.join("\n") : "(first week — introduce Stonebridge and the main characters)"}
 
 Today's date: ${new Date().toLocaleDateString()}`;
 
