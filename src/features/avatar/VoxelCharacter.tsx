@@ -215,6 +215,22 @@ function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): T
     }
   }
 
+  // Edge glow — thin bright line on front-facing platform edges
+  const edgeColor = tierBaseColor ?? 0x888888
+  const edgeMat = new THREE.MeshBasicMaterial({
+    color: edgeColor,
+    transparent: true,
+    opacity: 0.5,
+  })
+  // Front edge of bottom step
+  const frontEdge = new THREE.Mesh(new THREE.BoxGeometry(3.0 * s, 0.02 * s, 0.02 * s), edgeMat)
+  frontEdge.position.set(0, -0.125 * s + 0.125 * s, 1.0 * s)
+  platform.add(frontEdge)
+  // Front edge of top step
+  const topEdge = new THREE.Mesh(new THREE.BoxGeometry(2.4 * s, 0.02 * s, 0.02 * s), edgeMat.clone())
+  topEdge.position.set(0, 0.35 * s + 0.1 * s, 0.8 * s)
+  platform.add(topEdge)
+
   // Shift the whole platform down so character feet still at Y=0
   platform.position.y = -0.35 * s
 
@@ -253,14 +269,18 @@ function buildSkyGroup(): THREE.Group {
   moon.position.set(5, 6, -6)
   skyGroup.add(moon)
 
-  // Stars — small cubes scattered in the sky, with seasonal color tinting
+  // Stars — varied sizes for depth, with seasonal color tinting
   const season = getCurrentSeason()
-  for (let i = 0; i < 20; i++) {
-    const starGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04)
+  const starSizes = [0.03, 0.04, 0.06] // tiny, small, medium
+  for (let i = 0; i < 25; i++) {
+    const sizeIdx = i < 3 ? 2 : (i < 8 ? 1 : 0) // 3 medium, 5 small, rest tiny
+    const size = starSizes[sizeIdx]
+    const isBright = i < 3 // First 3 are "bright" stars
+    const starGeo = new THREE.BoxGeometry(size, size, size)
     const starMat = new THREE.MeshBasicMaterial({
-      color: getSeasonalStarColor(season),
+      color: isBright ? 0xFFFFFF : getSeasonalStarColor(season),
       transparent: true,
-      opacity: 0.6 + Math.random() * 0.4,
+      opacity: isBright ? 0.9 : (0.3 + Math.random() * 0.6),
     })
     const star = new THREE.Mesh(starGeo, starMat)
     star.name = 'twinkleStar'
@@ -759,14 +779,14 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         const dt = clock.getDelta()
         const time = clock.getElapsedTime()
 
-        // Gentle bob (freeze during ceremony so character stays still)
+        // Gentle breathing bob (freeze during ceremony so character stays still)
         if (!ceremonyActiveRef.current) {
-          characterRef.current.position.y = baseY + Math.sin(time * 1.2) * 0.03
+          characterRef.current.position.y = baseY + Math.sin(time * 2.1) * 0.02
 
           // Animate ground shadow scale with character bob
           const shadowMesh = scene.getObjectByName('groundShadow')
           if (shadowMesh) {
-            const bobScale = 1 + Math.sin(time * 1.2) * 0.02
+            const bobScale = 1 + Math.sin(time * 2.1) * 0.02
             shadowMesh.scale.set(bobScale, 1, bobScale)
           }
         }
@@ -801,15 +821,20 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           currentEqPose.armLRotX += (targetEqPose.armLRotX - currentEqPose.armLRotX) * lerpSpeed
           currentEqPose.armRRotX += (targetEqPose.armRRotX - currentEqPose.armRRotX) * lerpSpeed
 
-          const idleSway = Math.sin(time * 0.7) * 0.03
-
+          // Arm idle sway — opposition motion, 4s period
+          const armSwayTime = time * (Math.PI * 2 / 4) // 4-second period
           if (armLObj) {
-            armLObj.rotation.z = currentEqPose.armLRotZ + idleSway
-            armLObj.rotation.x = currentEqPose.armLRotX + Math.sin(time * 0.8) * 0.05
+            armLObj.rotation.z = currentEqPose.armLRotZ + Math.sin(armSwayTime) * 0.03
+            armLObj.rotation.x = currentEqPose.armLRotX + Math.sin(time * 0.8) * 0.03
           }
           if (armRObj) {
-            armRObj.rotation.z = currentEqPose.armRRotZ - idleSway
-            armRObj.rotation.x = currentEqPose.armRRotX - Math.sin(time * 0.8) * 0.05
+            armRObj.rotation.z = currentEqPose.armRRotZ - Math.sin(armSwayTime) * 0.03
+            armRObj.rotation.x = currentEqPose.armRRotX - Math.sin(time * 0.8) * 0.03
+          }
+
+          // Head micro-movement — very slow, subtle look-around (6s period)
+          if (headObj) {
+            headObj.rotation.y = Math.sin(time * (Math.PI * 2 / 6)) * 0.05
           }
         }
       }
@@ -1221,6 +1246,14 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         WebkitUserSelect: 'none',
         touchAction: 'none',
         position: 'relative',
+        // Scene fade-in on load
+        animation: 'sceneFadeIn 0.4s ease-out',
+        '@keyframes sceneFadeIn': {
+          '0%': { opacity: 0 },
+          '100%': { opacity: 1 },
+        },
+        // Subtle vignette — darkens corners for depth
+        boxShadow: 'inset 0 0 80px rgba(0,0,0,0.4)',
       }}
     />
   )
