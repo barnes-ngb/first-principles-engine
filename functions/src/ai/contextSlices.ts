@@ -28,6 +28,7 @@ export const ContextSlice = {
   WordMastery: "wordMastery",
   GeneratedContent: "generatedContent",
   WorkshopGames: "workshopGames",
+  Mastery: "mastery",
 } as const;
 export type ContextSlice = (typeof ContextSlice)[keyof typeof ContextSlice];
 
@@ -38,7 +39,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
     "charter", "childProfile", "workbookPaces",
     "weekFocus", "hoursProgress", "engagement", "gradeResults",
     "bookStatus", "sightWords", "recentEval", "wordMastery", "generatedContent",
-    "workshopGames",
+    "workshopGames", "mastery",
   ],
   chat: ["charter", "childProfile"],
   generate: ["charter", "childProfile"],
@@ -85,6 +86,79 @@ CONTENT GENERATION: When generating activities, questions, or plans:
 - For Shelly: simple to execute, adaptable to energy level, no prep required beyond what the app provides.
 
 Always align recommendations with these values. Be concise, practical, and encouraging.`;
+
+// ── Mastery summary ─────────────────────────────────────────────
+
+export interface MasterySummary {
+  activity: string;
+  subjectBucket: string;
+  gotIt: number;
+  working: number;
+  stuck: number;
+  lastSeen: string;
+}
+
+export function buildMasterySummary(
+  dayLogs: Array<{
+    date: string;
+    checklist: Array<{
+      label: string;
+      subjectBucket?: string;
+      mastery?: string;
+      completed?: boolean;
+    }>;
+  }>,
+): MasterySummary[] {
+  const map = new Map<string, MasterySummary>();
+
+  for (const day of dayLogs) {
+    for (const item of day.checklist ?? []) {
+      if (!item.completed || !item.mastery) continue;
+      const key = item.label.replace(/\s*\(\d+m\)/, "").trim();
+      const existing = map.get(key) ?? {
+        activity: key,
+        subjectBucket: item.subjectBucket ?? "Other",
+        gotIt: 0,
+        working: 0,
+        stuck: 0,
+        lastSeen: day.date,
+      };
+      if (item.mastery === "got-it") existing.gotIt++;
+      else if (item.mastery === "working") existing.working++;
+      else if (item.mastery === "stuck") existing.stuck++;
+      if (day.date > existing.lastSeen) existing.lastSeen = day.date;
+      map.set(key, existing);
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => {
+    const scoreA = a.stuck * 3 + a.working * 2 + a.gotIt;
+    const scoreB = b.stuck * 3 + b.working * 2 + b.gotIt;
+    return scoreB - scoreA;
+  });
+}
+
+export function formatMasterySummary(summaries: MasterySummary[]): string {
+  if (summaries.length === 0) return "";
+  const lines: string[] = [
+    "MASTERY OBSERVATIONS (parent feedback, last 4 weeks):",
+  ];
+  const mastered = summaries.filter(
+    (s) => s.gotIt >= 2 && s.stuck === 0 && s.working === 0,
+  );
+  const developing = summaries.filter(
+    (s) => s.working > 0 || (s.gotIt > 0 && s.stuck > 0),
+  );
+  const struggling = summaries.filter((s) => s.stuck >= 2);
+
+  if (mastered.length > 0)
+    lines.push(`CAN SKIP: ${mastered.map((s) => s.activity).join(", ")}`);
+  if (developing.length > 0)
+    lines.push(`CONTINUE: ${developing.map((s) => s.activity).join(", ")}`);
+  if (struggling.length > 0)
+    lines.push(`FOCUS HERE: ${struggling.map((s) => s.activity).join(", ")}`);
+  return lines.join("\n");
+}
 
 // ── Engagement summary compression ──────────────────────────────
 
@@ -273,6 +347,9 @@ export async function buildContextForTask(
   if (slices.includes("workshopGames")) {
     fetches.push({ slice: "workshopGames", promise: loadWorkshopGames(db, familyId, childId) });
   }
+  if (slices.includes("mastery")) {
+    fetches.push({ slice: "mastery", promise: loadMasterySummary(db, familyId, childId) });
+  }
 
   // Await all in parallel
   const results = await Promise.allSettled(fetches.map((f) => f.promise));
@@ -395,7 +472,51 @@ export async function buildContextForTask(
     if (workshopGames) sections.push(workshopGames);
   }
 
+  // Mastery observations (parent feedback on skill mastery)
+  if (sliceData.has("mastery")) {
+    const masteryText = sliceData.get("mastery") as string;
+    if (masteryText) sections.push(masteryText);
+  }
+
   return sections;
+}
+
+// ── Mastery summary loader ───────────────────────────────────
+
+/** Load mastery feedback from recent day logs (last 28 days) and format for AI context. */
+async function loadMasterySummary(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<string> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 28);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  const snap = await db
+    .collection(`families/${familyId}/days`)
+    .where("childId", "==", childId)
+    .where("date", ">=", cutoffStr)
+    .get();
+
+  const dayLogs = snap.docs.map((doc) => {
+    const data = doc.data() as {
+      date?: string;
+      checklist?: Array<{
+        label: string;
+        subjectBucket?: string;
+        mastery?: string;
+        completed?: boolean;
+      }>;
+    };
+    return {
+      date: data.date ?? "",
+      checklist: data.checklist ?? [],
+    };
+  });
+
+  const summaries = buildMasterySummary(dayLogs);
+  return formatMasterySummary(summaries);
 }
 
 // ── Generated content loader ──────────────────────────────────
