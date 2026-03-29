@@ -10,6 +10,10 @@ export function buildMaterialsPrompt(
   childName: string,
   snapshot: SkillSnapshot | null,
   theme?: string,
+  conundrum?: { title?: string; scenario?: string; question?: string },
+  virtue?: string,
+  scriptureRef?: string,
+  scriptureText?: string,
 ): string {
   const items = day.items.filter((i) => i.accepted && !i.isAppBlock)
 
@@ -47,7 +51,20 @@ ${theme ? `Week theme: ${theme}` : ''}
 
 ACTIVITIES:
 ${items.map((i) => `- ${i.title} (${i.estimatedMinutes}m, ${i.subjectBucket})${i.skipSuggestion ? ` [Skip: ${i.skipSuggestion.reason}]` : ''}`).join('\n')}
+${theme || conundrum?.title ? `
+WEEKLY THEME CONTEXT — USE THIS TO CONNECT WORKSHEETS:
+${theme ? `Theme: ${theme}` : ''}
+${virtue ? `Virtue: ${virtue}` : ''}
+${scriptureRef ? `Scripture: ${scriptureRef}${scriptureText ? ` — "${scriptureText}"` : ''}` : ''}
+${conundrum?.title ? `This week's story: "${conundrum.title}"` : ''}
+${conundrum?.scenario ? `Story summary: ${conundrum.scenario.slice(0, 200)}...` : ''}
 
+IMPORTANT: Connect at least 2 worksheets to this theme:
+- Math problems should reference the story characters/setting when possible
+- Phonics word lists should include words related to the theme
+- The formation worksheet should use the scripture and virtue above
+- Writing prompts should connect to the story world
+` : ''}
 CRITICAL RULES — READ THESE CAREFULLY:
 1. Return ONLY valid HTML. No markdown fences, no backticks, no explanation outside the HTML.
 2. Start directly with <html> tag.
@@ -192,6 +209,8 @@ export function openPrintWindow(rawHtml: string, title?: string): void {
   // If it doesn't start with <html or <!DOCTYPE, wrap it
   if (!html.match(/^<(!DOCTYPE|html)/i)) {
     html = `<!DOCTYPE html><html><head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>
         body { font-family: Arial, sans-serif; max-width: 7.5in; margin: 0.5in auto; }
         @media print { .page { page-break-before: always; } .page:first-child { page-break-before: auto; } }
@@ -199,13 +218,26 @@ export function openPrintWindow(rawHtml: string, title?: string): void {
     </head><body>${html}</body></html>`
   }
 
+  // Strategy 1: Try window.open (works on desktop)
   const printWindow = window.open('', '_blank')
   if (printWindow) {
     printWindow.document.write(html)
     printWindow.document.close()
     if (title) printWindow.document.title = title
     setTimeout(() => {
-      try { printWindow.print() } catch { /* print dialog blocked */ }
+      try { printWindow.print() } catch { /* blocked */ }
     }, 500)
+    return
   }
+
+  // Strategy 2: Fallback for mobile — download as HTML file
+  const blob = new Blob([html], { type: 'text/html' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${(title ?? 'worksheet').replace(/[^a-zA-Z0-9 -]/g, '')}.html`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }

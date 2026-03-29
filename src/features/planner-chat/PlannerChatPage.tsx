@@ -1583,6 +1583,10 @@ Generate a plan for Monday through Friday.`.trim()
         activeChild?.name ?? 'Student',
         snapshot,
         weekPlan?.theme,
+        weekPlan?.conundrum,
+        weekPlan?.virtue,
+        weekPlan?.scriptureRef,
+        weekPlan?.scriptureText,
       )
 
       const response = await aiChat({
@@ -1593,7 +1597,13 @@ Generate a plan for Monday through Friday.`.trim()
       })
 
       if (response?.message) {
-        openPrintWindow(response.message, `${activeChild?.name ?? 'Student'} - ${day.day}`)
+        try {
+          openPrintWindow(response.message, `${activeChild?.name ?? 'Student'} - ${day.day}`)
+          setSnack({ text: 'Worksheet ready! Check your new tab or downloads.', severity: 'success' })
+        } catch (err) {
+          console.error('Print failed:', err)
+          setSnack({ text: 'Print failed. Try again.', severity: 'error' })
+        }
       }
     } catch (err) {
       console.error('Material generation failed:', err)
