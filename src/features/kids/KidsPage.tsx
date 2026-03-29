@@ -21,8 +21,8 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { useProfile } from '../../core/profile/useProfile'
 import {
   artifactsCollection,
-  laddersCollection,
-  milestoneProgressCollection,
+  laddersCollection, // TODO: Remove ladder references after disposition system is fully live
+  milestoneProgressCollection, // TODO: Remove ladder references after disposition system is fully live
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type {

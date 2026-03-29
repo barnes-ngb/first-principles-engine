@@ -19,7 +19,6 @@ import {
   formatAppBlocksForPrompt,
   formatAssignmentsForPrompt,
   formatPaceDataForPrompt,
-  formatRecentSessionsForPrompt,
   formatSkillsForPrompt,
   formatStopRulesForPrompt,
   formatSupportsForPrompt,
@@ -100,10 +99,6 @@ const baseInputs: PlannerPromptInputs = {
       projectedFinishDate: '2026-06-15',
       bufferDays: 3,
     },
-  ],
-  recentSessions: [
-    { date: '2026-02-27', streamId: 'reading', result: 'near', notes: 'Struggled with digraphs' },
-    { date: '2026-02-27', streamId: 'math', result: 'hit' },
   ],
 }
 
@@ -208,18 +203,6 @@ describe('formatPaceDataForPrompt', () => {
   })
 })
 
-describe('formatRecentSessionsForPrompt', () => {
-  it('returns placeholder for empty sessions', () => {
-    expect(formatRecentSessionsForPrompt([])).toBe('No recent sessions.')
-  })
-
-  it('formats sessions', () => {
-    const result = formatRecentSessionsForPrompt(baseInputs.recentSessions!)
-    expect(result).toContain('2026-02-27 reading: near — Struggled with digraphs')
-    expect(result).toContain('2026-02-27 math: hit')
-  })
-})
-
 // ── Section Builder Tests ───────────────────────────────────────
 
 describe('buildChildContextSection', () => {
@@ -269,13 +252,11 @@ describe('buildSkillSnapshotSection', () => {
 })
 
 describe('buildSessionContextSection', () => {
-  it('includes pace data and recent sessions', () => {
+  it('includes pace data', () => {
     const section = buildSessionContextSection(baseInputs)
     expect(section).toContain('## Session Context')
     expect(section).toContain('### Pace Data')
     expect(section).toContain('Saxon Math 3')
-    expect(section).toContain('### Recent Sessions')
-    expect(section).toContain('Struggled with digraphs')
   })
 
   it('shows fallback when no context available', () => {
@@ -331,7 +312,6 @@ describe('buildPlannerSystemPrompt', () => {
 
     // Session context
     expect(prompt).toContain('Saxon Math 3: status=behind')
-    expect(prompt).toContain('Struggled with digraphs')
 
     // Assignments
     expect(prompt).toContain('Saxon Math 3 – Lesson 45')

@@ -254,7 +254,7 @@ export default function TodayPage() {
   const selectableChildren = children
   const selectedChild = activeChild
 
-  // Resolve card-based ladders from the catalog for the active child
+  // TODO: Remove ladder references after disposition system is fully live
   const cardLadders: LadderCardDefinition[] = useMemo(
     () => (selectedChild ? getLaddersForChild(selectedChild.name) ?? [] : []),
     [selectedChild],

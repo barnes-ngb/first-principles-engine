@@ -12,7 +12,6 @@ describe("TASK_CONTEXT", () => {
   it("plan includes all context slices", () => {
     expect(TASK_CONTEXT.plan).toContain("charter");
     expect(TASK_CONTEXT.plan).toContain("childProfile");
-    expect(TASK_CONTEXT.plan).toContain("recentSessions");
     expect(TASK_CONTEXT.plan).toContain("workbookPaces");
     expect(TASK_CONTEXT.plan).toContain("weekFocus");
     expect(TASK_CONTEXT.plan).toContain("hoursProgress");
@@ -31,7 +30,6 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.evaluate).toContain("charter");
     expect(TASK_CONTEXT.evaluate).toContain("childProfile");
     expect(TASK_CONTEXT.evaluate).toContain("sightWords");
-    expect(TASK_CONTEXT.evaluate).not.toContain("recentSessions");
     expect(TASK_CONTEXT.evaluate).not.toContain("workbookPaces");
     expect(TASK_CONTEXT.evaluate).not.toContain("engagement");
     expect(TASK_CONTEXT.evaluate).not.toContain("hoursProgress");

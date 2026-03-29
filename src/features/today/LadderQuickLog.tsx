@@ -1,3 +1,4 @@
+// TODO: Remove ladder references after disposition system is fully live
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Box from '@mui/material/Box'

@@ -14,7 +14,7 @@ import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
-  milestoneProgressCollection,
+  milestoneProgressCollection, // TODO: Remove ladder/milestone references after disposition system is fully live
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Artifact, MilestoneProgress } from '../../core/types'
