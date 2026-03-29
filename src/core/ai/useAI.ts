@@ -15,6 +15,7 @@ export const TaskType = {
   AnalyzeWorkbook: 'analyzeWorkbook',
   Disposition: 'disposition',
   Conundrum: 'conundrum',
+  WeeklyFocus: 'weeklyFocus',
 } as const
 export type TaskType = (typeof TaskType)[keyof typeof TaskType]
 

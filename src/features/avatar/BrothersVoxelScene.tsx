@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
-import type { AvatarProfile, CharacterFeatures, VoxelArmorPieceId } from '../../core/types'
+import type { AvatarBackground, AvatarProfile, CharacterFeatures, VoxelArmorPieceId } from '../../core/types'
 import { buildCharacter, applyProfileOutfit } from './voxel/buildCharacter'
 import { buildArmorPiece, VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import { applyTierToArmor, calculateTier, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
@@ -11,6 +11,7 @@ import { PoseAnimator, POSES, POSE_EXPRESSIONS, applyExpression, getEquipmentIdl
 import type { Pose } from './voxel/poseSystem'
 import { applyPaintedFace, applyFaceWithAIFallback } from './voxel/pixelFace'
 import { buildHelmHair } from './voxel/buildHair'
+import { buildRoom } from './voxel/buildRoom'
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ interface BrothersVoxelSceneProps {
   london: ChildData | null
   activePoseId?: string | null
   onPoseComplete?: () => void
+  background?: AvatarBackground
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -76,7 +78,10 @@ function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): T
   return platform
 }
 
-function addBackgroundElements(scene: THREE.Scene) {
+function buildSkyGroup(): THREE.Group {
+  const skyGroup = new THREE.Group()
+  skyGroup.name = 'skyGroup'
+
   const terrainColor = 0x0D0D1A
   for (let i = 0; i < 14; i++) {
     const w = 1 + Math.random() * 2
@@ -85,14 +90,14 @@ function addBackgroundElements(scene: THREE.Scene) {
     const hillMat = new THREE.MeshLambertMaterial({ color: terrainColor })
     const hill = new THREE.Mesh(hillGeo, hillMat)
     hill.position.set((Math.random() - 0.5) * 18, h / 2 - 2, -8 - Math.random() * 4)
-    scene.add(hill)
+    skyGroup.add(hill)
   }
 
   const moonGeo = new THREE.CircleGeometry(0.8, 8)
   const moonMat = new THREE.MeshBasicMaterial({ color: 0xFFFFDD, transparent: true, opacity: 0.5 })
   const moon = new THREE.Mesh(moonGeo, moonMat)
   moon.position.set(6, 6, -6)
-  scene.add(moon)
+  skyGroup.add(moon)
 
   for (let i = 0; i < 25; i++) {
     const starGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04)
@@ -102,8 +107,10 @@ function addBackgroundElements(scene: THREE.Scene) {
     star.userData.twinklePhase = Math.random() * Math.PI * 2
     star.userData.twinkleSpeed = 0.5 + Math.random() * 1.5
     star.position.set((Math.random() - 0.5) * 18, 3 + Math.random() * 5, -7 - Math.random() * 3)
-    scene.add(star)
+    skyGroup.add(star)
   }
+
+  return skyGroup
 }
 
 function applyHelmHairStyle(character: THREE.Group, isHelmetEquipped: boolean, features: CharacterFeatures) {
@@ -221,6 +228,24 @@ function buildCharacterWithArmor(
   return { characterGroup: character, armorMeshes }
 }
 
+/** Apply background mode to scene objects (extracted to avoid React compiler mutation tracking). */
+function applyBackground(
+  scene: THREE.Scene | null,
+  skyGroup: THREE.Group | null,
+  roomGroup: THREE.Group | null,
+  nightLights: THREE.Object3D[],
+  roomLights: THREE.Object3D[],
+  background: string,
+) {
+  if (!scene) return
+  const isRoom = background === 'room'
+  scene.background = new THREE.Color(isRoom ? 0x2a2218 : 0x1a1a2e)
+  if (skyGroup) skyGroup.visible = !isRoom
+  if (roomGroup) roomGroup.visible = isRoom
+  for (const l of nightLights) l.visible = !isRoom
+  for (const l of roomLights) l.visible = isRoom
+}
+
 // ── Component ────────────────────────────────────────────────────────
 
 export default function BrothersVoxelScene({
@@ -228,6 +253,7 @@ export default function BrothersVoxelScene({
   london,
   activePoseId,
   onPoseComplete,
+  background = 'night',
 }: BrothersVoxelSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -237,10 +263,18 @@ export default function BrothersVoxelScene({
   const sceneActiveRef = useRef(false)
   const charactersRef = useRef<THREE.Group[]>([])
   const poseAnimatorRef = useRef<PoseAnimator[]>([])
+  const skyGroupRef = useRef<THREE.Group | null>(null)
+  const roomGroupRef = useRef<THREE.Group | null>(null)
+  const nightLightsRef = useRef<THREE.Object3D[]>([])
+  const roomLightsRef = useRef<THREE.Object3D[]>([])
+  const backgroundRef = useRef(background)
   const onPoseCompleteRef = useRef(onPoseComplete)
   useEffect(() => {
     onPoseCompleteRef.current = onPoseComplete
   }, [onPoseComplete])
+  useEffect(() => {
+    backgroundRef.current = background
+  }, [background])
 
   const initScene = useCallback(() => {
     const container = containerRef.current
@@ -261,15 +295,26 @@ export default function BrothersVoxelScene({
     const height = container.clientHeight
 
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0x1a1a2e)
+    const bg = backgroundRef.current
+    scene.background = new THREE.Color(bg === 'room' ? 0x2a2218 : 0x1a1a2e)
     sceneRef.current = scene
 
-    addBackgroundElements(scene)
+    // Sky group (night background)
+    const skyGroup = buildSkyGroup()
+    skyGroup.visible = bg !== 'room'
+    scene.add(skyGroup)
+    skyGroupRef.current = skyGroup
+
+    // Room group (indoor background)
+    const roomGroup = buildRoom()
+    roomGroup.visible = bg === 'room'
+    scene.add(roomGroup)
+    roomGroupRef.current = roomGroup
 
     const camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 100)
     cameraRef.current = camera
 
-    // Lighting
+    // Night mode lighting
     const keyLight = new THREE.DirectionalLight(0xFFF5E6, 1.0)
     keyLight.position.set(5, 8, 6)
     scene.add(keyLight)
@@ -288,6 +333,25 @@ export default function BrothersVoxelScene({
     const bounceLight = new THREE.DirectionalLight(0xFFE8D6, 0.1)
     bounceLight.position.set(0, -4, 2)
     scene.add(bounceLight)
+
+    nightLightsRef.current = [keyLight, fillLight, rimLight, ambient, bounceLight]
+
+    // Room mode lighting (warmer, cozy)
+    const roomKeyLight = new THREE.DirectionalLight(0xFFF4E0, 0.8)
+    roomKeyLight.position.set(3, 6, 4)
+    scene.add(roomKeyLight)
+
+    const roomFill = new THREE.DirectionalLight(0xFFE8D0, 0.25)
+    roomFill.position.set(-3, 4, 2)
+    scene.add(roomFill)
+
+    const roomAmbient = new THREE.AmbientLight(0xFFFFFF, 0.35)
+    scene.add(roomAmbient)
+
+    roomLightsRef.current = [roomKeyLight, roomFill, roomAmbient]
+
+    for (const l of nightLightsRef.current) l.visible = bg !== 'room'
+    for (const l of roomLightsRef.current) l.visible = bg === 'room'
 
     // Build characters
     const characters: THREE.Group[] = []
@@ -409,7 +473,7 @@ export default function BrothersVoxelScene({
         }
       })
 
-      // Star twinkle
+      // Star twinkle + torch flame
       const twinkleTime = clock.getElapsedTime()
       scene.traverse((obj) => {
         if (obj.name === 'twinkleStar' && obj instanceof THREE.Mesh) {
@@ -417,6 +481,14 @@ export default function BrothersVoxelScene({
           const phase = obj.userData.twinklePhase as number
           const speed = obj.userData.twinkleSpeed as number
           mat.opacity = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(twinkleTime * speed + phase))
+        }
+        if (obj.name === 'torchFlame' && obj instanceof THREE.Mesh) {
+          const mat = obj.material as THREE.MeshBasicMaterial
+          const flicker = 0.85 + 0.15 * Math.sin(twinkleTime * 8 + Math.sin(twinkleTime * 3) * 2)
+          mat.color.setHex(0xFF8C00).multiplyScalar(flicker)
+        }
+        if (obj.name === 'torchLight' && obj instanceof THREE.PointLight) {
+          obj.intensity = 0.4 + 0.2 * Math.sin(twinkleTime * 6 + 1.5)
         }
       })
 
@@ -453,8 +525,24 @@ export default function BrothersVoxelScene({
       cameraRef.current = null
       charactersRef.current = []
       poseAnimatorRef.current = []
+      skyGroupRef.current = null
+      roomGroupRef.current = null
+      nightLightsRef.current = []
+      roomLightsRef.current = []
     }
   }, [initScene])
+
+  // ── Toggle background mode without full rebuild ──────────────────
+  useEffect(() => {
+    applyBackground(
+      sceneRef.current,
+      skyGroupRef.current,
+      roomGroupRef.current,
+      nightLightsRef.current,
+      roomLightsRef.current,
+      background,
+    )
+  }, [background])
 
   // Handle resize
   useEffect(() => {

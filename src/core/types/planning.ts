@@ -25,7 +25,9 @@ export interface WeekPlan {
   theme: string
   virtue: string
   scriptureRef: string
+  scriptureText?: string
   heartQuestion: string
+  formationPrompt?: string
   tracks: TrackType[]
   flywheelPlan: string
   buildLab: {
@@ -45,7 +47,11 @@ export interface WeekPlan {
     lincolnPrompt: string
     londonPrompt: string
     virtueConnection: string
-    subjectConnection: string
+    subjectConnection?: string
+    readingTieIn?: string
+    mathContext?: string
+    londonDrawingPrompt?: string
+    dadLabSuggestion?: string
   }
 }
 

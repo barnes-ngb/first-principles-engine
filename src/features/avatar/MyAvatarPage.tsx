@@ -1,23 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
-import { arrayRemove, deleteField, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore'
+import { addDoc, arrayRemove, deleteField, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
+import Dialog from '@mui/material/Dialog'
+import DialogContent from '@mui/material/DialogContent'
 import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
+import SaveAltIcon from '@mui/icons-material/SaveAlt'
+import ShareIcon from '@mui/icons-material/Share'
+import FolderIcon from '@mui/icons-material/Folder'
 
 import { useNavigate } from 'react-router-dom'
 import Page from '../../components/Page'
 import { app } from '../../core/firebase/firebase'
 import {
+  artifactsCollection,
   avatarProfilesCollection,
   dailyArmorSessionsCollection,
   dailyArmorSessionDocId,
   stripUndefined,
 } from '../../core/firebase/firestore'
+import { uploadArtifactFile, generateFilename } from '../../core/firebase/upload'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { addXpEvent } from '../../core/xp/addXpEvent'
@@ -26,9 +34,13 @@ import { normalizeAvatarProfile } from './normalizeProfile'
 import { useAvatarProfile } from './useAvatarProfile'
 import { safeUpdateProfile, safeSetProfile } from './safeProfileWrite'
 import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, VOXEL_TO_ARMOR_PIECE, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
+import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type {
+  AccessoryId,
   ArmorPiece,
   ArmorTier,
+  Artifact,
+  AvatarBackground,
   AvatarProfile,
   CharacterFeatures,
   DailyArmorSession,
@@ -38,11 +50,13 @@ import type {
   ShieldEmblem,
   VoxelArmorPieceId,
 } from '../../core/types'
+import { ACCESSORY_SLOTS } from '../../core/types'
 
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import { ArmorIcon } from './icons/ArmorIcons'
 import type { ArmorTierColor } from './icons/ArmorIcons'
 import VoxelCharacter from './VoxelCharacter'
+import type { VoxelCharacterHandle } from './VoxelCharacter'
 import BrothersVoxelScene from './BrothersVoxelScene'
 import PoseButtons from './PoseButtons'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
@@ -53,6 +67,7 @@ import TierUpgradeCelebration from './TierUpgradeCelebration'
 import TierUpCeremony from '../../components/avatar/TierUpCeremony'
 import OutfitCustomizer from './OutfitCustomizer'
 import ArmorDyePanel from './ArmorDyePanel'
+import AccessoriesPanel from './AccessoriesPanel'
 import ShieldEmblemPicker from './ShieldEmblemPicker'
 import HelmetCrestPicker from './HelmetCrestPicker'
 import { calculateTier, getTierBadgeColor, getTierTextColor, TIERS } from './voxel/tierMaterials'
@@ -179,8 +194,16 @@ export default function MyAvatarPage() {
   // Pose state
   const [activePoseId, setActivePoseId] = useState<string | null>(null)
 
+  // Screenshot state
+  const voxelRef = useRef<VoxelCharacterHandle>(null)
+  const [screenshotData, setScreenshotData] = useState<string | null>(null)
+  const [showScreenshotModal, setShowScreenshotModal] = useState(false)
+  const [savingToPortfolio, setSavingToPortfolio] = useState(false)
+
   // Brothers mode state
   const [brothersMode, setBrothersMode] = useState(false)
+  // Background mode (persisted in profile customization)
+  const [bgMode, setBgMode] = useState<AvatarBackground>('night')
   const siblingChild = children.find((c) => c.id !== childId)
   const siblingId = brothersMode ? siblingChild?.id : undefined
   const siblingProfile = useAvatarProfile(familyId, siblingId)
@@ -259,6 +282,10 @@ export default function MyAvatarPage() {
         if (snap.exists()) {
           const data = normalizeAvatarProfile(snap.data())
           setProfile(data)
+          // Sync background preference from profile
+          if (data.customization?.background) {
+            setBgMode(data.customization.background)
+          }
 
           const unlockedCount = getUnlockedVoxelPieces(data).length
           if (unlockedCount > prevPiecesCountRef.current && prevPiecesCountRef.current > 0) {
@@ -509,6 +536,47 @@ export default function MyAvatarPage() {
     [familyId, childId, profile],
   )
 
+  const handleBackgroundToggle = useCallback(
+    async () => {
+      if (!familyId || !childId || !profile) return
+      const newBg: AvatarBackground = bgMode === 'night' ? 'room' : 'night'
+      setBgMode(newBg)
+      const customization: OutfitCustomization = { ...profile.customization, background: newBg }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile, bgMode],
+  )
+
+  // ── Accessory toggle ──────────────────────────────────────────────
+  const handleAccessoryToggle = useCallback(
+    async (accId: AccessoryId) => {
+      if (!familyId || !childId || !profile) return
+      const current = profile.customization?.accessories ?? []
+      let updated: AccessoryId[]
+
+      if (current.includes(accId)) {
+        // Unequip
+        updated = current.filter((id) => id !== accId)
+      } else {
+        // Equip — enforce slot exclusivity (remove any other item in the same slot)
+        const slot = Object.entries(ACCESSORY_SLOTS).find(
+          ([, ids]) => (ids as readonly string[]).includes(accId),
+        )?.[0]
+        const slotItems = slot ? ACCESSORY_SLOTS[slot as keyof typeof ACCESSORY_SLOTS] : []
+        updated = [
+          ...current.filter((id) => !(slotItems as readonly string[]).includes(id)),
+          accId,
+        ]
+      }
+
+      const customization: OutfitCustomization = { ...profile.customization, accessories: updated }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile],
+  )
+
   // ── Streak tracking ─────────────────────────────────────────────
   const checkArmorStreak = useCallback(async (prof: AvatarProfile) => {
     if (!familyId || !childId) return
@@ -748,7 +816,127 @@ export default function MyAvatarPage() {
   const xpInTier = profile ? profile.totalXp - tierMinXp : 0
   const tierProgress = tierRange > 0 ? Math.min((xpInTier / tierRange) * 100, 100) : 100
 
+  // ── Screenshot capture ──────────────────────────────────────────
+  const playShutterSound = useCallback(() => {
+    try {
+      const ctx = new AudioContext()
+      const bufferSize = ctx.sampleRate * 0.1 // 100ms
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+      const data = buffer.getChannelData(0)
+      for (let i = 0; i < bufferSize; i++) {
+        const t = i / bufferSize
+        data[i] = (Math.random() * 2 - 1) * Math.max(0, 1 - t * 6) * 0.3
+      }
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'highpass'
+      filter.frequency.value = 2000
+      source.connect(filter)
+      filter.connect(ctx.destination)
+      source.start()
+    } catch { /* Web Audio not available */ }
+  }, [])
 
+  const captureAvatar = useCallback(() => {
+    const rawDataUrl = voxelRef.current?.capture()
+    if (!rawDataUrl) return
+
+    // Composite the 3D canvas with a text overlay bar
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(img, 0, 0)
+
+      // Semi-transparent bar at the bottom
+      const barHeight = Math.round(img.height * 0.08)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)'
+      ctx.fillRect(0, img.height - barHeight, img.width, barHeight)
+
+      // Text
+      const fontSize = Math.round(barHeight * 0.45)
+      ctx.font = `bold ${fontSize}px "Press Start 2P", monospace`
+      ctx.fillStyle = '#ffffff'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      const tierLabel = profile ? calculateTier(profile.totalXp) : ''
+      const xp = profile?.totalXp ?? 0
+      const name = activeChild?.name ?? ''
+      const text = `${name}  •  ${tierLabel} Tier  •  ${xp} XP`
+      ctx.fillText(text, img.width / 2, img.height - barHeight / 2, img.width - 20)
+
+      // Small watermark
+      const wmSize = Math.round(barHeight * 0.3)
+      ctx.font = `${wmSize}px monospace`
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)'
+      ctx.textAlign = 'right'
+      ctx.fillText('Armor of God', img.width - 8, img.height - barHeight - 6)
+
+      playShutterSound()
+      setScreenshotData(canvas.toDataURL('image/png'))
+      setShowScreenshotModal(true)
+    }
+    img.src = rawDataUrl
+  }, [profile, activeChild, playShutterSound])
+
+  const saveToDevice = useCallback((dataUrl: string) => {
+    const link = document.createElement('a')
+    link.download = `${activeChild?.name ?? 'avatar'}-armor-of-god.png`
+    link.href = dataUrl
+    link.click()
+  }, [activeChild])
+
+  const shareImage = useCallback(async (dataUrl: string) => {
+    const response = await fetch(dataUrl)
+    const blob = await response.blob()
+    const file = new File([blob], `${activeChild?.name ?? 'avatar'}-armor-of-god.png`, { type: 'image/png' })
+
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      await navigator.share({
+        title: `${activeChild?.name}'s Armor of God`,
+        text: `Check out ${activeChild?.name}'s armor! ${currentTierName} tier, ${profile?.totalXp ?? 0} XP!`,
+        files: [file],
+      })
+    } else {
+      saveToDevice(dataUrl)
+    }
+  }, [activeChild, profile, currentTierName, saveToDevice])
+
+  const saveToPortfolio = useCallback(async (dataUrl: string) => {
+    if (!familyId || !childId || !profile) return
+    setSavingToPortfolio(true)
+    try {
+      const response = await fetch(dataUrl)
+      const blob = await response.blob()
+
+      const artifact: Omit<Artifact, 'id'> = {
+        childId,
+        title: `${activeChild?.name ?? 'Avatar'} - ${currentTierName} Tier Armor`,
+        type: EvidenceType.Photo,
+        createdAt: new Date().toISOString(),
+        content: `Avatar screenshot: ${currentTierName} tier, ${profile.totalXp} XP, ${appliedVoxel.length}/6 pieces equipped`,
+        tags: {
+          engineStage: EngineStage.Share,
+          domain: 'Character',
+          subjectBucket: SubjectBucket.Other,
+          location: 'Home',
+        },
+      }
+      const docRef = await addDoc(artifactsCollection(familyId), artifact)
+
+      const filename = generateFilename('png')
+      const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, blob, filename)
+      await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+
+      setShowScreenshotModal(false)
+      setScreenshotData(null)
+    } finally {
+      setSavingToPortfolio(false)
+    }
+  }, [familyId, childId, profile, activeChild, currentTierName, appliedVoxel.length])
 
   if (loading) {
     return (
@@ -854,6 +1042,45 @@ export default function MyAvatarPage() {
               </Box>
             </Box>
           )}
+
+          {/* ── Background Toggle ────── */}
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
+            <Box
+              component="button"
+              onClick={handleBackgroundToggle}
+              sx={{
+                px: '16px',
+                py: '8px',
+                border: bgMode === 'room'
+                  ? `2px solid ${accentColor}`
+                  : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`,
+                borderRadius: isLincoln ? '6px' : '18px',
+                background: bgMode === 'room'
+                  ? (isLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
+                  : 'transparent',
+                color: bgMode === 'room'
+                  ? accentColor
+                  : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'),
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                fontSize: isLincoln ? '0.38rem' : '13px',
+                fontWeight: bgMode === 'room' ? 700 : 400,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                boxShadow: bgMode === 'room' ? `0 0 10px ${accentColor}22` : 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                '&:hover': {
+                  borderColor: accentColor,
+                  background: isLincoln ? 'rgba(126,252,32,0.06)' : 'rgba(232,160,191,0.06)',
+                },
+                '&:active': { transform: 'scale(0.96)' },
+              }}
+            >
+              <span style={{ fontSize: '16px' }}>{bgMode === 'room' ? '\uD83C\uDFE0' : '\uD83C\uDF19'}</span>
+              {bgMode === 'room' ? 'Room' : 'Night'}
+            </Box>
+          </Box>
 
           {/* ── Tier + XP Hero Banner ────── */}
           <Box
@@ -1064,6 +1291,7 @@ export default function MyAvatarPage() {
               })()}
               activePoseId={activePoseId}
               onPoseComplete={() => setActivePoseId(null)}
+              background={bgMode}
             />
             <PoseButtons
               onPose={(poseId) => setActivePoseId(poseId)}
@@ -1091,6 +1319,7 @@ export default function MyAvatarPage() {
             }}
           >
             <VoxelCharacter
+              ref={voxelRef}
               features={features}
               ageGroup={ageGroup}
               equippedPieces={appliedVoxel}
@@ -1101,9 +1330,11 @@ export default function MyAvatarPage() {
               onUnequipAnimDone={handleUnequipAnimDone}
               photoUrl={profile.photoUrl}
               customization={profile.customization}
+              background={bgMode}
               activePoseId={activePoseId}
               onPoseComplete={() => setActivePoseId(null)}
               onSwipePose={(poseId) => setActivePoseId(poseId)}
+              accessories={profile.customization?.accessories}
               onTierUpStart={() => setCeremonyActive(true)}
               onTierUp={async (_oldTier, newTier) => {
                 setCeremonyActive(false)
@@ -1125,11 +1356,45 @@ export default function MyAvatarPage() {
                 })
               }}
             />
-            <PoseButtons
-              onPose={(poseId) => setActivePoseId(poseId)}
-              currentPose={activePoseId}
-              isLincoln={isLincoln}
-            />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+              <Box sx={{ flex: 1 }}>
+                <PoseButtons
+                  onPose={(poseId) => setActivePoseId(poseId)}
+                  currentPose={activePoseId}
+                  isLincoln={isLincoln}
+                />
+              </Box>
+              <Box
+                component="button"
+                onClick={captureAvatar}
+                sx={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: isLincoln ? '8px' : '50%',
+                  border: `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
+                  background: isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
+                  color: isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  outline: 'none',
+                  p: 0,
+                  mr: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  '&:hover': {
+                    background: isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                    borderColor: isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)',
+                    transform: 'translateY(-1px)',
+                  },
+                  '&:active': { transform: 'scale(0.92)' },
+                }}
+                title="Screenshot"
+              >
+                <PhotoCameraIcon sx={{ fontSize: 20 }} />
+              </Box>
+            </Box>
           </Box>
         )}
 
@@ -1762,6 +2027,15 @@ export default function MyAvatarPage() {
           onReset={() => void handleArmorDyeReset()}
         />
 
+        {/* ── Accessories Panel ──────────────────────────────────── */}
+        <AccessoriesPanel
+          totalXp={profile.totalXp}
+          equippedAccessories={profile.customization?.accessories ?? []}
+          equippedArmor={appliedVoxel}
+          isLincoln={isLincoln}
+          onToggle={(accId) => void handleAccessoryToggle(accId)}
+        />
+
         {/* ── Photo Upload Section ──────────────────────────────── */}
         <Box
           sx={{
@@ -1938,6 +2212,146 @@ export default function MyAvatarPage() {
         newTierName={ceremonyTier}
         onComplete={handleCeremonyDone}
       />
+
+      {/* ── Screenshot Preview Modal ────────────────────────────── */}
+      <Dialog
+        open={showScreenshotModal}
+        onClose={() => { setShowScreenshotModal(false); setScreenshotData(null) }}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: isLincoln ? '#0d1117' : '#faf5ef',
+            borderRadius: isLincoln ? '8px' : '20px',
+            border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.2)'}`,
+          },
+        }}
+      >
+        <DialogContent sx={{ p: 2, position: 'relative' }}>
+          {/* Close button */}
+          <Box
+            component="button"
+            onClick={() => { setShowScreenshotModal(false); setScreenshotData(null) }}
+            sx={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              background: 'none',
+              border: 'none',
+              color: isLincoln ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.25)',
+              fontSize: 22,
+              cursor: 'pointer',
+              zIndex: 1,
+              '&:hover': { color: isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)' },
+            }}
+          >
+            ✕
+          </Box>
+
+          {/* Preview image */}
+          {screenshotData && (
+            <Box
+              component="img"
+              src={screenshotData}
+              alt="Avatar screenshot"
+              sx={{
+                width: '100%',
+                borderRadius: isLincoln ? '6px' : '14px',
+                border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.1)' : 'rgba(232,160,191,0.15)'}`,
+                mb: 2,
+              }}
+            />
+          )}
+
+          {/* Action buttons */}
+          <Box sx={{ display: 'flex', gap: 1.5, flexDirection: 'column' }}>
+            <Box
+              component="button"
+              onClick={() => screenshotData && saveToDevice(screenshotData)}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 1,
+                width: '100%',
+                py: 1.5,
+                borderRadius: isLincoln ? '6px' : '14px',
+                border: `2px solid ${accentColor}`,
+                background: isLincoln
+                  ? 'linear-gradient(135deg, rgba(126,252,32,0.12) 0%, rgba(126,252,32,0.06) 100%)'
+                  : 'linear-gradient(135deg, rgba(232,160,191,0.12) 0%, rgba(232,160,191,0.06) 100%)',
+                color: accentColor,
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '0.42rem' : '15px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                '&:hover': { transform: 'translateY(-1px)', boxShadow: `0 4px 16px ${accentColor}33` },
+                '&:active': { transform: 'scale(0.96)' },
+              }}
+            >
+              <SaveAltIcon sx={{ fontSize: 20 }} />
+              Save to Device
+            </Box>
+
+            <Box
+              component="button"
+              onClick={() => screenshotData && void shareImage(screenshotData)}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 1,
+                width: '100%',
+                py: 1.5,
+                borderRadius: isLincoln ? '6px' : '14px',
+                border: `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`,
+                background: isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
+                color: isLincoln ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '0.42rem' : '15px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                '&:hover': { borderColor: accentColor, color: accentColor },
+                '&:active': { transform: 'scale(0.96)' },
+              }}
+            >
+              <ShareIcon sx={{ fontSize: 20 }} />
+              Share
+            </Box>
+
+            <Box
+              component="button"
+              onClick={() => screenshotData && void saveToPortfolio(screenshotData)}
+              disabled={savingToPortfolio}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 1,
+                width: '100%',
+                py: 1.5,
+                borderRadius: isLincoln ? '6px' : '14px',
+                border: `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`,
+                background: isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
+                color: isLincoln ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '0.42rem' : '15px',
+                fontWeight: 600,
+                cursor: savingToPortfolio ? 'default' : 'pointer',
+                opacity: savingToPortfolio ? 0.5 : 1,
+                transition: 'all 0.2s ease',
+                '&:hover': savingToPortfolio ? {} : { borderColor: accentColor, color: accentColor },
+                '&:active': savingToPortfolio ? {} : { transform: 'scale(0.96)' },
+              }}
+            >
+              <FolderIcon sx={{ fontSize: 20 }} />
+              {savingToPortfolio ? 'Saving...' : 'Save to Portfolio'}
+            </Box>
+          </Box>
+        </DialogContent>
+      </Dialog>
     </Box>
   )
 }

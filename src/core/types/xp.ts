@@ -267,6 +267,71 @@ export const HelmetCrest = {
 } as const
 export type HelmetCrest = (typeof HelmetCrest)[keyof typeof HelmetCrest]
 
+export const AvatarBackground = {
+  Night: 'night',
+  Room: 'room',
+} as const
+export type AvatarBackground = (typeof AvatarBackground)[keyof typeof AvatarBackground]
+
+// ── Accessories (cosmetic items separate from armor) ──────────────
+
+export type AccessoryId =
+  | 'glasses'
+  | 'sunglasses'
+  | 'headband'
+  | 'crown'
+  | 'backpack'
+  | 'wings'
+  | 'book'
+  | 'scarf'
+  | 'bandana'
+  | 'parrot'
+
+export type AccessorySlot = 'eyes' | 'head' | 'back' | 'hand' | 'shoulder' | 'neck'
+
+export interface AccessoryMeta {
+  id: AccessoryId
+  name: string
+  slot: AccessorySlot
+  xpRequired: number
+  icon: string  // Emoji icon for UI
+}
+
+export const ACCESSORY_SLOTS: Record<AccessorySlot, AccessoryId[]> = {
+  eyes: ['glasses', 'sunglasses'],
+  head: ['headband', 'crown', 'bandana'],
+  back: ['backpack', 'wings'],
+  hand: ['book'],
+  shoulder: ['parrot'],
+  neck: ['scarf'],
+} as const
+
+export const ACCESSORIES: AccessoryMeta[] = [
+  { id: 'glasses',    name: 'Glasses',      slot: 'eyes',     xpRequired: 50,   icon: '\uD83D\uDC53' },
+  { id: 'headband',   name: 'Headband',     slot: 'head',     xpRequired: 50,   icon: '\uD83E\uDD4B' },
+  { id: 'sunglasses', name: 'Sunglasses',   slot: 'eyes',     xpRequired: 100,  icon: '\uD83D\uDD76\uFE0F' },
+  { id: 'scarf',      name: 'Scarf',        slot: 'neck',     xpRequired: 100,  icon: '\uD83E\uDDE3' },
+  { id: 'backpack',   name: 'Backpack',     slot: 'back',     xpRequired: 200,  icon: '\uD83C\uDF92' },
+  { id: 'book',       name: 'Book',         slot: 'hand',     xpRequired: 200,  icon: '\uD83D\uDCD6' },
+  { id: 'crown',      name: 'Crown',        slot: 'head',     xpRequired: 400,  icon: '\uD83D\uDC51' },
+  { id: 'bandana',    name: 'Bandana',      slot: 'head',     xpRequired: 400,  icon: '\uD83E\uDD78' },
+  { id: 'wings',      name: 'Wings',        slot: 'back',     xpRequired: 600,  icon: '\uD83D\uDC7C' },
+  { id: 'parrot',     name: 'Pet Parrot',   slot: 'shoulder', xpRequired: 1000, icon: '\uD83E\uDD9C' },
+] as const
+
+export const ACCESSORY_XP_THRESHOLDS: Record<AccessoryId, number> = {
+  glasses: 50,
+  headband: 50,
+  sunglasses: 100,
+  scarf: 100,
+  backpack: 200,
+  book: 200,
+  crown: 400,
+  bandana: 400,
+  wings: 600,
+  parrot: 1000,
+} as const
+
 export interface OutfitCustomization {
   shirtColor?: string   // Hex
   pantsColor?: string   // Hex
@@ -274,6 +339,8 @@ export interface OutfitCustomization {
   armorColors?: ArmorColors  // Per-piece dye colors (Stone tier+)
   shieldEmblem?: ShieldEmblem  // Shield emblem design (Iron tier+)
   helmetCrest?: HelmetCrest    // Helmet crest style (Iron tier+)
+  background?: AvatarBackground  // Scene background: night sky or indoor room
+  accessories?: AccessoryId[]  // Equipped accessory IDs
 }
 
 export interface AvatarProfile {

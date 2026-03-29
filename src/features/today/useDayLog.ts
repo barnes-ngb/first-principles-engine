@@ -29,7 +29,9 @@ interface UseDayLogResult {
     theme?: string
     virtue?: string
     scriptureRef?: string
+    scriptureText?: string
     heartQuestion?: string
+    formationPrompt?: string
     conundrum?: {
       title: string
       scenario: string
@@ -38,7 +40,11 @@ interface UseDayLogResult {
       lincolnPrompt: string
       londonPrompt: string
       virtueConnection: string
-      subjectConnection: string
+      subjectConnection?: string
+      readingTieIn?: string
+      mathContext?: string
+      londonDrawingPrompt?: string
+      dadLabSuggestion?: string
     }
   } | null
   snackMessage: { text: string; severity: 'success' | 'error' } | null
@@ -70,7 +76,9 @@ export function useDayLog({
     theme?: string
     virtue?: string
     scriptureRef?: string
+    scriptureText?: string
     heartQuestion?: string
+    formationPrompt?: string
     conundrum?: {
       title: string
       scenario: string
@@ -79,7 +87,11 @@ export function useDayLog({
       lincolnPrompt: string
       londonPrompt: string
       virtueConnection: string
-      subjectConnection: string
+      subjectConnection?: string
+      readingTieIn?: string
+      mathContext?: string
+      londonDrawingPrompt?: string
+      dadLabSuggestion?: string
     }
   } | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')

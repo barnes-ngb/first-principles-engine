@@ -2,9 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AddIcon from '@mui/icons-material/Add'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import DeleteIcon from '@mui/icons-material/Delete'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import PrintIcon from '@mui/icons-material/Print'
 import SendIcon from '@mui/icons-material/Send'
+import Accordion from '@mui/material/Accordion'
+import AccordionDetails from '@mui/material/AccordionDetails'
+import AccordionSummary from '@mui/material/AccordionSummary'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -253,9 +257,7 @@ export default function PlannerChatPage() {
 
   // Suggest focus state
   const [suggestingFocus, setSuggestingFocus] = useState(false)
-  const [focusWasSuggested, setFocusWasSuggested] = useState(false)
   // Conundrum state
-  const [generatingConundrum, setGeneratingConundrum] = useState(false)
   const autoSuggestTriggered = useRef(false)
 
   const conversationDocId = useMemo(
@@ -1045,27 +1047,31 @@ Return as JSON:
     })
   }, [])
 
-  // Suggest weekly focus via AI
-  const handleSuggestFocus = useCallback(async () => {
+  // Generate unified weekly focus (theme + conundrum + connections) via AI
+  const handleGenerateWeek = useCallback(async () => {
     if (!activeChildId) return
     setSuggestingFocus(true)
     try {
+      // Build context from planner state
+      const contextParts: string[] = []
+      if (readAloudBook) {
+        contextParts.push(`Read-aloud book: ${readAloudBook}${readAloudChapters ? ` (${readAloudChapters})` : ''}`)
+      }
+      if (weekNotes) {
+        contextParts.push(`Parent notes: ${weekNotes}`)
+      }
+      const subjects = selectedWorkbookIds.size > 0
+        ? Array.from(selectedWorkbookIds).join(', ')
+        : 'Reading, Math, Language Arts'
+      contextParts.push(`Subjects this week: ${subjects}`)
+
       const response = await aiChat({
         familyId,
         childId: activeChildId,
-        taskType: TaskType.Chat,
+        taskType: TaskType.WeeklyFocus,
         messages: [{
           role: 'user',
-          content: `Suggest a weekly focus for a Christian homeschool family. Return ONLY a JSON object:
-{
-  "theme": "a one-word or short phrase theme for the week",
-  "virtue": "a character virtue to focus on",
-  "scriptureRef": "a Bible verse reference (book chapter:verse)",
-  "heartQuestion": "a discussion question for the family related to the theme"
-}
-
-Make it age-appropriate for kids 6-10. Rotate through different virtues and themes — don't repeat common ones. Today's date is ${new Date().toLocaleDateString()}.
-Return ONLY valid JSON, no markdown.`,
+          content: contextParts.join('\n'),
         }],
       })
 
@@ -1079,18 +1085,30 @@ Return ONLY valid JSON, no markdown.`,
           if (firstBrace >= 0 && lastBrace > firstBrace) json = json.slice(firstBrace, lastBrace + 1)
 
           const parsed = JSON.parse(json)
+
+          // Set week focus fields
           if (parsed.theme) updateWeekField('theme', parsed.theme)
           if (parsed.virtue) updateWeekField('virtue', parsed.virtue)
           if (parsed.scriptureRef) updateWeekField('scriptureRef', parsed.scriptureRef)
+          if (parsed.scriptureText) updateWeekField('scriptureText', parsed.scriptureText)
           if (parsed.heartQuestion) updateWeekField('heartQuestion', parsed.heartQuestion)
-        } catch { /* AI didn't return valid JSON, ignore */ }
+          if (parsed.formationPrompt) updateWeekField('formationPrompt', parsed.formationPrompt)
+
+          // Set conundrum
+          if (parsed.conundrum) {
+            updateWeekField('conundrum', parsed.conundrum)
+          }
+
+        } catch (parseErr) {
+          console.error('[WeeklyFocus] Failed to parse response:', parseErr)
+        }
       }
     } finally {
       setSuggestingFocus(false)
     }
-  }, [activeChildId, familyId, aiChat, updateWeekField])
+  }, [activeChildId, familyId, aiChat, updateWeekField, readAloudBook, readAloudChapters, weekNotes, selectedWorkbookIds])
 
-  // Auto-suggest week focus when fields are empty on first visit
+  // Auto-generate week focus when fields are empty on first visit
   useEffect(() => {
     if (!weekPlan || !activeChildId || conversationLoaded || setupComplete) return
     if (autoSuggestTriggered.current) return
@@ -1098,11 +1116,11 @@ Return ONLY valid JSON, no markdown.`,
     if (isEmpty) {
       autoSuggestTriggered.current = true
       const timer = setTimeout(() => {
-        void handleSuggestFocus().then(() => setFocusWasSuggested(true))
+        void handleGenerateWeek()
       }, 500)
       return () => clearTimeout(timer)
     }
-  }, [weekPlan, activeChildId, conversationLoaded, setupComplete, handleSuggestFocus])
+  }, [weekPlan, activeChildId, conversationLoaded, setupComplete, handleGenerateWeek])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
@@ -1748,7 +1766,7 @@ Generate a plan for Monday through Friday.`.trim()
             currentDraft={currentDraft}
           />
 
-          {/* Week theme / virtue / scripture */}
+          {/* Week Focus — unified generation */}
           {weekPlan && (
             <Box
               sx={{
@@ -1759,135 +1777,97 @@ Generate a plan for Monday through Friday.`.trim()
                 bgcolor: 'background.paper',
               }}
             >
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                <Typography variant="subtitle2">
-                  Week Focus
-                </Typography>
+              <Stack spacing={2}>
+                <Typography variant="subtitle2">This Week&apos;s Journey</Typography>
+
+                {/* Generation button */}
                 <Button
-                  size="small"
-                  variant="text"
-                  startIcon={suggestingFocus ? <CircularProgress size={14} /> : <AutoAwesomeIcon />}
-                  onClick={handleSuggestFocus}
+                  variant="contained"
+                  onClick={handleGenerateWeek}
                   disabled={suggestingFocus}
+                  startIcon={suggestingFocus ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
+                  fullWidth
                 >
-                  {suggestingFocus ? 'Generating...' : 'Suggest'}
+                  {suggestingFocus ? 'Generating week...' : weekPlan.theme ? 'Regenerate Week Focus' : 'Generate Week Focus'}
                 </Button>
-              </Stack>
-              {suggestingFocus && (
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                  <CircularProgress size={16} />
-                  <Typography variant="caption" color="text.secondary">Generating suggestions...</Typography>
-                </Stack>
-              )}
-              {focusWasSuggested && !suggestingFocus && (
-                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-                  AI suggested — tap to edit
-                </Typography>
-              )}
-              <Stack spacing={1.5}>
-                <TextField
-                  label="Theme"
-                  size="small"
-                  value={weekPlan.theme}
-                  onChange={(e) => updateWeekField('theme', e.target.value)}
-                />
-                <TextField
-                  label="Virtue"
-                  size="small"
-                  value={weekPlan.virtue}
-                  onChange={(e) => updateWeekField('virtue', e.target.value)}
-                />
-                <TextField
-                  label="Scripture reference"
-                  size="small"
-                  value={weekPlan.scriptureRef}
-                  onChange={(e) => updateWeekField('scriptureRef', e.target.value)}
-                />
-                <TextField
-                  label="Heart question"
-                  size="small"
-                  multiline
-                  minRows={2}
-                  value={weekPlan.heartQuestion}
-                  onChange={(e) => updateWeekField('heartQuestion', e.target.value)}
-                />
-              </Stack>
-            </Box>
-          )}
 
-          {/* Weekly Conundrum */}
-          {weekPlan && (
-            <Box
-              sx={{
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: 2,
-                p: 2,
-                bgcolor: 'background.paper',
-              }}
-            >
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                <Typography variant="subtitle2">Weekly Conundrum</Typography>
-                <Button
-                  size="small"
-                  variant="text"
-                  startIcon={generatingConundrum ? <CircularProgress size={14} /> : <AutoAwesomeIcon />}
-                  disabled={generatingConundrum}
-                  onClick={async () => {
-                    if (!activeChildId) return
-                    setGeneratingConundrum(true)
-                    try {
-                      const response = await aiChat({
-                        familyId,
-                        childId: activeChildId,
-                        taskType: TaskType.Conundrum,
-                        messages: [{ role: 'user', content: 'Generate a conundrum.' }],
-                      })
-                      if (response?.message) {
-                        const jsonMatch = response.message.match(/\{[\s\S]*\}/)
-                        if (jsonMatch) {
-                          const conundrum = JSON.parse(jsonMatch[0])
-                          await updateDoc(weekPlanRef, { conundrum })
-                        }
-                      }
-                    } catch (err) {
-                      console.error('Conundrum generation failed:', err)
-                    } finally {
-                      setGeneratingConundrum(false)
-                    }
-                  }}
-                >
-                  {generatingConundrum ? 'Generating...' : weekPlan.conundrum ? 'Regenerate' : 'Generate'}
-                </Button>
-              </Stack>
-
-              {weekPlan.conundrum ? (
-                <Stack spacing={1.5}>
-                  <Typography variant="h6" sx={{ fontSize: '1rem' }}>{weekPlan.conundrum.title}</Typography>
-                  <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
-                    {weekPlan.conundrum.scenario}
+                {suggestingFocus && (
+                  <Typography variant="body2" color="text.secondary" textAlign="center">
+                    Building this week&apos;s journey for Stonebridge...
                   </Typography>
-                  <Box sx={{ p: 1.5, bgcolor: 'primary.50', borderRadius: 1, border: '1px solid', borderColor: 'primary.100' }}>
-                    <Typography variant="subtitle2" color="primary.main">
+                )}
+
+                {/* Theme / Virtue / Scripture row */}
+                {weekPlan.theme && (
+                  <Stack spacing={1.5}>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      <Chip label={`Theme: ${weekPlan.theme}`} color="primary" />
+                      <Chip label={`Virtue: ${weekPlan.virtue}`} color="secondary" />
+                    </Stack>
+
+                    {weekPlan.scriptureRef && (
+                      <Typography variant="body2">
+                        <strong>{weekPlan.scriptureRef}</strong>
+                        {weekPlan.scriptureText && ` — "${weekPlan.scriptureText}"`}
+                      </Typography>
+                    )}
+
+                    {weekPlan.heartQuestion && (
+                      <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+                        {weekPlan.heartQuestion}
+                      </Typography>
+                    )}
+
+                    {weekPlan.formationPrompt && (
+                      <Typography variant="body2" color="text.secondary">
+                        Daily prompt: {weekPlan.formationPrompt}
+                      </Typography>
+                    )}
+                  </Stack>
+                )}
+
+                {/* Conundrum preview */}
+                {weekPlan.conundrum && (
+                  <Stack spacing={1} sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+                    <Typography variant="subtitle2">
+                      Conundrum: {weekPlan.conundrum.title}
+                    </Typography>
+                    <Typography variant="body2">
+                      {weekPlan.conundrum.scenario.length > 200
+                        ? `${weekPlan.conundrum.scenario.slice(0, 200)}...`
+                        : weekPlan.conundrum.scenario}
+                    </Typography>
+                    <Typography variant="body2" fontWeight={600}>
                       {weekPlan.conundrum.question}
                     </Typography>
-                  </Box>
-                  <Stack spacing={0.5}>
-                    {weekPlan.conundrum.angles.map((angle, i) => (
-                      <Chip key={i} label={angle} variant="outlined" size="small" sx={{ height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.5 } }} />
-                    ))}
+
+                    {/* Weekly connections preview */}
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      {weekPlan.conundrum.readingTieIn && <Chip label="Reading" size="small" variant="outlined" />}
+                      {weekPlan.conundrum.mathContext && <Chip label="Math" size="small" variant="outlined" />}
+                      {weekPlan.conundrum.londonDrawingPrompt && <Chip label="Drawing" size="small" variant="outlined" />}
+                      {weekPlan.conundrum.dadLabSuggestion && <Chip label="Dad Lab" size="small" variant="outlined" />}
+                    </Stack>
                   </Stack>
-                  <Typography variant="body2"><strong>Lincoln:</strong> {weekPlan.conundrum.lincolnPrompt}</Typography>
-                  <Typography variant="body2"><strong>London:</strong> {weekPlan.conundrum.londonPrompt}</Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                    {weekPlan.conundrum.virtueConnection}
-                  </Typography>
-                </Stack>
-              ) : (
-                <Typography variant="body2" color="text.secondary">
-                  Generate an open-ended discussion scenario for family time.
-                </Typography>
-              )}
+                )}
+
+                {/* Editable fields — collapsed for manual tweaks */}
+                <Accordion>
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Typography variant="caption" color="text.secondary">
+                      Edit fields manually
+                    </Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Stack spacing={1}>
+                      <TextField size="small" label="Theme" value={weekPlan.theme} onChange={(e) => updateWeekField('theme', e.target.value)} />
+                      <TextField size="small" label="Virtue" value={weekPlan.virtue} onChange={(e) => updateWeekField('virtue', e.target.value)} />
+                      <TextField size="small" label="Scripture" value={weekPlan.scriptureRef} onChange={(e) => updateWeekField('scriptureRef', e.target.value)} />
+                      <TextField size="small" label="Heart Question" value={weekPlan.heartQuestion} onChange={(e) => updateWeekField('heartQuestion', e.target.value)} />
+                    </Stack>
+                  </AccordionDetails>
+                </Accordion>
+              </Stack>
             </Box>
           )}
 

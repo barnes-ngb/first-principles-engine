@@ -1,14 +1,16 @@
 import type {
+  AccessoryId,
   ArmorColors,
   ArmorPieceProgress,
   ArmorTier,
+  AvatarBackground,
   AvatarProfile,
   CharacterFeatures,
   HelmetCrest,
   OutfitCustomization,
   ShieldEmblem,
 } from '../../core/types'
-import { ShieldEmblem as ShieldEmblemValues, HelmetCrest as HelmetCrestValues } from '../../core/types'
+import { ACCESSORY_XP_THRESHOLDS, AvatarBackground as AvatarBackgroundValues, ShieldEmblem as ShieldEmblemValues, HelmetCrest as HelmetCrestValues } from '../../core/types'
 
 /**
  * Normalize raw Firestore data into a safe AvatarProfile.
@@ -98,6 +100,7 @@ function normalizeArmorColors(raw: unknown): ArmorColors | undefined {
 
 const VALID_EMBLEMS = new Set<string>(Object.values(ShieldEmblemValues))
 const VALID_CRESTS = new Set<string>(Object.values(HelmetCrestValues))
+const VALID_BACKGROUNDS = new Set<string>(Object.values(AvatarBackgroundValues))
 
 function normalizeCustomization(raw: unknown): OutfitCustomization | undefined {
   if (!raw || typeof raw !== 'object') return undefined
@@ -109,6 +112,10 @@ function normalizeCustomization(raw: unknown): OutfitCustomization | undefined {
   const helmetCrest = typeof c.helmetCrest === 'string' && VALID_CRESTS.has(c.helmetCrest)
     ? (c.helmetCrest as HelmetCrest)
     : undefined
+  const background = typeof c.background === 'string' && VALID_BACKGROUNDS.has(c.background)
+    ? (c.background as AvatarBackground)
+    : undefined
+  const accessories = normalizeAccessories(c.accessories)
   return {
     ...(c.shirtColor ? { shirtColor: c.shirtColor as string } : {}),
     ...(c.pantsColor ? { pantsColor: c.pantsColor as string } : {}),
@@ -116,7 +123,16 @@ function normalizeCustomization(raw: unknown): OutfitCustomization | undefined {
     ...(armorColors ? { armorColors } : {}),
     ...(shieldEmblem ? { shieldEmblem } : {}),
     ...(helmetCrest ? { helmetCrest } : {}),
+    ...(background ? { background } : {}),
+    ...(accessories.length > 0 ? { accessories } : {}),
   }
+}
+
+const VALID_ACCESSORY_IDS = new Set<string>(Object.keys(ACCESSORY_XP_THRESHOLDS))
+
+function normalizeAccessories(raw: unknown): AccessoryId[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((id): id is AccessoryId => typeof id === 'string' && VALID_ACCESSORY_IDS.has(id))
 }
 
 function createDefaultProfile(): AvatarProfile {
