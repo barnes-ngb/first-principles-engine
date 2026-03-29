@@ -3,6 +3,12 @@ import { callClaudeWithVision, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 
+/**
+ * Task: scan
+ * Context: childProfile + recentEval (via buildContextForTask)
+ * Model: Sonnet (vision)
+ */
+
 function buildScanSystemPrompt(
   childName: string,
   childGrade: string | undefined,

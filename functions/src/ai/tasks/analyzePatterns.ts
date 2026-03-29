@@ -3,6 +3,13 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { requireEmailAuth } from "../authGuard.js";
 import { claudeApiKey } from "../aiConfig.js";
 
+/**
+ * Task: analyzePatterns
+ * Context: childProfile (mapped in TASK_CONTEXT but not called — separate Cloud Function)
+ *          Loads evaluation session data directly from Firestore
+ * Model: Sonnet
+ */
+
 // ── Types ────────────────────────────────────────────────────────
 
 interface AnalyzePatternsRequest {

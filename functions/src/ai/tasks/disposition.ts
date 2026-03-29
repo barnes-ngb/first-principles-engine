@@ -2,7 +2,14 @@ import type { Firestore } from "firebase-admin/firestore";
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
-import { CHARTER_PREAMBLE } from "../contextSlices.js";
+import { buildContextForTask } from "../contextSlices.js";
+
+/**
+ * Task: disposition
+ * Context: charter + childProfile + engagement + gradeResults (via buildContextForTask)
+ *          + specialized 4-week day log aggregation, recent evaluations, recent lab reports
+ * Model: Sonnet
+ */
 
 // ── Data loaders ──────────────────────────────────────────────
 
@@ -186,7 +193,17 @@ export const handleDisposition = async (
   const { db, familyId, childId, childData, apiKey } = ctx;
   const model = modelForTask("disposition" as never);
 
-  // Load data in parallel
+  // Load shared context (charter + child profile + engagement + grade results)
+  const contextSections = await buildContextForTask("disposition", {
+    db,
+    familyId,
+    childId,
+    childData,
+    snapshotData: ctx.snapshotData,
+  });
+  const familyContext = contextSections.join("\n\n");
+
+  // Load specialized data in parallel (beyond what buildContextForTask provides)
   const [dayLogs, evalSummary, labSummary] = await Promise.all([
     loadRecentDayLogs(db, familyId, childId, 4),
     loadRecentEvaluations(db, familyId, childId),
@@ -202,7 +219,7 @@ export const handleDisposition = async (
     })
     .join("\n");
 
-  const systemPrompt = `${CHARTER_PREAMBLE}
+  const systemPrompt = `${familyContext}
 
 You are generating a Learning Disposition Profile for ${childData.name}. This is a portfolio-over-grades assessment that looks at HOW a child approaches learning, not what they can pass on a test.
 

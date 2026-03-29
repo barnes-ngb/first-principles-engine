@@ -3,6 +3,13 @@ import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
 import { CHARTER_PREAMBLE } from "../contextSlices.js";
 
+/**
+ * Task: conundrum
+ * Context: CHARTER_PREAMBLE (direct import) + week focus + recent subjects + child ages
+ *          Family-level generator, not child-specific — does not use buildContextForTask
+ * Model: Sonnet
+ */
+
 export const handleConundrum = async (
   ctx: ChatTaskContext,
 ): Promise<ChatTaskResult> => {
