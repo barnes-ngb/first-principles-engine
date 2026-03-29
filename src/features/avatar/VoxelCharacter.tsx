@@ -315,6 +315,7 @@ export default function VoxelCharacter({
   const roomGroupRef = useRef<THREE.Group | null>(null)
   const roomLightsRef = useRef<THREE.Object3D[]>([])
   const nightLightsRef = useRef<THREE.Object3D[]>([])
+  const backgroundRef = useRef(background)
   const equippedRef = useRef<string[]>([])
   const poseAnimatorRef = useRef<PoseAnimator>(new PoseAnimator())
   const swipePoseIndexRef = useRef(0)
@@ -334,6 +335,7 @@ export default function VoxelCharacter({
   const armorColors = customization?.armorColors
 
   // Keep refs in sync so animation loop always has current values
+  backgroundRef.current = background
   equippedRef.current = equippedPieces
   onSwipePoseRef.current = onSwipePose
   onPoseCompleteRef.current = onPoseComplete
@@ -363,18 +365,19 @@ export default function VoxelCharacter({
 
     // Scene — dark with slight blue tint (night default)
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(background === 'room' ? 0x2a2218 : 0x1a1a2e)
+    const bg = backgroundRef.current
+    scene.background = new THREE.Color(bg === 'room' ? 0x2a2218 : 0x1a1a2e)
     sceneRef.current = scene
 
     // Build sky group (night background)
     const skyGroup = buildSkyGroup()
-    skyGroup.visible = background !== 'room'
+    skyGroup.visible = bg !== 'room'
     scene.add(skyGroup)
     skyGroupRef.current = skyGroup
 
     // Build room group (indoor background)
     const roomGroup = buildRoom()
-    roomGroup.visible = background === 'room'
+    roomGroup.visible = bg === 'room'
     scene.add(roomGroup)
     roomGroupRef.current = roomGroup
 
@@ -423,8 +426,8 @@ export default function VoxelCharacter({
     roomLightsRef.current = [roomKeyLight, roomFill, roomAmbient]
 
     // Set initial lighting visibility
-    for (const l of nightLightsRef.current) l.visible = background !== 'room'
-    for (const l of roomLightsRef.current) l.visible = background === 'room'
+    for (const l of nightLightsRef.current) l.visible = bg !== 'room'
+    for (const l of roomLightsRef.current) l.visible = bg === 'room'
 
     // Build character
     const character = buildCharacter(resolvedFeatures, ageGroup)

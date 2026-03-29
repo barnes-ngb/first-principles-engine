@@ -257,7 +257,6 @@ export default function PlannerChatPage() {
 
   // Suggest focus state
   const [suggestingFocus, setSuggestingFocus] = useState(false)
-  const [focusWasSuggested, setFocusWasSuggested] = useState(false)
   // Conundrum state
   const autoSuggestTriggered = useRef(false)
 
@@ -1100,7 +1099,6 @@ Return as JSON:
             updateWeekField('conundrum', parsed.conundrum)
           }
 
-          setFocusWasSuggested(true)
         } catch (parseErr) {
           console.error('[WeeklyFocus] Failed to parse response:', parseErr)
         }
@@ -1118,7 +1116,7 @@ Return as JSON:
     if (isEmpty) {
       autoSuggestTriggered.current = true
       const timer = setTimeout(() => {
-        void handleGenerateWeek().then(() => setFocusWasSuggested(true))
+        void handleGenerateWeek()
       }, 500)
       return () => clearTimeout(timer)
     }
