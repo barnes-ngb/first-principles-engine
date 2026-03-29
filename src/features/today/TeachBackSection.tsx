@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
@@ -35,13 +35,7 @@ export default function TeachBackSection({
   onSnackMessage,
 }: TeachBackSectionProps) {
   const [teachBackText, setTeachBackText] = useState('')
-  const [teachBackSaved, setTeachBackSaved] = useState(false)
-
-  // Sync teachBackSaved from dayLog on load
-  useEffect(() => {
-    if (dayLog?.teachBackDone) setTeachBackSaved(true)
-    else setTeachBackSaved(false)
-  }, [dayLog?.teachBackDone])
+  const [teachBackSaved, setTeachBackSaved] = useState(!!dayLog?.teachBackDone)
 
   const isLincolnChild = selectedChild?.name?.toLowerCase() === 'lincoln'
   const checklist = dayLog?.checklist ?? []
