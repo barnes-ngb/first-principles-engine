@@ -2,6 +2,13 @@ import { HttpsError } from "firebase-functions/v2/https";
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import { callClaude, logAiUsage } from "../chatTypes.js";
 import { buildStoryPrompt, modelForTask } from "../chat.js";
+import { buildContextForTask } from "../contextSlices.js";
+
+/**
+ * Task: generateStory
+ * Context: childProfile + sightWords + wordMastery (via buildContextForTask)
+ * Model: Sonnet
+ */
 
 export const handleGenerateStory = async (
   ctx: ChatTaskContext,
@@ -51,7 +58,7 @@ export const handleGenerateStory = async (
     : "Minecraft, dragons, quests, building, adventures";
   const readingLevel = isLondon ? "pre-K to kindergarten" : "1st grade";
 
-  const storySystemPrompt = buildStoryPrompt({
+  const storyPrompt = buildStoryPrompt({
     storyIdea,
     words: storyWords,
     pageCount: storyConfig.pageCount ?? 10,
@@ -60,6 +67,17 @@ export const handleGenerateStory = async (
     childInterests,
     readingLevel,
   });
+
+  // Load shared context (child profile + sight words + word mastery)
+  const contextSections = await buildContextForTask("generateStory", {
+    db,
+    familyId,
+    childId,
+    childData,
+    snapshotData: ctx.snapshotData,
+  });
+  const familyContext = contextSections.join("\n\n");
+  const storySystemPrompt = `${familyContext}\n\n${storyPrompt}`;
 
   const model = modelForTask("generateStory");
 

@@ -1,7 +1,6 @@
 import type { Firestore } from "firebase-admin/firestore";
 import type { SnapshotData } from "./chatTypes.js";
 import {
-  loadRecentSessions,
   loadWorkbookPaces,
   loadWeekContext,
   loadHoursSummary,
@@ -18,7 +17,6 @@ import { loadRecentEvalContext } from "./chatTypes.js";
 export const ContextSlice = {
   Charter: "charter",
   ChildProfile: "childProfile",
-  RecentSessions: "recentSessions",
   WorkbookPaces: "workbookPaces",
   WeekFocus: "weekFocus",
   HoursProgress: "hoursProgress",
@@ -37,7 +35,7 @@ export type ContextSlice = (typeof ContextSlice)[keyof typeof ContextSlice];
 
 export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   plan: [
-    "charter", "childProfile", "recentSessions", "workbookPaces",
+    "charter", "childProfile", "workbookPaces",
     "weekFocus", "hoursProgress", "engagement", "gradeResults",
     "bookStatus", "sightWords", "recentEval", "wordMastery", "generatedContent",
     "workshopGames",
@@ -49,6 +47,8 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   generateStory: ["childProfile", "sightWords", "wordMastery"],
   analyzePatterns: ["childProfile"],
   workshop: ["charter", "childProfile", "workshopGames"],
+  analyzeWorkbook: ["charter", "childProfile"],
+  disposition: ["charter", "childProfile", "engagement", "gradeResults"],
   scan: ["childProfile", "recentEval"],
 };
 
@@ -240,9 +240,6 @@ export async function buildContextForTask(
   // ── Firestore slices (fetched in parallel) ────────────────────
   const fetches: Array<{ slice: ContextSlice; promise: Promise<unknown> }> = [];
 
-  if (slices.includes("recentSessions")) {
-    fetches.push({ slice: "recentSessions", promise: loadRecentSessions(db, familyId, childId) });
-  }
   if (slices.includes("workbookPaces")) {
     fetches.push({ slice: "workbookPaces", promise: loadWorkbookPaces(db, familyId, childId) });
   }
@@ -292,20 +289,6 @@ export async function buildContextForTask(
   }
 
   // ── Format each slice into prompt text ────────────────────────
-
-  // Recent sessions
-  if (sliceData.has("recentSessions")) {
-    const sessions = sliceData.get("recentSessions") as Array<{ streamId: string; hits: number; nears: number; misses: number }>;
-    const lines = ["RECENT PERFORMANCE (last 14 days):"];
-    if (sessions.length === 0) {
-      lines.push("No recent session data available.");
-    } else {
-      for (const s of sessions) {
-        lines.push(`- ${s.streamId}: ${s.hits} hits, ${s.nears} nears, ${s.misses} misses`);
-      }
-    }
-    sections.push(lines.join("\n"));
-  }
 
   // Workbook paces
   if (sliceData.has("workbookPaces")) {

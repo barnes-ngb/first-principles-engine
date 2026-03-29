@@ -247,7 +247,7 @@ export default function KidTodayView({
         `checklist_${today}`,
       ).then((awarded) => {
         if (awarded > 0) setXpToast({ amount: awarded, reason: 'All must-do items complete!' })
-      })
+      }).catch((err) => console.error('[XP] Award failed:', err))
     }
     prevMustDoDoneRef.current = mustDoDone
   }, [mustDoDone, child.id, familyId, today])
@@ -266,7 +266,7 @@ export default function KidTodayView({
         { reason: `All ${totalItems} items completed today!` },
       ).then((awarded) => {
         if (awarded > 0) setXpToast({ amount: awarded, reason: `All ${totalItems} items done — bonus!` })
-      })
+      }).catch((err) => console.error('[XP] Award failed:', err))
     }
     prevAllDoneRef.current = allDone
   }, [allDone, child.id, familyId, today, checklist.length])
@@ -372,7 +372,7 @@ export default function KidTodayView({
           reason: item.label ?? 'checklist item',
         }).then((awarded) => {
           if (awarded > 0) setXpToast({ amount: awarded, reason: item.label ?? 'checklist item' })
-        })
+        }).catch((err) => console.error('[XP] Award failed:', err))
       }
     },
     [dayLog, persistDayLogImmediate, child.id, familyId, today],

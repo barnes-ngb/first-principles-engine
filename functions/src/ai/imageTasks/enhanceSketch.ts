@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireApprovedUser } from "../authGuard.js";
 import { openaiApiKey } from "../aiConfig.js";
 import { createOpenAiProvider } from "../providers/openai.js";
 
@@ -51,9 +52,7 @@ export const enhanceSketch = onCall(
   { secrets: [openaiApiKey], timeoutSeconds: 60 },
   async (request): Promise<EnhanceSketchResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireApprovedUser(request);
 
     const { familyId, sketchStoragePath, style } =
       request.data as EnhanceSketchRequest;
@@ -70,7 +69,7 @@ export const enhanceSketch = onCall(
     }
 
     // ── Authorization ──────────────────────────────────────────
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",

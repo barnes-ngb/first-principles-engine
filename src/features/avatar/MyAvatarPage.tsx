@@ -679,6 +679,7 @@ export default function MyAvatarPage() {
 
       if (allApplied) {
         void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
+          .catch((err) => console.error('[XP] Award failed:', err))
         void checkArmorStreak(profile)
       }
 

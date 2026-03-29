@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireApprovedUser } from "../authGuard.js";
 import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 import { createOpenAiProvider } from "../providers/openai.js";
 
@@ -41,16 +42,14 @@ const BASE_CHARACTER_RAW_PROMPTS: Record<"minecraft" | "platformer", string> = {
 export const generateBaseCharacter = onCall(
   { secrets: [openaiApiKey, claudeApiKey] },
   async (request): Promise<BaseCharacterResponse> => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireApprovedUser(request);
 
     const { familyId, childId, themeStyle } = request.data as BaseCharacterRequest;
 
     if (!familyId || !childId || !themeStyle) {
       throw new HttpsError("invalid-argument", "Missing required fields.");
     }
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError("permission-denied", "You do not have access to this family.");
     }
 

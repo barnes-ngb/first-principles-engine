@@ -11,10 +11,11 @@ import { ProfileProvider } from '../core/profile/ProfileProvider'
 import { useProfile } from '../core/profile/useProfile'
 import { buildTheme } from './theme'
 import { AppRouter } from './router'
+import LoginPage from '../features/auth/LoginPage'
 import ProfileSelectPage from '../features/login/ProfileSelectPage'
 
 function AuthGate() {
-  const { loading } = useAuth()
+  const { user, loading } = useAuth()
 
   if (loading) {
     return (
@@ -29,6 +30,11 @@ function AuthGate() {
         <CircularProgress />
       </Box>
     )
+  }
+
+  // If no user or anonymous, show login page
+  if (!user || user.isAnonymous) {
+    return <LoginPage />
   }
 
   return <ProfileGate />

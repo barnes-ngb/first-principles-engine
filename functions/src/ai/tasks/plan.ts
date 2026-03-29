@@ -3,6 +3,14 @@ import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 
+/**
+ * Task: plan
+ * Context: charter + childProfile + workbookPaces + weekFocus + hoursProgress
+ *          + engagement + gradeResults + bookStatus + sightWords + recentEval
+ *          + wordMastery + generatedContent + workshopGames (via buildContextForTask)
+ * Model: Sonnet
+ */
+
 // Import plan-specific prompt pieces from chat.ts
 import { buildPlanOutputInstructions } from "../chat.js";
 

@@ -3,6 +3,13 @@ import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 
+/**
+ * Task: quest
+ * Context: childProfile + sightWords + recentEval + wordMastery (via buildContextForTask)
+ *          + per-child word progress (struggling/mastered words loaded separately)
+ * Model: Sonnet
+ */
+
 // Import quest-specific prompt builder from chat.ts
 import { buildQuestPrompt } from "../chat.js";
 

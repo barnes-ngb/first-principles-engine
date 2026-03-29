@@ -2,6 +2,7 @@ import type { Firestore } from "firebase-admin/firestore";
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
+import { requireEmailAuth, checkRateLimit } from "./authGuard.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -70,13 +71,6 @@ export function modelForTask(taskType: TaskType): string {
 
 // ── Enriched context types ──────────────────────────────────────
 
-interface SessionSummary {
-  streamId: string;
-  hits: number;
-  nears: number;
-  misses: number;
-}
-
 interface WorkbookPace {
   name: string;
   unitLabel: string;
@@ -131,47 +125,6 @@ function schoolYearStart(d: Date): string {
 }
 
 // ── Enriched context loaders ────────────────────────────────────
-
-/** Load recent sessions (last 14 days) and summarize by stream. */
-export async function loadRecentSessions(
-  db: Firestore,
-  familyId: string,
-  childId: string,
-): Promise<SessionSummary[]> {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 14);
-  const cutoffStr = toDateString(cutoff);
-
-  const snap = await db
-    .collection(`families/${familyId}/sessions`)
-    .where("childId", "==", childId)
-    .where("date", ">=", cutoffStr)
-    .get();
-
-  const byStream = new Map<
-    string,
-    { hits: number; nears: number; misses: number }
-  >();
-
-  for (const doc of snap.docs) {
-    const data = doc.data() as {
-      streamId: string;
-      result: string;
-    };
-    if (!byStream.has(data.streamId)) {
-      byStream.set(data.streamId, { hits: 0, nears: 0, misses: 0 });
-    }
-    const counts = byStream.get(data.streamId)!;
-    if (data.result === "hit") counts.hits++;
-    else if (data.result === "near") counts.nears++;
-    else if (data.result === "miss") counts.misses++;
-  }
-
-  return [...byStream.entries()].map(([streamId, counts]) => ({
-    streamId,
-    ...counts,
-  }));
-}
 
 /** Load workbook configs and calculate pace for each. */
 export async function loadWorkbookPaces(
@@ -1098,9 +1051,7 @@ export const chat = onCall(
   { secrets: [claudeApiKey], timeoutSeconds: 300 },
   async (request): Promise<ChatResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireEmailAuth(request);
 
     const { familyId, childId, taskType, messages, domain } =
       request.data as ChatRequest;
@@ -1129,12 +1080,15 @@ export const chat = onCall(
     }
 
     // ── Authorization: caller must own the family ──────────────
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",
       );
     }
+
+    // ── Rate limiting ─────────────────────────────────────────
+    await checkRateLimit(uid, taskType, 100, 60);
 
     // ── API key check ──────────────────────────────────────────
     const apiKey = claudeApiKey.value();
@@ -1197,9 +1151,19 @@ export const chat = onCall(
         error: errMsg,
       });
 
+      // User-friendly error messages
+      let userMessage = errMsg;
+      if (/rate.?limit|429/i.test(errMsg)) {
+        userMessage = "AI is busy — please wait a moment and try again.";
+      } else if (/context.?length|too.?long|token/i.test(errMsg)) {
+        userMessage = "The request was too large. Try with less context.";
+      } else if (/timeout|timed.?out/i.test(errMsg)) {
+        userMessage = "The AI took too long to respond. Please try again.";
+      }
+
       throw new HttpsError(
         "unavailable",
-        `AI service error: ${errMsg}`,
+        `AI service error: ${userMessage}`,
       );
     }
   },

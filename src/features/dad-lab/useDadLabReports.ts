@@ -102,7 +102,7 @@ export function useDadLabReports() {
         for (const child of children) {
           void addXpEvent(familyId, child.id, 'DAD_LAB_COMPLETE', 20, `dadlab-${reportId}`, {
             reason: `Dad Lab: ${report.title || 'experiment'}`,
-          })
+          }).catch((err) => console.error('[XP] Award failed:', err))
         }
       }
 
@@ -126,7 +126,7 @@ export function useDadLabReports() {
           for (const child of children) {
             void addXpEvent(familyId, child.id, 'DAD_LAB_COMPLETE', 20, `dadlab-${reportId}`, {
               reason: `Dad Lab: ${report.title || 'experiment'}`,
-            })
+            }).catch((err) => console.error('[XP] Award failed:', err))
           }
         }
       }

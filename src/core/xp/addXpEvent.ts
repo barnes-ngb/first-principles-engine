@@ -1,4 +1,4 @@
-import { doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore'
+import { doc, getDoc, setDoc } from 'firebase/firestore'
 
 import {
   avatarProfilesCollection,
@@ -97,14 +97,6 @@ export async function addXpEvent(
     lastUpdatedAt: new Date().toISOString(),
   })
 
-  // ── Compute real total from per-event xpLedger docs ────────
-  const eventDocsSnap = await getDocs(
-    query(xpLedgerCollection(familyId), where('childId', '==', childId), where('dedupKey', '!=', null)),
-  )
-  const realTotal = Math.max(0, eventDocsSnap.docs
-    .filter((d) => !(d.data() as unknown as Record<string, unknown>)._deleted)
-    .reduce((sum, d) => sum + ((d.data().amount as number) ?? 0), 0))
-
   // ── Update cached totalXp on avatarProfile ─────────────────
   const profileRef = doc(avatarProfilesCollection(familyId), childId)
   const profileSnap = await getDoc(profileRef)
@@ -113,8 +105,8 @@ export async function addXpEvent(
     : defaultAvatarProfile(childId)
 
   const oldTier = calculateTier(profile.totalXp ?? 0)
-  const newTier = calculateTier(realTotal)
-  console.log(`[XP] New total: ${realTotal}, tier: ${newTier}`)
+  const newTier = calculateTier(newTotal)
+  console.log(`[XP] New total: ${newTotal}, tier: ${newTier}`)
 
   const tierUpdate: Record<string, unknown> = {}
   if (newTier !== oldTier) {
@@ -125,13 +117,13 @@ export async function addXpEvent(
 
   await setDoc(profileRef, stripUndefined({
     ...profile,
-    totalXp: realTotal,
+    totalXp: newTotal,
     ...tierUpdate,
     updatedAt: new Date().toISOString(),
   }) as unknown as AvatarProfile)
 
   // ── Check for armor unlocks ────────────────────────────────
-  await checkAndUnlockArmor(familyId, childId, realTotal)
+  await checkAndUnlockArmor(familyId, childId, newTotal)
 
   return amount
 }

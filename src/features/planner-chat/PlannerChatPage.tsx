@@ -1158,9 +1158,17 @@ Return as JSON:
           const missing = required.filter(f => !parsed[f])
           if (missing.length > 0) {
             console.warn('[WeeklyFocus] Missing fields:', missing)
+            setSnack({
+              text: `Week focus generated, but ${missing.join(', ')} couldn't be filled. Tap ✨ to retry.`,
+              severity: 'warning',
+            })
           }
         } catch (parseErr) {
           console.error('[WeeklyFocus] Failed to parse:', parseErr)
+          setSnack({
+            text: 'Week focus response was malformed. Tap ✨ to retry.',
+            severity: 'error',
+          })
         }
       }
     } finally {
