@@ -543,6 +543,37 @@ export interface PlanModification {
   reason: string
 }
 
+// ── Curriculum Scan ──────────────────────────────────────────
+
+export interface ScanSkillResult {
+  skill: string
+  level: 'introductory' | 'practice' | 'mastery' | 'review'
+  alignsWithSnapshot: 'ahead' | 'at-level' | 'behind' | 'unknown'
+}
+
+export interface ScanResult {
+  pageType: 'worksheet' | 'textbook' | 'test' | 'activity' | 'other'
+  subject: string
+  specificTopic: string
+  skillsTargeted: ScanSkillResult[]
+  estimatedDifficulty: 'easy' | 'appropriate' | 'challenging' | 'too-hard'
+  recommendation: 'do' | 'skip' | 'quick-review' | 'modify'
+  recommendationReason: string
+  estimatedMinutes: number
+  teacherNotes: string
+}
+
+export interface ScanRecord {
+  id?: string
+  childId: string
+  imageUrl: string
+  storagePath: string
+  results: ScanResult | null
+  action: 'added' | 'skipped' | 'pending'
+  error?: string
+  createdAt?: string
+}
+
 // ── Skip Advisor Result ───────────────────────────────────────
 
 export interface SkipAdvisorResult {
