@@ -214,7 +214,8 @@ All under `families/{familyId}/`:
 4. **Child context is assembled per-request** from Firestore (skill snapshot, pace data, recent sessions).
 5. **Cost tracking:** Log token usage and model used to Firestore for monitoring.
 6. **Model selection by task:**
-   - All text generation unified on Claude Sonnet (`claude-sonnet-4-6`) as of Mar 24 cleanup
+   - Complex reasoning (plan, evaluate, quest, generateStory, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus): Claude Sonnet (`claude-sonnet-4-6`)
+   - Routine generation (generate, chat): Claude Haiku (`claude-haiku-4-5-20251001`)
    - Image generation: DALL-E 3 (scenes, armor sheets) + gpt-image-1 (transparent stickers, photo transform)
 
 ### Testing AI Logic
@@ -225,15 +226,15 @@ All under `families/{familyId}/`:
 
 ### Prompt Files
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
-- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, disposition, conundrum, etc.)
+- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, chat, analyzePatterns)
 
-### Cloud Functions (18 exported)
-- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, chat, analyzePatterns)
+### Cloud Functions (19 exported)
+- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, chat, generate)
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
 - `generateWeeklyReviewNow` — Manual review trigger
 - `generateActivity` — Lesson card generation
 - `healthCheck` — Diagnostic endpoint
-- 11 image functions: `generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`
+- 12 image functions: `generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`, `enhanceSketch`
 - `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 
 ### Cloud Functions Structure
@@ -245,11 +246,11 @@ All under `families/{familyId}/`:
 - `functions/src/ai/aiService.ts` — Core AI service orchestration
 - `functions/src/ai/sanitizeJson.ts` — JSON response sanitization
 - `functions/src/ai/health.ts` — Health check endpoint
-- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, chat, analyzePatterns
+- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, chat, analyzePatterns
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/imageGen.ts` — Image generation routing
-- `functions/src/ai/imageTasks/` — 12 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar, + index)
+- `functions/src/ai/imageTasks/` — 13 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, enhanceSketch, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar, + index)
 - `functions/src/ai/providers/` — Claude + OpenAI provider adapters (with `__stubs__/` for test mocking)
 
 ## Family Context (for AI prompt reference)
