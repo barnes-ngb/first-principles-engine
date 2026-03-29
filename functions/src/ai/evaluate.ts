@@ -3,6 +3,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { requireEmailAuth } from "./authGuard.js";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { claudeApiKey } from "./aiConfig.js";
+import { CHARTER_PREAMBLE } from "./contextSlices.js";
 import { sanitizeAndParseJson } from "./sanitizeJson.js";
 
 // ── Types ───────────────────────────────────────────────────────
@@ -60,7 +61,7 @@ interface DailyPlanRecord {
 /**
  * Return the Sunday-of-week date string for the most recent completed week.
  * The school week runs Sunday–Saturday. The scheduled review fires Sunday
- * morning, so lastWeekKey returns the previous Sunday (7 days ago on Sunday,
+ * evening, so lastWeekKey returns the previous Sunday (7 days ago on Sunday,
  * dayOfWeek+7 days ago otherwise).
  */
 export function lastWeekKey(today: Date): string {
@@ -215,42 +216,21 @@ export async function assembleWeekContext(
 
 // ── Prompt building ─────────────────────────────────────────────
 
-const BASE_SYSTEM_PROMPT = `You are the learning assistant for the Barnes family homeschool. You serve
-two parents (Shelly and Nathan) and two boys (Lincoln, 10, and London, 6).
+const WEEKLY_REVIEW_ADDENDUM = `
+WEEKLY REVIEW ROLE:
+You are generating a weekly review for the Barnes family homeschool. Analyze the week's data and provide actionable feedback.
 
-CHARTER VALUES (non-negotiable):
-- Faith first: identity comes from God, not performance.
-- No shame: correct behavior without attacking identity. Fast repair.
-- Courage + perseverance: hard things in small steps; mistakes are feedback.
-- Rest by design: margin and pacing are part of the plan, not signs of failure.
-- Portfolio over grades: evidence of growth matters more than scores.
-- Adventure matters: movement, building, discovery are core curriculum.
-
-OPERATING PRINCIPLES:
-- Shelly has fibromyalgia. Energy management is real. Never frame a low-energy
-  day as failure. The Minimum Viable Day is real school.
-- Lincoln has speech and neurodivergence challenges. Keep instructions short,
-  visual, and predictable. Celebrate small wins. Never pressure reading aloud.
-- London is story-driven and attention-seeking. Activities must be interactive
-  and engaging. Passive busywork will fail.
-- Shelly's direct attention is the primary resource. Plans must account for
-  split-block scheduling.
-
-LEARNING DISPOSITIONS:
-When analyzing the week, look for evidence of these dispositions:
-- Curiosity: Did the child choose optional activities? Show interest beyond requirements?
-- Persistence: Did the child push through struggle days? Engagement patterns on hard subjects?
-- Articulation: Any teach-back moments? Explanations to others? Audio recordings?
-- Self-Awareness: Engagement feedback patterns — does the child accurately identify hard vs easy?
-- Ownership: Evidence captured? Pride in work samples?
-
-Include disposition observations in the weekly summary alongside completion data.
-
-TONE:
-- Warm, encouraging, practical. Never clinical or condescending.
-- Speak as a knowledgeable partner, not an authority figure.
+REVIEW-SPECIFIC GUIDANCE:
+- Never pressure Lincoln about reading aloud — celebrate willingness, not volume.
+- London is attention-seeking; note when activities successfully engaged him vs when he disengaged.
+- Look for disposition evidence in the engagement data and grade notes.
 - When suggesting changes, explain the "why" briefly.
-- Default to "both modes count as real school" framing.`;
+- Default to "both modes count as real school" framing.
+- Warm, encouraging, practical tone. Never clinical or condescending.
+- Speak as a knowledgeable partner, not an authority figure.
+- Include disposition observations in the weekly summary alongside completion data.`;
+
+const WEEKLY_REVIEW_SYSTEM_PROMPT = CHARTER_PREAMBLE + "\n" + WEEKLY_REVIEW_ADDENDUM;
 
 export function buildEvaluationPrompt(ctx: WeekContext): string {
   // Compute week totals from dayLogs
@@ -405,6 +385,32 @@ export async function generateReviewForChild(
   ctx: WeekContext,
   apiKey: string,
 ): Promise<WeeklyReviewDoc> {
+  // Skip AI call if there's no data for the week
+  if (ctx.dayLogs.length === 0 && ctx.hours.length === 0) {
+    const db = getFirestore();
+    const emptyReview: WeeklyReviewDoc = {
+      childId: ctx.child.id,
+      weekKey: ctx.weekKey,
+      status: "no-data",
+      celebration: `No activities were logged for ${ctx.child.name} this week. That's okay — every week is different.`,
+      summary: "No day logs or hours were recorded. Use the Today page during the week to build up data for next week's review.",
+      wins: [],
+      growthAreas: [],
+      paceAdjustments: [],
+      recommendations: ["Try logging at least 3 days on the Today page this week for a more useful review."],
+      energyPattern: "No energy data recorded.",
+      model: "none",
+      usage: { inputTokens: 0, outputTokens: 0 },
+      createdAt: new Date().toISOString(),
+    };
+    const reviewDocId = `${ctx.weekKey}_${ctx.child.id}`;
+    await db
+      .collection(`families/${familyId}/weeklyReviews`)
+      .doc(reviewDocId)
+      .set(emptyReview);
+    return emptyReview;
+  }
+
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey });
   const model = "claude-sonnet-4-6";
@@ -414,7 +420,7 @@ export async function generateReviewForChild(
   const completion = await client.messages.create({
     model,
     max_tokens: 2048,
-    system: BASE_SYSTEM_PROMPT,
+    system: WEEKLY_REVIEW_SYSTEM_PROMPT,
     messages: [{ role: "user", content: userPrompt }],
   });
 
@@ -525,7 +531,7 @@ export const generateWeeklyReviewNow = onCall(
 
 export const weeklyReview = onSchedule(
   {
-    schedule: "every sunday 07:00",
+    schedule: "every sunday 19:00",
     timeZone: "America/Chicago",
     secrets: [claudeApiKey],
   },
