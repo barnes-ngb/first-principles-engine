@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 import Box from '@mui/material/Box'
 
-import type { AvatarBackground, CharacterFeatures, OutfitCustomization, VoxelArmorPieceId } from '../../core/types'
+import type { AccessoryId, AvatarBackground, CharacterFeatures, OutfitCustomization, VoxelArmorPieceId } from '../../core/types'
 import { DEFAULT_CHARACTER_FEATURES } from '../../core/types'
 import { XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import { buildCharacter, applyProfileOutfit } from './voxel/buildCharacter'
@@ -23,6 +23,7 @@ import { playEquipSound } from './voxel/equipSound'
 import { buildShieldEmblem } from './voxel/buildShieldEmblem'
 import { buildHelmetCrest } from './voxel/buildHelmetCrest'
 import { buildRoom } from './voxel/buildRoom'
+import { buildAccessory, getAccessoryAttachPoint, animateAccessories, getHiddenAccessories } from './voxel/buildAccessory'
 
 interface VoxelCharacterProps {
   features: CharacterFeatures | undefined
@@ -54,6 +55,8 @@ interface VoxelCharacterProps {
   onTierUp?: (oldTier: string, newTier: string) => void
   /** Scene background mode: night sky (default) or indoor room */
   background?: AvatarBackground
+  /** Equipped accessory IDs (cosmetic items) */
+  accessories?: AccessoryId[]
 }
 
 // ── Helmet hair management ────────────────────────────────────────────
@@ -294,6 +297,7 @@ export default function VoxelCharacter({
   skinTextureUrl,
   customization,
   background = 'night',
+  accessories = [],
 }: VoxelCharacterProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -301,6 +305,7 @@ export default function VoxelCharacter({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
   const characterRef = useRef<THREE.Group | null>(null)
   const armorGroupsRef = useRef<Map<VoxelArmorPieceId, THREE.Group>>(new Map())
+  const accessoryGroupsRef = useRef<Map<AccessoryId, THREE.Group>>(new Map())
   const controlsRef = useRef<TouchControlState | null>(null)
   const rafRef = useRef<number>(0)
   const prevEquippedRef = useRef<Set<string>>(new Set())
@@ -551,6 +556,28 @@ export default function VoxelCharacter({
       if (crest) helmetGroup.add(crest)
     }
 
+    // ── Build & attach accessories ──────────────────────────────────
+    accessoryGroupsRef.current.clear()
+    const hiddenAccessories = getHiddenAccessories(equippedPieces, accessories)
+    for (const accId of accessories) {
+      const accGroup = buildAccessory(accId as AccessoryId, ageGroup)
+      accessoryGroupsRef.current.set(accId as AccessoryId, accGroup)
+
+      const attachPoint = getAccessoryAttachPoint(accId as AccessoryId)
+      if (attachPoint === 'headGroup') {
+        if (headGroup) headGroup.add(accGroup)
+        else character.add(accGroup)
+      } else if (attachPoint === 'armL') {
+        if (armL) armL.add(accGroup)
+        else character.add(accGroup)
+      } else {
+        character.add(accGroup)
+      }
+
+      // Hide if conflicting with armor
+      accGroup.visible = !hiddenAccessories.has(accId as AccessoryId)
+    }
+
     // Enchantment glow (Iron tier+) — add glow aura to equipped armor pieces
     if (tierHasGlow(currentTier)) {
       for (const pieceId of equippedPieces) {
@@ -749,6 +776,9 @@ export default function VoxelCharacter({
       // Cape sway (Gold tier+)
       animateCape(scene, clock.getElapsedTime())
 
+      // Accessory animations (wing flutter, parrot bob)
+      animateAccessories(scene, clock.getElapsedTime())
+
       // Subtle star twinkle — sine wave on each star's opacity with unique phase
       const twinkleTime = clock.getElapsedTime()
       scene.traverse((obj) => {
@@ -784,7 +814,7 @@ export default function VoxelCharacter({
         applyPaintedFace(headMesh, character, resolvedFeatures, skinHex)
       }
     }
-  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, skinTextureUrl, customization, armorColors])
+  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, skinTextureUrl, customization, armorColors, accessories])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
@@ -888,6 +918,15 @@ export default function VoxelCharacter({
     applyTierToArmor(armorGroupsRef.current, currentTier, equippedPieces, armorColors)
     enforceArmorOpacity(armorGroupsRef.current, equippedPieces)
   }, [armorColors, currentTier, equippedPieces])
+
+  // ── Update accessory visibility on armor/accessory changes ──────
+  useEffect(() => {
+    if (accessories.length === 0) return
+    const hidden = getHiddenAccessories(equippedPieces, accessories)
+    for (const [accId, group] of accessoryGroupsRef.current) {
+      group.visible = accessories.includes(accId) && !hidden.has(accId)
+    }
+  }, [equippedPieces, accessories])
 
   // ── Tier upgrade ceremony when XP changes tier ─────────────────
   useEffect(() => {
