@@ -105,6 +105,7 @@ import ContextDrawer from './ContextDrawer'
 import LessonCardPreview from './LessonCardPreview'
 import PlanPreviewCard from './PlanPreviewCard'
 import PlanSummaryPanel from './PlanSummaryPanel'
+import { useScan } from '../../core/hooks/useScan'
 import PhotoLabelForm from './PhotoLabelForm'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
 import { buildMaterialsPrompt, openPrintWindow } from './generateMaterials'
@@ -225,6 +226,16 @@ export default function PlannerChatPage() {
   const [generatedPlanItem, setGeneratedPlanItem] = useState<DraftPlanItem | null>(null)
   const [lessonCardSaved, setLessonCardSaved] = useState(false)
   const [lessonCardSaving, setLessonCardSaving] = useState(false)
+
+  // Scan hook for workbook page analysis
+  const {
+    scan: runScan,
+    recordAction: recordScanAction,
+    scanResult: scanRecord,
+    scanning: scanLoading,
+    error: scanError,
+    clearScan,
+  } = useScan()
 
   // Workbook configs for active child (for photo label matching)
   const [workbookConfigs, setWorkbookConfigs] = useState<WorkbookConfig[]>([])
@@ -539,6 +550,49 @@ export default function PlannerChatPage() {
     },
     [activeChildId, familyId],
   )
+
+  // Scan a workbook page (upload + AI skill analysis)
+  const handleScanCapture = useCallback(
+    async (file: File) => {
+      if (!activeChildId) return
+      await runScan(file, familyId, activeChildId)
+    },
+    [activeChildId, familyId, runScan],
+  )
+
+  // Accept a scan result — add as a photo label with auto-filled fields
+  const handleScanAccept = useCallback(() => {
+    if (!scanRecord?.results) return
+    const r = scanRecord.results
+    // Map scan subject to SubjectBucket
+    const subjectMap: Record<string, SubjectBucket> = {
+      math: SubjectBucket.Math,
+      reading: SubjectBucket.Reading,
+      writing: SubjectBucket.LanguageArts,
+      spelling: SubjectBucket.LanguageArts,
+      phonics: SubjectBucket.Reading,
+      science: SubjectBucket.Science,
+    }
+    const subject = subjectMap[r.subject] ?? SubjectBucket.Other
+    const newLabel: PhotoLabel = {
+      artifactId: scanRecord.id ?? `scan-${Date.now()}`,
+      subjectBucket: subject,
+      lessonOrPages: r.specificTopic,
+      estimatedMinutes: r.estimatedMinutes,
+      extractedContent: {
+        subject: r.subject,
+        lessonNumber: '',
+        topic: r.specificTopic,
+        estimatedMinutes: r.estimatedMinutes,
+        difficulty: r.estimatedDifficulty,
+        modifications: r.teacherNotes,
+        rawDescription: `${r.specificTopic} (${r.recommendation}: ${r.recommendationReason})`,
+      },
+    }
+    setPhotoLabels((prev) => [...prev, newLabel])
+    void recordScanAction(familyId, scanRecord, 'added')
+    clearScan()
+  }, [scanRecord, familyId, recordScanAction, clearScan])
 
   // Extract photo content using AI vision (analyzes actual image) with text-only fallback
   const extractPhotoContent = useCallback(async (
@@ -2327,6 +2381,12 @@ Generate a plan for Monday through Friday.`.trim()
                 onPhotoCapture={handlePhotoCapture}
                 uploading={uploading}
                 workbookConfigs={workbookConfigs}
+                onScanCapture={handleScanCapture}
+                scanLoading={scanLoading}
+                scanResult={scanRecord?.results ?? null}
+                scanError={scanError}
+                onScanClear={clearScan}
+                onScanAccept={handleScanAccept}
               />
               {photoLabels.length > 0 && (
                 <Button

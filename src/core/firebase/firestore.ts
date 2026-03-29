@@ -26,6 +26,7 @@ import type {
   LessonCard,
   MilestoneProgress,
   PlannerConversation,
+  ScanRecord,
   SightWordProgress,
   SkillSnapshot,
   Sticker,
@@ -371,6 +372,15 @@ const storyGameConverter: FirestoreDataConverter<StoryGame> = {
     }
   },
 }
+
+// ── Curriculum Scans ──────────────────────────────────────────
+
+export const scansCollection = (
+  familyId: string,
+): CollectionReference<ScanRecord> =>
+  collection(db, `families/${familyId}/scans`) as CollectionReference<ScanRecord>
+
+// ── Story Games (Game Workshop) ─────────────────────────────────
 
 export const storyGamesCollection = (
   familyId: string,

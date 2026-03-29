@@ -52,6 +52,8 @@ import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
+import ScanButton from '../../components/ScanButton'
+import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -92,6 +94,7 @@ import QuickAddHours from '../records/QuickAddHours'
 import CreativeTimeLog from './CreativeTimeLog'
 import WorkshopGameCards from './WorkshopGameCards'
 import { syncChecklistToRoutine } from './checklistRoutineSync'
+import { useScan } from '../../core/hooks/useScan'
 import { calculateXp } from './xp'
 
 const subjectBucketColor: Record<string, string> = {
@@ -222,6 +225,8 @@ export default function TodayPage() {
   const [printingMaterials, setPrintingMaterials] = useState(false)
   const [todaySnapshot, setTodaySnapshot] = useState<SkillSnapshot | null>(null)
   const [addingItem, setAddingItem] = useState(false)
+  const { scan: runScan, recordAction: recordScanAction, scanResult, scanning: scanLoading, error: scanError, clearScan } = useScan()
+  const [scanItemIndex, setScanItemIndex] = useState<number | null>(null)
   const [newItemTitle, setNewItemTitle] = useState('')
   const [newItemMinutes, setNewItemMinutes] = useState(15)
   const [newItemSubject, setNewItemSubject] = useState<SubjectBucket>(SubjectBucket.Other)
@@ -1023,6 +1028,40 @@ export default function TodayPage() {
           setGradeNote(null)
         }
 
+        const handleScanCapture = async (file: File, index: number) => {
+          setScanItemIndex(index)
+          await runScan(file, familyId, selectedChildId)
+        }
+
+        const handleScanAddToPlan = () => {
+          if (!scanResult?.results || scanItemIndex == null || !dayLog?.checklist) return
+          const r = scanResult.results
+          const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
+            i === scanItemIndex
+              ? {
+                  ...ci,
+                  subjectBucket: (r.subject.charAt(0).toUpperCase() + r.subject.slice(1)) as SubjectBucket,
+                  estimatedMinutes: r.estimatedMinutes,
+                  plannedMinutes: r.estimatedMinutes,
+                  skillTags: r.skillsTargeted.map((s) => s.skill),
+                  skipGuidance: r.recommendation === 'skip' || r.recommendation === 'quick-review'
+                    ? `${r.recommendation}: ${r.recommendationReason}`
+                    : undefined,
+                }
+              : ci,
+          )
+          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+          if (scanResult) void recordScanAction(familyId, scanResult, 'added')
+          clearScan()
+          setScanItemIndex(null)
+        }
+
+        const handleScanSkip = () => {
+          if (scanResult) void recordScanAction(familyId, scanResult, 'skipped')
+          clearScan()
+          setScanItemIndex(null)
+        }
+
         return (
           <SectionCard title="Today's Plan" action={
             hasPlanItems ? (
@@ -1230,7 +1269,33 @@ export default function TodayPage() {
                             </IconButton>
                           </Tooltip>
                         )}
+                        {!item.completed && (
+                          <Tooltip title="Scan workbook page">
+                            <span>
+                              <ScanButton
+                                variant="icon"
+                                loading={scanLoading && scanItemIndex === index}
+                                onCapture={(file) => handleScanCapture(file, index)}
+                              />
+                            </span>
+                          </Tooltip>
+                        )}
                       </Stack>
+                      {/* Scan results panel */}
+                      {scanItemIndex === index && scanResult?.results && (
+                        <ScanResultsPanel
+                          results={scanResult.results}
+                          imageUrl={scanResult.imageUrl}
+                          onAddToPlan={handleScanAddToPlan}
+                          onSkip={handleScanSkip}
+                          onScanAnother={() => { clearScan(); setScanItemIndex(null) }}
+                        />
+                      )}
+                      {scanItemIndex === index && scanError && (
+                        <Alert severity="error" sx={{ mt: 1 }} onClose={() => { clearScan(); setScanItemIndex(null) }}>
+                          Scan failed: {scanError}
+                        </Alert>
+                      )}
                       {/* Engagement feedback: emoji row after completion */}
                       {item.completed && !item.engagement && (
                         <Stack direction="row" spacing={0.5} sx={{ ml: 5, mt: 0.5 }}>

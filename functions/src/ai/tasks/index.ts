@@ -9,6 +9,7 @@ import { handleAnalyzeWorkbook } from "./analyzeWorkbook.js";
 import { handleDisposition } from "./disposition.js";
 import { handleConundrum } from "./conundrum.js";
 import { handleWeeklyFocus } from "./weeklyFocus.js";
+import { handleScan } from "./scan.js";
 
 export { analyzeEvaluationPatterns } from "./analyzePatterns.js";
 
@@ -24,4 +25,5 @@ export const CHAT_TASKS: Record<string, ChatTaskHandler> = {
   disposition: handleDisposition,
   conundrum: handleConundrum,
   weeklyFocus: handleWeeklyFocus,
+  scan: handleScan,
 };
