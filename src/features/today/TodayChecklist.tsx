@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
@@ -35,7 +35,7 @@ import {
   RoutineItemKey,
   SubjectBucket,
 } from '../../core/types/enums'
-import type { ScanResult } from '../../core/types/planning'
+import type { ScanRecord } from '../../core/types/planning'
 import { autoFillBlockMinutes } from './daylog.model'
 import { syncChecklistToRoutine } from './checklistRoutineSync'
 import { calculateXp } from './xp'
@@ -103,7 +103,7 @@ interface TodayChecklistProps {
   onScanCapture: (file: File, index: number) => void
   scanLoading: boolean
   scanItemIndex: number | null
-  scanResult: ScanResult | null
+  scanResult: ScanRecord | null
   scanError: string | null
   onScanAddToPlan: () => void
   onScanSkip: () => void
@@ -137,6 +137,11 @@ export default function TodayChecklist({
   const [newItemMinutes, setNewItemMinutes] = useState(15)
   const [newItemSubject, setNewItemSubject] = useState<SubjectBucket>(SubjectBucket.Other)
   const [gradeNote, setGradeNote] = useState<{ index: number; text: string } | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(id)
+  }, [])
 
   const rawChecklist = dayLog.checklist ?? []
   const hasPlanItems = rawChecklist.length > 0
@@ -157,16 +162,16 @@ export default function TodayChecklist({
   const xp = calculateXp(dayLog, activeRoutineItems)
   const isLincoln = selectedChild?.name?.toLowerCase() === 'lincoln'
 
-  const estimatedFinishLabel = useMemo(() => {
+  const estimatedFinishLabel = (() => {
     const remainingMinutes = checklist
       .filter((ci) => !ci.completed)
       .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
     if (remainingMinutes > 0 && completedCount < checklist.length) {
-      const est = new Date(Date.now() + remainingMinutes * 60_000)
+      const est = new Date(now + remainingMinutes * 60_000)
       return ` \u00B7 Est. finish: ${formatTime12h(est)}`
     }
     return ''
-  }, [checklist, completedCount])
+  })()
 
   // Engagement pattern insights
   const itemsWithEngagement = checklist.filter((ci) => ci.engagement)
