@@ -1,5 +1,6 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireApprovedUser } from "../authGuard.js";
 import { claudeApiKey } from "../aiConfig.js";
 
 // ── Minecraft Pixel Face Generation (Claude Vision → 64-color grid) ──
@@ -50,9 +51,7 @@ Example start: ["#6B4C32","#6B4C32",...]`;
 export const generateMinecraftFace = onCall(
   { secrets: [claudeApiKey], timeoutSeconds: 60 },
   async (request): Promise<MinecraftFaceResponse> => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireApprovedUser(request);
 
     const { familyId, childId, photoBase64, photoMimeType } =
       request.data as MinecraftFaceRequest;
@@ -60,7 +59,7 @@ export const generateMinecraftFace = onCall(
     if (!familyId || !childId || !photoBase64 || !photoMimeType) {
       throw new HttpsError("invalid-argument", "Missing required fields.");
     }
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",

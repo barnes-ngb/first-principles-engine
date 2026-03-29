@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
+import { requireEmailAuth } from "./authGuard.js";
 import { CHARTER_PREAMBLE } from "./contextSlices.js";
 import { sanitizeAndParseJson } from "./sanitizeJson.js";
 
@@ -342,9 +343,7 @@ export const generateActivity = onCall(
   { secrets: [claudeApiKey] },
   async (request): Promise<GenerateResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireEmailAuth(request);
 
     const { familyId, childId, activityType, skillTag, estimatedMinutes } =
       request.data as GenerateRequest;
@@ -374,7 +373,7 @@ export const generateActivity = onCall(
     }
 
     // ── Authorization: caller must own the family ──────────────
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",

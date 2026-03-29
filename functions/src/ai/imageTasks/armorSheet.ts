@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireApprovedUser } from "../authGuard.js";
 import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 import { createOpenAiProvider } from "../providers/openai.js";
 
@@ -117,9 +118,7 @@ const ARMOR_SHEET_RAW_PROMPTS: Record<string, string> = {
 export const generateArmorSheet = onCall(
   { secrets: [openaiApiKey, claudeApiKey] },
   async (request): Promise<ArmorSheetResponse> => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireApprovedUser(request);
 
     const { familyId, childId, themeStyle, tier } =
       request.data as ArmorSheetRequest;
@@ -127,7 +126,7 @@ export const generateArmorSheet = onCall(
     if (!familyId || !childId || !themeStyle || !tier) {
       throw new HttpsError("invalid-argument", "Missing required fields.");
     }
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError("permission-denied", "You do not have access to this family.");
     }
 

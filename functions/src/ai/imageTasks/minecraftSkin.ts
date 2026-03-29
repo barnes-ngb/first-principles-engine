@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireApprovedUser } from "../authGuard.js";
 import { openaiApiKey } from "../aiConfig.js";
 
 // ── Minecraft Skin Face Generation (gpt-image-1) ──────────────────
@@ -28,9 +29,7 @@ export interface MinecraftSkinResponse {
 export const generateMinecraftSkin = onCall(
   { secrets: [openaiApiKey], timeoutSeconds: 60 },
   async (request): Promise<MinecraftSkinResponse> => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireApprovedUser(request);
 
     const {
       familyId,
@@ -44,7 +43,7 @@ export const generateMinecraftSkin = onCall(
     if (!familyId || !childId || !skinTone || !hairColor || !eyeColor) {
       throw new HttpsError("invalid-argument", "Missing required fields.");
     }
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError("permission-denied", "You do not have access to this family.");
     }
 
