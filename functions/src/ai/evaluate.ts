@@ -525,7 +525,7 @@ export const generateWeeklyReviewNow = onCall(
 
 export const weeklyReview = onSchedule(
   {
-    schedule: "every sunday 19:00",
+    schedule: "every sunday 09:00",
     timeZone: "America/Chicago",
     secrets: [claudeApiKey],
   },
