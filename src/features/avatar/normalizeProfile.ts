@@ -1,4 +1,5 @@
 import type {
+  AccessoryId,
   ArmorColors,
   ArmorPieceProgress,
   ArmorTier,
@@ -9,7 +10,7 @@ import type {
   OutfitCustomization,
   ShieldEmblem,
 } from '../../core/types'
-import { AvatarBackground as AvatarBackgroundValues, ShieldEmblem as ShieldEmblemValues, HelmetCrest as HelmetCrestValues } from '../../core/types'
+import { ACCESSORY_XP_THRESHOLDS, AvatarBackground as AvatarBackgroundValues, ShieldEmblem as ShieldEmblemValues, HelmetCrest as HelmetCrestValues } from '../../core/types'
 
 /**
  * Normalize raw Firestore data into a safe AvatarProfile.
@@ -114,6 +115,7 @@ function normalizeCustomization(raw: unknown): OutfitCustomization | undefined {
   const background = typeof c.background === 'string' && VALID_BACKGROUNDS.has(c.background)
     ? (c.background as AvatarBackground)
     : undefined
+  const accessories = normalizeAccessories(c.accessories)
   return {
     ...(c.shirtColor ? { shirtColor: c.shirtColor as string } : {}),
     ...(c.pantsColor ? { pantsColor: c.pantsColor as string } : {}),
@@ -122,7 +124,15 @@ function normalizeCustomization(raw: unknown): OutfitCustomization | undefined {
     ...(shieldEmblem ? { shieldEmblem } : {}),
     ...(helmetCrest ? { helmetCrest } : {}),
     ...(background ? { background } : {}),
+    ...(accessories.length > 0 ? { accessories } : {}),
   }
+}
+
+const VALID_ACCESSORY_IDS = new Set<string>(Object.keys(ACCESSORY_XP_THRESHOLDS))
+
+function normalizeAccessories(raw: unknown): AccessoryId[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((id): id is AccessoryId => typeof id === 'string' && VALID_ACCESSORY_IDS.has(id))
 }
 
 function createDefaultProfile(): AvatarProfile {
