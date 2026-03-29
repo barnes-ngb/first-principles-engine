@@ -17,9 +17,9 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true }: P
       sx={{
         display: 'flex',
         justifyContent: 'center',
-        gap: '8px',
-        py: 1.5,
-        px: 2,
+        gap: '6px',
+        py: 1,
+        px: 1.5,
       }}
     >
       {visiblePoses.map((pose) => {
@@ -30,9 +30,9 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true }: P
             component="button"
             onClick={() => onPose(pose.id)}
             sx={{
-              width: 54,
-              height: 54,
-              borderRadius: isLincoln ? '8px' : '50%',
+              width: 52,
+              height: 52,
+              borderRadius: isLincoln ? '10px' : '50%',
               border: isActive
                 ? `2px solid ${accentColor}`
                 : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
@@ -50,7 +50,7 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true }: P
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '2px',
+              gap: '3px',
               position: 'relative',
               boxShadow: isActive
                 ? `0 0 12px ${accentColor}33`
@@ -68,15 +68,15 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true }: P
             }}
             title={pose.name}
           >
-            <Box sx={{ fontSize: '20px', lineHeight: 1 }}>{pose.icon}</Box>
+            <Box sx={{ fontSize: '22px', lineHeight: 1 }}>{pose.icon}</Box>
             <Typography
               sx={{
-                fontSize: isLincoln ? '0.22rem' : '8px',
+                fontSize: isLincoln ? '7px' : '9px',
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
                 letterSpacing: isLincoln ? '-0.3px' : '0',
-                opacity: isActive ? 1 : 0.7,
+                opacity: isActive ? 1 : 0.65,
                 lineHeight: 1,
-                mt: '2px',
+                mt: '1px',
                 fontWeight: isActive ? 700 : 400,
                 color: 'inherit',
               }}

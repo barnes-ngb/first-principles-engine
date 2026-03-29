@@ -57,7 +57,7 @@ export default function AccessoriesPanel({
       <Typography
         sx={{
           fontFamily: titleFont,
-          fontSize: isLincoln ? '0.42rem' : '15px',
+          fontSize: isLincoln ? '9px' : '15px',
           fontWeight: 600,
           color: accentColor,
           mb: 1.5,
@@ -129,7 +129,7 @@ export default function AccessoriesPanel({
               <Typography
                 sx={{
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '0.2rem' : '9px',
+                  fontSize: isLincoln ? '7px' : '9px',
                   color: isEquipped
                     ? accentColor
                     : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)'),
@@ -145,7 +145,7 @@ export default function AccessoriesPanel({
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.16rem' : '8px',
+                    fontSize: isLincoln ? '7px' : '8px',
                     color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.25)',
                   }}
                 >
@@ -157,7 +157,7 @@ export default function AccessoriesPanel({
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.14rem' : '7px',
+                    fontSize: isLincoln ? '6px' : '7px',
                     color: '#ff9800',
                   }}
                 >
@@ -169,7 +169,7 @@ export default function AccessoriesPanel({
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.14rem' : '7px',
+                    fontSize: isLincoln ? '6px' : '7px',
                     color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.25)',
                   }}
                 >

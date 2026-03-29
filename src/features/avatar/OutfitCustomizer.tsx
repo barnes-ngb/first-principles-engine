@@ -87,7 +87,7 @@ export default function OutfitCustomizer({
       <Typography
         sx={{
           fontFamily: titleFont,
-          fontSize: isLincoln ? '0.42rem' : '15px',
+          fontSize: isLincoln ? '9px' : '15px',
           color: accentColor,
           mb: 2,
           fontWeight: 600,
@@ -148,7 +148,7 @@ export default function OutfitCustomizer({
               <Typography
                 sx={{
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '0.26rem' : '11px',
+                  fontSize: isLincoln ? '7px' : '11px',
                   color: isActive
                     ? accentColor
                     : (isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)'),

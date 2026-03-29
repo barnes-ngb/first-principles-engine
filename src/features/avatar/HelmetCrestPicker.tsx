@@ -36,7 +36,7 @@ export default function HelmetCrestPicker({
             startIcon={<LockIcon sx={{ fontSize: 14 }} />}
             sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.28rem' : '11px',
+              fontSize: isLincoln ? '7px' : '11px',
               color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.25)',
               textTransform: 'none',
               borderRadius: isLincoln ? '4px' : '10px',
@@ -63,7 +63,7 @@ export default function HelmetCrestPicker({
         onClick={() => setOpen(!open)}
         sx={{
           fontFamily: titleFont,
-          fontSize: isLincoln ? '0.28rem' : '11px',
+          fontSize: isLincoln ? '7px' : '11px',
           color: open ? accentColor : (isLincoln ? '#ccc' : '#555'),
           textTransform: 'none',
           borderRadius: isLincoln ? '4px' : '10px',

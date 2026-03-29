@@ -70,7 +70,7 @@ export default function MinecraftSkinExport({
               : 'linear-gradient(135deg, rgba(232,160,191,0.08) 0%, rgba(232,160,191,0.04) 100%)',
           color: isLocked ? 'rgba(128,128,128,0.5)' : accentColor,
           fontFamily: titleFont,
-          fontSize: isLincoln ? '0.4rem' : '14px',
+          fontSize: isLincoln ? '9px' : '14px',
           fontWeight: 700,
           cursor: isLocked ? 'default' : 'pointer',
           opacity: isLocked ? 0.5 : 1,
@@ -130,7 +130,7 @@ export default function MinecraftSkinExport({
           <Typography
             sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.5rem' : '17px',
+              fontSize: isLincoln ? '11px' : '17px',
               fontWeight: 700,
               color: accentColor,
               mb: 2,
@@ -161,7 +161,7 @@ export default function MinecraftSkinExport({
                 <Typography
                   sx={{
                     fontFamily: titleFont,
-                    fontSize: isLincoln ? '0.32rem' : '11px',
+                    fontSize: isLincoln ? '7px' : '11px',
                     color: isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)',
                     mt: 0.5,
                   }}
@@ -176,7 +176,7 @@ export default function MinecraftSkinExport({
           <Typography
             sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.34rem' : '12px',
+              fontSize: isLincoln ? '8px' : '12px',
               color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)',
               mb: 2,
             }}
@@ -191,7 +191,7 @@ export default function MinecraftSkinExport({
             fullWidth
             sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.42rem' : '14px',
+              fontSize: isLincoln ? '9px' : '14px',
               fontWeight: 700,
               py: 1.5,
               borderRadius: isLincoln ? '6px' : '14px',
@@ -218,7 +218,7 @@ export default function MinecraftSkinExport({
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.3rem' : '11px',
+                fontSize: isLincoln ? '7px' : '11px',
                 color: isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)',
                 lineHeight: 1.6,
                 textAlign: 'left',

@@ -47,7 +47,7 @@ export default function ArmorGateScreen({ gateStatus, avatarProfile, childName }
         <Typography
           sx={{
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
-            fontSize: isLincoln ? '0.65rem' : '20px',
+            fontSize: isLincoln ? '14px' : '20px',
             fontWeight: 500,
             mt: 2.5,
           }}
@@ -58,7 +58,7 @@ export default function ArmorGateScreen({ gateStatus, avatarProfile, childName }
         <Typography
           sx={{
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
-            fontSize: isLincoln ? '0.4rem' : '14px',
+            fontSize: isLincoln ? '9px' : '14px',
             color: 'text.secondary',
             mt: 1,
             maxWidth: 300,
@@ -101,7 +101,7 @@ export default function ArmorGateScreen({ gateStatus, avatarProfile, childName }
             borderColor: isLincoln ? '#7EFC20' : '#4caf50',
             color: isLincoln ? '#7EFC20' : '#4caf50',
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
-            fontSize: isLincoln ? '0.4rem' : '16px',
+            fontSize: isLincoln ? '9px' : '16px',
             fontWeight: 500,
             '&:hover': {
               borderColor: isLincoln ? '#7EFC20' : '#4caf50',

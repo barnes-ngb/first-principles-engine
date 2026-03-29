@@ -956,11 +956,11 @@ export default function MyAvatarPage() {
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3 }}>
       <Page>
-        {/* ── Child Switcher + XP/Tier Header ────── */}
-        <Box sx={{ textAlign: 'center', pt: 1.5, pb: 0.5 }}>
+        {/* ── Child Switcher + Controls Toolbar ────── */}
+        <Box sx={{ pt: 1.5, pb: 0.5 }}>
           {/* Child switcher — only for parent profiles with multiple children */}
           {!isChildProfile && children.length > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', gap: '8px', mb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', gap: '8px', mb: 1.5 }}>
               {children.map((child) => {
                 const isActive = child.id === childId
                 const childIsLincoln = child.name.toLowerCase() === 'lincoln'
@@ -976,7 +976,7 @@ export default function MyAvatarPage() {
                       border: isActive
                         ? `2px solid ${childAccent}`
                         : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'}`,
-                      borderRadius: childIsLincoln ? '6px' : '20px',
+                      borderRadius: childIsLincoln ? '8px' : '20px',
                       background: isActive
                         ? (childIsLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
                         : 'transparent',
@@ -984,7 +984,7 @@ export default function MyAvatarPage() {
                         ? childAccent
                         : (isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)'),
                       fontFamily: childIsLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                      fontSize: childIsLincoln ? '0.42rem' : '14px',
+                      fontSize: childIsLincoln ? '9px' : '14px',
                       fontWeight: isActive ? 700 : 400,
                       cursor: 'pointer',
                       transition: 'all 0.2s ease',
@@ -1003,19 +1003,19 @@ export default function MyAvatarPage() {
             </Box>
           )}
 
-          {/* ── Brothers Toggle ────── */}
-          {children.length > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
+          {/* ── Compact Controls Toolbar (Brothers + Background) ────── */}
+          <Box sx={{ display: 'flex', justifyContent: 'center', gap: '8px', mb: 1.5 }}>
+            {children.length > 1 && (
               <Box
                 component="button"
                 onClick={() => setBrothersMode((prev) => !prev)}
                 sx={{
-                  px: '16px',
-                  py: '8px',
+                  px: '14px',
+                  py: '7px',
                   border: brothersMode
                     ? `2px solid ${accentColor}`
                     : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`,
-                  borderRadius: isLincoln ? '6px' : '18px',
+                  borderRadius: isLincoln ? '8px' : '18px',
                   background: brothersMode
                     ? (isLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
                     : 'transparent',
@@ -1023,14 +1023,14 @@ export default function MyAvatarPage() {
                     ? accentColor
                     : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'),
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '0.38rem' : '13px',
+                  fontSize: isLincoln ? '8px' : '13px',
                   fontWeight: brothersMode ? 700 : 400,
                   cursor: 'pointer',
                   transition: 'all 0.2s ease',
                   boxShadow: brothersMode ? `0 0 10px ${accentColor}22` : 'none',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px',
+                  gap: '5px',
                   '&:hover': {
                     borderColor: accentColor,
                     background: isLincoln ? 'rgba(126,252,32,0.06)' : 'rgba(232,160,191,0.06)',
@@ -1038,24 +1038,20 @@ export default function MyAvatarPage() {
                   '&:active': { transform: 'scale(0.96)' },
                 }}
               >
-                <span style={{ fontSize: '16px' }}>👬</span>
+                <span style={{ fontSize: '14px' }}>👬</span>
                 Brothers
               </Box>
-            </Box>
-          )}
-
-          {/* ── Background Toggle ────── */}
-          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
+            )}
             <Box
               component="button"
               onClick={handleBackgroundToggle}
               sx={{
-                px: '16px',
-                py: '8px',
+                px: '14px',
+                py: '7px',
                 border: bgMode === 'room'
                   ? `2px solid ${accentColor}`
                   : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`,
-                borderRadius: isLincoln ? '6px' : '18px',
+                borderRadius: isLincoln ? '8px' : '18px',
                 background: bgMode === 'room'
                   ? (isLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
                   : 'transparent',
@@ -1063,14 +1059,14 @@ export default function MyAvatarPage() {
                   ? accentColor
                   : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'),
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                fontSize: isLincoln ? '0.38rem' : '13px',
+                fontSize: isLincoln ? '8px' : '13px',
                 fontWeight: bgMode === 'room' ? 700 : 400,
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
                 boxShadow: bgMode === 'room' ? `0 0 10px ${accentColor}22` : 'none',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px',
+                gap: '5px',
                 '&:hover': {
                   borderColor: accentColor,
                   background: isLincoln ? 'rgba(126,252,32,0.06)' : 'rgba(232,160,191,0.06)',
@@ -1078,7 +1074,7 @@ export default function MyAvatarPage() {
                 '&:active': { transform: 'scale(0.96)' },
               }}
             >
-              <span style={{ fontSize: '16px' }}>{bgMode === 'room' ? '\uD83C\uDFE0' : '\uD83C\uDF19'}</span>
+              <span style={{ fontSize: '14px' }}>{bgMode === 'room' ? '\uD83C\uDFE0' : '\uD83C\uDF19'}</span>
               {bgMode === 'room' ? 'Room' : 'Night'}
             </Box>
           </Box>
@@ -1087,9 +1083,9 @@ export default function MyAvatarPage() {
           <Box
             sx={{
               mx: 1,
-              px: 2,
+              px: 2.5,
               py: 2,
-              borderRadius: isLincoln ? '8px' : '18px',
+              borderRadius: isLincoln ? '10px' : '18px',
               background: isLincoln
                 ? 'linear-gradient(135deg, rgba(20,22,36,0.95) 0%, rgba(26,36,56,0.95) 100%)'
                 : 'linear-gradient(135deg, rgba(255,240,245,0.95) 0%, rgba(248,232,242,0.95) 100%)',
@@ -1124,11 +1120,11 @@ export default function MyAvatarPage() {
               sx={{
                 px: 1.5,
                 py: 1,
-                borderRadius: isLincoln ? '6px' : '12px',
+                borderRadius: isLincoln ? '8px' : '12px',
                 background: getTierBadgeColor(calculateTier(profile.totalXp)),
                 color: getTierTextColor(calculateTier(profile.totalXp)),
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                fontSize: isLincoln ? '0.45rem' : '14px',
+                fontSize: isLincoln ? '10px' : '14px',
                 fontWeight: 700,
                 textTransform: 'uppercase',
                 letterSpacing: '1px',
@@ -1151,7 +1147,7 @@ export default function MyAvatarPage() {
                   <Typography
                     sx={{
                       fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                      fontSize: isLincoln ? '0.38rem' : '13px',
+                      fontSize: isLincoln ? '8px' : '13px',
                       color: isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)',
                     }}
                   >
@@ -1161,7 +1157,7 @@ export default function MyAvatarPage() {
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.5rem' : '17px',
+                    fontSize: isLincoln ? '11px' : '17px',
                     fontWeight: 700,
                     color: accentColor,
                     ml: 'auto',
@@ -1172,11 +1168,11 @@ export default function MyAvatarPage() {
                 </Typography>
               </Box>
 
-              {/* Mini tier progress bar */}
+              {/* Tier progress bar */}
               <Box
                 sx={{
-                  height: 8,
-                  borderRadius: isLincoln ? '2px' : '4px',
+                  height: 10,
+                  borderRadius: isLincoln ? '3px' : '5px',
                   bgcolor: isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
                   overflow: 'hidden',
                   border: `1px solid ${isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'}`,
@@ -1188,8 +1184,8 @@ export default function MyAvatarPage() {
                     width: `${tierProgress}%`,
                     borderRadius: 'inherit',
                     background: isLincoln
-                      ? `linear-gradient(90deg, ${accentColor}66, ${accentColor})`
-                      : `linear-gradient(90deg, ${accentColor}66, ${accentColor})`,
+                      ? `linear-gradient(90deg, ${accentColor}88, ${accentColor})`
+                      : `linear-gradient(90deg, ${accentColor}88, ${accentColor})`,
                     transition: 'width 0.6s ease-out',
                     boxShadow: `0 0 8px ${accentColor}33`,
                   }}
@@ -1201,8 +1197,8 @@ export default function MyAvatarPage() {
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.28rem' : '10px',
-                    color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)',
+                    fontSize: isLincoln ? '7px' : '10px',
+                    color: isLincoln ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.3)',
                     mt: 0.5,
                     textAlign: 'right',
                   }}
@@ -1211,33 +1207,22 @@ export default function MyAvatarPage() {
                 </Typography>
               )}
 
-              {/* Enchantment glow / cape unlock hints */}
-              {!tierHasGlow(currentTierName) && (
+              {/* Compact unlock hints — single line */}
+              {(!tierHasGlow(currentTierName) || !tierHasCape(currentTierName)) && (
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.28rem' : '10px',
-                    color: isLincoln ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)',
+                    fontSize: isLincoln ? '6px' : '9px',
+                    color: isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)',
                     mt: 0.5,
                     textAlign: 'center',
                   }}
                 >
-                  Enchantment glow unlocks at Iron tier
-                </Typography>
-              )}
-              {!tierHasCape(currentTierName) && (
-                <Typography
-                  sx={{
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.28rem' : '10px',
-                    color: isLincoln ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)',
-                    mt: 0.25,
-                    textAlign: 'center',
-                  }}
-                >
-                  {tierHasGlow(currentTierName)
-                    ? 'Cape unlocks at Gold tier (enchantment glow active!)'
-                    : 'Cape unlocks at Gold tier'}
+                  {!tierHasGlow(currentTierName) && !tierHasCape(currentTierName)
+                    ? 'Glow at Iron · Cape at Gold'
+                    : !tierHasCape(currentTierName)
+                      ? 'Cape unlocks at Gold'
+                      : 'Enchantment glow unlocks at Iron'}
                 </Typography>
               )}
             </Box>
@@ -1423,7 +1408,7 @@ export default function MyAvatarPage() {
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.45rem' : '15px',
+                fontSize: isLincoln ? '10px' : '15px',
                 fontWeight: 600,
                 color: isLincoln ? '#FFD700' : '#9C27B0',
                 lineHeight: 1.6,
@@ -1440,7 +1425,7 @@ export default function MyAvatarPage() {
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.55rem' : '18px',
+                fontSize: isLincoln ? '12px' : '18px',
                 fontWeight: 700,
                 color: isLincoln ? '#FFD700' : '#9C27B0',
                 textShadow: isLincoln ? '0 0 12px rgba(255,215,0,0.3)' : 'none',
@@ -1468,7 +1453,7 @@ export default function MyAvatarPage() {
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.32rem' : '12px',
+                    fontSize: isLincoln ? '8px' : '12px',
                     color: '#FFA726',
                     fontWeight: 600,
                   }}
@@ -1495,7 +1480,7 @@ export default function MyAvatarPage() {
                     : 'linear-gradient(135deg, #4caf50, #388e3c)',
                   color: isLincoln ? '#000' : '#fff',
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '0.4rem' : '16px',
+                  fontSize: isLincoln ? '9px' : '16px',
                   fontWeight: 600,
                   cursor: 'pointer',
                   boxShadow: `0 4px 14px ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(76,175,80,0.3)'}`,
@@ -1513,23 +1498,24 @@ export default function MyAvatarPage() {
         ) : unlockedVoxel.length > 0 && appliedVoxel.length < unlockedVoxel.length ? (
           <Box sx={{ textAlign: 'center', py: 1, mb: 0.5 }}>
             {/* Equipped count dots */}
-            <Box sx={{ display: 'flex', justifyContent: 'center', gap: '6px', mb: 1.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', gap: '8px', mb: 1.5 }}>
               {Array.from({ length: 6 }).map((_, i) => (
                 <Box
                   key={i}
                   sx={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: isLincoln ? '2px' : '50%',
+                    width: 12,
+                    height: 12,
+                    borderRadius: isLincoln ? '3px' : '50%',
                     bgcolor: i < appliedVoxel.length
                       ? accentColor
                       : i < unlockedVoxel.length
                         ? (isLincoln ? 'rgba(126,252,32,0.2)' : 'rgba(232,160,191,0.25)')
                         : (isLincoln ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'),
-                    transition: 'all 0.3s ease',
+                    transition: 'all 0.4s ease',
                     boxShadow: i < appliedVoxel.length
-                      ? `0 0 6px ${accentColor}44`
+                      ? `0 0 8px ${accentColor}55`
                       : 'none',
+                    transform: i < appliedVoxel.length ? 'scale(1.1)' : 'scale(1)',
                   }}
                 />
               ))}
@@ -1537,7 +1523,7 @@ export default function MyAvatarPage() {
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.42rem' : '14px',
+                fontSize: isLincoln ? '9px' : '14px',
                 fontWeight: 500,
                 color: isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)',
               }}
@@ -1552,14 +1538,14 @@ export default function MyAvatarPage() {
                 mt: 1.5,
                 px: '28px',
                 py: '12px',
-                borderRadius: isLincoln ? '6px' : '22px',
+                borderRadius: isLincoln ? '8px' : '22px',
                 border: `2px solid ${accentColor}`,
                 background: isLincoln
                   ? 'linear-gradient(135deg, rgba(126,252,32,0.12) 0%, rgba(126,252,32,0.06) 100%)'
                   : 'linear-gradient(135deg, rgba(232,160,191,0.12) 0%, rgba(232,160,191,0.06) 100%)',
                 color: accentColor,
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                fontSize: isLincoln ? '0.42rem' : '15px',
+                fontSize: isLincoln ? '10px' : '15px',
                 fontWeight: 700,
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
@@ -1592,7 +1578,7 @@ export default function MyAvatarPage() {
                     mb: 0.75,
                     color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.primary',
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.35rem' : '13px',
+                    fontSize: isLincoln ? '8px' : '13px',
                     fontWeight: 500,
                   }}
                 >
@@ -1622,7 +1608,7 @@ export default function MyAvatarPage() {
                 sx={{
                   textAlign: 'center',
                   fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.4rem' : '14px',
+                  fontSize: isLincoln ? '9px' : '14px',
                   color: accentColor,
                   fontWeight: 700,
                 }}
@@ -1634,12 +1620,26 @@ export default function MyAvatarPage() {
         )}
 
         {/* ── Armor Piece Cards (horizontal scroll) ────────────── */}
+        <Box sx={{ px: 2, pt: 2, pb: 0.5 }}>
+          <Typography
+            sx={{
+              fontFamily: titleFont,
+              fontSize: isLincoln ? '8px' : '13px',
+              fontWeight: 600,
+              color: isLincoln ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.3)',
+              textTransform: 'uppercase',
+              letterSpacing: '1.5px',
+            }}
+          >
+            Armor of God
+          </Typography>
+        </Box>
         <Box
           ref={cardScrollRef}
           sx={{
             overflowX: 'auto',
             display: 'flex',
-            gap: '12px',
+            gap: '10px',
             pb: 2,
             pt: 0.5,
             px: '16px',
@@ -1661,8 +1661,8 @@ export default function MyAvatarPage() {
                 key={piece.id}
                 onClick={() => handlePieceTap(piece)}
                 sx={{
-                  minWidth: 120,
-                  maxWidth: 120,
+                  minWidth: 110,
+                  maxWidth: 110,
                   scrollSnapAlign: 'center',
                   p: '14px 12px 12px',
                   borderRadius: isLincoln ? '8px' : '18px',
@@ -1781,7 +1781,7 @@ export default function MyAvatarPage() {
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.3rem' : '12.5px',
+                    fontSize: isLincoln ? '8px' : '12.5px',
                     fontWeight: 600,
                     color: isApplied
                       ? accentColor
@@ -1799,7 +1799,7 @@ export default function MyAvatarPage() {
                   <Typography
                     sx={{
                       fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                      fontSize: isLincoln ? '0.24rem' : '10px',
+                      fontSize: isLincoln ? '7px' : '10px',
                       color: '#4caf50',
                       fontWeight: 600,
                     }}
@@ -1810,7 +1810,7 @@ export default function MyAvatarPage() {
                   <Typography
                     sx={{
                       fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                      fontSize: isLincoln ? '0.24rem' : '10px',
+                      fontSize: isLincoln ? '7px' : '10px',
                       color: '#FFA726',
                     }}
                   >
@@ -1820,8 +1820,8 @@ export default function MyAvatarPage() {
                   <Box sx={{ width: '85%' }}>
                     <Box
                       sx={{
-                        height: 4,
-                        borderRadius: '2px',
+                        height: 5,
+                        borderRadius: '2.5px',
                         bgcolor: isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
                         overflow: 'hidden',
                       }}
@@ -1839,7 +1839,7 @@ export default function MyAvatarPage() {
                     <Typography
                       sx={{
                         fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                        fontSize: isLincoln ? '0.18rem' : '9px',
+                        fontSize: isLincoln ? '6px' : '9px',
                         color: isLincoln ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
                         mt: 0.5,
                       }}
@@ -1939,7 +1939,7 @@ export default function MyAvatarPage() {
             {/* Piece name */}
             <Typography sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.5rem' : '16px',
+              fontSize: isLincoln ? '11px' : '16px',
               fontWeight: 600,
               color: accentColor,
               mb: 0.25,
@@ -1950,7 +1950,7 @@ export default function MyAvatarPage() {
             {/* Verse reference */}
             <Typography sx={{
               fontFamily: 'monospace',
-              fontSize: isLincoln ? '0.32rem' : '11px',
+              fontSize: isLincoln ? '7px' : '11px',
               color: isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)',
               mb: 1.5,
             }}>
@@ -1972,7 +1972,7 @@ export default function MyAvatarPage() {
             >
               <Typography sx={{
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                fontSize: isLincoln ? '0.42rem' : '14.5px',
+                fontSize: isLincoln ? '9px' : '14.5px',
                 color: textColor,
                 lineHeight: 1.8,
                 fontStyle: 'italic',
@@ -1995,10 +1995,10 @@ export default function MyAvatarPage() {
                   bgcolor: accentColor,
                   color: isLincoln ? '#000' : '#fff',
                   fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.42rem' : '15px',
+                  fontSize: isLincoln ? '9px' : '15px',
                   fontWeight: 700,
                   py: 1.25,
-                  borderRadius: isLincoln ? '4px' : '12px',
+                  borderRadius: isLincoln ? '8px' : '12px',
                   textTransform: 'none',
                   boxShadow: `0 2px 10px ${accentColor}33`,
                   '&:hover': { bgcolor: accentColor, opacity: 0.9 },
@@ -2009,6 +2009,30 @@ export default function MyAvatarPage() {
             )}
           </Box>
         )}
+
+        {/* ── Customization Section Divider ──────────────────── */}
+        <Box sx={{ mx: 2, mt: 2.5, mb: 1 }}>
+          <Box sx={{
+            height: '1px',
+            background: isLincoln
+              ? 'linear-gradient(90deg, transparent, rgba(126,252,32,0.15), transparent)'
+              : 'linear-gradient(90deg, transparent, rgba(232,160,191,0.2), transparent)',
+          }} />
+          <Typography
+            sx={{
+              fontFamily: titleFont,
+              fontSize: isLincoln ? '8px' : '13px',
+              fontWeight: 600,
+              color: isLincoln ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.3)',
+              textTransform: 'uppercase',
+              letterSpacing: '1.5px',
+              textAlign: 'center',
+              mt: 1.5,
+            }}
+          >
+            Customize
+          </Typography>
+        </Box>
 
         {/* ── Outfit Customizer ─────────────────────────────────── */}
         <OutfitCustomizer
@@ -2047,6 +2071,16 @@ export default function MyAvatarPage() {
           />
         </Box>
 
+        {/* ── Photo Section Divider ──────────────────────────── */}
+        <Box sx={{ mx: 2, mt: 2.5, mb: 0.5 }}>
+          <Box sx={{
+            height: '1px',
+            background: isLincoln
+              ? 'linear-gradient(90deg, transparent, rgba(126,252,32,0.15), transparent)'
+              : 'linear-gradient(90deg, transparent, rgba(232,160,191,0.2), transparent)',
+          }} />
+        </Box>
+
         {/* ── Photo Upload Section ──────────────────────────────── */}
         <Box
           sx={{
@@ -2076,7 +2110,7 @@ export default function MyAvatarPage() {
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.42rem' : '15px',
+                fontSize: isLincoln ? '9px' : '15px',
                 fontWeight: 600,
                 color: accentColor,
               }}
@@ -2102,7 +2136,7 @@ export default function MyAvatarPage() {
                 background: isLincoln ? 'rgba(126,252,32,0.04)' : 'rgba(232,160,191,0.04)',
                 color: accentColor,
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                fontSize: isLincoln ? '0.38rem' : '14px',
+                fontSize: isLincoln ? '8px' : '14px',
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
                 '&:hover': {
@@ -2142,7 +2176,7 @@ export default function MyAvatarPage() {
                     color: isLincoln ? '#000' : '#fff',
                     borderRadius: isLincoln ? '4px' : '10px',
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.35rem' : '13px',
+                    fontSize: isLincoln ? '8px' : '13px',
                     textTransform: 'none',
                     py: 1,
                     '&:hover': { bgcolor: accentColor, opacity: 0.85 },
@@ -2157,7 +2191,7 @@ export default function MyAvatarPage() {
                   sx={{
                     color: isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)',
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.32rem' : '12px',
+                    fontSize: isLincoln ? '7px' : '12px',
                     textTransform: 'none',
                   }}
                 >
@@ -2293,7 +2327,7 @@ export default function MyAvatarPage() {
                   : 'linear-gradient(135deg, rgba(232,160,191,0.12) 0%, rgba(232,160,191,0.06) 100%)',
                 color: accentColor,
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.42rem' : '15px',
+                fontSize: isLincoln ? '9px' : '15px',
                 fontWeight: 700,
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
@@ -2320,7 +2354,7 @@ export default function MyAvatarPage() {
                 background: isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
                 color: isLincoln ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.42rem' : '15px',
+                fontSize: isLincoln ? '9px' : '15px',
                 fontWeight: 600,
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
@@ -2348,7 +2382,7 @@ export default function MyAvatarPage() {
                 background: isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
                 color: isLincoln ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.42rem' : '15px',
+                fontSize: isLincoln ? '9px' : '15px',
                 fontWeight: 600,
                 cursor: savingToPortfolio ? 'default' : 'pointer',
                 opacity: savingToPortfolio ? 0.5 : 1,

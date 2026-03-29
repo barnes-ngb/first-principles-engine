@@ -76,7 +76,7 @@ export default function ArmorDyePanel({
               mt: 1,
               mx: 1,
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.36rem' : '13px',
+              fontSize: isLincoln ? '8px' : '13px',
               color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.25)',
               textTransform: 'none',
               borderRadius: isLincoln ? '6px' : '14px',
@@ -101,7 +101,7 @@ export default function ArmorDyePanel({
         onClick={() => setOpen(!open)}
         sx={{
           fontFamily: titleFont,
-          fontSize: isLincoln ? '0.36rem' : '13px',
+          fontSize: isLincoln ? '8px' : '13px',
           color: open ? accentColor : (isLincoln ? '#e0e0e0' : '#3d3d3d'),
           textTransform: 'none',
           borderRadius: isLincoln ? '6px' : '14px',
@@ -145,7 +145,7 @@ export default function ArmorDyePanel({
           <Typography
             sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.42rem' : '15px',
+              fontSize: isLincoln ? '9px' : '15px',
               color: accentColor,
               mb: 2,
               fontWeight: 600,
@@ -206,7 +206,7 @@ export default function ArmorDyePanel({
                   <Typography
                     sx={{
                       fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                      fontSize: isLincoln ? '0.22rem' : '10px',
+                      fontSize: isLincoln ? '7px' : '10px',
                       color: isActive
                         ? accentColor
                         : (isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)'),
@@ -279,7 +279,7 @@ export default function ArmorDyePanel({
                 }}
                 sx={{
                   fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.3rem' : '12px',
+                  fontSize: isLincoln ? '7px' : '12px',
                   color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)',
                   textTransform: 'none',
                   '&:hover': {
