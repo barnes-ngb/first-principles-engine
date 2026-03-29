@@ -811,11 +811,17 @@ export default function TodayPage() {
           {weekFocus.scriptureRef && (
             <Typography variant="body2" sx={{ fontStyle: 'italic', mt: 0.5 }}>
               📖 {weekFocus.scriptureRef}
+              {weekFocus.scriptureText && ` — "${weekFocus.scriptureText}"`}
             </Typography>
           )}
           {weekFocus.heartQuestion && (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
               ❤️ {weekFocus.heartQuestion}
+            </Typography>
+          )}
+          {weekFocus.formationPrompt && (
+            <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic', mt: 1 }}>
+              🙏 {weekFocus.formationPrompt}
             </Typography>
           )}
         </Box>
@@ -849,6 +855,26 @@ export default function TodayPage() {
               <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
                 {weekFocus.conundrum.virtueConnection}
               </Typography>
+              {weekFocus.conundrum.readingTieIn && (
+                <Typography variant="body2" color="text.secondary">
+                  📖 <strong>Reading:</strong> {weekFocus.conundrum.readingTieIn}
+                </Typography>
+              )}
+              {weekFocus.conundrum.mathContext && (
+                <Typography variant="body2" color="text.secondary">
+                  🔢 <strong>Math:</strong> {weekFocus.conundrum.mathContext}
+                </Typography>
+              )}
+              {weekFocus.conundrum.londonDrawingPrompt && (
+                <Typography variant="body2" color="text.secondary">
+                  🎨 <strong>Drawing:</strong> {weekFocus.conundrum.londonDrawingPrompt}
+                </Typography>
+              )}
+              {weekFocus.conundrum.dadLabSuggestion && (
+                <Typography variant="body2" color="text.secondary">
+                  🔬 <strong>Dad Lab:</strong> {weekFocus.conundrum.dadLabSuggestion}
+                </Typography>
+              )}
               <Button
                 size="small"
                 variant="outlined"

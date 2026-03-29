@@ -228,6 +228,24 @@ function buildCharacterWithArmor(
   return { characterGroup: character, armorMeshes }
 }
 
+/** Apply background mode to scene objects (extracted to avoid React compiler mutation tracking). */
+function applyBackground(
+  scene: THREE.Scene | null,
+  skyGroup: THREE.Group | null,
+  roomGroup: THREE.Group | null,
+  nightLights: THREE.Object3D[],
+  roomLights: THREE.Object3D[],
+  background: string,
+) {
+  if (!scene) return
+  const isRoom = background === 'room'
+  scene.background = new THREE.Color(isRoom ? 0x2a2218 : 0x1a1a2e)
+  if (skyGroup) skyGroup.visible = !isRoom
+  if (roomGroup) roomGroup.visible = isRoom
+  for (const l of nightLights) l.visible = !isRoom
+  for (const l of roomLights) l.visible = isRoom
+}
+
 // ── Component ────────────────────────────────────────────────────────
 
 export default function BrothersVoxelScene({
@@ -249,10 +267,14 @@ export default function BrothersVoxelScene({
   const roomGroupRef = useRef<THREE.Group | null>(null)
   const nightLightsRef = useRef<THREE.Object3D[]>([])
   const roomLightsRef = useRef<THREE.Object3D[]>([])
+  const backgroundRef = useRef(background)
   const onPoseCompleteRef = useRef(onPoseComplete)
   useEffect(() => {
     onPoseCompleteRef.current = onPoseComplete
   }, [onPoseComplete])
+  useEffect(() => {
+    backgroundRef.current = background
+  }, [background])
 
   const initScene = useCallback(() => {
     const container = containerRef.current
@@ -273,18 +295,19 @@ export default function BrothersVoxelScene({
     const height = container.clientHeight
 
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(background === 'room' ? 0x2a2218 : 0x1a1a2e)
+    const bg = backgroundRef.current
+    scene.background = new THREE.Color(bg === 'room' ? 0x2a2218 : 0x1a1a2e)
     sceneRef.current = scene
 
     // Sky group (night background)
     const skyGroup = buildSkyGroup()
-    skyGroup.visible = background !== 'room'
+    skyGroup.visible = bg !== 'room'
     scene.add(skyGroup)
     skyGroupRef.current = skyGroup
 
     // Room group (indoor background)
     const roomGroup = buildRoom()
-    roomGroup.visible = background === 'room'
+    roomGroup.visible = bg === 'room'
     scene.add(roomGroup)
     roomGroupRef.current = roomGroup
 
@@ -327,8 +350,8 @@ export default function BrothersVoxelScene({
 
     roomLightsRef.current = [roomKeyLight, roomFill, roomAmbient]
 
-    for (const l of nightLightsRef.current) l.visible = background !== 'room'
-    for (const l of roomLightsRef.current) l.visible = background === 'room'
+    for (const l of nightLightsRef.current) l.visible = bg !== 'room'
+    for (const l of roomLightsRef.current) l.visible = bg === 'room'
 
     // Build characters
     const characters: THREE.Group[] = []
@@ -511,14 +534,14 @@ export default function BrothersVoxelScene({
 
   // ── Toggle background mode without full rebuild ──────────────────
   useEffect(() => {
-    const scene = sceneRef.current
-    if (!scene) return
-    const isRoom = background === 'room'
-    scene.background = new THREE.Color(isRoom ? 0x2a2218 : 0x1a1a2e)
-    if (skyGroupRef.current) skyGroupRef.current.visible = !isRoom
-    if (roomGroupRef.current) roomGroupRef.current.visible = isRoom
-    for (const l of nightLightsRef.current) l.visible = !isRoom
-    for (const l of roomLightsRef.current) l.visible = isRoom
+    applyBackground(
+      sceneRef.current,
+      skyGroupRef.current,
+      roomGroupRef.current,
+      nightLightsRef.current,
+      roomLightsRef.current,
+      background,
+    )
   }, [background])
 
   // Handle resize
