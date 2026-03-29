@@ -2,6 +2,7 @@ import type { Firestore } from "firebase-admin/firestore";
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
+import { requireEmailAuth, checkRateLimit } from "./authGuard.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -1098,9 +1099,7 @@ export const chat = onCall(
   { secrets: [claudeApiKey], timeoutSeconds: 300 },
   async (request): Promise<ChatResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireEmailAuth(request);
 
     const { familyId, childId, taskType, messages, domain } =
       request.data as ChatRequest;
@@ -1129,12 +1128,15 @@ export const chat = onCall(
     }
 
     // ── Authorization: caller must own the family ──────────────
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",
       );
     }
+
+    // ── Rate limiting ─────────────────────────────────────────
+    await checkRateLimit(uid, taskType, 100, 60);
 
     // ── API key check ──────────────────────────────────────────
     const apiKey = claudeApiKey.value();

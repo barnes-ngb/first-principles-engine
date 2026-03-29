@@ -1,5 +1,6 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireEmailAuth } from "./authGuard.js";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { claudeApiKey } from "./aiConfig.js";
 import { sanitizeAndParseJson } from "./sanitizeJson.js";
@@ -471,6 +472,8 @@ export async function generateReviewForChild(
 export const generateWeeklyReviewNow = onCall(
   { secrets: [claudeApiKey] },
   async (request) => {
+    const { uid } = requireEmailAuth(request);
+
     const { familyId, childId, weekKey } = request.data as {
       familyId?: string;
       childId?: string;
@@ -481,6 +484,13 @@ export const generateWeeklyReviewNow = onCall(
       throw new HttpsError(
         "invalid-argument",
         "familyId, childId, and weekKey are required.",
+      );
+    }
+
+    if (uid !== familyId) {
+      throw new HttpsError(
+        "permission-denied",
+        "You do not have access to this family.",
       );
     }
 

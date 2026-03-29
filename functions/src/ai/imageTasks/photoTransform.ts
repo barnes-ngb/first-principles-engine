@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireApprovedUser } from "../authGuard.js";
 import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 
 // ── Photo Transform ───────────────────────────────────────────────
@@ -21,9 +22,7 @@ export interface PhotoTransformResponse {
 export const transformAvatarPhoto = onCall(
   { secrets: [openaiApiKey, claudeApiKey], timeoutSeconds: 120 },
   async (request): Promise<PhotoTransformResponse> => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireApprovedUser(request);
 
     const { familyId, childId, themeStyle, photoBase64, photoMimeType } =
       request.data as PhotoTransformRequest;
@@ -31,7 +30,7 @@ export const transformAvatarPhoto = onCall(
     if (!familyId || !childId || !themeStyle || !photoBase64 || !photoMimeType) {
       throw new HttpsError("invalid-argument", "Missing required fields.");
     }
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError("permission-denied", "You do not have access to this family.");
     }
 

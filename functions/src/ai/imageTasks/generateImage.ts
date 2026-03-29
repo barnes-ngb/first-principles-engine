@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireApprovedUser, checkRateLimit } from "../authGuard.js";
 import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 import { createOpenAiProvider } from "../providers/openai.js";
 import type { ImageOptions } from "../aiService.js";
@@ -66,9 +67,7 @@ export const generateImage = onCall(
   { secrets: [openaiApiKey, claudeApiKey] },
   async (request): Promise<ImageGenResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireApprovedUser(request);
 
     const { familyId, prompt, style, size } =
       request.data as ImageGenRequest;
@@ -116,12 +115,15 @@ export const generateImage = onCall(
     }
 
     // ── Authorization: caller must own the family ──────────────
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",
       );
     }
+
+    // ── Rate limiting ─────────────────────────────────────────
+    await checkRateLimit(uid, "image-generation", 20, 60);
 
     // ── Rewrite prompt for DALL-E safety via Claude ─────────────
     let safePrompt = prompt;

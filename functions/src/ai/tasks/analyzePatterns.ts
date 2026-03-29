@@ -1,5 +1,6 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireEmailAuth } from "../authGuard.js";
 import { claudeApiKey } from "../aiConfig.js";
 
 // ── Types ────────────────────────────────────────────────────────
@@ -91,9 +92,7 @@ DEFER blocks must always include a non-empty deferNote string.`;
 export const analyzeEvaluationPatterns = onCall(
   { secrets: [claudeApiKey] },
   async (request): Promise<AnalyzePatternsResponse> => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireEmailAuth(request);
 
     const { familyId, childId, evaluationSessionId, currentFindings } =
       request.data as AnalyzePatternsRequest;
@@ -111,7 +110,7 @@ export const analyzeEvaluationPatterns = onCall(
       throw new HttpsError("invalid-argument", "currentFindings must be an array.");
     }
 
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",
