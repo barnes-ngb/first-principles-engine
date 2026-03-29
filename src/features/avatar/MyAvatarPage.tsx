@@ -29,6 +29,7 @@ import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, VOXEL_TO_ARMOR_PIECE, LINCOLN_FEATU
 import type {
   ArmorPiece,
   ArmorTier,
+  AvatarBackground,
   AvatarProfile,
   CharacterFeatures,
   DailyArmorSession,
@@ -181,6 +182,8 @@ export default function MyAvatarPage() {
 
   // Brothers mode state
   const [brothersMode, setBrothersMode] = useState(false)
+  // Background mode (persisted in profile customization)
+  const [bgMode, setBgMode] = useState<AvatarBackground>('night')
   const siblingChild = children.find((c) => c.id !== childId)
   const siblingId = brothersMode ? siblingChild?.id : undefined
   const siblingProfile = useAvatarProfile(familyId, siblingId)
@@ -259,6 +262,10 @@ export default function MyAvatarPage() {
         if (snap.exists()) {
           const data = normalizeAvatarProfile(snap.data())
           setProfile(data)
+          // Sync background preference from profile
+          if (data.customization?.background) {
+            setBgMode(data.customization.background)
+          }
 
           const unlockedCount = getUnlockedVoxelPieces(data).length
           if (unlockedCount > prevPiecesCountRef.current && prevPiecesCountRef.current > 0) {
@@ -507,6 +514,18 @@ export default function MyAvatarPage() {
       await safeUpdateProfile(profileRef, { customization })
     },
     [familyId, childId, profile],
+  )
+
+  const handleBackgroundToggle = useCallback(
+    async () => {
+      if (!familyId || !childId || !profile) return
+      const newBg: AvatarBackground = bgMode === 'night' ? 'room' : 'night'
+      setBgMode(newBg)
+      const customization: OutfitCustomization = { ...profile.customization, background: newBg }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile, bgMode],
   )
 
   // ── Streak tracking ─────────────────────────────────────────────
@@ -855,6 +874,45 @@ export default function MyAvatarPage() {
             </Box>
           )}
 
+          {/* ── Background Toggle ────── */}
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
+            <Box
+              component="button"
+              onClick={handleBackgroundToggle}
+              sx={{
+                px: '16px',
+                py: '8px',
+                border: bgMode === 'room'
+                  ? `2px solid ${accentColor}`
+                  : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`,
+                borderRadius: isLincoln ? '6px' : '18px',
+                background: bgMode === 'room'
+                  ? (isLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
+                  : 'transparent',
+                color: bgMode === 'room'
+                  ? accentColor
+                  : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'),
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                fontSize: isLincoln ? '0.38rem' : '13px',
+                fontWeight: bgMode === 'room' ? 700 : 400,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                boxShadow: bgMode === 'room' ? `0 0 10px ${accentColor}22` : 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                '&:hover': {
+                  borderColor: accentColor,
+                  background: isLincoln ? 'rgba(126,252,32,0.06)' : 'rgba(232,160,191,0.06)',
+                },
+                '&:active': { transform: 'scale(0.96)' },
+              }}
+            >
+              <span style={{ fontSize: '16px' }}>{bgMode === 'room' ? '\uD83C\uDFE0' : '\uD83C\uDF19'}</span>
+              {bgMode === 'room' ? 'Room' : 'Night'}
+            </Box>
+          </Box>
+
           {/* ── Tier + XP Hero Banner ────── */}
           <Box
             sx={{
@@ -1064,6 +1122,7 @@ export default function MyAvatarPage() {
               })()}
               activePoseId={activePoseId}
               onPoseComplete={() => setActivePoseId(null)}
+              background={bgMode}
             />
             <PoseButtons
               onPose={(poseId) => setActivePoseId(poseId)}
@@ -1101,6 +1160,7 @@ export default function MyAvatarPage() {
               onUnequipAnimDone={handleUnequipAnimDone}
               photoUrl={profile.photoUrl}
               customization={profile.customization}
+              background={bgMode}
               activePoseId={activePoseId}
               onPoseComplete={() => setActivePoseId(null)}
               onSwipePose={(poseId) => setActivePoseId(poseId)}

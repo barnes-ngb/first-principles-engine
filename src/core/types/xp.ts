@@ -267,6 +267,12 @@ export const HelmetCrest = {
 } as const
 export type HelmetCrest = (typeof HelmetCrest)[keyof typeof HelmetCrest]
 
+export const AvatarBackground = {
+  Night: 'night',
+  Room: 'room',
+} as const
+export type AvatarBackground = (typeof AvatarBackground)[keyof typeof AvatarBackground]
+
 export interface OutfitCustomization {
   shirtColor?: string   // Hex
   pantsColor?: string   // Hex
@@ -274,6 +280,7 @@ export interface OutfitCustomization {
   armorColors?: ArmorColors  // Per-piece dye colors (Stone tier+)
   shieldEmblem?: ShieldEmblem  // Shield emblem design (Iron tier+)
   helmetCrest?: HelmetCrest    // Helmet crest style (Iron tier+)
+  background?: AvatarBackground  // Scene background: night sky or indoor room
 }
 
 export interface AvatarProfile {
