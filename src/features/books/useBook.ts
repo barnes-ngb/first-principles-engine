@@ -284,7 +284,9 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
       })
 
       const imageId = generateImageId()
-      const ext = file.name.split('.').pop() ?? 'jpg'
+      const ext = processedFile instanceof File
+        ? processedFile.name.split('.').pop() ?? 'jpg'
+        : 'jpg'
       const ts = new Date().toISOString().replace(/[:.]/g, '-')
       const filename = `${ts}.${ext}`
       const storagePath = `families/${familyId}/books/${bookId}/${filename}`
