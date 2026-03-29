@@ -12,9 +12,13 @@ import TextField from '@mui/material/TextField'
 import MenuItem from '@mui/material/MenuItem'
 import CircularProgress from '@mui/material/CircularProgress'
 import Box from '@mui/material/Box'
+import Tabs from '@mui/material/Tabs'
+import Tab from '@mui/material/Tab'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
+import { useAI } from '../../core/ai/useAI'
 import { cleanSketchBackground } from './cleanSketch'
 import { StickerCategory } from '../../core/types/enums'
 import type { StickerTag } from '../../core/types/books'
@@ -25,7 +29,7 @@ interface SketchScannerProps {
   familyId: string
   childId: string
   childName: string
-  /** Called when user chooses "Add to Book" — passes the cleaned file */
+  /** Called when user chooses "Add to Book" — passes the selected file */
   onAddToBook?: (file: File) => void
   /** Hide the "Add to Book" option (when opened outside book editor) */
   hideAddToBook?: boolean
@@ -56,6 +60,7 @@ const CHECKERBOARD_BG =
   'repeating-conic-gradient(#e0e0e0 0% 25%, transparent 0% 50%) 50% / 16px 16px'
 
 type Stage = 'capture' | 'cleaning' | 'preview' | 'saving' | 'done'
+type PreviewTab = 'original' | 'cleaned' | 'reimagined'
 
 async function saveAsSticker(
   familyId: string,
@@ -64,6 +69,12 @@ async function saveAsSticker(
   label: string,
   category: StickerCategory,
   tag: StickerTag,
+  extraFields?: {
+    originalUrl?: string
+    cleanedUrl?: string
+    reimaginedUrl?: string
+    selectedVersion?: PreviewTab
+  },
 ) {
   const path = `families/${familyId}/stickers/${Date.now()}_${file.name}`
   const storageRef = ref(storage, path)
@@ -83,7 +94,21 @@ async function saveAsSticker(
       : childId.includes('lincoln')
         ? 'lincoln'
         : 'both',
+    ...(extraFields?.originalUrl && { originalUrl: extraFields.originalUrl }),
+    ...(extraFields?.cleanedUrl && { cleanedUrl: extraFields.cleanedUrl }),
+    ...(extraFields?.reimaginedUrl && { reimaginedUrl: extraFields.reimaginedUrl }),
+    ...(extraFields?.selectedVersion && { selectedVersion: extraFields.selectedVersion }),
   })
+}
+
+/** Upload a file to Firebase Storage and return { url, storagePath }. */
+async function uploadToStorage(familyId: string, file: File, subfolder: string) {
+  const ts = Date.now()
+  const path = `families/${familyId}/${subfolder}/${ts}_${file.name}`
+  const storageRef = ref(storage, path)
+  const snap = await uploadBytes(storageRef, file)
+  const url = await getDownloadURL(snap.ref)
+  return { url, storagePath: path, ref: snap.ref }
 }
 
 export default function SketchScanner({
@@ -96,20 +121,42 @@ export default function SketchScanner({
   hideAddToBook,
 }: SketchScannerProps) {
   const [stage, setStage] = useState<Stage>('capture')
+  const [previewTab, setPreviewTab] = useState<PreviewTab>('cleaned')
+
+  // File / URL state for all three versions
+  const [originalFile, setOriginalFile] = useState<File | null>(null)
   const [originalUrl, setOriginalUrl] = useState<string | null>(null)
-  const [cleanedUrl, setCleanedUrl] = useState<string | null>(null)
+  const [originalStoragePath, setOriginalStoragePath] = useState<string | null>(null)
+
   const [cleanedFile, setCleanedFile] = useState<File | null>(null)
+  const [cleanedUrl, setCleanedUrl] = useState<string | null>(null)
+
+  const [reimaginedUrl, setReimaginedUrl] = useState<string | null>(null)
+  const [reimaginedFile, setReimaginedFile] = useState<File | null>(null)
+  const [reimagining, setReimagining] = useState(false)
+  const [reimagineError, setReimagineError] = useState<string | null>(null)
+
+  // Sticker metadata
   const [label, setLabel] = useState(`${childName}'s drawing`)
   const [category, setCategory] = useState<StickerCategory>(StickerCategory.Custom)
   const [tag, setTag] = useState<StickerTag>('object')
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const { enhanceSketch } = useAI()
+
   const reset = useCallback(() => {
     setStage('capture')
+    setPreviewTab('cleaned')
+    setOriginalFile(null)
     setOriginalUrl(null)
+    setOriginalStoragePath(null)
     setCleanedUrl(null)
     setCleanedFile(null)
+    setReimaginedUrl(null)
+    setReimaginedFile(null)
+    setReimagining(false)
+    setReimagineError(null)
     setLabel(`${childName}'s drawing`)
     setCategory(StickerCategory.Custom)
     setTag('object')
@@ -127,6 +174,7 @@ export default function SketchScanner({
       if (!file) return
 
       setError(null)
+      setOriginalFile(file)
       setOriginalUrl(URL.createObjectURL(file))
       setStage('cleaning')
 
@@ -135,6 +183,7 @@ export default function SketchScanner({
         setCleanedFile(cleaned)
         setCleanedUrl(URL.createObjectURL(cleaned))
         setStage('preview')
+        setPreviewTab('cleaned')
       } catch {
         setError('Failed to process image. Please try again.')
         setStage('capture')
@@ -143,24 +192,95 @@ export default function SketchScanner({
     [],
   )
 
+  // Upload original to storage (lazy — only when reimagine is first requested)
+  const ensureOriginalUploaded = useCallback(async (): Promise<string | null> => {
+    if (originalStoragePath) return originalStoragePath
+    if (!originalFile) return null
+    try {
+      const { storagePath } = await uploadToStorage(familyId, originalFile, 'sketches')
+      setOriginalStoragePath(storagePath)
+      return storagePath
+    } catch {
+      return null
+    }
+  }, [originalFile, originalStoragePath, familyId])
+
+  const handleReimagine = useCallback(async () => {
+    if (reimaginedUrl || reimagining) return
+
+    setReimagining(true)
+    setReimagineError(null)
+    setPreviewTab('reimagined')
+
+    try {
+      const storagePath = await ensureOriginalUploaded()
+      if (!storagePath) {
+        setReimagineError('Failed to upload sketch. Please try again.')
+        setReimagining(false)
+        return
+      }
+
+      const result = await enhanceSketch({
+        familyId,
+        sketchStoragePath: storagePath,
+        style: 'storybook',
+      })
+
+      if (result?.url) {
+        setReimaginedUrl(result.url)
+        // Fetch the image as a File so it can be saved as sticker / added to book
+        try {
+          const resp = await fetch(result.url)
+          const blob = await resp.blob()
+          setReimaginedFile(new File([blob], 'reimagined.png', { type: 'image/png' }))
+        } catch {
+          // URL is still valid for display even if we can't create a File
+        }
+      } else {
+        setReimagineError('Enhancement returned no image. Please try again.')
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Enhancement failed'
+      setReimagineError(msg)
+    } finally {
+      setReimagining(false)
+    }
+  }, [reimaginedUrl, reimagining, ensureOriginalUploaded, enhanceSketch, familyId])
+
+  /** Get the file for the currently selected preview tab. */
+  const getActiveFile = useCallback((): File | null => {
+    if (previewTab === 'original') return originalFile
+    if (previewTab === 'reimagined') return reimaginedFile
+    return cleanedFile
+  }, [previewTab, originalFile, cleanedFile, reimaginedFile])
+
   const handleSaveAsSticker = useCallback(async () => {
-    if (!cleanedFile) return
+    const file = getActiveFile()
+    if (!file) return
     setStage('saving')
     setError(null)
     try {
-      await saveAsSticker(familyId, childId, cleanedFile, label, category, tag)
+      await saveAsSticker(familyId, childId, file, label, category, tag, {
+        originalUrl: originalUrl ?? undefined,
+        cleanedUrl: cleanedUrl ?? undefined,
+        reimaginedUrl: reimaginedUrl ?? undefined,
+        selectedVersion: previewTab,
+      })
       setStage('done')
     } catch {
       setError('Failed to save sticker. Please try again.')
       setStage('preview')
     }
-  }, [cleanedFile, familyId, childId, label, category, tag])
+  }, [getActiveFile, familyId, childId, label, category, tag, originalUrl, cleanedUrl, reimaginedUrl, previewTab])
 
   const handleAddToBook = useCallback(() => {
-    if (!cleanedFile || !onAddToBook) return
-    onAddToBook(cleanedFile)
+    const file = getActiveFile()
+    if (!file || !onAddToBook) return
+    onAddToBook(file)
     handleClose()
-  }, [cleanedFile, onAddToBook, handleClose])
+  }, [getActiveFile, onAddToBook, handleClose])
+
+  const showTransparencyBg = previewTab === 'cleaned' || previewTab === 'reimagined'
 
   return (
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
@@ -205,48 +325,96 @@ export default function SketchScanner({
         {/* Preview stage */}
         {(stage === 'preview' || stage === 'saving') && (
           <Stack spacing={2}>
-            {/* Before / After */}
-            <Stack direction="row" spacing={1}>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Original
-                </Typography>
+            {/* Tab selector: Original | Cleaned | Reimagined */}
+            <Tabs
+              value={previewTab}
+              onChange={(_, v: PreviewTab) => {
+                setPreviewTab(v)
+                if (v === 'reimagined' && !reimaginedUrl && !reimagining) {
+                  void handleReimagine()
+                }
+              }}
+              variant="fullWidth"
+              sx={{ minHeight: 36 }}
+            >
+              <Tab label="Original" value="original" sx={{ minHeight: 36, py: 0.5 }} />
+              <Tab label="Cleaned" value="cleaned" sx={{ minHeight: 36, py: 0.5 }} />
+              <Tab
+                label="Reimagined"
+                value="reimagined"
+                icon={<AutoAwesomeIcon sx={{ fontSize: 16 }} />}
+                iconPosition="start"
+                sx={{ minHeight: 36, py: 0.5 }}
+              />
+            </Tabs>
+
+            {/* Image preview */}
+            <Box
+              sx={{
+                width: '100%',
+                borderRadius: 1,
+                border: '1px solid',
+                borderColor: 'divider',
+                overflow: 'hidden',
+                minHeight: 200,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                ...(showTransparencyBg && { background: CHECKERBOARD_BG }),
+              }}
+            >
+              {/* Original tab */}
+              {previewTab === 'original' && originalUrl && (
                 <Box
                   component="img"
-                  src={originalUrl ?? undefined}
+                  src={originalUrl}
                   alt="Original drawing"
-                  sx={{
-                    width: '100%',
-                    borderRadius: 1,
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    display: 'block',
-                  }}
+                  sx={{ width: '100%', display: 'block' }}
                 />
-              </Box>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Cleaned
-                </Typography>
+              )}
+
+              {/* Cleaned tab */}
+              {previewTab === 'cleaned' && cleanedUrl && (
                 <Box
-                  sx={{
-                    width: '100%',
-                    borderRadius: 1,
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    background: CHECKERBOARD_BG,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <Box
-                    component="img"
-                    src={cleanedUrl ?? undefined}
-                    alt="Cleaned drawing"
-                    sx={{ width: '100%', display: 'block' }}
-                  />
-                </Box>
-              </Box>
-            </Stack>
+                  component="img"
+                  src={cleanedUrl}
+                  alt="Cleaned drawing"
+                  sx={{ width: '100%', display: 'block' }}
+                />
+              )}
+
+              {/* Reimagined tab */}
+              {previewTab === 'reimagined' && (
+                <>
+                  {reimagining && (
+                    <Stack alignItems="center" spacing={1.5} sx={{ py: 4 }}>
+                      <CircularProgress size={32} />
+                      <Typography variant="body2" color="text.secondary">
+                        Reimagining {childName}&apos;s drawing...
+                      </Typography>
+                    </Stack>
+                  )}
+                  {!reimagining && reimaginedUrl && (
+                    <Box
+                      component="img"
+                      src={reimaginedUrl}
+                      alt="AI-reimagined illustration"
+                      sx={{ width: '100%', display: 'block' }}
+                    />
+                  )}
+                  {!reimagining && reimagineError && (
+                    <Stack alignItems="center" spacing={1.5} sx={{ py: 4 }}>
+                      <Typography variant="body2" color="error">
+                        {reimagineError}
+                      </Typography>
+                      <Button size="small" onClick={handleReimagine}>
+                        Try Again
+                      </Button>
+                    </Stack>
+                  )}
+                </>
+              )}
+            </Box>
 
             {/* Label */}
             <TextField
@@ -324,7 +492,7 @@ export default function SketchScanner({
               <Button
                 variant="outlined"
                 onClick={handleAddToBook}
-                disabled={stage === 'saving'}
+                disabled={stage === 'saving' || (previewTab === 'reimagined' && reimagining)}
                 sx={{ minHeight: 44 }}
               >
                 Add to Book
@@ -333,7 +501,7 @@ export default function SketchScanner({
             <Button
               variant="contained"
               onClick={handleSaveAsSticker}
-              disabled={stage === 'saving' || !label.trim()}
+              disabled={stage === 'saving' || !label.trim() || (previewTab === 'reimagined' && reimagining)}
               sx={{ minHeight: 44 }}
             >
               {stage === 'saving' ? (
