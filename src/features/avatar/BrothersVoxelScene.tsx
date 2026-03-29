@@ -114,9 +114,13 @@ function buildSkyGroup(): THREE.Group {
   skyGroup.add(moon)
 
   const season = getCurrentSeason()
-  for (let i = 0; i < 25; i++) {
-    const starGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04)
-    const starMat = new THREE.MeshBasicMaterial({ color: getSeasonalStarColor(season), transparent: true, opacity: 0.6 + Math.random() * 0.4 })
+  const starSizes = [0.03, 0.04, 0.06] // tiny, small, medium
+  for (let i = 0; i < 30; i++) {
+    const sizeIdx = i < 3 ? 2 : (i < 10 ? 1 : 0) // 3 medium, 7 small, rest tiny
+    const size = starSizes[sizeIdx]
+    const isBright = i < 3
+    const starGeo = new THREE.BoxGeometry(size, size, size)
+    const starMat = new THREE.MeshBasicMaterial({ color: isBright ? 0xFFFFFF : getSeasonalStarColor(season), transparent: true, opacity: isBright ? 0.9 : (0.3 + Math.random() * 0.6) })
     const star = new THREE.Mesh(starGeo, starMat)
     star.name = 'twinkleStar'
     star.userData.twinklePhase = Math.random() * Math.PI * 2
@@ -478,8 +482,8 @@ export default function BrothersVoxelScene({
       const time = clock.getElapsedTime()
 
       characters.forEach((character, idx) => {
-        // Gentle bob with slight offset per character
-        character.position.y = baseYs[idx] + Math.sin(time * 1.2 + idx * 0.5) * 0.03
+        // Breathing bob — 3s period, subtle amplitude
+        character.position.y = baseYs[idx] + Math.sin(time * 2.1 + idx * 0.5) * 0.02
 
         // Idle blink
         const blinkCycle = time % (3 + Math.sin(time * 0.37 + idx) * 1.5)
@@ -502,14 +506,19 @@ export default function BrothersVoxelScene({
         )
 
         if (!poseActive) {
-          const idleSway = Math.sin(time * 0.7 + idx * 1.2) * 0.03
+          // Arm sway — opposition, 4s period
+          const armSwayTime = time * (Math.PI * 2 / 4) + idx * 1.2
           if (armLObj) {
-            armLObj.rotation.z = idleSway
-            armLObj.rotation.x = Math.sin(time * 0.8 + idx) * 0.05
+            armLObj.rotation.z = Math.sin(armSwayTime) * 0.03
+            armLObj.rotation.x = Math.sin(time * 0.8 + idx) * 0.03
           }
           if (armRObj) {
-            armRObj.rotation.z = -idleSway
-            armRObj.rotation.x = -Math.sin(time * 0.8 + idx) * 0.05
+            armRObj.rotation.z = -Math.sin(armSwayTime) * 0.03
+            armRObj.rotation.x = -Math.sin(time * 0.8 + idx) * 0.03
+          }
+          // Head micro-movement — slow look-around (6s period)
+          if (headObj) {
+            headObj.rotation.y = Math.sin(time * (Math.PI * 2 / 6) + idx * 2) * 0.05
           }
         }
       })
@@ -666,6 +675,12 @@ export default function BrothersVoxelScene({
           WebkitUserSelect: 'none',
           touchAction: 'none',
           position: 'relative',
+          animation: 'sceneFadeIn 0.4s ease-out',
+          '@keyframes sceneFadeIn': {
+            '0%': { opacity: 0 },
+            '100%': { opacity: 1 },
+          },
+          boxShadow: 'inset 0 0 80px rgba(0,0,0,0.4)',
         }}
       />
       {/* Name labels overlay */}

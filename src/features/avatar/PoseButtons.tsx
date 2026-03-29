@@ -6,11 +6,12 @@ interface PoseButtonsProps {
   onPose: (poseId: string) => void
   currentPose: string | null
   isLincoln?: boolean
+  /** When true, a pose is actively animating (dims inactive buttons) */
+  poseAnimating?: boolean
 }
 
-export default function PoseButtons({ onPose, currentPose, isLincoln = true }: PoseButtonsProps) {
+export default function PoseButtons({ onPose, currentPose, isLincoln = true, poseAnimating = false }: PoseButtonsProps) {
   const visiblePoses = POSES.filter((p) => p.id !== 'idle')
-  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
 
   return (
     <Box
@@ -24,25 +25,27 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true }: P
     >
       {visiblePoses.map((pose) => {
         const isActive = currentPose === pose.id
+        // Dim non-active buttons while a pose is animating
+        const isDimmed = poseAnimating && !isActive
         return (
           <Box
             key={pose.id}
             component="button"
-            onClick={() => onPose(pose.id)}
+            onClick={() => !isDimmed && onPose(pose.id)}
             sx={{
               width: 56,
               height: 56,
               borderRadius: isLincoln ? '8px' : '50%',
               border: isActive
-                ? `2px solid ${accentColor}`
+                ? '2px solid #FFD700'
                 : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
               background: isActive
-                ? (isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.15)')
+                ? (isLincoln ? 'rgba(255,215,0,0.12)' : 'rgba(255,215,0,0.1)')
                 : (isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'),
               color: isActive
-                ? accentColor
+                ? '#FFD700'
                 : (isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)'),
-              cursor: 'pointer',
+              cursor: isDimmed ? 'default' : 'pointer',
               transition: 'all 0.2s ease',
               outline: 'none',
               p: 0,
@@ -52,18 +55,19 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true }: P
               justifyContent: 'center',
               gap: '2px',
               position: 'relative',
+              opacity: isDimmed ? 0.4 : 1,
               boxShadow: isActive
-                ? `0 0 12px ${accentColor}33`
+                ? '0 0 12px rgba(255,215,0,0.35)'
                 : 'none',
-              '&:hover': {
+              '&:hover': isDimmed ? {} : {
                 background: isActive
-                  ? (isLincoln ? 'rgba(126,252,32,0.22)' : 'rgba(232,160,191,0.22)')
+                  ? (isLincoln ? 'rgba(255,215,0,0.2)' : 'rgba(255,215,0,0.18)')
                   : (isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)'),
-                borderColor: isActive ? accentColor : (isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)'),
+                borderColor: isActive ? '#FFD700' : (isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)'),
                 transform: 'translateY(-1px)',
               },
-              '&:active': {
-                transform: 'scale(0.92)',
+              '&:active': isDimmed ? {} : {
+                transform: 'scale(0.95)',
               },
             }}
             title={pose.name}

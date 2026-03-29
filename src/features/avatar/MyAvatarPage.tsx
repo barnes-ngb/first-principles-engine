@@ -192,6 +192,27 @@ export default function MyAvatarPage() {
   const [animateUnequipId, setAnimateUnequipId] = useState<string | null>(null)
   const [particles, setParticles] = useState<{ x: number; y: number } | null>(null)
 
+  // Animated XP display (count-up effect)
+  const [displayXp, setDisplayXp] = useState(0)
+  const xpAnimRef = useRef<number>(0)
+  useEffect(() => {
+    const targetXp = profile?.totalXp ?? 0
+    const startXp = displayXp
+    const diff = targetXp - startXp
+    if (diff === 0) return
+    const duration = 500
+    const startTime = performance.now()
+    function tick(now: number) {
+      const t = Math.min((now - startTime) / duration, 1)
+      const eased = t * (2 - t)
+      setDisplayXp(Math.round(startXp + diff * eased))
+      if (t < 1) xpAnimRef.current = requestAnimationFrame(tick)
+    }
+    xpAnimRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(xpAnimRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.totalXp])
+
   // Pose state
   const [activePoseId, setActivePoseId] = useState<string | null>(null)
 
@@ -755,7 +776,9 @@ export default function MyAvatarPage() {
     const unlockedIds = getUnlockedVoxelPieces(profile)
     const currentApplied = session.appliedPieces ?? []
     const currentVoxel = sessionToVoxelPieces(currentApplied)
-    const toEquip = unlockedIds.filter((vid) => !currentVoxel.includes(vid))
+    // Canonical equip order: belt → breastplate → shoes → shield → helmet → sword
+    const equipOrder: VoxelArmorPieceId[] = ['belt', 'breastplate', 'shoes', 'shield', 'helmet', 'sword']
+    const toEquip = equipOrder.filter((vid) => unlockedIds.includes(vid) && !currentVoxel.includes(vid))
     if (toEquip.length === 0) return
 
     toEquip.forEach((voxelId, i) => {
@@ -763,7 +786,7 @@ export default function MyAvatarPage() {
         const meta = VOXEL_ARMOR_PIECES.find((p) => p.id === voxelId)
         if (meta) speakVerse(meta.name, meta.verseText)
         void handleApplyPiece(voxelId as VoxelArmorPieceId)
-      }, i * 1500) // 1.5s between each piece — time to hear the verse
+      }, i * 200) // Stagger 200ms apart for a cascading effect
     })
   }, [profile, session, familyId, childId, handleApplyPiece])
 
@@ -777,7 +800,7 @@ export default function MyAvatarPage() {
     setParticles({ x: window.innerWidth / 2, y: window.innerHeight / 3 })
     setTimeout(() => setParticles(null), 600)
 
-    // Screen flash
+    // Screen flash + subtle camera shake
     const container = flashContainerRef.current
     if (container) {
       const flash = document.createElement('div')
@@ -791,6 +814,26 @@ export default function MyAvatarPage() {
       `
       container.appendChild(flash)
       setTimeout(() => flash.remove(), 600)
+
+      // Subtle camera shake — 2px random offset for 200ms
+      const el = container
+      const origTransform = el.style.transform
+      let shakeFrame = 0
+      const shakeStart = performance.now()
+      function shake(now: number) {
+        const elapsed = now - shakeStart
+        if (elapsed > 200) {
+          el.style.transform = origTransform
+          return
+        }
+        const intensity = 2 * (1 - elapsed / 200)
+        const dx = (Math.random() - 0.5) * intensity
+        const dy = (Math.random() - 0.5) * intensity
+        el.style.transform = `translate(${dx}px, ${dy}px)`
+        shakeFrame = requestAnimationFrame(shake)
+      }
+      shakeFrame = requestAnimationFrame(shake)
+      setTimeout(() => cancelAnimationFrame(shakeFrame), 250)
     }
   }, [isLincoln])
 
@@ -1169,7 +1212,7 @@ export default function MyAvatarPage() {
                     textShadow: isLincoln ? `0 0 10px ${accentColor}44` : 'none',
                   }}
                 >
-                  {profile.totalXp} XP
+                  {displayXp} XP
                 </Typography>
               </Box>
 
@@ -1192,7 +1235,7 @@ export default function MyAvatarPage() {
                       ? `linear-gradient(90deg, ${accentColor}66, ${accentColor})`
                       : `linear-gradient(90deg, ${accentColor}66, ${accentColor})`,
                     transition: 'width 0.6s ease-out',
-                    boxShadow: `0 0 8px ${accentColor}33`,
+                    boxShadow: `2px 0 8px ${accentColor}66, 0 0 8px ${accentColor}33`,
                   }}
                 />
               </Box>
@@ -1364,6 +1407,7 @@ export default function MyAvatarPage() {
                   onPose={(poseId) => setActivePoseId(poseId)}
                   currentPose={activePoseId}
                   isLincoln={isLincoln}
+                  poseAnimating={!!activePoseId && activePoseId !== 'idle'}
                 />
               </Box>
               <Box
@@ -1414,7 +1458,7 @@ export default function MyAvatarPage() {
                 ? 'linear-gradient(135deg, rgba(255,215,0,0.06) 0%, rgba(255,215,0,0.02) 100%)'
                 : 'linear-gradient(135deg, rgba(156,39,176,0.06) 0%, rgba(156,39,176,0.02) 100%)',
               border: `1px solid ${isLincoln ? 'rgba(255,215,0,0.12)' : 'rgba(156,39,176,0.1)'}`,
-              animation: 'morningFadeIn 0.5s ease-out',
+              animation: 'morningFadeIn 0.8s ease-out 1s both',
               '@keyframes morningFadeIn': {
                 '0%': { opacity: 0, transform: 'translateY(-4px)' },
                 '100%': { opacity: 1, transform: 'translateY(0)' },
@@ -1439,12 +1483,19 @@ export default function MyAvatarPage() {
         {allEarnedApplied && unlockedVoxel.length > 0 ? (
           <Box sx={{ textAlign: 'center', py: 2, mb: 0.5 }}>
             <Typography
+              key={`count-${appliedVoxel.length}`}
               sx={{
                 fontFamily: titleFont,
                 fontSize: isLincoln ? '14px' : '18px',
                 fontWeight: 700,
                 color: isLincoln ? '#FFD700' : '#9C27B0',
                 textShadow: isLincoln ? '0 0 12px rgba(255,215,0,0.3)' : 'none',
+                animation: 'countPulse 0.4s ease-out',
+                '@keyframes countPulse': {
+                  '0%': { transform: 'scale(1)' },
+                  '40%': { transform: 'scale(1.08)' },
+                  '100%': { transform: 'scale(1)' },
+                },
               }}
             >
               {allSixUnlocked
@@ -1537,11 +1588,18 @@ export default function MyAvatarPage() {
               ))}
             </Box>
             <Typography
+              key={`eq-${appliedVoxel.length}`}
               sx={{
                 fontFamily: titleFont,
                 fontSize: isLincoln ? '12px' : '16px',
                 fontWeight: 700,
                 color: isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)',
+                animation: 'countPulse 0.4s ease-out',
+                '@keyframes countPulse': {
+                  '0%': { transform: 'scale(1)' },
+                  '40%': { transform: 'scale(1.08)' },
+                  '100%': { transform: 'scale(1)' },
+                },
               }}
             >
               {appliedVoxel.length}/{unlockedVoxel.length} equipped
@@ -1697,15 +1755,25 @@ export default function MyAvatarPage() {
                   position: 'relative',
                   flexShrink: 0,
                   boxShadow: isApplied
-                    ? `0 4px 16px ${accentColor}22`
-                    : (isUnlocked ? `0 2px 8px ${isLincoln ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.06)'}` : 'none'),
+                    ? `0 0 8px rgba(76,175,80,0.4), 0 4px 16px ${accentColor}22`
+                    : isSelected
+                      ? `0 0 12px ${accentColor}33`
+                      : (isUnlocked ? `0 2px 8px ${isLincoln ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.06)'}` : 'none'),
+                  // Pulsing border when verse card is showing for this piece
+                  ...(isSelected ? {
+                    animation: 'cardPulse 1.5s ease-in-out infinite',
+                    '@keyframes cardPulse': {
+                      '0%, 100%': { borderColor: `${accentColor}88` },
+                      '50%': { borderColor: accentColor },
+                    },
+                  } : {}),
                   '&:hover': {
-                    transform: 'translateY(-2px)',
+                    transform: 'translateY(-2px) scale(1.03)',
                     boxShadow: isApplied
-                      ? `0 6px 20px ${accentColor}33`
+                      ? `0 0 12px rgba(76,175,80,0.5), 0 6px 20px ${accentColor}33`
                       : `0 4px 12px ${isLincoln ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.08)'}`,
                   },
-                  '&:active': { transform: 'scale(0.96)' },
+                  '&:active': { transform: 'scale(0.97)' },
                 }}
               >
                 {/* Status indicator — top strip */}
