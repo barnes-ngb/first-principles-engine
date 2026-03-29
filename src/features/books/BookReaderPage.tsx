@@ -219,7 +219,7 @@ export default function BookReaderPage() {
         'BOOK_READ',
         15,
         `book_${book.id ?? 'unknown'}_${date}`,
-      )
+      ).catch((err) => console.error('[XP] Award failed:', err))
     }
     // Only run cleanup on unmount
     // eslint-disable-next-line react-hooks/exhaustive-deps
