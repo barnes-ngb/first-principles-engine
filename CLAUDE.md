@@ -102,7 +102,9 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/quest/` — Knowledge Mine (interactive reading quest)
 - `src/features/records/` — Hours, compliance, evaluations, portfolio
 - `src/features/settings/` — AI usage, account, avatar admin, sticker library
-- `src/features/today/` — Parent Today + Kid Today views, routine sync, XP
+- `src/components/ScanButton.tsx` — Camera capture for curriculum photo scanning
+- `src/components/ScanResultsPanel.tsx` — AI scan results display
+- `src/features/today/` — Parent Today (decomposed: TodayPage shell + TodayChecklist, WeekFocusCard, QuickCaptureSection, TeachBackSection, ChapterQuestionCard) + Kid Today views, routine sync, XP
 - `src/features/weekly-review/` — Weekly review page
 - `src/features/workshop/` — Story Game Workshop (board/adventure/card games)
 - `functions/src/` — Firebase Cloud Functions (AI endpoints)
@@ -193,8 +195,9 @@ All under `families/{familyId}/`:
 | `dailyArmorSessions` | Daily armor XP session tracking |
 | `evaluationSessions` | Interactive evaluation sessions (Knowledge Mine) |
 | `storyGames` | Story Game Workshop games |
+| `scans` | Curriculum photo scan records |
 
-**Note:** Cloud Functions reference `wordProgress` (in `tasks/quest.ts`) via a raw Firestore path — it has no collection reference helper in `firestore.ts`. `wordProgress` is a child subcollection (`children/{childId}/wordProgress`) used by Knowledge Mine. The dead `sessions` collection reference in `chat.ts` was removed in the dead-code cleanup.
+**Note:** Cloud Functions reference `wordProgress` (in `tasks/quest.ts`) via a raw Firestore path — it has no collection reference helper in `firestore.ts`. `wordProgress` is a child subcollection (`children/{childId}/wordProgress`) used by Knowledge Mine.
 
 ## AI Integration
 
@@ -228,8 +231,8 @@ All under `families/{familyId}/`:
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
 - `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, chat, analyzePatterns)
 
-### Cloud Functions (19 exported)
-- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, chat, generate)
+### Cloud Functions (18 exported)
+- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, chat, generate)
 - `weeklyReview` — Scheduled weekly review (Sunday 9am CT)
 - `generateWeeklyReviewNow` — Manual review trigger
 - `generateActivity` — Lesson card generation
@@ -246,7 +249,7 @@ All under `families/{familyId}/`:
 - `functions/src/ai/aiService.ts` — Core AI service orchestration
 - `functions/src/ai/sanitizeJson.ts` — JSON response sanitization
 - `functions/src/ai/health.ts` — Health check endpoint
-- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, chat, analyzePatterns
+- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, chat, analyzePatterns
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/imageGen.ts` — Image generation routing
@@ -265,3 +268,14 @@ All under `families/{familyId}/`:
 
 ### Scheduling Constraint
 Shelly's direct attention is the primary schedulable resource. Kids need split-block scheduling: Lincoln gets direct support while London does independent work, then swap. Running simultaneously means London's volume wins and Lincoln loses support.
+
+## Known Technical Debt
+
+- **PlannerChatPage.tsx (2,617L)** — Next decomposition target. Setup wizard, chat, plan preview, and apply logic are interleaved.
+- **MyAvatarPage.tsx (2,445L)** — 3D renderer, armor equip, theme picker, and admin features in one file.
+- **KidTodayView.tsx (1,607L)** — Similar decomposition opportunity as TodayPage.
+- **Ladder system** — Partially deprecated. Disposition system is replacing it. 5 files have TODO comments marking ladder references for removal.
+- **AI prompt drift** — 3 different patterns for system prompt construction across task handlers. Consolidation pending.
+- **XP ledger** — Full collection recompute on every award. Performance fix pending.
+- **evaluate.ts (weekly review)** — Separate prompt construction from the task system. Not in task registry.
+- **Hours partial-day edge** — If a day has some blocks with actualMinutes and others without, only tracked blocks count. By design but undocumented.
