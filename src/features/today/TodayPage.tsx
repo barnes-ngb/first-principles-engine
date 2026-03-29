@@ -845,11 +845,6 @@ export default function TodayPage() {
                   {weekFocus.conundrum.question}
                 </Typography>
               </Box>
-              <Stack spacing={0.5}>
-                {(weekFocus.conundrum.angles ?? []).map((angle: string, i: number) => (
-                  <Chip key={i} label={angle} variant="outlined" size="small" sx={{ height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.5 } }} />
-                ))}
-              </Stack>
               <Typography variant="body2"><strong>Lincoln:</strong> {weekFocus.conundrum.lincolnPrompt}</Typography>
               <Typography variant="body2"><strong>London:</strong> {weekFocus.conundrum.londonPrompt}</Typography>
               <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>

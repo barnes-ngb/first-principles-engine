@@ -36,15 +36,15 @@ interface UseDayLogResult {
       title: string
       scenario: string
       question: string
-      angles: string[]
       lincolnPrompt: string
       londonPrompt: string
       virtueConnection: string
-      subjectConnection?: string
       readingTieIn?: string
       mathContext?: string
       londonDrawingPrompt?: string
       dadLabSuggestion?: string
+      discussed?: boolean
+      discussedAt?: string
     }
   } | null
   snackMessage: { text: string; severity: 'success' | 'error' } | null
@@ -83,15 +83,15 @@ export function useDayLog({
       title: string
       scenario: string
       question: string
-      angles: string[]
       lincolnPrompt: string
       londonPrompt: string
       virtueConnection: string
-      subjectConnection?: string
       readingTieIn?: string
       mathContext?: string
       londonDrawingPrompt?: string
       dadLabSuggestion?: string
+      discussed?: boolean
+      discussedAt?: string
     }
   } | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
@@ -259,7 +259,9 @@ export function useDayLog({
             theme: data.theme || undefined,
             virtue: data.virtue || undefined,
             scriptureRef: data.scriptureRef || undefined,
+            scriptureText: data.scriptureText || undefined,
             heartQuestion: data.heartQuestion || undefined,
+            formationPrompt: data.formationPrompt || undefined,
             conundrum: data.conundrum || undefined,
           })
         } else {

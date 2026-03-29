@@ -41,17 +41,18 @@ export interface WeekPlan {
   }>
   conundrum?: {
     title: string
-    scenario: string
+    scenario: string          // Narrative story chapter, not a case study
     question: string
-    angles: string[]
     lincolnPrompt: string
     londonPrompt: string
     virtueConnection: string
-    subjectConnection?: string
     readingTieIn?: string
     mathContext?: string
     londonDrawingPrompt?: string
     dadLabSuggestion?: string
+    // Evidence fields (set when family discusses)
+    discussed?: boolean
+    discussedAt?: string
   }
 }
 
