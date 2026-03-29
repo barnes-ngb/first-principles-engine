@@ -119,7 +119,6 @@ src/core/ai/useAI.ts              functions/src/ai/
 |-------|--------|------|
 | `charter` | (constant) | CHARTER_PREAMBLE — family values, both kids, formation-first principles |
 | `childProfile` | formatChildProfile() | Name, grade, priority skills, supports, stop rules from skill snapshot |
-| `recentSessions` | loadRecentSessions() | Last 14 days of session results, summarized by stream (hits/nears/misses) |
 | `workbookPaces` | loadWorkbookPaces() | Current position, units/day needed, ahead/on-track/behind status |
 | `weekFocus` | loadWeekContext() | Current week's theme, virtue, scripture reference, heart question |
 | `hoursProgress` | loadHoursSummary() | Total hours logged since school year start vs 1000-hour MO target |
@@ -136,7 +135,7 @@ src/core/ai/useAI.ts              functions/src/ai/
 
 | Task Type | Slices Loaded |
 |-----------|--------------|
-| `plan` | charter, childProfile, recentSessions, workbookPaces, weekFocus, hoursProgress, engagement, gradeResults, bookStatus, sightWords, recentEval, wordMastery, generatedContent, workshopGames |
+| `plan` | charter, childProfile, workbookPaces, weekFocus, hoursProgress, engagement, gradeResults, bookStatus, sightWords, recentEval, wordMastery, generatedContent, workshopGames |
 | `chat` | charter, childProfile |
 | `generate` | charter, childProfile |
 | `evaluate` | charter, childProfile, sightWords, wordMastery |

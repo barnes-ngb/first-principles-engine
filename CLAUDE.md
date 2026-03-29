@@ -194,7 +194,7 @@ All under `families/{familyId}/`:
 | `evaluationSessions` | Interactive evaluation sessions (Knowledge Mine) |
 | `storyGames` | Story Game Workshop games |
 
-**Note:** Cloud Functions also reference `sessions` (in `chat.ts`) and `wordProgress` (in `tasks/quest.ts`) via raw Firestore paths — these have no collection reference helpers in `firestore.ts` and should be cleaned up or formalized. The `sessions` collection was removed in the Mar 24 cleanup sprint but its Cloud Function reference was not removed. `wordProgress` is a child subcollection (`children/{childId}/wordProgress`) used by Knowledge Mine.
+**Note:** Cloud Functions reference `wordProgress` (in `tasks/quest.ts`) via a raw Firestore path — it has no collection reference helper in `firestore.ts`. `wordProgress` is a child subcollection (`children/{childId}/wordProgress`) used by Knowledge Mine. The dead `sessions` collection reference in `chat.ts` was removed in the dead-code cleanup.
 
 ## AI Integration
 

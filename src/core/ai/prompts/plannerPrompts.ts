@@ -4,7 +4,7 @@
  * Assembles weekly plan generation prompts from:
  * - Base system prompt (charter values)
  * - Child context (skill snapshot, supports, stop rules)
- * - Session context (pace data, energy, recent history)
+ * - Session context (pace data, energy)
  * - Assignment candidates (from planner conversation)
  * - Output schema (DraftWeeklyPlan JSON)
  */
@@ -15,7 +15,6 @@ import type {
   Child,
   PaceGaugeResult,
   PrioritySkill,
-  Session,
   SkillSnapshot,
   StopRule,
   SupportDefault,
@@ -95,7 +94,6 @@ export interface PlannerPromptInputs {
   hoursPerDay: number
   energyLevel?: EnergyLevel
   paceData?: PaceGaugeResult[]
-  recentSessions?: Pick<Session, 'date' | 'streamId' | 'result' | 'notes'>[]
   energyPatterns?: EnergyPatternResult
 }
 
@@ -153,18 +151,6 @@ export function formatPaceDataForPrompt(paceData: PaceGaugeResult[]): string {
     .join('\n')
 }
 
-export function formatRecentSessionsForPrompt(
-  sessions: Pick<Session, 'date' | 'streamId' | 'result' | 'notes'>[],
-): string {
-  if (sessions.length === 0) return 'No recent sessions.'
-  return sessions
-    .map((s) => {
-      const notes = s.notes ? ` — ${s.notes}` : ''
-      return `- ${s.date} ${s.streamId}: ${s.result}${notes}`
-    })
-    .join('\n')
-}
-
 // ── Section Builders ────────────────────────────────────────────
 
 export function buildChildContextSection(inputs: PlannerPromptInputs): string {
@@ -214,10 +200,6 @@ export function buildSessionContextSection(inputs: PlannerPromptInputs): string 
 
   if (inputs.paceData && inputs.paceData.length > 0) {
     lines.push('', '### Pace Data', formatPaceDataForPrompt(inputs.paceData))
-  }
-
-  if (inputs.recentSessions && inputs.recentSessions.length > 0) {
-    lines.push('', '### Recent Sessions', formatRecentSessionsForPrompt(inputs.recentSessions))
   }
 
   if (lines.length === 1) {

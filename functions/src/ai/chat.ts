@@ -71,13 +71,6 @@ export function modelForTask(taskType: TaskType): string {
 
 // ── Enriched context types ──────────────────────────────────────
 
-interface SessionSummary {
-  streamId: string;
-  hits: number;
-  nears: number;
-  misses: number;
-}
-
 interface WorkbookPace {
   name: string;
   unitLabel: string;
@@ -132,47 +125,6 @@ function schoolYearStart(d: Date): string {
 }
 
 // ── Enriched context loaders ────────────────────────────────────
-
-/** Load recent sessions (last 14 days) and summarize by stream. */
-export async function loadRecentSessions(
-  db: Firestore,
-  familyId: string,
-  childId: string,
-): Promise<SessionSummary[]> {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 14);
-  const cutoffStr = toDateString(cutoff);
-
-  const snap = await db
-    .collection(`families/${familyId}/sessions`)
-    .where("childId", "==", childId)
-    .where("date", ">=", cutoffStr)
-    .get();
-
-  const byStream = new Map<
-    string,
-    { hits: number; nears: number; misses: number }
-  >();
-
-  for (const doc of snap.docs) {
-    const data = doc.data() as {
-      streamId: string;
-      result: string;
-    };
-    if (!byStream.has(data.streamId)) {
-      byStream.set(data.streamId, { hits: 0, nears: 0, misses: 0 });
-    }
-    const counts = byStream.get(data.streamId)!;
-    if (data.result === "hit") counts.hits++;
-    else if (data.result === "near") counts.nears++;
-    else if (data.result === "miss") counts.misses++;
-  }
-
-  return [...byStream.entries()].map(([streamId, counts]) => ({
-    streamId,
-    ...counts,
-  }));
-}
 
 /** Load workbook configs and calculate pace for each. */
 export async function loadWorkbookPaces(
