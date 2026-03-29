@@ -22,6 +22,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 
 import ChildSelector from '../../components/ChildSelector'
+import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -195,6 +196,11 @@ export default function WeeklyReviewPage() {
       <Typography variant="body2" color="text.secondary">
         Week of {weekKey}
       </Typography>
+      <HelpStrip
+        pageKey="weekly-review"
+        text="The weekly review analyzes everything logged on the Today page — completed items, engagement feedback, and grade notes. The more you capture during the week, the better the review."
+        maxShowCount={3}
+      />
 
       <ChildSelector
         children={children}

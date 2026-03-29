@@ -34,7 +34,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import { addDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
-import { useNavigate } from 'react-router-dom'
+import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import { AIFeatureFlag, useAIFeatureFlags } from '../../core/ai/featureFlags'
@@ -2072,6 +2072,16 @@ Generate a plan for Monday through Friday.`.trim()
                   rows={2}
                 />
 
+                {(!snapshot || snapshot.prioritySkills.length === 0) && (
+                  <Alert severity="info" sx={{ '& .MuiAlert-message': { fontSize: '0.85rem' } }}>
+                    💡 Plans are better with evaluation data.{' '}
+                    <RouterLink to="/evaluate" style={{ color: 'inherit', fontWeight: 600 }}>
+                      Run a quick reading evaluation
+                    </RouterLink>{' '}
+                    first — it helps me know what to focus on and what to skip.
+                  </Alert>
+                )}
+
                 {/* Generate button — big and primary */}
                 <Button
                   variant="contained"
@@ -2256,6 +2266,16 @@ Generate a plan for Monday through Friday.`.trim()
                     rows={2}
                   />
                 </Box>
+
+                {(!snapshot || snapshot.prioritySkills.length === 0) && (
+                  <Alert severity="info" sx={{ '& .MuiAlert-message': { fontSize: '0.85rem' } }}>
+                    💡 Plans are better with evaluation data.{' '}
+                    <RouterLink to="/evaluate" style={{ color: 'inherit', fontWeight: 600 }}>
+                      Run a quick reading evaluation
+                    </RouterLink>{' '}
+                    first — it helps me know what to focus on and what to skip.
+                  </Alert>
+                )}
 
                 {/* Generate button */}
                 <Button
