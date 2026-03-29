@@ -527,6 +527,34 @@ export default function TodayChecklist({
                   />
                 )}
 
+                {/* Mastery feedback row */}
+                {item.completed && (
+                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 5, mt: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
+                      Mastery:
+                    </Typography>
+                    {([
+                      { value: 'got-it', label: '⛏️ Got it', color: 'success' },
+                      { value: 'working', label: '🔨 Working', color: 'warning' },
+                      { value: 'stuck', label: '🧱 Stuck', color: 'error' },
+                    ] as const).map((opt) => (
+                      <Chip
+                        key={opt.value}
+                        label={opt.label}
+                        size="small"
+                        color={item.mastery === opt.value ? opt.color : 'default'}
+                        variant={item.mastery === opt.value ? 'filled' : 'outlined'}
+                        onClick={() => {
+                          const updated = [...(dayLog.checklist ?? [])]
+                          updated[index] = { ...item, mastery: opt.value }
+                          persistDayLogImmediate({ ...dayLog, checklist: updated })
+                        }}
+                        sx={{ cursor: 'pointer' }}
+                      />
+                    ))}
+                  </Stack>
+                )}
+
                 {/* Per-item capture — appears after checking off */}
                 {item.completed && (
                   <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 5, mt: 0.5 }}>

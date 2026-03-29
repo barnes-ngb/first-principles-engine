@@ -412,6 +412,14 @@ export default function KidTodayView({
     [checklist],
   )
 
+  const handleSetMastery = useCallback((itemIndex: number, mastery: 'got-it' | 'working' | 'stuck') => {
+    if (!dayLog?.checklist) return
+    const updated = dayLog.checklist.map((ci, i) =>
+      i === itemIndex ? { ...ci, mastery } : ci
+    )
+    persistDayLogImmediate({ ...dayLog, checklist: updated })
+  }, [dayLog, persistDayLogImmediate])
+
   const handleKidCapture = useCallback((index: number) => {
     setCaptureItemIndex(index)
     setCaptureReflection('')
@@ -977,6 +985,17 @@ export default function KidTodayView({
                     Work captured!
                   </Typography>
                 )}
+                {/* Lincoln self-report mastery */}
+                {item.completed && !item.mastery && isLincoln && (
+                  <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 0.5 }}>
+                    <Chip label="⛏️ Easy!" size="small" color="success" variant="outlined"
+                      onClick={() => handleSetMastery(absIndex, 'got-it')} />
+                    <Chip label="🔨 Tricky" size="small" color="warning" variant="outlined"
+                      onClick={() => handleSetMastery(absIndex, 'working')} />
+                    <Chip label="🧱 Hard" size="small" color="error" variant="outlined"
+                      onClick={() => handleSetMastery(absIndex, 'stuck')} />
+                  </Stack>
+                )}
               </Box>
             )
           })}
@@ -1139,6 +1158,17 @@ export default function KidTodayView({
                       <Typography variant="caption" color="success.main" sx={{ ml: 5, display: 'block' }}>
                         Work captured!
                       </Typography>
+                    )}
+                    {/* Lincoln self-report mastery */}
+                    {item.completed && !item.mastery && isLincoln && (
+                      <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 0.5 }}>
+                        <Chip label="⛏️ Easy!" size="small" color="success" variant="outlined"
+                          onClick={() => handleSetMastery(absIndex, 'got-it')} />
+                        <Chip label="🔨 Tricky" size="small" color="warning" variant="outlined"
+                          onClick={() => handleSetMastery(absIndex, 'working')} />
+                        <Chip label="🧱 Hard" size="small" color="error" variant="outlined"
+                          onClick={() => handleSetMastery(absIndex, 'stuck')} />
+                      </Stack>
                     )}
                   </Box>
                 )
