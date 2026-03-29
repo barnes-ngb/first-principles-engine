@@ -58,20 +58,20 @@ interface DailyPlanRecord {
 // ── Week helpers ────────────────────────────────────────────────
 
 /**
- * Return the Monday-of-week date string for the most recent completed week.
- * If today is Sunday, that week just ended. Otherwise, go back to the
- * previous Monday–Sunday window.
+ * Return the Sunday-of-week date string for the most recent completed week.
+ * The school week runs Sunday–Saturday. The scheduled review fires Sunday
+ * morning, so lastWeekKey returns the previous Sunday (7 days ago on Sunday,
+ * dayOfWeek+7 days ago otherwise).
  */
 export function lastWeekKey(today: Date): string {
-  const day = today.getDay(); // 0=Sun
-  // Days since the Monday that started last week:
-  // Sunday (0): last Monday was 6 days ago
-  // Monday (1): last Monday was 7 days ago (previous week)
-  // Tuesday–Saturday: last Monday was (day + 6) days ago
-  const daysBack = day === 0 ? 6 : day + 6;
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - daysBack);
-  return formatDate(monday);
+  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dayOfWeek = d.getDay(); // 0=Sun, 1=Mon, ...
+  // Go back to the start of the PREVIOUS Sunday-based week
+  // If today is Sunday (0), the previous week started 7 days ago
+  // If today is Monday (1), the previous week started 8 days ago
+  const offset = dayOfWeek === 0 ? 7 : dayOfWeek + 7;
+  d.setDate(d.getDate() - offset);
+  return formatDate(d);
 }
 
 function formatDate(d: Date): string {
@@ -197,7 +197,7 @@ export async function assembleWeekContext(
     };
   });
 
-  // Count school days (Mon–Fri) with no day logs and no daily plan
+  // Count school days (Sun–Thu) with no day logs and no daily plan
   const activeDates = new Set([
     ...dayLogs.map((d) => d.date),
     ...dailyPlans.map((p) => p.date),
@@ -330,7 +330,7 @@ ${allGradeResults.length > 0 ? `- Grade results:\n${allGradeResults.map((r) => `
 ${hoursSummary || "  (none)"}
 - Energy states: ${energySummary || "no data"}
 - Plan types: ${planTypeSummary || "no data"}
-- Missed school days (Mon–Fri): ${ctx.missedDays}
+- Missed school days (Sun–Thu): ${ctx.missedDays}
 
 Per-day breakdown:
 ${perDayBreakdown.join("\n") || "  (no day logs)"}
@@ -525,7 +525,7 @@ export const generateWeeklyReviewNow = onCall(
 
 export const weeklyReview = onSchedule(
   {
-    schedule: "every sunday 09:00",
+    schedule: "every sunday 07:00",
     timeZone: "America/Chicago",
     secrets: [claudeApiKey],
   },

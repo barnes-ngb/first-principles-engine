@@ -5,7 +5,7 @@ export type WeekRange = {
   end: string
 }
 
-export const getWeekRange = (date: Date = new Date(), weekStartsOn = 1): WeekRange => {
+export const getWeekRange = (date: Date = new Date(), weekStartsOn = 0): WeekRange => {
   const start = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   const dayOfWeek = start.getDay()
   const offset = (dayOfWeek - weekStartsOn + 7) % 7

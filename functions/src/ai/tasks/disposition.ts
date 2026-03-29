@@ -148,11 +148,11 @@ function aggregateByWeek(dayLogs: DayLogEntry[]): WeekAggregate[] {
   const weekMap = new Map<string, DayLogEntry[]>();
   for (const log of dayLogs) {
     const d = new Date(log.date + "T00:00:00");
-    const day = d.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    const monday = new Date(d);
-    monday.setDate(d.getDate() - diff);
-    const key = monday.toISOString().slice(0, 10);
+    const day = d.getDay(); // 0=Sun
+    const diff = day; // Sunday is 0, so diff=0 on Sunday
+    const sunday = new Date(d);
+    sunday.setDate(d.getDate() - diff);
+    const key = sunday.toISOString().slice(0, 10);
     const existing = weekMap.get(key) ?? [];
     existing.push(log);
     weekMap.set(key, existing);
