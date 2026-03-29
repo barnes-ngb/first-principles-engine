@@ -4,8 +4,9 @@ import { modelForTask } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 
 /**
- * Handles both "chat" and "generate" task types.
- * These share the same code path — minimal context, haiku model.
+ * Task: chat / generate
+ * Context: charter + childProfile (via buildContextForTask)
+ * Model: Haiku
  */
 export const handleChat = async (
   ctx: ChatTaskContext,

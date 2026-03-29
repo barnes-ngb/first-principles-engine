@@ -1,6 +1,13 @@
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import { callClaudeWithVision, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
+import { buildContextForTask } from "../contextSlices.js";
+
+/**
+ * Task: analyzeWorkbook
+ * Context: charter + childProfile (via buildContextForTask)
+ * Model: Sonnet (vision)
+ */
 
 const WORKBOOK_ANALYSIS_PROMPT = `You are an expert homeschool curriculum analyst. Analyze this workbook/worksheet photo and extract structured information.
 
@@ -73,8 +80,18 @@ export const handleAnalyzeWorkbook = async (
     };
   }
 
+  // Load shared context (charter + child profile)
+  const contextSections = await buildContextForTask("analyzeWorkbook", {
+    db,
+    familyId,
+    childId,
+    childData,
+    snapshotData: ctx.snapshotData,
+  });
+  const familyContext = contextSections.join("\n\n");
+
   const model = modelForTask("plan"); // Use Sonnet for vision analysis
-  const systemPrompt = `${WORKBOOK_ANALYSIS_PROMPT}\n\nChild context: ${childData.name}${childData.grade ? `, grade ${childData.grade}` : ""}.`;
+  const systemPrompt = `${familyContext}\n\n${WORKBOOK_ANALYSIS_PROMPT}`;
   const textPrompt = textLabel
     ? `Analyze this workbook page. The parent labeled it: "${textLabel}"`
     : "Analyze this workbook page and extract the structured information.";

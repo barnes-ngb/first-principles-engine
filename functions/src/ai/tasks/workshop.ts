@@ -2,6 +2,13 @@ import { HttpsError } from "firebase-functions/v2/https";
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
+import { buildContextForTask } from "../contextSlices.js";
+
+/**
+ * Task: workshop
+ * Context: charter + childProfile + workshopGames (via buildContextForTask)
+ * Model: Sonnet
+ */
 
 // ── Workshop prompt builder ─────────────────────────────────────
 
@@ -426,11 +433,23 @@ export const handleWorkshop = async (
   const isAdventure = workshopInput.gameType === "adventure";
   const isCards = workshopInput.gameType === "cards";
 
-  const systemPrompt = isCards
+  // Load shared context (charter + child profile + workshop games)
+  const contextSections = await buildContextForTask("workshop", {
+    db,
+    familyId,
+    childId,
+    childData,
+    snapshotData: ctx.snapshotData,
+  });
+  const familyContext = contextSections.join("\n\n");
+
+  const gamePrompt = isCards
     ? buildCardGamePrompt(childData.name, childData.grade, snapshotData, workshopInput)
     : isAdventure
       ? buildAdventurePrompt(childData.name, childData.grade, snapshotData, workshopInput)
       : buildWorkshopPrompt(childData.name, childData.grade, snapshotData, workshopInput);
+
+  const systemPrompt = `${familyContext}\n\n${gamePrompt}`;
 
   const model = modelForTask("workshop");
 
