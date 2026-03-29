@@ -154,7 +154,7 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
         <Typography
           sx={{
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-            fontSize: isLincoln ? '0.8rem' : '1.6rem',
+            fontSize: isLincoln ? '18px' : '1.6rem',
             fontWeight: 700,
             color: isLincoln ? '#7EFC20' : '#9C27B0',
             textAlign: 'center',
@@ -167,7 +167,7 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
         <Typography
           sx={{
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-            fontSize: isLincoln ? '0.55rem' : '1.1rem',
+            fontSize: isLincoln ? '14px' : '1.1rem',
             fontWeight: 700,
             color: isLincoln ? '#FFD700' : '#E91E63',
             textAlign: 'center',
@@ -179,7 +179,7 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
         <Typography
           sx={{
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-            fontSize: isLincoln ? '0.45rem' : '1rem',
+            fontSize: isLincoln ? '12px' : '1rem',
             color: isLincoln ? '#aaa' : '#666',
             textAlign: 'center',
           }}
@@ -190,7 +190,7 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
         <Typography
           sx={{
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-            fontSize: isLincoln ? '0.4rem' : '0.8rem',
+            fontSize: isLincoln ? '12px' : '0.8rem',
             color: isLincoln ? '#555' : '#999',
             textAlign: 'center',
             mt: 2,

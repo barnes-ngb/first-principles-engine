@@ -117,7 +117,7 @@ export default function TierUpgradeCelebration({
         <Typography
           sx={{
             fontFamily: titleFont,
-            fontSize: isLincoln ? '0.65rem' : '1.4rem',
+            fontSize: isLincoln ? '16px' : '1.4rem',
             fontWeight: 700,
             color: accentColor,
             textAlign: 'center',
@@ -135,7 +135,7 @@ export default function TierUpgradeCelebration({
         <Typography
           sx={{
             fontFamily: titleFont,
-            fontSize: isLincoln ? '0.55rem' : '1.1rem',
+            fontSize: isLincoln ? '14px' : '1.1rem',
             color: isLincoln ? '#FFD700' : '#9C27B0',
             textAlign: 'center',
           }}
@@ -191,7 +191,7 @@ export default function TierUpgradeCelebration({
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.35rem' : '0.7rem',
+                fontSize: isLincoln ? '12px' : '0.7rem',
                 color: isLincoln ? '#aaa' : '#888',
                 textAlign: 'center',
                 mb: 0.5,
@@ -218,7 +218,7 @@ export default function TierUpgradeCelebration({
         <Typography
           sx={{
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-            fontSize: isLincoln ? '0.35rem' : '0.7rem',
+            fontSize: isLincoln ? '12px' : '0.7rem',
             color: isLincoln ? '#555' : '#aaa',
           }}
         >

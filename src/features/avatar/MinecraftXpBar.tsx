@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
@@ -28,6 +29,26 @@ export default function MinecraftXpBar({
   const { current, next, progress, xpToNext } = getNextTierProgress(totalXp)
   const isMaxTier = !next
 
+  // Animated XP count-up
+  const [displayXp, setDisplayXp] = useState(totalXp)
+  const animRef = useRef<number>(0)
+  useEffect(() => {
+    const startXp = displayXp
+    const diff = totalXp - startXp
+    if (diff === 0) return
+    const duration = 500
+    const startTime = performance.now()
+    function tick(now: number) {
+      const t = Math.min((now - startTime) / duration, 1)
+      const eased = t * (2 - t) // ease-out quad
+      setDisplayXp(Math.round(startXp + diff * eased))
+      if (t < 1) animRef.current = requestAnimationFrame(tick)
+    }
+    animRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(animRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalXp])
+
   return (
     <Stack spacing={compact ? 0.5 : 1} sx={{ width: '100%' }}>
       {/* Tier label + XP count */}
@@ -39,9 +60,13 @@ export default function MinecraftXpBar({
         <Typography
           sx={{
             fontFamily: '"Press Start 2P", monospace',
-            fontSize: compact ? '0.5rem' : '0.6rem',
+            fontSize: compact ? '12px' : '13px',
             color: current.color,
             textShadow: '1px 1px 0 rgba(0,0,0,0.3)',
+            px: 1,
+            py: 0.25,
+            borderRadius: '3px',
+            background: `${current.color}15`,
           }}
         >
           {current.title}
@@ -51,7 +76,7 @@ export default function MinecraftXpBar({
             <Typography
               sx={{
                 fontFamily: '"Press Start 2P", monospace',
-                fontSize: '0.4rem',
+                fontSize: '12px',
                 color: '#7EFC20',
               }}
             >
@@ -61,11 +86,11 @@ export default function MinecraftXpBar({
           <Typography
             sx={{
               fontFamily: '"Press Start 2P", monospace',
-              fontSize: compact ? '0.45rem' : '0.5rem',
+              fontSize: compact ? '12px' : '13px',
               color: 'text.secondary',
             }}
           >
-            {totalXp} XP
+            {displayXp} XP
           </Typography>
         </Stack>
       </Stack>
@@ -89,7 +114,7 @@ export default function MinecraftXpBar({
           )`,
         }}
       >
-        {/* Fill */}
+        {/* Fill with leading edge glow */}
         <Box
           sx={{
             position: 'absolute',
@@ -100,7 +125,13 @@ export default function MinecraftXpBar({
             background: isMaxTier
               ? 'linear-gradient(180deg, #B388FF 0%, #7C4DFF 50%, #651FFF 100%)'
               : `linear-gradient(180deg, #7EFC20 0%, #5BC010 50%, #3A8008 100%)`,
-            transition: 'width 0.5s ease-out',
+            transition: 'width 0.6s ease-out',
+            // Leading edge glow
+            boxShadow: progress > 0 && progress < 1
+              ? (isMaxTier
+                  ? '2px 0 8px rgba(124,77,255,0.6), 1px 0 3px rgba(179,136,255,0.8)'
+                  : '2px 0 8px rgba(91,192,16,0.6), 1px 0 3px rgba(126,252,32,0.8)')
+              : 'none',
             // Pixel-art shimmer for max tier
             ...(isMaxTier
               ? {
@@ -123,7 +154,7 @@ export default function MinecraftXpBar({
             left: '50%',
             transform: 'translate(-50%, -50%)',
             fontFamily: '"Press Start 2P", monospace',
-            fontSize: compact ? '0.35rem' : '0.45rem',
+            fontSize: compact ? '12px' : '12px',
             color: '#7EFC20',
             textShadow: '0 0 4px rgba(0,0,0,0.8), 1px 1px 0 #000',
             lineHeight: 1,
@@ -138,7 +169,7 @@ export default function MinecraftXpBar({
         <Typography
           sx={{
             fontFamily: '"Press Start 2P", monospace',
-            fontSize: '0.35rem',
+            fontSize: '12px',
             color: 'text.secondary',
             textAlign: 'right',
           }}

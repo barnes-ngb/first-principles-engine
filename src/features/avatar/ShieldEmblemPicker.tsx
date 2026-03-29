@@ -36,7 +36,7 @@ export default function ShieldEmblemPicker({
             startIcon={<LockIcon sx={{ fontSize: 14 }} />}
             sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.28rem' : '11px',
+              fontSize: isLincoln ? '12px' : '14px',
               color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.25)',
               textTransform: 'none',
               borderRadius: isLincoln ? '4px' : '10px',
@@ -63,7 +63,7 @@ export default function ShieldEmblemPicker({
         onClick={() => setOpen(!open)}
         sx={{
           fontFamily: titleFont,
-          fontSize: isLincoln ? '0.28rem' : '11px',
+          fontSize: isLincoln ? '12px' : '14px',
           color: open ? accentColor : (isLincoln ? '#ccc' : '#555'),
           textTransform: 'none',
           borderRadius: isLincoln ? '4px' : '10px',
@@ -108,8 +108,8 @@ export default function ShieldEmblemPicker({
                 onClick={() => onSelect(opt.id)}
                 title={opt.label}
                 sx={{
-                  width: 38,
-                  height: 38,
+                  width: 44,
+                  height: 44,
                   borderRadius: isLincoln ? '4px' : '10px',
                   border: isActive
                     ? `2px solid ${accentColor}`

@@ -12,6 +12,20 @@ import type { Pose } from './voxel/poseSystem'
 import { applyPaintedFace, applyFaceWithAIFallback } from './voxel/pixelFace'
 import { buildHelmHair } from './voxel/buildHair'
 import { buildRoom } from './voxel/buildRoom'
+import {
+  getCurrentSeason,
+  getSeasonalStarColor,
+  tintPlatformColor,
+  applySeasonalLighting,
+  createFallingParticles,
+  animateParticles,
+  addChristmasStar,
+  animateChristmasStar,
+  addChristmasPlatformBlocks,
+  addEasterEggs,
+  getSeasonalTheme,
+} from './voxel/seasonalTheme'
+import type { FallingParticle } from './voxel/seasonalTheme'
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -99,15 +113,26 @@ function buildSkyGroup(): THREE.Group {
   moon.position.set(6, 6, -6)
   skyGroup.add(moon)
 
-  for (let i = 0; i < 25; i++) {
-    const starGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04)
-    const starMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.6 + Math.random() * 0.4 })
+  const season = getCurrentSeason()
+  const starSizes = [0.03, 0.04, 0.06] // tiny, small, medium
+  for (let i = 0; i < 30; i++) {
+    const sizeIdx = i < 3 ? 2 : (i < 10 ? 1 : 0) // 3 medium, 7 small, rest tiny
+    const size = starSizes[sizeIdx]
+    const isBright = i < 3
+    const starGeo = new THREE.BoxGeometry(size, size, size)
+    const starMat = new THREE.MeshBasicMaterial({ color: isBright ? 0xFFFFFF : getSeasonalStarColor(season), transparent: true, opacity: isBright ? 0.9 : (0.3 + Math.random() * 0.6) })
     const star = new THREE.Mesh(starGeo, starMat)
     star.name = 'twinkleStar'
     star.userData.twinklePhase = Math.random() * Math.PI * 2
     star.userData.twinkleSpeed = 0.5 + Math.random() * 1.5
     star.position.set((Math.random() - 0.5) * 18, 3 + Math.random() * 5, -7 - Math.random() * 3)
     skyGroup.add(star)
+  }
+
+  // Christmas: add Star of Bethlehem
+  const theme = getSeasonalTheme(season)
+  if (theme.christmasStar) {
+    addChristmasStar(skyGroup)
   }
 
   return skyGroup
@@ -267,6 +292,7 @@ export default function BrothersVoxelScene({
   const roomGroupRef = useRef<THREE.Group | null>(null)
   const nightLightsRef = useRef<THREE.Object3D[]>([])
   const roomLightsRef = useRef<THREE.Object3D[]>([])
+  const particlesRef = useRef<FallingParticle[]>([])
   const backgroundRef = useRef(background)
   const onPoseCompleteRef = useRef(onPoseComplete)
   useEffect(() => {
@@ -336,6 +362,10 @@ export default function BrothersVoxelScene({
 
     nightLightsRef.current = [keyLight, fillLight, rimLight, ambient, bounceLight]
 
+    // Apply seasonal lighting adjustments to night lights
+    const season = getCurrentSeason()
+    applySeasonalLighting(nightLightsRef.current, season)
+
     // Room mode lighting (warmer, cozy)
     const roomKeyLight = new THREE.DirectionalLight(0xFFF4E0, 0.8)
     roomKeyLight.position.set(3, 6, 4)
@@ -366,12 +396,24 @@ export default function BrothersVoxelScene({
       scene.add(characterGroup)
       characters.push(characterGroup)
 
-      // Platform per character
+      // Platform per character (with seasonal tint)
       const tierTint = getTierTint(calculateTier(child.totalXp))
       const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
-      const platform = buildPlatform(child.ageGroup, tierMat.primary)
+      const platformColor = tintPlatformColor(tierMat.primary, season)
+      const platform = buildPlatform(child.ageGroup, platformColor)
       platform.position.x = offsets[i]
       platform.position.y = characterGroup.position.y
+
+      // Seasonal platform decorations
+      const seasonTheme = getSeasonalTheme(season)
+      const scaleForPlatform = child.ageGroup === 'younger' ? 0.88 : 1.0
+      if (seasonTheme.christmasPlatform) {
+        addChristmasPlatformBlocks(platform, scaleForPlatform)
+      }
+      if (seasonTheme.easterEggs) {
+        addEasterEggs(platform, scaleForPlatform)
+      }
+
       scene.add(platform)
 
       // Shadow
@@ -402,6 +444,9 @@ export default function BrothersVoxelScene({
 
     charactersRef.current = characters
     poseAnimatorRef.current = animators
+
+    // Seasonal falling particles (snow, leaves, etc.)
+    particlesRef.current = createFallingParticles(season, scene)
 
     // Frame camera to fit both characters
     if (characters.length > 0) {
@@ -437,8 +482,8 @@ export default function BrothersVoxelScene({
       const time = clock.getElapsedTime()
 
       characters.forEach((character, idx) => {
-        // Gentle bob with slight offset per character
-        character.position.y = baseYs[idx] + Math.sin(time * 1.2 + idx * 0.5) * 0.03
+        // Breathing bob — 3s period, subtle amplitude
+        character.position.y = baseYs[idx] + Math.sin(time * 2.1 + idx * 0.5) * 0.02
 
         // Idle blink
         const blinkCycle = time % (3 + Math.sin(time * 0.37 + idx) * 1.5)
@@ -461,14 +506,19 @@ export default function BrothersVoxelScene({
         )
 
         if (!poseActive) {
-          const idleSway = Math.sin(time * 0.7 + idx * 1.2) * 0.03
+          // Arm sway — opposition, 4s period
+          const armSwayTime = time * (Math.PI * 2 / 4) + idx * 1.2
           if (armLObj) {
-            armLObj.rotation.z = idleSway
-            armLObj.rotation.x = Math.sin(time * 0.8 + idx) * 0.05
+            armLObj.rotation.z = Math.sin(armSwayTime) * 0.03
+            armLObj.rotation.x = Math.sin(time * 0.8 + idx) * 0.03
           }
           if (armRObj) {
-            armRObj.rotation.z = -idleSway
-            armRObj.rotation.x = -Math.sin(time * 0.8 + idx) * 0.05
+            armRObj.rotation.z = -Math.sin(armSwayTime) * 0.03
+            armRObj.rotation.x = -Math.sin(time * 0.8 + idx) * 0.03
+          }
+          // Head micro-movement — slow look-around (6s period)
+          if (headObj) {
+            headObj.rotation.y = Math.sin(time * (Math.PI * 2 / 6) + idx * 2) * 0.05
           }
         }
       })
@@ -491,6 +541,12 @@ export default function BrothersVoxelScene({
           obj.intensity = 0.4 + 0.2 * Math.sin(twinkleTime * 6 + 1.5)
         }
       })
+
+      // Seasonal particle animation (snow, leaves)
+      animateParticles(particlesRef.current)
+
+      // Christmas star glow pulse
+      animateChristmasStar(scene, twinkleTime)
 
       renderer.render(scene, camera)
     }
@@ -529,6 +585,7 @@ export default function BrothersVoxelScene({
       roomGroupRef.current = null
       nightLightsRef.current = []
       roomLightsRef.current = []
+      particlesRef.current = []
     }
   }, [initScene])
 
@@ -618,6 +675,12 @@ export default function BrothersVoxelScene({
           WebkitUserSelect: 'none',
           touchAction: 'none',
           position: 'relative',
+          animation: 'sceneFadeIn 0.4s ease-out',
+          '@keyframes sceneFadeIn': {
+            '0%': { opacity: 0 },
+            '100%': { opacity: 1 },
+          },
+          boxShadow: 'inset 0 0 80px rgba(0,0,0,0.4)',
         }}
       />
       {/* Name labels overlay */}
@@ -638,7 +701,7 @@ export default function BrothersVoxelScene({
             <Typography
               sx={{
                 fontFamily: '"Press Start 2P", monospace',
-                fontSize: '0.45rem',
+                fontSize: '12px',
                 color: '#e0e0e0',
                 textShadow: '0 1px 4px rgba(0,0,0,0.8)',
                 lineHeight: 1.4,
@@ -649,7 +712,7 @@ export default function BrothersVoxelScene({
             <Typography
               sx={{
                 fontFamily: '"Press Start 2P", monospace',
-                fontSize: '0.3rem',
+                fontSize: '12px',
                 color: 'rgba(255,255,255,0.55)',
                 textShadow: '0 1px 3px rgba(0,0,0,0.7)',
                 lineHeight: 1.4,

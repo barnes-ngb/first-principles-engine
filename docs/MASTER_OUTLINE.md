@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v12 **Version:** v12 — March 28, 2026 **Status:** Updated — docs alignment audit (collection count, CF count, key files reference, removed phantom collections) Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~73k lines TypeScript (reduced from ~78k after cleanup, grew with new features), 30+ test files, 600+ tests, 28 Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v13 **Version:** v13 — March 29, 2026 **Status:** Updated — cross-doc alignment audit (CF count 19, task types 11, collection count 26, model selection corrected, missing handlers documented) Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~73k lines TypeScript (reduced from ~78k after cleanup, grew with new features), 30+ test files, 600+ tests, 26 Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -218,14 +218,14 @@ Progress
 * Artifact gallery, compliance hours auto-logged on completion Settings
 * General family profile, AI usage dashboard
 * Avatar & XP tab — parent XP controls, piece management, force tier upgrade
-* Sticker Library tab — all generated stickers, tag editing, child profile assignment Cloud Functions (18 exported, 10 task types)
-1. `chat` — Task dispatch: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, chat, analyzePatterns
+* Sticker Library tab — all generated stickers, tag editing, child profile assignment Cloud Functions (19 exported, 11 task types)
+1. `chat` — Task dispatch: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, chat, generate
 2. `weeklyReview` — Scheduled Sunday 7pm CT
 3. `generateWeeklyReviewNow` — Manual trigger
 4. `generateActivity` — Lesson card generation
 5. `healthCheck` — Diagnostic
 6. `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
-7–17. Image functions (11): `generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace` AI Context Pipeline (task-specific slicing)
+7–18. Image functions (12): `generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`, `enhanceSketch` AI Context Pipeline (task-specific slicing)
 - Each task type receives only the context slices it needs (defined in contextSlices.ts)
 - Plan/chat: full context (charter, child profile, skill snapshot, workbook configs, eval findings, compressed engagement, week focus)
 - Evaluate: charter + child profile + sight words only
@@ -396,7 +396,7 @@ Key Design Decisions
 | `src/core/utils/perf.ts` | Performance measurement helpers |
 | `functions/src/ai/chat.ts` | AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) |
 | `functions/src/ai/imageGen.ts` | DALL-E 3 + gpt-image-1 routing |
-| `functions/src/ai/tasks/` | Chat task registry (10 handlers: plan, chat, evaluate, quest, generateStory, analyzeWorkbook, analyzePatterns, disposition, conundrum, workshop) |
+| `functions/src/ai/tasks/` | Chat task registry (11 handlers: plan, chat, evaluate, quest, generateStory, analyzeWorkbook, analyzePatterns, disposition, conundrum, weeklyFocus, workshop) |
 | `functions/src/ai/imageTasks/` | Image task registry (11 handlers) |
 | `functions/src/ai/contextSlices.ts` | Task-specific context assembly + engagement compression |
 | `src/features/avatar/` | My Armor (VoxelCharacter, VerseCard, ArmorIcons, Particles, voxel/) |

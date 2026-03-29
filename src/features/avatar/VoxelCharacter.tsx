@@ -24,6 +24,20 @@ import { buildShieldEmblem } from './voxel/buildShieldEmblem'
 import { buildHelmetCrest } from './voxel/buildHelmetCrest'
 import { buildRoom } from './voxel/buildRoom'
 import { buildAccessory, getAccessoryAttachPoint, animateAccessories, getHiddenAccessories } from './voxel/buildAccessory'
+import {
+  getCurrentSeason,
+  getSeasonalStarColor,
+  tintPlatformColor,
+  applySeasonalLighting,
+  createFallingParticles,
+  animateParticles,
+  addChristmasStar,
+  animateChristmasStar,
+  addChristmasPlatformBlocks,
+  addEasterEggs,
+  getSeasonalTheme,
+} from './voxel/seasonalTheme'
+import type { FallingParticle } from './voxel/seasonalTheme'
 
 interface VoxelCharacterProps {
   features: CharacterFeatures | undefined
@@ -201,6 +215,22 @@ function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): T
     }
   }
 
+  // Edge glow — thin bright line on front-facing platform edges
+  const edgeColor = tierBaseColor ?? 0x888888
+  const edgeMat = new THREE.MeshBasicMaterial({
+    color: edgeColor,
+    transparent: true,
+    opacity: 0.5,
+  })
+  // Front edge of bottom step
+  const frontEdge = new THREE.Mesh(new THREE.BoxGeometry(3.0 * s, 0.02 * s, 0.02 * s), edgeMat)
+  frontEdge.position.set(0, -0.125 * s + 0.125 * s, 1.0 * s)
+  platform.add(frontEdge)
+  // Front edge of top step
+  const topEdge = new THREE.Mesh(new THREE.BoxGeometry(2.4 * s, 0.02 * s, 0.02 * s), edgeMat.clone())
+  topEdge.position.set(0, 0.35 * s + 0.1 * s, 0.8 * s)
+  platform.add(topEdge)
+
   // Shift the whole platform down so character feet still at Y=0
   platform.position.y = -0.35 * s
 
@@ -239,13 +269,18 @@ function buildSkyGroup(): THREE.Group {
   moon.position.set(5, 6, -6)
   skyGroup.add(moon)
 
-  // Stars — small white cubes scattered in the sky, with phase offsets for twinkle
-  for (let i = 0; i < 20; i++) {
-    const starGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04)
+  // Stars — varied sizes for depth, with seasonal color tinting
+  const season = getCurrentSeason()
+  const starSizes = [0.03, 0.04, 0.06] // tiny, small, medium
+  for (let i = 0; i < 25; i++) {
+    const sizeIdx = i < 3 ? 2 : (i < 8 ? 1 : 0) // 3 medium, 5 small, rest tiny
+    const size = starSizes[sizeIdx]
+    const isBright = i < 3 // First 3 are "bright" stars
+    const starGeo = new THREE.BoxGeometry(size, size, size)
     const starMat = new THREE.MeshBasicMaterial({
-      color: 0xFFFFFF,
+      color: isBright ? 0xFFFFFF : getSeasonalStarColor(season),
       transparent: true,
-      opacity: 0.6 + Math.random() * 0.4,
+      opacity: isBright ? 0.9 : (0.3 + Math.random() * 0.6),
     })
     const star = new THREE.Mesh(starGeo, starMat)
     star.name = 'twinkleStar'
@@ -257,6 +292,12 @@ function buildSkyGroup(): THREE.Group {
       -7 - Math.random() * 3,
     )
     skyGroup.add(star)
+  }
+
+  // Christmas: add Star of Bethlehem
+  const seasonTheme = getSeasonalTheme(season)
+  if (seasonTheme.christmasStar) {
+    addChristmasStar(skyGroup)
   }
 
   // Also keep some particle-style stars for depth
@@ -320,6 +361,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   const roomGroupRef = useRef<THREE.Group | null>(null)
   const roomLightsRef = useRef<THREE.Object3D[]>([])
   const nightLightsRef = useRef<THREE.Object3D[]>([])
+  const particlesRef = useRef<FallingParticle[]>([])
   const backgroundRef = useRef(background)
   const equippedRef = useRef<string[]>([])
   const poseAnimatorRef = useRef<PoseAnimator>(new PoseAnimator())
@@ -427,6 +469,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     scene.add(bounceLight)
 
     nightLightsRef.current = [keyLight, fillLight, rimLight, ambient, bounceLight]
+
+    // Apply seasonal lighting adjustments to night lights
+    const season = getCurrentSeason()
+    applySeasonalLighting(nightLightsRef.current, season)
 
     // ── Room mode lighting (warmer, cozy) ────────────────────────
     const roomKeyLight = new THREE.DirectionalLight(0xFFF4E0, 0.8)
@@ -621,11 +667,23 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       applyHelmHairStyle(character, true, resolvedFeatures)
     }
 
-    // Platform — tinted to match tier
+    // Platform — tinted to match tier + seasonal color
     const tierTint = getTierTint(currentTier)
     const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
-    const platform = buildPlatform(ageGroup, tierMat.primary)
+    const platformColor = tintPlatformColor(tierMat.primary, season)
+    const platform = buildPlatform(ageGroup, platformColor)
     platform.position.y = character.position.y
+
+    // Seasonal platform decorations
+    const seasonTheme = getSeasonalTheme(season)
+    const scaleForPlatform = ageGroup === 'younger' ? 0.88 : 1.0
+    if (seasonTheme.christmasPlatform) {
+      addChristmasPlatformBlocks(platform, scaleForPlatform)
+    }
+    if (seasonTheme.easterEggs) {
+      addEasterEggs(platform, scaleForPlatform)
+    }
+
     scene.add(platform)
 
     // Auto-frame camera to fit the fully-built character with armor
@@ -645,6 +703,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     shadow.rotation.x = -Math.PI / 2
     shadow.position.y = 0.01
     scene.add(shadow)
+
+    // Seasonal falling particles (snow, leaves, etc.)
+    particlesRef.current = createFallingParticles(season, scene)
 
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
@@ -718,14 +779,14 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         const dt = clock.getDelta()
         const time = clock.getElapsedTime()
 
-        // Gentle bob (freeze during ceremony so character stays still)
+        // Gentle breathing bob (freeze during ceremony so character stays still)
         if (!ceremonyActiveRef.current) {
-          characterRef.current.position.y = baseY + Math.sin(time * 1.2) * 0.03
+          characterRef.current.position.y = baseY + Math.sin(time * 2.1) * 0.02
 
           // Animate ground shadow scale with character bob
           const shadowMesh = scene.getObjectByName('groundShadow')
           if (shadowMesh) {
-            const bobScale = 1 + Math.sin(time * 1.2) * 0.02
+            const bobScale = 1 + Math.sin(time * 2.1) * 0.02
             shadowMesh.scale.set(bobScale, 1, bobScale)
           }
         }
@@ -760,15 +821,20 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           currentEqPose.armLRotX += (targetEqPose.armLRotX - currentEqPose.armLRotX) * lerpSpeed
           currentEqPose.armRRotX += (targetEqPose.armRRotX - currentEqPose.armRRotX) * lerpSpeed
 
-          const idleSway = Math.sin(time * 0.7) * 0.03
-
+          // Arm idle sway — opposition motion, 4s period
+          const armSwayTime = time * (Math.PI * 2 / 4) // 4-second period
           if (armLObj) {
-            armLObj.rotation.z = currentEqPose.armLRotZ + idleSway
-            armLObj.rotation.x = currentEqPose.armLRotX + Math.sin(time * 0.8) * 0.05
+            armLObj.rotation.z = currentEqPose.armLRotZ + Math.sin(armSwayTime) * 0.03
+            armLObj.rotation.x = currentEqPose.armLRotX + Math.sin(time * 0.8) * 0.03
           }
           if (armRObj) {
-            armRObj.rotation.z = currentEqPose.armRRotZ - idleSway
-            armRObj.rotation.x = currentEqPose.armRRotX - Math.sin(time * 0.8) * 0.05
+            armRObj.rotation.z = currentEqPose.armRRotZ - Math.sin(armSwayTime) * 0.03
+            armRObj.rotation.x = currentEqPose.armRRotX - Math.sin(time * 0.8) * 0.03
+          }
+
+          // Head micro-movement — very slow, subtle look-around (6s period)
+          if (headObj) {
+            headObj.rotation.y = Math.sin(time * (Math.PI * 2 / 6)) * 0.05
           }
         }
       }
@@ -818,6 +884,12 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           obj.intensity = 0.4 + 0.2 * Math.sin(twinkleTime * 6 + 1.5)
         }
       })
+
+      // Seasonal particle animation (snow, leaves)
+      animateParticles(particlesRef.current)
+
+      // Christmas star glow pulse
+      animateChristmasStar(scene, twinkleTime)
 
       renderer.render(scene, camera)
     }
@@ -883,6 +955,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       roomGroupRef.current = null
       nightLightsRef.current = []
       roomLightsRef.current = []
+      particlesRef.current = []
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedFeatures.skinTone, resolvedFeatures.hairColor, resolvedFeatures.hairStyle, resolvedFeatures.hairLength, resolvedFeatures.eyeColor, ageGroup])
@@ -1173,6 +1246,14 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         WebkitUserSelect: 'none',
         touchAction: 'none',
         position: 'relative',
+        // Scene fade-in on load
+        animation: 'sceneFadeIn 0.4s ease-out',
+        '@keyframes sceneFadeIn': {
+          '0%': { opacity: 0 },
+          '100%': { opacity: 1 },
+        },
+        // Subtle vignette — darkens corners for depth
+        boxShadow: 'inset 0 0 80px rgba(0,0,0,0.4)',
       }}
     />
   )

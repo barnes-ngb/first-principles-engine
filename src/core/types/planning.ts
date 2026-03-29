@@ -41,17 +41,18 @@ export interface WeekPlan {
   }>
   conundrum?: {
     title: string
-    scenario: string
+    scenario: string          // Narrative story chapter, not a case study
     question: string
-    angles: string[]
     lincolnPrompt: string
     londonPrompt: string
     virtueConnection: string
-    subjectConnection?: string
     readingTieIn?: string
     mathContext?: string
     londonDrawingPrompt?: string
     dadLabSuggestion?: string
+    // Evidence fields (set when family discusses)
+    discussed?: boolean
+    discussedAt?: string
   }
 }
 
@@ -540,6 +541,37 @@ export interface PlanModification {
   area: string
   modification: string
   reason: string
+}
+
+// ── Curriculum Scan ──────────────────────────────────────────
+
+export interface ScanSkillResult {
+  skill: string
+  level: 'introductory' | 'practice' | 'mastery' | 'review'
+  alignsWithSnapshot: 'ahead' | 'at-level' | 'behind' | 'unknown'
+}
+
+export interface ScanResult {
+  pageType: 'worksheet' | 'textbook' | 'test' | 'activity' | 'other'
+  subject: string
+  specificTopic: string
+  skillsTargeted: ScanSkillResult[]
+  estimatedDifficulty: 'easy' | 'appropriate' | 'challenging' | 'too-hard'
+  recommendation: 'do' | 'skip' | 'quick-review' | 'modify'
+  recommendationReason: string
+  estimatedMinutes: number
+  teacherNotes: string
+}
+
+export interface ScanRecord {
+  id?: string
+  childId: string
+  imageUrl: string
+  storagePath: string
+  results: ScanResult | null
+  action: 'added' | 'skipped' | 'pending'
+  error?: string
+  createdAt?: string
 }
 
 // ── Skip Advisor Result ───────────────────────────────────────

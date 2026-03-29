@@ -49,6 +49,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   generateStory: ["childProfile", "sightWords", "wordMastery"],
   analyzePatterns: ["childProfile"],
   workshop: ["charter", "childProfile", "workshopGames"],
+  scan: ["childProfile", "recentEval"],
 };
 
 // ── Charter preamble (shared constant) ──────────────────────────

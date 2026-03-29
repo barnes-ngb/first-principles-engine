@@ -2,7 +2,7 @@
 
 > Generated from source: `functions/src/ai/` — chat.ts, chatTypes.ts, contextSlices.ts, tasks/\*, evaluate.ts, generate.ts, imageGen.ts
 >
-> Last updated: 2026-03-25
+> Last updated: 2026-03-29
 
 ---
 
@@ -40,6 +40,9 @@ src/core/ai/useAI.ts              functions/src/ai/
                                       generateStory → handleGenerateStory
                                       workshop   → handleWorkshop
                                       analyzeWorkbook → handleAnalyzeWorkbook
+                                      disposition → handleDisposition
+                                      conundrum  → handleConundrum
+                                      weeklyFocus → handleWeeklyFocus
                                            ↓
                                   tasks/<handler>.ts
                                     → buildContextForTask(taskType, ...)  [contextSlices.ts]
@@ -66,6 +69,9 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `generateArmorSheet` | imageTasks/armorSheet.ts | onCall |
 | `generateArmorReference` | imageTasks/armorReference.ts | onCall |
 | `extractFeatures` | imageTasks/extractFeatures.ts | onCall |
+| `generateMinecraftSkin` | imageTasks/minecraftSkin.ts | onCall |
+| `generateMinecraftFace` | imageTasks/minecraftFace.ts | onCall |
+| `enhanceSketch` | imageTasks/enhanceSketch.ts | onCall |
 | `healthCheck` | health.ts | onCall |
 
 ---
@@ -82,6 +88,9 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `generateStory` | `claude-sonnet-4-6` | Sight word story generation |
 | `workshop` | `claude-sonnet-4-6` | Story Game Workshop |
 | `analyzeWorkbook` | `claude-sonnet-4-6` | Workbook page analysis |
+| `disposition` | `claude-sonnet-4-6` | Learning disposition narrative |
+| `conundrum` | `claude-sonnet-4-6` | Weekly conundrum generation |
+| `weeklyFocus` | `claude-sonnet-4-6` | Unified weekly focus + conundrum |
 | `generate` | `claude-haiku-4-5-20251001` | Activity/lesson generation |
 | `chat` | `claude-haiku-4-5-20251001` | General chat |
 
@@ -93,6 +102,7 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `analyzeEvaluationPatterns` | `claude-sonnet-4-6` |
 | `extractFeatures` | `claude-sonnet-4-6` |
 | Image generation | `gpt-image-1` or `dall-e-3` |
+| `enhanceSketch` | `gpt-image-1` (image editing) |
 | Image prompts (Claude describes scene) | `claude-sonnet-4-6` |
 
 ---
@@ -134,6 +144,9 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `generateStory` | childProfile, sightWords, wordMastery |
 | `workshop` | charter, childProfile, workshopGames |
 | `analyzePatterns` | childProfile |
+| `disposition` | _(self-loading)_ charter preamble + 4 weeks day logs + 3 recent evals + 5 recent lab reports |
+| `conundrum` | _(self-loading)_ charter preamble + week focus + recent subjects + child profiles |
+| `weeklyFocus` | _(self-loading)_ charter preamble + previous 4 weeks' themes + recent subjects + user input |
 
 ---
 
@@ -220,6 +233,66 @@ src/core/ai/useAI.ts              functions/src/ai/
 - Generic conversational handler
 - Used for both "chat" and "generate" task types
 - Lightest context — just charter values and child profile
+
+### `disposition` (tasks/disposition.ts)
+
+**System prompt assembly:**
+1. CHARTER_PREAMBLE (self-loaded, does not use buildContextForTask)
+2. Custom narrative prompt: assess HOW a child approaches learning (portfolio over grades)
+3. 5 dispositions: Curiosity, Persistence, Articulation, Self-Awareness, Ownership
+4. Levels: growing / steady / emerging / not-yet-visible; Trends: up / stable / down / insufficient-data
+
+**Data loading (4-week window):**
+- Recent day logs (4 weeks) aggregated by week: completion rates, engagement patterns, evidence, subject minutes
+- Recent evaluation sessions (3 most recent completed)
+- Recent Dad Lab reports (5 most recent) with child contributions
+
+**Output:** JSON with `profileDate`, `periodWeeks`, 5 disposition objects (level, narrative, trend), `celebration`, `nudge`, `parentNote`
+
+**Tokens:** 4096
+
+### `conundrum` (tasks/conundrum.ts)
+
+**System prompt assembly:**
+1. CHARTER_PREAMBLE (self-loaded)
+2. Open-ended scenario design principles (no single right answer, for family discussion)
+3. Age context: Lincoln (10), London (6)
+
+**Data loading:**
+- Current week's focus (theme, virtue, scripture, heart question)
+- Recent subjects from last 7 days of day logs
+- All children profiles
+
+**Output:** JSON with `title`, `scenario` (2-3 paragraphs, readable by 6-year-old), `question`, `angles` (3 valid perspectives), `lincolnPrompt` (deeper), `londonPrompt` (simpler), `virtueConnection`, `subjectConnection`
+
+**Tokens:** 2048
+
+### `weeklyFocus` (tasks/weeklyFocus.ts)
+
+**System prompt assembly:**
+1. CHARTER_PREAMBLE (self-loaded)
+2. 4 recurring Stonebridge characters (Mayor Oakley, Tinkerer Maple, Story Keeper Wren, Elder Ironroot)
+3. Lincoln → engineering/building, London → stories/drawing
+4. Cohesion requirement: theme → virtue → scripture → conundrum → connections
+
+**Data loading:**
+- User input (read-aloud book, subjects, notes)
+- Previous 4 weeks' themes/virtues/conundrums (for continuity, no repeats)
+- Recent subjects from last 7 days
+
+**Output:** Large JSON with `theme`, `virtue`, `scriptureRef`, `scriptureText`, `heartQuestion`, `formationPrompt`, and nested conundrum object with Stonebridge scenario, `lincolnPrompt`, `londonPrompt`, `readingTieIn`, `mathContext`, `londonDrawingPrompt`, `dadLabSuggestion`
+
+**Tokens:** 4096
+
+### `enhanceSketch` (imageTasks/enhanceSketch.ts)
+
+**Standalone onCall function** (image generation, not task-dispatched).
+
+- Downloads child's sketch from Firebase Storage
+- Enhances into polished children's book illustration via gpt-image-1 `editImage()`
+- 4 style options: storybook (default), comic, realistic, minecraft
+- Saves enhanced image back to Storage, returns download URL
+- Logs usage to aiUsage collection
 
 ### `analyzeEvaluationPatterns` (tasks/analyzePatterns.ts)
 
@@ -321,6 +394,63 @@ src/core/ai/useAI.ts              functions/src/ai/
   ],
   "allWordsUsed": ["the", "cat"],
   "missedWords": []
+}
+```
+
+### Disposition Profile
+
+```json
+{
+  "profileDate": "2026-03-29",
+  "periodWeeks": 4,
+  "curiosity": { "level": "growing", "narrative": "2-3 sentences...", "trend": "up" },
+  "persistence": { "level": "steady", "narrative": "...", "trend": "stable" },
+  "articulation": { "level": "emerging", "narrative": "...", "trend": "up" },
+  "selfAwareness": { "level": "emerging", "narrative": "...", "trend": "stable" },
+  "ownership": { "level": "not-yet-visible", "narrative": "...", "trend": "insufficient-data" },
+  "celebration": "Warm, specific thing to celebrate",
+  "nudge": "Gentle suggestion for next step",
+  "parentNote": "Note to Shelly about what she's doing well"
+}
+```
+
+### Conundrum
+
+```json
+{
+  "title": "The Neighborhood Garden",
+  "scenario": "2-3 paragraphs, readable by 6-year-old...",
+  "question": "What should they do?",
+  "angles": ["Perspective 1", "Perspective 2", "Perspective 3"],
+  "lincolnPrompt": "Deeper thinking prompt for Lincoln",
+  "londonPrompt": "Simpler prompt for London",
+  "virtueConnection": "How this connects to the week's virtue",
+  "subjectConnection": "How this connects to what they're studying"
+}
+```
+
+### Weekly Focus
+
+```json
+{
+  "theme": "Bridges That Connect",
+  "virtue": "Faithfulness",
+  "scriptureRef": "Proverbs 3:5-6",
+  "scriptureText": "Trust in the Lord...",
+  "heartQuestion": "What does it mean to be faithful?",
+  "formationPrompt": "Short family discussion starter",
+  "conundrum": {
+    "title": "The Bridge Builder's Choice",
+    "scenario": "Stonebridge scenario with 2-3 recurring characters...",
+    "question": "What should they do?",
+    "angles": ["...", "...", "..."],
+    "lincolnPrompt": "Engineering angle...",
+    "londonPrompt": "Story/drawing angle...",
+    "readingTieIn": "Connected to the week's read-aloud",
+    "mathContext": "Word problem for 10-year-old tied to theme",
+    "londonDrawingPrompt": "Drawing activity for London",
+    "dadLabSuggestion": "Hands-on experiment with household materials"
+  }
 }
 ```
 

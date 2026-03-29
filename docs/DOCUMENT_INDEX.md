@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-03-28.
+> Where everything lives. Updated 2026-03-29.
 
 ---
 
@@ -17,7 +17,7 @@
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
 | `ENGINE_V2.md` | **CURRENT** | Engine framework (flywheel, stages, scoring) |
 | `FIRST_PRINCIPLES_ALIGNMENT.md` | **NEW** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
-| `SYSTEM_PROMPTS.md` | **STALE** | Needs disposition + conundrum task prompts added; model selection table outdated (all Sonnet now) |
+| `SYSTEM_PROMPTS.md` | **CURRENT** | Task dispatch, model selection, context slices, all 11 task handlers, output schemas, guardrails |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
 | `00_MASTER_SCOPE.md` | HISTORICAL | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `01_MVP_V0_1.md` | HISTORICAL | Phase 1 — MVP (Today, artifacts, engine, records) |
@@ -27,7 +27,7 @@
 | `05_DEPLOYMENT_OPERATIONS.md` | HISTORICAL | Phase 5 — Deployment + Ops |
 | `06_TESTING_PLAN.md` | HISTORICAL | Phase testing plan |
 | `07_SATURDAY_LAB_RUNBOOK.md` | HISTORICAL | Saturday lab runbook |
-| `08_RUNBOOK.md` | HISTORICAL | Operational runbook |
+| `08_RUNBOOK.md` | **CURRENT** (Reference) | Operational runbook: deploy, backups, key rotation, troubleshooting |
 | `archive/` | HISTORICAL | Old reference docs |
 
 ---
