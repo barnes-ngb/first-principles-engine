@@ -230,7 +230,7 @@ All under `families/{familyId}/`:
 
 ### Cloud Functions (19 exported)
 - `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, chat, generate)
-- `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
+- `weeklyReview` — Scheduled weekly review (Sunday 9am CT)
 - `generateWeeklyReviewNow` — Manual review trigger
 - `generateActivity` — Lesson card generation
 - `healthCheck` — Diagnostic endpoint
