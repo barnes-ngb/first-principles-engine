@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react'
 import * as THREE from 'three'
 import Box from '@mui/material/Box'
 
@@ -280,7 +280,12 @@ function buildSkyGroup(): THREE.Group {
   return skyGroup
 }
 
-export default function VoxelCharacter({
+export interface VoxelCharacterHandle {
+  /** Capture the current scene as a PNG data URL */
+  capture: () => string | null
+}
+
+const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(function VoxelCharacter({
   features,
   ageGroup,
   equippedPieces: equippedPiecesRaw,
@@ -298,7 +303,7 @@ export default function VoxelCharacter({
   customization,
   background = 'night',
   accessories = [],
-}: VoxelCharacterProps) {
+}: VoxelCharacterProps, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
@@ -325,6 +330,18 @@ export default function VoxelCharacter({
   const onTierUpRef = useRef(onTierUp)
   const ceremonyActiveRef = useRef(false)
   const sceneActiveRef = useRef(false)
+
+  // Expose capture method to parent via ref
+  useImperativeHandle(ref, () => ({
+    capture: () => {
+      const renderer = rendererRef.current
+      const scene = sceneRef.current
+      const camera = cameraRef.current
+      if (!renderer || !scene || !camera) return null
+      renderer.render(scene, camera)
+      return renderer.domElement.toDataURL('image/png')
+    },
+  }), [])
 
   const equippedPieces = useMemo(
     () => (Array.isArray(equippedPiecesRaw) ? equippedPiecesRaw : []),
@@ -630,7 +647,7 @@ export default function VoxelCharacter({
     scene.add(shadow)
 
     // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true })
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
     renderer.setSize(width, height)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     container.appendChild(renderer.domElement)
@@ -1159,4 +1176,6 @@ export default function VoxelCharacter({
       }}
     />
   )
-}
+})
+
+export default VoxelCharacter
