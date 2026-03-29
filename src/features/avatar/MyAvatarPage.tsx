@@ -27,6 +27,7 @@ import { useAvatarProfile } from './useAvatarProfile'
 import { safeUpdateProfile, safeSetProfile } from './safeProfileWrite'
 import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, VOXEL_TO_ARMOR_PIECE, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
 import type {
+  AccessoryId,
   ArmorPiece,
   ArmorTier,
   AvatarBackground,
@@ -39,6 +40,7 @@ import type {
   ShieldEmblem,
   VoxelArmorPieceId,
 } from '../../core/types'
+import { ACCESSORY_SLOTS } from '../../core/types'
 
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import { ArmorIcon } from './icons/ArmorIcons'
@@ -54,6 +56,7 @@ import TierUpgradeCelebration from './TierUpgradeCelebration'
 import TierUpCeremony from '../../components/avatar/TierUpCeremony'
 import OutfitCustomizer from './OutfitCustomizer'
 import ArmorDyePanel from './ArmorDyePanel'
+import AccessoriesPanel from './AccessoriesPanel'
 import ShieldEmblemPicker from './ShieldEmblemPicker'
 import HelmetCrestPicker from './HelmetCrestPicker'
 import { calculateTier, getTierBadgeColor, getTierTextColor, TIERS } from './voxel/tierMaterials'
@@ -526,6 +529,35 @@ export default function MyAvatarPage() {
       await safeUpdateProfile(profileRef, { customization })
     },
     [familyId, childId, profile, bgMode],
+  )
+
+  // ── Accessory toggle ──────────────────────────────────────────────
+  const handleAccessoryToggle = useCallback(
+    async (accId: AccessoryId) => {
+      if (!familyId || !childId || !profile) return
+      const current = profile.customization?.accessories ?? []
+      let updated: AccessoryId[]
+
+      if (current.includes(accId)) {
+        // Unequip
+        updated = current.filter((id) => id !== accId)
+      } else {
+        // Equip — enforce slot exclusivity (remove any other item in the same slot)
+        const slot = Object.entries(ACCESSORY_SLOTS).find(
+          ([, ids]) => (ids as readonly string[]).includes(accId),
+        )?.[0]
+        const slotItems = slot ? ACCESSORY_SLOTS[slot as keyof typeof ACCESSORY_SLOTS] : []
+        updated = [
+          ...current.filter((id) => !(slotItems as readonly string[]).includes(id)),
+          accId,
+        ]
+      }
+
+      const customization: OutfitCustomization = { ...profile.customization, accessories: updated }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile],
   )
 
   // ── Streak tracking ─────────────────────────────────────────────
@@ -1164,6 +1196,7 @@ export default function MyAvatarPage() {
               activePoseId={activePoseId}
               onPoseComplete={() => setActivePoseId(null)}
               onSwipePose={(poseId) => setActivePoseId(poseId)}
+              accessories={profile.customization?.accessories}
               onTierUpStart={() => setCeremonyActive(true)}
               onTierUp={async (_oldTier, newTier) => {
                 setCeremonyActive(false)
@@ -1820,6 +1853,15 @@ export default function MyAvatarPage() {
           isLincoln={isLincoln}
           onColorChange={(pieceId, hex) => void handleArmorDyeChange(pieceId, hex)}
           onReset={() => void handleArmorDyeReset()}
+        />
+
+        {/* ── Accessories Panel ──────────────────────────────────── */}
+        <AccessoriesPanel
+          totalXp={profile.totalXp}
+          equippedAccessories={profile.customization?.accessories ?? []}
+          equippedArmor={appliedVoxel}
+          isLincoln={isLincoln}
+          onToggle={(accId) => void handleAccessoryToggle(accId)}
         />
 
         {/* ── Photo Upload Section ──────────────────────────────── */}
