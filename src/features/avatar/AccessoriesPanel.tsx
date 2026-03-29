@@ -57,7 +57,7 @@ export default function AccessoriesPanel({
       <Typography
         sx={{
           fontFamily: titleFont,
-          fontSize: isLincoln ? '0.42rem' : '15px',
+          fontSize: isLincoln ? '12px' : '18px',
           fontWeight: 600,
           color: accentColor,
           mb: 1.5,
@@ -69,8 +69,8 @@ export default function AccessoriesPanel({
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
-          gap: '8px',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: '12px',
         }}
       >
         {ACCESSORIES.map((accessory) => {
@@ -100,8 +100,9 @@ export default function AccessoriesPanel({
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                gap: '4px',
-                p: '8px 4px',
+                gap: '6px',
+                p: '12px 8px',
+                minHeight: '100px',
                 borderRadius: isLincoln ? '6px' : '14px',
                 border: isEquipped
                   ? `2px solid ${isConflicted ? '#ff9800' : accentColor}`
@@ -121,7 +122,7 @@ export default function AccessoriesPanel({
               }}
             >
               {/* Icon */}
-              <Box sx={{ fontSize: '22px', filter: isUnlocked ? 'none' : 'grayscale(1)' }}>
+              <Box sx={{ fontSize: '32px', filter: isUnlocked ? 'none' : 'grayscale(1)' }}>
                 {accessory.icon}
               </Box>
 
@@ -129,7 +130,7 @@ export default function AccessoriesPanel({
               <Typography
                 sx={{
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '0.2rem' : '9px',
+                  fontSize: isLincoln ? '12px' : '13px',
                   color: isEquipped
                     ? accentColor
                     : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)'),
@@ -145,7 +146,7 @@ export default function AccessoriesPanel({
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.16rem' : '8px',
+                    fontSize: isLincoln ? '12px' : '12px',
                     color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.25)',
                   }}
                 >
@@ -157,7 +158,7 @@ export default function AccessoriesPanel({
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.14rem' : '7px',
+                    fontSize: isLincoln ? '12px' : '12px',
                     color: '#ff9800',
                   }}
                 >
@@ -169,7 +170,7 @@ export default function AccessoriesPanel({
                 <Typography
                   sx={{
                     fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.14rem' : '7px',
+                    fontSize: isLincoln ? '12px' : '12px',
                     color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.25)',
                   }}
                 >
@@ -184,14 +185,14 @@ export default function AccessoriesPanel({
                     position: 'absolute',
                     top: -4,
                     right: -4,
-                    width: 14,
-                    height: 14,
+                    width: 22,
+                    height: 22,
                     borderRadius: '50%',
                     bgcolor: '#4caf50',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: 8,
+                    fontSize: 12,
                     color: '#fff',
                     fontWeight: 700,
                   }}
@@ -207,7 +208,7 @@ export default function AccessoriesPanel({
                     position: 'absolute',
                     top: -2,
                     right: -2,
-                    fontSize: 10,
+                    fontSize: 16,
                   }}
                 >
                   🔒

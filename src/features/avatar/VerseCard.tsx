@@ -224,7 +224,7 @@ export default function VerseCard({
             variant="h6"
             sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.75rem' : '26px',
+              fontSize: isLincoln ? '16px' : '26px',
               fontWeight: 500,
               color: accentColor,
               textAlign: 'center',
@@ -293,7 +293,7 @@ export default function VerseCard({
                   borderRadius: 1,
                   cursor: 'pointer',
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '0.6rem' : '22px',
+                  fontSize: isLincoln ? '14px' : '22px',
                   fontStyle: 'italic',
                   lineHeight: 1.7,
                   transition: 'background-color 200ms ease, color 200ms ease, transform 150ms ease',
@@ -325,7 +325,7 @@ export default function VerseCard({
                   borderColor: accentColor,
                   color: accentColor,
                   fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.38rem' : '14px',
+                  fontSize: isLincoln ? '12px' : '14px',
                   borderRadius: isLincoln ? 0 : 2,
                 }}
               >
@@ -341,7 +341,7 @@ export default function VerseCard({
                   borderColor: accentColor,
                   color: accentColor,
                   fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.38rem' : '14px',
+                  fontSize: isLincoln ? '12px' : '14px',
                   borderRadius: isLincoln ? 0 : 2,
                 }}
               >
@@ -357,7 +357,7 @@ export default function VerseCard({
                   borderColor: accentColor,
                   color: accentColor,
                   fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.38rem' : '14px',
+                  fontSize: isLincoln ? '12px' : '14px',
                   borderRadius: isLincoln ? 0 : 2,
                 }}
               >
@@ -372,7 +372,7 @@ export default function VerseCard({
             sx={{
               color: isLincoln ? '#888' : '#999',
               fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-              fontSize: isLincoln ? '0.45rem' : '15px',
+              fontSize: isLincoln ? '12px' : '16px',
             }}
           >
             {pieceDef.scripture}
@@ -389,7 +389,7 @@ export default function VerseCard({
                 bgcolor: accentColor,
                 color: isLincoln ? '#000' : '#fff',
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.6rem' : '20px',
+                fontSize: isLincoln ? '14px' : '20px',
                 fontWeight: 700,
                 py: 2,
                 minHeight: 60,
@@ -403,7 +403,7 @@ export default function VerseCard({
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '0.5rem' : '16px',
+                fontSize: isLincoln ? '13px' : '16px',
                 color: isLincoln ? '#7EFC20' : '#9C27B0',
                 fontWeight: 700,
                 textAlign: 'center',

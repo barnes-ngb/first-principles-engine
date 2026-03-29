@@ -87,7 +87,7 @@ export default function OutfitCustomizer({
       <Typography
         sx={{
           fontFamily: titleFont,
-          fontSize: isLincoln ? '0.42rem' : '15px',
+          fontSize: isLincoln ? '12px' : '18px',
           color: accentColor,
           mb: 2,
           fontWeight: 600,
@@ -121,7 +121,8 @@ export default function OutfitCustomizer({
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: '6px',
-                minHeight: '56px',
+                minHeight: '80px',
+                minWidth: '100px',
                 transition: 'all 0.2s ease',
                 boxShadow: isActive ? `0 0 10px ${accentColor}22` : 'none',
                 '&:hover': {
@@ -134,8 +135,8 @@ export default function OutfitCustomizer({
               {/* Color preview circle */}
               <Box
                 sx={{
-                  width: 24,
-                  height: 24,
+                  width: 44,
+                  height: 44,
                   borderRadius: '50%',
                   background: slot.current,
                   border: `2.5px solid ${isActive ? accentColor : (isLincoln ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)')}`,
@@ -148,7 +149,7 @@ export default function OutfitCustomizer({
               <Typography
                 sx={{
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '0.26rem' : '11px',
+                  fontSize: isLincoln ? '12px' : '14px',
                   color: isActive
                     ? accentColor
                     : (isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)'),
@@ -189,8 +190,8 @@ export default function OutfitCustomizer({
                 onClick={() => onColorChange(activeSlot, color.hex)}
                 title={color.name}
                 sx={{
-                  width: 42,
-                  height: 42,
+                  width: 48,
+                  height: 48,
                   borderRadius: isLincoln ? '6px' : '50%',
                   background: color.hex,
                   border: isSelected

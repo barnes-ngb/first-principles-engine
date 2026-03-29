@@ -686,7 +686,7 @@ export default function BrothersVoxelScene({
             <Typography
               sx={{
                 fontFamily: '"Press Start 2P", monospace',
-                fontSize: '0.45rem',
+                fontSize: '12px',
                 color: '#e0e0e0',
                 textShadow: '0 1px 4px rgba(0,0,0,0.8)',
                 lineHeight: 1.4,
@@ -697,7 +697,7 @@ export default function BrothersVoxelScene({
             <Typography
               sx={{
                 fontFamily: '"Press Start 2P", monospace',
-                fontSize: '0.3rem',
+                fontSize: '12px',
                 color: 'rgba(255,255,255,0.55)',
                 textShadow: '0 1px 3px rgba(0,0,0,0.7)',
                 lineHeight: 1.4,

@@ -71,17 +71,18 @@ export default function ArmorDyePanel({
         <span>
           <Button
             disabled
-            startIcon={<LockIcon sx={{ fontSize: 16 }} />}
+            startIcon={<LockIcon sx={{ fontSize: 24 }} />}
             sx={{
               mt: 1,
               mx: 1,
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.36rem' : '13px',
+              fontSize: isLincoln ? '12px' : '16px',
               color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.25)',
               textTransform: 'none',
               borderRadius: isLincoln ? '6px' : '14px',
               border: `1px dashed ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
-              py: 1,
+              py: 1.5,
+              width: '100%',
               '&.Mui-disabled': {
                 color: isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.25)',
               },
@@ -101,7 +102,7 @@ export default function ArmorDyePanel({
         onClick={() => setOpen(!open)}
         sx={{
           fontFamily: titleFont,
-          fontSize: isLincoln ? '0.36rem' : '13px',
+          fontSize: isLincoln ? '12px' : '16px',
           color: open ? accentColor : (isLincoln ? '#e0e0e0' : '#3d3d3d'),
           textTransform: 'none',
           borderRadius: isLincoln ? '6px' : '14px',
@@ -109,8 +110,10 @@ export default function ArmorDyePanel({
           background: open
             ? (isLincoln ? 'rgba(126,252,32,0.08)' : 'rgba(232,160,191,0.08)')
             : 'transparent',
-          py: 1,
+          py: 1.5,
           px: 2,
+          width: '100%',
+          minHeight: '48px',
           transition: 'all 0.2s ease',
           '&:hover': {
             borderColor: accentColor,
@@ -145,7 +148,7 @@ export default function ArmorDyePanel({
           <Typography
             sx={{
               fontFamily: titleFont,
-              fontSize: isLincoln ? '0.42rem' : '15px',
+              fontSize: isLincoln ? '12px' : '18px',
               color: accentColor,
               mb: 2,
               fontWeight: 600,
@@ -172,7 +175,8 @@ export default function ArmorDyePanel({
                     alignItems: 'center',
                     gap: '4px',
                     p: 1,
-                    minWidth: 52,
+                    minWidth: 56,
+                    minHeight: 56,
                     borderRadius: isLincoln ? '6px' : '12px',
                     border: isActive
                       ? `2px solid ${accentColor}`
@@ -206,7 +210,7 @@ export default function ArmorDyePanel({
                   <Typography
                     sx={{
                       fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                      fontSize: isLincoln ? '0.22rem' : '10px',
+                      fontSize: isLincoln ? '12px' : '13px',
                       color: isActive
                         ? accentColor
                         : (isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)'),
@@ -242,8 +246,8 @@ export default function ArmorDyePanel({
                     onClick={() => onColorChange(activePiece, color.hex)}
                     title={color.name}
                     sx={{
-                      width: 42,
-                      height: 42,
+                      width: 48,
+                      height: 48,
                       borderRadius: isLincoln ? '6px' : '50%',
                       background: color.hex,
                       border: isSelected
@@ -279,7 +283,7 @@ export default function ArmorDyePanel({
                 }}
                 sx={{
                   fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.3rem' : '12px',
+                  fontSize: isLincoln ? '12px' : '14px',
                   color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)',
                   textTransform: 'none',
                   '&:hover': {

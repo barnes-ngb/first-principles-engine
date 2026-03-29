@@ -195,7 +195,7 @@ export default function MinecraftAvatar({
         <Box
           sx={{
             fontFamily: '"Press Start 2P", monospace',
-            fontSize: '0.45rem',
+            fontSize: '12px',
             color: tierInfo.color,
             textShadow: '1px 1px 0 rgba(0,0,0,0.3)',
             textAlign: 'center',
@@ -210,7 +210,7 @@ export default function MinecraftAvatar({
         <Box
           sx={{
             fontFamily: '"Press Start 2P", monospace',
-            fontSize: '0.35rem',
+            fontSize: '12px',
             color: 'text.secondary',
             textAlign: 'center',
           }}
