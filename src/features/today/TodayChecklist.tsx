@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
@@ -162,7 +162,7 @@ export default function TodayChecklist({
   const xp = calculateXp(dayLog, activeRoutineItems)
   const isLincoln = selectedChild?.name?.toLowerCase() === 'lincoln'
 
-  const estimatedFinishLabel = useMemo(() => {
+  const estimatedFinishLabel = (() => {
     const remainingMinutes = checklist
       .filter((ci) => !ci.completed)
       .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
@@ -171,7 +171,7 @@ export default function TodayChecklist({
       return ` \u00B7 Est. finish: ${formatTime12h(est)}`
     }
     return ''
-  }, [checklist, completedCount, now])
+  })()
 
   // Engagement pattern insights
   const itemsWithEngagement = checklist.filter((ci) => ci.engagement)
