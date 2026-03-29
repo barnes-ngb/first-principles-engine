@@ -9,30 +9,30 @@ import type { WeekContext } from "./evaluate.js";
 // ── lastWeekKey ─────────────────────────────────────────────────
 
 describe("lastWeekKey", () => {
-  it("returns the previous Monday when called on a Sunday", () => {
-    // Sunday March 1, 2026
+  it("returns the previous Sunday when called on a Sunday", () => {
+    // Sunday March 1, 2026 — previous week started Sunday Feb 22
     const sunday = new Date(2026, 2, 1); // month is 0-indexed
-    expect(lastWeekKey(sunday)).toBe("2026-02-23");
+    expect(lastWeekKey(sunday)).toBe("2026-02-22");
   });
 
-  it("returns the previous Monday when called on a Wednesday", () => {
+  it("returns the previous Sunday when called on a Wednesday", () => {
     // Wednesday March 4, 2026
+    // Previous week's Sunday = Feb 22
     const wednesday = new Date(2026, 2, 4);
-    // Previous week's Monday = Feb 23
-    expect(lastWeekKey(wednesday)).toBe("2026-02-23");
+    expect(lastWeekKey(wednesday)).toBe("2026-02-22");
   });
 
-  it("returns two Mondays back when called on a Monday", () => {
-    // Monday March 2, 2026 — the "last week" is Feb 23–Mar 1
+  it("returns the previous Sunday when called on a Monday", () => {
+    // Monday March 2, 2026 — previous week started Sunday Feb 22
     const monday = new Date(2026, 2, 2);
-    expect(lastWeekKey(monday)).toBe("2026-02-23");
+    expect(lastWeekKey(monday)).toBe("2026-02-22");
   });
 
-  it("returns the previous Monday when called on a Saturday", () => {
-    // Saturday March 7, 2026
+  it("returns the previous Sunday when called on a Saturday", () => {
+    // Saturday March 7, 2026 — current week started Sunday Mar 1,
+    // so previous week started Sunday Feb 22
     const saturday = new Date(2026, 2, 7);
-    // Previous week's Monday = Feb 23
-    expect(lastWeekKey(saturday)).toBe("2026-02-23");
+    expect(lastWeekKey(saturday)).toBe("2026-02-22");
   });
 });
 
@@ -130,7 +130,7 @@ describe("buildEvaluationPrompt", () => {
 
   it("includes missed days count", () => {
     const prompt = buildEvaluationPrompt(makeContext());
-    expect(prompt).toContain("Missed school days (Mon–Fri): 2");
+    expect(prompt).toContain("Missed school days (Sun–Thu): 2");
   });
 
   it("requests JSON output format", () => {
@@ -154,7 +154,7 @@ describe("buildEvaluationPrompt", () => {
     );
     expect(prompt).toContain("Day logs recorded: 0");
     expect(prompt).toContain("(none)");
-    expect(prompt).toContain("Missed school days (Mon–Fri): 5");
+    expect(prompt).toContain("Missed school days (Sun–Thu): 5");
   });
 });
 

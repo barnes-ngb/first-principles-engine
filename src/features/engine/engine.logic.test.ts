@@ -11,12 +11,12 @@ import {
 } from './engine.logic'
 
 describe('getWeekRange', () => {
-  it('returns the Monday-Sunday range for a fixed date', () => {
+  it('returns the Sunday-Saturday range for a fixed date', () => {
     const range = getWeekRange(new Date(2026, 1, 4))
 
     expect(range).toEqual({
-      start: '2026-02-02',
-      end: '2026-02-08',
+      start: '2026-02-01',
+      end: '2026-02-07',
     })
   })
 })

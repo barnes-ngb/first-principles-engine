@@ -23,11 +23,11 @@ export const handleConundrum = async (
   let weekHeartQuestion = "";
   try {
     const now = new Date();
-    const day = now.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - diff);
-    const weekKey = monday.toISOString().slice(0, 10);
+    const day = now.getDay(); // 0=Sun
+    const diff = day; // Sunday is 0, so diff=0 on Sunday, diff=1 on Monday, etc.
+    const sunday = new Date(now);
+    sunday.setDate(now.getDate() - diff);
+    const weekKey = sunday.toISOString().slice(0, 10);
 
     const weeksSnap = await db
       .collection(`families/${familyId}/weeks`)
