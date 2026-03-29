@@ -68,6 +68,7 @@ import TierUpCeremony from '../../components/avatar/TierUpCeremony'
 import OutfitCustomizer from './OutfitCustomizer'
 import ArmorDyePanel from './ArmorDyePanel'
 import AccessoriesPanel from './AccessoriesPanel'
+import MinecraftSkinExport from './MinecraftSkinExport'
 import ShieldEmblemPicker from './ShieldEmblemPicker'
 import HelmetCrestPicker from './HelmetCrestPicker'
 import { calculateTier, getTierBadgeColor, getTierTextColor, TIERS } from './voxel/tierMaterials'
@@ -2035,6 +2036,16 @@ export default function MyAvatarPage() {
           isLincoln={isLincoln}
           onToggle={(accId) => void handleAccessoryToggle(accId)}
         />
+
+        {/* ── Minecraft Skin Export ─────────────────────────────── */}
+        <Box sx={{ mt: 2, mx: 1 }}>
+          <MinecraftSkinExport
+            profile={profile}
+            childName={activeChild?.name ?? 'avatar'}
+            tierName={currentTierName}
+            isLincoln={isLincoln}
+          />
+        </Box>
 
         {/* ── Photo Upload Section ──────────────────────────────── */}
         <Box
