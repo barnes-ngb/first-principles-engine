@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v13 **Version:** v13 — March 29, 2026 **Status:** Updated — cross-doc alignment audit (CF count 19, task types 11, collection count 26, model selection corrected, missing handlers documented) Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~73k lines TypeScript (reduced from ~78k after cleanup, grew with new features), 30+ test files, 600+ tests, 26 Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v13 **Version:** v13 — March 29, 2026 **Status:** Updated — cross-doc alignment audit (CF count 19, task types 11, collection count 26, model selection corrected, missing handlers documented) Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~98k lines TypeScript (src/ ~89k + functions/ ~9k), 30+ test files, 600+ tests, 27 Firestore collections, 18 Cloud Functions, 12 chat task types, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -12,7 +12,17 @@ Barnes Family Homeschool — Master Project Outline v13 **Version:** v13 — Mar
 * Teach-Back prompt (parent view) — "Teach London" card appears after 3+ items completed or 50% must-do. Text capture, tags as Explain engine stage.
 * Teach-Back prompt (kid view) — Lincoln gets "I Taught London!" button with subject chips + audio recording. No text input — respects speech/writing challenges.
 * Extra Activity Logger (kid view) — "I Did More Mining!" lets Lincoln log tablet time (Reading Eggs, Math App, etc.) with activity + duration chips. All taps, no typing. Adds to checklist as completed item, counts toward hours and teach-back trigger.
-* Weekly Conundrum card — expandable discussion scenario from week plan Plan My Week
+* Weekly Conundrum card — expandable discussion scenario from week plan
+* Chapter Question card — Stonebridge narrative question from unified weekly focus
+* **Decomposition (completed):** TodayPage shell (816L) + TodayChecklist (681L) + QuickCaptureSection (285L) + WeekFocusCard (168L) + TeachBackSection (103L) + ChapterQuestionCard (60L) + ReadingRoutineItems + MathRoutineItems + SpeechRoutineItems + RoutineSection + ExplorerMap + WorkshopGameCards + KidCaptureForm + CreativeTimeLog + LadderQuickLog + HelperPanel
+
+### Curriculum Photo Scanning
+* ScanButton component — camera capture of workbook/worksheet pages
+* ScanResultsPanel — AI analysis results display
+* Cloud Function: `chat` with `taskType: 'scan'` — Claude analyzes photo for curriculum content
+* Scan records saved to `families/{familyId}/scans`
+
+Plan My Week
 * Page title "Plan My Week" with subtitle "Set up your week, review the plan, and you're done."
 * **Auto-suggested Week Focus** — AI pre-fills theme, virtue, scripture, heart question on page load (editable)
 * **Compact setup for returning users** — energy selector, routine shown read-only with Edit option, workbooks as chips, special notes field. Full wizard only on first visit.
@@ -218,8 +228,8 @@ Progress
 * Artifact gallery, compliance hours auto-logged on completion Settings
 * General family profile, AI usage dashboard
 * Avatar & XP tab — parent XP controls, piece management, force tier upgrade
-* Sticker Library tab — all generated stickers, tag editing, child profile assignment Cloud Functions (19 exported, 11 task types)
-1. `chat` — Task dispatch: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, chat, generate
+* Sticker Library tab — all generated stickers, tag editing, child profile assignment Cloud Functions (18 exported, 12 task types)
+1. `chat` — Task dispatch: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, chat, generate
 2. `weeklyReview` — Scheduled Sunday 7pm CT
 3. `generateWeeklyReviewNow` — Manual trigger
 4. `generateActivity` — Lesson card generation
@@ -235,12 +245,14 @@ Progress
 - Workshop: story inputs + skill snapshot for challenge calibration + game structure constraints + adventure tree generation + card game generation + card fix suggestions
 - Pattern analysis: child profile + skill snapshot + eval findings + conceptual blocks
 - Engagement data compressed to summary format (reduces tokens ~60%)
-- Token usage logged per task type to aiUsage collection Firestore Collections (26 in firestore.ts) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, dadLabReports, books, sightWordProgress, xpLedger, dailyArmorSessions, stickerLibrary, storyGames, evaluations
+- Token usage logged per task type to aiUsage collection Firestore Collections (27 in firestore.ts) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, dadLabReports, books, sightWordProgress, xpLedger, dailyArmorSessions, stickerLibrary, storyGames, evaluations, scans
 
 * `avatarProfiles` — per-child avatar data (features, XP, tier, equipped pieces, customization)
 * `xpLedger` — append-only XP event history per child
 
-**Note:** xpEventLog merged into xpLedger (dedup via dedupKey field on ledger entries). Interactive quest sessions stored in `evaluationSessions` with `sessionType: 'interactive'` field. Story games stored in `storyGames` with `gameType` field ('board' | 'adventure' | 'cards'). What's Built but Untested with Real Users
+* `scans` — curriculum photo scan records
+
+**Note:** xpEventLog merged into xpLedger (dedup via dedupKey field on ledger entries). Interactive quest sessions stored in `evaluationSessions` with `sessionType: 'interactive'` field. Story games stored in `storyGames` with `gameType` field ('board' | 'adventure' | 'cards'). `wordProgress` is a child subcollection (`children/{childId}/wordProgress`) used by Knowledge Mine — not in `firestore.ts` collection helpers. What's Built but Untested with Real Users
 * Weekly Review (needs full week of data)
 * Print materials (quality varies — book PDFs and worksheets)
 * Skip guidance (depends on evaluation data quality)
@@ -262,7 +274,7 @@ Progress
 * Auto-XP from checklist/quest/book completion What's Not Built Yet Priority Queue (ready to prompt)
 * Lincoln Development Chat — dedicated AI chat mode reviewing evaluations, skill snapshot, recent progress → recommends what to work on this week
 * Planning improvements — activity ideas mode, engagement-based suggestions (PARTIALLY DONE: per-subject defaults and must-do/choose now built; engagement-based suggestions and activity ideas still TODO)
-* Docs update — this outline (v6) needs to go into the repo as docs/MASTER_OUTLINE.md Story Game Workshop — Future
+Story Game Workshop — Future
 * Print & Draw (printable board PDF, cut-out cards, London's hand-drawn art)
 * Open Creator (freeform + AI chat helper + game remix)
 * Quiz show game type
@@ -386,9 +398,9 @@ Key Design Decisions
 | File | Purpose |
 |------|---------|
 | `src/app/AppShell.tsx` | Nav structure (parent + kid) |
-| `src/app/router.tsx` | All 26 routes |
+| `src/app/router.tsx` | All routes (21 pages + 6 redirects) |
 | `src/core/types/index.ts` | Barrel re-export of split type files (common, family, planning, evaluation, xp, books, compliance, dadlab, workshop, skillTags) |
-| `src/core/firebase/firestore.ts` | All 26 collection references |
+| `src/core/firebase/firestore.ts` | All 27 collection references |
 | `src/core/ai/useAI.ts` | Chat + generateImage hooks |
 | `src/core/xp/addXpEvent.ts` | XP writer with dedup guards |
 | `src/core/xp/checkAndUnlockArmor.ts` | Tier unlock + sheet generation trigger |
@@ -396,7 +408,7 @@ Key Design Decisions
 | `src/core/utils/perf.ts` | Performance measurement helpers |
 | `functions/src/ai/chat.ts` | AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) |
 | `functions/src/ai/imageGen.ts` | DALL-E 3 + gpt-image-1 routing |
-| `functions/src/ai/tasks/` | Chat task registry (11 handlers: plan, chat, evaluate, quest, generateStory, analyzeWorkbook, analyzePatterns, disposition, conundrum, weeklyFocus, workshop) |
+| `functions/src/ai/tasks/` | Chat task registry (12 handlers: plan, chat, evaluate, quest, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, workshop, scan + analyzePatterns export) |
 | `functions/src/ai/imageTasks/` | Image task registry (11 handlers) |
 | `functions/src/ai/contextSlices.ts` | Task-specific context assembly + engagement compression |
 | `src/features/avatar/` | My Armor (VoxelCharacter, VerseCard, ArmorIcons, Particles, voxel/) |
@@ -411,6 +423,45 @@ Key Design Decisions
 | `.github/workflows/deploy.yml` | CI/CD pipeline |
 
 ### Architecture Notes
+
+#### Top 5 Largest Files
+| File | Lines | Status |
+|------|-------|--------|
+| `PlannerChatPage.tsx` | 2,617 | Next decomposition target |
+| `MyAvatarPage.tsx` | 2,445 | Next decomposition target |
+| `KidTodayView.tsx` | 1,607 | Next decomposition target |
+| `WorkshopPage.tsx` | 1,549 | Stable |
+| `BookEditorPage.tsx` | 1,419 | Stable |
+
+#### TodayPage Decomposition (Completed)
+- Original: 1,789 lines → Shell: 816 lines + 5 extracted components
+- `TodayChecklist.tsx` (681L) — daily checklist rendering and interaction
+- `QuickCaptureSection.tsx` (285L) — note/photo/audio quick capture
+- `WeekFocusCard.tsx` (168L) — week theme/virtue/scripture card
+- `TeachBackSection.tsx` (103L) — teach-back prompt and capture
+- `ChapterQuestionCard.tsx` (60L) — Stonebridge narrative question
+
+#### Next Decomposition Targets
+- **KidTodayView.tsx (1,607L)** — Similar decomposition opportunity as TodayPage
+- **PlannerChatPage.tsx (2,617L)** — Setup wizard, chat, plan preview, and apply logic are interleaved
+- **MyAvatarPage.tsx (2,445L)** — 3D renderer, armor equip, theme picker, and admin features in one file
+
+#### Ladder System Deprecation
+- Partially deprecated. Disposition system (curiosity, persistence, articulation, self-awareness, ownership) is replacing ladder-based tracking.
+- TODO comments added in 5 files marking ladder references for removal.
+- Ladders page still exists at `/ladders` route but is secondary to the Learning Profile tab.
+
+#### AI Prompt Patterns
+- 5 tasks use `buildContextForTask` (contextSlices.ts): plan, evaluate, quest, disposition, weeklyFocus
+- 3 tasks use `CHARTER_PREAMBLE` directly: conundrum, generateStory, workshop
+- 4 tasks build prompts inline: chat, scan, analyzeWorkbook, analyzePatterns
+- Consolidation pending.
+
+#### Known Technical Debt
+- **XP ledger** — Full collection recompute on every award (`O(n)` over all events). Performance fix pending.
+- **evaluate.ts (weekly review)** — Separate prompt construction from the task system. Not in task registry.
+- **Hours partial-day edge** — If a day has some blocks with actualMinutes and others without, only tracked blocks count. By design but undocumented.
+- **Dead `sessions` collection** — Fully removed (PR #651). No orphaned references remain.
 
 #### Avatar / Three.js Architecture
 - Three.js scene lifecycle managed in a single React component with `useEffect` cleanup
@@ -452,12 +503,15 @@ Family business workstream layered on top of the homeschool system. London (art/
 16. **No live selling pressure** — Nathan handles customer interactions. Lincoln grows into it.
 17. **Two product lines per drawing** — Raw sketch = authentic sticker, AI-enhanced = art print
 
-Architecture Review Notes (March 21, 2026) The following areas are flagged for architecture review in the next chat session:
-* XP system — xpLedger + xpEventLog as separate collections; dedup guard pattern; whether totalXp should be cached on avatarProfile or always summed from ledger
+Architecture Review Notes (March 29, 2026) The following areas are flagged for architecture review:
+* XP system — xpLedger uses dedup guard pattern; totalXp computed from full ledger on every award (O(n), fix pending)
 * Avatar generation costs — DALL-E 3 sheet generation per tier per child; when to generate vs cache; cost implications at scale
-* Cloud Function sprawl — chat function handles 6+ task types; generateImage handles 4+; whether these should be split into separate functions
-* Firestore collection count — 26 formal collections + orphaned raw references (sessions, wordProgress); composite index requirements growing
+* Cloud Function sprawl — chat function handles 12 task types; generateImage handles 12 image tasks; whether these should be split into separate functions
+* Firestore collection count — 27 formal collections + `wordProgress` raw subcollection reference in quest.ts
 * Client-side image processing — cropArmorSheet, sketch cleanup, and print PDF all do heavy canvas work client-side; perf on low-end devices
 * AI context pipeline size — system prompt includes many data sources; token cost and latency implications
+* AI prompt drift — 3 different patterns for system prompt construction across task handlers; consolidation pending
 * Type safety — types split across 10 files (common, family, planning, evaluation, xp, books, compliance, dadlab, workshop, skillTags) with barrel re-export via index.ts
-* Orphaned collection references — `sessions` in chat.ts and `wordProgress` in quest.ts use raw Firestore paths, not the collection helpers in firestore.ts Last updated: March 28, 2026
+* Decomposition queue — PlannerChatPage (2,617L), MyAvatarPage (2,445L), KidTodayView (1,607L) are next targets
+
+Last updated: March 29, 2026
