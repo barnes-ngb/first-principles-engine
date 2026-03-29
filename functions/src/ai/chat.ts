@@ -1151,9 +1151,19 @@ export const chat = onCall(
         error: errMsg,
       });
 
+      // User-friendly error messages
+      let userMessage = errMsg;
+      if (/rate.?limit|429/i.test(errMsg)) {
+        userMessage = "AI is busy — please wait a moment and try again.";
+      } else if (/context.?length|too.?long|token/i.test(errMsg)) {
+        userMessage = "The request was too large. Try with less context.";
+      } else if (/timeout|timed.?out/i.test(errMsg)) {
+        userMessage = "The AI took too long to respond. Please try again.";
+      }
+
       throw new HttpsError(
         "unavailable",
-        `AI service error: ${errMsg}`,
+        `AI service error: ${userMessage}`,
       );
     }
   },

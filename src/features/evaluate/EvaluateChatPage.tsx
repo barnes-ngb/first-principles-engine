@@ -543,7 +543,7 @@ export default function EvaluateChatPage() {
           'EVALUATION_COMPLETE',
           25,
           `eval_${sessionDocId}`,
-        )
+        ).catch((err) => console.error('[XP] Award failed:', err))
       }
     } catch (err) {
       console.error('Failed to apply findings to skill snapshot', err)
