@@ -142,7 +142,7 @@ export default function QuestSummary({
             color: MC.stone,
           }}
         >
-          {totalCorrect}/{totalQuestions} correct · Level {finalLevel}
+          {totalQuestions} questions explored · Level {finalLevel}
         </Typography>
       </Box>
 

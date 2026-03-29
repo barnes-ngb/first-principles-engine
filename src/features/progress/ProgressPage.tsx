@@ -4,6 +4,7 @@ import Container from '@mui/material/Container'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 
+import HelpStrip from '../../components/HelpStrip'
 import DispositionProfile from './DispositionProfile'
 import SkillSnapshotPage from '../evaluation/SkillSnapshotPage'
 import WordWall from './WordWall'
@@ -18,6 +19,11 @@ export default function ProgressPage() {
   return (
     <>
       <Container maxWidth="lg" sx={{ pt: { xs: 2, md: 3 } }}>
+        <HelpStrip
+          pageKey="progress"
+          text="The Learning Profile shows growth in curiosity, persistence, articulation, self-awareness, and ownership — not grades. It's built from 4 weeks of daily data."
+          maxShowCount={3}
+        />
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs
             value={tab}

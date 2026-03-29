@@ -159,6 +159,9 @@ export default function TodayChecklist({
   const totalPlannedMinutes = checklist.reduce((sum, item) => {
     return sum + (item.plannedMinutes ?? item.estimatedMinutes ?? parseMinutesFromLabel(item.label))
   }, 0)
+  const completedMinutes = checklist
+    .filter((ci) => ci.completed)
+    .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
   const xp = calculateXp(dayLog, activeRoutineItems)
   const isLincoln = selectedChild?.name?.toLowerCase() === 'lincoln'
 
@@ -332,6 +335,7 @@ export default function TodayChecklist({
             <Typography variant="body2" color="text.secondary">
               {formatMinutes(totalPlannedMinutes)} planned{' \u00B7 '}
               {completedCount} of {checklist.length} done
+              {completedMinutes > 0 && ` \u00B7 ${formatMinutes(completedMinutes)} logged`}
               {estimatedFinishLabel}
             </Typography>
             <Chip
@@ -676,10 +680,10 @@ export default function TodayChecklist({
         <Stack spacing={1} sx={{ py: 1 }}>
           <Typography color="text.secondary">
             No plan for today yet.{' '}
-            <RouterLink to="/planner" style={{ color: 'inherit' }}>
-              Go to Plan My Week
+            <RouterLink to="/planner/chat" style={{ color: 'inherit', fontWeight: 600 }}>
+              Plan My Week
             </RouterLink>{' '}
-            to create one, or use the routine below.
+            takes about 2 minutes — it&apos;ll build your daily checklists automatically.
           </Typography>
         </Stack>
       )}

@@ -32,6 +32,7 @@ import {
   writeBatch,
 } from 'firebase/firestore'
 
+import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -97,6 +98,11 @@ export default function RecordsPage() {
   return (
     <>
       <Container maxWidth="lg" sx={{ pt: { xs: 2, md: 3 } }}>
+        <HelpStrip
+          pageKey="records"
+          text="Hours come from three sources: checklist items you complete on Today, manual entries (Dad Lab, extra activities), and backfill adjustments. Everything adds up for MO compliance."
+          maxShowCount={3}
+        />
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs value={activeTab} onChange={handleTabChange}>
             <Tab label="Hours & Compliance" />
