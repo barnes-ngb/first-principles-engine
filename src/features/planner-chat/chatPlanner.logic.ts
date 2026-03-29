@@ -273,40 +273,51 @@ export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftW
     dayBudgets.set(day, remainingPerDay)
   }
 
-  // Add skill-priority items (daily micro reps for emerging skills)
-  if (snapshot) {
-    for (const skill of snapshot.prioritySkills) {
-      if (skill.level === 'emerging') {
-        // Daily micro reps for emerging skills
-        for (const day of WEEK_DAYS) {
-          const dayPlan = dayMap.get(day)!
-          const item: DraftPlanItem = {
-            id: generateItemId(),
-            title: `${skill.label} (micro rep)`,
-            subjectBucket: skillTagToSubject(skill.tag),
-            estimatedMinutes: 8,
-            skillTags: [skill.tag],
-            accepted: true,
-          }
-          dayPlan.items.push(item)
-          dayBudgets.set(day, dayBudgets.get(day)! - 8)
+  // Add ONE consolidated skill practice item per day (not individual items per skill)
+  if (snapshot && snapshot.prioritySkills.length > 0) {
+    const emergingSkills = snapshot.prioritySkills.filter(s => s.level === 'emerging')
+    const developingSkills = snapshot.prioritySkills.filter(s => s.level === 'developing' || s.level === 'supported')
+
+    if (emergingSkills.length > 0) {
+      // ONE daily item that covers all emerging skills
+      const skillLabels = emergingSkills.map(s => s.label).join(', ')
+      const primarySubject = skillTagToSubject(emergingSkills[0].tag)
+
+      for (const day of WEEK_DAYS) {
+        const dayPlan = dayMap.get(day)!
+        const item: DraftPlanItem = {
+          id: generateItemId(),
+          title: `Skill practice: ${skillLabels.length > 50 ? emergingSkills.length + ' emerging skills' : skillLabels}`,
+          subjectBucket: primarySubject,
+          estimatedMinutes: Math.min(15, emergingSkills.length * 5), // cap at 15 min
+          skillTags: emergingSkills.map(s => s.tag),
+          accepted: true,
+          category: 'choose',  // choose, not must-do — keeps must-do list short
         }
-      } else if (skill.level === 'developing' || skill.level === 'supported') {
-        // 3x/week for developing/supported
-        const targetDays: WeekDay[] = ['Monday', 'Wednesday', 'Friday']
-        for (const day of targetDays) {
-          const dayPlan = dayMap.get(day)!
-          const item: DraftPlanItem = {
-            id: generateItemId(),
-            title: `${skill.label} practice`,
-            subjectBucket: skillTagToSubject(skill.tag),
-            estimatedMinutes: 15,
-            skillTags: [skill.tag],
-            accepted: true,
-          }
-          dayPlan.items.push(item)
-          dayBudgets.set(day, dayBudgets.get(day)! - 15)
+        dayPlan.items.push(item)
+        dayBudgets.set(day, dayBudgets.get(day)! - item.estimatedMinutes)
+      }
+    }
+
+    if (developingSkills.length > 0) {
+      // 3x/week for developing — ONE item covering all developing skills
+      const skillLabels = developingSkills.map(s => s.label).join(', ')
+      const primarySubject = skillTagToSubject(developingSkills[0].tag)
+      const targetDays: WeekDay[] = ['Monday', 'Wednesday', 'Friday']
+
+      for (const day of targetDays) {
+        const dayPlan = dayMap.get(day)!
+        const item: DraftPlanItem = {
+          id: generateItemId(),
+          title: `Practice: ${skillLabels.length > 50 ? developingSkills.length + ' developing skills' : skillLabels}`,
+          subjectBucket: primarySubject,
+          estimatedMinutes: 15,
+          skillTags: developingSkills.map(s => s.tag),
+          accepted: true,
+          category: 'choose',
         }
+        dayPlan.items.push(item)
+        dayBudgets.set(day, dayBudgets.get(day)! - 15)
       }
     }
   }
@@ -349,6 +360,27 @@ export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftW
       assignmentId: assignment.id,
     })
     dayBudgets.set(bestDay, dayBudgets.get(bestDay)! - effectiveMinutes)
+  }
+
+  // Enforce daily time budget — remove excess choose items
+  for (const day of WEEK_DAYS) {
+    const dayPlan = dayMap.get(day)!
+    const budget = minutesPerDay // from hoursPerDay input (e.g., 150 minutes)
+
+    let totalMinutes = dayPlan.items.reduce((sum, i) => sum + (i.accepted ? i.estimatedMinutes : 0), 0)
+
+    if (totalMinutes > budget) {
+      const mustDo = dayPlan.items.filter(i => i.category !== 'choose')
+      const choose = dayPlan.items.filter(i => i.category === 'choose')
+
+      // Keep removing choose items from the end until under budget
+      while (totalMinutes > budget && choose.length > 0) {
+        const removed = choose.pop()!
+        totalMinutes -= removed.estimatedMinutes
+      }
+
+      dayPlan.items = [...mustDo, ...choose]
+    }
   }
 
   // Apply adjustments

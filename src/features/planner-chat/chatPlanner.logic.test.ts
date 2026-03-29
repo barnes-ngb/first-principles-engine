@@ -114,13 +114,15 @@ describe('generateDraftPlanFromInputs', () => {
     }
   })
 
-  it('generates daily micro reps for emerging skills', () => {
+  it('consolidates emerging skills into one daily item', () => {
     const plan = generateDraftPlanFromInputs(baseInputs)
     for (const day of plan.days) {
-      const microReps = day.items.filter((item) => item.title.includes('micro rep'))
-      // 2 emerging skills = 2 micro reps per day
-      expect(microReps).toHaveLength(2)
-      expect(microReps[0].estimatedMinutes).toBe(8)
+      const skillItems = day.items.filter((item) => item.title.includes('Skill practice'))
+      // 2 emerging skills = 1 consolidated item per day
+      expect(skillItems).toHaveLength(1)
+      expect(skillItems[0].estimatedMinutes).toBe(10) // 2 skills × 5min, capped at 15
+      expect(skillItems[0].skillTags).toHaveLength(2)
+      expect(skillItems[0].category).toBe('choose')
     }
   })
 

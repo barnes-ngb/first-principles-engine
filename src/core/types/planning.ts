@@ -233,6 +233,8 @@ export interface ChecklistItem {
   evidenceArtifactId?: string
   /** Manual or AI-generated review result for the captured work. */
   gradeResult?: string
+  /** Mastery level observed by parent after completion */
+  mastery?: 'got-it' | 'working' | 'stuck'
   /** Guidance note when an item is skipped. */
   skipGuidance?: string
   /** Whether this item was explicitly skipped by the child. */

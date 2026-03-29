@@ -489,6 +489,12 @@ Rules:
 - If the child has sight word stories available (see SIGHT WORD PROGRESS in context), suggest reading one as a "choose" activity. Reference specific word counts and mastery progress.
 - "skipSuggestions" is an array of { "action": "skip"|"modify", "reason": "string", "replacement": "string", "evidence": "string" }.
 
+MASTERY GUIDANCE:
+- If an activity is marked "CAN SKIP", do NOT include it as a must-do item. Mention it once as "maintenance" or drop it entirely.
+- If an activity is marked "FOCUS HERE", give it priority time and generate specific practice suggestions.
+- Summarize at the top: "Focus this week: [items]. Reduced/skipped: [items]."
+- Keep total daily time to the parent's requested hours. Cut mastered items first to make room for focus items.
+
 When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.
 
 CRITICAL SIZE CONSTRAINTS:
