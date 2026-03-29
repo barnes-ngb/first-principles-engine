@@ -267,7 +267,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
       const isOverlay = (currentPage?.images.length ?? 0) > 0
 
       // If overlaying and cleanup requested, remove paper background
-      let processedFile = file
+      let processedFile: File | Blob = file
       if (isOverlay && options?.cleanBackground && file.type.startsWith('image/')) {
         try {
           processedFile = await cleanSketchBackground(file)
@@ -275,6 +275,13 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           console.warn('Sketch cleanup failed, using original')
         }
       }
+
+      // Compress before uploading
+      const { compressIfNeeded } = await import('../../core/utils/compressImage')
+      processedFile = await compressIfNeeded(processedFile, 500_000, {
+        maxWidth: 1024,
+        quality: 0.85,
+      })
 
       const imageId = generateImageId()
       const ext = processedFile.name.split('.').pop() ?? 'jpg'
@@ -411,9 +418,16 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
       const storagePath = `families/${familyId}/sketches/${filename}`
       const storageRef = ref(storage, storagePath)
 
+      // Compress sketch before uploading
+      const { compressIfNeeded: compressSketch } = await import('../../core/utils/compressImage')
+      const processedSketch = await compressSketch(file, 500_000, {
+        maxWidth: 1024,
+        quality: 0.85,
+      })
+
       setSaveState('saving')
       try {
-        await uploadBytes(storageRef, file)
+        await uploadBytes(storageRef, processedSketch)
         const url = await getDownloadURL(storageRef)
 
         const image: PageImage = {
