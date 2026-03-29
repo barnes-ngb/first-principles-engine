@@ -39,7 +39,7 @@ export default function MinecraftXpBar({
         <Typography
           sx={{
             fontFamily: '"Press Start 2P", monospace',
-            fontSize: compact ? '0.5rem' : '0.6rem',
+            fontSize: compact ? '12px' : '13px',
             color: current.color,
             textShadow: '1px 1px 0 rgba(0,0,0,0.3)',
           }}
@@ -51,7 +51,7 @@ export default function MinecraftXpBar({
             <Typography
               sx={{
                 fontFamily: '"Press Start 2P", monospace',
-                fontSize: '0.4rem',
+                fontSize: '12px',
                 color: '#7EFC20',
               }}
             >
@@ -61,7 +61,7 @@ export default function MinecraftXpBar({
           <Typography
             sx={{
               fontFamily: '"Press Start 2P", monospace',
-              fontSize: compact ? '0.45rem' : '0.5rem',
+              fontSize: compact ? '12px' : '13px',
               color: 'text.secondary',
             }}
           >
@@ -123,7 +123,7 @@ export default function MinecraftXpBar({
             left: '50%',
             transform: 'translate(-50%, -50%)',
             fontFamily: '"Press Start 2P", monospace',
-            fontSize: compact ? '0.35rem' : '0.45rem',
+            fontSize: compact ? '12px' : '12px',
             color: '#7EFC20',
             textShadow: '0 0 4px rgba(0,0,0,0.8), 1px 1px 0 #000',
             lineHeight: 1,
@@ -138,7 +138,7 @@ export default function MinecraftXpBar({
         <Typography
           sx={{
             fontFamily: '"Press Start 2P", monospace',
-            fontSize: '0.35rem',
+            fontSize: '12px',
             color: 'text.secondary',
             textAlign: 'right',
           }}

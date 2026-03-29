@@ -30,8 +30,8 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true }: P
             component="button"
             onClick={() => onPose(pose.id)}
             sx={{
-              width: 54,
-              height: 54,
+              width: 56,
+              height: 56,
               borderRadius: isLincoln ? '8px' : '50%',
               border: isActive
                 ? `2px solid ${accentColor}`
@@ -68,10 +68,10 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true }: P
             }}
             title={pose.name}
           >
-            <Box sx={{ fontSize: '20px', lineHeight: 1 }}>{pose.icon}</Box>
+            <Box sx={{ fontSize: '22px', lineHeight: 1 }}>{pose.icon}</Box>
             <Typography
               sx={{
-                fontSize: isLincoln ? '0.22rem' : '8px',
+                fontSize: isLincoln ? '12px' : '12px',
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
                 letterSpacing: isLincoln ? '-0.3px' : '0',
                 opacity: isActive ? 1 : 0.7,
