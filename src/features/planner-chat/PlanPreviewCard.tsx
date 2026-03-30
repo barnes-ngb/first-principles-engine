@@ -10,23 +10,22 @@ import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
 import type { DraftPlanItem, DraftWeeklyPlan } from '../../core/types'
-import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { dayTotalMinutes } from './chatPlanner.logic'
 
 interface PlanPreviewCardProps {
   plan: DraftWeeklyPlan
   hoursPerDay: number
   weekEnergy: 'full' | 'lighter' | 'mvd'
+  masteryReviewLine?: string
   onToggleItem?: (dayIndex: number, itemId: string) => void
   onGenerateActivity?: (item: DraftPlanItem) => void
   generatingItemId?: string
 }
 
-export default function PlanPreviewCard({ plan, hoursPerDay, weekEnergy, onToggleItem, onGenerateActivity, generatingItemId }: PlanPreviewCardProps) {
+export default function PlanPreviewCard({ plan, hoursPerDay, weekEnergy, masteryReviewLine, onToggleItem, onGenerateActivity, generatingItemId }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
   const skipCount = plan.skipSuggestions.filter((s) => s.action === 'skip').length
   const modifyCount = plan.skipSuggestions.filter((s) => s.action === 'modify').length
-  const focusSummary = plan.minimumWin.trim()
 
   const isRoutineItem = (item: DraftPlanItem) => item.category === 'must-do' || item.mvdEssential === true
 
@@ -36,9 +35,12 @@ export default function PlanPreviewCard({ plan, hoursPerDay, weekEnergy, onToggl
         <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
           Focus / Skip Summary
         </Typography>
-        <Typography variant="body2">
-          <Box component="span" sx={{ fontWeight: 600 }}>Focus:</Box> {focusSummary}
-        </Typography>
+        {masteryReviewLine && <Typography variant="body2">{masteryReviewLine}</Typography>}
+        {plan.minimumWin?.trim() && (
+          <Typography variant="caption" color="text.secondary">
+            Plan note: {plan.minimumWin.trim()}
+          </Typography>
+        )}
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
           <Chip label={`${skipCount} skip`} size="small" variant="outlined" color={skipCount > 0 ? 'default' : 'success'} />
           <Chip label={`${modifyCount} modify`} size="small" variant="outlined" color={modifyCount > 0 ? 'warning' : 'default'} />
@@ -111,24 +113,6 @@ export default function PlanPreviewCard({ plan, hoursPerDay, weekEnergy, onToggl
               >
                 {item.title}
               </Typography>
-              {item.skillTags.length > 0 && (
-                <Stack direction="row" spacing={0.25} flexWrap="wrap" useFlexGap>
-                  {item.skillTags.slice(0, 2).map((tag) => {
-                    const def = SKILL_TAG_MAP[tag]
-                    return (
-                      <Tooltip key={tag} title={def?.evidence ?? tag} arrow>
-                        <Chip
-                          label={def?.label ?? tag.split('.').pop()}
-                          size="small"
-                          color="info"
-                          variant="outlined"
-                          sx={{ height: 18, fontSize: '0.65rem' }}
-                        />
-                      </Tooltip>
-                    )
-                  })}
-                </Stack>
-              )}
               {item.isAppBlock && (
                 <Chip label="App" size="small" variant="outlined" sx={{ height: 20 }} />
               )}
