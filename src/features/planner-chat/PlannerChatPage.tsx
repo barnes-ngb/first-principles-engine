@@ -938,7 +938,6 @@ Return as JSON:
       let assistantMsg: ChatMessage
       if (aiDraft) {
         setCurrentDraft(aiDraft)
-        if (applied) setApplied(false)
         assistantMsg = {
           id: generateItemId(),
           role: ChatMessageRole.Assistant,
@@ -960,7 +959,6 @@ Return as JSON:
 
         if (recovered) {
           setCurrentDraft(recovered)
-          if (applied) setApplied(false)
           assistantMsg = {
             id: generateItemId(),
             role: ChatMessageRole.Assistant,
@@ -976,7 +974,6 @@ Return as JSON:
             subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
           })
           setCurrentDraft(localDraft)
-          if (applied) setApplied(false)
           assistantMsg = {
             id: generateItemId(),
             role: ChatMessageRole.Assistant,
@@ -998,7 +995,7 @@ Return as JSON:
 
       const final = [...updatedWithUser, assistantMsg]
       setMessages(final)
-      const persistStatus = aiDraft && applied ? { status: PlannerConversationStatus.Draft } : {}
+      const persistStatus = applied ? { status: PlannerConversationStatus.Applied } : {}
       void persistConversation({ messages: final, currentDraft: aiDraft ?? currentDraft ?? undefined, ...persistStatus })
       return
     }
@@ -1038,8 +1035,6 @@ Return as JSON:
 
       setCurrentDraft(draft)
       setAdjustments(newAdjustments)
-      if (applied) setApplied(false)
-
       assistantMsg = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
@@ -1080,7 +1075,7 @@ Return as JSON:
     void persistConversation({
       messages: updatedMessages,
       currentDraft: currentDraft ?? undefined,
-      ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
+      ...(applied ? { status: PlannerConversationStatus.Applied } : {}),
     })
   }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, dailyRoutine, handleGeneratePlan, subjectTimeDefaults])
 
@@ -1529,7 +1524,6 @@ Generate a plan for Monday through Friday.`.trim()
       })
       setCurrentDraft(draft)
       setAdjustments(newAdjustments)
-      if (applied) setApplied(false)
       assistantReply = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
@@ -1552,7 +1546,7 @@ Generate a plan for Monday through Friday.`.trim()
     void persistConversation({
       messages: updatedMessages,
       currentDraft: currentDraft ?? undefined,
-      ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
+      ...(applied ? { status: PlannerConversationStatus.Applied } : {}),
     })
   }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied, subjectTimeDefaults, isEnabled, activeChildId, handleSend])
 
@@ -1980,7 +1974,7 @@ Generate a plan for Monday through Friday.`.trim()
             </Box>
           )}
 
-          {(phase === 'review' || phase === 'active') && (
+          {phase === 'active' && (
             <Box
               sx={{
                 overflowY: 'auto',
@@ -2034,7 +2028,7 @@ Generate a plan for Monday through Friday.`.trim()
             </Box>
           )}
 
-          {(phase === 'review' || phase === 'active') && showPhotos && (
+          {phase === 'active' && showPhotos && (
             <Box
               sx={{
                 border: '1px solid',
@@ -2073,7 +2067,7 @@ Generate a plan for Monday through Friday.`.trim()
             </Box>
           )}
 
-          {(phase === 'review' || phase === 'active') && (
+          {phase === 'active' && (
             <Stack direction="row" spacing={1} alignItems="flex-end">
               <Button
                 variant="outlined"
@@ -2086,7 +2080,7 @@ Generate a plan for Monday through Friday.`.trim()
               <TextField
                 fullWidth
                 size="small"
-                placeholder={currentDraft ? 'Type an adjustment (e.g. "make Wed light")...' : 'Upload photos first, or type a message...'}
+                placeholder={currentDraft ? 'Type an in-week change (e.g. "cancel Wednesday", "make Thu light", "swap Thu/Fri")...' : 'Upload photos first, or type a message...'}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={(e) => {
@@ -2145,8 +2139,8 @@ Generate a plan for Monday through Friday.`.trim()
             <>
               <Alert severity="success" sx={{ display: 'flex', alignItems: 'center' }}>
                 <Box sx={{ flex: 1 }}>
-                  <Typography variant="body2" fontWeight={600}>Plan locked in!</Typography>
-                  <Typography variant="body2">Head to Today to start your week.</Typography>
+                  <Typography variant="body2" fontWeight={600}>Plan applied.</Typography>
+                  <Typography variant="body2">Use chat for in-week changes like canceling or lightening a day, or swapping days.</Typography>
                 </Box>
                 <Button
                   variant="contained"
