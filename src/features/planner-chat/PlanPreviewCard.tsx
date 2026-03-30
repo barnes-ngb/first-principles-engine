@@ -1,6 +1,10 @@
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
+import Accordion from '@mui/material/Accordion'
+import AccordionDetails from '@mui/material/AccordionDetails'
+import AccordionSummary from '@mui/material/AccordionSummary'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
@@ -30,24 +34,38 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
         <Typography variant="subtitle2" color="primary">
           Minimum Win
         </Typography>
-        <Typography variant="body2">{plan.minimumWin}</Typography>
+        {plan.minimumWin.length <= 100 ? (
+          <Typography variant="body2">{plan.minimumWin}</Typography>
+        ) : (
+          <Accordion disableGutters elevation={0} sx={{ '&::before': { display: 'none' } }}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 0, minHeight: 0, '& .MuiAccordionSummary-content': { my: 0.5 } }}>
+              <Typography variant="body2">{plan.minimumWin.slice(0, 100)}…</Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ px: 0, pt: 0 }}>
+              <Typography variant="body2">{plan.minimumWin}</Typography>
+            </AccordionDetails>
+          </Accordion>
+        )}
       </Stack>
 
       {plan.skipSuggestions.length > 0 && (
         <Stack spacing={0.5} sx={{ mb: 1.5 }}>
-          {plan.skipSuggestions.map((s, i) => (
-            <Alert key={i} severity="warning" sx={{ py: 0 }}>
-              <Typography variant="body2">
-                <strong>{s.action === 'skip' ? 'Skip' : 'Modify'}:</strong> {s.reason}
-                {' \u2014 '}{s.replacement}
-              </Typography>
-              {s.evidence && (
-                <Typography variant="caption" color="text.secondary">
-                  Why: {s.evidence}
-                </Typography>
-              )}
-            </Alert>
-          ))}
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+            {plan.skipSuggestions
+              .filter(s => s.action === 'skip')
+              .map((s, i) => (
+                <Tooltip key={`skip-${i}`} title={`${s.reason} — ${s.replacement}`} arrow>
+                  <Chip label={`Skip: ${s.reason}`} size="small" color="default" variant="outlined" />
+                </Tooltip>
+              ))}
+            {plan.skipSuggestions
+              .filter(s => s.action === 'modify')
+              .map((s, i) => (
+                <Tooltip key={`mod-${i}`} title={`${s.reason} — ${s.replacement}`} arrow>
+                  <Chip label={`Modify: ${s.reason}`} size="small" color="warning" variant="outlined" />
+                </Tooltip>
+              ))}
+          </Stack>
         </Stack>
       )}
 
@@ -150,6 +168,9 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
           </Box>
         )
 
+        const mustDoTotal = mustDoItems.reduce((sum, item) => sum + (item.estimatedMinutes ?? 0), 0)
+        const mustDoOverBudget = mustDoTotal > budgetMinutes
+
         return (
           <Box key={day.day} sx={{ mb: 2 }}>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
@@ -163,6 +184,13 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
                 variant="outlined"
               />
             </Stack>
+            {mustDoOverBudget && (
+              <Alert severity="info" sx={{ py: 0, mb: 0.5 }}>
+                <Typography variant="caption">
+                  Routine alone is {mustDoTotal}m (target {budgetMinutes}m). Consider reducing Reading Eggs from 45m to 20m or moving it to Choose.
+                </Typography>
+              </Alert>
+            )}
 
             {day.items.length === 0 ? (
               <Typography variant="body2" color="text.secondary" sx={{ pl: 1 }}>

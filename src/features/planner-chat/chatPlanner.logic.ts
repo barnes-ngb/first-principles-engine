@@ -30,6 +30,19 @@ Language arts workbook — 20 min — LanguageArts
 Reading Eggs (tablet) — 45 min — Reading Eggs (app) — Reading
 Good and the Beautiful Math — 30 min — GATB — Math`
 
+/** Parse a routine string and return total minutes per day. */
+export function parseRoutineTotalMinutes(routine: string): number {
+  if (!routine) return 0
+  let total = 0
+  for (const line of routine.split('\n').filter(l => l.trim())) {
+    const dashMatch = line.match(/^(.+?)\s*[—–-]\s*(\d+)\s*min/)
+    const parenMatch = line.match(/^(.+?)\s*\((\d+)\s*min\)/)
+    const match = dashMatch || parenMatch
+    total += match ? parseInt(match[2]) : 15
+  }
+  return total
+}
+
 export const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as const
 export type WeekDay = (typeof WEEK_DAYS)[number]
 
