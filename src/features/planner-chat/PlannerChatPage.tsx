@@ -180,7 +180,7 @@ function buildPhotoContextSection(labels: PhotoLabel[]): string {
 export default function PlannerChatPage() {
   const familyId = useFamilyId()
   const { isEnabled } = useAIFeatureFlags()
-  const { chat: aiChat, loading: aiLoading } = useAI()
+  const { chat: aiChat, loading: aiLoading, error: aiError } = useAI()
   const { generate: generateActivity, loading: generateLoading } = useGenerateActivity()
   const {
     children,
@@ -1138,8 +1138,9 @@ Return as JSON:
       })
 
       if (!response) {
+        const detail = aiError?.message || 'Unknown error'
         setSnack({
-          text: 'Failed to generate story. Please try again.',
+          text: `Failed to generate story: ${detail}`,
           severity: 'error',
         })
         return
@@ -1207,7 +1208,7 @@ Return as JSON:
     } finally {
       setSuggestingFocus(false)
     }
-  }, [activeChildId, familyId, aiChat, updateWeekField, readAloudBook, readAloudChapters, weekNotes, selectedWorkbookIds, setSnack])
+  }, [activeChildId, familyId, aiChat, aiError, updateWeekField, readAloudBook, readAloudChapters, weekNotes, selectedWorkbookIds, setSnack])
 
   // Auto-generate week focus when fields are empty on first visit
   useEffect(() => {
