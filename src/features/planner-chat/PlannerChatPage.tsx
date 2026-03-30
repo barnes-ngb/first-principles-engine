@@ -97,6 +97,7 @@ import PlanSummaryPanel from './PlanSummaryPanel'
 import { useScan } from '../../core/hooks/useScan'
 import PhotoLabelForm from './PhotoLabelForm'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
+import { buildMaterialsPrompt, openPrintWindow } from './generateMaterials'
 
 
 /** Detect if an AI response looks like it was trying to return plan JSON (contains days/items structure). */
@@ -239,6 +240,7 @@ export default function PlannerChatPage() {
   const [generatedPlanItem, setGeneratedPlanItem] = useState<DraftPlanItem | null>(null)
   const [lessonCardSaved, setLessonCardSaved] = useState(false)
   const [lessonCardSaving, setLessonCardSaving] = useState(false)
+  const [printingMaterials, setPrintingMaterials] = useState(false)
 
   // Scan hook for workbook page analysis
   const {
@@ -1667,6 +1669,88 @@ Generate a plan for Monday through Friday.`.trim()
     setLessonCardSaved(false)
   }, [])
 
+  const handlePrintWeekMaterials = useCallback(async () => {
+    if (!activeChildId || !currentDraft) return
+
+    const routineWorkbookPattern = /(workbook|practice page|lesson\s*\d+|daily review|drill)/i
+    const printableDays = currentDraft.days
+      .map((day) => {
+        const focusItems = day.items.filter((item) => (
+          item.accepted
+          && !item.isAppBlock
+          && !routineWorkbookPattern.test(item.title)
+        ))
+        return { ...day, items: focusItems }
+      })
+      .filter((day) => day.items.length > 0 || day.chapterQuestion)
+
+    if (printableDays.length === 0) {
+      setSnack({
+        text: 'No themed/focus activities found to print yet. Try accepting a few focus items first.',
+        severity: 'warning',
+      })
+      return
+    }
+
+    const childName = activeChild?.name ?? 'Student'
+    const dayPrompts = printableDays.map((day) => {
+      const chapterPrompt = day.chapterQuestion
+        ? `\nAdd a dedicated chapter-discussion page for ${day.day} using:
+- Book: ${day.chapterQuestion.book}
+- Chapter: ${day.chapterQuestion.chapter}
+- Question type: ${day.chapterQuestion.questionType}
+- Question: ${day.chapterQuestion.question}
+`
+        : ''
+      return `===== ${day.day} =====
+${buildMaterialsPrompt(
+  day,
+  childName,
+  snapshot,
+  weekPlan?.theme,
+  weekPlan?.conundrum,
+  weekPlan?.virtue,
+  weekPlan?.scriptureRef,
+  weekPlan?.scriptureText,
+)}
+${chapterPrompt}
+`
+    }).join('\n\n')
+
+    const packetPrompt = `Create ONE weekly printable packet in valid HTML (single <html> document) using the day-by-day prompts below.
+
+PACKET REQUIREMENTS:
+- Focus on themed/focus work (Stonebridge theme, conundrum tie-ins, chapter questions, reflection/discussion prompts).
+- Do NOT generate routine workbook blocks or repetitive daily drill sheets.
+- Keep each day in its own section with clear ${childName}-friendly headings.
+- Include concise answer keys where appropriate.
+- Return ONLY HTML.
+
+${dayPrompts}`
+
+    try {
+      setPrintingMaterials(true)
+      setSnack({ text: 'Generating print packet...', severity: 'info' })
+      const response = await aiChat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.Generate,
+        messages: [{ role: 'user', content: packetPrompt }],
+      })
+      if (!response?.message) {
+        setSnack({ text: 'Could not generate print packet. Please try again.', severity: 'error' })
+        return
+      }
+      openPrintWindow(response.message, `${childName} Week Materials`)
+      setSnack({ text: 'Print packet ready.', severity: 'success' })
+    } catch (err) {
+      console.error('Failed to print week materials', err)
+      setSnack({ text: 'Failed to generate print packet.', severity: 'error' })
+    } finally {
+      setPrintingMaterials(false)
+    }
+  }, [activeChildId, currentDraft, activeChild?.name, snapshot, weekPlan, aiChat, familyId])
+
   // Reset conversation state (shared by both Start New Plan and Clear Applied Plan)
   const resetConversationState = useCallback(async () => {
     setMessages([])
@@ -2084,15 +2168,26 @@ Generate a plan for Monday through Friday.`.trim()
           <QuickSuggestionButtons onSelect={handleQuickSuggestion} visible={phase === 'review' && currentDraft !== null} />
 
           {phase === 'review' && currentDraft && (
-            <Button
-              variant="contained"
-              color="success"
-              size="large"
-              onClick={handleApplyPlan}
-              fullWidth
-            >
-              Lock In This Plan
-            </Button>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+              <Button
+                variant="contained"
+                color="success"
+                size="large"
+                onClick={handleApplyPlan}
+                fullWidth
+              >
+                Apply This Week&apos;s Plan
+              </Button>
+              <Button
+                variant="outlined"
+                size="large"
+                onClick={handlePrintWeekMaterials}
+                disabled={printingMaterials || aiLoading}
+                fullWidth
+              >
+                {printingMaterials ? 'Generating print packet...' : 'Print Week Materials'}
+              </Button>
+            </Stack>
           )}
 
           {phase === 'active' && (
