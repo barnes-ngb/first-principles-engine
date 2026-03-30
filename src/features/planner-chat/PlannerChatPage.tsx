@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
-import PrintIcon from '@mui/icons-material/Print'
 import SendIcon from '@mui/icons-material/Send'
 import Accordion from '@mui/material/Accordion'
 import AccordionDetails from '@mui/material/AccordionDetails'
@@ -54,7 +53,6 @@ import type {
   ChecklistItem,
   DayBlock,
   DayLog,
-  DraftDayPlan,
   DraftPlanItem,
   DraftWeeklyPlan,
   LessonCard,
@@ -98,7 +96,6 @@ import PlanSummaryPanel from './PlanSummaryPanel'
 import { useScan } from '../../core/hooks/useScan'
 import PhotoLabelForm from './PhotoLabelForm'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
-import { buildMaterialsPrompt, openPrintWindow } from './generateMaterials'
 
 
 /** Detect if an AI response looks like it was trying to return plan JSON (contains days/items structure). */
@@ -224,8 +221,6 @@ export default function PlannerChatPage() {
   // Confirmation dialog state
   const [confirmNewPlan, setConfirmNewPlan] = useState(false)
 
-  // Print materials state
-  const [generatingMaterials, setGeneratingMaterials] = useState<string | null>(null)
 
   // Generate activity state
   const [generatingItemId, setGeneratingItemId] = useState<string | null>(null)
@@ -1562,55 +1557,6 @@ Generate a plan for Monday through Friday.`.trim()
     })
   }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied, subjectTimeDefaults, isEnabled, activeChildId, handleSend])
 
-  // Generate printable materials for a day
-  const handleGenerateMaterials = useCallback(async (day: DraftDayPlan) => {
-    if (!activeChildId) return
-    setGeneratingMaterials(day.day)
-
-    try {
-      const prompt = buildMaterialsPrompt(
-        day,
-        activeChild?.name ?? 'Student',
-        snapshot,
-        weekPlan?.theme,
-        weekPlan?.conundrum,
-        weekPlan?.virtue,
-        weekPlan?.scriptureRef,
-        weekPlan?.scriptureText,
-      )
-
-      const response = await aiChat({
-        familyId,
-        childId: activeChildId,
-        taskType: TaskType.Workshop,
-        messages: [{ role: 'user', content: prompt }],
-      })
-
-      if (response?.message) {
-        try {
-          openPrintWindow(response.message, `${activeChild?.name ?? 'Student'} - ${day.day}`)
-          setSnack({ text: 'Worksheet ready! Check your new tab or downloads.', severity: 'success' })
-        } catch (err) {
-          console.error('Print failed:', err)
-          setSnack({ text: 'Print failed. Try again.', severity: 'error' })
-        }
-      }
-    } catch (err) {
-      console.error('Material generation failed:', err)
-      setSnack({ text: 'Failed to generate materials. Try again.', severity: 'error' })
-    } finally {
-      setGeneratingMaterials(null)
-    }
-  }, [activeChildId, activeChild, snapshot, weekPlan, aiChat, familyId])
-
-  const handleGenerateAllMaterials = useCallback(async () => {
-    if (!currentDraft) return
-    for (const day of currentDraft.days) {
-      await handleGenerateMaterials(day)
-      await new Promise((r) => setTimeout(r, 1000))
-    }
-  }, [currentDraft, handleGenerateMaterials])
-
   // Generate activity for a plan item
   const handleGenerateActivity = useCallback(async (item: DraftPlanItem) => {
     if (!activeChildId) return
@@ -2111,47 +2057,22 @@ Generate a plan for Monday through Friday.`.trim()
           <QuickSuggestionButtons onSelect={handleQuickSuggestion} visible={phase === 'review' && currentDraft !== null} />
 
           {phase === 'review' && currentDraft && (
-            <>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                {currentDraft.days.map((day) => (
-                  <Button
-                    key={day.day}
-                    variant="outlined"
-                    size="small"
-                    onClick={() => handleGenerateMaterials(day)}
-                    disabled={generatingMaterials === day.day}
-                    startIcon={generatingMaterials === day.day ? <CircularProgress size={16} /> : <PrintIcon />}
-                  >
-                    {generatingMaterials === day.day ? 'Generating...' : `Print ${day.day}`}
-                  </Button>
-                ))}
-                <Button
-                  variant="contained"
-                  size="small"
-                  onClick={handleGenerateAllMaterials}
-                  disabled={!!generatingMaterials}
-                  startIcon={<PrintIcon />}
-                >
-                  Print All Week
-                </Button>
-              </Stack>
-              <Button
-                variant="contained"
-                color="success"
-                size="large"
-                onClick={handleApplyPlan}
-                fullWidth
-              >
-                Lock In This Plan
-              </Button>
-            </>
+            <Button
+              variant="contained"
+              color="success"
+              size="large"
+              onClick={handleApplyPlan}
+              fullWidth
+            >
+              Lock In This Plan
+            </Button>
           )}
 
           {phase === 'active' && (
             <>
               <Alert severity="success" sx={{ display: 'flex', alignItems: 'center' }}>
                 <Box sx={{ flex: 1 }}>
-                  <Typography variant="body2" fontWeight={600}>Plan applied.</Typography>
+                  <Typography variant="body2" fontWeight={600}>Plan applied</Typography>
                   <Typography variant="body2">Use chat for in-week changes like canceling or lightening a day, or swapping days.</Typography>
                 </Box>
                 <Button
