@@ -182,7 +182,7 @@ type PlannerMasterySummary = {
 export default function PlannerChatPage() {
   const familyId = useFamilyId()
   const { isEnabled } = useAIFeatureFlags()
-  const { chat: aiChat, loading: aiLoading, error: aiError } = useAI()
+  const { chat: aiChat, loading: aiLoading } = useAI()
   const { generate: generateActivity, loading: generateLoading } = useGenerateActivity()
   const {
     children,
@@ -281,9 +281,6 @@ export default function PlannerChatPage() {
       setHoursPerDay(TOUGH_WEEK_FIXED_MINUTES / 60)
     }
   }, [weekEnergy, dailyRoutine])
-
-  // Suggest focus state
-  const [suggestingFocus, setSuggestingFocus] = useState(false)
 
   const conversationDocId = useMemo(
     () => (activeChildId ? plannerConversationDocId(weekRange.start, activeChildId) : ''),
@@ -1181,7 +1178,7 @@ Return as JSON:
     return contextParts.join('\n')
   }, [readAloudBook, readAloudChapters, weekNotes, selectedWorkbookIds])
 
-  const parseWeekFocusResponse = useCallback((message: string): Partial<WeekPlan> | null => {
+  const parsePlanThemeFields = useCallback((message: string): Partial<WeekPlan> | null => {
     try {
       let json = message.trim()
       const fenceMatch = json.match(/```(?:json)?\s*([\s\S]*?)```/)
@@ -1190,75 +1187,26 @@ Return as JSON:
       const lastBrace = json.lastIndexOf('}')
       if (firstBrace >= 0 && lastBrace > firstBrace) json = json.slice(firstBrace, lastBrace + 1)
       const parsed = JSON.parse(json)
+      const payload = parsed?.plan && typeof parsed.plan === 'object' ? parsed.plan : parsed
       return {
-        ...(parsed.theme ? { theme: parsed.theme } : {}),
-        ...(parsed.virtue ? { virtue: parsed.virtue } : {}),
-        ...(parsed.scriptureRef ? { scriptureRef: parsed.scriptureRef } : {}),
-        ...(parsed.scriptureText ? { scriptureText: parsed.scriptureText } : {}),
-        ...(parsed.heartQuestion ? { heartQuestion: parsed.heartQuestion } : {}),
-        ...(parsed.formationPrompt ? { formationPrompt: parsed.formationPrompt } : {}),
-        ...(parsed.conundrum?.title && parsed.conundrum?.scenario ? { conundrum: parsed.conundrum } : {}),
+        ...(payload.theme ? { theme: payload.theme } : {}),
+        ...(payload.virtue ? { virtue: payload.virtue } : {}),
+        ...(payload.scriptureRef ? { scriptureRef: payload.scriptureRef } : {}),
+        ...(payload.scriptureText ? { scriptureText: payload.scriptureText } : {}),
+        ...(payload.heartQuestion ? { heartQuestion: payload.heartQuestion } : {}),
+        ...(payload.formationPrompt ? { formationPrompt: payload.formationPrompt } : {}),
+        ...(payload.conundrum?.title && payload.conundrum?.scenario ? { conundrum: payload.conundrum } : {}),
       }
     } catch (parseErr) {
-      console.error('[WeeklyFocus] Failed to parse:', parseErr, '\nRaw response:', message)
+      console.error('[PlanTheme] Failed to parse:', parseErr, '\nRaw response:', message)
       return null
     }
   }, [])
-
-  // Generate unified weekly focus (theme + story chapter + connections) via AI
-  const handleGenerateWeekStory = useCallback(async () => {
-    if (!activeChildId || !weekPlan) return null
-    setSuggestingFocus(true)
-    try {
-      const response = await aiChat({
-        familyId,
-        childId: activeChildId,
-        taskType: TaskType.WeeklyFocus,
-        messages: [{ role: 'user', content: buildWeekFocusContext() }],
-      })
-      if (!response?.message) {
-        const detail = aiError?.message || 'Story generation returned an empty response.'
-        setSnack({ text: `Failed to generate story: ${detail}`, severity: 'error' })
-        return null
-      }
-
-      const focus = parseWeekFocusResponse(response.message)
-      if (!focus) {
-        setSnack({ text: 'Story generated but couldn\'t parse response — check console.', severity: 'error' })
-        return null
-      }
-
-      const nextWeekPlan = { ...weekPlan, ...focus }
-      setWeekPlan(nextWeekPlan)
-      await setDoc(weekPlanRef, { ...focus }, { merge: true })
-      setSnack({ text: 'This week\'s story has been generated!', severity: 'success' })
-      return nextWeekPlan
-    } catch (err) {
-      console.error('[WeeklyFocus] Generation failed:', err)
-      setSnack({
-        text: `Story generation failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-        severity: 'error',
-      })
-      return null
-    } finally {
-      setSuggestingFocus(false)
-    }
-  }, [activeChildId, weekPlan, aiChat, aiError, familyId, buildWeekFocusContext, parseWeekFocusResponse, weekPlanRef])
 
   const handleGenerateWeek = useCallback(async (kickoffText?: string) => {
     if (!activeChildId || !weekPlan) return
     setGeneratingWeek(true)
     try {
-      const generatedFocus = await handleGenerateWeekStory()
-      const themedContext = generatedFocus
-        ? [
-          generatedFocus.theme ? `Theme: ${generatedFocus.theme}` : '',
-          generatedFocus.virtue ? `Virtue: ${generatedFocus.virtue}` : '',
-          generatedFocus.scriptureRef ? `Scripture: ${generatedFocus.scriptureRef}` : '',
-          generatedFocus.heartQuestion ? `Heart question: ${generatedFocus.heartQuestion}` : '',
-        ].filter(Boolean).join('\n')
-        : ''
-
       const assignments = photoLabelsToAssignments(photoLabels)
       const userMsg: ChatMessage = {
         id: generateItemId(),
@@ -1273,7 +1221,15 @@ Return as JSON:
 
       if (isEnabled(AIFeatureFlag.AiPlanning)) {
         const prompt = buildPlannerPrompt(inputs)
-        const fullPrompt = [prompt, masteryPromptContext, themedContext, `Daily routine context:\n${dailyRoutine}`].filter(Boolean).join('\n\n')
+        const fullPrompt = [
+          prompt,
+          masteryPromptContext,
+          `Weekly focus context:\n${buildWeekFocusContext()}`,
+          `Daily routine context:\n${dailyRoutine}`,
+          'Return one JSON payload that includes BOTH weekly themed content and the complete daily plan.',
+          'Include fields: theme, virtue, scriptureRef, scriptureText, heartQuestion, formationPrompt, conundrum, weekSkipSummary, days[].items[].',
+          'When read-aloud chapters are provided, include chapterQuestion per day.',
+        ].filter(Boolean).join('\n\n')
         const response = await aiChat({
           familyId,
           childId: activeChildId,
@@ -1285,6 +1241,12 @@ Return as JSON:
         if (aiDraft) {
           draft = aiDraft
           usedAI = true
+          const themedFields = parsePlanThemeFields(response.message)
+          if (themedFields) {
+            const nextWeekPlan = { ...weekPlan, ...themedFields }
+            setWeekPlan(nextWeekPlan)
+            await setDoc(weekPlanRef, themedFields, { merge: true })
+          }
         } else {
           draft = generateDraftPlanFromInputs(inputs)
         }
@@ -1307,7 +1269,7 @@ Return as JSON:
     } finally {
       setGeneratingWeek(false)
     }
-  }, [activeChildId, weekPlan, handleGenerateWeekStory, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext])
+  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
@@ -1880,7 +1842,7 @@ Generate a plan for Monday through Friday.`.trim()
                 variant="contained"
                 size="large"
                 onClick={handleSetupComplete}
-                disabled={generatingWeek || suggestingFocus}
+                disabled={generatingWeek}
                 fullWidth
                 startIcon={generatingWeek ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
                 sx={{ py: 1.5, fontWeight: 'bold', fontSize: '1rem' }}
@@ -1902,20 +1864,6 @@ Generate a plan for Monday through Friday.`.trim()
             >
               <Stack spacing={2}>
                 <Typography variant="subtitle2">This Week in Stonebridge</Typography>
-                <Button
-                  variant="contained"
-                  onClick={handleGenerateWeekStory}
-                  disabled={suggestingFocus}
-                  startIcon={suggestingFocus ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
-                  fullWidth
-                  size="large"
-                >
-                  {suggestingFocus
-                    ? 'Writing this week\'s chapter...'
-                    : weekPlan.theme
-                      ? 'Generate New Story'
-                      : 'Generate This Week\'s Story'}
-                </Button>
 
                 {weekPlan.theme && (
                   <Stack spacing={1.5}>
