@@ -311,7 +311,7 @@ export default function PlannerChatPage() {
     void getDoc(settingsRef).then((snap) => {
       if (snap.exists()) {
         const data = snap.data()
-        if (data.hoursPerDay) setHoursPerDay(data.hoursPerDay)
+        if (data.weekEnergy) setWeekEnergy(data.weekEnergy)
         if (data.readAloudBook) setReadAloudBook(data.readAloudBook)
         if (data.readAloudChapters) setReadAloudChapters(data.readAloudChapters)
       }
@@ -1315,9 +1315,9 @@ Return as JSON:
         .map((wb) => `- ${wb.name}: ${wb.unitLabel} ${wb.currentPosition + 1} (${wb.subjectBucket})`),
     ].join('\n')
 
-    // Save family-level planner defaults
+    // Save family-level planner defaults (weekEnergy drives hoursPerDay via useEffect)
     void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
-      hoursPerDay,
+      weekEnergy,
       readAloudBook,
       readAloudChapters,
       updatedAt: new Date().toISOString(),
