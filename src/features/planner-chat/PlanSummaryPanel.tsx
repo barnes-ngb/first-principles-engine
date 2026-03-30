@@ -53,25 +53,7 @@ export default function PlanSummaryPanel({
           ))}
         </Stack>
 
-        {/* Row 2: Priority Skills */}
-        {prioritySkills.length > 0 && (
-          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
-            <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
-              Focus:
-            </Typography>
-            {prioritySkills.map((skill) => (
-              <Chip
-                key={skill.tag}
-                label={`${skill.label} (${skill.level})`}
-                size="small"
-                color="info"
-                variant="outlined"
-              />
-            ))}
-          </Stack>
-        )}
-
-        {/* Row 3: Coverage (only when draft exists) */}
+        {/* Row 2: Coverage (only when draft exists) */}
         {coverage.length > 0 && (
           <Stack spacing={0.5}>
             <Typography variant="caption" color="text.secondary">
@@ -93,13 +75,6 @@ export default function PlanSummaryPanel({
               })}
             </Stack>
           </Stack>
-        )}
-
-        {/* Row 4: Minimum win */}
-        {currentDraft && (
-          <Typography variant="caption" color="text.secondary">
-            Min win: {currentDraft.minimumWin}
-          </Typography>
         )}
       </Stack>
     </Box>

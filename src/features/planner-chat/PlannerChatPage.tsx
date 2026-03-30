@@ -170,6 +170,23 @@ function buildPhotoContextSection(labels: PhotoLabel[]): string {
 
 const LIGHTER_WEEK_BUDGET_MULTIPLIER = 0.7
 const TOUGH_WEEK_FIXED_MINUTES = 90
+const MASTERY_LOOKBACK_DAYS = 14
+
+type SkillMasterySummary = {
+  gotIt: string[]
+  stillWorking: string[]
+  needsFocus: string[]
+}
+
+function toDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function buildSkillMasterySummaryLine(summary: SkillMasterySummary): string {
+  const focus = summary.needsFocus.length > 0 ? summary.needsFocus.join(', ') : 'none'
+  const skipCandidates = summary.gotIt.length > 0 ? summary.gotIt.join(', ') : 'none'
+  return `Focus: ${focus} · Skip candidates: ${skipCandidates}`
+}
 
 export default function PlannerChatPage() {
   const familyId = useFamilyId()
@@ -256,6 +273,11 @@ export default function PlannerChatPage() {
   const [readAloudChapters, setReadAloudChapters] = useState('')
   const [weekNotes, setWeekNotes] = useState('')
   const [selectedWorkbookIds, setSelectedWorkbookIds] = useState<Set<string>>(new Set())
+  const [skillMasterySummary, setSkillMasterySummary] = useState<SkillMasterySummary>({
+    gotIt: [],
+    stillWorking: [],
+    needsFocus: [],
+  })
 
   // Per-subject default time overrides (minutes per day)
   const [subjectTimeDefaults, setSubjectTimeDefaults] = useState<SubjectTimeDefaults>({})
@@ -376,6 +398,60 @@ export default function PlannerChatPage() {
       const configs = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
       setWorkbookConfigs(configs)
     })
+  }, [familyId, activeChildId])
+
+  // Load last 2 weeks of day docs and aggregate mastery state by skill tag
+  useEffect(() => {
+    if (!activeChildId) {
+      setSkillMasterySummary({ gotIt: [], stillWorking: [], needsFocus: [] })
+      return
+    }
+
+    void (async () => {
+      const masteryByTag = new Map<string, { gotIt: number; working: number; stuck: number }>()
+      const today = new Date()
+
+      for (let i = 0; i < MASTERY_LOOKBACK_DAYS; i++) {
+        const day = new Date(today)
+        day.setDate(today.getDate() - i)
+        const dateKey = toDateKey(day)
+        const logRef = doc(daysCollection(familyId), dayLogDocId(dateKey, activeChildId))
+        const daySnap = await getDoc(logRef)
+        if (!daySnap.exists()) continue
+
+        const dayData = daySnap.data() as DayLog
+        const checklist = dayData.checklist ?? []
+        for (const item of checklist) {
+          if (!item.mastery || !item.skillTags || item.skillTags.length === 0) continue
+          for (const tag of item.skillTags) {
+            const counts = masteryByTag.get(tag) ?? { gotIt: 0, working: 0, stuck: 0 }
+            if (item.mastery === 'got-it') counts.gotIt += 1
+            if (item.mastery === 'working') counts.working += 1
+            if (item.mastery === 'stuck') counts.stuck += 1
+            masteryByTag.set(tag, counts)
+          }
+        }
+      }
+
+      const gotIt: string[] = []
+      const stillWorking: string[] = []
+      const needsFocus: string[] = []
+      for (const [tag, counts] of masteryByTag.entries()) {
+        if (counts.stuck >= 2) {
+          needsFocus.push(tag)
+        } else if (counts.gotIt >= 3) {
+          gotIt.push(tag)
+        } else {
+          stillWorking.push(tag)
+        }
+      }
+
+      setSkillMasterySummary({
+        gotIt: gotIt.sort(),
+        stillWorking: stillWorking.sort(),
+        needsFocus: needsFocus.sort(),
+      })
+    })()
   }, [familyId, activeChildId])
 
   // Initialize selected workbooks when configs load
@@ -720,7 +796,7 @@ Return as JSON:
     }
 
     const mergedPhotoDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine, subjectTimeDefaults: mergedPhotoDefaults }
+    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, masterySummary: skillMasterySummary, adjustments, dailyRoutine, subjectTimeDefaults: mergedPhotoDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -773,7 +849,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, skillMasterySummary, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -790,7 +866,7 @@ Return as JSON:
     }
 
     const mergedDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine, subjectTimeDefaults: mergedDefaults }
+    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, masterySummary: skillMasterySummary, adjustments, dailyRoutine, subjectTimeDefaults: mergedDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -862,7 +938,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, skillMasterySummary, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -907,6 +983,7 @@ Return as JSON:
         adjustmentContent = [
           'Current plan:',
           JSON.stringify(currentDraft, null, 2),
+          `Recent mastery summary: ${JSON.stringify(skillMasterySummary)}`,
           `User adjustment: "${text}"`,
           '',
           'IMPORTANT: When removing items from one day, redistribute those minutes to other days.',
@@ -972,7 +1049,7 @@ Return as JSON:
           // Recovery failed — fall back to local planner
           const assignments = photoLabelsToAssignments(photoLabels)
           const localDraft = generateDraftPlanFromInputs({
-            snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine,
+            snapshot, hoursPerDay, appBlocks, assignments, masterySummary: skillMasterySummary, adjustments, dailyRoutine,
             subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
           })
           setCurrentDraft(localDraft)
@@ -1032,6 +1109,7 @@ Return as JSON:
         hoursPerDay,
         appBlocks,
         assignments,
+        masterySummary: skillMasterySummary,
         adjustments: newAdjustments,
         subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
       })
@@ -1082,7 +1160,7 @@ Return as JSON:
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, dailyRoutine, handleGeneratePlan, subjectTimeDefaults])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, skillMasterySummary, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, dailyRoutine, handleGeneratePlan, subjectTimeDefaults])
 
   // Generate unified weekly focus (theme + story chapter + connections) via AI
   const handleGenerateWeekStory = useCallback(async () => {
@@ -1524,6 +1602,7 @@ Generate a plan for Monday through Friday.`.trim()
         hoursPerDay,
         appBlocks,
         assignments,
+        masterySummary: skillMasterySummary,
         adjustments: newAdjustments,
         subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
       })
@@ -1554,7 +1633,7 @@ Generate a plan for Monday through Friday.`.trim()
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
     })
-  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied, subjectTimeDefaults, isEnabled, activeChildId, handleSend])
+  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, skillMasterySummary, messages, persistConversation, applied, subjectTimeDefaults, isEnabled, activeChildId, handleSend])
 
   // Generate printable materials for a day
   const handleGenerateMaterials = useCallback(async (day: DraftDayPlan) => {
@@ -1969,6 +2048,9 @@ Generate a plan for Monday through Friday.`.trim()
                   </Stack>
                 </Box>
               )}
+              <Alert severity="info" sx={{ mb: 2 }}>
+                {buildSkillMasterySummaryLine(skillMasterySummary)}
+              </Alert>
               <PlanPreviewCard
                 plan={currentDraft}
                 hoursPerDay={hoursPerDay}

@@ -61,6 +61,11 @@ export interface PlanGeneratorInputs {
   hoursPerDay: number
   appBlocks: AppBlock[]
   assignments: AssignmentCandidate[]
+  masterySummary?: {
+    gotIt: string[]
+    stillWorking: string[]
+    needsFocus: string[]
+  }
   adjustments?: AdjustmentIntent[]
   /** Daily routine text from Shelly's setup (activities + times) */
   dailyRoutine?: string
@@ -537,7 +542,7 @@ function skillTagToSubject(tag: string): SubjectBucket {
 
 /** Build the user message content that describes assignments and context for the LLM. */
 export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
-  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], dailyRoutine, subjectTimeDefaults } = inputs
+  const { snapshot, hoursPerDay, appBlocks, assignments, masterySummary, adjustments = [], dailyRoutine, subjectTimeDefaults } = inputs
   const lines: string[] = []
 
   // ── ROUTINE FIRST — this is the most important input ──
@@ -626,6 +631,17 @@ export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
     for (const rule of snapshot.stopRules) {
       lines.push(`- ${rule.label}: when "${rule.trigger}" → ${rule.action}`)
     }
+    lines.push('')
+  }
+
+  if (masterySummary && (masterySummary.gotIt.length > 0 || masterySummary.stillWorking.length > 0 || masterySummary.needsFocus.length > 0)) {
+    lines.push('Recent checklist mastery by skill tag (last 2 weeks):')
+    lines.push(JSON.stringify({
+      gotIt: masterySummary.gotIt,
+      stillWorking: masterySummary.stillWorking,
+      needsFocus: masterySummary.needsFocus,
+    }))
+    lines.push('Prioritize "needsFocus", keep "stillWorking" in rotation, and treat "gotIt" as skip/reduce candidates when time is tight.')
     lines.push('')
   }
 
