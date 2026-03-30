@@ -1934,6 +1934,38 @@ Generate a plan for Monday through Friday.`.trim()
             </Box>
           )}
 
+          {phase === 'review' && currentDraft && chapterQuestionsByDay.length > 0 && (
+            <Box
+              sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 2,
+                bgcolor: 'grey.50',
+                p: 2,
+              }}
+            >
+              <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+                Read-Aloud Chapter Questions
+              </Typography>
+              <Stack spacing={1.5}>
+                {chapterQuestionsByDay.map(({ day, chapterQuestion }) => (
+                  <Box key={day} sx={{ p: 1.5, bgcolor: 'background.paper', borderRadius: 1.5, border: '1px solid', borderColor: 'divider' }}>
+                    <Typography variant="subtitle2">{day}</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      <strong>Chapter:</strong> {chapterQuestion.chapter}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      <strong>Question Type:</strong> {chapterQuestion.questionType}
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 0.5 }}>
+                      {chapterQuestion.question}
+                    </Typography>
+                  </Box>
+                ))}
+              </Stack>
+            </Box>
+          )}
+
           {phase === 'review' && currentDraft && (
             <Box sx={{
               border: '1px solid',
@@ -1943,38 +1975,6 @@ Generate a plan for Monday through Friday.`.trim()
               p: 2,
             }}>
               <Typography variant="h6" gutterBottom>Your Week Plan</Typography>
-              {chapterQuestionsByDay.length > 0 && (
-                <Box
-                  sx={{
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    borderRadius: 2,
-                    bgcolor: 'grey.50',
-                    p: 2,
-                    mb: 2,
-                  }}
-                >
-                  <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-                    Read-Aloud Chapter Questions
-                  </Typography>
-                  <Stack spacing={1.5}>
-                    {chapterQuestionsByDay.map(({ day, chapterQuestion }) => (
-                      <Box key={day} sx={{ p: 1.5, bgcolor: 'background.paper', borderRadius: 1.5, border: '1px solid', borderColor: 'divider' }}>
-                        <Typography variant="subtitle2">{day}</Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          <strong>Chapter:</strong> {chapterQuestion.chapter}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          <strong>Question Type:</strong> {chapterQuestion.questionType}
-                        </Typography>
-                        <Typography variant="body2" sx={{ mt: 0.5 }}>
-                          {chapterQuestion.question}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                </Box>
-              )}
               <PlanPreviewCard
                 plan={currentDraft}
                 hoursPerDay={hoursPerDay}
