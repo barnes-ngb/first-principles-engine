@@ -256,11 +256,9 @@ export default function PlannerChatPage() {
   // Setup wizard state
   const [setupComplete, setSetupComplete] = useState(false)
   const [weekEnergy, setWeekEnergy] = useState<'full' | 'lighter' | 'mvd'>('full')
-  const [readAloud, setReadAloud] = useState('')
   const [readAloudBook, setReadAloudBook] = useState('')
   const [readAloudChapters, setReadAloudChapters] = useState('')
   const [weekNotes, setWeekNotes] = useState('')
-  const [selectedWorkbookIds, setSelectedWorkbookIds] = useState<Set<string>>(new Set())
 
   // Per-subject default time overrides (minutes per day)
   const [subjectTimeDefaults, setSubjectTimeDefaults] = useState<SubjectTimeDefaults>({})
@@ -290,7 +288,7 @@ export default function PlannerChatPage() {
     [weekRange.start, activeChildId],
   )
 
-  // Load planner defaults (hoursPerDay, readAloud — family-level)
+  // Load planner defaults (family-level)
   useEffect(() => {
     if (!familyId) return
     const settingsRef = doc(db, `families/${familyId}/settings/plannerDefaults`)
@@ -298,7 +296,6 @@ export default function PlannerChatPage() {
       if (snap.exists()) {
         const data = snap.data()
         if (data.hoursPerDay) setHoursPerDay(data.hoursPerDay)
-        if (data.readAloud) setReadAloud(data.readAloud)
         if (data.readAloudBook) setReadAloudBook(data.readAloudBook)
         if (data.readAloudChapters) setReadAloudChapters(data.readAloudChapters)
       }
@@ -464,13 +461,6 @@ export default function PlannerChatPage() {
       setWorkbookConfigs(configs)
     })
   }, [familyId, activeChildId])
-
-  // Initialize selected workbooks when configs load
-  useEffect(() => {
-    if (workbookConfigs.length > 0) {
-      setSelectedWorkbookIds(new Set(workbookConfigs.map((c) => c.id ?? '')))
-    }
-  }, [workbookConfigs])
 
   // Load week plan (theme/virtue/scripture/heartQuestion)
   const weekPlanRef = useMemo(
@@ -1174,12 +1164,12 @@ Return as JSON:
     if (weekNotes) {
       contextParts.push(`Parent notes: ${weekNotes}`)
     }
-    const subjects = selectedWorkbookIds.size > 0
-      ? Array.from(selectedWorkbookIds).join(', ')
-      : 'Reading, Math, Language Arts'
-    contextParts.push(`Subjects this week: ${subjects}`)
+    if (workbookConfigs.length > 0) {
+      contextParts.push('Configured workbooks this week:')
+      contextParts.push(...workbookConfigs.map((wb) => `- ${wb.name}: ${wb.unitLabel} ${wb.currentPosition + 1} (${wb.subjectBucket})`))
+    }
     return contextParts.join('\n')
-  }, [readAloudBook, readAloudChapters, weekNotes, selectedWorkbookIds])
+  }, [readAloudBook, readAloudChapters, weekNotes, workbookConfigs])
 
   const parseWeekFocusResponse = useCallback((message: string): Partial<WeekPlan> | null => {
     try {
@@ -1318,17 +1308,15 @@ Return as JSON:
           ? 'lighter week, reduce load'
           : 'MVD week, minimum items only'
 
-    // Build workbook lines from selected existing workbooks
+    // Build workbook lines from configured existing workbooks
     const allWorkbookLines = [
       ...workbookConfigs
-        .filter((wb) => selectedWorkbookIds.has(wb.id ?? ''))
         .map((wb) => `- ${wb.name}: ${wb.unitLabel} ${wb.currentPosition + 1} (${wb.subjectBucket})`),
     ].join('\n')
 
-    // Save family-level planner defaults (hoursPerDay, readAloud)
+    // Save family-level planner defaults
     void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
       hoursPerDay,
-      readAloud,
       readAloudBook,
       readAloudChapters,
       updatedAt: new Date().toISOString(),
@@ -1359,7 +1347,6 @@ Hours/day: ${hoursPerDay}
 
 Workbooks:
 ${allWorkbookLines || '(none configured)'}
-${readAloud ? `Read-aloud: ${readAloud}` : ''}
 ${readAloudBook ? `\nRead-aloud book: ${readAloudBook}${readAloudChapters ? ` (${readAloudChapters})` : ''}` : ''}
 ${readAloudBook && readAloudChapters ? `\nFor each day's chapter, generate ONE discussion question. Vary question types across the week:\n- Comprehension: "What happened? Why did the character do that?"\n- Application: "What would this look like in your life?"\n- Connection: "Does this remind you of anything?"\n- Opinion: "Do you agree with what the character did? Why?"\n- Prediction: "What do you think will happen next?"\nInclude the question in a "chapterQuestion" field on each day.` : ''}
 ${dailyRoutine ? `\nDaily routine (use this as the base template for each day — keep these activities and times, vary them across the week as appropriate):\n${dailyRoutine}` : ''}
@@ -1371,7 +1358,7 @@ ${weekNotes ? `\nNotes: ${weekNotes}` : ''}
 Generate a plan for Monday through Friday.`.trim()
 
     await handleGenerateWeek(contextMessage)
-  }, [weekEnergy, hoursPerDay, workbookConfigs, selectedWorkbookIds, readAloud, readAloudBook, readAloudChapters, weekNotes, activeChild, dailyRoutine, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek])
+  }, [weekEnergy, hoursPerDay, workbookConfigs, readAloudBook, readAloudChapters, weekNotes, activeChild, dailyRoutine, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -1727,7 +1714,6 @@ Generate a plan for Monday through Friday.`.trim()
     setAdjustments([])
     setSetupComplete(false)
     setWeekEnergy('full')
-    setReadAloud('')
     setWeekNotes('')
 
     if (conversationDocId) {
@@ -1841,14 +1827,6 @@ Generate a plan for Monday through Friday.`.trim()
                   <ToggleButton value="mvd">Tough Week (MVD)</ToggleButton>
                 </ToggleButtonGroup>
               </Box>
-              <TextField
-                size="small"
-                label="Read-aloud"
-                placeholder="Read-aloud book + chapter (e.g., Charlotte's Web Ch 5)"
-                value={readAloud}
-                onChange={(e) => setReadAloud(e.target.value)}
-                fullWidth
-              />
               <TextField
                 size="small"
                 label="Read-aloud book"
