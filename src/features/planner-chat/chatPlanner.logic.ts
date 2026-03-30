@@ -62,6 +62,12 @@ export interface PlanGeneratorInputs {
   appBlocks: AppBlock[]
   assignments: AssignmentCandidate[]
   adjustments?: AdjustmentIntent[]
+  /** Aggregated checklist mastery trends from recent day logs. */
+  checklistMasterySummary?: {
+    gotIt: string[]
+    stillWorking: string[]
+    needsFocus: string[]
+  }
   /** Daily routine text from Shelly's setup (activities + times) */
   dailyRoutine?: string
   /** Per-subject default minutes (e.g., { Reading: 25, Math: 30 }) */
@@ -537,7 +543,7 @@ function skillTagToSubject(tag: string): SubjectBucket {
 
 /** Build the user message content that describes assignments and context for the LLM. */
 export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
-  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], dailyRoutine, subjectTimeDefaults } = inputs
+  const { snapshot, hoursPerDay, appBlocks, assignments, adjustments = [], checklistMasterySummary, dailyRoutine, subjectTimeDefaults } = inputs
   const lines: string[] = []
 
   // ── ROUTINE FIRST — this is the most important input ──
@@ -626,6 +632,15 @@ export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
     for (const rule of snapshot.stopRules) {
       lines.push(`- ${rule.label}: when "${rule.trigger}" → ${rule.action}`)
     }
+    lines.push('')
+  }
+
+  if (checklistMasterySummary) {
+    lines.push('Recent checklist mastery trends (last 2 weeks):')
+    lines.push(`- Got it (>=3): ${checklistMasterySummary.gotIt.join(', ') || 'none'}`)
+    lines.push(`- Still working: ${checklistMasterySummary.stillWorking.join(', ') || 'none'}`)
+    lines.push(`- Needs focus (stuck >=2): ${checklistMasterySummary.needsFocus.join(', ') || 'none'}`)
+    lines.push('Use this to prioritize reinforcement and suggest safe skip candidates.')
     lines.push('')
   }
 

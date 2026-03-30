@@ -1,10 +1,6 @@
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
-import Accordion from '@mui/material/Accordion'
-import AccordionDetails from '@mui/material/AccordionDetails'
-import AccordionSummary from '@mui/material/AccordionSummary'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
@@ -14,7 +10,6 @@ import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
 import type { DraftPlanItem, DraftWeeklyPlan } from '../../core/types'
-import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { dayTotalMinutes } from './chatPlanner.logic'
 
 interface PlanPreviewCardProps {
@@ -30,24 +25,6 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
 
   return (
     <Box sx={{ width: '100%' }}>
-      <Stack spacing={0.5} sx={{ mb: 1 }}>
-        <Typography variant="subtitle2" color="primary">
-          Minimum Win
-        </Typography>
-        {plan.minimumWin.length <= 100 ? (
-          <Typography variant="body2">{plan.minimumWin}</Typography>
-        ) : (
-          <Accordion disableGutters elevation={0} sx={{ '&::before': { display: 'none' } }}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 0, minHeight: 0, '& .MuiAccordionSummary-content': { my: 0.5 } }}>
-              <Typography variant="body2">{plan.minimumWin.slice(0, 100)}…</Typography>
-            </AccordionSummary>
-            <AccordionDetails sx={{ px: 0, pt: 0 }}>
-              <Typography variant="body2">{plan.minimumWin}</Typography>
-            </AccordionDetails>
-          </Accordion>
-        )}
-      </Stack>
-
       {plan.skipSuggestions.length > 0 && (
         <Stack spacing={0.5} sx={{ mb: 1.5 }}>
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
@@ -114,24 +91,6 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
               >
                 {item.title}
               </Typography>
-              {item.skillTags.length > 0 && (
-                <Stack direction="row" spacing={0.25} flexWrap="wrap" useFlexGap>
-                  {item.skillTags.slice(0, 2).map((tag) => {
-                    const def = SKILL_TAG_MAP[tag]
-                    return (
-                      <Tooltip key={tag} title={def?.evidence ?? tag} arrow>
-                        <Chip
-                          label={def?.label ?? tag.split('.').pop()}
-                          size="small"
-                          color="info"
-                          variant="outlined"
-                          sx={{ height: 18, fontSize: '0.65rem' }}
-                        />
-                      </Tooltip>
-                    )
-                  })}
-                </Stack>
-              )}
               {item.isAppBlock && (
                 <Chip label="App" size="small" variant="outlined" sx={{ height: 20 }} />
               )}

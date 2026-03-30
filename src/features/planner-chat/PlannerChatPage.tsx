@@ -104,6 +104,7 @@ import ContextDrawer from './ContextDrawer'
 import LessonCardPreview from './LessonCardPreview'
 import PlanPreviewCard from './PlanPreviewCard'
 import PlanSummaryPanel from './PlanSummaryPanel'
+import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { useScan } from '../../core/hooks/useScan'
 import PhotoLabelForm from './PhotoLabelForm'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
@@ -175,6 +176,51 @@ function buildPhotoContextSection(labels: PhotoLabel[]): string {
   }
   lines.push('Please incorporate these specific materials into the plan.')
   return lines.join('\n')
+}
+
+type MasteryState = 'got-it' | 'working' | 'stuck'
+
+interface ChecklistMasterySummary {
+  gotIt: string[]
+  stillWorking: string[]
+  needsFocus: string[]
+}
+
+function aggregateChecklistMastery(days: DayLog[]): ChecklistMasterySummary {
+  const bySkill = new Map<string, Record<MasteryState, number>>()
+
+  for (const day of days) {
+    for (const item of day.checklist ?? []) {
+      if (!item.mastery || !item.skillTags || item.skillTags.length === 0) continue
+      const state = item.mastery as MasteryState
+      if (state !== 'got-it' && state !== 'working' && state !== 'stuck') continue
+      for (const tag of item.skillTags) {
+        const bucket = bySkill.get(tag) ?? { 'got-it': 0, working: 0, stuck: 0 }
+        bucket[state] += 1
+        bySkill.set(tag, bucket)
+      }
+    }
+  }
+
+  const entries = Array.from(bySkill.entries())
+  const gotIt = entries
+    .filter(([, counts]) => counts['got-it'] >= 3)
+    .sort((a, b) => b[1]['got-it'] - a[1]['got-it'])
+    .map(([tag]) => tag)
+  const needsFocus = entries
+    .filter(([, counts]) => counts.stuck >= 2)
+    .sort((a, b) => b[1].stuck - a[1].stuck)
+    .map(([tag]) => tag)
+  const stillWorking = entries
+    .filter(([tag, counts]) => !gotIt.includes(tag) && !needsFocus.includes(tag) && counts.working > 0)
+    .sort((a, b) => b[1].working - a[1].working)
+    .map(([tag]) => tag)
+
+  return { gotIt, stillWorking, needsFocus }
+}
+
+function formatSkillTag(tag: string): string {
+  return SKILL_TAG_MAP[tag]?.label ?? tag.split('.').pop() ?? tag
 }
 
 export default function PlannerChatPage() {
@@ -253,6 +299,7 @@ export default function PlannerChatPage() {
   const [quickWorkbooks, setQuickWorkbooks] = useState<Array<{ name: string; subject: string }>>([
     { name: '', subject: 'Reading' },
   ])
+  const [checklistMasterySummary, setChecklistMasterySummary] = useState<ChecklistMasterySummary | null>(null)
 
   // Per-subject default time overrides (minutes per day)
   const [subjectTimeDefaults, setSubjectTimeDefaults] = useState<SubjectTimeDefaults>({})
@@ -377,6 +424,33 @@ export default function PlannerChatPage() {
     return unsubscribe
   }, [familyId, activeChildId])
 
+  // Load recent (last 2 weeks) checklist mastery trends by skill tag.
+  useEffect(() => {
+    if (!activeChildId) {
+      setChecklistMasterySummary(null)
+      return
+    }
+
+    const end = new Date()
+    const start = new Date()
+    start.setDate(end.getDate() - 13)
+    const q = query(
+      daysCollection(familyId),
+      where('childId', '==', activeChildId),
+      where('date', '>=', formatDateYmd(start)),
+      where('date', '<=', formatDateYmd(end)),
+    )
+    void getDocs(q)
+      .then((snap) => {
+        const dayLogs = snap.docs.map((d) => d.data() as DayLog)
+        setChecklistMasterySummary(aggregateChecklistMastery(dayLogs))
+      })
+      .catch((error: unknown) => {
+        console.warn('[PlannerChatPage] Failed to load checklist mastery summary', error)
+        setChecklistMasterySummary(null)
+      })
+  }, [familyId, activeChildId])
+
   // Load workbook configs for active child
   useEffect(() => {
     if (!activeChildId) {
@@ -442,6 +516,14 @@ export default function PlannerChatPage() {
     },
     [weekPlan, debouncedWriteWeekField],
   )
+
+  const reviewSummaryText = useMemo(() => {
+    if (!checklistMasterySummary) return null
+    const focus = checklistMasterySummary.needsFocus.slice(0, 2).map(formatSkillTag)
+    const skipCandidates = checklistMasterySummary.gotIt.slice(0, 2).map(formatSkillTag)
+    if (focus.length === 0 && skipCandidates.length === 0) return null
+    return `Focus: ${focus.join(', ') || 'none'} · Skip candidates: ${skipCandidates.join(', ') || 'none'}`
+  }, [checklistMasterySummary])
 
   // Add welcome message on first load when child is selected (only after setup wizard is complete)
   useEffect(() => {
@@ -733,7 +815,16 @@ Return as JSON:
     }
 
     const mergedPhotoDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine, subjectTimeDefaults: mergedPhotoDefaults }
+    const inputs = {
+      snapshot,
+      hoursPerDay,
+      appBlocks,
+      assignments,
+      adjustments,
+      checklistMasterySummary: checklistMasterySummary ?? undefined,
+      dailyRoutine,
+      subjectTimeDefaults: mergedPhotoDefaults,
+    }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -786,7 +877,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, checklistMasterySummary, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -803,7 +894,16 @@ Return as JSON:
     }
 
     const mergedDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine, subjectTimeDefaults: mergedDefaults }
+    const inputs = {
+      snapshot,
+      hoursPerDay,
+      appBlocks,
+      assignments,
+      adjustments,
+      checklistMasterySummary: checklistMasterySummary ?? undefined,
+      dailyRoutine,
+      subjectTimeDefaults: mergedDefaults,
+    }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -875,7 +975,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, checklistMasterySummary, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -2379,6 +2479,11 @@ Generate a plan for Monday through Friday.`.trim()
               p: 2,
             }}>
               <Typography variant="h6" gutterBottom>Your Week Plan</Typography>
+              {reviewSummaryText && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  {reviewSummaryText}
+                </Typography>
+              )}
               <PlanPreviewCard
                 plan={currentDraft}
                 hoursPerDay={hoursPerDay}
