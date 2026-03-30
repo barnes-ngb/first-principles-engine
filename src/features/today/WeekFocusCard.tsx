@@ -131,11 +131,6 @@ export default function WeekFocusCard({
                   🎨 <strong>Drawing:</strong> {weekFocus.conundrum.londonDrawingPrompt}
                 </Typography>
               )}
-              {weekFocus.conundrum.dadLabSuggestion && (
-                <Typography variant="body2" color="text.secondary">
-                  🔬 <strong>Dad Lab:</strong> {weekFocus.conundrum.dadLabSuggestion}
-                </Typography>
-              )}
               <Button
                 size="small"
                 variant="outlined"
