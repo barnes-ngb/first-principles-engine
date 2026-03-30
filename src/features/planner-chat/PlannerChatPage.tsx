@@ -1171,10 +1171,16 @@ Return as JSON:
           })
         }
       }
+    } catch (err) {
+      console.error('[WeeklyFocus] Generation failed:', err)
+      setSnack({
+        text: `Story generation failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        severity: 'error',
+      })
     } finally {
       setSuggestingFocus(false)
     }
-  }, [activeChildId, familyId, aiChat, updateWeekField, readAloudBook, readAloudChapters, weekNotes, selectedWorkbookIds])
+  }, [activeChildId, familyId, aiChat, updateWeekField, readAloudBook, readAloudChapters, weekNotes, selectedWorkbookIds, setSnack])
 
   // Auto-generate week focus when fields are empty on first visit
   useEffect(() => {
