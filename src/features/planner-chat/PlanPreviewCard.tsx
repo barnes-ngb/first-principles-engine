@@ -36,11 +36,6 @@ export default function PlanPreviewCard({ plan, hoursPerDay, weekEnergy, mastery
           Focus / Skip Summary
         </Typography>
         {masteryReviewLine && <Typography variant="body2">{masteryReviewLine}</Typography>}
-        {plan.minimumWin?.trim() && (
-          <Typography variant="caption" color="text.secondary">
-            Plan note: {plan.minimumWin.trim()}
-          </Typography>
-        )}
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
           <Chip label={`${skipCount} skip`} size="small" variant="outlined" color={skipCount > 0 ? 'default' : 'success'} />
           <Chip label={`${modifyCount} modify`} size="small" variant="outlined" color={modifyCount > 0 ? 'warning' : 'default'} />

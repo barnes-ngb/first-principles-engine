@@ -423,10 +423,18 @@ export default function PlannerChatPage() {
 
   const masteryPromptContext = useMemo(() => {
     if (!masterySummary) return ''
+    const formatSkillLabel = (tag: string) => {
+      const mapped = SKILL_TAG_MAP[tag]?.label
+      if (mapped) return mapped
+      const fallback = tag.split('.').pop() ?? tag
+      return fallback
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase())
+    }
     const formatTags = (tags: string[]) =>
       tags
         .slice(0, 8)
-        .map((tag) => SKILL_TAG_MAP[tag]?.label ?? tag.split('.').pop() ?? tag)
+        .map((tag) => formatSkillLabel(tag))
         .join(', ') || 'none'
 
     return [
@@ -440,8 +448,16 @@ export default function PlannerChatPage() {
 
   const masteryReviewLine = useMemo(() => {
     if (!masterySummary) return ''
+    const formatSkillLabel = (tag: string) => {
+      const mapped = SKILL_TAG_MAP[tag]?.label
+      if (mapped) return mapped
+      const fallback = tag.split('.').pop() ?? tag
+      return fallback
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase())
+    }
     const short = (tags: string[]) =>
-      tags.slice(0, 2).map((tag) => SKILL_TAG_MAP[tag]?.label ?? tag.split('.').pop() ?? tag).join(', ')
+      tags.slice(0, 2).map((tag) => formatSkillLabel(tag)).join(', ')
     const focusPart = masterySummary.needsFocus.length > 0 ? `Focus: ${short(masterySummary.needsFocus)}` : 'Focus: none flagged'
     const skipPart = masterySummary.gotIt.length > 0 ? `Skip candidates: ${short(masterySummary.gotIt)}` : 'Skip candidates: none yet'
     return `${focusPart} · ${skipPart}`
