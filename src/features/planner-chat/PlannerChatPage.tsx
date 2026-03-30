@@ -89,7 +89,6 @@ import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
 import { defaultAppBlocks, defaultDailyRoutine, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
-  buildMinimumWinText,
   buildPlannerPrompt,
   fillMissingDaysFromRoutine,
   generateDraftPlanFromInputs,
@@ -266,6 +265,18 @@ export default function PlannerChatPage() {
   // Daily routine state — initialized with default template
   const [dailyRoutine, setDailyRoutine] = useState(defaultDailyRoutine)
 
+  // Adjust hoursPerDay based on energy selection and routine total
+  useEffect(() => {
+    const routineTotal = parseRoutineTotalMinutes(dailyRoutine)
+    if (weekEnergy === 'full') {
+      setHoursPerDay(routineTotal > 0 ? Math.round((routineTotal / 60) * 10) / 10 : 3)
+    } else if (weekEnergy === 'lighter') {
+      setHoursPerDay(routineTotal > 0 ? Math.round((routineTotal * 0.65 / 60) * 10) / 10 : 2)
+    } else {
+      setHoursPerDay(1.5)
+    }
+  }, [weekEnergy, dailyRoutine])
+
   // Suggest focus state
   const [suggestingFocus, setSuggestingFocus] = useState(false)
   // Conundrum state
@@ -435,7 +446,6 @@ export default function PlannerChatPage() {
   // Add welcome message on first load when child is selected (only after setup wizard is complete)
   useEffect(() => {
     if (!activeChildId || messages.length > 0 || !setupComplete) return
-    const minimumWin = buildMinimumWinText(snapshot)
     const welcomeParts = [
       `Planning week of ${weekRange.start} for ${activeChild?.name ?? 'your child'}.`,
     ]
@@ -444,7 +454,6 @@ export default function PlannerChatPage() {
         `\nSkill focus: ${snapshot.prioritySkills.map((s) => `${s.label} (${s.level})`).join(', ')}.`,
       )
     }
-    welcomeParts.push(`\nMinimum Win: ${minimumWin}`)
     welcomeParts.push('\nUpload workbook photos and label them, or type assignments. I\'ll build your week plan.')
 
     const welcomeMsg: ChatMessage = {
@@ -918,7 +927,7 @@ Return as JSON:
           'Do NOT just delete activities — move them to days with remaining capacity.',
           '',
           `Apply the adjustment and return the COMPLETE updated plan as valid JSON with this schema:`,
-          `{ "days": [{ "day": "Monday", "timeBudgetMinutes": 150, "items": [{ "title": "string", "subjectBucket": "Reading|Math|LanguageArts|Science|SocialStudies|Other", "estimatedMinutes": 15, "skillTags": [], "isAppBlock": false, "accepted": true }] }], "skipSuggestions": [], "minimumWin": "string" }`,
+          `{ "days": [{ "day": "Monday", "timeBudgetMinutes": ${Math.round(hoursPerDay * 60)}, "items": [{ "title": "string", "subjectBucket": "Reading|Math|LanguageArts|Science|SocialStudies|Other", "estimatedMinutes": 15, "skillTags": [], "isAppBlock": false, "accepted": true }] }], "skipSuggestions": [], "minimumWin": "string" }`,
           `Respect hours budget of ${hoursPerDay} hours/day. No markdown, no preamble — only valid JSON.`,
         ].join('\n')
       }
@@ -1128,7 +1137,15 @@ Return as JSON:
         }],
       })
 
-      if (response?.message) {
+      if (!response) {
+        setSnack({
+          text: 'Failed to generate story. Please try again.',
+          severity: 'error',
+        })
+        return
+      }
+
+      if (response.message) {
         try {
           let json = response.message.trim()
           // Strip markdown fences if present
@@ -1162,19 +1179,35 @@ Return as JSON:
               text: `Week focus generated, but ${missing.join(', ')} couldn't be filled. Tap ✨ to retry.`,
               severity: 'warning',
             })
+          } else {
+            setSnack({
+              text: 'This week\'s story has been generated!',
+              severity: 'success',
+            })
           }
         } catch (parseErr) {
-          console.error('[WeeklyFocus] Failed to parse:', parseErr)
+          console.error('[WeeklyFocus] Failed to parse:', parseErr, '\nRaw response:', response.message)
           setSnack({
-            text: 'Week focus response was malformed. Tap ✨ to retry.',
+            text: 'Story generated but couldn\'t parse response — check console.',
             severity: 'error',
           })
         }
+      } else {
+        setSnack({
+          text: 'Story generation returned an empty response. Tap ✨ to retry.',
+          severity: 'warning',
+        })
       }
+    } catch (err) {
+      console.error('[WeeklyFocus] Generation failed:', err)
+      setSnack({
+        text: `Story generation failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        severity: 'error',
+      })
     } finally {
       setSuggestingFocus(false)
     }
-  }, [activeChildId, familyId, aiChat, updateWeekField, readAloudBook, readAloudChapters, weekNotes, selectedWorkbookIds])
+  }, [activeChildId, familyId, aiChat, updateWeekField, readAloudBook, readAloudChapters, weekNotes, selectedWorkbookIds, setSnack])
 
   // Auto-generate week focus when fields are empty on first visit
   useEffect(() => {
@@ -1511,8 +1544,6 @@ Generate a plan for Monday through Friday.`.trim()
       setSnack({ text: 'Failed to apply plan.', severity: 'error' })
     }
   }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType])
-
-  const minimumWin = buildMinimumWinText(snapshot)
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
@@ -2602,7 +2633,6 @@ Generate a plan for Monday through Friday.`.trim()
         hoursPerDay={hoursPerDay}
         appBlocks={appBlocks}
         snapshot={snapshot}
-        minimumWin={minimumWin}
       />
 
       <Snackbar
