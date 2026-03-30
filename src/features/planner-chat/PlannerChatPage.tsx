@@ -76,7 +76,8 @@ import {
   PlannerConversationStatus,
   SubjectBucket,
 } from '../../core/types/enums'
-import { fixUnicodeEscapes } from '../../core/utils/format'
+import { SKILL_TAG_MAP } from '../../core/types/skillTags'
+import { fixUnicodeEscapes, formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
 import { defaultAppBlocks, defaultDailyRoutine, parseRoutineTotalMinutes } from './chatPlanner.logic'
@@ -171,6 +172,16 @@ function buildPhotoContextSection(labels: PhotoLabel[]): string {
 const LIGHTER_WEEK_BUDGET_MULTIPLIER = 0.7
 const TOUGH_WEEK_FIXED_MINUTES = 90
 
+type MasteryCounts = { gotIt: number; working: number; stuck: number }
+type PlannerMasterySummary = {
+  rangeStart: string
+  rangeEnd: string
+  gotIt: string[]
+  stillWorking: string[]
+  needsFocus: string[]
+  bySkillTag: Record<string, MasteryCounts>
+}
+
 export default function PlannerChatPage() {
   const familyId = useFamilyId()
   const { isEnabled } = useAIFeatureFlags()
@@ -259,6 +270,7 @@ export default function PlannerChatPage() {
   // Per-subject default time overrides (minutes per day)
   const [subjectTimeDefaults, setSubjectTimeDefaults] = useState<SubjectTimeDefaults>({})
   const [generatingWeek, setGeneratingWeek] = useState(false)
+  const [masterySummary, setMasterySummary] = useState<PlannerMasterySummary | null>(null)
 
   // Daily routine state — initialized with default template
   const [dailyRoutine, setDailyRoutine] = useState(defaultDailyRoutine)
@@ -360,6 +372,89 @@ export default function PlannerChatPage() {
     })
     return unsubscribe
   }, [familyId, activeChildId])
+
+  // Load recent mastery states from last 2 weeks of day logs for active child
+  useEffect(() => {
+    if (!activeChildId) {
+      setMasterySummary(null)
+      return
+    }
+
+    const end = new Date()
+    const start = new Date(end)
+    start.setDate(end.getDate() - 13)
+    const rangeStart = formatDateYmd(start)
+    const rangeEnd = formatDateYmd(end)
+    const daysQuery = query(
+      daysCollection(familyId),
+      where('date', '>=', rangeStart),
+      where('date', '<=', rangeEnd),
+    )
+
+    void getDocs(daysQuery).then((snap) => {
+      const bySkillTag: Record<string, MasteryCounts> = {}
+      for (const docSnap of snap.docs) {
+        const day = docSnap.data() as DayLog
+        if (day.childId !== activeChildId) continue
+        for (const item of day.checklist ?? []) {
+          if (!item.mastery || !item.skillTags || item.skillTags.length === 0) continue
+          for (const tag of item.skillTags) {
+            const counts = bySkillTag[tag] ?? { gotIt: 0, working: 0, stuck: 0 }
+            if (item.mastery === 'got-it') counts.gotIt += 1
+            else if (item.mastery === 'working') counts.working += 1
+            else if (item.mastery === 'stuck') counts.stuck += 1
+            bySkillTag[tag] = counts
+          }
+        }
+      }
+
+      const gotIt: string[] = []
+      const stillWorking: string[] = []
+      const needsFocus: string[] = []
+      for (const [tag, counts] of Object.entries(bySkillTag)) {
+        if (counts.gotIt >= 3) gotIt.push(tag)
+        else if (counts.stuck >= 2) needsFocus.push(tag)
+        else stillWorking.push(tag)
+      }
+
+      setMasterySummary({
+        rangeStart,
+        rangeEnd,
+        gotIt: gotIt.sort(),
+        stillWorking: stillWorking.sort(),
+        needsFocus: needsFocus.sort(),
+        bySkillTag,
+      })
+    }).catch(() => {
+      setMasterySummary(null)
+    })
+  }, [familyId, activeChildId])
+
+  const masteryPromptContext = useMemo(() => {
+    if (!masterySummary) return ''
+    const formatTags = (tags: string[]) =>
+      tags
+        .slice(0, 8)
+        .map((tag) => SKILL_TAG_MAP[tag]?.label ?? tag.split('.').pop() ?? tag)
+        .join(', ') || 'none'
+
+    return [
+      `Recent checklist mastery summary (${masterySummary.rangeStart} to ${masterySummary.rangeEnd}):`,
+      `- Needs focus (stuck >=2): ${formatTags(masterySummary.needsFocus)}`,
+      `- Still working: ${formatTags(masterySummary.stillWorking)}`,
+      `- Got it / skip candidates (got-it >=3): ${formatTags(masterySummary.gotIt)}`,
+      'Use this to prioritize "needs focus", keep "still working" in rotation, and reduce or review-only "got it" skills.',
+    ].join('\n')
+  }, [masterySummary])
+
+  const masteryReviewLine = useMemo(() => {
+    if (!masterySummary) return ''
+    const short = (tags: string[]) =>
+      tags.slice(0, 2).map((tag) => SKILL_TAG_MAP[tag]?.label ?? tag.split('.').pop() ?? tag).join(', ')
+    const focusPart = masterySummary.needsFocus.length > 0 ? `Focus: ${short(masterySummary.needsFocus)}` : 'Focus: none flagged'
+    const skipPart = masterySummary.gotIt.length > 0 ? `Skip candidates: ${short(masterySummary.gotIt)}` : 'Skip candidates: none yet'
+    return `${focusPart} · ${skipPart}`
+  }, [masterySummary])
 
   // Load workbook configs for active child
   useEffect(() => {
@@ -725,7 +820,7 @@ Return as JSON:
       // AI path: send context to Cloud Function
       const prompt = buildPlannerPrompt(inputs)
       const photoContext = buildPhotoContextSection(photoLabels)
-      const fullPrompt = photoContext ? `${prompt}\n\n${photoContext}` : prompt
+      const fullPrompt = [prompt, masteryPromptContext, photoContext].filter(Boolean).join('\n\n')
       const aiMessages: AIChatMessage[] = [{ role: 'user', content: fullPrompt }]
       const response = await aiChat({
         familyId,
@@ -770,7 +865,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -794,7 +889,7 @@ Return as JSON:
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       const prompt = buildPlannerPrompt(inputs)
       const photoContext = buildPhotoContextSection(photoLabels)
-      const fullPrompt = photoContext ? `${prompt}\n\n${photoContext}` : prompt
+      const fullPrompt = [prompt, masteryPromptContext, photoContext].filter(Boolean).join('\n\n')
       const aiMessages: AIChatMessage[] = [
         ...messages.map((m) => ({
           role: m.role as 'user' | 'assistant',
@@ -859,7 +954,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -1183,7 +1278,7 @@ Return as JSON:
 
       if (isEnabled(AIFeatureFlag.AiPlanning)) {
         const prompt = buildPlannerPrompt(inputs)
-        const fullPrompt = [prompt, themedContext, `Daily routine context:\n${dailyRoutine}`].filter(Boolean).join('\n\n')
+        const fullPrompt = [prompt, masteryPromptContext, themedContext, `Daily routine context:\n${dailyRoutine}`].filter(Boolean).join('\n\n')
         const response = await aiChat({
           familyId,
           childId: activeChildId,
@@ -1217,7 +1312,7 @@ Return as JSON:
     } finally {
       setGeneratingWeek(false)
     }
-  }, [activeChildId, weekPlan, handleGenerateWeekStory, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation])
+  }, [activeChildId, weekPlan, handleGenerateWeekStory, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
@@ -1975,10 +2070,16 @@ Generate a plan for Monday through Friday.`.trim()
               p: 2,
             }}>
               <Typography variant="h6" gutterBottom>Your Week Plan</Typography>
+              {masteryReviewLine && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  {masteryReviewLine}
+                </Typography>
+              )}
               <PlanPreviewCard
                 plan={currentDraft}
                 hoursPerDay={hoursPerDay}
                 weekEnergy={weekEnergy}
+                masteryReviewLine={masteryReviewLine}
                 onToggleItem={handleToggleItem}
                 onGenerateActivity={!applied ? handleGenerateActivity : undefined}
                 generatingItemId={generatingItemId ?? undefined}
