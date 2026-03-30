@@ -60,6 +60,13 @@ interface KidTodayViewProps {
     virtue?: string
     scriptureRef?: string
     heartQuestion?: string
+    conundrum?: {
+      title: string
+      question: string
+      lincolnPrompt: string
+      londonPrompt: string
+      londonDrawingPrompt?: string
+    }
   } | null
 }
 
@@ -191,6 +198,17 @@ export default function KidTodayView({
   const [chapterAudioBlob, setChapterAudioBlob] = useState<Blob | null>(null)
   const [savingChapter, setSavingChapter] = useState(false)
   const chapterRecorderRef = useRef<MediaRecorder | null>(null)
+
+  // Conundrum response state
+  const [isRecordingConundrum, setIsRecordingConundrum] = useState(false)
+  const [conundrumAudioUrl, setConundrumAudioUrl] = useState<string | null>(null)
+  const [conundrumAudioBlob, setConundrumAudioBlob] = useState<Blob | null>(null)
+  const [savingConundrum, setSavingConundrum] = useState(false)
+  const [conundrumSaved, setConundrumSaved] = useState(false)
+  const conundrumRecorderRef = useRef<MediaRecorder | null>(null)
+  // Photo capture for London conundrum drawing
+  const [showConundrumPhoto, setShowConundrumPhoto] = useState(false)
+  const [conundrumPhotoSaved, setConundrumPhotoSaved] = useState(false)
 
   // XP toast state
   const [xpToast, setXpToast] = useState<{ amount: number; reason: string } | null>(null)
@@ -597,6 +615,91 @@ export default function KidTodayView({
     }
     setSavingChapter(false)
   }, [dayLog, child.id, familyId, chapterAudioBlob, persistDayLogImmediate])
+
+  // Conundrum audio recording (Lincoln)
+  const startConundrumRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      const chunks: Blob[] = []
+      recorder.ondataavailable = (e) => chunks.push(e.data)
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' })
+        setConundrumAudioBlob(blob)
+        setConundrumAudioUrl(URL.createObjectURL(blob))
+        stream.getTracks().forEach(t => t.stop())
+      }
+      recorder.start()
+      conundrumRecorderRef.current = recorder
+      setIsRecordingConundrum(true)
+    } catch (err) {
+      console.error('Mic access failed:', err)
+    }
+  }, [])
+
+  const stopConundrumRecording = useCallback(() => {
+    conundrumRecorderRef.current?.stop()
+    setIsRecordingConundrum(false)
+  }, [])
+
+  const handleSaveConundrumResponse = useCallback(async () => {
+    if (!weekFocus?.conundrum) return
+    setSavingConundrum(true)
+    try {
+      let mediaUrl: string | undefined
+      if (conundrumAudioBlob) {
+        const filename = `conundrum_response_${Date.now()}.webm`
+        const storageRef = ref(storage, `families/${familyId}/artifacts/${filename}`)
+        await uploadBytes(storageRef, conundrumAudioBlob)
+        mediaUrl = await getDownloadURL(storageRef)
+      }
+      await addDoc(artifactsCollection(familyId), {
+        childId: child.id,
+        type: EvidenceType.Audio,
+        tags: {
+          engineStage: EngineStage.Wonder,
+          subjectBucket: SubjectBucket.Other,
+          domain: 'conundrum',
+          location: 'home',
+        },
+        title: `Conundrum: ${weekFocus.conundrum.title}`,
+        content: `Q: ${weekFocus.conundrum.question}`,
+        ...(mediaUrl ? { mediaUrl } : {}),
+        createdAt: new Date().toISOString(),
+      })
+      setConundrumSaved(true)
+    } catch (err) {
+      console.error('Conundrum response save failed:', err)
+    }
+    setSavingConundrum(false)
+  }, [weekFocus, conundrumAudioBlob, familyId, child.id])
+
+  // Conundrum photo save (London drawing)
+  const handleConundrumPhoto = useCallback(async (file: File) => {
+    if (!weekFocus?.conundrum) return
+    try {
+      const filename = generateFilename('jpg')
+      const docRef = await addDoc(artifactsCollection(familyId), {
+        childId: child.id,
+        type: EvidenceType.Photo,
+        tags: {
+          engineStage: EngineStage.Wonder,
+          subjectBucket: SubjectBucket.Other,
+          domain: 'conundrum',
+          location: 'home',
+        },
+        title: `Conundrum Drawing: ${weekFocus.conundrum.title}`,
+        content: weekFocus.conundrum.londonDrawingPrompt ?? weekFocus.conundrum.question,
+        createdAt: new Date().toISOString(),
+      })
+      const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+      await updateDoc(docRef, { mediaUrl: downloadUrl })
+      setConundrumPhotoSaved(true)
+      setShowConundrumPhoto(false)
+    } catch (err) {
+      console.error('Conundrum photo save failed:', err)
+    }
+  }, [weekFocus, familyId, child.id])
 
   // ── Armor Gate early return (after all hooks) ──
   if (avatarProfile && !armorReady && armorGateStatus) {
@@ -1281,6 +1384,79 @@ export default function KidTodayView({
               <audio src={dayLog.chapterQuestion.responseUrl} controls style={{ width: '100%' }} />
             )}
           </Stack>
+        </SectionCard>
+      )}
+
+      {/* ── CONUNDRUM RESPONSE ── */}
+      {weekFocus?.conundrum && isLincoln && !conundrumSaved && (
+        <SectionCard title={`\u{1F5FA}\u{FE0F} ${weekFocus.conundrum.title}`}>
+          <Stack spacing={2} sx={{ py: 1 }}>
+            <Typography variant="body1" sx={{ fontWeight: 500 }}>
+              {weekFocus.conundrum.question}
+            </Typography>
+            <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+              {weekFocus.conundrum.lincolnPrompt}
+            </Typography>
+            <Button
+              variant="outlined"
+              onClick={isRecordingConundrum ? stopConundrumRecording : startConundrumRecording}
+              color={isRecordingConundrum ? 'error' : 'primary'}
+              size="large"
+            >
+              {isRecordingConundrum ? '\u23F9 Stop Recording' : '\u{1F3A4} What Do You Think?'}
+            </Button>
+            {conundrumAudioUrl && (
+              <Stack spacing={1}>
+                <audio src={conundrumAudioUrl} controls style={{ width: '100%' }} />
+                <Button
+                  variant="contained"
+                  color="success"
+                  onClick={handleSaveConundrumResponse}
+                  disabled={savingConundrum}
+                  size="large"
+                >
+                  {savingConundrum ? 'Saving...' : '\u{1F48E} Save My Answer'}
+                </Button>
+              </Stack>
+            )}
+          </Stack>
+        </SectionCard>
+      )}
+
+      {weekFocus?.conundrum && isLincoln && conundrumSaved && (
+        <SectionCard title={`\u{1F5FA}\u{FE0F} ${weekFocus.conundrum.title}`}>
+          <Typography variant="body2" color="success.main">
+            Responded {'\u2713'}
+          </Typography>
+        </SectionCard>
+      )}
+
+      {weekFocus?.conundrum?.londonDrawingPrompt && !isLincoln && !conundrumPhotoSaved && (
+        <SectionCard title={`\u{1F3A8} Drawing Quest`}>
+          <Stack spacing={2} sx={{ py: 1 }}>
+            <Typography variant="body1" sx={{ fontWeight: 500 }}>
+              {weekFocus.conundrum.londonDrawingPrompt}
+            </Typography>
+            {showConundrumPhoto ? (
+              <PhotoCapture onCapture={handleConundrumPhoto} />
+            ) : (
+              <Button
+                variant="contained"
+                size="large"
+                onClick={() => setShowConundrumPhoto(true)}
+              >
+                {'\u{1F4F8}'} Take a Photo of Your Drawing
+              </Button>
+            )}
+          </Stack>
+        </SectionCard>
+      )}
+
+      {weekFocus?.conundrum?.londonDrawingPrompt && !isLincoln && conundrumPhotoSaved && (
+        <SectionCard title={`\u{1F3A8} Drawing Quest`}>
+          <Typography variant="body2" color="success.main">
+            Drawing saved {'\u2713'}
+          </Typography>
         </SectionCard>
       )}
 

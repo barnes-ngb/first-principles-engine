@@ -475,9 +475,13 @@ export default function PlannerChatPage() {
     }
     const short = (tags: string[]) =>
       tags.slice(0, 2).map((tag) => formatSkillLabel(tag)).join(', ')
-    const focusPart = masterySummary.needsFocus.length > 0 ? `Focus: ${short(masterySummary.needsFocus)}` : 'Focus: none flagged'
-    const skipPart = masterySummary.gotIt.length > 0 ? `Skip candidates: ${short(masterySummary.gotIt)}` : 'Skip candidates: none yet'
-    return `${focusPart} · ${skipPart}`
+    const hasFocus = masterySummary.needsFocus.length > 0
+    const hasSkip = masterySummary.gotIt.length > 0
+    if (!hasFocus && !hasSkip) return ''
+    const parts: string[] = []
+    if (hasFocus) parts.push(`Focus: ${short(masterySummary.needsFocus)}`)
+    if (hasSkip) parts.push(`Skip candidates: ${short(masterySummary.gotIt)}`)
+    return parts.join(' · ')
   }, [masterySummary])
 
   // Load workbook configs for active child
@@ -1251,7 +1255,9 @@ Return as JSON:
           `Daily routine context:\n${dailyRoutine}`,
           'Return one JSON payload that includes BOTH weekly themed content and the complete daily plan.',
           'Include fields: theme, virtue, scriptureRef, scriptureText, heartQuestion, formationPrompt, conundrum, weekSkipSummary, days[].items[].',
-          'When read-aloud chapters are provided, include chapterQuestion per day.',
+          readAloudBook && readAloudChapters
+            ? `Read-aloud: ${readAloudBook} (${readAloudChapters}). Generate ONE chapterQuestion per school day for these SPECIFIC chapters in order. Do NOT start from Chapter 1 unless the parent specified it. The "chapter" field must use the actual chapter numbers from the entered range.`
+            : '',
         ].filter(Boolean).join('\n\n')
         const response = await aiChat({
           familyId,
@@ -1343,7 +1349,14 @@ Hours/day: ${hoursPerDay}
 Workbooks:
 ${allWorkbookLines || '(none configured)'}
 ${readAloudBook ? `\nRead-aloud book: ${readAloudBook}${readAloudChapters ? ` (${readAloudChapters})` : ''}` : ''}
-${readAloudBook && readAloudChapters ? `\nFor each day's chapter, generate ONE discussion question. Vary question types across the week:\n- Comprehension: "What happened? Why did the character do that?"\n- Application: "What would this look like in your life?"\n- Connection: "Does this remind you of anything?"\n- Opinion: "Do you agree with what the character did? Why?"\n- Prediction: "What do you think will happen next?"\nInclude the question in a "chapterQuestion" field on each day.` : ''}
+${readAloudBook && readAloudChapters ? `\nThe parent specified these chapters for this week: ${readAloudChapters}
+Generate ONE discussion question per school day (Monday–Friday) for these specific chapters IN ORDER.
+Do NOT start from Chapter 1 unless the parent specified Chapter 1.
+If the parent said "Ch 5-8", generate questions for Ch 5, Ch 6, Ch 7, Ch 8, and one review/prediction question for Friday.
+Each question must have a questionType: comprehension, application, connection, opinion, or prediction.
+Vary the question types across the week.
+The "chapter" field in each chapterQuestion must match the actual chapter numbers from the entered range, not auto-numbered from 1.
+Include the question in a "chapterQuestion" field on each day.` : ''}
 ${dailyRoutine ? `\nDaily routine (use this as the base template for each day — keep these activities and times, vary them across the week as appropriate):\n${dailyRoutine}` : ''}
 
 Subject time defaults (use these as the baseline for estimatedMinutes per item):
@@ -2054,7 +2067,6 @@ ${dayPrompts}`
                       {weekPlan.conundrum.readingTieIn && <Chip label="Reading" size="small" variant="outlined" />}
                       {weekPlan.conundrum.mathContext && <Chip label="Math" size="small" variant="outlined" />}
                       {weekPlan.conundrum.londonDrawingPrompt && <Chip label="Drawing" size="small" variant="outlined" />}
-                      {weekPlan.conundrum.dadLabSuggestion && <Chip label="Dad Lab" size="small" variant="outlined" />}
                     </Stack>
                   </Stack>
                 )}
