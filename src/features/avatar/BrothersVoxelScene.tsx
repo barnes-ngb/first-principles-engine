@@ -323,6 +323,7 @@ export default function BrothersVoxelScene({
     const scene = new THREE.Scene()
     const bg = backgroundRef.current
     scene.background = new THREE.Color(bg === 'room' ? 0x2a2218 : 0x1a1a2e)
+    scene.fog = new THREE.FogExp2(0x0F1520, 0.035)
     sceneRef.current = scene
 
     // Sky group (night background)
@@ -340,24 +341,29 @@ export default function BrothersVoxelScene({
     const camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 100)
     cameraRef.current = camera
 
-    // Night mode lighting
-    const keyLight = new THREE.DirectionalLight(0xFFF5E6, 1.0)
-    keyLight.position.set(5, 8, 6)
-    scene.add(keyLight)
-
-    const fillLight = new THREE.DirectionalLight(0xC8D8E8, 0.3)
-    fillLight.position.set(-5, 3, 3)
-    scene.add(fillLight)
-
-    const rimLight = new THREE.DirectionalLight(0xFFFFFF, 0.5)
-    rimLight.position.set(0, 3, -6)
-    scene.add(rimLight)
-
-    const ambient = new THREE.AmbientLight(0xFFFFFF, 0.25)
+    // Night mode lighting — Minecraft Legends style
+    // 1. AMBIENT — low, warm tint
+    const ambient = new THREE.AmbientLight(0x352A1F, 0.35)
     scene.add(ambient)
 
-    const bounceLight = new THREE.DirectionalLight(0xFFE8D6, 0.1)
-    bounceLight.position.set(0, -4, 2)
+    // 2. KEY LIGHT — warm golden, upper-right-front, strong
+    const keyLight = new THREE.DirectionalLight(0xFFE4B5, 1.2)
+    keyLight.position.set(4, 6, 3)
+    scene.add(keyLight)
+
+    // 3. FILL — cool blue, left side, soft
+    const fillLight = new THREE.DirectionalLight(0x8CA8C8, 0.3)
+    fillLight.position.set(-3, 2, 2)
+    scene.add(fillLight)
+
+    // 4. RIM — gold, from behind — THE Legends signature
+    const rimLight = new THREE.DirectionalLight(0xFFD700, 0.5)
+    rimLight.position.set(0, 3, -5)
+    scene.add(rimLight)
+
+    // 5. BOUNCE — warm from below, very subtle
+    const bounceLight = new THREE.DirectionalLight(0xDEB887, 0.15)
+    bounceLight.position.set(0, -2, 2)
     scene.add(bounceLight)
 
     nightLightsRef.current = [keyLight, fillLight, rimLight, ambient, bounceLight]
@@ -366,19 +372,23 @@ export default function BrothersVoxelScene({
     const season = getCurrentSeason()
     applySeasonalLighting(nightLightsRef.current, season)
 
-    // Room mode lighting (warmer, cozy)
-    const roomKeyLight = new THREE.DirectionalLight(0xFFF4E0, 0.8)
+    // Room mode lighting — Legends style, warmer/cozier variant
+    const roomAmbient = new THREE.AmbientLight(0x3D2E1F, 0.4)
+    scene.add(roomAmbient)
+
+    const roomKeyLight = new THREE.DirectionalLight(0xFFE4B5, 1.0)
     roomKeyLight.position.set(3, 6, 4)
     scene.add(roomKeyLight)
 
-    const roomFill = new THREE.DirectionalLight(0xFFE8D0, 0.25)
+    const roomFill = new THREE.DirectionalLight(0x8CA8C8, 0.2)
     roomFill.position.set(-3, 4, 2)
     scene.add(roomFill)
 
-    const roomAmbient = new THREE.AmbientLight(0xFFFFFF, 0.35)
-    scene.add(roomAmbient)
+    const roomRim = new THREE.DirectionalLight(0xFFD700, 0.4)
+    roomRim.position.set(0, 3, -5)
+    scene.add(roomRim)
 
-    roomLightsRef.current = [roomKeyLight, roomFill, roomAmbient]
+    roomLightsRef.current = [roomAmbient, roomKeyLight, roomFill, roomRim]
 
     for (const l of nightLightsRef.current) l.visible = bg !== 'room'
     for (const l of roomLightsRef.current) l.visible = bg === 'room'
