@@ -16,12 +16,13 @@ import { dayTotalMinutes } from './chatPlanner.logic'
 interface PlanPreviewCardProps {
   plan: DraftWeeklyPlan
   hoursPerDay: number
+  weekEnergy: 'full' | 'lighter' | 'mvd'
   onToggleItem?: (dayIndex: number, itemId: string) => void
   onGenerateActivity?: (item: DraftPlanItem) => void
   generatingItemId?: string
 }
 
-export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGenerateActivity, generatingItemId }: PlanPreviewCardProps) {
+export default function PlanPreviewCard({ plan, hoursPerDay, weekEnergy, onToggleItem, onGenerateActivity, generatingItemId }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
   const skipCount = plan.skipSuggestions.filter((s) => s.action === 'skip').length
   const modifyCount = plan.skipSuggestions.filter((s) => s.action === 'modify').length
@@ -165,7 +166,9 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
         )
 
         const routineTotal = routineItems.reduce((sum, item) => sum + (item.estimatedMinutes ?? 0), 0)
-        const routineOverBudget = routineTotal > budgetMinutes
+        const generatedTotal = focusItems.reduce((sum, item) => sum + (item.estimatedMinutes ?? 0), 0)
+        const additionsBudget = Math.max(0, budgetMinutes - routineTotal)
+        const generatedOverBudget = generatedTotal > additionsBudget
 
         return (
           <Box key={day.day} sx={{ mb: 2 }}>
@@ -180,10 +183,12 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
                 variant="outlined"
               />
             </Stack>
-            {routineOverBudget && (
+            {generatedOverBudget && (
               <Alert severity="info" sx={{ py: 0, mb: 0.5 }}>
                 <Typography variant="caption">
-                  Routine alone is {routineTotal}m (target {budgetMinutes}m). Consider reducing an activity or switching to a Lighter Week.
+                  {weekEnergy === 'full'
+                    ? `Themed/generated load is ${generatedTotal}m, but Full Week budget leaves ${additionsBudget}m beyond routine. Reduce generated additions to stay on target.`
+                    : `Themed/generated load is ${generatedTotal}m, but your selected budget allows ${additionsBudget}m beyond routine. Reduce generated additions to stay on target.`}
                 </Typography>
               </Alert>
             )}

@@ -168,6 +168,9 @@ function buildPhotoContextSection(labels: PhotoLabel[]): string {
   return lines.join('\n')
 }
 
+const LIGHTER_WEEK_BUDGET_MULTIPLIER = 0.7
+const TOUGH_WEEK_FIXED_MINUTES = 90
+
 export default function PlannerChatPage() {
   const familyId = useFamilyId()
   const { isEnabled } = useAIFeatureFlags()
@@ -266,9 +269,9 @@ export default function PlannerChatPage() {
     if (weekEnergy === 'full') {
       setHoursPerDay(routineTotal > 0 ? Math.round((routineTotal / 60) * 10) / 10 : 3)
     } else if (weekEnergy === 'lighter') {
-      setHoursPerDay(routineTotal > 0 ? Math.round((routineTotal * 0.65 / 60) * 10) / 10 : 2)
+      setHoursPerDay(routineTotal > 0 ? Math.round((routineTotal * LIGHTER_WEEK_BUDGET_MULTIPLIER / 60) * 10) / 10 : 2)
     } else {
-      setHoursPerDay(1.5)
+      setHoursPerDay(TOUGH_WEEK_FIXED_MINUTES / 60)
     }
   }, [weekEnergy, dailyRoutine])
 
@@ -1969,6 +1972,7 @@ Generate a plan for Monday through Friday.`.trim()
               <PlanPreviewCard
                 plan={currentDraft}
                 hoursPerDay={hoursPerDay}
+                weekEnergy={weekEnergy}
                 onToggleItem={handleToggleItem}
                 onGenerateActivity={!applied ? handleGenerateActivity : undefined}
                 generatingItemId={generatingItemId ?? undefined}
