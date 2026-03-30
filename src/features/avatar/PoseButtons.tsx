@@ -17,15 +17,17 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true, pos
     <Box
       sx={{
         display: 'flex',
-        justifyContent: 'center',
-        gap: '8px',
-        py: 1.5,
-        px: 2,
+        gap: '6px',
+        py: 1,
+        px: 1.5,
+        overflowX: 'auto',
+        scrollbarWidth: 'none',
+        '&::-webkit-scrollbar': { display: 'none' },
+        justifyContent: visiblePoses.length <= 5 ? 'center' : 'flex-start',
       }}
     >
       {visiblePoses.map((pose) => {
         const isActive = currentPose === pose.id
-        // Dim non-active buttons while a pose is animating
         const isDimmed = poseAnimating && !isActive
         return (
           <Box
@@ -33,56 +35,57 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true, pos
             component="button"
             onClick={() => !isDimmed && onPose(pose.id)}
             sx={{
-              width: 56,
-              height: 56,
-              borderRadius: isLincoln ? '8px' : '50%',
+              minWidth: 48,
+              height: 48,
+              borderRadius: isLincoln ? '8px' : '14px',
               border: isActive
                 ? '2px solid #FFD700'
-                : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
+                : `1px solid ${isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}`,
               background: isActive
-                ? (isLincoln ? 'rgba(255,215,0,0.12)' : 'rgba(255,215,0,0.1)')
-                : (isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'),
+                ? (isLincoln ? 'rgba(255,215,0,0.15)' : 'rgba(255,215,0,0.12)')
+                : 'transparent',
               color: isActive
                 ? '#FFD700'
-                : (isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)'),
+                : (isLincoln ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.4)'),
               cursor: isDimmed ? 'default' : 'pointer',
               transition: 'all 0.2s ease',
               outline: 'none',
-              p: 0,
+              px: 1,
+              py: 0.5,
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '2px',
-              position: 'relative',
-              opacity: isDimmed ? 0.4 : 1,
+              gap: '1px',
+              flexShrink: 0,
+              opacity: isDimmed ? 0.35 : 1,
               boxShadow: isActive
-                ? '0 0 12px rgba(255,215,0,0.35)'
+                ? '0 0 10px rgba(255,215,0,0.3)'
                 : 'none',
               '&:hover': isDimmed ? {} : {
                 background: isActive
                   ? (isLincoln ? 'rgba(255,215,0,0.2)' : 'rgba(255,215,0,0.18)')
-                  : (isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)'),
-                borderColor: isActive ? '#FFD700' : (isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)'),
-                transform: 'translateY(-1px)',
+                  : (isLincoln ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)'),
+                borderColor: isActive ? '#FFD700' : (isLincoln ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'),
               },
               '&:active': isDimmed ? {} : {
-                transform: 'scale(0.95)',
+                transform: 'scale(0.93)',
               },
             }}
             title={pose.name}
           >
-            <Box sx={{ fontSize: '22px', lineHeight: 1 }}>{pose.icon}</Box>
+            <Box sx={{ fontSize: '20px', lineHeight: 1 }}>{pose.icon}</Box>
             <Typography
               sx={{
-                fontSize: isLincoln ? '12px' : '12px',
+                fontSize: isLincoln ? '8px' : '10px',
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
                 letterSpacing: isLincoln ? '-0.3px' : '0',
-                opacity: isActive ? 1 : 0.7,
+                opacity: isActive ? 1 : 0.65,
                 lineHeight: 1,
                 mt: '2px',
                 fontWeight: isActive ? 700 : 400,
                 color: 'inherit',
+                whiteSpace: 'nowrap',
               }}
             >
               {pose.name}
