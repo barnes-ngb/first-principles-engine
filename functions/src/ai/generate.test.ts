@@ -135,7 +135,7 @@ describe("buildGenerateSystemPrompt", () => {
   it("includes weekly theme when available", () => {
     const prompt = buildGenerateSystemPrompt(lincolnCtx);
     expect(prompt).toContain("Ocean Explorers");
-    expect(prompt).toContain("Weave it in naturally");
+    expect(prompt).toContain("when the connection is natural");
   });
 
   it("omits weekly theme when not available", () => {
