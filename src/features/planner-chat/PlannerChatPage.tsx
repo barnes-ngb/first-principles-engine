@@ -1843,6 +1843,9 @@ Generate a plan for Monday through Friday.`.trim()
     }
   }, [activeChildId, currentDraft, familyId, weekRange.start, resetConversationState])
 
+  const isReviewPhase = Boolean(currentDraft) && !applied
+  const isActivePhase = (setupComplete || conversationLoaded) && !isReviewPhase
+
   return (
     <Page>
       <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -2389,8 +2392,8 @@ Generate a plan for Monday through Friday.`.trim()
             </Box>
           )}
 
-          {/* Chat area — shown below plan for adjustments, or as main area before plan exists */}
-          {(setupComplete || conversationLoaded) && (
+          {/* Chat area — active phase only (planning + in-week adjustments after apply) */}
+          {isActivePhase && (
             <Box
               sx={{
                 overflowY: 'auto',
@@ -2403,9 +2406,14 @@ Generate a plan for Monday through Friday.`.trim()
               }}
             >
               {/* Adjustment label when plan exists */}
-              {currentDraft && (
+              {currentDraft && !applied && (
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
                   Need changes? Type below or tap a quick tweak.
+                </Typography>
+              )}
+              {currentDraft && applied && (
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+                  Need an in-week change? Try: &quot;cancel Wednesday&quot;, &quot;lighten Thursday&quot;, or &quot;swap Tue/Thu&quot;.
                 </Typography>
               )}
               <Stack spacing={1.5}>
@@ -2484,40 +2492,46 @@ Generate a plan for Monday through Friday.`.trim()
             </Box>
           )}
 
-          {/* Input area */}
-          <Stack direction="row" spacing={1} alignItems="flex-end">
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => setShowPhotos(!showPhotos)}
-              sx={{ whiteSpace: 'nowrap' }}
-            >
-              {showPhotos ? 'Hide Photos' : 'Add Photos'}
-            </Button>
-            <TextField
-              fullWidth
-              size="small"
-              placeholder={
-                currentDraft
-                  ? 'Type an adjustment (e.g. "make Wed light")...'
-                  : 'Upload photos first, or type a message...'
-              }
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSend()
+          {/* Input area — active phase only */}
+          {isActivePhase && (
+            <Stack direction="row" spacing={1} alignItems="flex-end">
+              {!currentDraft && !applied && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => setShowPhotos(!showPhotos)}
+                  sx={{ whiteSpace: 'nowrap' }}
+                >
+                  {showPhotos ? 'Hide Photos' : 'Add Photos'}
+                </Button>
+              )}
+              <TextField
+                fullWidth
+                size="small"
+                placeholder={
+                  applied
+                    ? 'Type an in-week change (e.g. "cancel Wednesday")...'
+                    : currentDraft
+                      ? 'Type an adjustment (e.g. "make Wed light")...'
+                      : 'Upload photos first, or type a message...'
                 }
-              }}
-            />
-            <IconButton onClick={() => handleSend()} color="primary" disabled={!inputText.trim() || aiLoading}>
-              {aiLoading ? <CircularProgress size={24} /> : <SendIcon />}
-            </IconButton>
-          </Stack>
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSend()
+                  }
+                }}
+              />
+              <IconButton onClick={() => handleSend()} color="primary" disabled={!inputText.trim() || aiLoading}>
+                {aiLoading ? <CircularProgress size={24} /> : <SendIcon />}
+              </IconButton>
+            </Stack>
+          )}
 
-          {/* Generate Plan button — visible after setup is complete (or conversation loaded), before a draft exists */}
-          {(setupComplete || conversationLoaded) && !currentDraft && !applied && (
+          {/* Generate Plan button — active phase only, before a draft exists */}
+          {isActivePhase && !currentDraft && !applied && (
             <Button
               variant="contained"
               color="primary"
@@ -2532,14 +2546,19 @@ Generate a plan for Monday through Friday.`.trim()
             </Button>
           )}
 
-          {/* Quick suggestion buttons */}
+          {/* Review phase actions */}
+          {isReviewPhase && (
+            <Typography variant="body2" color="text.secondary">
+              Quick adjustments before applying:
+            </Typography>
+          )}
           <QuickSuggestionButtons
             onSelect={handleQuickSuggestion}
-            visible={currentDraft !== null && !applied}
+            visible={isReviewPhase}
           />
 
           {/* Apply plan button */}
-          {currentDraft && !applied && (
+          {isReviewPhase && (
             <Button
               variant="contained"
               color="success"
@@ -2555,8 +2574,8 @@ Generate a plan for Monday through Friday.`.trim()
             <>
               <Alert severity="success" sx={{ display: 'flex', alignItems: 'center' }}>
                 <Box sx={{ flex: 1 }}>
-                  <Typography variant="body2" fontWeight={600}>Plan locked in!</Typography>
-                  <Typography variant="body2">Head to Today to start your week.</Typography>
+                  <Typography variant="body2" fontWeight={600}>Plan applied.</Typography>
+                  <Typography variant="body2">Use the chat box below for in-week changes, or head to Today to start your week.</Typography>
                 </Box>
                 <Button
                   variant="contained"
