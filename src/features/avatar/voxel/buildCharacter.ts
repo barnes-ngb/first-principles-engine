@@ -15,12 +15,17 @@ function texturedBox(
   const geo = new THREE.BoxGeometry(w, h, d)
   const color = baseColor instanceof THREE.Color ? baseColor : new THREE.Color(baseColor)
 
-  // Create material with slight variations per face
-  const materials: THREE.MeshLambertMaterial[] = []
+  // Create material with slight variations per face — Phong for Legends lighting response
+  const materials: THREE.MeshPhongMaterial[] = []
   for (let i = 0; i < 6; i++) {
     const variation = 0.95 + Math.random() * 0.1 // 95% to 105% brightness
     const faceColor = color.clone().multiplyScalar(variation)
-    materials.push(new THREE.MeshLambertMaterial({ color: faceColor }))
+    materials.push(new THREE.MeshPhongMaterial({
+      color: faceColor,
+      specular: 0x222222,
+      shininess: 8,
+      flatShading: true,
+    }))
   }
 
   const mesh = new THREE.Mesh(geo, materials)
@@ -38,18 +43,32 @@ function box(
 ): THREE.Mesh {
   const c = color instanceof THREE.Color ? color : new THREE.Color(color)
   const geo = new THREE.BoxGeometry(w, h, d)
-  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: c }))
+  const mesh = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({
+    color: c,
+    specular: 0x222222,
+    shininess: 8,
+    flatShading: true,
+  }))
   if (name) mesh.name = name
   return mesh
 }
 
 /** Create an array of 6 slightly-varied materials for per-face texturing */
-function createTexturedMaterials(baseColor: THREE.Color | number): THREE.MeshLambertMaterial[] {
+function createTexturedMaterials(
+  baseColor: THREE.Color | number,
+  specular = 0x222222,
+  shininess = 8,
+): THREE.MeshPhongMaterial[] {
   const color = baseColor instanceof THREE.Color ? baseColor : new THREE.Color(baseColor)
-  const materials: THREE.MeshLambertMaterial[] = []
+  const materials: THREE.MeshPhongMaterial[] = []
   for (let i = 0; i < 6; i++) {
     const variation = 0.95 + Math.random() * 0.1
-    materials.push(new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(variation) }))
+    materials.push(new THREE.MeshPhongMaterial({
+      color: color.clone().multiplyScalar(variation),
+      specular,
+      shininess,
+      flatShading: true,
+    }))
   }
   return materials
 }
@@ -171,13 +190,22 @@ export function buildCharacter(
   headGroup.add(mouth)
 
   // Hair — built from the hair module, child of headGroup (headY = 0 in local space)
-  const hairMat = new THREE.MeshLambertMaterial({ color: hairColor })
+  const hairMat = new THREE.MeshPhongMaterial({
+    color: hairColor,
+    specular: 0x332211,
+    shininess: 12,
+    flatShading: true,
+  })
   const hairGroup = buildHair(features.hairStyle, features.hairLength, hairMat, 0, hU)
   headGroup.add(hairGroup)
 
   // --- BODY ---
   const torsoCenter = legTop + (torsoPxH * U) / 2
-  const torso = texturedBox(U * torsoPxW, U * torsoPxH, U * 4, shirtColor, 'torso')
+  const torso = new THREE.Mesh(
+    new THREE.BoxGeometry(U * torsoPxW, U * torsoPxH, U * 4),
+    createTexturedMaterials(shirtColor, 0x111111, 5),
+  )
+  torso.name = 'torso'
   torso.position.y = torsoCenter
   character.add(torso)
 
@@ -231,13 +259,13 @@ export function buildCharacter(
   const sleeveLen = Math.min(5, armPxLen * 0.42) // Proportional sleeve length
   const sleeveGeoL = new THREE.BoxGeometry(U * 4.2, U * sleeveLen, U * 4.2)
   sleeveGeoL.translate(0, -U * sleeveLen / 2, 0) // Upper portion of arm relative to shoulder pivot
-  const sleeveL = new THREE.Mesh(sleeveGeoL, createTexturedMaterials(shirtColor))
+  const sleeveL = new THREE.Mesh(sleeveGeoL, createTexturedMaterials(shirtColor, 0x111111, 5))
   sleeveL.name = 'sleeveL'
   armL.add(sleeveL) // Child of arm — rotates with it
 
   const sleeveGeoR = new THREE.BoxGeometry(U * 4.2, U * sleeveLen, U * 4.2)
   sleeveGeoR.translate(0, -U * sleeveLen / 2, 0)
-  const sleeveR = new THREE.Mesh(sleeveGeoR, createTexturedMaterials(shirtColor))
+  const sleeveR = new THREE.Mesh(sleeveGeoR, createTexturedMaterials(shirtColor, 0x111111, 5))
   sleeveR.name = 'sleeveR'
   armR.add(sleeveR) // Child of arm — rotates with it
 
@@ -269,10 +297,20 @@ function recolorMesh(mesh: THREE.Mesh, color: THREE.Color): void {
   if (Array.isArray(mesh.material)) {
     for (let i = 0; i < mesh.material.length; i++) {
       const variation = 0.95 + Math.random() * 0.1
-      mesh.material[i] = new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(variation) })
+      mesh.material[i] = new THREE.MeshPhongMaterial({
+        color: color.clone().multiplyScalar(variation),
+        specular: 0x111111,
+        shininess: 5,
+        flatShading: true,
+      })
     }
   } else {
-    mesh.material = new THREE.MeshLambertMaterial({ color })
+    mesh.material = new THREE.MeshPhongMaterial({
+      color,
+      specular: 0x111111,
+      shininess: 5,
+      flatShading: true,
+    })
   }
 }
 
@@ -298,7 +336,12 @@ export function applyOutfitColor(
       const creeperColor = brightness > 0.5 ? 0x2E7D32 : 0x4CAF50
       character.traverse((child) => {
         if (child.name?.startsWith('creeper') && child instanceof THREE.Mesh) {
-          child.material = new THREE.MeshLambertMaterial({ color: creeperColor })
+          child.material = new THREE.MeshPhongMaterial({
+            color: creeperColor,
+            specular: 0x111111,
+            shininess: 5,
+            flatShading: true,
+          })
         }
       })
       break
@@ -347,10 +390,20 @@ export function applyFeatures(
         for (let i = 0; i < mesh.material.length; i++) {
           const variation = 0.95 + Math.random() * 0.1
           const faceColor = skinColor.clone().multiplyScalar(variation)
-          mesh.material[i] = new THREE.MeshLambertMaterial({ color: faceColor })
+          mesh.material[i] = new THREE.MeshPhongMaterial({
+            color: faceColor,
+            specular: 0x222222,
+            shininess: 8,
+            flatShading: true,
+          })
         }
       } else {
-        mesh.material = new THREE.MeshLambertMaterial({ color: skinColor })
+        mesh.material = new THREE.MeshPhongMaterial({
+          color: skinColor,
+          specular: 0x222222,
+          shininess: 8,
+          flatShading: true,
+        })
       }
     }
   }
@@ -363,7 +416,12 @@ export function applyFeatures(
     const oldHair = headGroup.getObjectByName('hairGroup')
     if (oldHair) headGroup.remove(oldHair)
 
-    const hairMat = new THREE.MeshLambertMaterial({ color: features.hairColor })
+    const hairMat = new THREE.MeshPhongMaterial({
+      color: features.hairColor,
+      specular: 0x332211,
+      shininess: 12,
+      flatShading: true,
+    })
     const headGeo = headMesh.geometry as THREE.BoxGeometry
     const U = headGeo.parameters.width / 8
     // headY = 0 because hair is a child of headGroup (local space)
@@ -373,7 +431,12 @@ export function applyFeatures(
 
   // Update eye color
   if (features.eyeColor) {
-    const eyeMat = new THREE.MeshLambertMaterial({ color: features.eyeColor })
+    const eyeMat = new THREE.MeshPhongMaterial({
+      color: features.eyeColor,
+      specular: 0x222222,
+      shininess: 8,
+      flatShading: true,
+    })
     for (const name of ['pupilL', 'pupilR']) {
       const mesh = character.getObjectByName(name) as THREE.Mesh | undefined
       if (mesh) mesh.material = eyeMat

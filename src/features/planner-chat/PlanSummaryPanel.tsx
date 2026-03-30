@@ -12,6 +12,7 @@ interface PlanSummaryPanelProps {
   appBlocks: AppBlock[]
   prioritySkills: PrioritySkill[]
   currentDraft: DraftWeeklyPlan | null
+  masteryReviewLine?: string
 }
 
 export default function PlanSummaryPanel({
@@ -19,6 +20,7 @@ export default function PlanSummaryPanel({
   appBlocks,
   prioritySkills,
   currentDraft,
+  masteryReviewLine,
 }: PlanSummaryPanelProps) {
   const coverage: CoverageEntry[] = currentDraft
     ? buildCoverageSummary(currentDraft, prioritySkills)
@@ -53,22 +55,11 @@ export default function PlanSummaryPanel({
           ))}
         </Stack>
 
-        {/* Row 2: Priority Skills */}
-        {prioritySkills.length > 0 && (
-          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
-            <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
-              Focus:
-            </Typography>
-            {prioritySkills.map((skill) => (
-              <Chip
-                key={skill.tag}
-                label={`${skill.label} (${skill.level})`}
-                size="small"
-                color="info"
-                variant="outlined"
-              />
-            ))}
-          </Stack>
+        {/* Row 2: Mastery one-liner (replaces raw skill chip dump) */}
+        {masteryReviewLine && (
+          <Typography variant="caption" color="text.secondary">
+            {masteryReviewLine}
+          </Typography>
         )}
 
         {/* Row 3: Coverage (only when draft exists) */}
@@ -95,12 +86,6 @@ export default function PlanSummaryPanel({
           </Stack>
         )}
 
-        {/* Row 4: Minimum win */}
-        {currentDraft && (
-          <Typography variant="caption" color="text.secondary">
-            Min win: {currentDraft.minimumWin}
-          </Typography>
-        )}
       </Stack>
     </Box>
   )
