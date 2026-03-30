@@ -257,6 +257,11 @@ export default function PlannerChatPage() {
   // Per-subject default time overrides (minutes per day)
   const [subjectTimeDefaults, setSubjectTimeDefaults] = useState<SubjectTimeDefaults>({})
 
+  const chapterQuestionsByDay = useMemo(
+    () => (currentDraft?.days ?? []).filter((day) => Boolean(day.chapterQuestion)),
+    [currentDraft],
+  )
+
   // Returning-user compact setup toggles
   const [showRoutineEdit, setShowRoutineEdit] = useState(false)
   const [showWorkbookEdit, setShowWorkbookEdit] = useState(false)
@@ -2379,6 +2384,43 @@ Generate a plan for Monday through Friday.`.trim()
               p: 2,
             }}>
               <Typography variant="h6" gutterBottom>Your Week Plan</Typography>
+              {chapterQuestionsByDay.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                    Chapter Questions
+                  </Typography>
+                  <Stack spacing={1}>
+                    {chapterQuestionsByDay.map((dayPlan) => {
+                      const chapterQuestion = dayPlan.chapterQuestion
+                      if (!chapterQuestion) return null
+
+                      return (
+                        <Box
+                          key={`${dayPlan.day}-${chapterQuestion.chapter}-${chapterQuestion.question}`}
+                          sx={{
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            borderRadius: 1.5,
+                            p: 1.5,
+                            bgcolor: 'grey.50',
+                          }}
+                        >
+                          <Typography variant="subtitle2">{dayPlan.day}</Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Chapter: {chapterQuestion.chapter}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Type: {chapterQuestion.questionType}
+                          </Typography>
+                          <Typography variant="body2" sx={{ mt: 0.5 }}>
+                            {chapterQuestion.question}
+                          </Typography>
+                        </Box>
+                      )
+                    })}
+                  </Stack>
+                </Box>
+              )}
               <PlanPreviewCard
                 plan={currentDraft}
                 hoursPerDay={hoursPerDay}
