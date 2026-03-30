@@ -177,6 +177,8 @@ function buildPhotoContextSection(labels: PhotoLabel[]): string {
   return lines.join('\n')
 }
 
+const LIGHTER_WEEK_BUDGET_MULTIPLIER = 0.7
+
 export default function PlannerChatPage() {
   const familyId = useFamilyId()
   const { isEnabled } = useAIFeatureFlags()
@@ -271,7 +273,7 @@ export default function PlannerChatPage() {
     if (weekEnergy === 'full') {
       setHoursPerDay(routineTotal > 0 ? Math.round((routineTotal / 60) * 10) / 10 : 3)
     } else if (weekEnergy === 'lighter') {
-      setHoursPerDay(routineTotal > 0 ? Math.round((routineTotal * 0.65 / 60) * 10) / 10 : 2)
+      setHoursPerDay(routineTotal > 0 ? Math.round((routineTotal * LIGHTER_WEEK_BUDGET_MULTIPLIER / 60) * 10) / 10 : 2)
     } else {
       setHoursPerDay(1.5)
     }

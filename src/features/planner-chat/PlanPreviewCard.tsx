@@ -169,7 +169,10 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
         )
 
         const mustDoTotal = mustDoItems.reduce((sum, item) => sum + (item.estimatedMinutes ?? 0), 0)
-        const mustDoOverBudget = mustDoTotal > budgetMinutes
+        const generatedAdditionsMinutes = Math.max(0, total - mustDoTotal)
+        const additionsBudgetMinutes = Math.max(0, budgetMinutes - mustDoTotal)
+        const generatedAdditionsOverBudget = generatedAdditionsMinutes > additionsBudgetMinutes
+        const shouldShowLoadWarning = generatedAdditionsOverBudget
 
         return (
           <Box key={day.day} sx={{ mb: 2 }}>
@@ -184,10 +187,10 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
                 variant="outlined"
               />
             </Stack>
-            {mustDoOverBudget && (
+            {shouldShowLoadWarning && (
               <Alert severity="info" sx={{ py: 0, mb: 0.5 }}>
                 <Typography variant="caption">
-                  Routine alone is {mustDoTotal}m (target {budgetMinutes}m). Consider reducing an activity or switching to a Lighter Week.
+                  Generated/themed additions are {generatedAdditionsMinutes}m (budget {additionsBudgetMinutes}m). Consider trimming added items to stay within your selected week target.
                 </Typography>
               </Alert>
             )}
