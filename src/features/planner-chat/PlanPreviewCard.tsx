@@ -1,10 +1,6 @@
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
-import Accordion from '@mui/material/Accordion'
-import AccordionDetails from '@mui/material/AccordionDetails'
-import AccordionSummary from '@mui/material/AccordionSummary'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
@@ -27,25 +23,25 @@ interface PlanPreviewCardProps {
 
 export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGenerateActivity, generatingItemId }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
+  const skipCount = plan.skipSuggestions.filter((s) => s.action === 'skip').length
+  const modifyCount = plan.skipSuggestions.filter((s) => s.action === 'modify').length
+  const focusSummary = plan.minimumWin.trim()
+
+  const isRoutineItem = (item: DraftPlanItem) => item.category === 'must-do' || item.mvdEssential === true
 
   return (
     <Box sx={{ width: '100%' }}>
-      <Stack spacing={0.5} sx={{ mb: 1 }}>
-        <Typography variant="subtitle2" color="primary">
-          Minimum Win
+      <Stack spacing={0.5} sx={{ mb: 1.5 }}>
+        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          Focus / Skip Summary
         </Typography>
-        {plan.minimumWin.length <= 100 ? (
-          <Typography variant="body2">{plan.minimumWin}</Typography>
-        ) : (
-          <Accordion disableGutters elevation={0} sx={{ '&::before': { display: 'none' } }}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 0, minHeight: 0, '& .MuiAccordionSummary-content': { my: 0.5 } }}>
-              <Typography variant="body2">{plan.minimumWin.slice(0, 100)}…</Typography>
-            </AccordionSummary>
-            <AccordionDetails sx={{ px: 0, pt: 0 }}>
-              <Typography variant="body2">{plan.minimumWin}</Typography>
-            </AccordionDetails>
-          </Accordion>
-        )}
+        <Typography variant="body2">
+          <Box component="span" sx={{ fontWeight: 600 }}>Focus:</Box> {focusSummary}
+        </Typography>
+        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+          <Chip label={`${skipCount} skip`} size="small" variant="outlined" color={skipCount > 0 ? 'default' : 'success'} />
+          <Chip label={`${modifyCount} modify`} size="small" variant="outlined" color={modifyCount > 0 ? 'warning' : 'default'} />
+        </Stack>
       </Stack>
 
       {plan.skipSuggestions.length > 0 && (
@@ -72,8 +68,8 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
       {plan.days.map((day, dayIndex) => {
         const total = dayTotalMinutes(day)
         const overBudget = total > budgetMinutes
-        const mustDoItems = day.items.filter(item => item.category === 'must-do')
-        const chooseItems = day.items.filter(item => item.category === 'choose' || item.category === undefined)
+        const routineItems = day.items.filter(isRoutineItem)
+        const focusItems = day.items.filter(item => !isRoutineItem(item))
 
         const renderItem = (item: DraftPlanItem) => (
           <Box key={item.id}>
@@ -168,8 +164,8 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
           </Box>
         )
 
-        const mustDoTotal = mustDoItems.reduce((sum, item) => sum + (item.estimatedMinutes ?? 0), 0)
-        const mustDoOverBudget = mustDoTotal > budgetMinutes
+        const routineTotal = routineItems.reduce((sum, item) => sum + (item.estimatedMinutes ?? 0), 0)
+        const routineOverBudget = routineTotal > budgetMinutes
 
         return (
           <Box key={day.day} sx={{ mb: 2 }}>
@@ -184,10 +180,10 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
                 variant="outlined"
               />
             </Stack>
-            {mustDoOverBudget && (
+            {routineOverBudget && (
               <Alert severity="info" sx={{ py: 0, mb: 0.5 }}>
                 <Typography variant="caption">
-                  Routine alone is {mustDoTotal}m (target {budgetMinutes}m). Consider reducing an activity or switching to a Lighter Week.
+                  Routine alone is {routineTotal}m (target {budgetMinutes}m). Consider reducing an activity or switching to a Lighter Week.
                 </Typography>
               </Alert>
             )}
@@ -198,26 +194,34 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
               </Typography>
             ) : (
               <>
-                {/* Must-Do section */}
-                {mustDoItems.length > 0 && (
+                {/* ROUTINE section */}
+                {routineItems.length > 0 && (
                   <Box sx={{ pl: 1, mb: 0.5 }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                      Must Do
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6 }}
+                    >
+                      Routine
                     </Typography>
-                    <Stack spacing={0.25}>
-                      {mustDoItems.map(item => renderItem(item))}
+                    <Stack spacing={0.25} sx={{ color: 'text.secondary' }}>
+                      {routineItems.map(item => renderItem(item))}
                     </Stack>
                   </Box>
                 )}
 
-                {/* Choose section */}
-                {chooseItems.length > 0 && (
+                {/* TODAY'S FOCUS section */}
+                {focusItems.length > 0 && (
                   <Box sx={{ pl: 1, mt: 0.5 }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                      Choose{chooseItems.length >= 3 ? ' 2' : ''}
+                    <Typography
+                      variant="caption"
+                      color="secondary.main"
+                      sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6 }}
+                    >
+                      Today&apos;s Focus{focusItems.length >= 3 ? ' · Choose 2' : ''}
                     </Typography>
                     <Stack spacing={0.25}>
-                      {chooseItems.map(item => renderItem(item))}
+                      {focusItems.map(item => renderItem(item))}
                     </Stack>
                   </Box>
                 )}
