@@ -187,7 +187,7 @@ export default function PlanPreviewCard({ plan, hoursPerDay, onToggleItem, onGen
             {mustDoOverBudget && (
               <Alert severity="info" sx={{ py: 0, mb: 0.5 }}>
                 <Typography variant="caption">
-                  Routine alone is {mustDoTotal}m (target {budgetMinutes}m). Consider reducing Reading Eggs from 45m to 20m or moving it to Choose.
+                  Routine alone is {mustDoTotal}m (target {budgetMinutes}m). Consider reducing an activity or switching to a Lighter Week.
                 </Typography>
               </Alert>
             )}
