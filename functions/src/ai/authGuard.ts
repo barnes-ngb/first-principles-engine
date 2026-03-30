@@ -83,23 +83,30 @@ export async function checkRateLimit(
   maxCalls: number = 50,
   windowMinutes: number = 60,
 ): Promise<void> {
-  const db = getFirestore();
-  const cutoff = new Date(
-    Date.now() - windowMinutes * 60 * 1000,
-  ).toISOString();
+  try {
+    const db = getFirestore();
+    const cutoff = new Date(
+      Date.now() - windowMinutes * 60 * 1000,
+    ).toISOString();
 
-  const recentSnap = await db
-    .collection(`families/${uid}/aiUsage`)
-    .where("createdAt", ">=", cutoff)
-    .where("taskType", "==", action)
-    .count()
-    .get();
+    const recentSnap = await db
+      .collection(`families/${uid}/aiUsage`)
+      .where("taskType", "==", action)
+      .where("createdAt", ">=", cutoff)
+      .count()
+      .get();
 
-  const count = recentSnap.data().count;
-  if (count >= maxCalls) {
-    throw new HttpsError(
-      "resource-exhausted",
-      `Rate limit exceeded: max ${maxCalls} ${action} calls per ${windowMinutes} minutes.`,
-    );
+    const count = recentSnap.data().count;
+    if (count >= maxCalls) {
+      throw new HttpsError(
+        "resource-exhausted",
+        `Rate limit exceeded: max ${maxCalls} ${action} calls per ${windowMinutes} minutes.`,
+      );
+    }
+  } catch (err) {
+    // Re-throw actual rate limit violations
+    if (err instanceof HttpsError) throw err;
+    // Log but don't block on infrastructure errors (e.g. missing composite index)
+    console.warn("Rate limit check failed (non-blocking):", err);
   }
 }
