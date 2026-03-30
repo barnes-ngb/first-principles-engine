@@ -95,12 +95,6 @@ export default function PlanSummaryPanel({
           </Stack>
         )}
 
-        {/* Row 4: Minimum win */}
-        {currentDraft && (
-          <Typography variant="caption" color="text.secondary">
-            Min win: {currentDraft.minimumWin}
-          </Typography>
-        )}
       </Stack>
     </Box>
   )
