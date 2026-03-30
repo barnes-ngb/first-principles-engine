@@ -43,6 +43,7 @@ src/core/ai/useAI.ts              functions/src/ai/
                                       disposition → handleDisposition
                                       conundrum  → handleConundrum
                                       weeklyFocus → handleWeeklyFocus
+                                      scan       → handleScan
                                            ↓
                                   tasks/<handler>.ts
                                     → buildContextForTask(taskType, ...)  [contextSlices.ts]
