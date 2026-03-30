@@ -76,6 +76,9 @@ interface PromptContext {
   currentRung: { title: string; description?: string } | undefined;
   ladderTitle: string | undefined;
   weekTheme: string | undefined;
+  weekVirtue: string | undefined;
+  weekStoryTitle: string | undefined;
+  weekReadAloud: string | undefined;
 }
 
 function buildGenerateSystemPrompt(ctx: PromptContext): string {
@@ -137,13 +140,18 @@ function buildGenerateSystemPrompt(ctx: PromptContext): string {
     }
   }
 
-  // Weekly theme
-  if (ctx.weekTheme) {
+  // Weekly theme and story context
+  if (ctx.weekTheme || ctx.weekVirtue || ctx.weekStoryTitle || ctx.weekReadAloud) {
+    lines.push("", "## Weekly Context", "");
+    if (ctx.weekTheme) lines.push(`Theme: "${ctx.weekTheme}"`);
+    if (ctx.weekVirtue) lines.push(`Virtue: ${ctx.weekVirtue}`);
+    if (ctx.weekStoryTitle) lines.push(`Story: ${ctx.weekStoryTitle}`);
+    if (ctx.weekReadAloud) lines.push(`Read-aloud book: ${ctx.weekReadAloud}`);
     lines.push(
       "",
-      "## Weekly Theme",
-      "",
-      `This week's theme is: "${ctx.weekTheme}". Weave it in naturally where possible.`,
+      "Tie the activity to this week's theme/story when the connection is natural.",
+      "For example, use the story scenario as context for math problems or the virtue as a discussion thread.",
+      "Don't force it if the connection is unnatural.",
     );
   }
 
@@ -444,16 +452,27 @@ export const generateActivity = onCall(
       }
     }
 
-    // ── Load current week theme (optional) ─────────────────────
+    // ── Load current week context (optional) ────────────────────
     let weekTheme: string | undefined;
+    let weekVirtue: string | undefined;
+    let weekStoryTitle: string | undefined;
+    let weekReadAloud: string | undefined;
     const weekKey = currentWeekKey();
     const weekSnap = await db
       .doc(`families/${familyId}/weeks/${weekKey}`)
       .get();
 
     if (weekSnap.exists) {
-      const weekData = weekSnap.data() as { theme?: string };
+      const weekData = weekSnap.data() as {
+        theme?: string;
+        virtue?: string;
+        conundrum?: { title?: string };
+        readAloudBook?: string;
+      };
       weekTheme = weekData.theme;
+      weekVirtue = weekData.virtue;
+      weekStoryTitle = weekData.conundrum?.title;
+      weekReadAloud = weekData.readAloudBook;
     }
 
     // ── Assemble prompt ────────────────────────────────────────
@@ -466,6 +485,9 @@ export const generateActivity = onCall(
       currentRung,
       ladderTitle,
       weekTheme,
+      weekVirtue,
+      weekStoryTitle,
+      weekReadAloud,
     };
 
     const systemPrompt = buildGenerateSystemPrompt(ctx);
