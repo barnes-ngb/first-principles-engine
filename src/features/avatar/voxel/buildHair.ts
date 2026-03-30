@@ -36,10 +36,20 @@ export function buildHair(
   // Head is 8U×8U×8U, centered at headY
   if (U) {
     // Extract base color for shade variations
-    const baseMat = material as THREE.MeshLambertMaterial
+    const baseMat = material as THREE.MeshPhongMaterial
     const baseHex = baseMat.color.getHex()
-    const lightMat = new THREE.MeshLambertMaterial({ color: lerpColor(baseHex, 0xFFFFFF, 0.1) })
-    const darkMat = new THREE.MeshLambertMaterial({ color: lerpColor(baseHex, 0x000000, 0.12) })
+    const lightMat = new THREE.MeshPhongMaterial({
+      color: lerpColor(baseHex, 0xFFFFFF, 0.1),
+      specular: 0x332211,
+      shininess: 12,
+      flatShading: true,
+    })
+    const darkMat = new THREE.MeshPhongMaterial({
+      color: lerpColor(baseHex, 0x000000, 0.12),
+      specular: 0x332211,
+      shininess: 12,
+      flatShading: true,
+    })
 
     // ── Lincoln-specific hair: medium style + ear_length ────────────
     // Parted on the LEFT, most volume sweeps to the RIGHT,

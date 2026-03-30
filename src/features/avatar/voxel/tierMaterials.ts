@@ -24,6 +24,7 @@ export interface TierMaterials {
   primary: number
   accent: number
   detail: number
+  specular: number
   emissive: number
   emissiveIntensity: number
   shininess: number
@@ -37,9 +38,10 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     primary: 0x8B7332,       // Warm golden-brown (treated wood planks)
     accent: 0xA08A4A,
     detail: 0x6B5522,        // Darker wood grain
+    specular: 0x554422,
     emissive: 0x000000,
     emissiveIntensity: 0,
-    shininess: 10,
+    shininess: 15,
     roughnessHint: 'rough, natural wood planks',
     weathering: 0.05,
   },
@@ -47,19 +49,32 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     primary: 0x808080,
     accent: 0x999999,
     detail: 0x666666,
+    specular: 0x444444,
     emissive: 0x000000,
     emissiveIntensity: 0,
-    shininess: 15,
+    shininess: 20,
     roughnessHint: 'rough cobblestone',
     weathering: 0.1,
   },
-  iron: {
-    primary: 0x6E6E6E,      // Medium-dark iron gray — NOT bright/white
-    accent: 0x4E4E4E,       // Dark iron — shadows, edges
-    detail: 0x8A8A8A,       // Lighter spots — highlights, buckles
+  leather: {
+    primary: 0x8B5E3C,
+    accent: 0xA07050,
+    detail: 0x6B4428,
+    specular: 0x443322,
     emissive: 0x000000,
     emissiveIntensity: 0,
-    shininess: 40,
+    shininess: 10,
+    roughnessHint: 'worn leather',
+    weathering: 0.15,
+  },
+  iron: {
+    primary: 0xA0A0A8,      // Brighter iron for Legends look
+    accent: 0x4E4E4E,       // Dark iron — shadows, edges
+    detail: 0x8A8A8A,       // Lighter spots — highlights, buckles
+    specular: 0x888888,
+    emissive: 0x000000,
+    emissiveIntensity: 0,
+    shininess: 45,
     roughnessHint: 'smooth metal',
     rust: 0x7A5C3C,         // Warm brown-gray for weathering spots
     weathering: 0.2,        // Moderate weathering
@@ -68,28 +83,31 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     primary: 0xDAA520,
     accent: 0xFFD700,
     detail: 0xB8860B,
-    emissive: 0x332200,
-    emissiveIntensity: 0.15,
-    shininess: 60,
+    specular: 0xFFD700,
+    emissive: 0x1a1400,
+    emissiveIntensity: 0.1,
+    shininess: 65,
     roughnessHint: 'polished, gleaming',
     weathering: 0.1,
   },
   diamond: {
-    primary: 0x4DD6E8,
+    primary: 0x4ECDC4,
     accent: 0x7DF9FF,
     detail: 0x2CB5C6,
-    emissive: 0x114455,
-    emissiveIntensity: 0.25,
+    specular: 0x88FFFF,
+    emissive: 0x0a1a1a,
+    emissiveIntensity: 0.15,
     shininess: 80,
     roughnessHint: 'crystalline, translucent edges',
     weathering: 0.0,     // Pristine, no weathering
   },
   netherite: {
-    primary: 0x3D3535,
+    primary: 0x3C2A4A,
     accent: 0x5C4A4A,
     detail: 0x2A2222,
-    emissive: 0x331111,
-    emissiveIntensity: 0.2,
+    specular: 0x6644AA,
+    emissive: 0x0a0515,
+    emissiveIntensity: 0.1,
     shininess: 50,
     roughnessHint: 'ancient, dark, with ember glow',
     rust: 0x4A2020,
@@ -190,7 +208,7 @@ export function applyTierToArmor(
         const variation = 0.95 + Math.random() * 0.1
         faceMats.push(new THREE.MeshPhongMaterial({
           color: color.clone().multiplyScalar(variation),
-          specular: new THREE.Color(0x444444),
+          specular: new THREE.Color(materials.specular),
           shininess: materials.shininess,
           emissive: new THREE.Color(materials.emissive),
           emissiveIntensity: materials.emissiveIntensity,
