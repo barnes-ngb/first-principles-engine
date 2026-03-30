@@ -77,9 +77,9 @@ const items = snapshot.docs.map((doc) => ({
 - `src/components/` — Shared UI components
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
-- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useDebounce, useSaveState, useAudioRecorder, useSpeechRecognition, useTTS, useXpLedger)
-- `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`) and enum-like constants (`enums.ts`)
-- `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns
+- `src/core/hooks/` — Shared hooks (useActiveChild, useAudioRecorder, useChildren, useCreativeTimer, useDebounce, useSaveState, useScan, useSpeechRecognition, useTTS)
+- `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`), enum-like constants (`enums.ts`), Zod validation schemas (`zod.ts`)
+- `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns, image compression, performance helpers
 - `src/core/ai/` — AI service layer, feature flags, useAI hook, prompt templates
 - `src/core/profile/` — Profile context provider and hook (family + children)
 - `src/core/xp/` — XP ledger, armor tiers, armor unlock logic
@@ -217,7 +217,7 @@ All under `families/{familyId}/`:
 4. **Child context is assembled per-request** from Firestore (skill snapshot, pace data, recent sessions).
 5. **Cost tracking:** Log token usage and model used to Firestore for monitoring.
 6. **Model selection by task:**
-   - Complex reasoning (plan, evaluate, quest, generateStory, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus): Claude Sonnet (`claude-sonnet-4-6`)
+   - Complex reasoning (plan, evaluate, quest, generateStory, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan): Claude Sonnet (`claude-sonnet-4-6`)
    - Routine generation (generate, chat): Claude Haiku (`claude-haiku-4-5-20251001`)
    - Image generation: DALL-E 3 (scenes, armor sheets) + gpt-image-1 (transparent stickers, photo transform)
 
@@ -245,15 +245,16 @@ All under `families/{familyId}/`:
 - `functions/src/ai/chat.ts` — Main chat CF, task type routing, prompt builders
 - `functions/src/ai/chatTypes.ts` — callClaude helper, task handler types
 - `functions/src/ai/contextSlices.ts` — Per-task context loading (charter, child, engagement, etc.)
-- `functions/src/ai/aiConfig.ts` — AI configuration (model selection, tokens, etc.)
-- `functions/src/ai/aiService.ts` — Core AI service orchestration
+- `functions/src/ai/aiConfig.ts` — API key management (Firebase Functions Params)
+- `functions/src/ai/aiService.ts` — Image generation provider abstraction
+- `functions/src/ai/authGuard.ts` — Auth utilities (requireApprovedUser, checkRateLimit)
 - `functions/src/ai/sanitizeJson.ts` — JSON response sanitization
 - `functions/src/ai/health.ts` — Health check endpoint
 - `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, chat, analyzePatterns
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/imageGen.ts` — Image generation routing
-- `functions/src/ai/imageTasks/` — 13 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, enhanceSketch, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar, + index)
+- `functions/src/ai/imageTasks/` — 12 image task handlers + index (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, enhanceSketch, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar)
 - `functions/src/ai/providers/` — Claude + OpenAI provider adapters (with `__stubs__/` for test mocking)
 
 ## Family Context (for AI prompt reference)
