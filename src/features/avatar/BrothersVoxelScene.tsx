@@ -14,7 +14,6 @@ import { buildHelmHair } from './voxel/buildHair'
 import { buildRoom } from './voxel/buildRoom'
 import {
   getCurrentSeason,
-  getSeasonalStarColor,
   tintPlatformColor,
   applySeasonalLighting,
   createFallingParticles,
@@ -55,41 +54,75 @@ function lerpPlatformColor(a: number, b: number, t: number): number {
   return ca.getHex()
 }
 
-function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): THREE.Group {
-  const scale = ageGroup === 'younger' ? 0.88 : 1.0
-  const s = scale
-  const platform = new THREE.Group()
-  platform.name = 'platform'
+function buildPedestal(tierColor: number): THREE.Group {
+  const pedestal = new THREE.Group()
+  pedestal.name = 'platform'
 
-  const mainColor = tierBaseColor ?? 0x555555
-  const darkColor = lerpPlatformColor(mainColor, 0x000000, 0.2)
-  const lightColor = lerpPlatformColor(mainColor, 0xFFFFFF, 0.15)
+  const stoneMat = new THREE.MeshPhongMaterial({
+    color: 0x3A3A3A, specular: 0x222222, shininess: 10, flatShading: true,
+  })
+  const tierMat = new THREE.MeshPhongMaterial({
+    color: tierColor, specular: 0x444444, shininess: 15, flatShading: true,
+  })
+  const topColor = lerpPlatformColor(tierColor, 0xFFFFFF, 0.15)
+  const topMat = new THREE.MeshPhongMaterial({
+    color: topColor, specular: 0x555555, shininess: 20, flatShading: true,
+  })
 
-  function makeBox(w: number, h: number, d: number, color: number): THREE.Mesh {
-    const geo = new THREE.BoxGeometry(w, h, d)
-    const mats: THREE.MeshLambertMaterial[] = []
-    const base = new THREE.Color(color)
-    for (let i = 0; i < 6; i++) {
-      const variation = 0.92 + Math.random() * 0.16
-      mats.push(new THREE.MeshLambertMaterial({ color: base.clone().multiplyScalar(variation) }))
-    }
-    return new THREE.Mesh(geo, mats)
+  // Wide dark base
+  const base = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.3, 3.5), stoneMat)
+  base.position.set(0, -0.15, 0)
+  pedestal.add(base)
+
+  // Middle tier-colored step
+  const mid = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.25, 2.8), tierMat)
+  mid.position.set(0, 0.25, 0)
+  pedestal.add(mid)
+
+  // Light top surface
+  const top = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.15, 2.2), topMat)
+  top.position.set(0, 0.55, 0)
+  pedestal.add(top)
+
+  // Gold edge glow on top step
+  const glowMat = new THREE.MeshBasicMaterial({ color: 0xFFD700, transparent: true, opacity: 0.25 })
+  const edges: [number, number, number, number, number, number][] = [
+    [0, 0.63, 1.1, 2.2, 0.02, 0.02],     // front
+    [0, 0.63, -1.1, 2.2, 0.02, 0.02],     // back
+    [-1.1, 0.63, 0, 0.02, 0.02, 2.2],     // left
+    [1.1, 0.63, 0, 0.02, 0.02, 2.2],      // right
+  ]
+  for (const [x, y, z, w, h, d] of edges) {
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), glowMat)
+    edge.position.set(x, y, z)
+    pedestal.add(edge)
   }
 
-  const step1 = makeBox(3.0 * s, 0.25 * s, 2.0 * s, darkColor)
-  step1.position.y = -0.125 * s
-  platform.add(step1)
+  return pedestal
+}
 
-  const step2 = makeBox(2.4 * s, 0.25 * s, 1.6 * s, mainColor)
-  step2.position.y = 0.125 * s
-  platform.add(step2)
+function buildGradientSky(scene: THREE.Scene) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 2
+  canvas.height = 256
+  const ctx = canvas.getContext('2d')!
 
-  const step3 = makeBox(1.8 * s, 0.2 * s, 1.2 * s, lightColor)
-  step3.position.y = 0.35 * s
-  platform.add(step3)
+  const grad = ctx.createLinearGradient(0, 0, 0, 256)
+  grad.addColorStop(0, '#0B0D1A')     // deep space (top)
+  grad.addColorStop(0.3, '#0F1B2E')   // dark blue
+  grad.addColorStop(0.6, '#1A2A3A')   // steel blue-gray
+  grad.addColorStop(0.85, '#1E2E2E')  // dark teal
+  grad.addColorStop(1, '#1A2820')     // forest floor hint
+  ctx.fillStyle = grad
+  ctx.fillRect(0, 0, 2, 256)
 
-  platform.position.y = -0.35 * s
-  return platform
+  const tex = new THREE.CanvasTexture(canvas)
+  const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, depthWrite: false })
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(60, 40), mat)
+  plane.position.set(0, 8, -25)
+  plane.renderOrder = -1
+  plane.name = 'gradientSky'
+  scene.add(plane)
 }
 
 function buildSkyGroup(): THREE.Group {
@@ -113,29 +146,72 @@ function buildSkyGroup(): THREE.Group {
   moon.position.set(6, 6, -6)
   skyGroup.add(moon)
 
-  const season = getCurrentSeason()
-  const starSizes = [0.03, 0.04, 0.06] // tiny, small, medium
-  for (let i = 0; i < 30; i++) {
-    const sizeIdx = i < 3 ? 2 : (i < 10 ? 1 : 0) // 3 medium, 7 small, rest tiny
-    const size = starSizes[sizeIdx]
-    const isBright = i < 3
+  // Quality stars — wider spread, varied brightness
+  for (let i = 0; i < 40; i++) {
+    const size = 0.015 + Math.random() * 0.04
+    const brightness = 0.2 + Math.random() * 0.8
     const starGeo = new THREE.BoxGeometry(size, size, size)
-    const starMat = new THREE.MeshBasicMaterial({ color: isBright ? 0xFFFFFF : getSeasonalStarColor(season), transparent: true, opacity: isBright ? 0.9 : (0.3 + Math.random() * 0.6) })
+    const starMat = new THREE.MeshBasicMaterial({
+      color: 0xFFFFFF,
+      transparent: true,
+      opacity: brightness,
+    })
     const star = new THREE.Mesh(starGeo, starMat)
-    star.name = 'twinkleStar'
+    star.position.set(
+      (Math.random() - 0.5) * 30,
+      2 + Math.random() * 18,
+      -18 - Math.random() * 7,
+    )
+    star.userData.isStar = true
+    star.userData.baseOpacity = brightness
+    star.userData.twinkleSpeed = 0.8 + Math.random() * 2
     star.userData.twinklePhase = Math.random() * Math.PI * 2
-    star.userData.twinkleSpeed = 0.5 + Math.random() * 1.5
-    star.position.set((Math.random() - 0.5) * 18, 3 + Math.random() * 5, -7 - Math.random() * 3)
+    // Keep legacy name for seasonal compat
+    star.name = 'twinkleStar'
     skyGroup.add(star)
   }
 
   // Christmas: add Star of Bethlehem
+  const season = getCurrentSeason()
   const theme = getSeasonalTheme(season)
   if (theme.christmasStar) {
     addChristmasStar(skyGroup)
   }
 
   return skyGroup
+}
+
+function createGoldenParticles(scene: THREE.Scene, count: number = 12): THREE.Mesh[] {
+  const particles: THREE.Mesh[] = []
+
+  for (let i = 0; i < count; i++) {
+    const size = 0.025 + Math.random() * 0.03
+    const geo = new THREE.BoxGeometry(size, size, size)
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xFFD700,
+      transparent: true,
+      opacity: 0.3 + Math.random() * 0.3,
+    })
+    const p = new THREE.Mesh(geo, mat)
+
+    p.position.set(
+      (Math.random() - 0.5) * 5,
+      -0.5 + Math.random() * 5,
+      (Math.random() - 0.5) * 3,
+    )
+
+    p.userData.isGoldenParticle = true
+    p.userData.drift = {
+      x: (Math.random() - 0.5) * 0.003,
+      y: 0.002 + Math.random() * 0.004,
+      z: (Math.random() - 0.5) * 0.002,
+    }
+    p.userData.wobblePhase = Math.random() * Math.PI * 2
+
+    scene.add(p)
+    particles.push(p)
+  }
+  return particles
 }
 
 function applyHelmHairStyle(character: THREE.Group, isHelmetEquipped: boolean, features: CharacterFeatures) {
@@ -264,9 +340,12 @@ function applyBackground(
 ) {
   if (!scene) return
   const isRoom = background === 'room'
-  scene.background = new THREE.Color(isRoom ? 0x2a2218 : 0x1a1a2e)
+  scene.background = isRoom ? new THREE.Color(0x2a2218) : null
   if (skyGroup) skyGroup.visible = !isRoom
   if (roomGroup) roomGroup.visible = isRoom
+  // Show/hide gradient sky plane
+  const gradientSky = scene.getObjectByName('gradientSky')
+  if (gradientSky) gradientSky.visible = !isRoom
   for (const l of nightLights) l.visible = !isRoom
   for (const l of roomLights) l.visible = isRoom
 }
@@ -293,6 +372,7 @@ export default function BrothersVoxelScene({
   const nightLightsRef = useRef<THREE.Object3D[]>([])
   const roomLightsRef = useRef<THREE.Object3D[]>([])
   const particlesRef = useRef<FallingParticle[]>([])
+  const goldenParticlesRef = useRef<THREE.Mesh[]>([])
   const backgroundRef = useRef(background)
   const onPoseCompleteRef = useRef(onPoseComplete)
   useEffect(() => {
@@ -322,11 +402,17 @@ export default function BrothersVoxelScene({
 
     const scene = new THREE.Scene()
     const bg = backgroundRef.current
-    scene.background = new THREE.Color(bg === 'room' ? 0x2a2218 : 0x1a1a2e)
+    // Use null background for night so gradient sky shows through; room keeps solid color
+    scene.background = bg === 'room' ? new THREE.Color(0x2a2218) : null
     scene.fog = new THREE.FogExp2(0x0F1520, 0.035)
     sceneRef.current = scene
 
-    // Sky group (night background)
+    // Gradient sky plane (night background)
+    if (bg !== 'room') {
+      buildGradientSky(scene)
+    }
+
+    // Sky group (stars, moon, terrain silhouette)
     const skyGroup = buildSkyGroup()
     skyGroup.visible = bg !== 'room'
     scene.add(skyGroup)
@@ -406,13 +492,13 @@ export default function BrothersVoxelScene({
       scene.add(characterGroup)
       characters.push(characterGroup)
 
-      // Platform per character (with seasonal tint)
+      // Stone pedestal per character (with tier color + seasonal tint)
       const tierTint = getTierTint(calculateTier(child.totalXp))
       const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
       const platformColor = tintPlatformColor(tierMat.primary, season)
-      const platform = buildPlatform(child.ageGroup, platformColor)
+      const platform = buildPedestal(platformColor)
       platform.position.x = offsets[i]
-      platform.position.y = characterGroup.position.y
+      platform.position.y = characterGroup.position.y - 0.35
 
       // Seasonal platform decorations
       const seasonTheme = getSeasonalTheme(season)
@@ -457,6 +543,9 @@ export default function BrothersVoxelScene({
 
     // Seasonal falling particles (snow, leaves, etc.)
     particlesRef.current = createFallingParticles(season, scene)
+
+    // Golden particles — THE Legends signature
+    goldenParticlesRef.current = createGoldenParticles(scene)
 
     // Frame camera to fit both characters
     if (characters.length > 0) {
@@ -516,19 +605,22 @@ export default function BrothersVoxelScene({
         )
 
         if (!poseActive) {
-          // Arm sway — opposition, 4s period
-          const armSwayTime = time * (Math.PI * 2 / 4) + idx * 1.2
+          // Subtle weight shift rotation
+          character.rotation.y = Math.sin(time * 0.7 + idx * 1.2) * 0.01
+
+          // Arm sway — opposing, natural
           if (armLObj) {
-            armLObj.rotation.z = Math.sin(armSwayTime) * 0.03
-            armLObj.rotation.x = Math.sin(time * 0.8 + idx) * 0.03
+            armLObj.rotation.z = Math.sin(time * (Math.PI * 2 / 4) + idx * 1.2) * 0.03
+            armLObj.rotation.x = Math.sin(time * 1.1 + idx) * 0.03
           }
           if (armRObj) {
-            armRObj.rotation.z = -Math.sin(armSwayTime) * 0.03
-            armRObj.rotation.x = -Math.sin(time * 0.8 + idx) * 0.03
+            armRObj.rotation.z = -Math.sin(time * (Math.PI * 2 / 4) + idx * 1.2) * 0.03
+            armRObj.rotation.x = Math.sin(time * 1.1 + idx + Math.PI) * 0.03
           }
-          // Head micro-movement — slow look-around (6s period)
+          // Head look-around — very slow, very subtle
           if (headObj) {
-            headObj.rotation.y = Math.sin(time * (Math.PI * 2 / 6) + idx * 2) * 0.05
+            headObj.rotation.y = Math.sin(time * 0.4 + idx * 2) * 0.06
+            headObj.rotation.x = Math.sin(time * 0.3 + idx * 1.5) * 0.015
           }
         }
       })
@@ -540,7 +632,8 @@ export default function BrothersVoxelScene({
           const mat = obj.material as THREE.MeshBasicMaterial
           const phase = obj.userData.twinklePhase as number
           const speed = obj.userData.twinkleSpeed as number
-          mat.opacity = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(twinkleTime * speed + phase))
+          const baseOp = (obj.userData.baseOpacity as number) ?? 0.5
+          mat.opacity = baseOp * (0.5 + 0.5 * Math.sin(twinkleTime * speed + phase))
         }
         if (obj.name === 'torchFlame' && obj instanceof THREE.Mesh) {
           const mat = obj.material as THREE.MeshBasicMaterial
@@ -550,6 +643,26 @@ export default function BrothersVoxelScene({
         if (obj.name === 'torchLight' && obj instanceof THREE.PointLight) {
           obj.intensity = 0.4 + 0.2 * Math.sin(twinkleTime * 6 + 1.5)
         }
+      })
+
+      // Golden particles — drift upward, fade, reset
+      goldenParticlesRef.current.forEach((p) => {
+        const drift = p.userData.drift as { x: number; y: number; z: number }
+        p.position.x += drift.x + Math.sin(time * 0.5 + (p.userData.wobblePhase as number)) * 0.001
+        p.position.y += drift.y
+        p.position.z += drift.z
+
+        // Fade as they rise
+        const t = Math.max(0, Math.min(1, (p.position.y + 0.5) / 6))
+        ;(p.material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.4
+
+        // Reset when too high
+        if (p.position.y > 6) {
+          p.position.set((Math.random() - 0.5) * 5, -0.5, (Math.random() - 0.5) * 3)
+        }
+
+        p.rotation.x += 0.01
+        p.rotation.y += 0.015
       })
 
       // Seasonal particle animation (snow, leaves)
@@ -596,6 +709,7 @@ export default function BrothersVoxelScene({
       nightLightsRef.current = []
       roomLightsRef.current = []
       particlesRef.current = []
+      goldenParticlesRef.current = []
     }
   }, [initScene])
 
@@ -690,7 +804,20 @@ export default function BrothersVoxelScene({
             '0%': { opacity: 0 },
             '100%': { opacity: 1 },
           },
-          boxShadow: 'inset 0 0 80px rgba(0,0,0,0.4)',
+        }}
+      />
+      {/* Vignette overlay */}
+      <Box
+        sx={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          pointerEvents: 'none',
+          boxShadow: 'inset 0 0 60px rgba(0,0,0,0.5)',
+          borderRadius: 'inherit',
+          zIndex: 1,
         }}
       />
       {/* Name labels overlay */}
