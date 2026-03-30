@@ -11,10 +11,14 @@ import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
+import { doc, getDoc } from 'firebase/firestore'
+
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
 import type { DadLabType } from '../../core/types/enums'
+import { db } from '../../core/firebase/firestore'
+import { weekKeyFromDate } from '../../core/utils/dateKey'
 
 interface Prefill {
   title: string
@@ -141,6 +145,25 @@ function LabSuggestionsContent({ onClose, onSelect }: Omit<LabSuggestionsProps, 
   const [suggestions, setSuggestions] = useState<ParsedSuggestion[]>([])
   const [rawText, setRawText] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [storySuggestion, setStorySuggestion] = useState<{ title: string; text: string } | null>(null)
+
+  // Load this week's dadLabSuggestion from the conundrum
+  useEffect(() => {
+    const weekKey = weekKeyFromDate(new Date())
+    getDoc(doc(db, `families/${familyId}/weeks/${weekKey}`))
+      .then((snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as { conundrum?: { title?: string; dadLabSuggestion?: string } }
+          if (data.conundrum?.dadLabSuggestion) {
+            setStorySuggestion({
+              title: data.conundrum.title ?? "This Week's Story",
+              text: data.conundrum.dadLabSuggestion,
+            })
+          }
+        }
+      })
+      .catch(() => { /* ignore */ })
+  }, [familyId])
 
   const fetchSuggestions = useCallback(async () => {
     if (!children.length) {
@@ -244,6 +267,38 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
               Try Again
             </Button>
           </Stack>
+        )}
+
+        {storySuggestion && (
+          <Card variant="outlined" sx={{ mb: 2, border: '2px solid', borderColor: 'warning.main' }}>
+            <CardContent>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                <Chip label="From This Week's Story" size="small" color="warning" />
+              </Stack>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                {'\u{1F5FA}\u{FE0F}'} {storySuggestion.title}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                {storySuggestion.text}
+              </Typography>
+              <Button
+                variant="contained"
+                size="small"
+                color="warning"
+                sx={{ mt: 1.5 }}
+                onClick={() =>
+                  onSelect({
+                    title: `Story Lab: ${storySuggestion.title}`,
+                    question: '',
+                    labType: 'science',
+                    description: storySuggestion.text,
+                  })
+                }
+              >
+                Plan This Lab
+              </Button>
+            </CardContent>
+          </Card>
         )}
 
         {!aiLoading && !childrenLoading && suggestions.length > 0 && (
