@@ -87,7 +87,7 @@ import {
 import { fixUnicodeEscapes, formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
-import { defaultAppBlocks, defaultDailyRoutine } from './chatPlanner.logic'
+import { defaultAppBlocks, defaultDailyRoutine, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
   buildMinimumWinText,
   buildPlannerPrompt,
@@ -1988,6 +1988,19 @@ Generate a plan for Monday through Friday.`.trim()
                       {showRoutineEdit ? 'Done' : 'Edit'}
                     </Button>
                   </Stack>
+                  {dailyRoutine && (() => {
+                    const routineTotal = parseRoutineTotalMinutes(dailyRoutine)
+                    const target = Math.round(hoursPerDay * 60)
+                    return routineTotal > 0 ? (
+                      <Typography
+                        variant="caption"
+                        color={routineTotal > target ? 'error' : 'text.secondary'}
+                        sx={{ mt: 0.25 }}
+                      >
+                        Total: {routineTotal} min/day (target: {target} min)
+                      </Typography>
+                    ) : null
+                  })()}
                   {!showRoutineEdit ? (
                     <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-line', mt: 0.5 }}>
                       {dailyRoutine || 'No routine saved yet'}
