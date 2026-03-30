@@ -156,9 +156,10 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                 {day.day}
               </Typography>
               <Chip
-                label={`${total}m`}
+                label={`${total}m / ${budgetMinutes}m`}
                 size="small"
                 variant="outlined"
+                color={total > budgetMinutes + 15 ? 'error' : total <= budgetMinutes ? 'success' : 'warning'}
               />
             </Stack>
             {generatedOverBudget && (
