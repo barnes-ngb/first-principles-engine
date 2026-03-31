@@ -7,15 +7,12 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import LockIcon from '@mui/icons-material/Lock'
-import MicIcon from '@mui/icons-material/Mic'
 import NoteIcon from '@mui/icons-material/Note'
-import StopIcon from '@mui/icons-material/Stop'
 import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import TextField from '@mui/material/TextField'
 import { addDoc, doc, getDocs, query, updateDoc, where } from 'firebase/firestore'
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
 import { useNavigate } from 'react-router-dom'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
@@ -26,7 +23,6 @@ import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
 import { artifactsCollection } from '../../core/firebase/firestore'
-import { storage } from '../../core/firebase/storage'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import type { Artifact, ChecklistItem, Child, DayLog } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
@@ -43,8 +39,12 @@ import { useXpLedger } from '../../core/xp/useXpLedger'
 import { useDraftBook } from '../books/useBook'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import ExplorerMap from './ExplorerMap'
+import KidExtraLogger from './KidExtraLogger'
 import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
+import KidChapterResponse from './KidChapterResponse'
+import KidConundrumResponse from './KidConundrumResponse'
+import KidTeachBack from './KidTeachBack'
 import { calculateXp } from './xp'
 
 interface KidTodayViewProps {
@@ -68,14 +68,6 @@ interface KidTodayViewProps {
       londonDrawingPrompt?: string
     }
   } | null
-}
-
-const questionTypeEmoji: Record<string, string> = {
-  comprehension: '\u{1F50D}',  // What happened?
-  application: '\u{1F30E}',    // In your life?
-  connection: '\u{1F517}',     // Reminds you of?
-  opinion: '\u{1F4AD}',        // What do you think?
-  prediction: '\u{1F52E}',     // What happens next?
 }
 
 const CELEBRATIONS = [
@@ -177,38 +169,8 @@ export default function KidTodayView({
   const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
   const [captureReflection, setCaptureReflection] = useState('')
 
-  // "I Did More Mining!" extra activity logger state
-  const [showExtraLog, setShowExtraLog] = useState(false)
-  const [extraActivity, setExtraActivity] = useState<{ label: string; subject: string } | null>(null)
-  const [extraMinutes, setExtraMinutes] = useState<number | null>(null)
-  const [savingExtra, setSavingExtra] = useState(false)
 
-  // Teach-back state (Lincoln only)
-  const [showTeachBack, setShowTeachBack] = useState(false)
-  const [teachSubject, setTeachSubject] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [isRecording, setIsRecording] = useState(false)
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
 
-  // Chapter response state
-  const [isRecordingChapter, setIsRecordingChapter] = useState(false)
-  const [chapterAudioUrl, setChapterAudioUrl] = useState<string | null>(null)
-  const [chapterAudioBlob, setChapterAudioBlob] = useState<Blob | null>(null)
-  const [savingChapter, setSavingChapter] = useState(false)
-  const chapterRecorderRef = useRef<MediaRecorder | null>(null)
-
-  // Conundrum response state
-  const [isRecordingConundrum, setIsRecordingConundrum] = useState(false)
-  const [conundrumAudioUrl, setConundrumAudioUrl] = useState<string | null>(null)
-  const [conundrumAudioBlob, setConundrumAudioBlob] = useState<Blob | null>(null)
-  const [savingConundrum, setSavingConundrum] = useState(false)
-  const [conundrumSaved, setConundrumSaved] = useState(false)
-  const conundrumRecorderRef = useRef<MediaRecorder | null>(null)
-  // Photo capture for London conundrum drawing
-  const [showConundrumPhoto, setShowConundrumPhoto] = useState(false)
-  const [conundrumPhotoSaved, setConundrumPhotoSaved] = useState(false)
 
   // XP toast state
   const [xpToast, setXpToast] = useState<{ amount: number; reason: string } | null>(null)
@@ -330,45 +292,6 @@ export default function KidTodayView({
   useEffect(() => {
     loadArtifacts()
   }, [loadArtifacts])
-
-  // Derive extra activity items from dayLog checklist
-  const extraItems = useMemo(() => {
-    const items = dayLog.checklist
-    if (!items) return []
-    return items
-      .filter((item) => item.source === 'manual' && item.completed)
-      .map((item) => ({
-        label: item.label.replace(/\s*\(\d+m\)\s*$/, ''),
-        minutes: item.estimatedMinutes ?? 0,
-      }))
-  }, [dayLog.checklist])
-
-  const handleSaveExtra = useCallback(async () => {
-    if (!extraActivity || !extraMinutes || !dayLog) return
-    setSavingExtra(true)
-    try {
-      const newItem: ChecklistItem = {
-        label: `${extraActivity.label} (${extraMinutes}m)`,
-        completed: true,
-        estimatedMinutes: extraMinutes,
-        subjectBucket: extraActivity.subject as SubjectBucket,
-        source: 'manual' as const,
-        category: 'choose' as const,
-        mvdEssential: false,
-        engagement: 'engaged' as const,
-      }
-
-      const updatedChecklist = [...(dayLog.checklist ?? []), newItem]
-      persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-
-      setShowExtraLog(false)
-      setExtraActivity(null)
-      setExtraMinutes(null)
-    } catch (err) {
-      console.error('Extra activity save failed:', err)
-    }
-    setSavingExtra(false)
-  }, [extraActivity, extraMinutes, dayLog, persistDayLogImmediate])
 
   const handleToggleItem = useCallback(
     (itemIndex: number) => {
@@ -492,214 +415,8 @@ export default function KidTodayView({
   const showTeachBackSection =
     isLincoln && !dayLog.teachBackDone && (totalCompleted >= 3 || hasEngagementFeedback)
 
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
-      const chunks: Blob[] = []
-      recorder.ondataavailable = (e) => chunks.push(e.data)
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' })
-        setAudioBlob(blob)
-        setAudioUrl(URL.createObjectURL(blob))
-        stream.getTracks().forEach((t) => t.stop())
-      }
-      recorder.start()
-      mediaRecorderRef.current = recorder
-      setIsRecording(true)
-    } catch (err) {
-      console.error('Mic access failed:', err)
-    }
-  }, [])
 
-  const stopRecording = useCallback(() => {
-    mediaRecorderRef.current?.stop()
-    setIsRecording(false)
-  }, [])
 
-  const handleSaveTeachBack = useCallback(async () => {
-    if (!teachSubject || !child.id || !familyId) return
-    setSaving(true)
-    try {
-      let mediaUrl: string | undefined
-      if (audioBlob) {
-        const filename = `teachback_${Date.now()}.webm`
-        const storageRef = ref(storage, `families/${familyId}/artifacts/${filename}`)
-        await uploadBytes(storageRef, audioBlob)
-        mediaUrl = await getDownloadURL(storageRef)
-      }
-
-      await addDoc(artifactsCollection(familyId), {
-        childId: child.id,
-        title: `Teach-back: ${teachSubject}`,
-        type: EvidenceType.Audio,
-        dayLogId: today,
-        tags: {
-          engineStage: EngineStage.Explain,
-          subjectBucket: (teachSubject as SubjectBucket) ?? SubjectBucket.Other,
-          domain: 'speech',
-          location: 'home',
-        },
-        ...(mediaUrl ? { mediaUrl } : {}),
-        notes: `Lincoln taught London about ${teachSubject}`,
-        createdAt: new Date().toISOString(),
-      })
-
-      persistDayLogImmediate({ ...dayLog, teachBackDone: true })
-      setShowTeachBack(false)
-    } catch (err) {
-      console.error('Teach-back save failed:', err)
-    }
-    setSaving(false)
-  }, [teachSubject, child.id, familyId, audioBlob, today, dayLog, persistDayLogImmediate])
-
-  // Chapter response recording
-  const startChapterRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
-      const chunks: Blob[] = []
-      recorder.ondataavailable = (e) => chunks.push(e.data)
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' })
-        setChapterAudioBlob(blob)
-        setChapterAudioUrl(URL.createObjectURL(blob))
-        stream.getTracks().forEach(t => t.stop())
-      }
-      recorder.start()
-      chapterRecorderRef.current = recorder
-      setIsRecordingChapter(true)
-    } catch (err) {
-      console.error('Mic access failed:', err)
-    }
-  }, [])
-
-  const stopChapterRecording = useCallback(() => {
-    chapterRecorderRef.current?.stop()
-    setIsRecordingChapter(false)
-  }, [])
-
-  const handleSaveChapterResponse = useCallback(async () => {
-    if (!dayLog?.chapterQuestion || !child.id) return
-    setSavingChapter(true)
-    try {
-      let mediaUrl: string | undefined
-      if (chapterAudioBlob) {
-        const filename = `chapter_response_${Date.now()}.webm`
-        const storageRef = ref(storage, `families/${familyId}/artifacts/${filename}`)
-        await uploadBytes(storageRef, chapterAudioBlob)
-        mediaUrl = await getDownloadURL(storageRef)
-      }
-
-      await addDoc(artifactsCollection(familyId), {
-        childId: child.id,
-        type: EvidenceType.Audio,
-        tags: {
-          engineStage: EngineStage.Reflect,
-          subjectBucket: SubjectBucket.Reading,
-          domain: 'reading',
-          location: 'home',
-        },
-        title: `${dayLog.chapterQuestion.book} — ${dayLog.chapterQuestion.chapter}`,
-        content: `Q: ${dayLog.chapterQuestion.question}`,
-        ...(mediaUrl ? { mediaUrl } : {}),
-        createdAt: new Date().toISOString(),
-      })
-
-      persistDayLogImmediate({
-        ...dayLog,
-        chapterQuestion: { ...dayLog.chapterQuestion, responded: true, responseUrl: mediaUrl },
-      })
-    } catch (err) {
-      console.error('Chapter response save failed:', err)
-    }
-    setSavingChapter(false)
-  }, [dayLog, child.id, familyId, chapterAudioBlob, persistDayLogImmediate])
-
-  // Conundrum audio recording (Lincoln)
-  const startConundrumRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
-      const chunks: Blob[] = []
-      recorder.ondataavailable = (e) => chunks.push(e.data)
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' })
-        setConundrumAudioBlob(blob)
-        setConundrumAudioUrl(URL.createObjectURL(blob))
-        stream.getTracks().forEach(t => t.stop())
-      }
-      recorder.start()
-      conundrumRecorderRef.current = recorder
-      setIsRecordingConundrum(true)
-    } catch (err) {
-      console.error('Mic access failed:', err)
-    }
-  }, [])
-
-  const stopConundrumRecording = useCallback(() => {
-    conundrumRecorderRef.current?.stop()
-    setIsRecordingConundrum(false)
-  }, [])
-
-  const handleSaveConundrumResponse = useCallback(async () => {
-    if (!weekFocus?.conundrum) return
-    setSavingConundrum(true)
-    try {
-      let mediaUrl: string | undefined
-      if (conundrumAudioBlob) {
-        const filename = `conundrum_response_${Date.now()}.webm`
-        const storageRef = ref(storage, `families/${familyId}/artifacts/${filename}`)
-        await uploadBytes(storageRef, conundrumAudioBlob)
-        mediaUrl = await getDownloadURL(storageRef)
-      }
-      await addDoc(artifactsCollection(familyId), {
-        childId: child.id,
-        type: EvidenceType.Audio,
-        tags: {
-          engineStage: EngineStage.Wonder,
-          subjectBucket: SubjectBucket.Other,
-          domain: 'conundrum',
-          location: 'home',
-        },
-        title: `Conundrum: ${weekFocus.conundrum.title}`,
-        content: `Q: ${weekFocus.conundrum.question}`,
-        ...(mediaUrl ? { mediaUrl } : {}),
-        createdAt: new Date().toISOString(),
-      })
-      setConundrumSaved(true)
-    } catch (err) {
-      console.error('Conundrum response save failed:', err)
-    }
-    setSavingConundrum(false)
-  }, [weekFocus, conundrumAudioBlob, familyId, child.id])
-
-  // Conundrum photo save (London drawing)
-  const handleConundrumPhoto = useCallback(async (file: File) => {
-    if (!weekFocus?.conundrum) return
-    try {
-      const filename = generateFilename('jpg')
-      const docRef = await addDoc(artifactsCollection(familyId), {
-        childId: child.id,
-        type: EvidenceType.Photo,
-        tags: {
-          engineStage: EngineStage.Wonder,
-          subjectBucket: SubjectBucket.Other,
-          domain: 'conundrum',
-          location: 'home',
-        },
-        title: `Conundrum Drawing: ${weekFocus.conundrum.title}`,
-        content: weekFocus.conundrum.londonDrawingPrompt ?? weekFocus.conundrum.question,
-        createdAt: new Date().toISOString(),
-      })
-      const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-      await updateDoc(docRef, { mediaUrl: downloadUrl })
-      setConundrumPhotoSaved(true)
-      setShowConundrumPhoto(false)
-    } catch (err) {
-      console.error('Conundrum photo save failed:', err)
-    }
-  }, [weekFocus, familyId, child.id])
 
   // ── Armor Gate early return (after all hooks) ──
   if (avatarProfile && !armorReady && armorGateStatus) {
@@ -876,104 +593,10 @@ export default function KidTodayView({
 
       {/* ── I DID MORE MINING! (Lincoln only) ── */}
       {isLincoln && (
-        <SectionCard title="⛏️ I Did More Mining!">
-          <Stack spacing={2} sx={{ py: 1 }}>
-            <Typography variant="body2" sx={{ textAlign: 'center' }}>
-              Did extra work on your tablet or on your own? Log it here!
-            </Typography>
-
-            {!showExtraLog ? (
-              <Button
-                variant="outlined"
-                color="primary"
-                size="large"
-                onClick={() => setShowExtraLog(true)}
-                sx={{ alignSelf: 'center' }}
-              >
-                ⛏️ I Did More!
-              </Button>
-            ) : (
-              <Stack spacing={2}>
-                {/* What did you do? — single tap */}
-                <Typography variant="subtitle2">What did you work on?</Typography>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  {[
-                    { label: '📖 Reading Eggs', subject: 'Reading' },
-                    { label: '🔢 Math App', subject: 'Math' },
-                    { label: '📚 Reading', subject: 'Reading' },
-                    { label: '✏️ Writing', subject: 'LanguageArts' },
-                    { label: '🔬 Science', subject: 'Science' },
-                    { label: '🎮 Other', subject: 'Other' },
-                  ].map((opt) => (
-                    <Chip
-                      key={opt.label}
-                      label={opt.label}
-                      onClick={() => setExtraActivity(opt)}
-                      color={extraActivity?.label === opt.label ? 'primary' : 'default'}
-                      variant={extraActivity?.label === opt.label ? 'filled' : 'outlined'}
-                      sx={{ fontSize: '0.95rem', py: 2.5 }}
-                    />
-                  ))}
-                </Stack>
-
-                {/* How long? — single tap */}
-                <Typography variant="subtitle2">How long?</Typography>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  {[
-                    { label: '15 min', minutes: 15 },
-                    { label: '30 min', minutes: 30 },
-                    { label: '45 min', minutes: 45 },
-                    { label: '1 hour', minutes: 60 },
-                  ].map((opt) => (
-                    <Chip
-                      key={opt.label}
-                      label={opt.label}
-                      onClick={() => setExtraMinutes(opt.minutes)}
-                      color={extraMinutes === opt.minutes ? 'primary' : 'default'}
-                      variant={extraMinutes === opt.minutes ? 'filled' : 'outlined'}
-                      sx={{ fontSize: '0.95rem', py: 2.5 }}
-                    />
-                  ))}
-                </Stack>
-
-                {/* Save */}
-                <Button
-                  variant="contained"
-                  color="success"
-                  disabled={!extraActivity || !extraMinutes || savingExtra}
-                  onClick={handleSaveExtra}
-                  size="large"
-                >
-                  {savingExtra ? 'Saving...' : '💎 Log It!'}
-                </Button>
-
-                <Button
-                  variant="text"
-                  size="small"
-                  onClick={() => { setShowExtraLog(false); setExtraActivity(null); setExtraMinutes(null) }}
-                >
-                  Cancel
-                </Button>
-              </Stack>
-            )}
-
-            {/* Show already-logged extras for today */}
-            {extraItems.length > 0 && (
-              <Stack spacing={0.5}>
-                <Typography variant="caption" color="text.secondary">Logged today:</Typography>
-                {extraItems.map((item, i) => (
-                  <Chip
-                    key={i}
-                    label={`${item.label} — ${item.minutes}m`}
-                    size="small"
-                    color="success"
-                    variant="outlined"
-                  />
-                ))}
-              </Stack>
-            )}
-          </Stack>
-        </SectionCard>
+        <KidExtraLogger
+          dayLog={dayLog}
+          persistDayLogImmediate={persistDayLogImmediate}
+        />
       )}
 
       {/* ── MUST DO ── */}
@@ -1333,199 +956,34 @@ export default function KidTodayView({
       )}
 
       {/* ── CHAPTER RESPONSE (Lincoln only) ── */}
-      {dayLog?.chapterQuestion && !dayLog.chapterQuestion.responded && isLincoln && (
-        <SectionCard title={`\u{1F4D6} ${dayLog.chapterQuestion.book}`}>
-          <Stack spacing={2} sx={{ py: 1 }}>
-            <Typography variant="subtitle2" color="text.secondary">
-              {dayLog.chapterQuestion.chapter}
-            </Typography>
-            <Typography variant="body1" sx={{ fontStyle: 'italic', fontSize: '1.1rem' }}>
-              {questionTypeEmoji[dayLog.chapterQuestion.questionType] ?? ''} {dayLog.chapterQuestion.question}
-            </Typography>
-
-            <Button
-              variant="outlined"
-              onClick={isRecordingChapter ? stopChapterRecording : startChapterRecording}
-              color={isRecordingChapter ? 'error' : 'primary'}
-              size="large"
-            >
-              {isRecordingChapter ? '\u23F9 Stop Recording' : '\u{1F3A4} Record Your Answer'}
-            </Button>
-
-            {chapterAudioUrl && (
-              <Stack spacing={1}>
-                <audio src={chapterAudioUrl} controls style={{ width: '100%' }} />
-                <Button
-                  variant="contained"
-                  color="success"
-                  onClick={handleSaveChapterResponse}
-                  disabled={savingChapter}
-                  size="large"
-                >
-                  {savingChapter ? 'Saving...' : '\u{1F48E} Save Response'}
-                </Button>
-              </Stack>
-            )}
-          </Stack>
-        </SectionCard>
-      )}
-
-      {/* Show completed chapter response */}
-      {dayLog?.chapterQuestion?.responded && isLincoln && (
-        <SectionCard title={`\u{1F4D6} ${dayLog.chapterQuestion.book}`}>
-          <Stack spacing={1}>
-            <Typography variant="subtitle2" color="text.secondary">
-              {dayLog.chapterQuestion.chapter} — Responded ✓
-            </Typography>
-            <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
-              {dayLog.chapterQuestion.question}
-            </Typography>
-            {dayLog.chapterQuestion.responseUrl && (
-              <audio src={dayLog.chapterQuestion.responseUrl} controls style={{ width: '100%' }} />
-            )}
-          </Stack>
-        </SectionCard>
+      {dayLog?.chapterQuestion && isLincoln && (
+        <KidChapterResponse
+          dayLog={dayLog}
+          child={child}
+          familyId={familyId}
+          persistDayLogImmediate={persistDayLogImmediate}
+        />
       )}
 
       {/* ── CONUNDRUM RESPONSE ── */}
-      {weekFocus?.conundrum && isLincoln && !conundrumSaved && (
-        <SectionCard title={`\u{1F5FA}\u{FE0F} ${weekFocus.conundrum.title}`}>
-          <Stack spacing={2} sx={{ py: 1 }}>
-            <Typography variant="body1" sx={{ fontWeight: 500 }}>
-              {weekFocus.conundrum.question}
-            </Typography>
-            <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
-              {weekFocus.conundrum.lincolnPrompt}
-            </Typography>
-            <Button
-              variant="outlined"
-              onClick={isRecordingConundrum ? stopConundrumRecording : startConundrumRecording}
-              color={isRecordingConundrum ? 'error' : 'primary'}
-              size="large"
-            >
-              {isRecordingConundrum ? '\u23F9 Stop Recording' : '\u{1F3A4} What Do You Think?'}
-            </Button>
-            {conundrumAudioUrl && (
-              <Stack spacing={1}>
-                <audio src={conundrumAudioUrl} controls style={{ width: '100%' }} />
-                <Button
-                  variant="contained"
-                  color="success"
-                  onClick={handleSaveConundrumResponse}
-                  disabled={savingConundrum}
-                  size="large"
-                >
-                  {savingConundrum ? 'Saving...' : '\u{1F48E} Save My Answer'}
-                </Button>
-              </Stack>
-            )}
-          </Stack>
-        </SectionCard>
-      )}
-
-      {weekFocus?.conundrum && isLincoln && conundrumSaved && (
-        <SectionCard title={`\u{1F5FA}\u{FE0F} ${weekFocus.conundrum.title}`}>
-          <Typography variant="body2" color="success.main">
-            Responded {'\u2713'}
-          </Typography>
-        </SectionCard>
-      )}
-
-      {weekFocus?.conundrum?.londonDrawingPrompt && !isLincoln && !conundrumPhotoSaved && (
-        <SectionCard title={`\u{1F3A8} Drawing Quest`}>
-          <Stack spacing={2} sx={{ py: 1 }}>
-            <Typography variant="body1" sx={{ fontWeight: 500 }}>
-              {weekFocus.conundrum.londonDrawingPrompt}
-            </Typography>
-            {showConundrumPhoto ? (
-              <PhotoCapture onCapture={handleConundrumPhoto} />
-            ) : (
-              <Button
-                variant="contained"
-                size="large"
-                onClick={() => setShowConundrumPhoto(true)}
-              >
-                {'\u{1F4F8}'} Take a Photo of Your Drawing
-              </Button>
-            )}
-          </Stack>
-        </SectionCard>
-      )}
-
-      {weekFocus?.conundrum?.londonDrawingPrompt && !isLincoln && conundrumPhotoSaved && (
-        <SectionCard title={`\u{1F3A8} Drawing Quest`}>
-          <Typography variant="body2" color="success.main">
-            Drawing saved {'\u2713'}
-          </Typography>
-        </SectionCard>
+      {weekFocus?.conundrum && (
+        <KidConundrumResponse
+          conundrum={weekFocus.conundrum}
+          isLincoln={isLincoln}
+          child={child}
+          familyId={familyId}
+        />
       )}
 
       {/* ── TEACH-BACK (Lincoln only) ── */}
       {showTeachBackSection && (
-        <SectionCard title="⛏️ I Taught London Something!">
-          <Stack spacing={2} alignItems="center" sx={{ py: 1 }}>
-            <Typography variant="body1" sx={{ textAlign: 'center' }}>
-              Did you explain something to London today? Tap to mine a knowledge diamond!
-            </Typography>
-
-            {!showTeachBack ? (
-              <Button
-                variant="contained"
-                color="success"
-                size="large"
-                onClick={() => setShowTeachBack(true)}
-                sx={{ fontSize: '1.1rem', py: 1.5, px: 4 }}
-              >
-                💎 I Taught London!
-              </Button>
-            ) : (
-              <Stack spacing={2} sx={{ width: '100%' }}>
-                {/* Subject picker — single tap chips */}
-                <Typography variant="subtitle2">What was it about?</Typography>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  {['Reading', 'Math', 'Science', 'Other'].map((subject) => (
-                    <Chip
-                      key={subject}
-                      label={subject}
-                      onClick={() => setTeachSubject(subject)}
-                      color={teachSubject === subject ? 'primary' : 'default'}
-                      variant={teachSubject === subject ? 'filled' : 'outlined'}
-                      sx={{ fontSize: '1rem', py: 2.5, px: 1 }}
-                    />
-                  ))}
-                </Stack>
-
-                {/* Audio capture — Lincoln's primary input */}
-                <Button
-                  variant="outlined"
-                  startIcon={isRecording ? <StopIcon /> : <MicIcon />}
-                  onClick={isRecording ? stopRecording : startRecording}
-                  color={isRecording ? 'error' : 'primary'}
-                  size="large"
-                >
-                  {isRecording ? 'Stop Recording' : '🎤 Say What You Taught'}
-                </Button>
-                {audioUrl && (
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <audio src={audioUrl} controls style={{ flex: 1 }} />
-                    <Chip label="✓ Recorded" color="success" size="small" />
-                  </Stack>
-                )}
-
-                {/* Save button */}
-                <Button
-                  variant="contained"
-                  color="success"
-                  disabled={!teachSubject || saving}
-                  onClick={handleSaveTeachBack}
-                  size="large"
-                >
-                  {saving ? 'Saving...' : '💎 Mine This Diamond!'}
-                </Button>
-              </Stack>
-            )}
-          </Stack>
-        </SectionCard>
+        <KidTeachBack
+          child={child}
+          familyId={familyId}
+          today={today}
+          dayLog={dayLog}
+          persistDayLogImmediate={persistDayLogImmediate}
+        />
       )}
 
       {/* ── CONTINUE YOUR BOOK (gated) ── */}

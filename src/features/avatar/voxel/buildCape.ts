@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { LEGENDS_OUTFIT } from './buildCharacter'
+import { LEGENDS_OUTFIT, getBodyLayout } from './buildCharacter'
 
 // ── Cape colors per tier (Gold+ override the base cape color) ───────
 
@@ -54,8 +54,11 @@ export function resolveCapeColor(
  * The cape attaches to the torso, positioned behind the character's back.
  */
 export function buildBaseCape(ageGroup: 'older' | 'younger', capeColor: number): THREE.Group {
-  const scale = ageGroup === 'younger' ? 0.88 : 1.0
-  const U = 0.125 * scale
+  const layout = getBodyLayout(ageGroup)
+  const { U } = layout
+  const tW = layout.p.torsoPxW
+  const tD = layout.p.torsoPxD
+  const tH = layout.p.torsoPxH
 
   const capeGroup = new THREE.Group()
   capeGroup.name = 'cape'
@@ -70,7 +73,7 @@ export function buildBaseCape(ageGroup: 'older' | 'younger', capeColor: number):
 
   // Top section (shoulder width)
   const top = new THREE.Mesh(
-    new THREE.BoxGeometry(U * 7.2, U * 4, U * 0.5),
+    new THREE.BoxGeometry(U * (tW + 0.2), U * (tH * 0.35), U * 0.5),
     capeMat,
   )
   top.position.set(0, -U * 0.8, 0)
@@ -80,10 +83,10 @@ export function buildBaseCape(ageGroup: 'older' | 'younger', capeColor: number):
   const midMat = capeMat.clone()
   midMat.color = new THREE.Color(lerpColor(capeColor, 0x000000, 0.08))
   const mid = new THREE.Mesh(
-    new THREE.BoxGeometry(U * 8, U * 4.8, U * 0.5),
+    new THREE.BoxGeometry(U * (tW + 1), U * (tH * 0.45), U * 0.5),
     midMat,
   )
-  mid.position.set(0, -U * 5.2, 0)
+  mid.position.set(0, -U * (tH * 0.45), 0)
   capeGroup.add(mid)
 
   // Bottom section (widest, darkest)
@@ -95,10 +98,10 @@ export function buildBaseCape(ageGroup: 'older' | 'younger', capeColor: number):
     side: THREE.DoubleSide,
   })
   const bot = new THREE.Mesh(
-    new THREE.BoxGeometry(U * 8.8, U * 4, U * 0.5),
+    new THREE.BoxGeometry(U * (tW + 1.8), U * (tH * 0.35), U * 0.5),
     botMat,
   )
-  bot.position.set(0, -U * 9.6, 0)
+  bot.position.set(0, -U * (tH * 0.85), 0)
   capeGroup.add(bot)
 
   // Clasp at top (gold, holds cape at shoulders)
@@ -110,7 +113,9 @@ export function buildBaseCape(ageGroup: 'older' | 'younger', capeColor: number):
   capeGroup.add(clasp)
 
   // Position cape behind torso, attached near shoulders
-  capeGroup.position.set(0, U * 3, -U * 4.5)
+  // torsoTop is relative to character root; cape needs torso-relative offset
+  // Cape attaches at upper back: slightly below torso top, behind torso depth
+  capeGroup.position.set(0, U * (tH * 0.3), -U * (tD / 2 + 2))
 
   capeGroup.userData.isCape = true
 

@@ -4,17 +4,19 @@ import type { HelmetCrest } from '../../../core/types'
 /**
  * Build a helmet crest group from small BoxGeometry shapes.
  * Positioned in helmet-local coordinates (headGroup space).
- * Sits on top of the helmet dome (shell top is at ~Y = U * 5.4).
+ * Sits on top of the helmet dome.
  *
  * @param type - Crest type identifier
  * @param U - One Minecraft pixel unit (0.125 * scale)
  * @param color - Crest color (hex number)
+ * @param headPx - Head size in pixels (default 9 for Legends proportions)
  * @returns Group or null if type is 'none'
  */
 export function buildHelmetCrest(
   type: HelmetCrest,
   U: number,
   color: number,
+  headPx = 9,
 ): THREE.Group | null {
   if (type === 'none') return null
 
@@ -23,8 +25,10 @@ export function buildHelmetCrest(
 
   const mat = () => new THREE.MeshLambertMaterial({ color })
 
-  // Base Y: top of helmet dome is at U * 5.4 (dome center U*3 + half height U*2.4)
-  const baseY = U * 5.4
+  // Base Y: top of helmet dome. Dome is (headPx + 1.6)U with center at 0.4U.
+  // Top = 0.4 + (headPx + 1.6) / 2
+  const domeSize = headPx + 1.6
+  const baseY = U * (0.4 + domeSize / 2)
 
   switch (type) {
     case 'fin': {
