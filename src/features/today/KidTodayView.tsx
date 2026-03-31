@@ -7,9 +7,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import LockIcon from '@mui/icons-material/Lock'
-import MicIcon from '@mui/icons-material/Mic'
 import NoteIcon from '@mui/icons-material/Note'
-import StopIcon from '@mui/icons-material/Stop'
 import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
@@ -46,6 +44,7 @@ import ExplorerMap from './ExplorerMap'
 import KidExtraLogger from './KidExtraLogger'
 import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
+import KidTeachBack from './KidTeachBack'
 import { calculateXp } from './xp'
 
 interface KidTodayViewProps {
@@ -178,14 +177,6 @@ export default function KidTodayView({
   const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
   const [captureReflection, setCaptureReflection] = useState('')
 
-  // Teach-back state (Lincoln only)
-  const [showTeachBack, setShowTeachBack] = useState(false)
-  const [teachSubject, setTeachSubject] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [isRecording, setIsRecording] = useState(false)
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
 
   // Chapter response state
   const [isRecordingChapter, setIsRecordingChapter] = useState(false)
@@ -448,66 +439,6 @@ export default function KidTodayView({
   const showTeachBackSection =
     isLincoln && !dayLog.teachBackDone && (totalCompleted >= 3 || hasEngagementFeedback)
 
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
-      const chunks: Blob[] = []
-      recorder.ondataavailable = (e) => chunks.push(e.data)
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' })
-        setAudioBlob(blob)
-        setAudioUrl(URL.createObjectURL(blob))
-        stream.getTracks().forEach((t) => t.stop())
-      }
-      recorder.start()
-      mediaRecorderRef.current = recorder
-      setIsRecording(true)
-    } catch (err) {
-      console.error('Mic access failed:', err)
-    }
-  }, [])
-
-  const stopRecording = useCallback(() => {
-    mediaRecorderRef.current?.stop()
-    setIsRecording(false)
-  }, [])
-
-  const handleSaveTeachBack = useCallback(async () => {
-    if (!teachSubject || !child.id || !familyId) return
-    setSaving(true)
-    try {
-      let mediaUrl: string | undefined
-      if (audioBlob) {
-        const filename = `teachback_${Date.now()}.webm`
-        const storageRef = ref(storage, `families/${familyId}/artifacts/${filename}`)
-        await uploadBytes(storageRef, audioBlob)
-        mediaUrl = await getDownloadURL(storageRef)
-      }
-
-      await addDoc(artifactsCollection(familyId), {
-        childId: child.id,
-        title: `Teach-back: ${teachSubject}`,
-        type: EvidenceType.Audio,
-        dayLogId: today,
-        tags: {
-          engineStage: EngineStage.Explain,
-          subjectBucket: (teachSubject as SubjectBucket) ?? SubjectBucket.Other,
-          domain: 'speech',
-          location: 'home',
-        },
-        ...(mediaUrl ? { mediaUrl } : {}),
-        notes: `Lincoln taught London about ${teachSubject}`,
-        createdAt: new Date().toISOString(),
-      })
-
-      persistDayLogImmediate({ ...dayLog, teachBackDone: true })
-      setShowTeachBack(false)
-    } catch (err) {
-      console.error('Teach-back save failed:', err)
-    }
-    setSaving(false)
-  }, [teachSubject, child.id, familyId, audioBlob, today, dayLog, persistDayLogImmediate])
 
   // Chapter response recording
   const startChapterRecording = useCallback(async () => {
@@ -1324,70 +1255,13 @@ export default function KidTodayView({
 
       {/* ── TEACH-BACK (Lincoln only) ── */}
       {showTeachBackSection && (
-        <SectionCard title="⛏️ I Taught London Something!">
-          <Stack spacing={2} alignItems="center" sx={{ py: 1 }}>
-            <Typography variant="body1" sx={{ textAlign: 'center' }}>
-              Did you explain something to London today? Tap to mine a knowledge diamond!
-            </Typography>
-
-            {!showTeachBack ? (
-              <Button
-                variant="contained"
-                color="success"
-                size="large"
-                onClick={() => setShowTeachBack(true)}
-                sx={{ fontSize: '1.1rem', py: 1.5, px: 4 }}
-              >
-                💎 I Taught London!
-              </Button>
-            ) : (
-              <Stack spacing={2} sx={{ width: '100%' }}>
-                {/* Subject picker — single tap chips */}
-                <Typography variant="subtitle2">What was it about?</Typography>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  {['Reading', 'Math', 'Science', 'Other'].map((subject) => (
-                    <Chip
-                      key={subject}
-                      label={subject}
-                      onClick={() => setTeachSubject(subject)}
-                      color={teachSubject === subject ? 'primary' : 'default'}
-                      variant={teachSubject === subject ? 'filled' : 'outlined'}
-                      sx={{ fontSize: '1rem', py: 2.5, px: 1 }}
-                    />
-                  ))}
-                </Stack>
-
-                {/* Audio capture — Lincoln's primary input */}
-                <Button
-                  variant="outlined"
-                  startIcon={isRecording ? <StopIcon /> : <MicIcon />}
-                  onClick={isRecording ? stopRecording : startRecording}
-                  color={isRecording ? 'error' : 'primary'}
-                  size="large"
-                >
-                  {isRecording ? 'Stop Recording' : '🎤 Say What You Taught'}
-                </Button>
-                {audioUrl && (
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <audio src={audioUrl} controls style={{ flex: 1 }} />
-                    <Chip label="✓ Recorded" color="success" size="small" />
-                  </Stack>
-                )}
-
-                {/* Save button */}
-                <Button
-                  variant="contained"
-                  color="success"
-                  disabled={!teachSubject || saving}
-                  onClick={handleSaveTeachBack}
-                  size="large"
-                >
-                  {saving ? 'Saving...' : '💎 Mine This Diamond!'}
-                </Button>
-              </Stack>
-            )}
-          </Stack>
-        </SectionCard>
+        <KidTeachBack
+          child={child}
+          familyId={familyId}
+          today={today}
+          dayLog={dayLog}
+          persistDayLogImmediate={persistDayLogImmediate}
+        />
       )}
 
       {/* ── CONTINUE YOUR BOOK (gated) ── */}
