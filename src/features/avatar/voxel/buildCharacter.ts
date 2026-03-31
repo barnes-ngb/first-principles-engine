@@ -106,12 +106,12 @@ export const LEGENDS_OUTFIT = {
 
 // ── Build character (Minecraft Legends hero proportions) ──────────
 //
-// Steve proportions:
-//   Head:  8×8×8 px  → 1×1×1 units
-//   Body:  8×12×4 px → 1×1.5×0.5 units
-//   Arms:  4×12×4 px → 0.5×1.5×0.5 units
-//   Legs:  4×12×4 px → 0.5×1.5×0.5 units
-//   Total height = 1 + 1.5 + 1.5 = 4 units
+// Legends heroic proportions (older, U=0.125):
+//   Head:  10×10×10 px → 1.25×1.25×1.25 units
+//   Torso: 6×9×3 px    → 0.75×1.125×0.375 units
+//   Arms:  2×10.5×2 px → 0.25×1.3125×0.25 units
+//   Legs:  2.5×17×2.5  → 0.3125×2.125×0.3125 units
+//   Total height = 2.125 + 1.125 + 1.25 = 4.5 units
 //
 // 1 pixel = U = 0.125 units at scale 1.0
 
@@ -121,28 +121,28 @@ export const LEGENDS_OUTFIT = {
 
 export const BODY_PROPORTIONS = {
   older: {
-    headPx: 9,        // 10% bigger than Steve (was 8) — personality + readability
-    torsoPxH: 10,     // shorter torso (was 12) — not a rectangle
-    torsoPxW: 7,      // narrower (was 8) — armor changes silhouette
-    torsoPxD: 3.5,    // thinner (was 4)
-    armPxH: 11,       // slightly shorter (was 12)
-    armPxW: 2.5,      // MUCH thinner (was 4) — no more white planks
-    armPxD: 2.5,      // MUCH thinner (was 4)
-    legPxH: 15,       // MUCH longer (was 12) — heroic stance
-    legPxW: 3,        // thinner (was 4)
-    legPxD: 3,        // thinner (was 4)
+    headPx: 10,       // Bigger head — personality + readability on small screens
+    torsoPxH: 9,      // Shorter torso — less boxy, armor changes silhouette
+    torsoPxW: 6,      // NARROW torso — heroic V-shape, not a fridge
+    torsoPxD: 3,      // Thinner — side profile not a block
+    armPxH: 10.5,     // Slightly shorter than torso+head gap
+    armPxW: 2,        // THIN arms — no more planks, sleeves add bulk
+    armPxD: 2,        // THIN arms
+    legPxH: 17,       // LONG legs — heroic stance, ~1.9× torso height
+    legPxW: 2.5,      // Thinner — proportional to narrow body
+    legPxD: 2.5,      // Thinner
   },
   younger: {
-    headPx: 9,        // Same head = bigger head-to-body ratio (reads younger)
-    torsoPxH: 7.5,    // 75% of older
-    torsoPxW: 6.3,    // 90% of older
-    torsoPxD: 3.15,   // 90% of older
-    armPxH: 8.25,     // 75% of older
-    armPxW: 2.5,      // Same thin arms
-    armPxD: 2.5,
-    legPxH: 10.5,     // 70% of older
-    legPxW: 3,        // Same thin legs
-    legPxD: 3,
+    headPx: 10,       // Same head = bigger head-to-body ratio (reads younger)
+    torsoPxH: 6.75,   // 75% of older
+    torsoPxW: 5.4,    // 90% of older
+    torsoPxD: 2.7,    // 90% of older
+    armPxH: 7.875,    // 75% of older
+    armPxW: 2,        // Same thin arms
+    armPxD: 2,
+    legPxH: 11.9,     // 70% of older
+    legPxW: 2.5,      // Same thin legs
+    legPxD: 2.5,
   },
 } as const
 
@@ -309,7 +309,7 @@ export function buildCharacter(
   // --- ARMS (split: sleeve upper + skin forearm + wrist wrap) ---
   // Geometry is shifted so pivot point is at the SHOULDER (top of arm),
   // enabling natural rotation from the shoulder joint.
-  const armGap = U * 0.8 // Gap between arm and torso edge (smaller for thinner arms)
+  const armGap = U * 0.6 // Small gap between arm and torso edge
   const shoulderY = torsoTop
   const armHalfW = (p.armPxW / 2) * U
   const torsoHalfW = (p.torsoPxW / 2) * U

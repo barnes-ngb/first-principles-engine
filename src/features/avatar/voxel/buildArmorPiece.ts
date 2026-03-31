@@ -288,9 +288,9 @@ function buildBreastplate(U: number, layout: ReturnType<typeof getBodyLayout>): 
   group.add(pauldronLipR)
 
   // Arm covers (armor sleeves) — arm-local space (shoulder pivot at Y=0)
-  const armArmorW = layout.p.armPxW + 2.5  // wider than thin arm
+  const armArmorW = layout.p.armPxW + 2     // wider than thin arm (~2× arm width)
   const armArmorH = aH * 0.8               // cover upper 80% of arm
-  const armArmorD = layout.p.armPxD + 2.5
+  const armArmorD = layout.p.armPxD + 2
   const armArmorL = taggedBox(U * armArmorW, U * armArmorH, U * armArmorD, W, 'primary', 'arm_armor_l')
   armArmorL.position.set(0, -U * (armArmorH / 2 + 0.5), 0)
   armArmorL.userData.attachToArm = 'L'
