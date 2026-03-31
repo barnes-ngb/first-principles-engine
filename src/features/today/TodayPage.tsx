@@ -793,6 +793,7 @@ export default function TodayPage() {
           childName={selectedChild?.name ?? ''}
           item={teachHelperItem}
           ladders={cardLadders}
+          weekTheme={weekFocus?.theme}
         />
       )}
 
