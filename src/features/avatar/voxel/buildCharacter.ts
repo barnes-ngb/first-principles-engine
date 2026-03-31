@@ -115,26 +115,67 @@ export const LEGENDS_OUTFIT = {
 //
 // 1 pixel = U = 0.125 units at scale 1.0
 
-// ── Body proportions per age group ──────────────────────────────────
-// Younger child: same-size head on a smaller body = reads as younger.
-// All multipliers are relative to the base 8-pixel Minecraft Steve anatomy.
+// ── Body proportions per age group (Minecraft Legends heroic style) ──
+// All values in Minecraft pixels. U = 0.125 * scale converts to world units.
+// Legends heroes: bigger head, narrower torso, thin arms, LONG legs.
 
-const BODY_PROPORTIONS = {
+export const BODY_PROPORTIONS = {
   older: {
-    headSize: 1.0,
-    torsoHeight: 1.0,
-    torsoWidth: 1.0,
-    armLength: 1.0,
-    legLength: 1.0,
+    headPx: 9,        // 10% bigger than Steve (was 8) — personality + readability
+    torsoPxH: 10,     // shorter torso (was 12) — not a rectangle
+    torsoPxW: 7,      // narrower (was 8) — armor changes silhouette
+    torsoPxD: 3.5,    // thinner (was 4)
+    armPxH: 11,       // slightly shorter (was 12)
+    armPxW: 2.5,      // MUCH thinner (was 4) — no more white planks
+    armPxD: 2.5,      // MUCH thinner (was 4)
+    legPxH: 15,       // MUCH longer (was 12) — heroic stance
+    legPxW: 3,        // thinner (was 4)
+    legPxD: 3,        // thinner (was 4)
   },
   younger: {
-    headSize: 1.0,    // Same head size → bigger head-to-body ratio
-    torsoHeight: 0.75, // Shorter torso
-    torsoWidth: 0.9,   // Slightly narrower
-    armLength: 0.75,   // Shorter arms
-    legLength: 0.7,    // Shorter legs
+    headPx: 9,        // Same head = bigger head-to-body ratio (reads younger)
+    torsoPxH: 7.5,    // 75% of older
+    torsoPxW: 6.3,    // 90% of older
+    torsoPxD: 3.15,   // 90% of older
+    armPxH: 8.25,     // 75% of older
+    armPxW: 2.5,      // Same thin arms
+    armPxD: 2.5,
+    legPxH: 10.5,     // 70% of older
+    legPxW: 3,        // Same thin legs
+    legPxD: 3,
   },
 } as const
+
+/** Compute key layout coordinates from proportions (shared with armor/cape/accessories) */
+export function getBodyLayout(ageGroup: 'older' | 'younger') {
+  const scale = ageGroup === 'younger' ? 0.88 : 1.0
+  const U = 0.125 * scale
+  const p = BODY_PROPORTIONS[ageGroup]
+
+  const headSize = p.headPx * U
+  const torsoH = p.torsoPxH * U
+  const torsoW = p.torsoPxW * U
+  const torsoD = p.torsoPxD * U
+  const armH = p.armPxH * U
+  const armW = p.armPxW * U
+  const armD = p.armPxD * U
+  const legH = p.legPxH * U
+  const legW = p.legPxW * U
+  const legD = p.legPxD * U
+
+  const legTop = legH
+  const torsoCenter = legTop + torsoH / 2
+  const torsoTop = legTop + torsoH
+  const headCenter = torsoTop + headSize / 2
+
+  return {
+    U, p, scale, headSize,
+    torsoH, torsoW, torsoD,
+    armH, armW, armD,
+    legH, legW, legD,
+    legTop, torsoCenter, torsoTop, headCenter,
+  }
+}
 
 export function buildCharacter(
   features: CharacterFeatures,
@@ -143,33 +184,13 @@ export function buildCharacter(
   const character = new THREE.Group()
   character.name = 'character'
 
-  const U = 0.125 // 1 Minecraft pixel (no uniform scale — proportions vary per body part)
-  const p = BODY_PROPORTIONS[ageGroup]
-  const s = ageGroup === 'younger' ? 0.88 : 1.0 // Scale factor for detail pieces
+  const layout = getBodyLayout(ageGroup)
+  const { U, p, scale: s } = layout
   const outfit = LEGENDS_OUTFIT[ageGroup]
 
-  // Derived dimensions (in pixel-units)
-  const headPx = 8 * p.headSize
-  const torsoPxH = 12 * p.torsoHeight
-  const torsoPxW = 8 * p.torsoWidth
-  const armPxLen = 12 * p.armLength
-  const legPxLen = 12 * p.legLength
-
-  // Vertical layout: feet at Y=0, then legs, torso, head
-  const legTop = legPxLen * U
-  const torsoTop = legTop + torsoPxH * U
-  const headCenter = torsoTop + (headPx / 2) * U
-
-  // Dimensions
-  const torsoW = U * torsoPxW
-  const torsoH = U * torsoPxH
-  const torsoD = U * 4
-  const legW = U * 4
-  const legH = U * legPxLen
-  const legD = U * 4
-  const armW = U * 4
-  const armH = U * armPxLen
-  const armD = U * 4
+  // Dimensions from layout
+  const { headSize, torsoW, torsoH, torsoD, armW, armH, armD, legW, legH, legD } = layout
+  const { torsoTop, headCenter } = layout
 
   // Colors from features (with fallbacks) — skin & hair from photo, clothes are Legends outfit
   const skinColor = new THREE.Color(features.skinTone ?? '#F5D6B8')
@@ -185,13 +206,13 @@ export function buildCharacter(
   headGroup.position.y = headCenter
   character.add(headGroup)
 
-  const headMesh = texturedBox(U * headPx, U * headPx, U * headPx, skinColor, 'head')
+  const headMesh = texturedBox(headSize, headSize, headSize, skinColor, 'head')
   // headMesh at (0,0,0) within headGroup
   headGroup.add(headMesh)
 
   // Face details — positions RELATIVE to headGroup center (0,0,0)
-  // All face features use headPx-based coords so they scale with head size
-  const hU = U * p.headSize // head pixel unit
+  // hU scales proportionally with head: when head was 8px, hU=U; now 9px, hU=1.125*U
+  const hU = (U * p.headPx) / 8
   // Eyes — white sclera with dark pupils
   const eyeWhiteL = box(hU * 2, hU * 1, hU * 0.5, 0xffffff, 'eyeWhiteL')
   eyeWhiteL.position.set(-hU * 1.5, hU * 0.5, hU * 4.1)
@@ -240,7 +261,7 @@ export function buildCharacter(
   headGroup.add(hairGroup)
 
   // --- TORSO (Legends Tunic) ---
-  const torsoCenter = legTop + torsoH / 2
+  const torsoCenter = layout.torsoCenter
   const torso = new THREE.Mesh(
     new THREE.BoxGeometry(torsoW, torsoH, torsoD),
     createTexturedMaterials(shirtColor, 0x222222, 8),
@@ -288,10 +309,10 @@ export function buildCharacter(
   // --- ARMS (split: sleeve upper + skin forearm + wrist wrap) ---
   // Geometry is shifted so pivot point is at the SHOULDER (top of arm),
   // enabling natural rotation from the shoulder joint.
-  const armGap = U * 1.2 // Gap between arm and torso edge
+  const armGap = U * 0.8 // Gap between arm and torso edge (smaller for thinner arms)
   const shoulderY = torsoTop
-  const armHalfW = U * 2 // arm is 4U wide
-  const torsoHalfW = (torsoPxW / 2) * U
+  const armHalfW = (p.armPxW / 2) * U
+  const torsoHalfW = (p.torsoPxW / 2) * U
 
   // Arms are skin-colored (forearms exposed, Legends hero style)
   const armGeoL = new THREE.BoxGeometry(armW, armH, armD)
@@ -309,22 +330,23 @@ export function buildCharacter(
   character.add(armR)
 
   // Shirt sleeves — upper 50% of arm (tunic sleeves, Legends style)
-  const sleeveLen = armPxLen * 0.5
-  const sleeveGeoL = new THREE.BoxGeometry(armW + U * 0.2, U * sleeveLen, armD + U * 0.2)
-  sleeveGeoL.translate(0, -U * sleeveLen / 2, 0) // Upper portion of arm relative to shoulder pivot
+  const sleevePxLen = p.armPxH * 0.5
+  const sleeveH = sleevePxLen * U
+  const sleeveGeoL = new THREE.BoxGeometry(armW + U * 0.2, sleeveH, armD + U * 0.2)
+  sleeveGeoL.translate(0, -sleeveH / 2, 0) // Upper portion of arm relative to shoulder pivot
   const sleeveL = new THREE.Mesh(sleeveGeoL, createTexturedMaterials(shirtColor, 0x111111, 5))
   sleeveL.name = 'sleeveL'
   armL.add(sleeveL) // Child of arm — rotates with it
 
-  const sleeveGeoR = new THREE.BoxGeometry(armW + U * 0.2, U * sleeveLen, armD + U * 0.2)
-  sleeveGeoR.translate(0, -U * sleeveLen / 2, 0)
+  const sleeveGeoR = new THREE.BoxGeometry(armW + U * 0.2, sleeveH, armD + U * 0.2)
+  sleeveGeoR.translate(0, -sleeveH / 2, 0)
   const sleeveR = new THREE.Mesh(sleeveGeoR, createTexturedMaterials(shirtColor, 0x111111, 5))
   sleeveR.name = 'sleeveR'
   armR.add(sleeveR) // Child of arm — rotates with it
 
   // Wrist wraps — small band at the sleeve/forearm transition
   const wristWrapGeoL = new THREE.BoxGeometry(armW + 0.03, 0.08 * s, armD + 0.03)
-  wristWrapGeoL.translate(0, -U * sleeveLen, 0) // At bottom edge of sleeve
+  wristWrapGeoL.translate(0, -sleeveH, 0) // At bottom edge of sleeve
   const wristWrapL = new THREE.Mesh(wristWrapGeoL, new THREE.MeshPhongMaterial({
     color: outfit.wrapColor,
     specular: 0x222211,
@@ -335,7 +357,7 @@ export function buildCharacter(
   armL.add(wristWrapL)
 
   const wristWrapGeoR = new THREE.BoxGeometry(armW + 0.03, 0.08 * s, armD + 0.03)
-  wristWrapGeoR.translate(0, -U * sleeveLen, 0)
+  wristWrapGeoR.translate(0, -sleeveH, 0)
   const wristWrapR = new THREE.Mesh(wristWrapGeoR, new THREE.MeshPhongMaterial({
     color: outfit.wrapColor,
     specular: 0x222211,
@@ -347,14 +369,15 @@ export function buildCharacter(
 
   // --- LEGS (upper pants + lower boots) ---
   const legCenter = legH / 2
+  const legXOffset = (p.legPxW / 2 + 0.15) * U // Slight gap between legs
 
   // Full leg mesh in pants color
   const legL = texturedBox(legW, legH, legD, pantsColor, 'legL')
-  legL.position.set(-U * 2, legCenter, 0)
+  legL.position.set(-legXOffset, legCenter, 0)
   character.add(legL)
 
   const legR = texturedBox(legW, legH, legD, pantsColor, 'legR')
-  legR.position.set(U * 2, legCenter, 0)
+  legR.position.set(legXOffset, legCenter, 0)
   character.add(legR)
 
   // BOOTS — cover lower 35% of each leg (darker, extends outward slightly)
@@ -362,20 +385,20 @@ export function buildCharacter(
   const bootY = bootH / 2 // Centered on lower leg
 
   const bootL = texturedBox(legW + 0.04, bootH, legD + 0.04, outfit.bootColor, 'bootL')
-  bootL.position.set(-U * 2, bootY, 0)
+  bootL.position.set(-legXOffset, bootY, 0)
   character.add(bootL)
 
   const bootR = texturedBox(legW + 0.04, bootH, legD + 0.04, outfit.bootColor, 'bootR')
-  bootR.position.set(U * 2, bootY, 0)
+  bootR.position.set(legXOffset, bootY, 0)
   character.add(bootR)
 
   // Boot top band — accent strip at top of each boot
   const bootBandL = box(legW + 0.06, 0.06 * s, legD + 0.06, outfit.beltColor, 'bootBandL')
-  bootBandL.position.set(-U * 2, bootH, 0)
+  bootBandL.position.set(-legXOffset, bootH, 0)
   character.add(bootBandL)
 
   const bootBandR = box(legW + 0.06, 0.06 * s, legD + 0.06, outfit.beltColor, 'bootBandR')
-  bootBandR.position.set(U * 2, bootH, 0)
+  bootBandR.position.set(legXOffset, bootH, 0)
   character.add(bootBandR)
 
   // Character feet sit at Y=0
