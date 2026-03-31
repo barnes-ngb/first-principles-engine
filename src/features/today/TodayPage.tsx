@@ -128,7 +128,7 @@ export default function TodayPage() {
   // Compute Mon-Fri dates for the week containing selectedDate
   const weekDayDates = useMemo(() => {
     const parsed = new Date(selectedDate + 'T00:00:00')
-    const range = getWeekRange(parsed)
+    const range = getWeekRange(parsed, 1)
     const monday = new Date(range.start + 'T00:00:00')
     const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] as const
     return labels.map((label, i) => {
