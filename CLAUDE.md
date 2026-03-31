@@ -77,12 +77,12 @@ const items = snapshot.docs.map((doc) => ({
 - `src/components/` — Shared UI components
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
-- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useDebounce, useSaveState, useAudioRecorder, useSpeechRecognition, useTTS, useXpLedger)
-- `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`) and enum-like constants (`enums.ts`)
+- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useDebounce, useSaveState, useAudioRecorder, useSpeechRecognition, useTTS, useScan, useCreativeTimer)
+- `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
 - `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns
 - `src/core/ai/` — AI service layer, feature flags, useAI hook, prompt templates
 - `src/core/profile/` — Profile context provider and hook (family + children)
-- `src/core/xp/` — XP ledger, armor tiers, armor unlock logic
+- `src/core/xp/` — XP ledger (useXpLedger), armor tiers, armor unlock logic
 - `src/core/avatar/` — Daily armor session management (`getDailyArmorSession.ts`)
 - `src/core/data/` — Database seed data
 - `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, `voxel/` sub-module (Three.js character, armor, poses, materials, camera)
@@ -233,7 +233,7 @@ All under `families/{familyId}/`:
 
 ### Cloud Functions (18 exported)
 - `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, chat, generate)
-- `weeklyReview` — Scheduled weekly review (Sunday 9am CT)
+- `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
 - `generateWeeklyReviewNow` — Manual review trigger
 - `generateActivity` — Lesson card generation
 - `healthCheck` — Diagnostic endpoint
@@ -253,7 +253,7 @@ All under `families/{familyId}/`:
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/imageGen.ts` — Image generation routing
-- `functions/src/ai/imageTasks/` — 13 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, enhanceSketch, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar, + index)
+- `functions/src/ai/imageTasks/` — 12 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, enhanceSketch, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar) + index
 - `functions/src/ai/providers/` — Claude + OpenAI provider adapters (with `__stubs__/` for test mocking)
 
 ## Family Context (for AI prompt reference)
@@ -271,10 +271,10 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 
 ## Known Technical Debt
 
-- **PlannerChatPage.tsx (2,617L)** — Next decomposition target. Setup wizard, chat, plan preview, and apply logic are interleaved.
-- **MyAvatarPage.tsx (2,445L)** — 3D renderer, armor equip, theme picker, and admin features in one file.
-- **KidTodayView.tsx (1,607L)** — Similar decomposition opportunity as TodayPage.
-- **Ladder system** — Partially deprecated. Disposition system is replacing it. 5 files have TODO comments marking ladder references for removal.
+- **PlannerChatPage.tsx (2,112L)** — Next decomposition target. Setup wizard, chat, plan preview, and apply logic are interleaved.
+- **MyAvatarPage.tsx (1,862L)** — 3D renderer, armor equip, theme picker, and admin features in one file.
+- **KidTodayView.tsx (805L)** — Partially decomposed but still a candidate for further extraction.
+- **Ladder system** — Partially deprecated. Disposition system is replacing it.
 - **AI prompt drift** — 3 different patterns for system prompt construction across task handlers. Consolidation pending.
 - **XP ledger** — Full collection recompute on every award. Performance fix pending.
 - **evaluate.ts (weekly review)** — Separate prompt construction from the task system. Not in task registry.

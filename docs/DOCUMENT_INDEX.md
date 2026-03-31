@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-03-29.
+> Where everything lives. Updated 2026-03-31.
 
 ---
 
@@ -8,7 +8,7 @@
 
 | Document | Status | Notes |
 |---|---|---|
-| `MASTER_OUTLINE.md` | **CURRENT** (v13) | Single source of truth: features, status, sprint history. Updated Mar 29: CF count 18, task types 12, collections 27, TodayPage decomposition, scan task, architecture notes expanded |
+| `MASTER_OUTLINE.md` | **CURRENT** (v14) | Single source of truth: features, status, sprint history. Updated Mar 31: line counts corrected, handler counts verified, scale metrics updated |
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
@@ -17,8 +17,8 @@
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
 | `ENGINE_V2.md` | **CURRENT** | Engine framework (flywheel, stages, scoring) |
-| `FIRST_PRINCIPLES_ALIGNMENT.md` | **NEW** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
-| `SYSTEM_PROMPTS.md` | **STALE** (Mar 21) | Task dispatch, model selection, context slices — needs update for scan task handler (12 total), unified weekly focus, disposition prompts |
+| `FIRST_PRINCIPLES_ALIGNMENT.md` | **CURRENT** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
+| `SYSTEM_PROMPTS.md` | **STALE** (Mar 21) | Task dispatch, model selection, context slices — needs update for scan task handler (12 total), unified weekly focus, disposition prompts, weekly review schedule (7pm CT) |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
 | `00_MASTER_SCOPE.md` | HISTORICAL | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `01_MVP_V0_1.md` | HISTORICAL | Phase 1 — MVP (Today, artifacts, engine, records) |

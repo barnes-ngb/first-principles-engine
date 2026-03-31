@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v13 **Version:** v13 — March 29, 2026 **Status:** Updated — cross-doc alignment audit (CF count 19, task types 11, collection count 26, model selection corrected, missing handlers documented) Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~98k lines TypeScript (src/ ~89k + functions/ ~9k), 30+ test files, 600+ tests, 27 Firestore collections, 18 Cloud Functions, 12 chat task types, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v14 **Version:** v14 — March 31, 2026 **Status:** Updated — doc alignment audit (line counts corrected, handler counts verified, scale metrics updated, stale claims removed) Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~100k lines TypeScript (src/ ~90.5k + functions/ ~9.6k), 51 test files, 600+ tests, 27 Firestore collections, 18 Cloud Functions, 12 chat task types, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -230,7 +230,7 @@ Progress
 * Avatar & XP tab — parent XP controls, piece management, force tier upgrade
 * Sticker Library tab — all generated stickers, tag editing, child profile assignment Cloud Functions (18 exported, 12 task types)
 1. `chat` — Task dispatch: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, chat, generate
-2. `weeklyReview` — Scheduled Sunday 7pm CT
+2. `weeklyReview` — Scheduled Sunday 7pm CT (America/Chicago)
 3. `generateWeeklyReviewNow` — Manual trigger
 4. `generateActivity` — Lesson card generation
 5. `healthCheck` — Diagnostic
@@ -409,7 +409,7 @@ Key Design Decisions
 | `functions/src/ai/chat.ts` | AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) |
 | `functions/src/ai/imageGen.ts` | DALL-E 3 + gpt-image-1 routing |
 | `functions/src/ai/tasks/` | Chat task registry (12 handlers: plan, chat, evaluate, quest, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, workshop, scan + analyzePatterns export) |
-| `functions/src/ai/imageTasks/` | Image task registry (11 handlers) |
+| `functions/src/ai/imageTasks/` | Image task registry (12 handlers) |
 | `functions/src/ai/contextSlices.ts` | Task-specific context assembly + engagement compression |
 | `src/features/avatar/` | My Armor (VoxelCharacter, VerseCard, ArmorIcons, Particles, voxel/) |
 | `src/features/books/` | My Books |
@@ -427,11 +427,11 @@ Key Design Decisions
 #### Top 5 Largest Files
 | File | Lines | Status |
 |------|-------|--------|
-| `PlannerChatPage.tsx` | 2,617 | Next decomposition target |
-| `MyAvatarPage.tsx` | 2,445 | Next decomposition target |
-| `KidTodayView.tsx` | 1,607 | Next decomposition target |
+| `PlannerChatPage.tsx` | 2,112 | Next decomposition target |
+| `MyAvatarPage.tsx` | 1,862 | Next decomposition target |
 | `WorkshopPage.tsx` | 1,549 | Stable |
 | `BookEditorPage.tsx` | 1,419 | Stable |
+| `TodayPage.tsx` | 816 | Decomposed (was 1,789) |
 
 #### TodayPage Decomposition (Completed)
 - Original: 1,789 lines → Shell: 816 lines + 5 extracted components
@@ -442,14 +442,14 @@ Key Design Decisions
 - `ChapterQuestionCard.tsx` (60L) — Stonebridge narrative question
 
 #### Next Decomposition Targets
-- **KidTodayView.tsx (1,607L)** — Similar decomposition opportunity as TodayPage
-- **PlannerChatPage.tsx (2,617L)** — Setup wizard, chat, plan preview, and apply logic are interleaved
-- **MyAvatarPage.tsx (2,445L)** — 3D renderer, armor equip, theme picker, and admin features in one file
+- **PlannerChatPage.tsx (2,112L)** — Setup wizard, chat, plan preview, and apply logic are interleaved
+- **MyAvatarPage.tsx (1,862L)** — 3D renderer, armor equip, theme picker, and admin features in one file
+- **KidTodayView.tsx (805L)** — Partially decomposed; further extraction possible
 
 #### Ladder System Deprecation
 - Partially deprecated. Disposition system (curiosity, persistence, articulation, self-awareness, ownership) is replacing ladder-based tracking.
-- TODO comments added in 5 files marking ladder references for removal.
 - Ladders page still exists at `/ladders` route but is secondary to the Learning Profile tab.
+- No TODO markers remain in ladder files — deprecation plan needs explicit tracking if pursued.
 
 #### AI Prompt Patterns
 - 5 tasks use `buildContextForTask` (contextSlices.ts): plan, evaluate, quest, disposition, weeklyFocus
@@ -512,6 +512,6 @@ Architecture Review Notes (March 29, 2026) The following areas are flagged for a
 * AI context pipeline size — system prompt includes many data sources; token cost and latency implications
 * AI prompt drift — 3 different patterns for system prompt construction across task handlers; consolidation pending
 * Type safety — types split across 10 files (common, family, planning, evaluation, xp, books, compliance, dadlab, workshop, skillTags) with barrel re-export via index.ts
-* Decomposition queue — PlannerChatPage (2,617L), MyAvatarPage (2,445L), KidTodayView (1,607L) are next targets
+* Decomposition queue — PlannerChatPage (2,112L), MyAvatarPage (1,862L) are the remaining targets
 
-Last updated: March 29, 2026
+Last updated: March 31, 2026
