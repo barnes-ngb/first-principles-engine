@@ -74,7 +74,7 @@ const items = snapshot.docs.map((doc) => ({
 ## Project Structure
 
 - `src/app/` — App shell, routing, theme provider
-- `src/components/` — Shared UI components
+- `src/components/` — Shared UI components (includes SectionErrorBoundary for per-section crash isolation)
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
 - `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useDebounce, useSaveState, useAudioRecorder, useSpeechRecognition, useTTS, useXpLedger)
@@ -85,7 +85,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/core/xp/` — XP ledger, armor tiers, armor unlock logic
 - `src/core/avatar/` — Daily armor session management (`getDailyArmorSession.ts`)
 - `src/core/data/` — Database seed data
-- `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, `voxel/` sub-module (Three.js character, armor, poses, materials, camera)
+- `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, decomposed panels (ArmorPieceGallery, ArmorVerseCard, AvatarPhotoUpload, AvatarHeroBanner, AvatarCharacterDisplay, ArmorSuitUpPanel, AvatarCustomizer, speakVerse), `voxel/` sub-module (Three.js character, armor, poses, materials, camera)
 - `src/features/books/` — Bookshelf, book editor/reader, sight word dashboard, story guide
 - `src/features/dad-lab/` — Dad Lab lifecycle (plan, start, contribute, complete)
 - `src/features/engine/` — Engine page and engine logic
@@ -96,7 +96,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/login/` — Profile selection
 - `src/features/not-found/` — 404 page
 - `src/features/planner/` — TeachHelperDialog (shared)
-- `src/features/planner-chat/` — Plan My Week (AI chat planner, main planning flow)
+- `src/features/planner-chat/` — Plan My Week (AI chat planner, decomposed: PlannerChatPage + PlannerSetupWizard, WeekFocusPanel, PlanDayCards, PlannerChatMessages)
 - `src/features/progress/` — Progress tabs (learning profile, ladders, engine, snapshot, milestones, word wall, armor)
 - `src/features/progress/DispositionProfile.tsx` — AI disposition narrative from day log data
 - `src/features/quest/` — Knowledge Mine (interactive reading quest)
@@ -104,7 +104,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/settings/` — AI usage, account, avatar admin, sticker library
 - `src/components/ScanButton.tsx` — Camera capture for curriculum photo scanning
 - `src/components/ScanResultsPanel.tsx` — AI scan results display
-- `src/features/today/` — Parent Today (decomposed: TodayPage shell + TodayChecklist, WeekFocusCard, QuickCaptureSection, TeachBackSection, ChapterQuestionCard) + Kid Today views, routine sync, XP
+- `src/features/today/` — Parent Today (decomposed: TodayPage shell + TodayChecklist, WeekFocusCard, QuickCaptureSection, TeachBackSection, ChapterQuestionCard) + Kid Today (decomposed: KidTodayView shell + KidChecklist, KidTeachBack, KidChapterResponse, KidConundrumResponse, KidExtraLogger, KidCelebration) + routine sync, XP
 - `src/features/weekly-review/` — Weekly review page
 - `src/features/workshop/` — Story Game Workshop (board/adventure/card games)
 - `functions/src/` — Firebase Cloud Functions (AI endpoints)
@@ -233,7 +233,7 @@ All under `families/{familyId}/`:
 
 ### Cloud Functions (18 exported)
 - `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, chat, generate)
-- `weeklyReview` — Scheduled weekly review (Sunday 9am CT)
+- `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
 - `generateWeeklyReviewNow` — Manual review trigger
 - `generateActivity` — Lesson card generation
 - `healthCheck` — Diagnostic endpoint
@@ -271,11 +271,11 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 
 ## Known Technical Debt
 
-- **PlannerChatPage.tsx (2,617L)** — Next decomposition target. Setup wizard, chat, plan preview, and apply logic are interleaved.
-- **MyAvatarPage.tsx (2,445L)** — 3D renderer, armor equip, theme picker, and admin features in one file.
-- **KidTodayView.tsx (1,607L)** — Similar decomposition opportunity as TodayPage.
-- **Ladder system** — Partially deprecated. Disposition system is replacing it. 5 files have TODO comments marking ladder references for removal.
-- **AI prompt drift** — 3 different patterns for system prompt construction across task handlers. Consolidation pending.
-- **XP ledger** — Full collection recompute on every award. Performance fix pending.
-- **evaluate.ts (weekly review)** — Separate prompt construction from the task system. Not in task registry.
+- **PlannerChatPage.tsx (2,112L)** — Decomposed render (800→500L) but state management is still ~1,600L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **WorkshopPage.tsx (1,549L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
+- **BookEditorPage.tsx (1,419L)** — Stable, handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
+- **VoxelCharacter.tsx (1,264L)** — Three.js render code. Splitting the render loop is risky. Leave as-is.
+- **MyAvatarPage.tsx (1,234L)** — Decomposed from 1,862L. Remaining code is state management + ceremony flow. Stable.
+- **Ladder system** — Partially deprecated. Disposition system replacing it. 5 files have TODO comments marking ladder references for removal.
+- **evaluate.ts (weekly review)** — Now uses CHARTER_PREAMBLE + addendum, but still separate from the task system. Not in task registry.
 - **Hours partial-day edge** — If a day has some blocks with actualMinutes and others without, only tracked blocks count. By design but undocumented.
