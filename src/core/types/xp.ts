@@ -336,6 +336,7 @@ export interface OutfitCustomization {
   shirtColor?: string   // Hex
   pantsColor?: string   // Hex
   shoeColor?: string    // Hex
+  capeColor?: string    // Hex — base cape color (default: dark red / blue by age)
   armorColors?: ArmorColors  // Per-piece dye colors (Stone tier+)
   shieldEmblem?: ShieldEmblem  // Shield emblem design (Iron tier+)
   helmetCrest?: HelmetCrest    // Helmet crest style (Iron tier+)

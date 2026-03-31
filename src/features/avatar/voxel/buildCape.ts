@@ -1,65 +1,130 @@
 import * as THREE from 'three'
+import { LEGENDS_OUTFIT } from './buildCharacter'
 
-// ── Cape colors per tier (Gold+ only) ────────────────────────────
+// ── Cape colors per tier (Gold+ override the base cape color) ───────
 
-const CAPE_COLORS: Record<string, number> = {
-  GOLD: 0x8b0000, // deep red
-  DIAMOND: 0x1e3a8a, // royal blue
+const TIER_CAPE_COLORS: Record<string, number> = {
+  GOLD: 0x8b0000,     // deep red
+  DIAMOND: 0x1e3a8a,  // royal blue
   NETHERITE: 0x1a0a2e, // black-purple
 }
 
-/**
- * Returns true if the given tier should have a cape.
- */
-export function tierHasCape(tier: string): boolean {
-  return tier in CAPE_COLORS
+/** Lerp between two hex colors */
+function lerpColor(colorA: number, colorB: number, t: number): number {
+  const a = new THREE.Color(colorA)
+  const b = new THREE.Color(colorB)
+  a.lerp(b, t)
+  return a.getHex()
 }
 
 /**
- * Builds a voxel-style cape (3 stacked box segments, wider toward bottom).
- * Attaches to the torso group, positioned behind the character's back.
+ * Returns true if the given tier has a special cape color override.
+ * (All characters now have a base cape regardless of tier.)
  */
-export function buildCape(tier: string, ageGroup: 'older' | 'younger'): THREE.Group | null {
-  const color = CAPE_COLORS[tier]
-  if (color == null) return null
+export function tierHasCape(tier: string): boolean {
+  return tier in TIER_CAPE_COLORS
+}
 
+/**
+ * Get the default base cape color for an age group.
+ */
+export function getDefaultCapeColor(ageGroup: 'older' | 'younger'): number {
+  return LEGENDS_OUTFIT[ageGroup].capeColor
+}
+
+/**
+ * Resolve the cape color: tier override > customization > age-group default.
+ */
+export function resolveCapeColor(
+  tier: string,
+  ageGroup: 'older' | 'younger',
+  customCapeColor?: string,
+): number {
+  // Tier colors take precedence (Gold+)
+  if (tier in TIER_CAPE_COLORS) return TIER_CAPE_COLORS[tier]
+  // Then saved customization
+  if (customCapeColor) return new THREE.Color(customCapeColor).getHex()
+  // Then age-group default
+  return getDefaultCapeColor(ageGroup)
+}
+
+/**
+ * Builds a voxel-style Legends cape (3 stacked box segments, wider toward bottom).
+ * Part of the BASE outfit — every character gets a cape, not just Gold+ tier.
+ * The cape attaches to the torso, positioned behind the character's back.
+ */
+export function buildBaseCape(ageGroup: 'older' | 'younger', capeColor: number): THREE.Group {
   const scale = ageGroup === 'younger' ? 0.88 : 1.0
   const U = 0.125 * scale
 
   const capeGroup = new THREE.Group()
   capeGroup.name = 'cape'
-  const capeMat = new THREE.MeshLambertMaterial({ color })
+
+  const capeMat = new THREE.MeshPhongMaterial({
+    color: capeColor,
+    specular: 0x222222,
+    shininess: 8,
+    flatShading: true,
+    side: THREE.DoubleSide,
+  })
 
   // Top section (shoulder width)
   const top = new THREE.Mesh(
-    new THREE.BoxGeometry(U * 6, U * 3, U * 0.5),
+    new THREE.BoxGeometry(U * 7.2, U * 4, U * 0.5),
     capeMat,
   )
-  top.position.set(0, 0, 0)
+  top.position.set(0, -U * 0.8, 0)
   capeGroup.add(top)
 
   // Middle section (slightly wider)
+  const midMat = capeMat.clone()
+  midMat.color = new THREE.Color(lerpColor(capeColor, 0x000000, 0.08))
   const mid = new THREE.Mesh(
-    new THREE.BoxGeometry(U * 7, U * 4, U * 0.5),
-    capeMat.clone(),
+    new THREE.BoxGeometry(U * 8, U * 4.8, U * 0.5),
+    midMat,
   )
-  mid.position.set(0, -U * 3.5, 0)
+  mid.position.set(0, -U * 5.2, 0)
   capeGroup.add(mid)
 
-  // Bottom section (widest)
+  // Bottom section (widest, darkest)
+  const botMat = new THREE.MeshPhongMaterial({
+    color: lerpColor(capeColor, 0x000000, 0.15),
+    specular: 0x222222,
+    shininess: 8,
+    flatShading: true,
+    side: THREE.DoubleSide,
+  })
   const bot = new THREE.Mesh(
-    new THREE.BoxGeometry(U * 8, U * 3, U * 0.5),
-    capeMat.clone(),
+    new THREE.BoxGeometry(U * 8.8, U * 4, U * 0.5),
+    botMat,
   )
-  bot.position.set(0, -U * 7, 0)
+  bot.position.set(0, -U * 9.6, 0)
   capeGroup.add(bot)
 
-  // Position cape behind torso, near shoulders
+  // Clasp at top (gold, holds cape at shoulders)
+  const clasp = new THREE.Mesh(
+    new THREE.BoxGeometry(U * 1.2, U * 0.6, U * 0.6),
+    new THREE.MeshPhongMaterial({ color: 0xC8A84E, shininess: 25, flatShading: true }),
+  )
+  clasp.position.set(0, U * 1.2, 0)
+  capeGroup.add(clasp)
+
+  // Position cape behind torso, attached near shoulders
   capeGroup.position.set(0, U * 3, -U * 4.5)
 
   capeGroup.userData.isCape = true
 
   return capeGroup
+}
+
+/**
+ * Legacy compatibility: builds a cape for a given tier.
+ * Now delegates to buildBaseCape with tier-specific color.
+ */
+export function buildCape(tier: string, ageGroup: 'older' | 'younger'): THREE.Group | null {
+  const color = TIER_CAPE_COLORS[tier]
+  if (color == null) return null
+  return buildBaseCape(ageGroup, color)
 }
 
 /**
@@ -69,7 +134,7 @@ export function buildCape(tier: string, ageGroup: 'older' | 'younger'): THREE.Gr
 export function animateCape(scene: THREE.Scene, time: number): void {
   scene.traverse((obj) => {
     if (obj.userData.isCape) {
-      obj.rotation.x = Math.sin(time * 1.2) * 0.05
+      obj.rotation.x = Math.sin(time * 1.2) * 0.04
     }
   })
 }
