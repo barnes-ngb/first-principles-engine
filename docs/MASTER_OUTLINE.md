@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v13 **Version:** v13 — March 29, 2026 **Status:** Updated — cross-doc alignment audit (CF count 19, task types 11, collection count 26, model selection corrected, missing handlers documented) Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~98k lines TypeScript (src/ ~89k + functions/ ~9k), 30+ test files, 600+ tests, 27 Firestore collections, 18 Cloud Functions, 12 chat task types, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v14 **Version:** v14 — March 31, 2026 **Status:** Updated — 4 file decompositions (22 new components), architecture audit fixes, first-week polish, materials theming, weekly review fixes Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~100k lines TypeScript (src/ ~91k + functions/ ~9k), 52 test files, 600+ tests, 113 commits, 27 Firestore collections, 18 Cloud Functions, 12 chat task types, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -14,7 +14,13 @@ Barnes Family Homeschool — Master Project Outline v13 **Version:** v13 — Mar
 * Extra Activity Logger (kid view) — "I Did More Mining!" lets Lincoln log tablet time (Reading Eggs, Math App, etc.) with activity + duration chips. All taps, no typing. Adds to checklist as completed item, counts toward hours and teach-back trigger.
 * Weekly Conundrum card — expandable discussion scenario from week plan
 * Chapter Question card — Stonebridge narrative question from unified weekly focus
-* **Decomposition (completed):** TodayPage shell (816L) + TodayChecklist (681L) + QuickCaptureSection (285L) + WeekFocusCard (168L) + TeachBackSection (103L) + ChapterQuestionCard (60L) + ReadingRoutineItems + MathRoutineItems + SpeechRoutineItems + RoutineSection + ExplorerMap + WorkshopGameCards + KidCaptureForm + CreativeTimeLog + LadderQuickLog + HelperPanel
+* **SectionErrorBoundary** — per-section crash isolation prevents one broken section from taking down the whole page
+* **Evaluation nudge** — planner shows nudge when no skill snapshot exists
+* **Minutes-logged indicator** — Today checklist shows tracked minutes per item
+* **HelpStrip guidance** — contextual help on Records, Weekly Review, and Progress pages
+* **Per-child materials theming** — Lincoln gets Minecraft-themed worksheets, London gets story/adventure-themed worksheets
+* **Decomposition (completed):** TodayPage shell (816L) + TodayChecklist (720L) + QuickCaptureSection (285L) + WeekFocusCard (163L) + TeachBackSection (97L) + ChapterQuestionCard (60L) + ReadingRoutineItems + MathRoutineItems + SpeechRoutineItems + RoutineSection + ExplorerMap + WorkshopGameCards + KidCaptureForm + CreativeTimeLog + LadderQuickLog + HelperPanel
+* **Kid Today View decomposition (completed):** KidTodayView shell (805L) + KidChecklist (484L) + KidTeachBack (167L) + KidChapterResponse (159L) + KidConundrumResponse (209L) + KidExtraLogger (163L) + KidCelebration (117L)
 
 ### Curriculum Photo Scanning
 * ScanButton component — camera capture of workbook/worksheet pages
@@ -38,7 +44,10 @@ Plan My Week
 * Print Materials — per-day or all-week Minecraft-themed worksheet generation
 * "Repeat Last Week" shortcut for low-energy weeks
 * AI feature flag defaults to ON (no manual Settings toggle needed)
-* Weekly Conundrum — AI-generated open-ended discussion scenario tied to week theme/virtue/subjects. No right answer. Separate prompts for Lincoln (deeper) and London (simpler). Saved to week plan, visible on Today. Evaluation Chat
+* Weekly Conundrum — AI-generated open-ended discussion scenario tied to week theme/virtue/subjects. No right answer. Separate prompts for Lincoln (deeper) and London (simpler). Saved to week plan, visible on Today.
+* **Plan My Week decomposition (completed):** PlannerChatPage (2,112L) + PlannerSetupWizard (201L) + WeekFocusPanel (88L) + PlanDayCards (104L) + PlannerChatMessages (65L). Render reduced 800→500L; state management still unified in main page.
+
+Evaluation Chat
 * Shelly-guided reading diagnostic, AI walks through structured assessment levels
 * Live findings panel, <finding> and <complete> block extraction
 * Report view: skill map, frontier, recommendations, what to skip
@@ -62,6 +71,7 @@ Plan My Week
 * End-on-a-win — bonus round question if last question is wrong, framed as "BONUS ROUND"
 * 24 unit tests for adaptive logic
 * Quest diamonds → 2 XP each → avatar progression
+* Quest summary ethos fix — "questions explored" not "correct/total" (disposition over content mastery)
 * Math Quest + Speech Quest shown as "coming soon"
 
 ### Story Game Workshop
@@ -142,6 +152,7 @@ My Books (Book Builder + AI Story Generator)
 * Tier upgrade — all 6 pieces collected → full-set celebration, new tier sheet generates in parallel, before/after reveal
 * Parent controls — Settings → Avatar & XP tab: add/subtract XP, delete pieces, reset avatar, force tier upgrade (testing), activity log
 * Daily session — DailyArmorSession per child per date; resets at midnight; tracks applied pieces
+* **MyAvatarPage decomposition (completed):** MyAvatarPage (1,234L) + ArmorPieceGallery (271L) + ArmorVerseCard (169L) + AvatarPhotoUpload (250L) + AvatarHeroBanner (199L) + AvatarCharacterDisplay (288L) + ArmorSuitUpPanel (296L) + AvatarCustomizer (133L) + speakVerse (19L)
 
 ### 3D Avatar — Armor of God System
 
@@ -341,6 +352,7 @@ Plan My Week Fix Mar 23 Critical bug fixes (handleSetupComplete routing, JSON pa
 Cleanup Mar 24 Parent experience audit, dead code removal (5.6k+ lines), model unification (all Sonnet → claude-sonnet-4-6), plan quality fixes (timeBudget 185m, estimatedMinutes 30m, routine promotion, must-do default), hours computation fix, AI Usage panel model labels, docs refresh, orphaned collections/types/seed cleanup, CHARTER_PREAMBLE dedup, Progress tab reorder
 First Principles Mar 25 Weekly review rewrite (day logs + type alignment), disposition profile, teach-back (parent + kid), conundrum generation, extra activity logger, Firestore indexes, first principles alignment
 Business Prep Mar 28+ Creative timer, mini-book PDF, sketch-to-story pipeline
+Audit Mar 29-31 Architecture audit: dead code cleanup, TodayPage decomposition, error handling (SectionErrorBoundary), XP ledger perf, prompt consolidation, docs v14, first-week polish (evaluation nudge, minutes-logged indicator, HelpStrips, warmer empty states), materials theming (per-child), weekly review fixes (7PM schedule, CHARTER_PREAMBLE + addendum, empty-week guard), quest summary ethos fix, KidTodayView decomposition, PlannerChatPage decomposition, MyAvatarPage decomposition
 
 Removed Features (Cleanup Sprint, Mar 24-25)
 * Sessions (1,720 lines) — orphaned feature with no nav links; sessionsCollection removed
@@ -411,7 +423,7 @@ Key Design Decisions
 | `functions/src/ai/tasks/` | Chat task registry (12 handlers: plan, chat, evaluate, quest, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, workshop, scan + analyzePatterns export) |
 | `functions/src/ai/imageTasks/` | Image task registry (11 handlers) |
 | `functions/src/ai/contextSlices.ts` | Task-specific context assembly + engagement compression |
-| `src/features/avatar/` | My Armor (VoxelCharacter, VerseCard, ArmorIcons, Particles, voxel/) |
+| `src/features/avatar/` | My Armor (MyAvatarPage + 8 extracted panels, VoxelCharacter, voxel/) |
 | `src/features/books/` | My Books |
 | `src/features/quest/` | Knowledge Mine |
 | `src/features/today/` | Today page |
@@ -427,24 +439,44 @@ Key Design Decisions
 #### Top 5 Largest Files
 | File | Lines | Status |
 |------|-------|--------|
-| `PlannerChatPage.tsx` | 2,617 | Next decomposition target |
-| `MyAvatarPage.tsx` | 2,445 | Next decomposition target |
-| `KidTodayView.tsx` | 1,607 | Next decomposition target |
-| `WorkshopPage.tsx` | 1,549 | Stable |
-| `BookEditorPage.tsx` | 1,419 | Stable |
+| `PlannerChatPage.tsx` | 2,112 | Decomposed render (800→500L), state management unified. Stable. |
+| `WorkshopPage.tsx` | 1,549 | Stable — phase-based rendering, shared currentGame state |
+| `BookEditorPage.tsx` | 1,419 | Stable — clear section boundaries |
+| `VoxelCharacter.tsx` | 1,264 | Three.js render code. Leave as-is. |
+| `MyAvatarPage.tsx` | 1,234 | Decomposed from 1,862L. State + ceremony flow. Stable. |
 
-#### TodayPage Decomposition (Completed)
-- Original: 1,789 lines → Shell: 816 lines + 5 extracted components
-- `TodayChecklist.tsx` (681L) — daily checklist rendering and interaction
+#### Decompositions (All Completed)
+
+**TodayPage** — Original: 1,789L → Shell: 816L + 5 extracted components
+- `TodayChecklist.tsx` (720L) — daily checklist rendering and interaction
 - `QuickCaptureSection.tsx` (285L) — note/photo/audio quick capture
-- `WeekFocusCard.tsx` (168L) — week theme/virtue/scripture card
-- `TeachBackSection.tsx` (103L) — teach-back prompt and capture
+- `WeekFocusCard.tsx` (163L) — week theme/virtue/scripture card
+- `TeachBackSection.tsx` (97L) — teach-back prompt and capture
 - `ChapterQuestionCard.tsx` (60L) — Stonebridge narrative question
 
-#### Next Decomposition Targets
-- **KidTodayView.tsx (1,607L)** — Similar decomposition opportunity as TodayPage
-- **PlannerChatPage.tsx (2,617L)** — Setup wizard, chat, plan preview, and apply logic are interleaved
-- **MyAvatarPage.tsx (2,445L)** — 3D renderer, armor equip, theme picker, and admin features in one file
+**KidTodayView** — Original: 1,813L → Shell: 805L + 6 extracted components
+- `KidChecklist.tsx` (484L) — kid daily checklist with must-do/choose sections
+- `KidConundrumResponse.tsx` (209L) — weekly conundrum response
+- `KidTeachBack.tsx` (167L) — "I Taught London!" capture
+- `KidExtraLogger.tsx` (163L) — extra activity logger ("I Did More Mining!")
+- `KidChapterResponse.tsx` (159L) — chapter question response
+- `KidCelebration.tsx` (117L) — completion celebration
+
+**PlannerChatPage** — Original: 2,363L → Shell: 2,112L + 4 extracted components (render 800→500L)
+- `PlannerSetupWizard.tsx` (201L) — first-visit setup wizard
+- `PlanDayCards.tsx` (104L) — day card rendering in plan preview
+- `WeekFocusPanel.tsx` (88L) — week focus display panel
+- `PlannerChatMessages.tsx` (65L) — chat message rendering
+
+**MyAvatarPage** — Original: 1,862L → Shell: 1,234L + 8 extracted components
+- `ArmorSuitUpPanel.tsx` (296L) — daily armor suit-up flow
+- `AvatarCharacterDisplay.tsx` (288L) — character display wrapper
+- `ArmorPieceGallery.tsx` (271L) — armor piece card gallery
+- `AvatarPhotoUpload.tsx` (250L) — photo upload + transform
+- `AvatarHeroBanner.tsx` (199L) — hero banner with character + XP
+- `ArmorVerseCard.tsx` (169L) — verse card with TTS
+- `AvatarCustomizer.tsx` (133L) — customization UI (dye, emblems, crests)
+- `speakVerse.ts` (19L) — verse TTS utility
 
 #### Ladder System Deprecation
 - Partially deprecated. Disposition system (curiosity, persistence, articulation, self-awareness, ownership) is replacing ladder-based tracking.
@@ -458,8 +490,8 @@ Key Design Decisions
 - Consolidation pending.
 
 #### Known Technical Debt
-- **XP ledger** — Full collection recompute on every award (`O(n)` over all events). Performance fix pending.
-- **evaluate.ts (weekly review)** — Separate prompt construction from the task system. Not in task registry.
+- **PlannerChatPage.tsx (2,112L)** — Decomposed render (800→500L) but state management is still ~1,600L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **evaluate.ts (weekly review)** — Now uses CHARTER_PREAMBLE + addendum, but still separate from the task system. Not in task registry.
 - **Hours partial-day edge** — If a day has some blocks with actualMinutes and others without, only tracked blocks count. By design but undocumented.
 - **Dead `sessions` collection** — Fully removed (PR #651). No orphaned references remain.
 
@@ -512,6 +544,6 @@ Architecture Review Notes (March 29, 2026) The following areas are flagged for a
 * AI context pipeline size — system prompt includes many data sources; token cost and latency implications
 * AI prompt drift — 3 different patterns for system prompt construction across task handlers; consolidation pending
 * Type safety — types split across 10 files (common, family, planning, evaluation, xp, books, compliance, dadlab, workshop, skillTags) with barrel re-export via index.ts
-* Decomposition queue — PlannerChatPage (2,617L), MyAvatarPage (2,445L), KidTodayView (1,607L) are next targets
+* Decomposition queue — all 4 targets completed (TodayPage, KidTodayView, PlannerChatPage, MyAvatarPage). Next largest files are WorkshopPage (1,549L) and BookEditorPage (1,419L), both stable.
 
 Last updated: March 29, 2026

@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-03-29.
+> Where everything lives. Updated 2026-03-31.
 
 ---
 
@@ -8,7 +8,7 @@
 
 | Document | Status | Notes |
 |---|---|---|
-| `MASTER_OUTLINE.md` | **CURRENT** (v13) | Single source of truth: features, status, sprint history. Updated Mar 29: CF count 18, task types 12, collections 27, TodayPage decomposition, scan task, architecture notes expanded |
+| `MASTER_OUTLINE.md` | **CURRENT** (v14) | Single source of truth: features, status, sprint history. Updated Mar 31: 4 file decompositions (22 new components), architecture audit, first-week polish, materials theming, weekly review fixes |
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
