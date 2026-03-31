@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CloseIcon from '@mui/icons-material/Close'
 import PrintIcon from '@mui/icons-material/Print'
-import SchoolIcon from '@mui/icons-material/School'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -32,6 +31,7 @@ interface TeachHelperDialogProps {
   childName: string
   item: ChecklistItem | null
   ladders: LadderCardDefinition[]
+  weekTheme?: string
 }
 
 /**
@@ -48,6 +48,7 @@ export default function TeachHelperDialog({
   childName,
   item,
   ladders,
+  weekTheme,
 }: TeachHelperDialogProps) {
   const [snapshot, setSnapshot] = useState<SkillSnapshot | null>(null)
   const [lessonCard, setLessonCard] = useState<LessonCard | null>(null)
@@ -208,7 +209,9 @@ export default function TeachHelperDialog({
         ? `Lesson card: ${activeLessonCard.title}\nObjective: ${activeLessonCard.objective}\nSteps: ${activeLessonCard.steps.join('; ')}`
         : ''
 
-      const prompt = `Generate a single Minecraft-themed printable worksheet for this activity:
+      const themeContext = weekTheme ? `\nWeek theme: "${weekTheme}" — weave this theme into the activity. Reference the theme in scenarios, example sentences, and the connection quote at the bottom.` : ''
+
+      const prompt = `Generate a single themed printable worksheet for this activity:
 
 Activity: ${item.label}
 Child: ${childName} (age 10)
@@ -216,15 +219,16 @@ Subject: ${item.subjectBucket ?? 'Other'}
 Duration: ${item.estimatedMinutes ?? item.plannedMinutes ?? 15} minutes
 ${item.skipGuidance ? `Skip guidance: ${item.skipGuidance}` : ''}
 ${lessonContext}
-${snapshot?.prioritySkills?.length ? `Skill focus: ${snapshot.prioritySkills.map((s) => `${s.label} (${s.level})`).join(', ')}` : ''}
+${snapshot?.prioritySkills?.length ? `Skill focus: ${snapshot.prioritySkills.map((s) => `${s.label} (${s.level})`).join(', ')}` : ''}${themeContext}
 
 RULES:
 1. Return ONLY valid HTML starting with <html>. No markdown, no backticks.
-2. MINECRAFT THEMED — use Minecraft items, mobs, biomes in problems and scenarios.
+2. ${weekTheme ? `THEMED around "${weekTheme}" — use the theme in problems, scenarios, and a connection quote.` : 'MINECRAFT THEMED — use Minecraft items, mobs, biomes in problems and scenarios.'}
 3. Include REAL CONTENT: actual problems, actual words, actual questions.
 4. ${item.subjectBucket === 'Math' ? 'Generate 6-8 math problems with work space. Include 2 guided examples at top.' : ''}
 ${item.subjectBucket === 'Reading' || item.subjectBucket === 'LanguageArts' ? 'Generate a word list (8-10 words), sound boxes, and 3-4 sentences using target words.' : ''}
-5. Use this CSS for print-ready formatting:
+5. Include a THEME CONNECTION section at the bottom — a short italic quote connecting the activity to the theme.
+6. Use this CSS for print-ready formatting:
 
 <html><head><style>
   @page { margin: 0.5in; }
@@ -239,6 +243,8 @@ ${item.subjectBucket === 'Reading' || item.subjectBucket === 'LanguageArts' ? 'G
   .line { border-bottom: 1px solid #999; height: 35px; margin: 8px 0; }
   .example { background: #e8f5e9; padding: 12px; border-radius: 6px; border-left: 4px solid #4caf50; }
   .drawing-box { width: 100%; height: 200px; border: 2px dashed #aaa; border-radius: 8px; margin: 12px 0; }
+  .theme-badge { background: #e8f5e9; padding: 4px 12px; border-radius: 12px; font-size: 14px; display: inline-block; margin-bottom: 16px; }
+  .connection { font-style: italic; background: #fff8e1; padding: 12px; border-left: 3px solid #ffc107; margin-top: 16px; border-radius: 4px; }
 </style></head><body>`
 
       const response = await aiChat({
@@ -266,8 +272,8 @@ ${item.subjectBucket === 'Reading' || item.subjectBucket === 'LanguageArts' ? 'G
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <SchoolIcon color="primary" />
-        Help Me Teach This
+        <AutoAwesomeIcon color="primary" />
+        {weekTheme ? `Activity — ${weekTheme}` : 'Help Me Teach This'}
         <Box sx={{ flex: 1 }} />
         <IconButton size="small" onClick={onClose}>
           <CloseIcon />
