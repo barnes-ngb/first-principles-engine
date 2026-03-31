@@ -1,15 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import SendIcon from '@mui/icons-material/Send'
-import Accordion from '@mui/material/Accordion'
-import AccordionDetails from '@mui/material/AccordionDetails'
-import AccordionSummary from '@mui/material/AccordionSummary'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
@@ -20,8 +14,6 @@ import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
-import ToggleButton from '@mui/material/ToggleButton'
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import { addDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
@@ -75,7 +67,7 @@ import {
   SubjectBucket,
 } from '../../core/types/enums'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
-import { fixUnicodeEscapes, formatDateYmd } from '../../core/utils/format'
+import { formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
 import { defaultAppBlocks, defaultDailyRoutine, parseRoutineTotalMinutes } from './chatPlanner.logic'
@@ -92,12 +84,14 @@ import { describeAdjustment, parseAdjustmentIntent } from './intentParser'
 import { formatCoverageSummaryText, buildCoverageSummary } from './coverageSummary'
 import ContextDrawer from './ContextDrawer'
 import LessonCardPreview from './LessonCardPreview'
-import PlanPreviewCard from './PlanPreviewCard'
 import PlanSummaryPanel from './PlanSummaryPanel'
 import { useScan } from '../../core/hooks/useScan'
-import PhotoLabelForm from './PhotoLabelForm'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
 import { buildMaterialsPrompt, openPrintWindow } from './generateMaterials'
+import PlannerSetupWizard from './PlannerSetupWizard'
+import WeekFocusPanel from './WeekFocusPanel'
+import PlanDayCards from './PlanDayCards'
+import PlannerChatMessages from './PlannerChatMessages'
 
 
 /** Detect if an AI response looks like it was trying to return plan JSON (contains days/items structure). */
@@ -165,14 +159,6 @@ function buildPhotoContextSection(labels: PhotoLabel[]): string {
   }
   lines.push('Please incorporate these specific materials into the plan.')
   return lines.join('\n')
-}
-
-const CHAPTER_QUESTION_TYPE_EMOJI: Record<string, string> = {
-  comprehension: '\uD83D\uDD0D',
-  application: '\uD83C\uDF0E',
-  connection: '\uD83D\uDD17',
-  opinion: '\uD83D\uDCAD',
-  prediction: '\uD83D\uDD2E',
 }
 
 const LIGHTER_WEEK_BUDGET_MULTIPLIER = 0.7
@@ -1908,242 +1894,52 @@ ${dayPrompts}`
           />
 
           {phase === 'setup' && (
-            <Stack spacing={2.5} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
-              <Typography variant="h6">Plan {activeChild?.name ?? 'your child'}&apos;s Week</Typography>
-
-              {/* Step 1: Energy selection */}
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>How&apos;s this week looking?</Typography>
-                <ToggleButtonGroup value={weekEnergy} exclusive onChange={(_, v) => { if (v) setWeekEnergy(v) }} size="small" fullWidth>
-                  <ToggleButton value="full">Full Week ({Math.round(hoursPerDay * 10) / 10}h/day)</ToggleButton>
-                  <ToggleButton value="lighter">Lighter Week</ToggleButton>
-                  <ToggleButton value="mvd">Tough Week (MVD)</ToggleButton>
-                </ToggleButtonGroup>
-              </Box>
-
-              {/* Step 1b: Read-aloud info */}
-              <Stack spacing={1.5}>
-                <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  Read-Aloud This Week
-                </Typography>
-                <TextField
-                  size="small"
-                  label="Book"
-                  placeholder="e.g., Charlotte's Web"
-                  value={readAloudBook}
-                  onChange={(e) => setReadAloudBook(e.target.value)}
-                  fullWidth
-                />
-                <TextField
-                  size="small"
-                  label="Chapters this week"
-                  placeholder="e.g., Ch 5-8"
-                  value={readAloudChapters}
-                  onChange={(e) => setReadAloudChapters(e.target.value)}
-                  fullWidth
-                  helperText="The AI will generate a discussion question for each chapter"
-                />
-              </Stack>
-
-              {/* Step 1c: Notes */}
-              <TextField
-                size="small"
-                label="Anything different this week?"
-                placeholder="Field trip Tuesday afternoon, doctor Thursday morning..."
-                value={weekNotes}
-                onChange={(e) => setWeekNotes(e.target.value)}
-                fullWidth
-                multiline
-                rows={2}
-              />
-
-              {/* Mastery context (read-only summary, not raw data) */}
-              {masterySummary && (masterySummary.gotIt.length > 0 || masterySummary.needsFocus.length > 0 || masterySummary.stillWorking.length > 0) && (
-                <Box sx={{ p: 1.5, bgcolor: 'grey.50', borderRadius: 1.5 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, mb: 0.5, display: 'block' }}>
-                    Based on last 2 weeks
-                  </Typography>
-                  {masterySummary.gotIt.length > 0 && (
-                    <Typography variant="body2" color="text.secondary">
-                      Got it: {masterySummary.gotIt.slice(0, 4).map(t => formatSkillLabel(t)).join(', ')}
-                    </Typography>
-                  )}
-                  {masterySummary.stillWorking.length > 0 && (
-                    <Typography variant="body2" color="text.secondary">
-                      Still working: {masterySummary.stillWorking.slice(0, 4).map(t => formatSkillLabel(t)).join(', ')}
-                    </Typography>
-                  )}
-                  {masterySummary.needsFocus.length > 0 && (
-                    <Typography variant="body2" color="warning.main" fontWeight={500}>
-                      Needs focus: {masterySummary.needsFocus.slice(0, 4).map(t => formatSkillLabel(t)).join(', ')}
-                    </Typography>
-                  )}
-                </Box>
-              )}
-
-              {/* Optional photo upload */}
-              <Accordion>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography variant="subtitle2">Upload workbook photos (optional)</Typography>
-                </AccordionSummary>
-                <AccordionDetails>
-                  <PhotoLabelForm
-                    labels={photoLabels}
-                    onLabelsChange={setPhotoLabels}
-                    onPhotoCapture={handlePhotoCapture}
-                    uploading={uploading}
-                    workbookConfigs={workbookConfigs}
-                    onScanCapture={handleScanCapture}
-                    scanLoading={scanLoading}
-                    scanResult={scanRecord?.results ?? null}
-                    scanError={scanError}
-                    onScanClear={clearScan}
-                    onScanAccept={handleScanAccept}
-                  />
-                </AccordionDetails>
-              </Accordion>
-
-              {/* Generate button */}
-              <Button
-                variant="contained"
-                size="large"
-                onClick={photoLabels.length > 0 ? handleSubmitPhotos : handleSetupComplete}
-                disabled={generatingWeek}
-                fullWidth
-                startIcon={generatingWeek ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
-                sx={{ py: 1.5, fontWeight: 'bold', fontSize: '1rem' }}
-              >
-                {generatingWeek
-                  ? 'Generating your week...'
-                  : photoLabels.length > 0
-                    ? `Generate Plan (${photoLabels.length} photo${photoLabels.length > 1 ? 's' : ''})`
-                    : 'Generate This Week\u2019s Plan'}
-              </Button>
-            </Stack>
+            <PlannerSetupWizard
+              childName={activeChild?.name ?? 'your child'}
+              weekEnergy={weekEnergy}
+              onWeekEnergyChange={setWeekEnergy}
+              hoursPerDay={hoursPerDay}
+              readAloudBook={readAloudBook}
+              onReadAloudBookChange={setReadAloudBook}
+              readAloudChapters={readAloudChapters}
+              onReadAloudChaptersChange={setReadAloudChapters}
+              weekNotes={weekNotes}
+              onWeekNotesChange={setWeekNotes}
+              masterySummary={masterySummary}
+              formatSkillLabel={formatSkillLabel}
+              photoLabels={photoLabels}
+              onLabelsChange={setPhotoLabels}
+              onPhotoCapture={handlePhotoCapture}
+              uploading={uploading}
+              workbookConfigs={workbookConfigs}
+              onScanCapture={handleScanCapture}
+              scanLoading={scanLoading}
+              scanResult={scanRecord?.results ?? null}
+              scanError={scanError ?? null}
+              onScanClear={clearScan}
+              onScanAccept={handleScanAccept}
+              onSubmitPhotos={handleSubmitPhotos}
+              onSetupComplete={handleSetupComplete}
+              generatingWeek={generatingWeek}
+            />
           )}
 
           {phase === 'review' && weekPlan && (
-            <Box
-              sx={{
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: 2,
-                p: 2,
-                bgcolor: 'background.paper',
-              }}
-            >
-              <Stack spacing={2}>
-                <Typography variant="subtitle2">This Week in Stonebridge</Typography>
-
-                {weekPlan.theme && (
-                  <Stack spacing={1.5}>
-                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                      <Chip label={weekPlan.theme} color="primary" />
-                      {weekPlan.virtue && <Chip label={weekPlan.virtue} color="secondary" variant="outlined" />}
-                    </Stack>
-                    {weekPlan.scriptureRef && (
-                      <Typography variant="body2">
-                        <strong>{weekPlan.scriptureRef}</strong>
-                        {weekPlan.scriptureText && (
-                          <Typography component="span" variant="body2" sx={{ fontStyle: 'italic' }}>
-                            {' — "'}{weekPlan.scriptureText}{'"'}
-                          </Typography>
-                        )}
-                      </Typography>
-                    )}
-                    {weekPlan.heartQuestion && <Typography variant="body2" color="text.secondary">{weekPlan.heartQuestion}</Typography>}
-                    {weekPlan.formationPrompt && <Typography variant="body2" color="text.secondary">{weekPlan.formationPrompt}</Typography>}
-                  </Stack>
-                )}
-
-                {weekPlan.conundrum && (
-                  <Stack spacing={1.5} sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 2 }}>
-                    <Typography variant="h6" sx={{ fontWeight: 700 }}>{weekPlan.conundrum.title}</Typography>
-                    <Typography variant="body1" sx={{ lineHeight: 1.8, whiteSpace: 'pre-line' }}>{weekPlan.conundrum.scenario}</Typography>
-                    <Typography variant="body1" fontWeight={700} sx={{ mt: 1 }}>{weekPlan.conundrum.question}</Typography>
-                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-                      <Chip label={`Lincoln: ${weekPlan.conundrum.lincolnPrompt?.slice(0, 40)}...`} size="small" variant="outlined" color="primary" />
-                      <Chip label={`London: ${weekPlan.conundrum.londonPrompt?.slice(0, 40)}...`} size="small" variant="outlined" color="secondary" />
-                      {weekPlan.conundrum.readingTieIn && <Chip label="Reading" size="small" variant="outlined" />}
-                      {weekPlan.conundrum.mathContext && <Chip label="Math" size="small" variant="outlined" />}
-                      {weekPlan.conundrum.londonDrawingPrompt && <Chip label="Drawing" size="small" variant="outlined" />}
-                    </Stack>
-                  </Stack>
-                )}
-
-                {weekPlan.theme && (
-                  <Accordion>
-                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                      <Typography variant="caption" color="text.secondary">Edit fields manually</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <Stack spacing={1}>
-                        <TextField size="small" label="Theme" value={weekPlan.theme} onChange={(e) => updateWeekField('theme', e.target.value)} />
-                        <TextField size="small" label="Virtue" value={weekPlan.virtue} onChange={(e) => updateWeekField('virtue', e.target.value)} />
-                        <TextField size="small" label="Scripture Ref" value={weekPlan.scriptureRef} onChange={(e) => updateWeekField('scriptureRef', e.target.value)} />
-                        <TextField size="small" label="Scripture Text" value={weekPlan.scriptureText ?? ''} onChange={(e) => updateWeekField('scriptureText', e.target.value)} multiline />
-                        <TextField size="small" label="Heart Question" value={weekPlan.heartQuestion} onChange={(e) => updateWeekField('heartQuestion', e.target.value)} multiline />
-                        <TextField size="small" label="Formation Prompt" value={weekPlan.formationPrompt ?? ''} onChange={(e) => updateWeekField('formationPrompt', e.target.value)} multiline />
-                      </Stack>
-                    </AccordionDetails>
-                  </Accordion>
-                )}
-              </Stack>
-            </Box>
-          )}
-
-          {phase === 'review' && currentDraft && chapterQuestionsByDay.length > 0 && (
-            <Box
-              sx={{
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: 2,
-                bgcolor: 'grey.50',
-                p: 2,
-              }}
-            >
-              <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-                {readAloudBook ? `${readAloudBook} This Week` : 'Read-Aloud Chapter Questions'}
-              </Typography>
-              <Stack spacing={1}>
-                {chapterQuestionsByDay.map(({ day, chapterQuestion }) => {
-                  const emoji = CHAPTER_QUESTION_TYPE_EMOJI[chapterQuestion.questionType.toLowerCase().trim()] ?? '\u2753'
-                  return (
-                    <Box key={day} sx={{ p: 1.5, bgcolor: 'background.paper', borderRadius: 1.5, border: '1px solid', borderColor: 'divider' }}>
-                      <Stack direction="row" spacing={1} alignItems="baseline">
-                        <Typography variant="subtitle2" sx={{ minWidth: 70 }}>{day}</Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {chapterQuestion.chapter}
-                        </Typography>
-                      </Stack>
-                      <Typography variant="body2" sx={{ mt: 0.5, fontStyle: 'italic' }}>
-                        {emoji} &ldquo;{chapterQuestion.question}&rdquo;
-                      </Typography>
-                    </Box>
-                  )
-                })}
-              </Stack>
-            </Box>
+            <WeekFocusPanel weekPlan={weekPlan} onUpdateField={updateWeekField} />
           )}
 
           {phase === 'review' && currentDraft && (
-            <Box sx={{
-              border: '1px solid',
-              borderColor: 'divider',
-              borderRadius: 2,
-              bgcolor: 'background.paper',
-              p: 2,
-            }}>
-              <Typography variant="h6" gutterBottom>Your Week Plan</Typography>
-              <PlanPreviewCard
-                plan={currentDraft}
-                hoursPerDay={hoursPerDay}
-                masteryReviewLine={masteryReviewLine}
-                onToggleItem={handleToggleItem}
-                onGenerateActivity={!applied ? handleGenerateActivity : undefined}
-                generatingItemId={generatingItemId ?? undefined}
-              />
-            </Box>
+            <PlanDayCards
+              draft={currentDraft}
+              hoursPerDay={hoursPerDay}
+              masteryReviewLine={masteryReviewLine}
+              chapterQuestionsByDay={chapterQuestionsByDay}
+              readAloudBook={readAloudBook}
+              onToggleItem={handleToggleItem}
+              onGenerateActivity={handleGenerateActivity}
+              generatingItemId={generatingItemId}
+              applied={applied}
+            />
           )}
 
           {phase === 'active' && (
@@ -2165,53 +1961,7 @@ ${dayPrompts}`
               </Alert>
 
               {/* Chat history (scrollable) */}
-              {messages.length > 0 && (
-                <Box
-                  sx={{
-                    overflowY: 'auto',
-                    maxHeight: '35vh',
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    borderRadius: 2,
-                    p: 2,
-                    bgcolor: 'grey.50',
-                  }}
-                >
-                  <Stack spacing={1.5}>
-                    {messages.map((msg) => (
-                      <Box
-                        key={msg.id}
-                        sx={{
-                          alignSelf: msg.role === ChatMessageRole.User ? 'flex-end' : 'flex-start',
-                          maxWidth: '85%',
-                          bgcolor: msg.role === ChatMessageRole.User ? 'primary.main' : 'background.paper',
-                          color: msg.role === ChatMessageRole.User ? 'primary.contrastText' : 'text.primary',
-                          px: 2,
-                          py: 1,
-                          borderRadius: 2,
-                          boxShadow: 1,
-                        }}
-                      >
-                        {msg.text && (
-                          <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
-                            {fixUnicodeEscapes(msg.text)}
-                          </Typography>
-                        )}
-                        {msg.photoLabels && msg.photoLabels.length > 0 && (
-                          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
-                            {msg.photoLabels.map((label, i) => (
-                              <Typography key={i} variant="caption">
-                                {label.subjectBucket}: {label.lessonOrPages || 'page'} ({label.estimatedMinutes}m)
-                              </Typography>
-                            ))}
-                          </Stack>
-                        )}
-                      </Box>
-                    ))}
-                    <div ref={chatEndRef} />
-                  </Stack>
-                </Box>
-              )}
+              <PlannerChatMessages messages={messages} messagesEndRef={chatEndRef} />
 
               {/* Chat input for in-week adjustments */}
               <Typography variant="caption" color="text.secondary">
