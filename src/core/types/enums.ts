@@ -174,16 +174,6 @@ export const LabSessionStatus = {
 } as const
 export type LabSessionStatus = (typeof LabSessionStatus)[keyof typeof LabSessionStatus]
 
-export const PlannerSessionStatus = {
-  Setup: 'setup',
-  Uploading: 'uploading',
-  Extracting: 'extracting',
-  DraftReview: 'draft_review',
-  Applied: 'applied',
-} as const
-export type PlannerSessionStatus =
-  (typeof PlannerSessionStatus)[keyof typeof PlannerSessionStatus]
-
 export const AssignmentAction = {
   Keep: 'keep',
   Modify: 'modify',
