@@ -120,6 +120,7 @@ function normalizeCustomization(raw: unknown): OutfitCustomization | undefined {
     ...(c.shirtColor ? { shirtColor: c.shirtColor as string } : {}),
     ...(c.pantsColor ? { pantsColor: c.pantsColor as string } : {}),
     ...(c.shoeColor ? { shoeColor: c.shoeColor as string } : {}),
+    ...(typeof c.capeColor === 'string' ? { capeColor: c.capeColor } : {}),
     ...(armorColors ? { armorColors } : {}),
     ...(shieldEmblem ? { shieldEmblem } : {}),
     ...(helmetCrest ? { helmetCrest } : {}),

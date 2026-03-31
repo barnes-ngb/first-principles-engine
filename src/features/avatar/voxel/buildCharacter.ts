@@ -4,6 +4,14 @@ import { buildHair } from './buildHair'
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
+/** Lerp between two hex colors. t=0 → colorA, t=1 → colorB */
+function lerpColor(colorA: number, colorB: number, t: number): number {
+  const a = new THREE.Color(colorA)
+  const b = new THREE.Color(colorB)
+  a.lerp(b, t)
+  return a.getHex()
+}
+
 /** Create a box with per-face color variation for a Minecraft texture feel */
 function texturedBox(
   w: number,
@@ -73,7 +81,30 @@ function createTexturedMaterials(
   return materials
 }
 
-// ── Build character (Minecraft Steve proportions) ───────────────────
+// ── Default outfit palettes (Minecraft Legends hero style) ─────────
+
+export const LEGENDS_OUTFIT = {
+  older: {
+    shirtColor: 0xCC5500,    // warm burnt orange
+    pantsColor: 0x2A3A52,    // dark navy
+    bootColor: 0x3D2B1F,     // dark brown leather
+    beltColor: 0x5C4033,     // medium brown leather
+    capeColor: 0x8B0000,     // dark red (heroic)
+    trimColor: 0xC8A84E,     // gold accents
+    wrapColor: 0x5C4033,     // brown wrist wraps
+  },
+  younger: {
+    shirtColor: 0xE8A838,    // mustard yellow
+    pantsColor: 0xC4B998,    // khaki
+    bootColor: 0x3D2B1F,     // dark brown leather
+    beltColor: 0x5C4033,     // medium brown leather
+    capeColor: 0x2255AA,     // blue
+    trimColor: 0xC8A84E,     // gold accents
+    wrapColor: 0x5C4033,     // brown wrist wraps
+  },
+} as const
+
+// ── Build character (Minecraft Legends hero proportions) ──────────
 //
 // Steve proportions:
 //   Head:  8×8×8 px  → 1×1×1 units
@@ -114,6 +145,8 @@ export function buildCharacter(
 
   const U = 0.125 // 1 Minecraft pixel (no uniform scale — proportions vary per body part)
   const p = BODY_PROPORTIONS[ageGroup]
+  const s = ageGroup === 'younger' ? 0.88 : 1.0 // Scale factor for detail pieces
+  const outfit = LEGENDS_OUTFIT[ageGroup]
 
   // Derived dimensions (in pixel-units)
   const headPx = 8 * p.headSize
@@ -127,15 +160,22 @@ export function buildCharacter(
   const torsoTop = legTop + torsoPxH * U
   const headCenter = torsoTop + (headPx / 2) * U
 
-  // Colors from features (with fallbacks) — skin & hair from photo, clothes are child-specific
+  // Dimensions
+  const torsoW = U * torsoPxW
+  const torsoH = U * torsoPxH
+  const torsoD = U * 4
+  const legW = U * 4
+  const legH = U * legPxLen
+  const legD = U * 4
+  const armW = U * 4
+  const armH = U * armPxLen
+  const armD = U * 4
+
+  // Colors from features (with fallbacks) — skin & hair from photo, clothes are Legends outfit
   const skinColor = new THREE.Color(features.skinTone ?? '#F5D6B8')
   const hairColor = new THREE.Color(features.hairColor ?? '#6B4C32')
-  // Lincoln: light heather gray Minecraft creeper tee; London: mustard yellow
-  const shirtColor = new THREE.Color(ageGroup === 'younger' ? '#E8A838' : '#BBBBBB')
-  // Lincoln: dark navy shorts; London: khaki/tan
-  const pantsColor = new THREE.Color(ageGroup === 'younger' ? '#C4B998' : '#2A3A52')
-  // Lincoln is barefoot — shoe color matches skin; London gets brown shoes
-  const shoeColor = new THREE.Color(ageGroup === 'younger' ? '#8B7355' : features.skinTone ?? '#F5D6B8')
+  const shirtColor = new THREE.Color(outfit.shirtColor)
+  const pantsColor = new THREE.Color(outfit.pantsColor)
 
   // --- HEAD GROUP (contains head mesh + face features + hair) ---
   // Everything attached to the head is a child of headGroup so it all
@@ -199,41 +239,53 @@ export function buildCharacter(
   const hairGroup = buildHair(features.hairStyle, features.hairLength, hairMat, 0, hU)
   headGroup.add(hairGroup)
 
-  // --- BODY ---
-  const torsoCenter = legTop + (torsoPxH * U) / 2
+  // --- TORSO (Legends Tunic) ---
+  const torsoCenter = legTop + torsoH / 2
   const torso = new THREE.Mesh(
-    new THREE.BoxGeometry(U * torsoPxW, U * torsoPxH, U * 4),
-    createTexturedMaterials(shirtColor, 0x111111, 5),
+    new THREE.BoxGeometry(torsoW, torsoH, torsoD),
+    createTexturedMaterials(shirtColor, 0x222222, 8),
   )
   torso.name = 'torso'
   torso.position.y = torsoCenter
   character.add(torso)
 
-  // Shirt design — Lincoln gets a creeper face, London gets a simple star
-  if (ageGroup === 'older') {
-    // Creeper face on gray shirt — darker green to contrast against gray
-    const creeperGreen = 0x3D8C35
-    const cEyeL = box(U * 1.2, U * 1.2, U * 0.3, creeperGreen, 'creeperEyeL')
-    cEyeL.position.set(-U * 1.5, torsoCenter + U * 2, U * 2.15)
-    character.add(cEyeL)
-    const cEyeR = box(U * 1.2, U * 1.2, U * 0.3, creeperGreen, 'creeperEyeR')
-    cEyeR.position.set(U * 1.5, torsoCenter + U * 2, U * 2.15)
-    character.add(cEyeR)
-    const cMouth = box(U * 2, U * 1, U * 0.3, creeperGreen, 'creeperMouth')
-    cMouth.position.set(0, torsoCenter - U * 0.5, U * 2.15)
-    character.add(cMouth)
-  } else {
-    // Simple yellow star on London's mustard shirt
-    const starColor = 0xFFD700
-    const starV = box(U * 1.2, U * 2.5, U * 0.3, starColor, 'starV')
-    starV.position.set(0, torsoCenter + U * 1, U * 2.15)
-    character.add(starV)
-    const starH = box(U * 2.5, U * 1.2, U * 0.3, starColor, 'starH')
-    starH.position.set(0, torsoCenter + U * 1, U * 2.15)
-    character.add(starH)
-  }
+  // COLLAR/NECKLINE — thin darker band at top of tunic
+  const collarColor = lerpColor(outfit.shirtColor, 0x000000, 0.25)
+  const collar = box(torsoW + 0.02, 0.12 * s, torsoD + 0.02, collarColor, 'tunicCollar')
+  collar.position.y = torsoCenter + torsoH / 2 - 0.06 * s
+  character.add(collar)
 
-  // --- ARMS ---
+  // TRIM BAND — decorative gold stripe across the chest (like Legends heroes)
+  const trimBand = box(torsoW + 0.03, 0.1 * s, 0.03, outfit.trimColor, 'trimBand')
+  trimBand.position.set(0, torsoCenter, torsoD / 2 + 0.015)
+  character.add(trimBand)
+
+  // TUNIC SKIRT — extends below torso, slightly wider, covers top of legs
+  const skirtColor = lerpColor(outfit.shirtColor, 0x000000, 0.15)
+  const skirt = texturedBox(torsoW + 0.1, 0.4 * s, torsoD + 0.05, skirtColor, 'tunicSkirt')
+  skirt.position.y = torsoCenter - torsoH / 2 - 0.2 * s
+  character.add(skirt)
+
+  // CLOTH BELT — every Legends character has one (base outfit, separate from Armor Belt of Truth)
+  const clothBelt = box(torsoW + 0.06, 0.15 * s, torsoD + 0.06, outfit.beltColor, 'clothBelt')
+  clothBelt.position.y = torsoCenter - torsoH / 2 + 0.1 * s
+  character.add(clothBelt)
+
+  // Belt buckle
+  const buckle = box(0.12 * s, 0.12 * s, 0.03, outfit.trimColor, 'clothBuckle')
+  buckle.position.set(0, clothBelt.position.y, torsoD / 2 + 0.04)
+  character.add(buckle)
+
+  // SHOULDER PADS — slightly wider shoulders (Legends style)
+  const shoulderL = box(0.3 * s, 0.15 * s, armD + 0.04, shirtColor, 'shoulderL')
+  shoulderL.position.set(-(torsoW / 2 + 0.05), torsoCenter + torsoH / 2 - 0.08 * s, 0)
+  character.add(shoulderL)
+
+  const shoulderR = box(0.3 * s, 0.15 * s, armD + 0.04, shirtColor, 'shoulderR')
+  shoulderR.position.set(torsoW / 2 + 0.05, torsoCenter + torsoH / 2 - 0.08 * s, 0)
+  character.add(shoulderR)
+
+  // --- ARMS (split: sleeve upper + skin forearm + wrist wrap) ---
   // Geometry is shifted so pivot point is at the SHOULDER (top of arm),
   // enabling natural rotation from the shoulder joint.
   const armGap = U * 1.2 // Gap between arm and torso edge
@@ -241,52 +293,90 @@ export function buildCharacter(
   const armHalfW = U * 2 // arm is 4U wide
   const torsoHalfW = (torsoPxW / 2) * U
 
-  const armGeoL = new THREE.BoxGeometry(U * 4, U * armPxLen, U * 4)
-  armGeoL.translate(0, -U * armPxLen / 2, 0) // Shift so top of arm (shoulder) is at local Y=0
+  // Arms are skin-colored (forearms exposed, Legends hero style)
+  const armGeoL = new THREE.BoxGeometry(armW, armH, armD)
+  armGeoL.translate(0, -armH / 2, 0) // Shift so top of arm (shoulder) is at local Y=0
   const armL = new THREE.Mesh(armGeoL, createTexturedMaterials(skinColor))
   armL.name = 'armL'
   armL.position.set(-torsoHalfW - armHalfW - armGap, shoulderY, 0)
   character.add(armL)
 
-  const armGeoR = new THREE.BoxGeometry(U * 4, U * armPxLen, U * 4)
-  armGeoR.translate(0, -U * armPxLen / 2, 0)
+  const armGeoR = new THREE.BoxGeometry(armW, armH, armD)
+  armGeoR.translate(0, -armH / 2, 0)
   const armR = new THREE.Mesh(armGeoR, createTexturedMaterials(skinColor))
   armR.name = 'armR'
   armR.position.set(torsoHalfW + armHalfW + armGap, shoulderY, 0)
   character.add(armR)
 
-  // Shirt sleeves — children of arms so they rotate together
-  const sleeveLen = Math.min(5, armPxLen * 0.42) // Proportional sleeve length
-  const sleeveGeoL = new THREE.BoxGeometry(U * 4.2, U * sleeveLen, U * 4.2)
+  // Shirt sleeves — upper 50% of arm (tunic sleeves, Legends style)
+  const sleeveLen = armPxLen * 0.5
+  const sleeveGeoL = new THREE.BoxGeometry(armW + U * 0.2, U * sleeveLen, armD + U * 0.2)
   sleeveGeoL.translate(0, -U * sleeveLen / 2, 0) // Upper portion of arm relative to shoulder pivot
   const sleeveL = new THREE.Mesh(sleeveGeoL, createTexturedMaterials(shirtColor, 0x111111, 5))
   sleeveL.name = 'sleeveL'
   armL.add(sleeveL) // Child of arm — rotates with it
 
-  const sleeveGeoR = new THREE.BoxGeometry(U * 4.2, U * sleeveLen, U * 4.2)
+  const sleeveGeoR = new THREE.BoxGeometry(armW + U * 0.2, U * sleeveLen, armD + U * 0.2)
   sleeveGeoR.translate(0, -U * sleeveLen / 2, 0)
   const sleeveR = new THREE.Mesh(sleeveGeoR, createTexturedMaterials(shirtColor, 0x111111, 5))
   sleeveR.name = 'sleeveR'
   armR.add(sleeveR) // Child of arm — rotates with it
 
-  // --- LEGS ---
-  const legCenter = (legPxLen * U) / 2
-  const legL = texturedBox(U * 4, U * legPxLen, U * 4, pantsColor, 'legL')
+  // Wrist wraps — small band at the sleeve/forearm transition
+  const wristWrapGeoL = new THREE.BoxGeometry(armW + 0.03, 0.08 * s, armD + 0.03)
+  wristWrapGeoL.translate(0, -U * sleeveLen, 0) // At bottom edge of sleeve
+  const wristWrapL = new THREE.Mesh(wristWrapGeoL, new THREE.MeshPhongMaterial({
+    color: outfit.wrapColor,
+    specular: 0x222211,
+    shininess: 10,
+    flatShading: true,
+  }))
+  wristWrapL.name = 'wristWrapL'
+  armL.add(wristWrapL)
+
+  const wristWrapGeoR = new THREE.BoxGeometry(armW + 0.03, 0.08 * s, armD + 0.03)
+  wristWrapGeoR.translate(0, -U * sleeveLen, 0)
+  const wristWrapR = new THREE.Mesh(wristWrapGeoR, new THREE.MeshPhongMaterial({
+    color: outfit.wrapColor,
+    specular: 0x222211,
+    shininess: 10,
+    flatShading: true,
+  }))
+  wristWrapR.name = 'wristWrapR'
+  armR.add(wristWrapR)
+
+  // --- LEGS (upper pants + lower boots) ---
+  const legCenter = legH / 2
+
+  // Full leg mesh in pants color
+  const legL = texturedBox(legW, legH, legD, pantsColor, 'legL')
   legL.position.set(-U * 2, legCenter, 0)
   character.add(legL)
 
-  const legR = texturedBox(U * 4, U * legPxLen, U * 4, pantsColor, 'legR')
+  const legR = texturedBox(legW, legH, legD, pantsColor, 'legR')
   legR.position.set(U * 2, legCenter, 0)
   character.add(legR)
 
-  // Shoes (bottom 2px of legs)
-  const footL = texturedBox(U * 4.1, U * 2, U * 4.5, shoeColor, 'footL')
-  footL.position.set(-U * 2, U * 1, U * 0.2)
-  character.add(footL)
+  // BOOTS — cover lower 35% of each leg (darker, extends outward slightly)
+  const bootH = legH * 0.35
+  const bootY = bootH / 2 // Centered on lower leg
 
-  const footR = texturedBox(U * 4.1, U * 2, U * 4.5, shoeColor, 'footR')
-  footR.position.set(U * 2, U * 1, U * 0.2)
-  character.add(footR)
+  const bootL = texturedBox(legW + 0.04, bootH, legD + 0.04, outfit.bootColor, 'bootL')
+  bootL.position.set(-U * 2, bootY, 0)
+  character.add(bootL)
+
+  const bootR = texturedBox(legW + 0.04, bootH, legD + 0.04, outfit.bootColor, 'bootR')
+  bootR.position.set(U * 2, bootY, 0)
+  character.add(bootR)
+
+  // Boot top band — accent strip at top of each boot
+  const bootBandL = box(legW + 0.06, 0.06 * s, legD + 0.06, outfit.beltColor, 'bootBandL')
+  bootBandL.position.set(-U * 2, bootH, 0)
+  character.add(bootBandL)
+
+  const bootBandR = box(legW + 0.06, 0.06 * s, legD + 0.06, outfit.beltColor, 'bootBandR')
+  bootBandR.position.set(U * 2, bootH, 0)
+  character.add(bootBandR)
 
   // Character feet sit at Y=0
   return character
@@ -324,26 +414,30 @@ export function applyOutfitColor(
 
   switch (slot) {
     case 'shirt': {
+      // Recolor torso, sleeves, tunic details, and shoulders
       const torso = character.getObjectByName('torso')
       if (torso instanceof THREE.Mesh) recolorMesh(torso, color)
       character.traverse((child) => {
-        if (child.name?.startsWith('sleeve') && child instanceof THREE.Mesh) {
+        if (child instanceof THREE.Mesh && (
+          child.name?.startsWith('sleeve') ||
+          child.name === 'shoulderL' ||
+          child.name === 'shoulderR'
+        )) {
           recolorMesh(child, color)
         }
       })
-      // Adjust creeper face contrast against new shirt color
-      const brightness = color.r * 0.299 + color.g * 0.587 + color.b * 0.114
-      const creeperColor = brightness > 0.5 ? 0x2E7D32 : 0x4CAF50
-      character.traverse((child) => {
-        if (child.name?.startsWith('creeper') && child instanceof THREE.Mesh) {
-          child.material = new THREE.MeshPhongMaterial({
-            color: creeperColor,
-            specular: 0x111111,
-            shininess: 5,
-            flatShading: true,
-          })
-        }
-      })
+      // Recolor tunic skirt (slightly darker than shirt)
+      const skirt = character.getObjectByName('tunicSkirt')
+      if (skirt instanceof THREE.Mesh) {
+        const darkerColor = color.clone().multiplyScalar(0.85)
+        recolorMesh(skirt, darkerColor)
+      }
+      // Recolor collar (even darker)
+      const collar = character.getObjectByName('tunicCollar')
+      if (collar instanceof THREE.Mesh) {
+        const darkerColor = color.clone().multiplyScalar(0.75)
+        recolorMesh(collar, darkerColor)
+      }
       break
     }
     case 'pants': {
@@ -354,9 +448,9 @@ export function applyOutfitColor(
       break
     }
     case 'shoes': {
-      for (const name of ['footL', 'footR']) {
-        const foot = character.getObjectByName(name)
-        if (foot instanceof THREE.Mesh) recolorMesh(foot, color)
+      for (const name of ['bootL', 'bootR']) {
+        const boot = character.getObjectByName(name)
+        if (boot instanceof THREE.Mesh) recolorMesh(boot, color)
       }
       break
     }

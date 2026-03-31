@@ -295,7 +295,7 @@ function buildCharacterWithArmor(
           for (const m of mat) {
             if (m instanceof THREE.MeshLambertMaterial) {
               m.transparent = true
-              m.opacity = 0.3
+              m.opacity = 0.15
               m.depthWrite = false
             }
           }

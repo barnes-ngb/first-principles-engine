@@ -12,7 +12,7 @@ import { createTouchControls, updateRotation, destroyTouchControls } from './vox
 import type { TouchControlState } from './voxel/touchControls'
 import { applyTierToArmor, calculateTier, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
 import { addEnchantGlow, removeEnchantGlow, animateEnchantGlow, tierHasGlow } from './voxel/enchantmentGlow'
-import { buildCape, animateCape, tierHasCape } from './voxel/buildCape'
+import { buildBaseCape, animateCape, resolveCapeColor } from './voxel/buildCape'
 import { triggerTierUpCeremony } from './voxel/tierUpCeremony'
 import { PoseAnimator, POSES, POSE_EXPRESSIONS, applyExpression, getEquipmentIdlePose } from './voxel/poseSystem'
 import type { Pose } from './voxel/poseSystem'
@@ -652,11 +652,13 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       }
     }
 
-    // Cape (Gold tier+) — attach flowing cape behind torso
+    // Cape — always part of base outfit (Legends hero style)
+    // Tier Gold+ overrides color; otherwise uses customization or age-group default
     const torso = character.getObjectByName('torso')
-    if (tierHasCape(currentTier) && torso) {
-      const cape = buildCape(currentTier, ageGroup)
-      if (cape) torso.add(cape)
+    if (torso) {
+      const capeColor = resolveCapeColor(currentTier, ageGroup, customization?.capeColor)
+      const cape = buildBaseCape(ageGroup, capeColor)
+      torso.add(cape)
     }
 
     // Apply saved outfit colors
