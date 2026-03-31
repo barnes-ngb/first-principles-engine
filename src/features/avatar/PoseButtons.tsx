@@ -18,9 +18,15 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true, pos
       sx={{
         display: 'flex',
         justifyContent: 'center',
-        gap: '8px',
+        gap: '6px',
         py: 1.5,
-        px: 2,
+        px: 1,
+        overflowX: 'auto',
+        WebkitOverflowScrolling: 'touch',
+        scrollSnapType: 'x mandatory',
+        '&::-webkit-scrollbar': { display: 'none' },
+        msOverflowStyle: 'none',
+        scrollbarWidth: 'none',
       }}
     >
       {visiblePoses.map((pose) => {
@@ -33,8 +39,11 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true, pos
             component="button"
             onClick={() => !isDimmed && onPose(pose.id)}
             sx={{
-              width: 56,
-              height: 56,
+              minWidth: 52,
+              width: 52,
+              height: 52,
+              flexShrink: 0,
+              scrollSnapAlign: 'start',
               borderRadius: isLincoln ? '8px' : '50%',
               border: isActive
                 ? '2px solid #FFD700'
@@ -75,14 +84,19 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true, pos
             <Box sx={{ fontSize: '22px', lineHeight: 1 }}>{pose.icon}</Box>
             <Typography
               sx={{
-                fontSize: isLincoln ? '12px' : '12px',
+                fontSize: isLincoln ? '7px' : '10px',
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
                 letterSpacing: isLincoln ? '-0.3px' : '0',
                 opacity: isActive ? 1 : 0.7,
-                lineHeight: 1,
+                lineHeight: 1.1,
                 mt: '2px',
                 fontWeight: isActive ? 700 : 400,
                 color: 'inherit',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: '48px',
+                textAlign: 'center',
               }}
             >
               {pose.name}
