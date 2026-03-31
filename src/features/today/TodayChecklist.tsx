@@ -3,12 +3,12 @@ import { Link as RouterLink } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import CheckIcon from '@mui/icons-material/Check'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import PrintIcon from '@mui/icons-material/Print'
-import SchoolIcon from '@mui/icons-material/School'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -78,6 +78,26 @@ function formatMinutes(mins: number): string {
   if (h === 0) return `${m}m`
   if (m === 0) return `${h}h`
   return `${h}h ${m}m`
+}
+
+type SparkleMode = 'scan' | 'generate' | 'none'
+
+const scanPatterns = [
+  /good and the beautiful/i,
+  /gatb/i,
+  /language arts workbook/i,
+  /reading eggs/i,
+  /workbook/i,
+]
+
+const noSparklePatterns = [/prayer/i, /scripture/i, /devotion/i]
+
+function getSparkleMode(item: ChecklistItemType): SparkleMode {
+  const label = item.label || ''
+  if (noSparklePatterns.some((p) => p.test(label))) return 'none'
+  if (item.lessonCardId) return 'generate'
+  if (scanPatterns.some((p) => p.test(label))) return 'scan'
+  return 'generate'
 }
 
 function formatTime12h(date: Date): string {
@@ -446,31 +466,35 @@ export default function TodayChecklist({
                   {isDimmed && !item.completed && (
                     <Chip label="(stretch)" size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
                   )}
-                  {!item.completed && (
-                    <Tooltip title={item.lessonCardId ? 'View lesson plan' : 'Help me teach this'}>
-                      <IconButton
-                        size="small"
-                        onClick={() => onTeachHelperOpen(item)}
-                      >
-                        <SchoolIcon
-                          fontSize="small"
-                          color={item.lessonCardId ? 'primary' : 'action'}
-                          sx={item.lessonCardId ? undefined : { opacity: 0.5 }}
-                        />
-                      </IconButton>
-                    </Tooltip>
-                  )}
-                  {!item.completed && (
-                    <Tooltip title="Scan workbook page">
-                      <span>
-                        <ScanButton
-                          variant="icon"
-                          loading={scanLoading && scanItemIndex === index}
-                          onCapture={(file) => onScanCapture(file, index)}
-                        />
-                      </span>
-                    </Tooltip>
-                  )}
+                  {!item.completed && (() => {
+                    const mode = getSparkleMode(item)
+                    if (mode === 'none') return null
+                    if (mode === 'scan') return (
+                      <Tooltip title="Scan workbook page">
+                        <span>
+                          <ScanButton
+                            variant="icon"
+                            loading={scanLoading && scanItemIndex === index}
+                            onCapture={(file) => onScanCapture(file, index)}
+                          />
+                        </span>
+                      </Tooltip>
+                    )
+                    return (
+                      <Tooltip title={item.lessonCardId ? 'View lesson plan' : 'Generate themed activity'}>
+                        <IconButton
+                          size="small"
+                          onClick={() => onTeachHelperOpen(item)}
+                        >
+                          <AutoAwesomeIcon
+                            fontSize="small"
+                            color={item.lessonCardId ? 'primary' : 'action'}
+                            sx={item.lessonCardId ? undefined : { opacity: 0.5 }}
+                          />
+                        </IconButton>
+                      </Tooltip>
+                    )
+                  })()}
                 </Stack>
                 {/* Scan results panel */}
                 {scanItemIndex === index && scanResult?.results && (
