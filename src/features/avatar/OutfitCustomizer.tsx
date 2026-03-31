@@ -33,12 +33,6 @@ const DEFAULT_PANTS = '#2A3A52'
 const DEFAULT_SHOES_OLDER = '#F5D6B8' // barefoot (skin)
 const DEFAULT_SHOES_YOUNGER = '#444444'
 
-const SLOT_ICONS: Record<OutfitSlot, string> = {
-  shirt: '👕',
-  pants: '👖',
-  shoes: '👟',
-}
-
 export default function OutfitCustomizer({
   customization,
   ageGroup,
@@ -75,9 +69,9 @@ export default function OutfitCustomizer({
           ? 'linear-gradient(135deg, rgba(20,22,36,0.95) 0%, rgba(26,30,46,0.95) 100%)'
           : 'linear-gradient(135deg, rgba(255,254,249,0.95) 0%, rgba(250,245,240,0.95) 100%)',
         border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.1)' : 'rgba(232,160,191,0.18)'}`,
-        borderRadius: isLincoln ? '8px' : '18px',
+        borderRadius: isLincoln ? '10px' : '18px',
         p: 2,
-        mt: 2,
+        mt: 1.5,
         mx: 1,
         boxShadow: isLincoln
           ? '0 4px 16px rgba(0,0,0,0.2)'
@@ -87,13 +81,17 @@ export default function OutfitCustomizer({
       <Typography
         sx={{
           fontFamily: titleFont,
-          fontSize: isLincoln ? '12px' : '18px',
+          fontSize: isLincoln ? '10px' : '16px',
           color: accentColor,
-          mb: 2,
+          mb: 1.5,
           fontWeight: 600,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
         }}
       >
-        Customize Outfit
+        <span style={{ fontSize: isLincoln ? '14px' : '18px' }}>👕</span>
+        Outfit
       </Typography>
 
       {/* Slot selector — pill buttons with color preview */}
@@ -157,7 +155,7 @@ export default function OutfitCustomizer({
                   fontWeight: isActive ? 700 : 400,
                 }}
               >
-                {SLOT_ICONS[slot.id]} {slot.label}
+                {slot.label}
               </Typography>
             </Box>
           )
