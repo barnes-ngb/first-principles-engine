@@ -138,13 +138,56 @@ Guidelines:
   // Send only last 20 messages
   const recentMessages = messages.slice(-20);
 
-  const result = await callClaude({
-    apiKey,
-    model,
-    maxTokens: 2000,
-    systemPrompt,
-    messages: recentMessages,
-  });
+  // Check if the last user message contains an image URL for vision analysis
+  const lastUserMsg = [...recentMessages].reverse().find((m) => m.role === "user");
+  const imageUrlMatch = lastUserMsg?.content.match(/^\[IMAGE_URL:(https?:\/\/[^\]]+)\]\n?([\s\S]*)$/);
+
+  let result: { text: string; inputTokens: number; outputTokens: number };
+
+  if (imageUrlMatch) {
+    // Vision path: use multi-part content for the last user message
+    const imageUrl = imageUrlMatch[1];
+    const textContent = imageUrlMatch[2] || "What can you tell me about this image?";
+
+    // Build messages, replacing the last user message with multi-part content
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const client = new Anthropic({ apiKey });
+
+    const claudeMessages: Array<{
+      role: "user" | "assistant";
+      content: string | Array<{ type: "image"; source: { type: "url"; url: string } } | { type: "text"; text: string }>;
+    }> = recentMessages.map((m) => {
+      if (m === lastUserMsg) {
+        return {
+          role: "user" as const,
+          content: [
+            { type: "image" as const, source: { type: "url" as const, url: imageUrl } },
+            { type: "text" as const, text: textContent },
+          ],
+        };
+      }
+      return { role: m.role as "user" | "assistant", content: m.content };
+    });
+
+    const completion = await client.messages.create({
+      model,
+      max_tokens: 2000,
+      system: systemPrompt,
+      messages: claudeMessages,
+    });
+
+    const firstBlock = completion.content[0];
+    const text = firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
+    result = { text, inputTokens: completion.usage.input_tokens, outputTokens: completion.usage.output_tokens };
+  } else {
+    result = await callClaude({
+      apiKey,
+      model,
+      maxTokens: 2000,
+      systemPrompt,
+      messages: recentMessages,
+    });
+  }
 
   if (!result.text) {
     console.warn("Claude returned empty response", { model, taskType: "shellyChat" });

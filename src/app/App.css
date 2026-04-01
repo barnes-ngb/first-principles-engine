@@ -75,6 +75,20 @@
   }
 }
 
+/* Chat page: fill available height with no extra padding */
+.app-shell__content:has(> [data-page="chat"]) {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px); /* subtract mobile header height */
+}
+
+@media (min-width: 900px) {
+  .app-shell__content:has(> [data-page="chat"]) {
+    height: 100vh;
+  }
+}
+
 /* Style nav links inside the MUI Drawer the same as the sidebar */
 .MuiDrawer-paper .app-shell__profile-row {
   margin: 0 0 20px;

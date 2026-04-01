@@ -1,22 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
+import CloseIcon from '@mui/icons-material/Close'
+import ForumIcon from '@mui/icons-material/Forum'
 import ImageIcon from '@mui/icons-material/Image'
-import MenuIcon from '@mui/icons-material/Menu'
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import SendIcon from '@mui/icons-material/Send'
-import AppBar from '@mui/material/AppBar'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
+import LinearProgress from '@mui/material/LinearProgress'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
-import Toolbar from '@mui/material/Toolbar'
 import Typography from '@mui/material/Typography'
 import {
   addDoc,
@@ -29,13 +31,16 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore'
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { compressIfNeeded } from '../../core/utils/compressImage'
 import {
   shellyChatMessagesCollection,
   shellyChatThreadsCollection,
 } from '../../core/firebase/firestore'
+import { storage } from '../../core/firebase/storage'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { ShellyChatMessage, ChatThread } from '../../core/types'
 import ChatMessageBubble from './ChatMessageBubble'
@@ -56,6 +61,13 @@ const SUGGESTIONS = [
   },
 ] as const
 
+// ── Image refinement types ─────────────────────────────────────
+
+interface RefinementQuestion {
+  question: string
+  options: string[]
+}
+
 export default function ShellyChatPage() {
   const familyId = useFamilyId()
   const { activeChild } = useActiveChild()
@@ -70,12 +82,27 @@ export default function ShellyChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [imageDialogOpen, setImageDialogOpen] = useState(false)
-  const [imagePromptText, setImagePromptText] = useState('')
   const [generatingImage, setGeneratingImage] = useState(false)
+
+  // ── Image upload state (Prompt 8) ──────────────────────────────
+  const [uploadPreview, setUploadPreview] = useState<string | null>(null)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // ── Image refinement state (Prompt 9) ──────────────────────────
+  const [imageFlowOpen, setImageFlowOpen] = useState(false)
+  const [imageFlowStep, setImageFlowStep] = useState<'idea' | 'questions' | 'generating'>('idea')
+  const [imageIdea, setImageIdea] = useState('')
+  const [imageQuestions, setImageQuestions] = useState<RefinementQuestion[]>([])
+  const [imageAnswers, setImageAnswers] = useState<Record<number, string>>({})
+  const [loadingQuestions, setLoadingQuestions] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const autoSendTriggered = useRef(false)
+
+  const activeThread = threads.find((t) => t.id === activeThreadId)
 
   // ── Real-time thread list ──────────────────────────────────────
   useEffect(() => {
@@ -152,7 +179,9 @@ export default function ShellyChatPage() {
       try {
         const aiMessages = currentMessages.slice(-20).map((m) => ({
           role: m.role as 'user' | 'assistant',
-          content: m.content,
+          content: m.uploadedImageUrl && m.imageAction === 'analyze'
+            ? `[IMAGE_URL:${m.uploadedImageUrl}]\n${m.content}`
+            : m.content,
         }))
         const response = await chat({
           familyId,
@@ -261,13 +290,10 @@ export default function ShellyChatPage() {
     }
   }, [input, sending, activeThreadId, familyId, messages, chat, activeChild?.id, setSearchParams])
 
-  // ── Image generation ───────────────────────────────────────────
-  const handleGenerateImage = useCallback(async () => {
-    const prompt = imagePromptText.trim()
-    if (!prompt) return
+  // ── Image generation (refactored for Prompt 9) ─────────────────
+  const handleGenerateImageDirect = useCallback(async (prompt: string) => {
+    if (!prompt.trim()) return
 
-    setImageDialogOpen(false)
-    setImagePromptText('')
     setGeneratingImage(true)
 
     try {
@@ -331,7 +357,259 @@ export default function ShellyChatPage() {
     } finally {
       setGeneratingImage(false)
     }
-  }, [imagePromptText, activeThreadId, familyId, generateImage, setSearchParams])
+  }, [activeThreadId, familyId, generateImage, setSearchParams])
+
+  // ── Image refinement flow (Prompt 9) ───────────────────────────
+
+  const handleImageFlowOpen = useCallback(() => {
+    setImageFlowOpen(true)
+    setImageFlowStep('idea')
+    setImageIdea('')
+    setImageQuestions([])
+    setImageAnswers({})
+  }, [])
+
+  const handleImageFlowClose = useCallback(() => {
+    setImageFlowOpen(false)
+    setImageIdea('')
+    setImageQuestions([])
+    setImageAnswers({})
+    setLoadingQuestions(false)
+  }, [])
+
+  const handleImageIdeaSubmit = useCallback(async () => {
+    const idea = imageIdea.trim()
+    if (!idea) return
+
+    setLoadingQuestions(true)
+    setImageFlowStep('questions')
+
+    // Set a 5-second timeout
+    const timeoutId = setTimeout(() => {
+      setLoadingQuestions(false)
+      // Auto-skip to direct generation if too slow
+      setImageFlowStep('generating')
+      handleImageFlowClose()
+      handleGenerateImageDirect(idea)
+    }, 5000)
+
+    try {
+      const response = await chat({
+        familyId,
+        childId: activeChild?.id ?? '',
+        taskType: TaskType.ShellyChat,
+        messages: [{
+          role: 'user',
+          content: `[IMAGE_REFINEMENT] The user wants to generate an image. Their description: "${idea}". Ask 2-3 quick clarifying questions to help create the perfect image. For each question, provide 3-4 short suggested answers they can tap, plus an "Other" option. Format your response as JSON only, no other text:
+{
+  "questions": [
+    {
+      "question": "What style?",
+      "options": ["Realistic photo", "Cartoon/illustrated", "Minecraft-style", "Watercolor"]
+    }
+  ]
+}`,
+        }],
+      })
+
+      clearTimeout(timeoutId)
+
+      if (response?.message) {
+        try {
+          // Extract JSON from response (handle markdown code blocks)
+          let jsonStr = response.message
+          const jsonMatch = jsonStr.match(/\{[\s\S]*"questions"[\s\S]*\}/)
+          if (jsonMatch) jsonStr = jsonMatch[0]
+          const parsed = JSON.parse(jsonStr) as { questions: RefinementQuestion[] }
+          if (parsed.questions?.length) {
+            setImageQuestions(parsed.questions)
+            setLoadingQuestions(false)
+            return
+          }
+        } catch {
+          // JSON parse failed — fall through to direct generation
+        }
+      }
+
+      // Fallback: skip to direct generation
+      setLoadingQuestions(false)
+      handleImageFlowClose()
+      handleGenerateImageDirect(idea)
+    } catch {
+      clearTimeout(timeoutId)
+      setLoadingQuestions(false)
+      handleImageFlowClose()
+      handleGenerateImageDirect(idea)
+    }
+  }, [imageIdea, chat, familyId, activeChild?.id, handleImageFlowClose, handleGenerateImageDirect])
+
+  const handleImageRefinementGenerate = useCallback(async () => {
+    setImageFlowStep('generating')
+
+    // Build refined prompt via Claude
+    const selectedOptions = Object.entries(imageAnswers)
+      .map(([idx, val]) => {
+        const q = imageQuestions[Number(idx)]
+        return q ? `${q.question}: ${val}` : val
+      })
+      .join('. ')
+
+    try {
+      const response = await chat({
+        familyId,
+        childId: activeChild?.id ?? '',
+        taskType: TaskType.ShellyChat,
+        messages: [{
+          role: 'user',
+          content: `[BUILD_IMAGE_PROMPT] Original idea: "${imageIdea}". Preferences: ${selectedOptions}. Write a detailed DALL-E image prompt (1-2 sentences) that incorporates these preferences. Respond with ONLY the prompt text, nothing else.`,
+        }],
+      })
+
+      handleImageFlowClose()
+
+      const refinedPrompt = response?.message?.trim() || imageIdea
+      await handleGenerateImageDirect(refinedPrompt)
+    } catch {
+      handleImageFlowClose()
+      await handleGenerateImageDirect(imageIdea)
+    }
+  }, [imageAnswers, imageQuestions, imageIdea, chat, familyId, activeChild?.id, handleImageFlowClose, handleGenerateImageDirect])
+
+  const handleJustGenerate = useCallback(() => {
+    const idea = imageIdea.trim()
+    handleImageFlowClose()
+    if (idea) handleGenerateImageDirect(idea)
+  }, [imageIdea, handleImageFlowClose, handleGenerateImageDirect])
+
+  // ── Image upload handlers (Prompt 8) ───────────────────────────
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    // Reset the input so the same file can be re-selected
+    e.target.value = ''
+
+    setUploadFile(file)
+    setUploadPreview(URL.createObjectURL(file))
+    setUploadDialogOpen(true)
+  }, [])
+
+  const handleUploadCancel = useCallback(() => {
+    if (uploadPreview) URL.revokeObjectURL(uploadPreview)
+    setUploadDialogOpen(false)
+    setUploadFile(null)
+    setUploadPreview(null)
+  }, [uploadPreview])
+
+  const handleUploadAction = useCallback(async (action: 'analyze' | 'transform') => {
+    if (!uploadFile) return
+
+    setUploadDialogOpen(false)
+    setUploading(true)
+
+    try {
+      // Compress if needed (> 2MB → max 1600px)
+      const compressed = await compressIfNeeded(uploadFile, 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
+
+      let threadId = activeThreadId
+
+      if (!threadId) {
+        const threadRef = await addDoc(shellyChatThreadsCollection(familyId), {
+          title: action === 'analyze' ? '📷 Image analysis' : '🎨 Image transform',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messageCount: 0,
+          lastMessagePreview: action === 'analyze' ? '📷 Asking about image...' : '🎨 Using as inspiration...',
+          archived: false,
+        })
+        threadId = threadRef.id
+        setActiveThreadId(threadId)
+        setSearchParams({ thread: threadId })
+      }
+
+      // Upload to Firebase Storage
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const storagePath = `families/${familyId}/chat-uploads/${threadId}/${timestamp}.jpg`
+      const storageRef = ref(storage, storagePath)
+      await uploadBytes(storageRef, compressed)
+      const downloadUrl = await getDownloadURL(storageRef)
+
+      const content = action === 'analyze'
+        ? 'Can you tell me about this image?'
+        : 'Use this as inspiration to create something'
+
+      // Add user message with uploaded image
+      await addDoc(shellyChatMessagesCollection(familyId, threadId), {
+        role: 'user',
+        content,
+        timestamp: new Date().toISOString(),
+        uploadedImageUrl: downloadUrl,
+        imageAction: action,
+      })
+      await updateDoc(
+        doc(shellyChatThreadsCollection(familyId), threadId),
+        {
+          updatedAt: new Date().toISOString(),
+          messageCount: increment(1),
+          lastMessagePreview: content.slice(0, 100),
+        },
+      )
+
+      // Get AI response
+      setSending(true)
+      setUploading(false)
+
+      const msgContent = action === 'analyze'
+        ? `[IMAGE_URL:${downloadUrl}]\n${content}`
+        : content
+
+      const currentMsgs = [...messages, {
+        id: '', role: 'user' as const, content: msgContent, timestamp: new Date().toISOString(),
+      }]
+      const aiMessages = currentMsgs.slice(-20).map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      }))
+
+      let systemSuffix = ''
+      if (action === 'transform') {
+        systemSuffix = `\n\nThe user has uploaded an image (URL: ${downloadUrl}). They want to use it as inspiration to create something new. Ask them what they'd like you to create from it. Suggest ideas like: "Turn this into a Minecraft-style scene" or "Make this into a sticker" or "Create a cartoon version of this".`
+      }
+
+      const response = await chat({
+        familyId,
+        childId: activeChild?.id ?? '',
+        taskType: TaskType.ShellyChat,
+        messages: action === 'transform'
+          ? [{ role: 'user', content: `${content}${systemSuffix}` }]
+          : aiMessages,
+      })
+
+      if (response?.message) {
+        await addDoc(shellyChatMessagesCollection(familyId, threadId), {
+          role: 'assistant',
+          content: response.message,
+          timestamp: new Date().toISOString(),
+        })
+        await updateDoc(
+          doc(shellyChatThreadsCollection(familyId), threadId),
+          {
+            updatedAt: new Date().toISOString(),
+            messageCount: increment(1),
+            lastMessagePreview: response.message.slice(0, 100),
+          },
+        )
+      }
+    } catch (err) {
+      console.error('Failed to upload image:', err)
+    } finally {
+      if (uploadPreview) URL.revokeObjectURL(uploadPreview)
+      setUploadFile(null)
+      setUploadPreview(null)
+      setUploading(false)
+      setSending(false)
+    }
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, activeChild?.id, setSearchParams])
 
   // ── New thread ─────────────────────────────────────────────────
   const handleNewThread = useCallback(() => {
@@ -398,23 +676,26 @@ export default function ShellyChatPage() {
   )
 
   const showEmpty = !activeThreadId && messages.length === 0
+  const isBusy = sending || generatingImage || uploading
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', maxHeight: '100dvh' }}>
-      {/* AppBar */}
-      <AppBar position="static" color="default" elevation={1}>
-        <Toolbar>
-          <IconButton edge="start" onClick={() => setDrawerOpen(true)} aria-label="Open threads">
-            <MenuIcon />
-          </IconButton>
-          <Typography variant="h6" sx={{ flex: 1, ml: 1 }}>
-            Ask AI
-          </Typography>
-          <Button startIcon={<AddIcon />} onClick={handleNewThread} size="small">
-            New
-          </Button>
-        </Toolbar>
-      </AppBar>
+    <Box data-page="chat" sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, flex: 1 }}>
+      {/* Slim inline toolbar (replaces AppBar — Prompt 7) */}
+      <Box sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
+        <IconButton size="small" onClick={() => setDrawerOpen(true)} aria-label="Conversations">
+          <ForumIcon />
+        </IconButton>
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ flex: 1, ml: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        >
+          {activeThread?.title || 'New conversation'}
+        </Typography>
+        <Button size="small" startIcon={<AddIcon />} onClick={handleNewThread}>
+          New
+        </Button>
+      </Box>
 
       {/* Thread drawer */}
       <ChatThreadDrawer
@@ -429,7 +710,7 @@ export default function ShellyChatPage() {
       />
 
       {/* Messages area */}
-      <Box sx={{ flex: 1, overflow: 'auto', px: 2, py: 2 }}>
+      <Box sx={{ flex: 1, overflow: 'auto', px: 2, py: 2, minHeight: 0 }}>
         {showEmpty ? (
           <Box
             sx={{
@@ -465,7 +746,7 @@ export default function ShellyChatPage() {
             {messages.map((msg) => (
               <ChatMessageBubble key={msg.id} message={msg} />
             ))}
-            {(sending || generatingImage) && (
+            {isBusy && (
               <Box sx={{ display: 'flex', mb: 1.5 }}>
                 <Box
                   sx={{
@@ -480,7 +761,7 @@ export default function ShellyChatPage() {
                 >
                   <CircularProgress size={16} />
                   <Typography variant="body2" color="text.secondary">
-                    {generatingImage ? 'Generating image...' : 'Thinking...'}
+                    {uploading ? 'Uploading image...' : generatingImage ? 'Generating image...' : 'Thinking...'}
                   </Typography>
                 </Box>
               </Box>
@@ -490,12 +771,150 @@ export default function ShellyChatPage() {
         )}
       </Box>
 
+      {/* Image refinement panel (Prompt 9) */}
+      {imageFlowOpen && (
+        <Paper
+          elevation={4}
+          sx={{
+            borderRadius: '16px 16px 0 0',
+            p: 2,
+            maxHeight: '60vh',
+            overflow: 'auto',
+            borderTop: 1,
+            borderColor: 'divider',
+          }}
+        >
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+            <Typography variant="subtitle2">Create an Image</Typography>
+            <IconButton size="small" onClick={handleImageFlowClose}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Box>
+
+          {imageFlowStep === 'idea' && (
+            <Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                What would you like me to create?
+              </Typography>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="e.g., something for our reading corner"
+                value={imageIdea}
+                onChange={(e) => setImageIdea(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleImageIdeaSubmit()
+                  }
+                }}
+                autoFocus
+                sx={{ mb: 1 }}
+              />
+              <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                <Button
+                  size="small"
+                  variant="text"
+                  disabled={!imageIdea.trim()}
+                  onClick={handleJustGenerate}
+                >
+                  Just generate
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  disabled={!imageIdea.trim()}
+                  onClick={handleImageIdeaSubmit}
+                >
+                  Next
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {imageFlowStep === 'questions' && loadingQuestions && (
+            <Box sx={{ textAlign: 'center', py: 2 }}>
+              <CircularProgress size={24} />
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Getting suggestions...
+              </Typography>
+              <Button size="small" sx={{ mt: 1 }} onClick={handleJustGenerate}>
+                Just generate with what I have
+              </Button>
+            </Box>
+          )}
+
+          {imageFlowStep === 'questions' && !loadingQuestions && imageQuestions.length > 0 && (
+            <Box>
+              {imageQuestions.map((q, qIdx) => (
+                <Box key={qIdx} sx={{ mb: 2 }}>
+                  <Typography variant="body2" fontWeight={500} sx={{ mb: 0.5 }}>
+                    {q.question}
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    {q.options.map((opt) => (
+                      <Chip
+                        key={opt}
+                        label={opt}
+                        size="small"
+                        variant={imageAnswers[qIdx] === opt ? 'filled' : 'outlined'}
+                        color={imageAnswers[qIdx] === opt ? 'primary' : 'default'}
+                        onClick={() => setImageAnswers((prev) => ({ ...prev, [qIdx]: opt }))}
+                      />
+                    ))}
+                  </Box>
+                </Box>
+              ))}
+              <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                <Button size="small" variant="text" onClick={handleJustGenerate}>
+                  Just generate
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  onClick={handleImageRefinementGenerate}
+                >
+                  Generate
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {imageFlowStep === 'generating' && (
+            <Box sx={{ textAlign: 'center', py: 2 }}>
+              <CircularProgress size={24} />
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Creating your image...
+              </Typography>
+            </Box>
+          )}
+        </Paper>
+      )}
+
       {/* Input area */}
       <Paper elevation={2} sx={{ p: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+        {uploading && <LinearProgress sx={{ mb: 1 }} />}
         <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 0.5 }}>
+          {/* Hidden file input for image upload */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+          />
           <IconButton
-            onClick={() => setImageDialogOpen(true)}
-            disabled={sending || generatingImage}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isBusy}
+            size="small"
+            aria-label="Upload image"
+          >
+            <PhotoCameraIcon />
+          </IconButton>
+          <IconButton
+            onClick={handleImageFlowOpen}
+            disabled={isBusy}
             size="small"
             aria-label="Generate image"
           >
@@ -510,12 +929,12 @@ export default function ShellyChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={sending || generatingImage}
+            disabled={isBusy}
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
           <IconButton
             onClick={handleSend}
-            disabled={!input.trim() || sending || generatingImage}
+            disabled={!input.trim() || isBusy}
             color="primary"
             size="small"
             aria-label="Send message"
@@ -525,35 +944,44 @@ export default function ShellyChatPage() {
         </Box>
       </Paper>
 
-      {/* Image generation dialog */}
+      {/* Image upload action dialog (Prompt 8) */}
       <Dialog
-        open={imageDialogOpen}
-        onClose={() => setImageDialogOpen(false)}
+        open={uploadDialogOpen}
+        onClose={handleUploadCancel}
         fullWidth
-        maxWidth="sm"
+        maxWidth="xs"
       >
-        <DialogTitle>Generate an Image</DialogTitle>
+        <DialogTitle>What would you like to do?</DialogTitle>
         <DialogContent>
-          <TextField
-            autoFocus
-            fullWidth
-            multiline
-            rows={3}
-            placeholder="Describe what you want..."
-            value={imagePromptText}
-            onChange={(e) => setImagePromptText(e.target.value)}
-            sx={{ mt: 1 }}
-          />
+          {uploadPreview && (
+            <Box
+              component="img"
+              src={uploadPreview}
+              alt="Upload preview"
+              sx={{ maxHeight: 120, maxWidth: '100%', borderRadius: 1, display: 'block', mx: 'auto', mb: 2 }}
+            />
+          )}
+          <Stack spacing={1}>
+            <Button
+              variant="outlined"
+              fullWidth
+              onClick={() => handleUploadAction('analyze')}
+              sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+            >
+              Ask about this image
+            </Button>
+            <Button
+              variant="outlined"
+              fullWidth
+              onClick={() => handleUploadAction('transform')}
+              sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+            >
+              Make something from this
+            </Button>
+          </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setImageDialogOpen(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={handleGenerateImage}
-            disabled={!imagePromptText.trim()}
-          >
-            Generate
-          </Button>
+          <Button onClick={handleUploadCancel}>Cancel</Button>
         </DialogActions>
       </Dialog>
     </Box>
