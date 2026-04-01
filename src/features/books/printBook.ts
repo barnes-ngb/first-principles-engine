@@ -338,6 +338,34 @@ function renderText(
   return y + lineSpacing
 }
 
+/* ───────────────────── PDF clipping helper ───────────────────── */
+
+/**
+ * Begin a rectangular clip region in the PDF.
+ * Call `pdf.saveGraphicsState()` before and `pdf.restoreGraphicsState()` after
+ * to scope the clip. Uses raw PDF operators because jsPDF has no direct clip API.
+ */
+function beginClipRect(pdf: jsPDF, x: number, y: number, w: number, h: number): void {
+  // jsPDF's internal scale factor converts user units (mm) to PDF points.
+  // The PDF coordinate system has its origin at the bottom-left corner, so
+  // the y-axis must be flipped relative to the top-left origin jsPDF exposes.
+  const k = (pdf as unknown as { internal: { scaleFactor: number; pageSize: { getHeight: () => number } } }).internal.scaleFactor
+  const pageH = (pdf as unknown as { internal: { scaleFactor: number; pageSize: { getHeight: () => number } } }).internal.pageSize.getHeight()
+  const px = x * k
+  const py = (pageH - y - h) * k // flip y: PDF origin is bottom-left
+  const pw = w * k
+  const ph = h * k
+  // 're' draws a rectangle path; 'W n' sets it as a clipping path
+  ;(pdf as unknown as { internal: { write: (s: string) => void } }).internal.write(
+    `${toFixed(px)} ${toFixed(py)} ${toFixed(pw)} ${toFixed(ph)} re W n`,
+  )
+}
+
+/** Format a number to 4 decimal places for PDF operators. */
+function toFixed(n: number): string {
+  return n.toFixed(4)
+}
+
 /* ───────────────────── page drawing functions ───────────────────── */
 
 interface ContentArea {
@@ -449,6 +477,13 @@ async function drawContentPage(
     pdf.setFillColor(...hexToRgb(colors.imgBg))
     pdf.roundedRect(imgAreaX - 1.5, curY - 1.5, imgAreaW + 3, imgAreaH + 3, 2, 2, 'F')
 
+    // Set a clipping rectangle matching the image container bounds.
+    // This replicates the CSS `overflow: hidden` in the BookReader so stickers
+    // that extend past the container edge are cropped instead of floating
+    // in the page margin.
+    pdf.saveGraphicsState()
+    beginClipRect(pdf, imgAreaX, curY, imgAreaW, imgAreaH)
+
     for (const img of sortedImages) {
       let dataUri = resolveUrl(img.url)
       if (!dataUri.startsWith('data:')) continue
@@ -485,6 +520,9 @@ async function drawContentPage(
       }
     }
 
+    // Restore graphics state to remove the clipping rectangle
+    pdf.restoreGraphicsState()
+
     curY += imgAreaH + 6
   }
 
@@ -495,19 +533,22 @@ async function drawContentPage(
     const maxTextY = area.y + area.h - pageNumSpace
     const availableTextH = maxTextY - curY
 
-    // Scale font size and line height based on text length and available space
+    // Scale font size and line height based on text length and available space.
+    // Narrower page formats (half-letter, mini-5x7, booklet halves) need smaller
+    // base sizes to avoid text clipping on the right edge.
+    const isNarrowPage = area.w < 120 // mm — letter content is ~190mm, half-letter ~114mm
     let fontSize: number
     let lineHeight: number
     if (textLen > 400 || availableTextH < 40) {
-      fontSize = 10; lineHeight = 1.35
+      fontSize = isNarrowPage ? 9 : 10; lineHeight = 1.35
     } else if (textLen > 300 || availableTextH < 50) {
-      fontSize = 11; lineHeight = 1.4
+      fontSize = isNarrowPage ? 10 : 11; lineHeight = 1.4
     } else if (textLen > 200) {
-      fontSize = 12; lineHeight = 1.45
+      fontSize = isNarrowPage ? 11 : 12; lineHeight = 1.45
     } else if (textLen > 120) {
-      fontSize = 14; lineHeight = 1.5
+      fontSize = isNarrowPage ? 12 : 14; lineHeight = 1.5
     } else {
-      fontSize = 16; lineHeight = 1.6
+      fontSize = isNarrowPage ? 14 : 16; lineHeight = 1.6
     }
 
     curY = renderText(
