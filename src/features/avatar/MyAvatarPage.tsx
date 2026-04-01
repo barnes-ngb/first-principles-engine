@@ -924,7 +924,7 @@ export default function MyAvatarPage() {
   const features = profile.characterFeatures ?? childDefaults
 
   return (
-    <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3 }}>
+    <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3, maxWidth: '100vw', overflowX: 'hidden', boxSizing: 'border-box' }}>
       <Page>
         {/* ── Child Switcher + XP/Tier Header ────── */}
         <Box sx={{ textAlign: 'center', pt: 1.5, pb: 0.5 }}>
