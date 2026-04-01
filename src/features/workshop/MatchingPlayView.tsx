@@ -19,6 +19,8 @@ import type {
 } from '../../core/types'
 import { useTTS } from '../../core/hooks/useTTS'
 import Confetti from './Confetti'
+import { useAvatarProfiles } from './useAvatarProfiles'
+import AvatarThumbnail from '../avatar/AvatarThumbnail'
 
 export interface MatchingPlayResult {
   durationMinutes: number
@@ -46,6 +48,7 @@ interface PlayerScore {
 
 export default function MatchingPlayView({
   cardGame,
+  familyId,
   storyPlayers,
   generatedArt,
   activeSession,
@@ -53,6 +56,7 @@ export default function MatchingPlayView({
   onSaveSession,
 }: MatchingPlayViewProps) {
   const tts = useTTS()
+  const avatarProfiles = useAvatarProfiles(familyId, storyPlayers)
   const startTime = useRef(Date.now())
 
   // Shuffle cards for the grid (each card appears once; pairs share category)
@@ -276,26 +280,48 @@ export default function MatchingPlayView({
 
       {/* Scoreboard */}
       <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>
-        {scores.map((s, i) => (
-          <Box
-            key={s.id}
-            sx={{
-              textAlign: 'center',
-              p: 1,
-              borderRadius: 2,
-              border: '2px solid',
-              borderColor: i === currentPlayerIndex ? 'primary.main' : 'divider',
-              bgcolor: i === currentPlayerIndex ? 'primary.light' : 'background.paper',
-              minWidth: 80,
-            }}
-          >
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-              {s.name}
-            </Typography>
-            <Typography variant="h6">{s.pairs}</Typography>
-            <Typography variant="caption">pairs</Typography>
-          </Box>
-        ))}
+        {scores.map((s, i) => {
+          const profile = avatarProfiles[s.id]
+          const player = players.find((p) => p.id === s.id)
+          return (
+            <Box
+              key={s.id}
+              sx={{
+                textAlign: 'center',
+                p: 1,
+                borderRadius: 2,
+                border: '2px solid',
+                borderColor: i === currentPlayerIndex ? 'primary.main' : 'divider',
+                bgcolor: i === currentPlayerIndex ? 'primary.light' : 'background.paper',
+                minWidth: 80,
+              }}
+            >
+              {profile ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.5 }}>
+                  <AvatarThumbnail
+                    features={profile.characterFeatures}
+                    ageGroup={profile.ageGroup ?? 'older'}
+                    faceGrid={profile.faceGrid}
+                    size={32}
+                    showArmor={false}
+                  />
+                </Box>
+              ) : player?.avatarUrl ? (
+                <Box
+                  component="img"
+                  src={player.avatarUrl}
+                  alt={s.name}
+                  sx={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', mb: 0.5 }}
+                />
+              ) : null}
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                {s.name}
+              </Typography>
+              <Typography variant="h6">{s.pairs}</Typography>
+              <Typography variant="caption">pairs</Typography>
+            </Box>
+          )
+        })}
       </Box>
 
       {/* Turn indicator */}

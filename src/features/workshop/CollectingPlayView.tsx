@@ -20,6 +20,8 @@ import type {
 } from '../../core/types'
 import { useTTS } from '../../core/hooks/useTTS'
 import Confetti from './Confetti'
+import { useAvatarProfiles } from './useAvatarProfiles'
+import AvatarThumbnail from '../avatar/AvatarThumbnail'
 
 export interface CollectingPlayResult {
   durationMinutes: number
@@ -41,12 +43,14 @@ interface CollectingPlayViewProps {
 
 export default function CollectingPlayView({
   cardGame,
+  familyId,
   storyPlayers,
   activeSession,
   onFinished,
   onSaveSession,
 }: CollectingPlayViewProps) {
   const tts = useTTS()
+  const avatarProfiles = useAvatarProfiles(familyId, storyPlayers)
   const startTime = useRef(Date.now())
   const players = storyPlayers
 
@@ -311,26 +315,47 @@ export default function CollectingPlayView({
 
       {/* Scoreboard */}
       <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>
-        {players.map((p, i) => (
-          <Box
-            key={p.id}
-            sx={{
-              textAlign: 'center',
-              p: 1,
-              borderRadius: 2,
-              border: '2px solid',
-              borderColor: i === currentPlayerIndex ? 'primary.main' : 'divider',
-              bgcolor: i === currentPlayerIndex ? 'primary.light' : 'background.paper',
-              minWidth: 80,
-            }}
-          >
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-              {p.name}
-            </Typography>
-            <Typography variant="h6">{completedSets[p.id]?.length ?? 0}</Typography>
-            <Typography variant="caption">sets</Typography>
-          </Box>
-        ))}
+        {players.map((p, i) => {
+          const profile = avatarProfiles[p.id]
+          return (
+            <Box
+              key={p.id}
+              sx={{
+                textAlign: 'center',
+                p: 1,
+                borderRadius: 2,
+                border: '2px solid',
+                borderColor: i === currentPlayerIndex ? 'primary.main' : 'divider',
+                bgcolor: i === currentPlayerIndex ? 'primary.light' : 'background.paper',
+                minWidth: 80,
+              }}
+            >
+              {profile ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.5 }}>
+                  <AvatarThumbnail
+                    features={profile.characterFeatures}
+                    ageGroup={profile.ageGroup ?? 'older'}
+                    faceGrid={profile.faceGrid}
+                    size={32}
+                    showArmor={false}
+                  />
+                </Box>
+              ) : p.avatarUrl ? (
+                <Box
+                  component="img"
+                  src={p.avatarUrl}
+                  alt={p.name}
+                  sx={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', mb: 0.5 }}
+                />
+              ) : null}
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                {p.name}
+              </Typography>
+              <Typography variant="h6">{completedSets[p.id]?.length ?? 0}</Typography>
+              <Typography variant="caption">sets</Typography>
+            </Box>
+          )
+        })}
       </Box>
 
       {/* Turn indicator */}
