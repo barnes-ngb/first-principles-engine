@@ -332,6 +332,36 @@ export const ACCESSORY_XP_THRESHOLDS: Record<AccessoryId, number> = {
   parrot: 1000,
 } as const
 
+/** Custom character body proportions (adjustable via Character Tuner) */
+export interface CharacterProportions {
+  headSize: number
+  torsoW: number
+  torsoH: number
+  torsoD: number
+  armW: number
+  armH: number
+  legW: number
+  legH: number
+  sleeveRatio: number
+  bootRatio: number
+  cape: boolean
+}
+
+/** Family-tuned default proportions (from visual tuning tool) */
+export const DEFAULT_PROPORTIONS: CharacterProportions = {
+  headSize: 1.8,
+  torsoW: 1.7,
+  torsoH: 2.6,
+  torsoD: 1.1,
+  armW: 1.0,
+  armH: 2.6,
+  legW: 0.8,
+  legH: 2.8,
+  sleeveRatio: 0.7,
+  bootRatio: 0.3,
+  cape: true,
+}
+
 export interface OutfitCustomization {
   shirtColor?: string   // Hex
   pantsColor?: string   // Hex
@@ -342,6 +372,7 @@ export interface OutfitCustomization {
   helmetCrest?: HelmetCrest    // Helmet crest style (Iron tier+)
   background?: AvatarBackground  // Scene background: night sky or indoor room
   accessories?: AccessoryId[]  // Equipped accessory IDs
+  proportions?: CharacterProportions  // Custom character body proportions
 }
 
 export interface AvatarProfile {

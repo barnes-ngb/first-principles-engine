@@ -3,6 +3,7 @@ import Box from '@mui/material/Box'
 import type {
   ArmorPiece,
   AvatarProfile,
+  CharacterProportions,
   HelmetCrest,
   ShieldEmblem,
   VoxelArmorPieceId,
@@ -16,6 +17,7 @@ import ShieldEmblemPicker from './ShieldEmblemPicker'
 import HelmetCrestPicker from './HelmetCrestPicker'
 import MinecraftSkinExport from './MinecraftSkinExport'
 import AvatarPhotoUpload from './AvatarPhotoUpload'
+import CharacterTunerPanel from './CharacterTunerPanel'
 
 interface AvatarCustomizerProps {
   profile: AvatarProfile
@@ -36,6 +38,14 @@ interface AvatarCustomizerProps {
   onEmblemChange: (emblem: ShieldEmblem) => void
   onCrestChange: (crest: HelmetCrest) => void
   onAccessoryToggle: (accessoryId: AccessoryId) => void
+  // Character tuner
+  tunerOpen: boolean
+  tunerProportions: CharacterProportions
+  tunerOutfitColors: { shirtColor: string; pantsColor: string; shoeColor: string; capeColor: string }
+  onTunerProportionsChange: (proportions: CharacterProportions) => void
+  onTunerCapeColorChange: (hex: string) => void
+  onTunerDone: () => void
+  onTunerReset: () => void
 }
 
 export default function AvatarCustomizer({
@@ -57,9 +67,30 @@ export default function AvatarCustomizer({
   onEmblemChange,
   onCrestChange,
   onAccessoryToggle,
+  tunerOpen,
+  tunerProportions,
+  tunerOutfitColors,
+  onTunerProportionsChange,
+  onTunerCapeColorChange,
+  onTunerDone,
+  onTunerReset,
 }: AvatarCustomizerProps) {
   return (
     <SectionErrorBoundary section="customizer">
+      {/* ── Character Tuner Panel ─────────────────────────────── */}
+      {tunerOpen && (
+        <CharacterTunerPanel
+          proportions={tunerProportions}
+          isLincoln={isLincoln}
+          outfitColors={tunerOutfitColors}
+          onProportionsChange={onTunerProportionsChange}
+          onOutfitColorChange={onOutfitColorChange}
+          onCapeColorChange={onTunerCapeColorChange}
+          onDone={onTunerDone}
+          onReset={onTunerReset}
+        />
+      )}
+
       {/* ── Shield Emblem & Helmet Crest Pickers ──────────────── */}
       {(appliedPieces.includes('shield_of_faith' as ArmorPiece) || appliedPieces.includes('helmet_of_salvation' as ArmorPiece)) && (
         <Box sx={{ display: 'flex', gap: 1.5, mt: 1, mx: 2, flexWrap: 'wrap' }}>

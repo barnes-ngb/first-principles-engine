@@ -2,7 +2,9 @@ import type { RefObject } from 'react'
 import Box from '@mui/material/Box'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 
-import type { AvatarProfile, AvatarBackground, Child } from '../../core/types'
+import EditIcon from '@mui/icons-material/Edit'
+
+import type { AvatarProfile, AvatarBackground, CharacterProportions, Child } from '../../core/types'
 import { LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
 import type { CharacterFeatures } from '../../core/types'
 import type { VoxelCharacterHandle } from './VoxelCharacter'
@@ -36,6 +38,10 @@ interface AvatarCharacterDisplayProps {
   onUnequipAnimDone: () => void
   onTierUpStart: () => void
   onTierUp: (oldTier: string, newTier: string) => Promise<void>
+  // Character tuner
+  proportions?: Partial<CharacterProportions>
+  onEditCharacter: () => void
+  tunerOpen: boolean
 }
 
 export default function AvatarCharacterDisplay({
@@ -63,6 +69,9 @@ export default function AvatarCharacterDisplay({
   onUnequipAnimDone,
   onTierUpStart,
   onTierUp,
+  proportions,
+  onEditCharacter,
+  tunerOpen,
 }: AvatarCharacterDisplayProps) {
   return (
     <>
@@ -240,6 +249,7 @@ export default function AvatarCharacterDisplay({
             accessories={profile.customization?.accessories}
             onTierUpStart={onTierUpStart}
             onTierUp={onTierUp}
+            proportions={proportions}
           />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
             <Box sx={{ flex: 1 }}>
@@ -249,6 +259,42 @@ export default function AvatarCharacterDisplay({
                 isLincoln={isLincoln}
                 poseAnimating={!!activePoseId && activePoseId !== 'idle'}
               />
+            </Box>
+            <Box
+              component="button"
+              onClick={onEditCharacter}
+              sx={{
+                width: 44,
+                height: 44,
+                borderRadius: isLincoln ? '8px' : '50%',
+                border: tunerOpen
+                  ? `2px solid ${accentColor}`
+                  : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
+                background: tunerOpen
+                  ? (isLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
+                  : (isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'),
+                color: tunerOpen
+                  ? accentColor
+                  : (isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)'),
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                outline: 'none',
+                p: 0,
+                mr: 0.5,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                '&:hover': {
+                  background: isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                  borderColor: isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)',
+                  transform: 'translateY(-1px)',
+                },
+                '&:active': { transform: 'scale(0.92)' },
+              }}
+              title="Edit Character"
+            >
+              <EditIcon sx={{ fontSize: 20 }} />
             </Box>
             <Box
               component="button"

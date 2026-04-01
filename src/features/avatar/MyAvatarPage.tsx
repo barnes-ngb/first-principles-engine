@@ -26,7 +26,7 @@ import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
 import { normalizeAvatarProfile } from './normalizeProfile'
 import { useAvatarProfile } from './useAvatarProfile'
 import { safeUpdateProfile, safeSetProfile } from './safeProfileWrite'
-import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
+import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, DEFAULT_PROPORTIONS, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type {
   AccessoryId,
@@ -35,6 +35,7 @@ import type {
   Artifact,
   AvatarBackground,
   AvatarProfile,
+  CharacterProportions,
   DailyArmorSession,
   HelmetCrest,
   OutfitCustomization,
@@ -183,6 +184,9 @@ export default function MyAvatarPage() {
   const [brothersMode, setBrothersMode] = useState(false)
   // Background mode (persisted in profile customization)
   const [bgMode, setBgMode] = useState<AvatarBackground>('night')
+  // Character tuner state
+  const [tunerOpen, setTunerOpen] = useState(false)
+  const [localProportions, setLocalProportions] = useState<CharacterProportions>(DEFAULT_PROPORTIONS)
   const siblingChild = children.find((c) => c.id !== childId)
   const siblingId = brothersMode ? siblingChild?.id : undefined
   const siblingProfile = useAvatarProfile(familyId, siblingId)
@@ -259,6 +263,12 @@ export default function MyAvatarPage() {
           // Sync background preference from profile
           if (data.customization?.background) {
             setBgMode(data.customization.background)
+          }
+          // Sync proportions from profile
+          if (data.customization?.proportions) {
+            setLocalProportions({ ...DEFAULT_PROPORTIONS, ...data.customization.proportions })
+          } else {
+            setLocalProportions(DEFAULT_PROPORTIONS)
           }
 
           const unlockedCount = getUnlockedVoxelPieces(data).length
@@ -480,6 +490,40 @@ export default function MyAvatarPage() {
     },
     [familyId, childId, profile],
   )
+
+  // ── Character tuner handlers ─────────────────────────────────────
+  const handleTunerToggle = useCallback(() => {
+    setTunerOpen((prev) => !prev)
+  }, [])
+
+  const handleTunerProportionsChange = useCallback((newProportions: CharacterProportions) => {
+    setLocalProportions(newProportions)
+  }, [])
+
+  const handleTunerCapeColorChange = useCallback(
+    async (hex: string) => {
+      if (!familyId || !childId || !profile) return
+      const customization: OutfitCustomization = { ...profile.customization, capeColor: hex }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile],
+  )
+
+  const handleTunerDone = useCallback(async () => {
+    if (!familyId || !childId || !profile) return
+    const customization: OutfitCustomization = {
+      ...profile.customization,
+      proportions: localProportions,
+    }
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    await safeUpdateProfile(profileRef, { customization })
+    setTunerOpen(false)
+  }, [familyId, childId, profile, localProportions])
+
+  const handleTunerReset = useCallback(() => {
+    setLocalProportions(DEFAULT_PROPORTIONS)
+  }, [])
 
   // ── Streak tracking ─────────────────────────────────────────────
   const checkArmorStreak = useCallback(async (prof: AvatarProfile) => {
@@ -966,6 +1010,9 @@ export default function MyAvatarPage() {
           onEquipAnimDone={handleEquipAnimDone}
           onUnequipAnimDone={handleUnequipAnimDone}
           onTierUpStart={() => setCeremonyActive(true)}
+          proportions={localProportions}
+          onEditCharacter={handleTunerToggle}
+          tunerOpen={tunerOpen}
           onTierUp={async (_oldTier, newTier) => {
             setCeremonyActive(false)
             if (!familyId || !childId) return
@@ -1051,6 +1098,18 @@ export default function MyAvatarPage() {
           onEmblemChange={handleEmblemChange}
           onCrestChange={handleCrestChange}
           onAccessoryToggle={handleAccessoryToggle}
+          tunerOpen={tunerOpen}
+          tunerProportions={localProportions}
+          tunerOutfitColors={{
+            shirtColor: profile.customization?.shirtColor ?? (isLincoln ? '#CC5500' : '#E8A838'),
+            pantsColor: profile.customization?.pantsColor ?? (isLincoln ? '#2A3A52' : '#C4B998'),
+            shoeColor: profile.customization?.shoeColor ?? '#3D2B1F',
+            capeColor: profile.customization?.capeColor ?? (isLincoln ? '#8B0000' : '#2255AA'),
+          }}
+          onTunerProportionsChange={handleTunerProportionsChange}
+          onTunerCapeColorChange={handleTunerCapeColorChange}
+          onTunerDone={handleTunerDone}
+          onTunerReset={handleTunerReset}
         />
       </Page>
 
