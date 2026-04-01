@@ -22,5 +22,5 @@ export interface ShellyChatMessage {
   imageUrl?: string
   imagePrompt?: string
   uploadedImageUrl?: string
-  imageAction?: 'analyze' | 'transform'
+  imageAction?: 'analyze' | 'transform' | 'context'
 }
