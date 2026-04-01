@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v14 **Version:** v14 — March 31, 2026 **Status:** Updated — 4 file decompositions (22 new components), architecture audit fixes, first-week polish, materials theming, weekly review fixes Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~100k lines TypeScript (src/ ~91k + functions/ ~9k), 52 test files, 600+ tests, 113 commits, 28 Firestore collections, 18 Cloud Functions, 13 chat task types, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — April 1, 2026 **Status:** Updated — Shelly Chat context tabs (Lincoln/London/General), deep child context loading, follow-up suggestions, markdown rendering Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~100k lines TypeScript (src/ ~91k + functions/ ~9k), 52 test files, 600+ tests, 113 commits, 28 Firestore collections, 18 Cloud Functions, 13 chat task types, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -239,24 +239,27 @@ Progress
 * Artifact gallery, compliance hours auto-logged on completion Settings
 * General family profile, AI usage dashboard
 * Avatar & XP tab — parent XP controls, piece management, force tier upgrade
-* Sticker Library tab — all generated stickers, tag editing, child profile assignment Shelly's AI Chat (Ask AI)
-* Persistent conversation threads saved to Firestore
-* Claude-powered responses with full family context (charter, children, skill snapshots, week theme)
-* Image generation via DALL-E (inline in conversation)
-* Image upload — camera/gallery button in input bar, uploads to Firebase Storage
-* Image analysis — Claude vision analyzes uploaded photos in family context
-* Image transform — upload a photo as inspiration for DALL-E generation
-* Prompt refinement flow — AI asks 2-3 clarifying questions with tappable chip options before generating (style, mood, details); "Just generate" escape hatch at every step
-* Slim inline toolbar replaces AppBar — thread title, history drawer toggle, New button (no double header)
-* Mobile-first chat interface with message bubbles
-* Thread management — rename, archive, new thread
-* Suggestion buttons for common queries (sight words, quick activities, reading progress)
-* Pre-seeded chat utility — other features can open a chat with context via `openChatWithContext`
-* FAB on Today page for quick access
+* Sticker Library tab — all generated stickers, tag editing, child profile assignment ### Shelly's AI Chat (Ask AI)
+* **Context tabs: Lincoln | London | General** — primary filter at top of page; each tab shows only its threads, loads child-specific data into Claude, and has tailored suggestion buttons
+* Lincoln tab context: skill snapshot, recent evaluation findings, today's plan items, engagement history, disposition profile, sight word progress
+* London tab context: skill snapshot, recent evaluation findings, today's plan items, engagement history, disposition profile
+* General tab: family charter, both children overview, week theme — no child-specific deep data
+* Persistent conversation threads saved to Firestore, tagged with chatContext (rename, archive, list in drawer)
+* Claude-powered responses with full family + child context
+* Markdown rendering in assistant messages (bold, lists, headers, code blocks)
+* Suggested follow-up questions — 2-3 tappable chips after each response, specific to conversation context
+* Image generation via DALL-E with prompt refinement flow — AI asks clarifying questions with tappable chip options before generating; "Just generate" escape hatch
+* Image upload — camera/gallery picker; three actions:
+  - "Analyze this image" — Claude vision analyzes photo in family/child context
+  - "Use as reference for image creation" — Claude describes reference, feeds into DALL-E prompt
+  - "Attach to my next message" — pending attachment strip, sends with next typed message
+* Mobile-first chat interface — slim inline toolbar, tabs, input bar always visible
+* Pre-seeded chat utility — `openChatWithContext` auto-selects correct tab based on child
+* FAB on parent Today page for quick access
 * Parent nav: "Ask AI" (last item)
-* Auto-send for pre-seeded threads (sparkle buttons, future integration)
-* Saves to `families/{familyId}/shellyChatThreads` + messages subcollection Cloud Functions (18 exported, 13 task types)
-1. `chat` — Task dispatch: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat (supports vision via multi-part content blocks), chat, generate
+* Saves to `families/{familyId}/shellyChatThreads` (tagged with chatContext) + messages subcollection
+* Firebase Storage: `families/{familyId}/chat-uploads/` for uploaded images Cloud Functions (18 exported, 13 task types)
+1. `chat` — Task dispatch (13 task types): plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat (context-aware general chat + vision analysis), chat, generate. shellyChat loads child-specific context (skill snapshot, evals, engagement, disposition, sight words, today's plan) based on chatContext. Supports multi-part content for image analysis via Claude vision.
 2. `weeklyReview` — Scheduled Sunday 7pm CT
 3. `generateWeeklyReviewNow` — Manual trigger
 4. `generateActivity` — Lesson card generation
@@ -278,7 +281,7 @@ Progress
 * `xpLedger` — append-only XP event history per child
 
 * `scans` — curriculum photo scan records
-* `shellyChatThreads` — Shelly's AI chat conversation threads + messages subcollection. Messages may include `uploadedImageUrl` (Firebase Storage) and `imageAction` (`'analyze'` | `'transform'`).
+* `shellyChatThreads` — Shelly's AI chat threads tagged with `chatContext` (`'lincoln'` | `'london'` | `'general'`) + messages subcollection. Messages may include `uploadedImageUrl` (Firebase Storage) and `imageAction` (`'analyze'` | `'transform'`).
 
 **Note:** xpEventLog merged into xpLedger (dedup via dedupKey field on ledger entries). Interactive quest sessions stored in `evaluationSessions` with `sessionType: 'interactive'` field. Story games stored in `storyGames` with `gameType` field ('board' | 'adventure' | 'cards'). `wordProgress` is a child subcollection (`children/{childId}/wordProgress`) used by Knowledge Mine — not in `firestore.ts` collection helpers. What's Built but Untested with Real Users
 * Weekly Review (needs full week of data)
@@ -299,7 +302,7 @@ Progress
 * Customization UI (dye colors, emblems, crests)
 * AvatarThumbnail on other pages
 * Parent XP management UI
-* Shelly's AI Chat — thread persistence, family context quality, image generation with prompt refinement, image upload + vision analysis, mobile UX
+* Shelly's AI Chat — context tab switching, child-specific context quality (skill snapshot, evals, engagement, disposition), image generation with prompt refinement, image upload + vision analysis, follow-up suggestion quality, mobile UX
 * Auto-XP from checklist/quest/book completion What's Not Built Yet Priority Queue (ready to prompt)
 * Lincoln Development Chat — dedicated AI chat mode reviewing evaluations, skill snapshot, recent progress → recommends what to work on this week
 * Planning improvements — activity ideas mode, engagement-based suggestions (PARTIALLY DONE: per-subject defaults and must-do/choose now built; engagement-based suggestions and activity ideas still TODO)
@@ -372,6 +375,7 @@ First Principles Mar 25 Weekly review rewrite (day logs + type alignment), dispo
 Business Prep Mar 28+ Creative timer, mini-book PDF, sketch-to-story pipeline
 Audit Mar 29-31 Architecture audit: dead code cleanup, TodayPage decomposition, error handling (SectionErrorBoundary), XP ledger perf, prompt consolidation, docs v14, first-week polish (evaluation nudge, minutes-logged indicator, HelpStrips, warmer empty states), materials theming (per-child), weekly review fixes (7PM schedule, CHARTER_PREAMBLE + addendum, empty-week guard), quest summary ethos fix, KidTodayView decomposition, PlannerChatPage decomposition, MyAvatarPage decomposition
 Shelly Chat  Mar 31  Shelly's AI Chat: persistent threads, Claude with family context, inline DALL-E image gen, image upload + Claude vision analysis, prompt refinement flow with tappable options, thread drawer (rename/archive), suggestion buttons, pre-seeded chat utility, FAB on Today, parent nav entry
+Shelly Chat  Apr 1  Shelly's AI Chat: context tabs (Lincoln/London/General), persistent threads, deep child context (skill snapshot + evals + engagement + disposition + sight words + today's plan), markdown rendering, follow-up suggestions, DALL-E with prompt refinement, image upload + Claude vision, thread drawer, pre-seeded chat utility, FAB on Today, parent nav entry
 
 Removed Features (Cleanup Sprint, Mar 24-25)
 * Sessions (1,720 lines) — orphaned feature with no nav links; sessionsCollection removed
@@ -423,8 +427,10 @@ Key Design Decisions
 35. **Flexible triggers** — features activate based on meaningful work done (3+ items OR 50% must-do), not rigid thresholds. Lincoln's day isn't always linear.
 36. **School creates product** — London's books and art in the app ARE the business inventory
 37. **Sunny the brand** — family golden retriever is the mascot tying all products and content together
-38. **Refine before generating** — image generation asks clarifying questions with tappable options before spending an API call. Shelly gets better results without prompt engineering skill.
-39. **Camera-first on mobile** — image upload uses `capture="environment"` so Shelly can photograph worksheets, drawings, or whiteboard work directly from the chat.
+38. **Context tabs over toggle** — Lincoln/London/General tabs are the primary chat filter, not a small toggle. Changes which threads show, what data Claude loads, and which suggestions appear. Each child gets their own conversation space.
+39. **Refine before generating** — image generation asks clarifying questions with tappable options before spending an API call. Better results without prompt engineering skill.
+40. **Camera-first on mobile** — image upload uses standard file picker (camera + gallery) so Shelly can photograph worksheets or pick from saved images.
+41. **Follow-ups reduce friction** — every assistant response suggests 2-3 specific follow-up questions as tappable chips. Shelly keeps the conversation going without typing.
 
 ### Key Files Reference
 
@@ -449,7 +455,7 @@ Key Design Decisions
 | `src/features/quest/` | Knowledge Mine |
 | `src/features/today/` | Today page |
 | `src/features/records/` | Records + compliance |
-| `src/features/shelly-chat/` | Shelly's AI Chat (Ask AI page, thread drawer, image upload, prompt refinement, pre-seeded chat utility) |
+| `src/features/shelly-chat/` | Shelly's AI Chat (Ask AI page, context tabs, thread drawer, image upload/vision, prompt refinement, pre-seeded chat utility) |
 | `src/features/workshop/` | Story Game Workshop |
 | `src/features/settings/` | Settings (AvatarAdminTab, StickerLibraryTab) |
 | `docs/FIRESTORE_AUDIT.md` | Firestore collection + index audit |
@@ -509,7 +515,14 @@ Key Design Decisions
 - 5 tasks use `buildContextForTask` (contextSlices.ts): plan, evaluate, quest, disposition, weeklyFocus
 - 3 tasks use `CHARTER_PREAMBLE` directly: conundrum, generateStory, workshop
 - 4 tasks build prompts inline: chat, scan, analyzeWorkbook, analyzePatterns
+- shellyChat builds context per chatContext tab (see below)
 - Consolidation pending.
+
+#### shellyChat Context Loading
+- Lincoln/London tabs: loads 6 context sources per child (skill snapshot, eval findings, today's plan, engagement history, disposition profile, sight words)
+- General tab: loads family charter, children overview, week theme only
+- Each context source wrapped in independent try/catch — partial failures don't block response
+- All queries use `.limit()` to bound cost
 
 #### Firebase Storage Paths
 - `families/{familyId}/chat-uploads/{threadId}/{timestamp}.jpg` — user-uploaded chat images (Shelly's AI Chat)
@@ -563,7 +576,7 @@ Family business workstream layered on top of the homeschool system. London (art/
 Architecture Review Notes (March 29, 2026) The following areas are flagged for architecture review:
 * XP system — xpLedger uses dedup guard pattern; totalXp computed from full ledger on every award (O(n), fix pending)
 * Avatar generation costs — DALL-E 3 sheet generation per tier per child; when to generate vs cache; cost implications at scale
-* Cloud Function sprawl — chat function handles 12 task types; generateImage handles 12 image tasks; whether these should be split into separate functions
+* Cloud Function sprawl — chat function handles 13 task types; generateImage handles 12 image tasks; whether these should be split into separate functions
 * Firestore collection count — 27 formal collections + `wordProgress` raw subcollection reference in quest.ts
 * Client-side image processing — cropArmorSheet, sketch cleanup, and print PDF all do heavy canvas work client-side; perf on low-end devices
 * AI context pipeline size — system prompt includes many data sources; token cost and latency implications
@@ -571,4 +584,4 @@ Architecture Review Notes (March 29, 2026) The following areas are flagged for a
 * Type safety — types split across 10 files (common, family, planning, evaluation, xp, books, compliance, dadlab, workshop, skillTags) with barrel re-export via index.ts
 * Decomposition queue — all 4 targets completed (TodayPage, KidTodayView, PlannerChatPage, MyAvatarPage). Next largest files are WorkshopPage (1,549L) and BookEditorPage (1,419L), both stable.
 
-Last updated: March 29, 2026
+Last updated: April 1, 2026
