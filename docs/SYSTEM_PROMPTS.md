@@ -1,8 +1,8 @@
-# First Principles Engine — System Prompts Reference (v3)
+# First Principles Engine — System Prompts Reference (v4)
 
 > Generated from source: `functions/src/ai/` — chat.ts, chatTypes.ts, contextSlices.ts, tasks/\*, evaluate.ts, generate.ts, imageGen.ts
 >
-> Last updated: 2026-03-29
+> Last updated: 2026-04-01
 
 ---
 
@@ -43,6 +43,8 @@ src/core/ai/useAI.ts              functions/src/ai/
                                       disposition → handleDisposition
                                       conundrum  → handleConundrum
                                       weeklyFocus → handleWeeklyFocus
+                                      scan       → handleScan
+                                      shellyChat → handleShellyChat
                                            ↓
                                   tasks/<handler>.ts
                                     → buildContextForTask(taskType, ...)  [contextSlices.ts]
@@ -91,6 +93,8 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `disposition` | `claude-sonnet-4-6` | Learning disposition narrative |
 | `conundrum` | `claude-sonnet-4-6` | Weekly conundrum generation |
 | `weeklyFocus` | `claude-sonnet-4-6` | Unified weekly focus + conundrum |
+| `scan` | `claude-sonnet-4-6` | Curriculum photo analysis (vision) |
+| `shellyChat` | `claude-sonnet-4-6` | Parent AI assistant (family context) |
 | `generate` | `claude-haiku-4-5-20251001` | Activity/lesson generation |
 | `chat` | `claude-haiku-4-5-20251001` | General chat |
 
@@ -143,9 +147,11 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `generateStory` | childProfile, sightWords, wordMastery |
 | `workshop` | charter, childProfile, workshopGames |
 | `analyzePatterns` | childProfile |
+| `scan` | childProfile, recentEval |
 | `disposition` | _(self-loading)_ charter preamble + 4 weeks day logs + 3 recent evals + 5 recent lab reports |
 | `conundrum` | _(self-loading)_ charter preamble + week focus + recent subjects + child profiles |
 | `weeklyFocus` | _(self-loading)_ charter preamble + previous 4 weeks' themes + recent subjects + user input |
+| `shellyChat` | _(self-loading)_ family charter summary + all children profiles + week theme/virtue + conundrum title |
 
 ---
 
@@ -292,6 +298,32 @@ src/core/ai/useAI.ts              functions/src/ai/
 - 4 style options: storybook (default), comic, realistic, minecraft
 - Saves enhanced image back to Storage, returns download URL
 - Logs usage to aiUsage collection
+
+### `scan` (tasks/scan.ts)
+
+**System prompt assembly:**
+1. Context slices for "scan" (childProfile + recentEval via buildContextForTask)
+2. `buildScanSystemPrompt(childName, childGrade, contextSections)` — workbook/worksheet photo analysis
+
+**Key behaviors:**
+- Uses `callClaudeWithVision` — accepts image data in the first message
+- Analyzes page type, subject, specific topic, skills targeted
+- Compares against child's skill snapshot for level alignment
+- Outputs JSON with `pageType`, `subject`, `specificTopic`, `skillsTargeted[]`, `estimatedDifficulty`, `recommendation` (do/skip/quick-review/modify), `estimatedMinutes`, `teacherNotes`
+- Notes neurodivergent-friendly concerns (dense text, too many problems)
+
+### `shellyChat` (tasks/shellyChat.ts)
+
+**System prompt assembly:**
+1. Self-loaded context (does not use buildContextForTask)
+2. Loads: family charter summary, all children profiles, current week theme/virtue, conundrum title
+3. Builds a parent-focused assistant prompt with full family context
+
+**Key behaviors:**
+- General-purpose AI assistant for Shelly (parent user)
+- Has family context: charter values, children profiles, weekly focus
+- Thread-based conversation stored in `shellyChatThreads` collection
+- Sonnet model for complex reasoning and contextual advice
 
 ### `analyzeEvaluationPatterns` (tasks/analyzePatterns.ts)
 
