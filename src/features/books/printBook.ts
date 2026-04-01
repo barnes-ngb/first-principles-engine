@@ -366,6 +366,35 @@ function toFixed(n: number): string {
   return n.toFixed(4)
 }
 
+/* ───────────────────── rotation helper ───────────────────── */
+
+/**
+ * Adjust (x, y) so that a jsPDF image rotation pivots around the image center
+ * instead of the top-left corner. jsPDF rotates clockwise around (x, y), but
+ * CSS `transform-origin: center center` rotates around the element's center.
+ *
+ * Given the desired top-left position (x, y) and image size (w, h), returns
+ * the adjusted (x, y) that makes the center stay in place after rotation.
+ */
+function adjustForCenterRotation(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  rotationDeg: number,
+): [number, number] {
+  const rad = (rotationDeg * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const cx = x + w / 2
+  const cy = y + h / 2
+  // Solve for the top-left position that places the center at (cx, cy) after
+  // clockwise rotation around the top-left: center' = pivot + R * (w/2, h/2)
+  const adjX = cx - (w / 2) * cos - (h / 2) * sin
+  const adjY = cy + (w / 2) * sin - (h / 2) * cos
+  return [adjX, adjY]
+}
+
 /* ───────────────────── page drawing functions ───────────────────── */
 
 interface ContentArea {
@@ -509,11 +538,24 @@ async function drawContentPage(
         // Stickers use contain-fit; scene/photo images use cover-fit (crop to fill box)
         if (img.type === 'sticker') {
           const fit = fitInBox(dims.width, dims.height, imgW, imgH)
-          pdf.addImage({ imageData: dataUri, x: imgX, y: imgY, width: fit.w, height: fit.h, rotation })
+          // Center within bounding box to match CSS object-fit: contain
+          let drawX = imgX + (imgW - fit.w) / 2
+          let drawY = imgY + (imgH - fit.h) / 2
+          if (rotation !== 0) {
+            // jsPDF rotates around top-left corner. Adjust coordinates so the
+            // rotation pivots around the center, matching CSS transform-origin: center.
+            ;[drawX, drawY] = adjustForCenterRotation(drawX, drawY, fit.w, fit.h, rotation)
+          }
+          pdf.addImage({ imageData: dataUri, x: drawX, y: drawY, width: fit.w, height: fit.h, rotation })
         } else {
           // Cover-fit: crop image to match the box aspect ratio, then fill entire box
           const cropped = await cropToAspect(dataUri, dims.width, dims.height, imgW, imgH)
-          pdf.addImage({ imageData: cropped, x: imgX, y: imgY, width: imgW, height: imgH, rotation })
+          let drawX = imgX
+          let drawY = imgY
+          if (rotation !== 0) {
+            ;[drawX, drawY] = adjustForCenterRotation(drawX, drawY, imgW, imgH, rotation)
+          }
+          pdf.addImage({ imageData: cropped, x: drawX, y: drawY, width: imgW, height: imgH, rotation })
         }
       } catch {
         // Skip image on failure
