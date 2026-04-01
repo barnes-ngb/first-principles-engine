@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
 import CloseIcon from '@mui/icons-material/Close'
@@ -18,6 +19,9 @@ import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import IconButton from '@mui/material/IconButton'
 import LinearProgress from '@mui/material/LinearProgress'
+import List from '@mui/material/List'
+import ListItemButton from '@mui/material/ListItemButton'
+import ListItemText from '@mui/material/ListItemText'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
 import Tab from '@mui/material/Tab'
@@ -51,7 +55,7 @@ import { storage } from '../../core/firebase/storage'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { ShellyChatMessage, ChatThread, ChatContext } from '../../core/types'
 import ChatMessageBubble from './ChatMessageBubble'
-import ChatThreadDrawer from './ChatThreadDrawer'
+import ChatThreadDrawer, { formatRelativeTime } from './ChatThreadDrawer'
 
 const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: string; suggestions: ReadonlyArray<{ label: string; message: string }> }> = {
   lincoln: {
@@ -996,17 +1000,27 @@ export default function ShellyChatPage() {
     <Box data-page="chat" sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, flex: 1 }}>
       {/* Slim toolbar row */}
       <Box sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
-        <IconButton size="small" onClick={() => setDrawerOpen(true)} aria-label="Conversations">
+        <IconButton size="small" onClick={() => setDrawerOpen(true)} aria-label="All conversations">
           <HistoryIcon />
         </IconButton>
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          noWrap
-          sx={{ flex: 1, ml: 1 }}
-        >
-          {activeThread?.title || 'New conversation'}
-        </Typography>
+
+        {activeThreadId ? (
+          <>
+            <IconButton size="small" onClick={handleNewThread} aria-label="Back">
+              <ArrowBackIcon fontSize="small" />
+            </IconButton>
+            <Typography variant="body2" color="text.secondary" noWrap sx={{ flex: 1, ml: 0.5 }}>
+              {activeThread?.title || 'Conversation'}
+            </Typography>
+          </>
+        ) : (
+          <Typography variant="body2" color="text.secondary" sx={{ flex: 1, ml: 1 }}>
+            {chatContext === 'lincoln' ? "Lincoln's conversations" :
+             chatContext === 'london' ? "London's conversations" :
+             'Conversations'}
+          </Typography>
+        )}
+
         <Button size="small" startIcon={<AddIcon />} onClick={handleNewThread}>
           New
         </Button>
@@ -1043,34 +1057,70 @@ export default function ShellyChatPage() {
       {/* Messages area */}
       <Box sx={{ flex: 1, overflow: 'auto', px: 2, py: 2, minHeight: 0 }}>
         {showEmpty ? (
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              textAlign: 'center',
-              gap: 2,
-            }}
-          >
-            <Typography variant="h5">{SUGGESTIONS_BY_CONTEXT[chatContext].greeting}</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 320 }}>
-              {SUGGESTIONS_BY_CONTEXT[chatContext].subtitle}
-            </Typography>
-            <Stack spacing={1} sx={{ mt: 1, width: '100%', maxWidth: 360 }}>
-              {SUGGESTIONS_BY_CONTEXT[chatContext].suggestions.map((s) => (
-                <Button
-                  key={s.label}
-                  variant="outlined"
-                  size="small"
-                  onClick={() => setInput(s.message)}
-                  sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
-                >
-                  {s.label}
-                </Button>
-              ))}
-            </Stack>
+          <Box sx={{ px: 1, py: 3 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                textAlign: 'center',
+                gap: 2,
+              }}
+            >
+              <Typography variant="h5">{SUGGESTIONS_BY_CONTEXT[chatContext].greeting}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 320 }}>
+                {SUGGESTIONS_BY_CONTEXT[chatContext].subtitle}
+              </Typography>
+              <Stack spacing={1} sx={{ mt: 1, width: '100%', maxWidth: 360 }}>
+                {SUGGESTIONS_BY_CONTEXT[chatContext].suggestions.map((s) => (
+                  <Button
+                    key={s.label}
+                    variant="outlined"
+                    size="small"
+                    onClick={() => setInput(s.message)}
+                    sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+                  >
+                    {s.label}
+                  </Button>
+                ))}
+              </Stack>
+            </Box>
+
+            {threads.length > 0 && (
+              <Box sx={{ mt: 4 }}>
+                <Typography variant="overline" color="text.secondary" sx={{ px: 1 }}>
+                  Recent conversations
+                </Typography>
+                <List dense disablePadding>
+                  {threads.slice(0, 5).map((thread) => (
+                    <ListItemButton
+                      key={thread.id}
+                      onClick={() => handleSelectThread(thread.id)}
+                      sx={{ borderRadius: 1, mb: 0.5 }}
+                    >
+                      <ListItemText
+                        primary={thread.title}
+                        secondary={thread.lastMessagePreview}
+                        primaryTypographyProps={{ variant: 'body2', noWrap: true }}
+                        secondaryTypographyProps={{ variant: 'caption', noWrap: true }}
+                      />
+                      <Typography variant="caption" color="text.secondary" sx={{ ml: 1, whiteSpace: 'nowrap' }}>
+                        {formatRelativeTime(thread.updatedAt)}
+                      </Typography>
+                    </ListItemButton>
+                  ))}
+                </List>
+                {threads.length > 5 && (
+                  <Button
+                    size="small"
+                    onClick={() => setDrawerOpen(true)}
+                    sx={{ mt: 0.5 }}
+                  >
+                    View all conversations
+                  </Button>
+                )}
+              </Box>
+            )}
           </Box>
         ) : (
           <>
