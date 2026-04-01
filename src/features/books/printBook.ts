@@ -141,6 +141,42 @@ function fitInBox(
   return { w: imgW * scale, h: imgH * scale }
 }
 
+/** Crop an image data URI to a target aspect ratio (cover-fit) via offscreen canvas. */
+function cropToAspect(
+  dataUri: string,
+  imgW: number,
+  imgH: number,
+  targetW: number,
+  targetH: number,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const targetRatio = targetW / targetH
+      const imgRatio = imgW / imgH
+      let sx = 0, sy = 0, sw = imgW, sh = imgH
+      if (imgRatio > targetRatio) {
+        // Image is wider — crop sides
+        sw = imgH * targetRatio
+        sx = (imgW - sw) / 2
+      } else {
+        // Image is taller — crop top/bottom
+        sh = imgW / targetRatio
+        sy = (imgH - sh) / 2
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = sw
+      canvas.height = sh
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { resolve(dataUri); return }
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+      resolve(canvas.toDataURL('image/png'))
+    }
+    img.onerror = reject
+    img.src = dataUri
+  })
+}
+
 /* ───────────────────── flip helper for PDF ───────────────────── */
 
 /** Flip an image data URI horizontally/vertically via an offscreen canvas. */
@@ -397,12 +433,12 @@ async function drawContentPage(
 
   // Render page images
   if (page.images.length > 0) {
-    // Match the editor's image container aspect ratio (~3:2, i.e. 375×250 on mobile).
-    // Without this, percentage-based sticker positions compress/expand and overlap.
-    const EDITOR_ASPECT_RATIO = 3 / 2
-    const imgAreaH = Math.min(area.w / EDITOR_ASPECT_RATIO, area.h * 0.5)
-    const imgAreaW = imgAreaH * EDITOR_ASPECT_RATIO
-    const imgAreaX = area.x + (area.w - imgAreaW) / 2 // center horizontally
+    // Lock to the same 3:2 aspect ratio used in editor + reader containers.
+    // Derive height from available width so the container always fits.
+    const IMAGE_ASPECT_RATIO = 3 / 2
+    const imgAreaW = area.w
+    const imgAreaH = Math.min(area.w / IMAGE_ASPECT_RATIO, area.h * 0.55)
+    const imgAreaX = area.x
 
     // Sort by zIndex for proper stacking
     const sortedImages = [...page.images].sort(
@@ -414,7 +450,7 @@ async function drawContentPage(
     pdf.roundedRect(imgAreaX - 1.5, curY - 1.5, imgAreaW + 3, imgAreaH + 3, 2, 2, 'F')
 
     for (const img of sortedImages) {
-      const dataUri = resolveUrl(img.url)
+      let dataUri = resolveUrl(img.url)
       if (!dataUri.startsWith('data:')) continue
       try {
         const dims = await getImageDimensions(dataUri)
@@ -426,18 +462,23 @@ async function drawContentPage(
         const imgW = (pos.width / 100) * imgAreaW
         const imgH = (pos.height / 100) * imgAreaH
 
-        const fit = fitInBox(dims.width, dims.height, imgW, imgH)
         const rotation = pos.rotation ?? 0
-
-        // Apply flip via canvas if needed, otherwise render directly
         const flipH = pos.flipH ?? false
         const flipV = pos.flipV ?? false
+
+        // Apply flip via canvas if needed
         if (flipH || flipV) {
-          // Create a canvas to flip the image, then add as data URI
-          const flippedUri = await flipImageDataUri(dataUri, dims.width, dims.height, flipH, flipV)
-          pdf.addImage({ imageData: flippedUri, x: imgX, y: imgY, width: fit.w, height: fit.h, rotation })
-        } else {
+          dataUri = await flipImageDataUri(dataUri, dims.width, dims.height, flipH, flipV)
+        }
+
+        // Stickers use contain-fit; scene/photo images use cover-fit (crop to fill box)
+        if (img.type === 'sticker') {
+          const fit = fitInBox(dims.width, dims.height, imgW, imgH)
           pdf.addImage({ imageData: dataUri, x: imgX, y: imgY, width: fit.w, height: fit.h, rotation })
+        } else {
+          // Cover-fit: crop image to match the box aspect ratio, then fill entire box
+          const cropped = await cropToAspect(dataUri, dims.width, dims.height, imgW, imgH)
+          pdf.addImage({ imageData: cropped, x: imgX, y: imgY, width: imgW, height: imgH, rotation })
         }
       } catch {
         // Skip image on failure
@@ -450,8 +491,25 @@ async function drawContentPage(
   // Render text with dynamic font sizing to prevent overflow
   if (page.text) {
     const textLen = page.text.length
-    const fontSize = textLen > 300 ? 11 : textLen > 200 ? 12 : textLen > 120 ? 14 : 16
-    const maxTextY = area.y + area.h - (settings.includePageNumbers ? 6 : 0)
+    const pageNumSpace = settings.includePageNumbers ? 6 : 0
+    const maxTextY = area.y + area.h - pageNumSpace
+    const availableTextH = maxTextY - curY
+
+    // Scale font size and line height based on text length and available space
+    let fontSize: number
+    let lineHeight: number
+    if (textLen > 400 || availableTextH < 40) {
+      fontSize = 10; lineHeight = 1.35
+    } else if (textLen > 300 || availableTextH < 50) {
+      fontSize = 11; lineHeight = 1.4
+    } else if (textLen > 200) {
+      fontSize = 12; lineHeight = 1.45
+    } else if (textLen > 120) {
+      fontSize = 14; lineHeight = 1.5
+    } else {
+      fontSize = 16; lineHeight = 1.6
+    }
+
     curY = renderText(
       pdf,
       page.text,
@@ -459,7 +517,7 @@ async function drawContentPage(
       curY,
       area.w,
       fontSize,
-      1.6,
+      lineHeight,
       textColor,
       sightWordSet,
       settings.sightWordStyle,
