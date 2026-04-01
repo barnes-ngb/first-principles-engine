@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CreativeTimer from '../../components/CreativeTimer'
@@ -145,16 +145,15 @@ export default function WorkshopPage() {
     () => allGames.filter((g) => g.childId === activeChildId && g.status !== 'draft'),
     [allGames, activeChildId],
   )
-  const [hasAnnouncedMap, setHasAnnouncedMap] = useState(() => {
-    return localStorage.getItem(`workshop-map-announced-${activeChildId}`) === 'true'
-  })
+  const mapAnnouncedRef = useRef(false)
   useEffect(() => {
-    if (childGames.length >= 3 && !hasAnnouncedMap && activeChildId) {
+    const key = `workshop-map-announced-${activeChildId}`
+    if (childGames.length >= 3 && activeChildId && !mapAnnouncedRef.current && localStorage.getItem(key) !== 'true') {
+      mapAnnouncedRef.current = true
+      localStorage.setItem(key, 'true')
       tts.speak("Your world is growing! You've created 3 games. Tap the map to explore your worlds!")
-      localStorage.setItem(`workshop-map-announced-${activeChildId}`, 'true')
-      setHasAnnouncedMap(true)
     }
-  }, [childGames.length, hasAnnouncedMap, activeChildId, tts])
+  }, [childGames.length, activeChildId, tts])
 
   // ── Draft auto-save helpers ──────────────────────────────────────
 
