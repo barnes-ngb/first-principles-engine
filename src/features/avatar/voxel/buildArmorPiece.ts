@@ -165,375 +165,354 @@ export const XP_THRESHOLDS: Record<VoxelArmorPieceId, number> = {
   sword: 1000,
 }
 
-// ── Armor geometry builders (Minecraft armor-layer style) ────────────
+// ── Armor geometry builders ─────────────────────────────────────────
 //
-// Minecraft armor is a second layer that sits slightly outside the body.
-// Each armor piece is the body part's shape but ~1px bigger in all dimensions.
-//
-// Coordinate system matches buildCharacter.ts — uses getBodyLayout() for positions.
-// Key Y positions (older): legTop=15U, torsoCenter=20U, torsoTop=25U, headCenter=29.5U
+// Armor is a second layer slightly outside the body.
+// Uses getBodyLayout() world-unit dimensions + U for detail padding.
+// All positions in character-root space (feet at Y=0) unless attached to arm.
 
 // White placeholder color — tier materials override these
 const W = 0xffffff
 
-function buildHelmet(U: number, headPx: number): THREE.Group {
+function buildHelmet(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   const group = new THREE.Group()
+  const { U, headSize } = layout
 
   // Helmet uses HEAD-LOCAL coordinates (headGroup center = 0,0,0).
-  // Head is headPx × headPx × headPx (9px for Legends proportions).
   // Crusader-style closed helmet: fully encloses the head, visor slit IS the face.
-  const h = headPx // shorthand for head pixel count
-  const pad = 1.6  // padding pixels beyond head on each side
+  const h = headSize // head size in world units
+  const pad = U * 1.6 // padding beyond head on each side
 
   // Main dome — slightly larger than head on all sides
   const domeSize = h + pad
-  const dome = taggedBox(U * domeSize, U * domeSize, U * domeSize, W, 'primary', 'helmet_dome')
+  const dome = taggedBox(domeSize, domeSize, domeSize, W, 'primary', 'helmet_dome')
   dome.position.set(0, U * 0.4, 0)
   group.add(dome)
 
-  // Bottom brim/lip — thin strip around the bottom edge, extending outward
-  const brimW = h + pad + 0.8
-  const brimFront = taggedBox(U * brimW, U * 0.8, U * 1.0, W, 'accent', 'helmet_brim_front')
-  brimFront.position.set(0, -U * (h / 2), U * (domeSize / 2 + 0.1))
+  // Bottom brim/lip — thin strip around the bottom edge
+  const brimW = h + pad + U * 0.8
+  const brimFront = taggedBox(brimW, U * 0.8, U * 1.0, W, 'accent', 'helmet_brim_front')
+  brimFront.position.set(0, -h / 2, domeSize / 2 + U * 0.1)
   group.add(brimFront)
-  const brimBack = taggedBox(U * brimW, U * 0.8, U * 1.0, W, 'accent', 'helmet_brim_back')
-  brimBack.position.set(0, -U * (h / 2), -U * (domeSize / 2 + 0.1))
+  const brimBack = taggedBox(brimW, U * 0.8, U * 1.0, W, 'accent', 'helmet_brim_back')
+  brimBack.position.set(0, -h / 2, -(domeSize / 2 + U * 0.1))
   group.add(brimBack)
-  const brimL = taggedBox(U * 1.0, U * 0.8, U * domeSize, W, 'accent', 'helmet_brim_l')
-  brimL.position.set(-U * (domeSize / 2 + 0.4), -U * (h / 2), 0)
+  const brimL = taggedBox(U * 1.0, U * 0.8, domeSize, W, 'accent', 'helmet_brim_l')
+  brimL.position.set(-(domeSize / 2 + U * 0.4), -h / 2, 0)
   group.add(brimL)
-  const brimR = taggedBox(U * 1.0, U * 0.8, U * domeSize, W, 'accent', 'helmet_brim_r')
-  brimR.position.set(U * (domeSize / 2 + 0.4), -U * (h / 2), 0)
+  const brimR = taggedBox(U * 1.0, U * 0.8, domeSize, W, 'accent', 'helmet_brim_r')
+  brimR.position.set(domeSize / 2 + U * 0.4, -h / 2, 0)
   group.add(brimR)
 
-  // Front face plate — covers the face area
-  const facePlate = taggedBox(U * h, U * (h * 0.6), U * 1.0, W, 'primary', 'helmet_faceplate')
-  facePlate.position.set(0, -U * (h * 0.15), U * (domeSize / 2 - 0.2))
+  // Front face plate
+  const facePlate = taggedBox(h, h * 0.6, U * 1.0, W, 'primary', 'helmet_faceplate')
+  facePlate.position.set(0, -h * 0.15, domeSize / 2 - U * 0.2)
   group.add(facePlate)
 
-  // Visor slit — thin dark horizontal bar across the front face
-  const visor = taggedFlatBox(U * (h - 0.4), U * 1.0, U * 0.6, 0x222222, 'detail', 'helmet_visor')
-  visor.position.set(0, U * 0.6, U * (domeSize / 2 + 0.4))
+  // Visor slit — thin dark horizontal bar
+  const visor = taggedFlatBox(h - U * 0.4, U * 1.0, U * 0.6, 0x222222, 'detail', 'helmet_visor')
+  visor.position.set(0, U * 0.6, domeSize / 2 + U * 0.4)
   group.add(visor)
 
-  // Nose guard — vertical bar from visor slit down to chin
-  const noseGuard = taggedBox(U * 1.0, U * (h * 0.45), U * 0.8, W, 'accent', 'helmet_noseguard')
-  noseGuard.position.set(0, -U * (h * 0.2), U * (domeSize / 2 + 0.2))
+  // Nose guard — vertical bar from visor to chin
+  const noseGuard = taggedBox(U * 1.0, h * 0.45, U * 0.8, W, 'accent', 'helmet_noseguard')
+  noseGuard.position.set(0, -h * 0.2, domeSize / 2 + U * 0.2)
   group.add(noseGuard)
 
-  // Top crest — accent ridge running front to back
-  const crest = taggedBox(U * 1.0, U * 1.4, U * h, W, 'accent', 'helmet_crest')
+  // Top crest — accent ridge front to back
+  const crest = taggedBox(U * 1.0, U * 1.4, h, W, 'accent', 'helmet_crest')
   crest.userData.isAccent = true
-  crest.position.set(0, U * (domeSize / 2 + 0.8), 0)
+  crest.position.set(0, domeSize / 2 + U * 0.8, 0)
   group.add(crest)
 
-  // Neck guard — extends below head at the back for protection
-  const neckGuard = taggedBox(U * h, U * 2.4, U * 1.4, W, 'primary', 'helmet_neckguard')
-  neckGuard.position.set(0, -U * (h * 0.6), -U * (h * 0.55))
+  // Neck guard — extends below head at the back
+  const neckGuard = taggedBox(h, U * 2.4, U * 1.4, W, 'primary', 'helmet_neckguard')
+  neckGuard.position.set(0, -h * 0.6, -h * 0.55)
   group.add(neckGuard)
 
   return group
 }
 
-function buildBreastplate(U: number, layout: ReturnType<typeof getBodyLayout>): THREE.Group {
+function buildBreastplate(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   const group = new THREE.Group()
-  const { torsoCenter, torsoTop, torsoH, torsoW, torsoD, legTop, armH } = layout
-  const tC = torsoCenter / U // torso center in px
-  const tT = torsoTop / U   // torso top in px
-  const tW = torsoW / U     // torso width in px
-  const tD = torsoD / U     // torso depth in px
-  const tH = torsoH / U     // torso height in px
-  const lT = legTop / U     // leg top in px
-  const aH = armH / U       // arm height in px
+  const { U, torsoCenter, torsoTop, torsoH, torsoW, torsoD, legTop, armH } = layout
 
   // Main chest plate — sits ON TOP of body, slightly wider and thicker
-  const chestW = tW + 1.6   // 1.6px wider than torso
-  const chestH = tH + 0.4
-  const chestD = tD + 3     // substantial depth so it protrudes visibly
-  const chest = taggedBox(U * chestW, U * chestH, U * chestD, W, 'primary', 'breastplate_body')
-  chest.position.set(0, U * tC, U * 0.5)
+  const chestW = torsoW + U * 1.6
+  const chestH = torsoH + U * 0.4
+  const chestD = torsoD + U * 3
+  const chest = taggedBox(chestW, chestH, chestD, W, 'primary', 'breastplate_body')
+  chest.position.set(0, torsoCenter, U * 0.5)
   group.add(chest)
 
-  // Neck guard/collar — at torso top
-  const collar = taggedBox(U * (tW - 1), U * 2.0, U * (tD + 1.5), W, 'accent', 'breastplate_collar')
-  collar.position.set(0, U * (tT + 1), 0)
+  // Neck guard/collar
+  const collar = taggedBox(torsoW - U * 1, U * 2.0, torsoD + U * 1.5, W, 'accent', 'breastplate_collar')
+  collar.position.set(0, torsoTop + U * 1, 0)
   group.add(collar)
 
   // Cross emblem on front
-  const crossV = taggedFlatBox(U * 1, U * (tH * 0.5), U * 0.5, W, 'detail', 'cross_v')
-  crossV.position.set(0, U * (tC + 1), U * (chestD / 2 + 0.8))
+  const crossV = taggedFlatBox(U * 1, torsoH * 0.5, U * 0.5, W, 'detail', 'cross_v')
+  crossV.position.set(0, torsoCenter + U * 1, chestD / 2 + U * 0.8)
   group.add(crossV)
-  const crossH = taggedFlatBox(U * (tW * 0.75), U * 1, U * 0.5, W, 'detail', 'cross_h')
-  crossH.position.set(0, U * (tC + tH * 0.2), U * (chestD / 2 + 0.8))
+  const crossH = taggedFlatBox(torsoW * 0.75, U * 1, U * 0.5, W, 'detail', 'cross_h')
+  crossH.position.set(0, torsoCenter + torsoH * 0.2, chestD / 2 + U * 0.8)
   group.add(crossH)
 
-  // Left pauldron (shoulder guard) — at torso top, extends past body
-  const pauldronL = taggedBox(U * 4.5, U * 2.4, U * (tD + 2), W, 'primary', 'pauldron_l')
-  pauldronL.position.set(-U * (tW / 2 + 2.7), U * (tT - 0.2), 0)
+  // Pauldrons (shoulder guards)
+  const pauldronL = taggedBox(U * 4.5, U * 2.4, torsoD + U * 2, W, 'primary', 'pauldron_l')
+  pauldronL.position.set(-(torsoW / 2 + U * 2.7), torsoTop - U * 0.2, 0)
   pauldronL.rotation.z = THREE.MathUtils.degToRad(5)
   group.add(pauldronL)
-  const pauldronLipL = taggedFlatBox(U * 4.8, U * 0.5, U * (tD + 2.4), W, 'accent', 'pauldron_lip_l')
-  pauldronLipL.position.set(-U * (tW / 2 + 2.7), U * (tT - 1.4), 0)
+  const pauldronLipL = taggedFlatBox(U * 4.8, U * 0.5, torsoD + U * 2.4, W, 'accent', 'pauldron_lip_l')
+  pauldronLipL.position.set(-(torsoW / 2 + U * 2.7), torsoTop - U * 1.4, 0)
   pauldronLipL.rotation.z = THREE.MathUtils.degToRad(5)
   group.add(pauldronLipL)
 
-  // Right pauldron — mirror of left
-  const pauldronR = taggedBox(U * 4.5, U * 2.4, U * (tD + 2), W, 'primary', 'pauldron_r')
-  pauldronR.position.set(U * (tW / 2 + 2.7), U * (tT - 0.2), 0)
+  const pauldronR = taggedBox(U * 4.5, U * 2.4, torsoD + U * 2, W, 'primary', 'pauldron_r')
+  pauldronR.position.set(torsoW / 2 + U * 2.7, torsoTop - U * 0.2, 0)
   pauldronR.rotation.z = THREE.MathUtils.degToRad(-5)
   group.add(pauldronR)
-  const pauldronLipR = taggedFlatBox(U * 4.8, U * 0.5, U * (tD + 2.4), W, 'accent', 'pauldron_lip_r')
-  pauldronLipR.position.set(U * (tW / 2 + 2.7), U * (tT - 1.4), 0)
+  const pauldronLipR = taggedFlatBox(U * 4.8, U * 0.5, torsoD + U * 2.4, W, 'accent', 'pauldron_lip_r')
+  pauldronLipR.position.set(torsoW / 2 + U * 2.7, torsoTop - U * 1.4, 0)
   pauldronLipR.rotation.z = THREE.MathUtils.degToRad(-5)
   group.add(pauldronLipR)
 
-  // Arm covers (armor sleeves) — arm-local space (shoulder pivot at Y=0)
-  const armArmorW = layout.p.armPxW + 2     // wider than thin arm (~2× arm width)
-  const armArmorH = aH * 0.8               // cover upper 80% of arm
-  const armArmorD = layout.p.armPxD + 2
-  const armArmorL = taggedBox(U * armArmorW, U * armArmorH, U * armArmorD, W, 'primary', 'arm_armor_l')
-  armArmorL.position.set(0, -U * (armArmorH / 2 + 0.5), 0)
+  // Arm covers — arm-local space (shoulder pivot at Y=0)
+  const armArmorW = layout.armW + U * 2
+  const armArmorH = armH * 0.8
+  const armArmorD = layout.armW + U * 2
+  const armArmorL = taggedBox(armArmorW, armArmorH, armArmorD, W, 'primary', 'arm_armor_l')
+  armArmorL.position.set(0, -(armArmorH / 2 + U * 0.5), 0)
   armArmorL.userData.attachToArm = 'L'
   group.add(armArmorL)
-  const armArmorR = taggedBox(U * armArmorW, U * armArmorH, U * armArmorD, W, 'primary', 'arm_armor_r')
-  armArmorR.position.set(0, -U * (armArmorH / 2 + 0.5), 0)
+  const armArmorR = taggedBox(armArmorW, armArmorH, armArmorD, W, 'primary', 'arm_armor_r')
+  armArmorR.position.set(0, -(armArmorH / 2 + U * 0.5), 0)
   armArmorR.userData.attachToArm = 'R'
   group.add(armArmorR)
 
   // Bottom trim
-  const trim = taggedBox(U * (chestW + 0.2), U * 1, U * (chestD + 0.2), W, 'accent', 'breastplate_rim')
-  trim.position.set(0, U * (lT + 0.2), U * 0.5)
+  const trim = taggedBox(chestW + U * 0.2, U * 1, chestD + U * 0.2, W, 'accent', 'breastplate_rim')
+  trim.position.set(0, legTop + U * 0.2, U * 0.5)
   group.add(trim)
 
-  // Horizontal plate lines across the chest (layered armor plates)
-  const plateSpacing = tH / 4
+  // Horizontal plate lines
+  const plateSpacing = torsoH / 4
   for (let i = 0; i < 3; i++) {
-    const plateLine = taggedFlatBox(U * (chestW - 0.4), U * 0.3, U * (chestD + 0.1), W, 'accent', `plate_line_${i}`)
-    plateLine.position.set(0, U * (tT - 1 - i * plateSpacing), U * 0.5)
+    const plateLine = taggedFlatBox(chestW - U * 0.4, U * 0.3, chestD + U * 0.1, W, 'accent', `plate_line_${i}`)
+    plateLine.position.set(0, torsoTop - U * 1 - i * plateSpacing, U * 0.5)
     group.add(plateLine)
   }
 
   return group
 }
 
-function buildBelt(U: number, layout: ReturnType<typeof getBodyLayout>): THREE.Group {
+function buildBelt(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   const group = new THREE.Group()
-  const beltY = layout.legTop // Belt sits at waist (bottom of torso / top of legs)
-  const beltYpx = beltY / U
-  const tW = layout.torsoW / U
-  const tD = layout.torsoD / U
+  const { U, legTop, torsoW, torsoD } = layout
 
-  // Waist band — wider and thicker than body so it wraps AROUND the torso
-  const bandW = tW + 3.4  // protrude past torso edges
-  const bandD = tD + 3    // protrude front/back
-  const band = taggedBox(U * bandW, U * 3.2, U * bandD, W, 'primary', 'belt_band')
-  band.position.y = U * beltYpx
+  // Waist band — wider and thicker than body
+  const bandW = torsoW + U * 3.4
+  const bandD = torsoD + U * 3
+  const band = taggedBox(bandW, U * 3.2, bandD, W, 'primary', 'belt_band')
+  band.position.y = legTop
   group.add(band)
 
   // Side wrap pieces
-  const wrapL = taggedBox(U * 1.0, U * 3.2, U * (bandD - 1), W, 'primary', 'belt_wrap_l')
-  wrapL.position.set(-U * (bandW / 2 + 0.2), U * beltYpx, 0)
+  const wrapL = taggedBox(U * 1.0, U * 3.2, bandD - U * 1, W, 'primary', 'belt_wrap_l')
+  wrapL.position.set(-(bandW / 2 + U * 0.2), legTop, 0)
   group.add(wrapL)
-  const wrapR = taggedBox(U * 1.0, U * 3.2, U * (bandD - 1), W, 'primary', 'belt_wrap_r')
-  wrapR.position.set(U * (bandW / 2 + 0.2), U * beltYpx, 0)
+  const wrapR = taggedBox(U * 1.0, U * 3.2, bandD - U * 1, W, 'primary', 'belt_wrap_r')
+  wrapR.position.set(bandW / 2 + U * 0.2, legTop, 0)
   group.add(wrapR)
 
   // Buckle — gold square, protruding forward
   const buckle = taggedFlatBox(U * 3.2, U * 3.0, U * 1.2, 0xC8A84E, 'accent', 'belt_buckle')
-  buckle.position.set(0, U * beltYpx, U * (bandD / 2 + 0.3))
+  buckle.position.set(0, legTop, bandD / 2 + U * 0.3)
   group.add(buckle)
 
-  // Buckle inner detail — dark inset
+  // Buckle inner detail
   const inner = taggedFlatBox(U * 1.6, U * 1.4, U * 0.3, 0x111111, 'detail', 'belt_inner')
-  inner.position.set(0, U * beltYpx, U * (bandD / 2 + 1))
+  inner.position.set(0, legTop, bandD / 2 + U * 1)
   group.add(inner)
 
   // Buckle prong
   const prong = taggedFlatBox(U * 0.3, U * 2.0, U * 0.3, 0xC8A84E, 'accent', 'belt_prong')
-  prong.position.set(U * 0.4, U * beltYpx, U * (bandD / 2 + 1))
+  prong.position.set(U * 0.4, legTop, bandD / 2 + U * 1)
   group.add(prong)
 
   // Rivets along the belt
-  const rivetSpacing = (bandW - 2) / 6
+  const rivetSpacing = (bandW - U * 2) / 6
   for (let i = -3; i <= 3; i++) {
-    if (i === 0) continue // Skip center (buckle is there)
+    if (i === 0) continue
     const rivet = taggedFlatBox(U * 0.5, U * 0.5, U * 0.5, W, 'accent', `belt_rivet_${i}`)
-    rivet.position.set(i * U * rivetSpacing, U * beltYpx, U * (bandD / 2 + 0.1))
+    rivet.position.set(i * rivetSpacing, legTop, bandD / 2 + U * 0.1)
     group.add(rivet)
   }
 
   return group
 }
 
-function buildShoes(U: number, layout: ReturnType<typeof getBodyLayout>): THREE.Group {
+function buildShoes(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   const group = new THREE.Group()
-  const lW = layout.p.legPxW
-  const lD = layout.p.legPxD
-  const lH = layout.p.legPxH
-  const legX = lW / 2 + 0.15 // match leg X offset from buildCharacter
+  const { U, legW, legD, legH } = layout
+  const legX = legW / 2 + U * 0.15
 
-  // Boot shaft — covers lower ~45% of each leg (proportional to longer legs)
-  const bootShaftH = lH * 0.45
-  const bootW = lW + 2.2   // wider than leg for armor look
-  const bootD = lD + 2.2
-  const bootL = taggedBox(U * bootW, U * bootShaftH, U * bootD, W, 'primary', 'boot_l')
-  bootL.position.set(-U * legX, U * (bootShaftH / 2), 0)
+  // Boot shaft — covers lower ~45% of each leg (armor boots are taller than base boots)
+  const bootShaftH = legH * 0.45
+  const bootW = legW + U * 2.2
+  const bootD = legD + U * 2.2
+  const bootL = taggedBox(bootW, bootShaftH, bootD, W, 'primary', 'boot_l')
+  bootL.position.set(-legX, bootShaftH / 2, 0)
   group.add(bootL)
-  const bootR = taggedBox(U * bootW, U * bootShaftH, U * bootD, W, 'primary', 'boot_r')
-  bootR.position.set(U * legX, U * (bootShaftH / 2), 0)
+  const bootR = taggedBox(bootW, bootShaftH, bootD, W, 'primary', 'boot_r')
+  bootR.position.set(legX, bootShaftH / 2, 0)
   group.add(bootR)
 
-  // Boot soles — wider than boot for a shoe shape
-  const soleL = taggedBox(U * (bootW + 0.4), U * 1.2, U * (bootD + 1.2), W, 'accent', 'boot_sole_l')
-  soleL.position.set(-U * legX, U * 0.2, U * 0.5)
+  // Boot soles
+  const soleL = taggedBox(bootW + U * 0.4, U * 1.2, bootD + U * 1.2, W, 'accent', 'boot_sole_l')
+  soleL.position.set(-legX, U * 0.2, U * 0.5)
   group.add(soleL)
-  const soleR = taggedBox(U * (bootW + 0.4), U * 1.2, U * (bootD + 1.2), W, 'accent', 'boot_sole_r')
-  soleR.position.set(U * legX, U * 0.2, U * 0.5)
+  const soleR = taggedBox(bootW + U * 0.4, U * 1.2, bootD + U * 1.2, W, 'accent', 'boot_sole_r')
+  soleR.position.set(legX, U * 0.2, U * 0.5)
   group.add(soleR)
 
   // Top cuff band
-  const cuffL = taggedFlatBox(U * (bootW + 0.4), U * 1.0, U * (bootD + 0.4), W, 'accent', 'boot_cuff_l')
-  cuffL.position.set(-U * legX, U * (bootShaftH + 0.2), 0)
+  const cuffL = taggedFlatBox(bootW + U * 0.4, U * 1.0, bootD + U * 0.4, W, 'accent', 'boot_cuff_l')
+  cuffL.position.set(-legX, bootShaftH + U * 0.2, 0)
   group.add(cuffL)
-  const cuffR = taggedFlatBox(U * (bootW + 0.4), U * 1.0, U * (bootD + 0.4), W, 'accent', 'boot_cuff_r')
-  cuffR.position.set(U * legX, U * (bootShaftH + 0.2), 0)
+  const cuffR = taggedFlatBox(bootW + U * 0.4, U * 1.0, bootD + U * 0.4, W, 'accent', 'boot_cuff_r')
+  cuffR.position.set(legX, bootShaftH + U * 0.2, 0)
   group.add(cuffR)
 
-  // Knee guards — raised plates on front of each boot
-  const kneeY = bootShaftH - 1.5
-  const kneeL = taggedFlatBox(U * (lW - 0.2), U * 2.4, U * 1.2, W, 'accent', 'knee_l')
-  kneeL.position.set(-U * legX, U * kneeY, U * (bootD / 2 + 0.3))
+  // Knee guards
+  const kneeY = bootShaftH - U * 1.5
+  const kneeL = taggedFlatBox(legW - U * 0.2, U * 2.4, U * 1.2, W, 'accent', 'knee_l')
+  kneeL.position.set(-legX, kneeY, bootD / 2 + U * 0.3)
   group.add(kneeL)
-  const kneeR = taggedFlatBox(U * (lW - 0.2), U * 2.4, U * 1.2, W, 'accent', 'knee_r')
-  kneeR.position.set(U * legX, U * kneeY, U * (bootD / 2 + 0.3))
+  const kneeR = taggedFlatBox(legW - U * 0.2, U * 2.4, U * 1.2, W, 'accent', 'knee_r')
+  kneeR.position.set(legX, kneeY, bootD / 2 + U * 0.3)
   group.add(kneeR)
 
   return group
 }
 
-function buildShield(U: number, layout: ReturnType<typeof getBodyLayout>): THREE.Group {
-  // Shield positions are relative to the LEFT ARM's local space.
-  // Arm pivots at shoulder (local Y=0), hand at Y=-armPxH*U.
+function buildShield(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   const group = new THREE.Group()
   group.userData.attachToArm = 'L'
-  const aH = layout.p.armPxH
-  const armMid = aH / 2 // arm center in px
+  const { U, armH } = layout
+  const armMid = armH / 2
 
-  // Angle the shield ~15° on Y so it's not perfectly flat to camera
+  // Angle the shield
   group.rotation.y = THREE.MathUtils.degToRad(15)
 
-  // Shield offset: outside the arm (negative X = away from body on left side)
-  const shX = -U * 4  // Adjusted for thinner arm
-  const shZ = U * 1.5 // Forward — shield presents to the front
+  // Shield offset: outside the arm
+  const shX = -U * 4
+  const shZ = U * 1.5
 
-  // Shield is tall relative to arm
-  const shieldH = aH * 0.9
-  const shieldW = 8
+  const shieldH = armH * 0.9
+  const shieldW = U * 8
 
   // Main shield body
-  const body = taggedBox(U * 1.6, U * shieldH, U * shieldW, W, 'primary', 'shield_body')
-  body.position.set(shX, -U * (armMid + 1), shZ)
+  const body = taggedBox(U * 1.6, shieldH, shieldW, W, 'primary', 'shield_body')
+  body.position.set(shX, -(armMid + U * 1), shZ)
   group.add(body)
 
   // Bevel layers
-  const bevel1 = taggedFlatBox(U * 0.3, U * (shieldH - 1.2), U * (shieldW - 1), W, 'primary', 'shield_bevel1')
-  bevel1.position.set(shX - U * 0.95, -U * (armMid + 1), shZ)
+  const bevel1 = taggedFlatBox(U * 0.3, shieldH - U * 1.2, shieldW - U * 1, W, 'primary', 'shield_bevel1')
+  bevel1.position.set(shX - U * 0.95, -(armMid + U * 1), shZ)
   group.add(bevel1)
-  const bevel2 = taggedFlatBox(U * 0.2, U * (shieldH - 2.4), U * (shieldW - 2.2), W, 'primary', 'shield_bevel2')
-  bevel2.position.set(shX - U * 1.05, -U * (armMid + 1), shZ)
+  const bevel2 = taggedFlatBox(U * 0.2, shieldH - U * 2.4, shieldW - U * 2.2, W, 'primary', 'shield_bevel2')
+  bevel2.position.set(shX - U * 1.05, -(armMid + U * 1), shZ)
   group.add(bevel2)
 
   // Front face panel
-  const face = taggedFlatBox(U * 0.3, U * (shieldH - 0.8), U * (shieldW - 0.8), W, 'accent', 'shield_face')
-  face.position.set(shX - U * 0.9, -U * (armMid + 1), shZ)
+  const face = taggedFlatBox(U * 0.3, shieldH - U * 0.8, shieldW - U * 0.8, W, 'accent', 'shield_face')
+  face.position.set(shX - U * 0.9, -(armMid + U * 1), shZ)
   group.add(face)
 
   // Emblem placeholder
   group.userData.emblemX = shX - U * 1.1
-  group.userData.emblemY = -U * (armMid + 1)
+  group.userData.emblemY = -(armMid + U * 1)
   group.userData.emblemZ = shZ
 
   // Cross emblem
-  const crossV = taggedFlatBox(U * 0.2, U * (shieldH * 0.55), U * 1.0, W, 'detail', 'shield_cross_v')
-  crossV.position.set(shX - U * 1.05, -U * (armMid + 1), shZ)
+  const crossV = taggedFlatBox(U * 0.2, shieldH * 0.55, U * 1.0, W, 'detail', 'shield_cross_v')
+  crossV.position.set(shX - U * 1.05, -(armMid + U * 1), shZ)
   group.add(crossV)
   const crossH = taggedFlatBox(U * 0.2, U * 1.0, U * 4.0, W, 'detail', 'shield_cross_h')
-  crossH.position.set(shX - U * 1.05, -U * armMid, shZ)
+  crossH.position.set(shX - U * 1.05, -armMid, shZ)
   group.add(crossH)
 
-  // Border frame — 4 rim boxes
-  const rimTop = taggedBox(U * 1.8, U * 0.6, U * (shieldW + 0.4), W, 'accent', 'shield_rim_top')
-  rimTop.position.set(shX, -U * (armMid + 1 - shieldH / 2 + 0.3), shZ)
+  // Border frame
+  const rimTop = taggedBox(U * 1.8, U * 0.6, shieldW + U * 0.4, W, 'accent', 'shield_rim_top')
+  rimTop.position.set(shX, -(armMid + U * 1 - shieldH / 2 + U * 0.3), shZ)
   group.add(rimTop)
-  const rimBot = taggedBox(U * 1.8, U * 0.6, U * (shieldW + 0.4), W, 'accent', 'shield_rim_bot')
-  rimBot.position.set(shX, -U * (armMid + 1 + shieldH / 2 - 0.3), shZ)
+  const rimBot = taggedBox(U * 1.8, U * 0.6, shieldW + U * 0.4, W, 'accent', 'shield_rim_bot')
+  rimBot.position.set(shX, -(armMid + U * 1 + shieldH / 2 - U * 0.3), shZ)
   group.add(rimBot)
-  const rimL = taggedBox(U * 1.8, U * shieldH, U * 0.6, W, 'accent', 'shield_rim_l')
-  rimL.position.set(shX, -U * (armMid + 1), shZ + U * (shieldW / 2 + 0.1))
+  const rimL = taggedBox(U * 1.8, shieldH, U * 0.6, W, 'accent', 'shield_rim_l')
+  rimL.position.set(shX, -(armMid + U * 1), shZ + shieldW / 2 + U * 0.1)
   group.add(rimL)
-  const rimR = taggedBox(U * 1.8, U * shieldH, U * 0.6, W, 'accent', 'shield_rim_r')
-  rimR.position.set(shX, -U * (armMid + 1), shZ - U * (shieldW / 2 + 0.1))
+  const rimR = taggedBox(U * 1.8, shieldH, U * 0.6, W, 'accent', 'shield_rim_r')
+  rimR.position.set(shX, -(armMid + U * 1), shZ - shieldW / 2 - U * 0.1)
   group.add(rimR)
 
   // Center boss
   const boss = taggedFlatBox(U * 0.5, U * 2.4, U * 2.4, W, 'accent', 'shield_boss')
   boss.userData.isAccent = true
-  boss.position.set(shX - U * 1.2, -U * (armMid + 1), shZ)
+  boss.position.set(shX - U * 1.2, -(armMid + U * 1), shZ)
   group.add(boss)
 
   // Vertical grain lines
   for (let i = -2; i <= 2; i++) {
-    const grain = taggedFlatBox(U * 0.15, U * (shieldH - 1.6), U * 0.15, W, 'detail', `shield_grain_${i}`)
-    grain.position.set(shX - U * 1.0, -U * (armMid + 1), shZ + i * U * 1.5)
+    const grain = taggedFlatBox(U * 0.15, shieldH - U * 1.6, U * 0.15, W, 'detail', `shield_grain_${i}`)
+    grain.position.set(shX - U * 1.0, -(armMid + U * 1), shZ + i * U * 1.5)
     group.add(grain)
   }
 
   return group
 }
 
-function buildSword(U: number, layout: ReturnType<typeof getBodyLayout>): THREE.Group {
-  // Sword positions are relative to the RIGHT ARM's local space.
-  // Arm pivots at shoulder (local Y=0), hand at Y=-armPxH*U.
+function buildSword(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   const group = new THREE.Group()
   group.userData.attachToArm = 'R'
-  const aH = layout.p.armPxH
-  const handY = aH - 1 // 1px above bottom of arm
+  const { U, armH } = layout
+  const handY = armH - U * 1
 
-  // Sword offset: outside the arm (positive X = away from body center)
-  const sX = U * 3.5 // Adjusted for thinner arm
+  // Sword offset
+  const sX = U * 3.5
 
-  // Handle/grip — dark brown leather, at hand position
+  // Handle/grip
   const grip = box(U * 1.2, U * 4, U * 1.5, 0x5D4037)
   grip.userData.materialRole = 'detail'
   grip.name = 'sword_grip'
-  grip.position.set(sX, -U * handY, U * 1)
+  grip.position.set(sX, -handY, U * 1)
   group.add(grip)
 
   // Crossguard
-  const guardY = handY - 2.5
+  const guardY = handY - U * 2.5
   const guard = taggedFlatBox(U * 1.2, U * 1.5, U * 6, W, 'accent', 'sword_crossguard')
   guard.userData.isAccent = true
-  guard.position.set(sX, -U * guardY, U * 1)
+  guard.position.set(sX, -guardY, U * 1)
   group.add(guard)
 
-  // Blade — two sections: wider base near hilt, narrower upper
+  // Blade — two sections
   const bladeBaseMat = new THREE.MeshLambertMaterial({
     color: 0x87ceeb,
     emissive: new THREE.Color(0x2196f3),
     emissiveIntensity: 0.35,
   })
-  const bladeBaseY = guardY - 5 // extends up from crossguard
+  const bladeBaseY = guardY - U * 5
   const bladeBase = new THREE.Mesh(
     new THREE.BoxGeometry(U * 1, U * 8, U * 2.4),
     bladeBaseMat,
   )
   bladeBase.name = 'sword_blade_base'
   bladeBase.userData.materialRole = 'sword_blade'
-  bladeBase.position.set(sX, -U * bladeBaseY, U * 1)
+  bladeBase.position.set(sX, -bladeBaseY, U * 1)
   group.add(bladeBase)
 
-  // Upper blade (narrower, toward tip)
-  const bladeUpperY = bladeBaseY - 8
+  const bladeUpperY = bladeBaseY - U * 8
   const bladeTipMat = new THREE.MeshLambertMaterial({
     color: 0x87ceeb,
     emissive: new THREE.Color(0x2196f3),
@@ -545,7 +524,7 @@ function buildSword(U: number, layout: ReturnType<typeof getBodyLayout>): THREE.
   )
   bladeUpper.name = 'sword_blade_upper'
   bladeUpper.userData.materialRole = 'sword_blade'
-  bladeUpper.position.set(sX, -U * bladeUpperY, U * 1)
+  bladeUpper.position.set(sX, -bladeUpperY, U * 1)
   group.add(bladeUpper)
 
   // Blade edge highlight
@@ -561,11 +540,11 @@ function buildSword(U: number, layout: ReturnType<typeof getBodyLayout>): THREE.
   )
   edge.name = 'sword_edge'
   edge.userData.materialRole = 'sword_blade'
-  edge.position.set(sX, -U * edgeCenterY, U * 2.1)
+  edge.position.set(sX, -edgeCenterY, U * 2.1)
   group.add(edge)
 
   // Blade tip
-  const tipY = bladeUpperY - 5
+  const tipY = bladeUpperY - U * 5
   const tipMat = new THREE.MeshLambertMaterial({
     color: 0xadd8e6,
     emissive: new THREE.Color(0x2196f3),
@@ -577,7 +556,7 @@ function buildSword(U: number, layout: ReturnType<typeof getBodyLayout>): THREE.
   )
   tip.name = 'sword_tip'
   tip.userData.materialRole = 'sword_blade'
-  tip.position.set(sX, -U * tipY, U * 1)
+  tip.position.set(sX, -tipY, U * 1)
   group.add(tip)
 
   // Enchantment glow
@@ -594,18 +573,18 @@ function buildSword(U: number, layout: ReturnType<typeof getBodyLayout>): THREE.
   )
   glow.name = 'sword_glow'
   glow.userData.materialRole = 'sword_blade'
-  glow.position.set(sX, -U * edgeCenterY, U * 1)
+  glow.position.set(sX, -edgeCenterY, U * 1)
   group.add(glow)
 
-  // Pommel — below grip
+  // Pommel
   const pommel = taggedFlatBox(U * 1.6, U * 1.2, U * 1.6, W, 'accent', 'sword_pommel')
   pommel.userData.isAccent = true
-  pommel.position.set(sX, -U * (handY + 2.5), U * 1)
+  pommel.position.set(sX, -(handY + U * 2.5), U * 1)
   group.add(pommel)
 
   // Point light for glow effect
   const glowLight = new THREE.PointLight(0x87ceeb, 0.8, 3)
-  glowLight.position.set(sX, -U * edgeCenterY, U * 2)
+  glowLight.position.set(sX, -edgeCenterY, U * 2)
   group.add(glowLight)
 
   return group
@@ -618,28 +597,27 @@ export function buildArmorPiece(
   ageGroup: 'older' | 'younger',
 ): THREE.Group {
   const layout = getBodyLayout(ageGroup)
-  const { U } = layout
 
   let group: THREE.Group
 
   switch (pieceId) {
     case 'helmet':
-      group = buildHelmet(U, layout.p.headPx)
+      group = buildHelmet(layout)
       break
     case 'breastplate':
-      group = buildBreastplate(U, layout)
+      group = buildBreastplate(layout)
       break
     case 'belt':
-      group = buildBelt(U, layout)
+      group = buildBelt(layout)
       break
     case 'shoes':
-      group = buildShoes(U, layout)
+      group = buildShoes(layout)
       break
     case 'shield':
-      group = buildShield(U, layout)
+      group = buildShield(layout)
       break
     case 'sword':
-      group = buildSword(U, layout)
+      group = buildSword(layout)
       break
   }
 
