@@ -37,7 +37,7 @@ import {
   shellyChatThreadsCollection,
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { ChatMessage, ChatThread } from '../../core/types'
+import type { ShellyChatMessage, ChatThread } from '../../core/types'
 import ChatMessageBubble from './ChatMessageBubble'
 import ChatThreadDrawer from './ChatThreadDrawer'
 
@@ -66,7 +66,7 @@ export default function ShellyChatPage() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(
     searchParams.get('thread'),
   )
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<ShellyChatMessage[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -114,9 +114,9 @@ export default function ShellyChatPage() {
       q,
       (snap) => {
         const items = snap.docs.map((d) => ({
-          ...(d.data() as Omit<ChatMessage, 'id'>),
+          ...(d.data() as Omit<ShellyChatMessage, 'id'>),
           id: d.id,
-        })) as ChatMessage[]
+        })) as ShellyChatMessage[]
         setMessages(items)
       },
       (err) => console.error('Messages listener error:', err),
@@ -146,7 +146,7 @@ export default function ShellyChatPage() {
 
   // ── Send to AI (shared logic) ──────────────────────────────────
   const sendToAI = useCallback(
-    async (currentMessages: ChatMessage[]) => {
+    async (currentMessages: ShellyChatMessage[]) => {
       if (!activeThreadId) return
       setSending(true)
       try {
