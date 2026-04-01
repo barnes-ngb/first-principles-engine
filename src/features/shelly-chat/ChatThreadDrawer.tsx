@@ -13,7 +13,7 @@ import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import type { ChatThread } from '../../core/types'
+import type { ChatThread, ChatContext } from '../../core/types'
 
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr)
@@ -38,6 +38,7 @@ interface ChatThreadDrawerProps {
   onClose: () => void
   threads: ChatThread[]
   activeThreadId: string | null
+  chatContext: ChatContext
   onSelectThread: (threadId: string) => void
   onNewThread: () => void
   onArchiveThread: (threadId: string) => void
@@ -49,6 +50,7 @@ export default function ChatThreadDrawer({
   onClose,
   threads,
   activeThreadId,
+  chatContext,
   onSelectThread,
   onNewThread,
   onArchiveThread,
@@ -113,7 +115,11 @@ export default function ChatThreadDrawer({
       }}
     >
       <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Typography variant="h6">Conversations</Typography>
+        <Typography variant="h6">
+          {chatContext === 'lincoln' ? "Lincoln's Conversations" :
+           chatContext === 'london' ? "London's Conversations" :
+           'General Conversations'}
+        </Typography>
         <Button
           startIcon={<AddIcon />}
           size="small"

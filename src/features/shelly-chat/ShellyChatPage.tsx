@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
-import AttachFileIcon from '@mui/icons-material/AttachFile'
+import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
+import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
 import CloseIcon from '@mui/icons-material/Close'
-import ForumIcon from '@mui/icons-material/Forum'
+import HistoryIcon from '@mui/icons-material/History'
 import ImageIcon from '@mui/icons-material/Image'
-import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
-import SearchIcon from '@mui/icons-material/Search'
 import SendIcon from '@mui/icons-material/Send'
+import VisibilityIcon from '@mui/icons-material/Visibility'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -16,18 +16,18 @@ import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
-import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import LinearProgress from '@mui/material/LinearProgress'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
+import Tab from '@mui/material/Tab'
+import Tabs from '@mui/material/Tabs'
 import TextField from '@mui/material/TextField'
-import ToggleButton from '@mui/material/ToggleButton'
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import {
   addDoc,
   doc,
+  getDocs,
   increment,
   limit,
   onSnapshot,
@@ -35,6 +35,7 @@ import {
   query,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
@@ -42,29 +43,45 @@ import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { compressIfNeeded } from '../../core/utils/compressImage'
 import {
+  db,
   shellyChatMessagesCollection,
   shellyChatThreadsCollection,
 } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { ShellyChatMessage, ChatThread } from '../../core/types'
+import type { ShellyChatMessage, ChatThread, ChatContext } from '../../core/types'
 import ChatMessageBubble from './ChatMessageBubble'
 import ChatThreadDrawer from './ChatThreadDrawer'
 
-const SUGGESTIONS = [
-  {
-    label: 'Sight word activity ideas',
-    message: 'What are some fun ways to practice sight words with Lincoln?',
+const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: string; suggestions: ReadonlyArray<{ label: string; message: string }> }> = {
+  lincoln: {
+    greeting: "Lincoln's Learning Space \u{1F3AE}",
+    subtitle: "Ask about Lincoln's reading progress, activity ideas, skill recommendations, or anything related to his learning.",
+    suggestions: [
+      { label: 'Reading progress check', message: "How is Lincoln doing with reading? What should we focus on this week based on his evaluations?" },
+      { label: 'Sight word activities', message: 'What are some fun, hands-on ways to practice sight words with Lincoln?' },
+      { label: 'What to work on next', message: "Based on Lincoln's skill snapshot and recent evaluations, what should be our priority this week?" },
+    ],
   },
-  {
-    label: 'Quick London activity',
-    message: 'I need a quick 10-minute activity for London while I work with Lincoln',
+  london: {
+    greeting: "London's Creative Corner \u{1F3A8}",
+    subtitle: "Ask about London's progress, story ideas, creative activities, or anything related to his learning.",
+    suggestions: [
+      { label: 'Story activity ideas', message: 'What are some creative story or drawing activities for London this week?' },
+      { label: 'Learning through art', message: "How can I tie London's love of drawing into our academic goals?" },
+      { label: 'Quick independent activity', message: 'I need a quick 10-minute activity for London while I work with Lincoln.' },
+    ],
   },
-  {
-    label: 'Reading progress check',
-    message: 'Help me understand where Lincoln is with reading and what to focus on',
+  general: {
+    greeting: "Hi Shelly \u{1F44B}",
+    subtitle: "Ask me anything \u2014 teaching ideas, curriculum questions, scheduling, or just vent about your day.",
+    suggestions: [
+      { label: 'Weekly planning help', message: "Help me think through this week's plan. What should I prioritize?" },
+      { label: 'Low energy day ideas', message: "I'm having a low energy day. What's the most important thing to cover with the boys?" },
+      { label: 'Curriculum question', message: 'I have a question about our curriculum approach.' },
+    ],
   },
-] as const
+}
 
 // ── Image refinement types ─────────────────────────────────────
 
@@ -75,10 +92,11 @@ interface RefinementQuestion {
 
 export default function ShellyChatPage() {
   const familyId = useFamilyId()
-  const { activeChild, activeChildId, setActiveChildId, children } = useActiveChild()
+  const { activeChildId, children } = useActiveChild()
   const { chat, generateImage } = useAI()
 
   const [searchParams, setSearchParams] = useSearchParams()
+  const [chatContext, setChatContext] = useState<ChatContext>('general')
   const [threads, setThreads] = useState<ChatThread[]>([])
   const [activeThreadId, setActiveThreadId] = useState<string | null>(
     searchParams.get('thread'),
@@ -94,7 +112,8 @@ export default function ShellyChatPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
-  const [pendingAttachment, setPendingAttachment] = useState<string | null>(null)
+  const [pendingAttachment, setPendingAttachment] = useState<{ url: string; previewUrl: string } | null>(null)
+  const [pendingReferenceImage, setPendingReferenceImage] = useState<{ url: string; previewUrl: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Image refinement state (Prompt 9) ──────────────────────────
@@ -113,11 +132,75 @@ export default function ShellyChatPage() {
 
   const activeThread = threads.find((t) => t.id === activeThreadId)
 
-  // ── Real-time thread list ──────────────────────────────────────
+  // ── Initialize context from URL param or active child ─────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const contextParam = params.get('context') as ChatContext | null
+
+    if (contextParam && ['lincoln', 'london', 'general'].includes(contextParam)) {
+      setChatContext(contextParam)
+    } else if (activeChildId) {
+      const child = children.find(c => c.id === activeChildId)
+      if (child) {
+        const name = child.name.toLowerCase()
+        if (name === 'lincoln' || name === 'london') {
+          setChatContext(name)
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only on mount
+
+  // ── Migrate old threads without chatContext ────────────────────
+  useEffect(() => {
+    const migrateOldThreads = async () => {
+      try {
+        const oldThreads = await getDocs(
+          query(shellyChatThreadsCollection(familyId), where('archived', '==', false))
+        )
+        const batch = writeBatch(db)
+        let needsMigration = false
+        for (const threadDoc of oldThreads.docs) {
+          if (!threadDoc.data().chatContext) {
+            batch.update(threadDoc.ref, { chatContext: 'general' })
+            needsMigration = true
+          }
+        }
+        if (needsMigration) {
+          await batch.commit()
+          console.log('[shellyChat] Migrated old threads to general context')
+        }
+      } catch (err) {
+        console.warn('[shellyChat] Thread migration error:', err)
+      }
+    }
+    migrateOldThreads()
+  }, [familyId])
+
+  // ── Context change handler ────────────────────────────────────
+  const handleContextChange = useCallback((_: unknown, val: ChatContext | null) => {
+    if (!val) return
+    setChatContext(val)
+    setActiveThreadId(null)
+    setMessages([])
+    setFollowUps([])
+    setSearchParams({})
+    autoSendTriggered.current = false
+  }, [setSearchParams])
+
+  // ── Map chatContext to childId for AI calls ───────────────────
+  const getChildIdForContext = useCallback((): string => {
+    if (chatContext === 'general') return ''
+    const child = children.find(c => c.name.toLowerCase() === chatContext)
+    return child?.id || ''
+  }, [chatContext, children])
+
+  // ── Real-time thread list (filtered by chatContext) ───────────
   useEffect(() => {
     const q = query(
       shellyChatThreadsCollection(familyId),
       where('archived', '==', false),
+      where('chatContext', '==', chatContext),
       orderBy('updatedAt', 'desc'),
       limit(20),
     )
@@ -133,7 +216,7 @@ export default function ShellyChatPage() {
       (err) => console.error('Thread list listener error:', err),
     )
     return unsub
-  }, [familyId])
+  }, [familyId, chatContext])
 
   // ── Real-time messages ─────────────────────────────────────────
   useEffect(() => {
@@ -215,7 +298,7 @@ export default function ShellyChatPage() {
         }))
         const response = await chat({
           familyId,
-          childId: activeChild?.id ?? '',
+          childId: getChildIdForContext(),
           taskType: TaskType.ShellyChat,
           messages: aiMessages,
         })
@@ -242,7 +325,7 @@ export default function ShellyChatPage() {
         setSending(false)
       }
     },
-    [activeThreadId, chat, familyId, activeChild?.id],
+    [activeThreadId, chat, familyId, getChildIdForContext],
   )
 
   // ── Send handler ───────────────────────────────────────────────
@@ -265,6 +348,7 @@ export default function ShellyChatPage() {
           updatedAt: new Date().toISOString(),
           messageCount: 0,
           lastMessagePreview: text.slice(0, 100),
+          chatContext,
           archived: false,
         })
         threadId = threadRef.id
@@ -279,8 +363,8 @@ export default function ShellyChatPage() {
         timestamp: new Date().toISOString(),
       }
       if (pendingAttachment) {
-        userMsgData.uploadedImageUrl = pendingAttachment
-        userMsgData.imageAction = 'context'
+        userMsgData.uploadedImageUrl = pendingAttachment.url
+        userMsgData.imageAction = 'attach'
       }
       await addDoc(shellyChatMessagesCollection(familyId, threadId), userMsgData)
       await updateDoc(
@@ -294,9 +378,12 @@ export default function ShellyChatPage() {
 
       // Get AI response — include image URL for vision if attached
       const aiContent = pendingAttachment
-        ? `[IMAGE_URL:${pendingAttachment}]\n${text}`
+        ? `[IMAGE_URL:${pendingAttachment.url}]\n${text}`
         : text
-      if (pendingAttachment) setPendingAttachment(null)
+      if (pendingAttachment) {
+        URL.revokeObjectURL(pendingAttachment.previewUrl)
+        setPendingAttachment(null)
+      }
 
       const currentMsgs = [...messages, { id: '', role: 'user' as const, content: aiContent, timestamp: new Date().toISOString() }]
       const aiMessages = currentMsgs.slice(-20).map((m) => ({
@@ -306,7 +393,7 @@ export default function ShellyChatPage() {
 
       const response = await chat({
         familyId,
-        childId: activeChild?.id ?? '',
+        childId: getChildIdForContext(),
         taskType: TaskType.ShellyChat,
         messages: aiMessages,
       })
@@ -333,7 +420,7 @@ export default function ShellyChatPage() {
     } finally {
       setSending(false)
     }
-  }, [input, sending, activeThreadId, familyId, messages, chat, activeChild?.id, setSearchParams, pendingAttachment])
+  }, [input, sending, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, pendingAttachment, chatContext])
 
   // ── Image generation (refactored for Prompt 9) ─────────────────
   const handleGenerateImageDirect = useCallback(async (prompt: string) => {
@@ -351,6 +438,7 @@ export default function ShellyChatPage() {
           updatedAt: new Date().toISOString(),
           messageCount: 0,
           lastMessagePreview: `🎨 ${prompt.slice(0, 90)}`,
+          chatContext,
           archived: false,
         })
         threadId = threadRef.id
@@ -402,7 +490,7 @@ export default function ShellyChatPage() {
     } finally {
       setGeneratingImage(false)
     }
-  }, [activeThreadId, familyId, generateImage, setSearchParams])
+  }, [activeThreadId, familyId, generateImage, setSearchParams, chatContext])
 
   // ── Image refinement flow (Prompt 9) ───────────────────────────
 
@@ -420,7 +508,11 @@ export default function ShellyChatPage() {
     setImageQuestions([])
     setImageAnswers({})
     setLoadingQuestions(false)
-  }, [])
+    if (pendingReferenceImage) {
+      URL.revokeObjectURL(pendingReferenceImage.previewUrl)
+      setPendingReferenceImage(null)
+    }
+  }, [pendingReferenceImage])
 
   const handleImageIdeaSubmit = useCallback(async () => {
     const idea = imageIdea.trim()
@@ -441,7 +533,7 @@ export default function ShellyChatPage() {
     try {
       const response = await chat({
         familyId,
-        childId: activeChild?.id ?? '',
+        childId: getChildIdForContext(),
         taskType: TaskType.ShellyChat,
         messages: [{
           role: 'user',
@@ -486,7 +578,7 @@ export default function ShellyChatPage() {
       handleImageFlowClose()
       handleGenerateImageDirect(idea)
     }
-  }, [imageIdea, chat, familyId, activeChild?.id, handleImageFlowClose, handleGenerateImageDirect])
+  }, [imageIdea, chat, familyId, getChildIdForContext, handleImageFlowClose, handleGenerateImageDirect])
 
   const handleImageRefinementGenerate = useCallback(async () => {
     setImageFlowStep('generating')
@@ -502,7 +594,7 @@ export default function ShellyChatPage() {
     try {
       const response = await chat({
         familyId,
-        childId: activeChild?.id ?? '',
+        childId: getChildIdForContext(),
         taskType: TaskType.ShellyChat,
         messages: [{
           role: 'user',
@@ -510,21 +602,95 @@ export default function ShellyChatPage() {
         }],
       })
 
-      handleImageFlowClose()
+      let refinedPrompt = response?.message?.trim() || imageIdea
 
-      const refinedPrompt = response?.message?.trim() || imageIdea
+      // If there's a reference image, have Claude describe it and fold that into the prompt
+      const refImage = pendingReferenceImage
+      if (refImage) {
+        try {
+          const descResult = await chat({
+            familyId,
+            childId: getChildIdForContext(),
+            taskType: TaskType.ShellyChat,
+            messages: [{
+              role: 'user',
+              content: `[IMAGE_URL:${refImage.url}]\nDescribe this image in detail for use as a DALL-E prompt reference. Focus on style, colors, composition, and subject matter. Respond with ONLY the description, 2-3 sentences.`,
+            }],
+          })
+          if (descResult?.message) {
+            refinedPrompt = `${refinedPrompt}. Reference style: ${descResult.message.trim()}`
+          }
+        } catch {
+          // Proceed without reference description
+        }
+      }
+
+      // Clean up reference image before generating
+      if (pendingReferenceImage) {
+        URL.revokeObjectURL(pendingReferenceImage.previewUrl)
+        setPendingReferenceImage(null)
+      }
+      setImageFlowOpen(false)
+      setImageIdea('')
+      setImageQuestions([])
+      setImageAnswers({})
+      setLoadingQuestions(false)
+
       await handleGenerateImageDirect(refinedPrompt)
     } catch {
-      handleImageFlowClose()
+      if (pendingReferenceImage) {
+        URL.revokeObjectURL(pendingReferenceImage.previewUrl)
+        setPendingReferenceImage(null)
+      }
+      setImageFlowOpen(false)
+      setImageIdea('')
+      setImageQuestions([])
+      setImageAnswers({})
+      setLoadingQuestions(false)
       await handleGenerateImageDirect(imageIdea)
     }
-  }, [imageAnswers, imageQuestions, imageIdea, chat, familyId, activeChild?.id, handleImageFlowClose, handleGenerateImageDirect])
+  }, [imageAnswers, imageQuestions, imageIdea, chat, familyId, getChildIdForContext, handleGenerateImageDirect, pendingReferenceImage])
 
-  const handleJustGenerate = useCallback(() => {
+  const handleJustGenerate = useCallback(async () => {
     const idea = imageIdea.trim()
-    handleImageFlowClose()
-    if (idea) handleGenerateImageDirect(idea)
-  }, [imageIdea, handleImageFlowClose, handleGenerateImageDirect])
+    if (!idea) return
+
+    let finalPrompt = idea
+
+    // If there's a reference image, have Claude describe it
+    const refImage = pendingReferenceImage
+    if (refImage) {
+      setImageFlowStep('generating')
+      try {
+        const descResult = await chat({
+          familyId,
+          childId: getChildIdForContext(),
+          taskType: TaskType.ShellyChat,
+          messages: [{
+            role: 'user',
+            content: `[IMAGE_URL:${refImage.url}]\nDescribe this image in detail for use as a DALL-E prompt reference. Focus on style, colors, composition, and subject matter. Respond with ONLY the description, 2-3 sentences.`,
+          }],
+        })
+        if (descResult?.message) {
+          finalPrompt = `${idea}. Reference style: ${descResult.message.trim()}`
+        }
+      } catch {
+        // Proceed without reference description
+      }
+    }
+
+    if (pendingReferenceImage) {
+      URL.revokeObjectURL(pendingReferenceImage.previewUrl)
+      setPendingReferenceImage(null)
+    }
+    setImageFlowOpen(false)
+    setImageIdea('')
+    setImageQuestions([])
+    setImageAnswers({})
+    setLoadingQuestions(false)
+
+    await handleGenerateImageDirect(finalPrompt)
+  }, [imageIdea, handleGenerateImageDirect, pendingReferenceImage, chat, familyId, getChildIdForContext])
 
   // ── Image upload handlers (Prompt 8) ───────────────────────────
 
@@ -547,7 +713,7 @@ export default function ShellyChatPage() {
   }, [uploadPreview])
 
   const handleUploadContext = useCallback(async () => {
-    if (!uploadFile) return
+    if (!uploadFile || !uploadPreview) return
 
     setUploadDialogOpen(false)
     setUploading(true)
@@ -564,6 +730,7 @@ export default function ShellyChatPage() {
           updatedAt: new Date().toISOString(),
           messageCount: 0,
           lastMessagePreview: '',
+          chatContext,
           archived: false,
         })
         threadId = threadRef.id
@@ -577,36 +744,37 @@ export default function ShellyChatPage() {
       await uploadBytes(storageRef, compressed)
       const downloadUrl = await getDownloadURL(storageRef)
 
-      setPendingAttachment(downloadUrl)
+      // Keep the preview URL alive for the attachment strip
+      setPendingAttachment({ url: downloadUrl, previewUrl: uploadPreview })
     } catch (err) {
       console.error('Failed to upload image for attachment:', err)
-    } finally {
       if (uploadPreview) URL.revokeObjectURL(uploadPreview)
+    } finally {
       setUploadFile(null)
       setUploadPreview(null)
       setUploading(false)
     }
   }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams])
 
-  const handleUploadAction = useCallback(async (action: 'analyze' | 'transform') => {
+  const handleUploadAnalyze = useCallback(async () => {
     if (!uploadFile) return
 
     setUploadDialogOpen(false)
     setUploading(true)
 
     try {
-      // Compress if needed (> 2MB → max 1600px)
       const compressed = await compressIfNeeded(uploadFile, 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
 
       let threadId = activeThreadId
 
       if (!threadId) {
         const threadRef = await addDoc(shellyChatThreadsCollection(familyId), {
-          title: action === 'analyze' ? '📷 Image analysis' : '🎨 Image transform',
+          title: '📷 Image analysis',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           messageCount: 0,
-          lastMessagePreview: action === 'analyze' ? '📷 Asking about image...' : '🎨 Using as inspiration...',
+          lastMessagePreview: '📷 Analyzing image...',
+          chatContext,
           archived: false,
         })
         threadId = threadRef.id
@@ -614,24 +782,20 @@ export default function ShellyChatPage() {
         setSearchParams({ thread: threadId })
       }
 
-      // Upload to Firebase Storage
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
       const storagePath = `families/${familyId}/chat-uploads/${threadId}/${timestamp}.jpg`
       const storageRef = ref(storage, storagePath)
       await uploadBytes(storageRef, compressed)
       const downloadUrl = await getDownloadURL(storageRef)
 
-      const content = action === 'analyze'
-        ? 'Can you tell me about this image?'
-        : 'Use this as inspiration to create something'
+      const content = 'What can you tell me about this image?'
 
-      // Add user message with uploaded image
       await addDoc(shellyChatMessagesCollection(familyId, threadId), {
         role: 'user',
         content,
         timestamp: new Date().toISOString(),
         uploadedImageUrl: downloadUrl,
-        imageAction: action,
+        imageAction: 'analyze',
       })
       await updateDoc(
         doc(shellyChatThreadsCollection(familyId), threadId),
@@ -642,34 +806,22 @@ export default function ShellyChatPage() {
         },
       )
 
-      // Get AI response
       setSending(true)
       setUploading(false)
 
-      const msgContent = action === 'analyze'
-        ? `[IMAGE_URL:${downloadUrl}]\n${content}`
-        : content
-
       const currentMsgs = [...messages, {
-        id: '', role: 'user' as const, content: msgContent, timestamp: new Date().toISOString(),
+        id: '', role: 'user' as const, content: `[IMAGE_URL:${downloadUrl}]\n${content}`, timestamp: new Date().toISOString(),
       }]
       const aiMessages = currentMsgs.slice(-20).map((m) => ({
         role: m.role as 'user' | 'assistant',
         content: m.content,
       }))
 
-      let systemSuffix = ''
-      if (action === 'transform') {
-        systemSuffix = `\n\nThe user has uploaded an image (URL: ${downloadUrl}). They want to use it as inspiration to create something new. Ask them what they'd like you to create from it. Suggest ideas like: "Turn this into a Minecraft-style scene" or "Make this into a sticker" or "Create a cartoon version of this".`
-      }
-
       const response = await chat({
         familyId,
-        childId: activeChild?.id ?? '',
+        childId: getChildIdForContext(),
         taskType: TaskType.ShellyChat,
-        messages: action === 'transform'
-          ? [{ role: 'user', content: `${content}${systemSuffix}` }]
-          : aiMessages,
+        messages: aiMessages,
       })
 
       if (response?.message) {
@@ -690,7 +842,7 @@ export default function ShellyChatPage() {
         )
       }
     } catch (err) {
-      console.error('Failed to upload image:', err)
+      console.error('Failed to analyze image:', err)
     } finally {
       if (uploadPreview) URL.revokeObjectURL(uploadPreview)
       setUploadFile(null)
@@ -698,7 +850,56 @@ export default function ShellyChatPage() {
       setUploading(false)
       setSending(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, activeChild?.id, setSearchParams])
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams])
+
+  const handleUploadGenerate = useCallback(async () => {
+    if (!uploadFile || !uploadPreview) return
+
+    setUploadDialogOpen(false)
+    setUploading(true)
+
+    try {
+      const compressed = await compressIfNeeded(uploadFile, 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
+
+      let threadId = activeThreadId
+
+      if (!threadId) {
+        const threadRef = await addDoc(shellyChatThreadsCollection(familyId), {
+          title: '🎨 Image creation',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messageCount: 0,
+          lastMessagePreview: '🎨 Using as reference...',
+          chatContext,
+          archived: false,
+        })
+        threadId = threadRef.id
+        setActiveThreadId(threadId)
+        setSearchParams({ thread: threadId })
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const storagePath = `families/${familyId}/chat-uploads/${threadId}/${timestamp}.jpg`
+      const storageRef = ref(storage, storagePath)
+      await uploadBytes(storageRef, compressed)
+      const downloadUrl = await getDownloadURL(storageRef)
+
+      // Store as reference image and open the refinement flow
+      setPendingReferenceImage({ url: downloadUrl, previewUrl: uploadPreview })
+      setImageFlowOpen(true)
+      setImageFlowStep('idea')
+      setImageIdea('')
+      setImageQuestions([])
+      setImageAnswers({})
+    } catch (err) {
+      console.error('Failed to upload reference image:', err)
+      if (uploadPreview) URL.revokeObjectURL(uploadPreview)
+    } finally {
+      setUploadFile(null)
+      setUploadPreview(null)
+      setUploading(false)
+    }
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams])
 
   // ── New thread ─────────────────────────────────────────────────
   const handleNewThread = useCallback(() => {
@@ -771,41 +972,38 @@ export default function ShellyChatPage() {
 
   return (
     <Box data-page="chat" sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, flex: 1 }}>
-      {/* Slim inline toolbar (replaces AppBar — Prompt 7) */}
+      {/* Slim toolbar row */}
       <Box sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
         <IconButton size="small" onClick={() => setDrawerOpen(true)} aria-label="Conversations">
-          <ForumIcon />
+          <HistoryIcon />
         </IconButton>
         <Typography
           variant="body2"
           color="text.secondary"
-          sx={{ flex: 1, ml: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          noWrap
+          sx={{ flex: 1, ml: 1 }}
         >
           {activeThread?.title || 'New conversation'}
         </Typography>
-        {children.length > 0 && (
-          <ToggleButtonGroup
-            size="small"
-            exclusive
-            value={activeChildId}
-            onChange={(_, val) => { if (val) setActiveChildId(val) }}
-            sx={{ mx: 1 }}
-          >
-            {children.map((child) => (
-              <ToggleButton
-                key={child.id}
-                value={child.id}
-                sx={{ py: 0.25, px: 1, textTransform: 'none', fontSize: '0.75rem' }}
-              >
-                {child.name}
-              </ToggleButton>
-            ))}
-          </ToggleButtonGroup>
-        )}
         <Button size="small" startIcon={<AddIcon />} onClick={handleNewThread}>
           New
         </Button>
       </Box>
+
+      {/* Context tabs */}
+      <Tabs
+        value={chatContext}
+        onChange={handleContextChange}
+        variant="fullWidth"
+        sx={{
+          minHeight: 36,
+          '& .MuiTab-root': { minHeight: 36, py: 0.5, textTransform: 'none', fontSize: '0.875rem' },
+        }}
+      >
+        <Tab value="lincoln" label="Lincoln" />
+        <Tab value="london" label="London" />
+        <Tab value="general" label="General" />
+      </Tabs>
 
       {/* Thread drawer */}
       <ChatThreadDrawer
@@ -813,6 +1011,7 @@ export default function ShellyChatPage() {
         onClose={() => setDrawerOpen(false)}
         threads={threads}
         activeThreadId={activeThreadId}
+        chatContext={chatContext}
         onSelectThread={handleSelectThread}
         onNewThread={handleNewThread}
         onArchiveThread={handleArchiveThread}
@@ -833,12 +1032,12 @@ export default function ShellyChatPage() {
               gap: 2,
             }}
           >
-            <Typography variant="h5">Hi Shelly 👋</Typography>
+            <Typography variant="h5">{SUGGESTIONS_BY_CONTEXT[chatContext].greeting}</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 320 }}>
-              Ask me anything about teaching, activities, curriculum ideas, or just chat.
+              {SUGGESTIONS_BY_CONTEXT[chatContext].subtitle}
             </Typography>
             <Stack spacing={1} sx={{ mt: 1, width: '100%', maxWidth: 360 }}>
-              {SUGGESTIONS.map((s) => (
+              {SUGGESTIONS_BY_CONTEXT[chatContext].suggestions.map((s) => (
                 <Button
                   key={s.label}
                   variant="outlined"
@@ -900,6 +1099,20 @@ export default function ShellyChatPage() {
               <CloseIcon fontSize="small" />
             </IconButton>
           </Box>
+
+          {pendingReferenceImage && (
+            <Box sx={{ textAlign: 'center', mb: 1.5 }}>
+              <Box
+                component="img"
+                src={pendingReferenceImage.previewUrl}
+                alt="Reference"
+                sx={{ maxHeight: 120, borderRadius: 2, objectFit: 'contain' }}
+              />
+              <Typography variant="caption" display="block" color="text.secondary">
+                Using as reference
+              </Typography>
+            </Box>
+          )}
 
           {imageFlowStep === 'idea' && (
             <Box>
@@ -1027,25 +1240,27 @@ export default function ShellyChatPage() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, px: 0.5 }}>
             <Box
               component="img"
-              src={pendingAttachment}
+              src={pendingAttachment.previewUrl}
               alt="Attached"
               sx={{ width: 36, height: 36, borderRadius: 1, objectFit: 'cover' }}
             />
             <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
-              Image attached
+              Image attached — type your question
             </Typography>
-            <IconButton size="small" onClick={() => setPendingAttachment(null)} aria-label="Remove attachment">
+            <IconButton size="small" onClick={() => {
+              URL.revokeObjectURL(pendingAttachment.previewUrl)
+              setPendingAttachment(null)
+            }} aria-label="Remove attachment">
               <CloseIcon fontSize="small" />
             </IconButton>
           </Box>
         )}
         <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 0.5 }}>
-          {/* Hidden file input for image upload */}
+          {/* Hidden file input for image upload (no capture attr — shows camera + gallery picker) */}
           <input
             ref={fileInputRef}
             type="file"
             accept="image/*"
-            capture="environment"
             onChange={handleFileSelect}
             style={{ display: 'none' }}
           />
@@ -1055,7 +1270,7 @@ export default function ShellyChatPage() {
             size="small"
             aria-label="Upload image"
           >
-            <PhotoCameraIcon />
+            <AddPhotoAlternateIcon />
           </IconButton>
           <IconButton
             onClick={handleImageFlowOpen}
@@ -1089,52 +1304,67 @@ export default function ShellyChatPage() {
         </Box>
       </Paper>
 
-      {/* Image upload action dialog (Prompt 8) */}
+      {/* Image upload action dialog */}
       <Dialog
         open={uploadDialogOpen}
         onClose={handleUploadCancel}
         fullWidth
         maxWidth="xs"
       >
-        <DialogTitle>What should I do with this?</DialogTitle>
-        <DialogContent>
+        <DialogContent sx={{ pt: 3 }}>
           {uploadPreview && (
-            <Box sx={{ textAlign: 'center', mb: 2 }}>
+            <Box sx={{ textAlign: 'center', mb: 2.5 }}>
               <Box
                 component="img"
                 src={uploadPreview}
-                alt="Upload preview"
-                sx={{ maxHeight: 150, borderRadius: 1 }}
+                alt="Selected"
+                sx={{ maxHeight: 180, maxWidth: '100%', borderRadius: 2, objectFit: 'contain' }}
               />
             </Box>
           )}
-          <Stack spacing={1}>
+          <Typography variant="subtitle2" gutterBottom>What would you like to do?</Typography>
+          <Stack spacing={1.5}>
             <Button
-              variant="outlined"
               fullWidth
-              startIcon={<SearchIcon />}
-              onClick={() => handleUploadAction('analyze')}
-              sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+              variant="outlined"
+              startIcon={<VisibilityIcon />}
+              onClick={handleUploadAnalyze}
+              sx={{ justifyContent: 'flex-start', textTransform: 'none', py: 1.5 }}
             >
-              Ask about this image
+              <Box sx={{ textAlign: 'left' }}>
+                <Typography variant="body2" fontWeight="medium">Analyze this image</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Ask questions about what's in the image
+                </Typography>
+              </Box>
             </Button>
             <Button
-              variant="outlined"
               fullWidth
+              variant="outlined"
               startIcon={<AutoFixHighIcon />}
-              onClick={() => handleUploadAction('transform')}
-              sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+              onClick={handleUploadGenerate}
+              sx={{ justifyContent: 'flex-start', textTransform: 'none', py: 1.5 }}
             >
-              Create something from this
+              <Box sx={{ textAlign: 'left' }}>
+                <Typography variant="body2" fontWeight="medium">Use as reference for image creation</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Generate a new image inspired by this one
+                </Typography>
+              </Box>
             </Button>
             <Button
-              variant="outlined"
               fullWidth
-              startIcon={<AttachFileIcon />}
+              variant="outlined"
+              startIcon={<ChatBubbleOutlineIcon />}
               onClick={handleUploadContext}
-              sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+              sx={{ justifyContent: 'flex-start', textTransform: 'none', py: 1.5 }}
             >
-              Attach to my next message
+              <Box sx={{ textAlign: 'left' }}>
+                <Typography variant="body2" fontWeight="medium">Attach to my message</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Send with a question like "what should Lincoln work on next?"
+                </Typography>
+              </Box>
             </Button>
           </Stack>
         </DialogContent>

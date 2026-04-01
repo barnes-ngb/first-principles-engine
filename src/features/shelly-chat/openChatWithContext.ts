@@ -1,14 +1,15 @@
 import { addDoc } from 'firebase/firestore'
 import { shellyChatThreadsCollection, shellyChatMessagesCollection } from '../../core/firebase/firestore'
+import type { ChatContext } from '../../core/types'
 
 export const openChatWithContext = async (
   familyId: string,
   navigate: (path: string) => void,
   context: {
     source: 'sparkle' | 'planner' | 'evaluation' | 'general'
+    chatContext: ChatContext
     itemTitle?: string
     weekTheme?: string
-    childId?: string
     initialMessage: string
   },
 ) => {
@@ -19,11 +20,11 @@ export const openChatWithContext = async (
     updatedAt: new Date().toISOString(),
     messageCount: 1,
     lastMessagePreview: context.initialMessage.slice(0, 100),
+    chatContext: context.chatContext,
     context: {
       source: context.source,
       itemTitle: context.itemTitle,
       weekTheme: context.weekTheme,
-      childId: context.childId,
     },
     archived: false,
   })
@@ -35,6 +36,6 @@ export const openChatWithContext = async (
     timestamp: new Date().toISOString(),
   })
 
-  // 3. Navigate to chat with thread ID
-  navigate(`/chat?thread=${threadRef.id}`)
+  // 3. Navigate to chat with thread ID and context
+  navigate(`/chat?thread=${threadRef.id}&context=${context.chatContext}`)
 }
