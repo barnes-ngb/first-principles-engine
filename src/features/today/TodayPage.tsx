@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -12,6 +13,7 @@ import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
+import Fab from '@mui/material/Fab'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
@@ -83,6 +85,7 @@ import WeekFocusCard from './WeekFocusCard'
 import WorkshopGameCards from './WorkshopGameCards'
 
 export default function TodayPage() {
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const dateParam = searchParams.get('date')
   const initialDate = useMemo(() => {
@@ -796,6 +799,16 @@ export default function TodayPage() {
           weekTheme={weekFocus?.theme}
         />
       )}
+
+      <Fab
+        color="primary"
+        size="medium"
+        sx={{ position: 'fixed', bottom: 80, right: 16, zIndex: 10 }}
+        onClick={() => navigate('/chat')}
+        aria-label="Ask AI"
+      >
+        <AutoAwesomeIcon />
+      </Fab>
 
       <Snackbar
         open={snackMessage !== null}
