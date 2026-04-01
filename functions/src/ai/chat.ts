@@ -992,6 +992,11 @@ ${hasWords ? "- You MUST use every word from the word list at least once in the 
 ${hasWords ? "- On each page, list which provided words appear on that page." : ""}
 - Do NOT use words significantly above ${level} level unless they are in the word list.
 
+COPYRIGHT — IMPORTANT:
+- Never use copyrighted character names (Mario, Luigi, Peach, Bowser, Link, Zelda, Pikachu, Elsa, Spider-Man, Batman, Sonic, etc.) or franchise/brand names (Nintendo, Disney, Marvel, Minecraft, Pokemon, Fortnite, etc.).
+- If the child's idea references a copyrighted character, create an original character inspired by the same archetype. For example: "Princess Peach" → "Princess Coral" (a kind, brave princess in a pink dress), "Mario" → "Marco" (a fearless explorer in red overalls with a big mustache).
+- The story should capture the spirit of what the child imagined with original characters that belong to THEM.
+
 OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
 {
   "title": "Story Title",
