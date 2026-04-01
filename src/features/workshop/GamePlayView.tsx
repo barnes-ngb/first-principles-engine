@@ -28,6 +28,8 @@ import type { StoryPlayer } from '../../core/types'
 import { useGameSession } from './useGameSession'
 import type { Player } from './useGameSession'
 import { useGameSounds } from './useGameSounds'
+import { useAvatarProfiles } from './useAvatarProfiles'
+import AvatarThumbnail from '../avatar/AvatarThumbnail'
 
 export interface GamePlayResult {
   winner: string | null
@@ -65,6 +67,7 @@ export default function GamePlayView({
   const session = useGameSession(game)
   const tts = useTTS()
   const sounds = useGameSounds()
+  const avatarProfiles = useAvatarProfiles(familyId, storyPlayers)
   const [hasStarted, setHasStarted] = useState(false)
   const gameStartTime = useRef<number>(Date.now())
 
@@ -407,6 +410,7 @@ export default function GamePlayView({
 
   // Build player positions — use animating position during movement
   const displayPlayers = state.players.map((p, i) => ({
+    id: p.id,
     name: p.name,
     color: p.color,
     position:
@@ -488,18 +492,44 @@ export default function GamePlayView({
           const isActive = i === state.currentPlayerIndex
           const isFinished = state.finishers.includes(player.name)
           const isWinner = player.name === state.winner
+          const profile = avatarProfiles[player.id]
 
           return (
             <Chip
               key={player.id}
-              icon={
-                isWinner
-                  ? <EmojiEventsIcon sx={{ fontSize: 16, color: '#ffd700 !important' }} />
-                  : isFinished
-                    ? <CheckCircleIcon sx={{ fontSize: 16, color: 'rgba(255,255,255,0.8) !important' }} />
-                    : undefined
+              avatar={
+                profile ? (
+                  <AvatarThumbnail
+                    features={profile.characterFeatures}
+                    ageGroup={profile.ageGroup ?? 'older'}
+                    faceGrid={profile.faceGrid}
+                    size={24}
+                    showArmor={false}
+                  />
+                ) : player.avatarUrl ? (
+                  <img src={player.avatarUrl} alt={player.name} style={{ borderRadius: '50%', width: 24, height: 24 }} />
+                ) : undefined
               }
-              label={player.name}
+              icon={
+                !profile && !player.avatarUrl
+                  ? isWinner
+                    ? <EmojiEventsIcon sx={{ fontSize: 16, color: '#ffd700 !important' }} />
+                    : isFinished
+                      ? <CheckCircleIcon sx={{ fontSize: 16, color: 'rgba(255,255,255,0.8) !important' }} />
+                      : undefined
+                  : undefined
+              }
+              label={
+                <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                  {(profile || player.avatarUrl) && isWinner && (
+                    <EmojiEventsIcon sx={{ fontSize: 14, color: '#ffd700' }} />
+                  )}
+                  {(profile || player.avatarUrl) && isFinished && !isWinner && (
+                    <CheckCircleIcon sx={{ fontSize: 14, color: 'rgba(255,255,255,0.8)' }} />
+                  )}
+                  {player.name}
+                </Box>
+              }
               size="small"
               sx={{
                 bgcolor: player.color,
@@ -549,7 +579,9 @@ export default function GamePlayView({
       <GameBoard
         game={game}
         players={displayPlayers}
+        avatarProfiles={avatarProfiles}
         activeSpaceIndex={currentPlayer?.position}
+        activePlayerIndex={state.currentPlayerIndex}
         boardBackground={generatedArt?.boardBackground}
         landingSpaceIndex={landingSpaceIndex}
         spaceAnimation={spaceAnimation}
@@ -634,18 +666,29 @@ export default function GamePlayView({
                 </Box>
 
                 <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, mb: 2, flexWrap: 'wrap' }}>
-                  {state.players.map((p) => (
-                    <Chip
-                      key={p.id}
-                      avatar={
-                        p.avatarUrl ? (
-                          <img src={p.avatarUrl} alt={p.name} style={{ borderRadius: '50%' }} />
-                        ) : undefined
-                      }
-                      label={p.name}
-                      sx={{ bgcolor: p.color, color: 'white', fontWeight: 700 }}
-                    />
-                  ))}
+                  {state.players.map((p) => {
+                    const profile = avatarProfiles[p.id]
+                    return (
+                      <Chip
+                        key={p.id}
+                        avatar={
+                          profile ? (
+                            <AvatarThumbnail
+                              features={profile.characterFeatures}
+                              ageGroup={profile.ageGroup ?? 'older'}
+                              faceGrid={profile.faceGrid}
+                              size={24}
+                              showArmor={false}
+                            />
+                          ) : p.avatarUrl ? (
+                            <img src={p.avatarUrl} alt={p.name} style={{ borderRadius: '50%' }} />
+                          ) : undefined
+                        }
+                        label={p.name}
+                        sx={{ bgcolor: p.color, color: 'white', fontWeight: 700 }}
+                      />
+                    )
+                  })}
                 </Box>
                 <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
                   <Button variant="outlined" onClick={() => { session.reset(); setShowFinalCelebration(false); setShowCelebration(false); setShowConfetti(false); setShowSmallConfetti(false); setHasStarted(false) }}>

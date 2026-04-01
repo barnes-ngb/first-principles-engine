@@ -1,5 +1,5 @@
 import Box from '@mui/material/Box'
-import type { GeneratedGame } from '../../core/types'
+import type { AvatarProfile, GeneratedGame } from '../../core/types'
 import type { BoardSpaceType } from '../../core/types/workshop'
 import BoardSpace from './BoardSpace'
 
@@ -10,12 +10,17 @@ interface PlayerToken {
   color: string
   position: number
   avatarUrl?: string
+  id?: string
 }
 
 interface GameBoardProps {
   game: GeneratedGame
   players?: PlayerToken[]
+  /** Avatar profiles keyed by player (child) ID */
+  avatarProfiles?: Record<string, AvatarProfile>
   activeSpaceIndex?: number
+  /** Index of the currently active player */
+  activePlayerIndex?: number
   /** DALL-E generated board background URL */
   boardBackground?: string
   /** Index of space that just had a token land on it */
@@ -29,7 +34,9 @@ interface GameBoardProps {
 export default function GameBoard({
   game,
   players = [],
+  avatarProfiles,
   activeSpaceIndex,
+  activePlayerIndex,
   boardBackground,
   landingSpaceIndex,
   spaceAnimation,
@@ -106,7 +113,9 @@ export default function GameBoard({
             }}
           >
             {row.map((space) => {
-              const playersOnSpace = players.filter((p) => p.position === space.index)
+              const playersOnSpace = players
+                .map((p, i) => ({ ...p, isActivePlayer: i === activePlayerIndex }))
+                .filter((p) => p.position === space.index)
               return (
                 <BoardSpace
                   key={space.index}
@@ -115,6 +124,7 @@ export default function GameBoard({
                   label={space.label}
                   color={space.color}
                   players={playersOnSpace}
+                  avatarProfiles={avatarProfiles}
                   isFirst={space.index === 0}
                   isLast={space.index === spaces.length - 1}
                   isActive={activeSpaceIndex === space.index}
