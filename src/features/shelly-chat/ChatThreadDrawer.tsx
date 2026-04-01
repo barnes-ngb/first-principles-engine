@@ -15,7 +15,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import type { ChatThread, ChatContext } from '../../core/types'
 
-function formatRelativeTime(dateStr: string): string {
+export function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
@@ -116,9 +116,9 @@ export default function ChatThreadDrawer({
     >
       <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Typography variant="h6">
-          {chatContext === 'lincoln' ? "Lincoln's Conversations" :
-           chatContext === 'london' ? "London's Conversations" :
-           'General Conversations'}
+          {chatContext === 'lincoln' ? "Lincoln's Chats" :
+           chatContext === 'london' ? "London's Chats" :
+           'All Chats'}
         </Typography>
         <Button
           startIcon={<AddIcon />}
