@@ -51,6 +51,29 @@ function applyBold(text: string): React.ReactNode {
   })
 }
 
+function renderImage(url: string, alt: string) {
+  return (
+    <Box
+      component="a"
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      sx={{ display: 'block', mb: 1 }}
+    >
+      <Box
+        component="img"
+        src={url}
+        alt={alt}
+        sx={{
+          maxWidth: '100%',
+          borderRadius: 1,
+          display: 'block',
+        }}
+      />
+    </Box>
+  )
+}
+
 interface ChatMessageBubbleProps {
   message: ShellyChatMessage
 }
@@ -78,31 +101,24 @@ export default function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
             color: isUser ? 'primary.contrastText' : 'text.primary',
           }}
         >
+          {/* Image prompt indicator */}
           {message.imagePrompt && isUser && (
             <Typography variant="caption" sx={{ opacity: 0.8 }}>
               🎨{' '}
             </Typography>
           )}
-          {message.imageUrl && (
-            <Box
-              component="a"
-              href={message.imageUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              sx={{ display: 'block', mb: message.content ? 1 : 0 }}
-            >
-              <Box
-                component="img"
-                src={message.imageUrl}
-                alt="Generated image"
-                sx={{
-                  maxWidth: '100%',
-                  borderRadius: 1,
-                  display: 'block',
-                }}
-              />
+          {/* Uploaded image with action badge */}
+          {message.uploadedImageUrl && isUser && (
+            <Box sx={{ mb: 1 }}>
+              <Typography variant="caption" sx={{ opacity: 0.8, display: 'block', mb: 0.5 }}>
+                {message.imageAction === 'analyze' ? '📷 Asking about image...' : '🎨 Using as inspiration...'}
+              </Typography>
+              {renderImage(message.uploadedImageUrl, 'Uploaded image')}
             </Box>
           )}
+          {/* Generated/AI image */}
+          {message.imageUrl && renderImage(message.imageUrl, 'Generated image')}
+          {/* Message content */}
           {isUser ? (
             <Typography variant="body2">{message.content}</Typography>
           ) : (
