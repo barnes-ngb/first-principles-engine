@@ -99,16 +99,13 @@ export const handleShellyChat = async (
   let childContext = "";
 
   if (childId) {
-    // 1. Skill Snapshot
+    // 1. Skill Snapshot — stored as doc with childId as doc ID
     try {
-      const snapshots = await db
-        .collection(`families/${familyId}/skillSnapshots`)
-        .where("childId", "==", childId)
-        .orderBy("createdAt", "desc")
-        .limit(1)
+      const snapshotDoc = await db
+        .doc(`families/${familyId}/skillSnapshots/${childId}`)
         .get();
-      if (!snapshots.empty) {
-        const ss = snapshots.docs[0].data();
+      if (snapshotDoc.exists) {
+        const ss = snapshotDoc.data()!;
         if (ss.prioritySkills?.length) {
           childContext += `\n\nSkill Snapshot for ${childName}:`;
           childContext += `\nPriority skills: ${ss.prioritySkills.map((s: { skill?: string; label?: string; status?: string; level?: string }) => `${s.label || s.skill} (${s.status || s.level})`).join(", ")}`;
@@ -127,25 +124,28 @@ export const handleShellyChat = async (
       console.warn("[shellyChat] Skill snapshot load error:", err);
     }
 
-    // 2. Recent Evaluation Findings (last 2)
+    // 2. Recent Evaluation Findings (last 2) — use evaluatedAt (indexed)
     try {
       const evals = await db
         .collection(`families/${familyId}/evaluationSessions`)
         .where("childId", "==", childId)
-        .orderBy("createdAt", "desc")
+        .orderBy("evaluatedAt", "desc")
         .limit(2)
         .get();
       if (!evals.empty) {
         childContext += `\n\nRecent Evaluations for ${childName}:`;
         for (const evalDoc of evals.docs) {
           const e = evalDoc.data();
-          const date = e.createdAt?.slice?.(0, 10) || "unknown date";
+          const date = e.evaluatedAt?.slice?.(0, 10) || e.createdAt?.slice?.(0, 10) || "unknown date";
           childContext += `\n- ${e.sessionType || "guided"} eval (${date}):`;
+          if (e.summary) {
+            childContext += ` Summary: ${e.summary}`;
+          }
           if (e.findings?.length) {
-            childContext += ` Findings: ${e.findings.map((f: { text?: string; finding?: string }) => f.text || f.finding || String(f)).join("; ")}`;
+            childContext += ` Findings: ${e.findings.map((f: { skill?: string; area?: string; status?: string; level?: string; text?: string; evidence?: string }) => `${f.skill || f.area || "?"}: ${f.status || f.level || f.text || ""}${f.evidence ? " — " + f.evidence : ""}`).join("; ")}`;
           }
           if (e.recommendations?.length) {
-            childContext += ` Recommendations: ${e.recommendations.join("; ")}`;
+            childContext += ` Recommendations: ${e.recommendations.map((r: string | { skill?: string; action?: string }) => typeof r === "string" ? r : `${r.skill}: ${r.action}`).join("; ")}`;
           }
         }
       }
@@ -153,42 +153,42 @@ export const handleShellyChat = async (
       console.warn("[shellyChat] Evaluation load error:", err);
     }
 
-    // 3. Current Week Plan Items
+    // 3. Recent Days — query by childId + date desc (indexed)
     try {
-      const now = new Date();
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - now.getDay());
-      const weekId = weekStart.toISOString().slice(0, 10);
-
       const daysSnap = await db
         .collection(`families/${familyId}/days`)
-        .where("weekId", "==", weekId)
         .where("childId", "==", childId)
         .orderBy("date", "desc")
         .limit(5)
         .get();
 
       if (!daysSnap.empty) {
-        childContext += `\n\nThis Week's Activity for ${childName}:`;
+        childContext += `\n\nRecent Activity for ${childName}:`;
         for (const dayDoc of daysSnap.docs) {
           const d = dayDoc.data();
-          const items = d.items || d.checklist || [];
+          const items = d.checklist || [];
           if (items.length) {
-            const completed = items.filter((i: { completed?: boolean; done?: boolean }) => i.completed || i.done).length;
+            const completed = items.filter((i: { completed?: boolean }) => i.completed).length;
             childContext += `\n- ${d.date}: ${completed}/${items.length} items completed`;
             const engaged = items
               .filter((i: { engagement?: string }) => i.engagement)
-              .map((i: { title?: string; engagement?: string }) => `${i.title}: ${i.engagement}`)
+              .map((i: { label?: string; engagement?: string }) => `${(i.label || "?").slice(0, 20)}: ${i.engagement}`)
               .join(", ");
             if (engaged) childContext += ` (engagement: ${engaged})`;
+          }
+          // Include block-level data if present
+          const blocks = d.blocks || [];
+          if (blocks.length && !items.length) {
+            const tracked = blocks.filter((b: { actualMinutes?: number }) => b.actualMinutes).length;
+            childContext += `\n- ${d.date}: ${tracked}/${blocks.length} blocks tracked`;
           }
         }
       }
     } catch (err) {
-      console.warn("[shellyChat] Week plan load error:", err);
+      console.warn("[shellyChat] Days load error:", err);
     }
 
-    // 4. Disposition Profile
+    // 4. Disposition Profile + Weekly Review narrative
     try {
       const childDoc = await db.doc(`families/${familyId}/children/${childId}`).get();
       const cd = childDoc.data();
@@ -199,21 +199,29 @@ export const handleShellyChat = async (
           if (value) childContext += `\n${key}: ${value}`;
         }
       }
+    } catch (err) {
+      console.warn("[shellyChat] Disposition load error:", err);
+    }
 
+    // Load most recent weekly review (separate query, no composite index needed)
+    try {
       const reviews = await db
         .collection(`families/${familyId}/weeklyReviews`)
         .where("childId", "==", childId)
-        .orderBy("createdAt", "desc")
-        .limit(1)
+        .limit(5)
         .get();
       if (!reviews.empty) {
-        const review = reviews.docs[0].data();
+        // Sort client-side since we don't have a composite index
+        const sorted = reviews.docs
+          .map((d: { data: () => Record<string, unknown> }) => d.data())
+          .sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.createdAt as string) || "").localeCompare((a.createdAt as string) || ""));
+        const review = sorted[0];
         if (review.dispositionNarrative) {
           childContext += `\nRecent growth narrative: ${review.dispositionNarrative}`;
         }
       }
     } catch (err) {
-      console.warn("[shellyChat] Disposition load error:", err);
+      console.warn("[shellyChat] Weekly review load error:", err);
     }
 
     // 5. Sight Word Progress (Lincoln only)
@@ -225,7 +233,7 @@ export const handleShellyChat = async (
           .limit(50)
           .get();
         if (!wordProgress.empty) {
-          interface WpEntry { status?: string; word?: string; id: string }
+          type WpEntry = { status?: string; word?: string; id: string };
           const wpData: WpEntry[] = wordProgress.docs.map((d: { data: () => Record<string, unknown>; id: string }) => ({ ...d.data() as { status?: string; word?: string }, id: d.id }));
           const mastered = wpData.filter((w: WpEntry) => w.status === "mastered").length;
           const practicing = wpData.filter((w: WpEntry) => w.status === "practicing").length;
@@ -244,6 +252,8 @@ export const handleShellyChat = async (
     }
   }
 
+  console.log(`[shellyChat] childId=${childId}, childName=${childName}, childContextLength=${childContext.length}`);
+
   // ── Build system prompt ──────────────────────────────────────
 
   let systemPrompt = `You are a helpful assistant for Shelly Barnes, a homeschool mom.
@@ -253,16 +263,20 @@ Shelly has fibromyalgia and homeschools two boys:
 - London (6): loves drawing, stories, and creating games
 ${familyContext}`;
 
-  if (childId && childContext) {
+  if (childId && childName) {
+    const dataSection = childContext
+      ? `\n== ${childName}'s Data ==${childContext}`
+      : `\n== ${childName}'s Data ==\nNo data loaded yet — Shelly may need to run an evaluation or complete a week of school first.`;
+
     systemPrompt += `
 
 You are currently focused on ${childName}. Shelly selected ${childName}'s tab, so prioritize ${childName}'s data and needs in your responses. Reference ${childName}'s specific skills, recent progress, and evaluation findings when relevant.
 
-${childContext}
+${dataSection}
 
 Guidelines:
 - Be warm, practical, and specific. Shelly is busy — respect her time.
-- You have detailed context about ${childName}'s current skills, evaluations, and weekly progress. Use this data to give specific, personalized advice.
+- You DO have access to ${childName}'s records — the data above is everything currently available. Never say "I don't have access to records" or "I can't see evaluations." If data is missing, tell Shelly specifically what's not there yet and how to populate it (e.g., "No evaluations yet — running one from the Progress tab would help me give more specific advice").
 - When suggesting activities, connect them directly to ${childName}'s skill snapshot and what's emerging vs. mastered.
 - Reference recent evaluation findings when discussing what to work on.
 - If engagement data shows frustration or low energy on certain subjects, acknowledge that and suggest alternatives.
