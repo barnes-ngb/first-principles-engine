@@ -172,8 +172,10 @@ export function useAI() {
         const result = await imageGenFn(request)
         return result.data
       } catch (err) {
-        const e = err instanceof Error ? err : new Error(String(err))
-        setError(e)
+        const fireErr = err as { code?: string; message?: string; details?: string }
+        const message =
+          fireErr.details || fireErr.message || (err instanceof Error ? err.message : String(err))
+        setError(new Error(message))
         return null
       } finally {
         setLoading(false)
@@ -190,8 +192,10 @@ export function useAI() {
         const result = await enhanceSketchFn(request)
         return result.data
       } catch (err) {
-        const e = err instanceof Error ? err : new Error(String(err))
-        setError(e)
+        const fireErr = err as { code?: string; message?: string; details?: string }
+        const message =
+          fireErr.details || fireErr.message || (err instanceof Error ? err.message : String(err))
+        setError(new Error(message))
         return null
       } finally {
         setLoading(false)
