@@ -55,7 +55,8 @@ import { storage } from '../../core/firebase/storage'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { ShellyChatMessage, ChatThread, ChatContext } from '../../core/types'
 import ChatMessageBubble from './ChatMessageBubble'
-import ChatThreadDrawer, { formatRelativeTime } from './ChatThreadDrawer'
+import ChatThreadDrawer from './ChatThreadDrawer'
+import { formatRelativeTime } from './formatRelativeTime'
 
 const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: string; suggestions: ReadonlyArray<{ label: string; message: string }> }> = {
   lincoln: {
