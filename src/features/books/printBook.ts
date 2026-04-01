@@ -141,6 +141,34 @@ function fitInBox(
   return { w: imgW * scale, h: imgH * scale }
 }
 
+/* ───────────────────── flip helper for PDF ───────────────────── */
+
+/** Flip an image data URI horizontally/vertically via an offscreen canvas. */
+function flipImageDataUri(
+  dataUri: string,
+  width: number,
+  height: number,
+  flipH: boolean,
+  flipV: boolean,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { resolve(dataUri); return }
+      ctx.translate(flipH ? width : 0, flipV ? height : 0)
+      ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1)
+      ctx.drawImage(img, 0, 0, width, height)
+      resolve(canvas.toDataURL('image/png'))
+    }
+    img.onerror = reject
+    img.src = dataUri
+  })
+}
+
 /* ───────────────────── color helpers ───────────────────── */
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -362,30 +390,50 @@ async function drawContentPage(
   const textColor = hexToRgb(colors.text)
   let curY = area.y
 
-  // Render the first/primary image
+  // Render page images
   if (page.images.length > 0) {
-    const firstImg = page.images[0]
-    const dataUri = resolveUrl(firstImg.url)
-    const maxImgW = area.w
-    const maxImgH = area.h * 0.5
+    const imgAreaH = area.h * 0.5
+    // Sort by zIndex for proper stacking
+    const sortedImages = [...page.images].sort(
+      (a, b) => (a.position?.zIndex ?? 0) - (b.position?.zIndex ?? 0),
+    )
 
-    // Draw image container background
-    if (dataUri.startsWith('data:')) {
+    // Draw container background
+    pdf.setFillColor(...hexToRgb(colors.imgBg))
+    pdf.roundedRect(area.x - 1.5, curY - 1.5, area.w + 3, imgAreaH + 3, 2, 2, 'F')
+
+    for (const img of sortedImages) {
+      const dataUri = resolveUrl(img.url)
+      if (!dataUri.startsWith('data:')) continue
       try {
         const dims = await getImageDimensions(dataUri)
-        const fit = fitInBox(dims.width, dims.height, maxImgW, maxImgH)
-        const imgX = area.x + (area.w - fit.w) / 2
+        const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
 
-        // Subtle background behind image
-        pdf.setFillColor(...hexToRgb(colors.imgBg))
-        pdf.roundedRect(imgX - 1.5, curY - 1.5, fit.w + 3, fit.h + 3, 2, 2, 'F')
+        // Convert percentage position to mm within the image area
+        const imgX = area.x + (pos.x / 100) * area.w
+        const imgY = curY + (pos.y / 100) * imgAreaH
+        const imgW = (pos.width / 100) * area.w
+        const imgH = (pos.height / 100) * imgAreaH
 
-        pdf.addImage(dataUri, imgX, curY, fit.w, fit.h)
-        curY += fit.h + 6
+        const fit = fitInBox(dims.width, dims.height, imgW, imgH)
+        const rotation = pos.rotation ?? 0
+
+        // Apply flip via canvas if needed, otherwise render directly
+        const flipH = pos.flipH ?? false
+        const flipV = pos.flipV ?? false
+        if (flipH || flipV) {
+          // Create a canvas to flip the image, then add as data URI
+          const flippedUri = await flipImageDataUri(dataUri, dims.width, dims.height, flipH, flipV)
+          pdf.addImage({ imageData: flippedUri, x: imgX, y: imgY, width: fit.w, height: fit.h, rotation })
+        } else {
+          pdf.addImage({ imageData: dataUri, x: imgX, y: imgY, width: fit.w, height: fit.h, rotation })
+        }
       } catch {
         // Skip image on failure
       }
     }
+
+    curY += imgAreaH + 6
   }
 
   // Render text
