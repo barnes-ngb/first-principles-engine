@@ -14,24 +14,7 @@ import MenuItem from '@mui/material/MenuItem'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import type { ChatThread, ChatContext } from '../../core/types'
-
-export function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMin = Math.floor(diffMs / 60_000)
-  const diffHr = Math.floor(diffMs / 3_600_000)
-  const diffDays = Math.floor(diffMs / 86_400_000)
-
-  if (diffMin < 1) return 'Just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  if (diffHr < 24) return `${diffHr}h ago`
-  if (diffDays === 1) return 'Yesterday'
-  if (diffDays < 7) {
-    return date.toLocaleDateString([], { weekday: 'long' })
-  }
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
-}
+import { formatRelativeTime } from './formatRelativeTime'
 
 interface ChatThreadDrawerProps {
   open: boolean
