@@ -1,3 +1,5 @@
+import type { Components } from 'react-markdown'
+import ReactMarkdown from 'react-markdown'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import type { ShellyChatMessage } from '../../core/types'
@@ -17,38 +19,18 @@ function formatTimestamp(timestamp: string): string {
   return `${month}, ${time}`
 }
 
-function renderContent(text: string) {
-  return text.split('\n').map((line, i) => {
-    if (!line.trim()) return <br key={i} />
-
-    // Bullet points
-    if (line.match(/^[-*]\s/)) {
-      const bulletText = line.replace(/^[-*]\s/, '')
-      return (
-        <Typography key={i} variant="body2" component="p" sx={{ pl: 2, my: 0.25 }}>
-          &bull; {applyBold(bulletText)}
-        </Typography>
-      )
-    }
-
-    return (
-      <Typography key={i} variant="body2" component="p" sx={{ my: 0.25 }}>
-        {applyBold(line)}
-      </Typography>
-    )
-  })
-}
-
-function applyBold(text: string): React.ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*)/)
-  return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return (
-        <strong key={i}>{part.slice(2, -2)}</strong>
-      )
-    }
-    return part
-  })
+const markdownComponents: Components = {
+  h1: ({ children }) => <Typography variant="subtitle1" fontWeight="bold" gutterBottom>{children}</Typography>,
+  h2: ({ children }) => <Typography variant="subtitle2" fontWeight="bold" gutterBottom>{children}</Typography>,
+  h3: ({ children }) => <Typography variant="subtitle2" fontWeight="bold" gutterBottom>{children}</Typography>,
+  p: ({ children }) => <Typography variant="body2" sx={{ mb: 1 }}>{children}</Typography>,
+  li: ({ children }) => <Typography variant="body2" component="li">{children}</Typography>,
+  code: ({ children, className }) => {
+    const isBlock = className?.includes('language-')
+    return isBlock
+      ? <Box component="pre" sx={{ bgcolor: 'grey.100', p: 1, borderRadius: 1, overflowX: 'auto', fontSize: '0.8rem' }}><code>{children}</code></Box>
+      : <Box component="code" sx={{ bgcolor: 'grey.200', px: 0.5, borderRadius: 0.5, fontSize: '0.85em' }}>{children}</Box>
+  },
 }
 
 function renderImage(url: string, alt: string) {
@@ -126,7 +108,9 @@ export default function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
           {isUser ? (
             <Typography variant="body2">{message.content}</Typography>
           ) : (
-            renderContent(message.content)
+            <ReactMarkdown components={markdownComponents}>
+              {message.content}
+            </ReactMarkdown>
           )}
         </Box>
         <Typography

@@ -105,6 +105,9 @@ export default function ShellyChatPage() {
   const [imageAnswers, setImageAnswers] = useState<Record<number, string>>({})
   const [loadingQuestions, setLoadingQuestions] = useState(false)
 
+  // ── Follow-up suggestions state ─────────────────────────────────
+  const [followUps, setFollowUps] = useState<string[]>([])
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const autoSendTriggered = useRef(false)
 
@@ -177,6 +180,27 @@ export default function ShellyChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, activeThreadId])
 
+  // ── Follow-up parser ────────────────────────────────────────────
+  const parseFollowUps = (text: string): { cleanText: string; followUps: string[] } => {
+    const lines = text.split('\n')
+    const followUpItems: string[] = []
+    const contentLines: string[] = []
+
+    for (const line of lines) {
+      const match = line.match(/^\[FOLLOWUP\]\s*(.+)/)
+      if (match) {
+        followUpItems.push(match[1].trim())
+      } else {
+        contentLines.push(line)
+      }
+    }
+
+    return {
+      cleanText: contentLines.join('\n').trimEnd(),
+      followUps: followUpItems.slice(0, 3),
+    }
+  }
+
   // ── Send to AI (shared logic) ──────────────────────────────────
   const sendToAI = useCallback(
     async (currentMessages: ShellyChatMessage[]) => {
@@ -196,9 +220,11 @@ export default function ShellyChatPage() {
           messages: aiMessages,
         })
         if (response?.message) {
+          const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
+          setFollowUps(suggestions)
           await addDoc(shellyChatMessagesCollection(familyId, activeThreadId), {
             role: 'assistant',
-            content: response.message,
+            content: cleanText,
             timestamp: new Date().toISOString(),
           })
           await updateDoc(
@@ -206,7 +232,7 @@ export default function ShellyChatPage() {
             {
               updatedAt: new Date().toISOString(),
               messageCount: increment(1),
-              lastMessagePreview: response.message.slice(0, 100),
+              lastMessagePreview: cleanText.slice(0, 100),
             },
           )
         }
@@ -225,6 +251,7 @@ export default function ShellyChatPage() {
     if (!text || sending) return
 
     setInput('')
+    setFollowUps([])
     setSending(true)
 
     try {
@@ -285,9 +312,11 @@ export default function ShellyChatPage() {
       })
 
       if (response?.message) {
+        const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
+        setFollowUps(suggestions)
         await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
-          content: response.message,
+          content: cleanText,
           timestamp: new Date().toISOString(),
         })
         await updateDoc(
@@ -295,7 +324,7 @@ export default function ShellyChatPage() {
           {
             updatedAt: new Date().toISOString(),
             messageCount: increment(1),
-            lastMessagePreview: response.message.slice(0, 100),
+            lastMessagePreview: cleanText.slice(0, 100),
           },
         )
       }
@@ -644,9 +673,11 @@ export default function ShellyChatPage() {
       })
 
       if (response?.message) {
+        const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
+        setFollowUps(suggestions)
         await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
-          content: response.message,
+          content: cleanText,
           timestamp: new Date().toISOString(),
         })
         await updateDoc(
@@ -654,7 +685,7 @@ export default function ShellyChatPage() {
           {
             updatedAt: new Date().toISOString(),
             messageCount: increment(1),
-            lastMessagePreview: response.message.slice(0, 100),
+            lastMessagePreview: cleanText.slice(0, 100),
           },
         )
       }
@@ -675,6 +706,7 @@ export default function ShellyChatPage() {
     setMessages([])
     setSearchParams({})
     setDrawerOpen(false)
+    setFollowUps([])
     autoSendTriggered.current = false
   }, [setSearchParams])
 
@@ -684,6 +716,7 @@ export default function ShellyChatPage() {
       setActiveThreadId(threadId)
       setSearchParams({ thread: threadId })
       setDrawerOpen(false)
+      setFollowUps([])
       autoSendTriggered.current = false
     },
     [setSearchParams],
@@ -968,6 +1001,25 @@ export default function ShellyChatPage() {
         </Paper>
       )}
 
+      {/* Follow-up suggestions */}
+      {followUps.length > 0 && !sending && (
+        <Box sx={{ px: 1, pb: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+          {followUps.map((q, i) => (
+            <Chip
+              key={i}
+              label={q}
+              size="small"
+              variant="outlined"
+              onClick={() => {
+                setInput(q)
+                setFollowUps([])
+              }}
+              sx={{ fontSize: '0.75rem' }}
+            />
+          ))}
+        </Box>
+      )}
+
       {/* Input area */}
       <Paper elevation={2} sx={{ p: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
         {uploading && <LinearProgress sx={{ mb: 1 }} />}
@@ -1020,7 +1072,7 @@ export default function ShellyChatPage() {
             size="small"
             placeholder="Ask Shelly's AI..."
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => { setInput(e.target.value); if (followUps.length) setFollowUps([]) }}
             onKeyDown={handleKeyDown}
             disabled={isBusy}
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
