@@ -111,7 +111,11 @@ export default function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
           {message.uploadedImageUrl && isUser && (
             <Box sx={{ mb: 1 }}>
               <Typography variant="caption" sx={{ opacity: 0.8, display: 'block', mb: 0.5 }}>
-                {message.imageAction === 'analyze' ? '📷 Asking about image...' : '🎨 Using as inspiration...'}
+                {message.imageAction === 'analyze'
+                  ? '📷 Asking about image...'
+                  : message.imageAction === 'transform'
+                    ? '🎨 Using as inspiration...'
+                    : '📎 Attached image'}
               </Typography>
               {renderImage(message.uploadedImageUrl, 'Uploaded image')}
             </Box>
