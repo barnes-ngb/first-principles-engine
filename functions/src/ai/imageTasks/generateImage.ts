@@ -74,7 +74,7 @@ function fallbackCopyrightStrip(prompt: string): string {
 // ── Callable Cloud Function ─────────────────────────────────────
 
 export const generateImage = onCall(
-  { secrets: [openaiApiKey, claudeApiKey] },
+  { secrets: [openaiApiKey, claudeApiKey], timeoutSeconds: 120 },
   async (request): Promise<ImageGenResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
     const { uid } = requireApprovedUser(request);
