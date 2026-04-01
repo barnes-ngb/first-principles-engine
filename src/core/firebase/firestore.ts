@@ -388,3 +388,11 @@ export const storyGamesCollection = (
   collection(db, `families/${familyId}/storyGames`).withConverter(
     storyGameConverter,
   ) as CollectionReference<StoryGame>
+
+// ── Shelly Chat ─────────────────────────────────────────────────
+
+export const shellyChatThreadsCollection = (familyId: string) =>
+  collection(db, 'families', familyId, 'shellyChatThreads')
+
+export const shellyChatMessagesCollection = (familyId: string, threadId: string) =>
+  collection(db, 'families', familyId, 'shellyChatThreads', threadId, 'messages')

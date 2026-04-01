@@ -25,6 +25,7 @@ const navItems = [
   { label: 'Game Workshop', to: '/workshop' },
   { label: 'Dad Lab', to: '/dad-lab' },
   { label: 'Settings', to: '/settings', parentOnly: true },
+  { label: 'Ask AI', to: '/chat', parentOnly: true },
 ]
 
 const kidNavItems = [
