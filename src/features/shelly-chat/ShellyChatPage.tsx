@@ -129,6 +129,7 @@ export default function ShellyChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const autoSendTriggered = useRef(false)
+  const imageIdeaTimeoutFired = useRef(false)
 
   const activeThread = threads.find((t) => t.id === activeThreadId)
 
@@ -484,9 +485,25 @@ export default function ShellyChatPage() {
             lastMessagePreview: '🎨 Image generated',
           },
         )
+      } else {
+        // Image generation failed — show error in chat so user knows what happened
+        console.error('[Chat] Image generation returned no result for prompt:', prompt.slice(0, 80))
+        await addDoc(shellyChatMessagesCollection(familyId, threadId), {
+          role: 'assistant',
+          content: 'Sorry, I wasn\'t able to generate that image. The AI image service may be busy or the prompt may need adjusting — try rephrasing or try again in a moment.',
+          timestamp: new Date().toISOString(),
+        })
+        await updateDoc(
+          doc(shellyChatThreadsCollection(familyId), threadId),
+          {
+            updatedAt: new Date().toISOString(),
+            messageCount: increment(1),
+            lastMessagePreview: '⚠️ Image generation failed',
+          },
+        )
       }
     } catch (err) {
-      console.error('Failed to generate image:', err)
+      console.error('[Chat] Image generation failed:', err)
     } finally {
       setGeneratingImage(false)
     }
@@ -520,11 +537,12 @@ export default function ShellyChatPage() {
 
     setLoadingQuestions(true)
     setImageFlowStep('questions')
+    imageIdeaTimeoutFired.current = false
 
-    // Set a 5-second timeout
+    // Set a 5-second timeout — skip refinement and generate directly if AI is slow
     const timeoutId = setTimeout(() => {
+      imageIdeaTimeoutFired.current = true
       setLoadingQuestions(false)
-      // Auto-skip to direct generation if too slow
       setImageFlowStep('generating')
       handleImageFlowClose()
       handleGenerateImageDirect(idea)
@@ -550,6 +568,8 @@ export default function ShellyChatPage() {
       })
 
       clearTimeout(timeoutId)
+      // If the timeout already fired, generation is in progress — don't duplicate
+      if (imageIdeaTimeoutFired.current) return
 
       if (response?.message) {
         try {
@@ -574,6 +594,8 @@ export default function ShellyChatPage() {
       handleGenerateImageDirect(idea)
     } catch {
       clearTimeout(timeoutId)
+      // If the timeout already fired, generation is in progress — don't duplicate
+      if (imageIdeaTimeoutFired.current) return
       setLoadingQuestions(false)
       handleImageFlowClose()
       handleGenerateImageDirect(idea)
@@ -754,7 +776,7 @@ export default function ShellyChatPage() {
       setUploadPreview(null)
       setUploading(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams])
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams, chatContext])
 
   const handleUploadAnalyze = useCallback(async () => {
     if (!uploadFile) return
@@ -850,7 +872,7 @@ export default function ShellyChatPage() {
       setUploading(false)
       setSending(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams])
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, chatContext])
 
   const handleUploadGenerate = useCallback(async () => {
     if (!uploadFile || !uploadPreview) return
@@ -899,7 +921,7 @@ export default function ShellyChatPage() {
       setUploadPreview(null)
       setUploading(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams])
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams, chatContext])
 
   // ── New thread ─────────────────────────────────────────────────
   const handleNewThread = useCallback(() => {
