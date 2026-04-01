@@ -80,6 +80,49 @@ export function compressImage(
 }
 
 /**
+ * Compress a photo to a square data URL (center-cropped).
+ * Used for guest player tokens — keeps data URL small for Firestore storage.
+ */
+export function compressPhotoToDataUrl(
+  file: File | Blob,
+  maxSize: number = 128,
+  quality: number = 0.7
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+
+      const canvas = document.createElement('canvas')
+      canvas.width = maxSize
+      canvas.height = maxSize
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        reject(new Error('Failed to get canvas context'))
+        return
+      }
+
+      // Center-crop to square
+      const minDim = Math.min(img.width, img.height)
+      const sx = (img.width - minDim) / 2
+      const sy = (img.height - minDim) / 2
+
+      ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, maxSize, maxSize)
+      resolve(canvas.toDataURL('image/jpeg', quality))
+    }
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('Failed to load image'))
+    }
+
+    img.src = url
+  })
+}
+
+/**
  * Compress only if the file is larger than the threshold.
  * Small images (icons, stickers, AI-generated) don't need compression.
  */
