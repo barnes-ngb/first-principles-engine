@@ -52,13 +52,17 @@ export function resolveCapeColor(
  * Builds a voxel-style Legends cape (3 stacked box segments, wider toward bottom).
  * Part of the BASE outfit — every character gets a cape, not just Gold+ tier.
  * The cape attaches to the torso, positioned behind the character's back.
+ *
+ * Cape dimensions (family-tuned):
+ *   Top:    torsoW × 0.6 wide, torsoH × 0.3 tall, 0.04 deep
+ *   Middle: torsoW × 0.7 wide, torsoH × 0.35 tall, 0.04 deep
+ *   Bottom: torsoW × 0.8 wide, torsoH × 0.3 tall, 0.04 deep (darkened 20%)
+ *   Clasp:  0.08 × 0.05 × 0.05 gold
  */
 export function buildBaseCape(ageGroup: 'older' | 'younger', capeColor: number): THREE.Group {
   const layout = getBodyLayout(ageGroup)
-  const { U } = layout
-  const tW = layout.p.torsoPxW
-  const tD = layout.p.torsoPxD
-  const tH = layout.p.torsoPxH
+  const s = layout.scale
+  const { torsoW, torsoH, torsoD } = layout
 
   const capeGroup = new THREE.Group()
   capeGroup.name = 'cape'
@@ -71,51 +75,66 @@ export function buildBaseCape(ageGroup: 'older' | 'younger', capeColor: number):
     side: THREE.DoubleSide,
   })
 
-  // Top section (shoulder width)
+  // Segment dimensions
+  const topW = torsoW * 0.6
+  const topH = torsoH * 0.3
+  const topD = 0.04 * s
+
+  const midW = torsoW * 0.7
+  const midH = torsoH * 0.35
+  const midD = 0.04 * s
+
+  const botW = torsoW * 0.8
+  const botH = torsoH * 0.3
+  const botD = 0.04 * s
+
+  // Top section (narrowest, at shoulders)
   const top = new THREE.Mesh(
-    new THREE.BoxGeometry(U * (tW + 0.2), U * (tH * 0.35), U * 0.5),
+    new THREE.BoxGeometry(topW, topH, topD),
     capeMat,
   )
-  top.position.set(0, -U * 0.8, 0)
+  top.position.set(0, -topH / 2, 0)
+  top.userData.isCape = true
   capeGroup.add(top)
 
   // Middle section (slightly wider)
   const midMat = capeMat.clone()
   midMat.color = new THREE.Color(lerpColor(capeColor, 0x000000, 0.08))
   const mid = new THREE.Mesh(
-    new THREE.BoxGeometry(U * (tW + 1), U * (tH * 0.45), U * 0.5),
+    new THREE.BoxGeometry(midW, midH, midD),
     midMat,
   )
-  mid.position.set(0, -U * (tH * 0.45), 0)
+  mid.position.set(0, -(topH + midH / 2), 0)
+  mid.userData.isCape = true
   capeGroup.add(mid)
 
-  // Bottom section (widest, darkest)
+  // Bottom section (widest, darkened 20%)
   const botMat = new THREE.MeshPhongMaterial({
-    color: lerpColor(capeColor, 0x000000, 0.15),
+    color: lerpColor(capeColor, 0x000000, 0.2),
     specular: 0x222222,
     shininess: 8,
     flatShading: true,
     side: THREE.DoubleSide,
   })
   const bot = new THREE.Mesh(
-    new THREE.BoxGeometry(U * (tW + 1.8), U * (tH * 0.35), U * 0.5),
+    new THREE.BoxGeometry(botW, botH, botD),
     botMat,
   )
-  bot.position.set(0, -U * (tH * 0.85), 0)
+  bot.position.set(0, -(topH + midH + botH / 2), 0)
+  bot.userData.isCape = true
   capeGroup.add(bot)
 
   // Clasp at top (gold, holds cape at shoulders)
   const clasp = new THREE.Mesh(
-    new THREE.BoxGeometry(U * 1.2, U * 0.6, U * 0.6),
+    new THREE.BoxGeometry(0.08 * s, 0.05 * s, 0.05 * s),
     new THREE.MeshPhongMaterial({ color: 0xC8A84E, shininess: 25, flatShading: true }),
   )
-  clasp.position.set(0, U * 1.2, 0)
+  clasp.position.set(0, 0.025 * s, 0)
   capeGroup.add(clasp)
 
-  // Position cape behind torso, attached near shoulders
-  // torsoTop is relative to character root; cape needs torso-relative offset
-  // Cape attaches at upper back: slightly below torso top, behind torso depth
-  capeGroup.position.set(0, U * (tH * 0.3), -U * (tD / 2 + 2))
+  // Position cape behind torso — torso-local coordinates (child of torso mesh)
+  // Cape hangs from top of torso (shoulder level), behind the torso's back face
+  capeGroup.position.set(0, torsoH / 2, -(torsoD / 2 + 0.03 * s))
 
   capeGroup.userData.isCape = true
 
