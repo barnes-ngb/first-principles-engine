@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { VoxelArmorPieceId } from '../../../core/types'
+import type { CharacterProportions, VoxelArmorPieceId } from '../../../core/types'
 import { getBodyLayout } from './buildCharacter'
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -595,8 +595,9 @@ function buildSword(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
 export function buildArmorPiece(
   pieceId: VoxelArmorPieceId,
   ageGroup: 'older' | 'younger',
+  customProportions?: Partial<CharacterProportions>,
 ): THREE.Group {
-  const layout = getBodyLayout(ageGroup)
+  const layout = getBodyLayout(ageGroup, customProportions)
 
   let group: THREE.Group
 

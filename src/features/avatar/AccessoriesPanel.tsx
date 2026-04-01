@@ -70,7 +70,9 @@ export default function AccessoriesPanel({
         sx={{
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '12px',
+          gap: '8px',
+          width: '100%',
+          boxSizing: 'border-box',
         }}
       >
         {ACCESSORIES.map((accessory) => {
@@ -101,8 +103,10 @@ export default function AccessoriesPanel({
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: '6px',
-                p: '12px 8px',
+                p: '10px 6px',
                 minHeight: '100px',
+                minWidth: 0,
+                overflow: 'hidden',
                 borderRadius: isLincoln ? '6px' : '14px',
                 border: isEquipped
                   ? `2px solid ${isConflicted ? '#ff9800' : accentColor}`
@@ -130,12 +134,16 @@ export default function AccessoriesPanel({
               <Typography
                 sx={{
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '12px' : '13px',
+                  fontSize: isLincoln ? '11px' : '13px',
                   color: isEquipped
                     ? accentColor
                     : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)'),
                   textAlign: 'center',
                   lineHeight: 1.2,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  width: '100%',
                 }}
               >
                 {accessory.name}
@@ -183,10 +191,10 @@ export default function AccessoriesPanel({
                 <Box
                   sx={{
                     position: 'absolute',
-                    top: -4,
-                    right: -4,
-                    width: 22,
-                    height: 22,
+                    top: -2,
+                    right: -2,
+                    width: 20,
+                    height: 20,
                     borderRadius: '50%',
                     bgcolor: '#4caf50',
                     display: 'flex',

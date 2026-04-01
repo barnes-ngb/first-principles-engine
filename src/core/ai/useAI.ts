@@ -17,6 +17,7 @@ export const TaskType = {
   Conundrum: 'conundrum',
   WeeklyFocus: 'weeklyFocus',
   Scan: 'scan',
+  ShellyChat: 'shellyChat',
 } as const
 export type TaskType = (typeof TaskType)[keyof typeof TaskType]
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandl
 import * as THREE from 'three'
 import Box from '@mui/material/Box'
 
-import type { AccessoryId, AvatarBackground, CharacterFeatures, OutfitCustomization, VoxelArmorPieceId } from '../../core/types'
+import type { AccessoryId, AvatarBackground, CharacterFeatures, CharacterProportions, OutfitCustomization, VoxelArmorPieceId } from '../../core/types'
 import { DEFAULT_CHARACTER_FEATURES } from '../../core/types'
 import { XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import { buildCharacter, applyProfileOutfit } from './voxel/buildCharacter'
@@ -23,6 +23,7 @@ import { playEquipSound } from './voxel/equipSound'
 import { buildShieldEmblem } from './voxel/buildShieldEmblem'
 import { buildHelmetCrest } from './voxel/buildHelmetCrest'
 import { buildRoom } from './voxel/buildRoom'
+import { addOutlinesToGroup, removeOutlinesFromGroup } from './voxel/blockOutline'
 import { buildAccessory, getAccessoryAttachPoint, animateAccessories, getHiddenAccessories } from './voxel/buildAccessory'
 import {
   getCurrentSeason,
@@ -71,6 +72,8 @@ interface VoxelCharacterProps {
   background?: AvatarBackground
   /** Equipped accessory IDs (cosmetic items) */
   accessories?: AccessoryId[]
+  /** Custom character body proportions (from Character Tuner) */
+  proportions?: Partial<CharacterProportions>
 }
 
 // ── Helmet hair management ────────────────────────────────────────────
@@ -344,6 +347,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   customization,
   background = 'night',
   accessories = [],
+  proportions,
 }: VoxelCharacterProps, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -392,6 +396,11 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
   const currentTier = calculateTier(totalXp)
   const armorColors = customization?.armorColors
+  // Stable string key for proportions to avoid unnecessary scene rebuilds on same values
+  const proportionsKey = useMemo(
+    () => proportions ? JSON.stringify(proportions) : '',
+    [proportions],
+  )
 
   // Keep refs in sync so animation loop always has current values
   backgroundRef.current = background
@@ -493,7 +502,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     for (const l of roomLightsRef.current) l.visible = bg === 'room'
 
     // Build character
-    const character = buildCharacter(resolvedFeatures, ageGroup)
+    const character = buildCharacter(resolvedFeatures, ageGroup, proportions)
     characterRef.current = character
     scene.add(character)
 
@@ -505,7 +514,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     const headGroup = character.getObjectByName('headGroup')
 
     for (const pieceMeta of VOXEL_ARMOR_PIECES) {
-      const pieceGroup = buildArmorPiece(pieceMeta.id, ageGroup)
+      const pieceGroup = buildArmorPiece(pieceMeta.id, ageGroup, proportions)
       armorGroupsRef.current.set(pieceMeta.id, pieceGroup)
 
       const attachTo = pieceGroup.userData.attachToArm as string | undefined
@@ -626,7 +635,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     accessoryGroupsRef.current.clear()
     const hiddenAccessories = getHiddenAccessories(equippedPieces, accessories)
     for (const accId of accessories) {
-      const accGroup = buildAccessory(accId as AccessoryId, ageGroup)
+      const accGroup = buildAccessory(accId as AccessoryId, ageGroup, undefined, proportions)
       accessoryGroupsRef.current.set(accId as AccessoryId, accGroup)
 
       const attachPoint = getAccessoryAttachPoint(accId as AccessoryId)
@@ -652,17 +661,30 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       }
     }
 
-    // Cape — always part of base outfit (Legends hero style)
+    // Cape — always part of base outfit (Legends hero style) unless disabled via tuner
     // Tier Gold+ overrides color; otherwise uses customization or age-group default
+    const showCape = proportions?.cape !== false
     const torso = character.getObjectByName('torso')
-    if (torso) {
+    if (torso && showCape) {
       const capeColor = resolveCapeColor(currentTier, ageGroup, customization?.capeColor)
-      const cape = buildBaseCape(ageGroup, capeColor)
+      const cape = buildBaseCape(ageGroup, capeColor, proportions)
       torso.add(cape)
     }
 
     // Apply saved outfit colors
     applyProfileOutfit(character, customization)
+
+    // ── Edge outlines — Minecraft Legends block definition ──────────
+    // Body parts get standard outlines
+    addOutlinesToGroup(character, 0.25)
+    // Equipped armor pieces get slightly lighter outlines
+    for (const pieceId of equippedPieces) {
+      const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
+      if (group) addOutlinesToGroup(group, 0.2)
+    }
+    // Cape gets very subtle outlines (should feel soft)
+    const capeMesh = character.getObjectByName('cape') ?? scene.getObjectByName('cape')
+    if (capeMesh instanceof THREE.Group) addOutlinesToGroup(capeMesh, 0.15)
 
     // Apply helmet hair if helmet is initially equipped
     if (equippedPieces.includes('helmet')) {
@@ -908,7 +930,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         applyPaintedFace(headMesh, character, resolvedFeatures, skinHex)
       }
     }
-  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, skinTextureUrl, customization, armorColors, accessories])
+  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, skinTextureUrl, customization, armorColors, accessories, proportions])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
@@ -960,7 +982,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       particlesRef.current = []
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedFeatures.skinTone, resolvedFeatures.hairColor, resolvedFeatures.hairStyle, resolvedFeatures.hairLength, resolvedFeatures.eyeColor, ageGroup])
+  }, [resolvedFeatures.skinTone, resolvedFeatures.hairColor, resolvedFeatures.hairStyle, resolvedFeatures.hairLength, resolvedFeatures.eyeColor, ageGroup, proportionsKey])
 
   // ── Handle resize ───────────────────────────────────────────────
   useEffect(() => {
@@ -1082,6 +1104,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         }
         applyTierToArmor(armorGroupsRef.current, currentTier, [pieceId], armorColors)
 
+        // Add edge outlines to newly equipped armor
+        if (group) addOutlinesToGroup(group, 0.2)
+
         // Add enchantment glow if tier qualifies (Iron+)
         if (tierHasGlow(currentTier) && group) {
           removeEnchantGlow(group) // clear any stale glow
@@ -1150,8 +1175,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         }
         const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
         if (group) {
-          // Remove glow from unequipped piece
+          // Remove glow + outlines from unequipped piece
           removeEnchantGlow(group)
+          removeOutlinesFromGroup(group)
 
           const isUnlocked = totalXp >= XP_THRESHOLDS[pieceId as VoxelArmorPieceId]
           const tierTint = getTierTint(currentTier)

@@ -19,6 +19,8 @@ import type {
 } from '../../core/types'
 import { useTTS } from '../../core/hooks/useTTS'
 import Confetti from './Confetti'
+import { useAvatarProfiles } from './useAvatarProfiles'
+import AvatarThumbnail from '../avatar/AvatarThumbnail'
 
 export interface BattlePlayResult {
   durationMinutes: number
@@ -46,6 +48,7 @@ interface RoundResult {
 
 export default function BattlePlayView({
   cardGame,
+  familyId,
   storyPlayers,
   generatedArt,
   activeSession,
@@ -53,6 +56,7 @@ export default function BattlePlayView({
   onSaveSession,
 }: BattlePlayViewProps) {
   const tts = useTTS()
+  const avatarProfiles = useAvatarProfiles(familyId, storyPlayers)
   const startTime = useRef(Date.now())
   const players = storyPlayers
   const maxRounds = 15
@@ -305,29 +309,50 @@ export default function BattlePlayView({
 
       {/* Scoreboard */}
       <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>
-        {players.map((p) => (
-          <Box
-            key={p.id}
-            sx={{
-              textAlign: 'center',
-              p: 1,
-              borderRadius: 2,
-              border: '2px solid',
-              borderColor: roundResult?.winnerId === p.id ? 'success.main' : 'divider',
-              bgcolor: roundResult?.winnerId === p.id ? 'success.light' : 'background.paper',
-              minWidth: 80,
-            }}
-          >
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-              {p.name}
-            </Typography>
-            <Typography variant="h6">{wonCards[p.id]?.length ?? 0}</Typography>
-            <Typography variant="caption">cards won</Typography>
-            <Typography variant="caption" display="block" color="text.secondary">
-              {playerHands[p.id]?.length ?? 0} in hand
-            </Typography>
-          </Box>
-        ))}
+        {players.map((p) => {
+          const profile = avatarProfiles[p.id]
+          return (
+            <Box
+              key={p.id}
+              sx={{
+                textAlign: 'center',
+                p: 1,
+                borderRadius: 2,
+                border: '2px solid',
+                borderColor: roundResult?.winnerId === p.id ? 'success.main' : 'divider',
+                bgcolor: roundResult?.winnerId === p.id ? 'success.light' : 'background.paper',
+                minWidth: 80,
+              }}
+            >
+              {profile ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.5 }}>
+                  <AvatarThumbnail
+                    features={profile.characterFeatures}
+                    ageGroup={profile.ageGroup ?? 'older'}
+                    faceGrid={profile.faceGrid}
+                    size={32}
+                    showArmor={false}
+                  />
+                </Box>
+              ) : p.avatarUrl ? (
+                <Box
+                  component="img"
+                  src={p.avatarUrl}
+                  alt={p.name}
+                  sx={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', mb: 0.5 }}
+                />
+              ) : null}
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                {p.name}
+              </Typography>
+              <Typography variant="h6">{wonCards[p.id]?.length ?? 0}</Typography>
+              <Typography variant="caption">cards won</Typography>
+              <Typography variant="caption" display="block" color="text.secondary">
+                {playerHands[p.id]?.length ?? 0} in hand
+              </Typography>
+            </Box>
+          )
+        })}
       </Box>
 
       {/* Round indicator */}

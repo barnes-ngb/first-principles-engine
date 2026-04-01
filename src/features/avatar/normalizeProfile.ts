@@ -6,6 +6,7 @@ import type {
   AvatarBackground,
   AvatarProfile,
   CharacterFeatures,
+  CharacterProportions,
   HelmetCrest,
   OutfitCustomization,
   ShieldEmblem,
@@ -116,6 +117,7 @@ function normalizeCustomization(raw: unknown): OutfitCustomization | undefined {
     ? (c.background as AvatarBackground)
     : undefined
   const accessories = normalizeAccessories(c.accessories)
+  const proportions = normalizeProportions(c.proportions)
   return {
     ...(c.shirtColor ? { shirtColor: c.shirtColor as string } : {}),
     ...(c.pantsColor ? { pantsColor: c.pantsColor as string } : {}),
@@ -126,7 +128,29 @@ function normalizeCustomization(raw: unknown): OutfitCustomization | undefined {
     ...(helmetCrest ? { helmetCrest } : {}),
     ...(background ? { background } : {}),
     ...(accessories.length > 0 ? { accessories } : {}),
+    ...(proportions ? { proportions } : {}),
   }
+}
+
+const PROPORTION_KEYS: (keyof CharacterProportions)[] = [
+  'headSize', 'torsoW', 'torsoH', 'torsoD', 'armW', 'armH', 'legW', 'legH', 'sleeveRatio', 'bootRatio', 'cape',
+]
+
+function normalizeProportions(raw: unknown): CharacterProportions | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const p = raw as Record<string, unknown>
+  // Validate that at least one numeric proportion key exists
+  const hasAny = PROPORTION_KEYS.some((k) => k in p)
+  if (!hasAny) return undefined
+  const result: Record<string, unknown> = {}
+  for (const key of PROPORTION_KEYS) {
+    if (key === 'cape') {
+      result[key] = typeof p[key] === 'boolean' ? p[key] : true
+    } else if (typeof p[key] === 'number' && isFinite(p[key] as number)) {
+      result[key] = p[key]
+    }
+  }
+  return Object.keys(result).length > 0 ? (result as unknown as CharacterProportions) : undefined
 }
 
 const VALID_ACCESSORY_IDS = new Set<string>(Object.keys(ACCESSORY_XP_THRESHOLDS))

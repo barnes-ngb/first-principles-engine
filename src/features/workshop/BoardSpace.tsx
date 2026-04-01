@@ -1,6 +1,8 @@
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import type { BoardSpaceType } from '../../core/types/workshop'
+import type { AvatarProfile } from '../../core/types'
+import AvatarThumbnail from '../avatar/AvatarThumbnail'
 
 const SPACE_COLORS: Record<BoardSpaceType, string> = {
   normal: '#e3f2fd',
@@ -36,7 +38,9 @@ interface BoardSpaceProps {
   label?: string
   color?: string
   /** Player tokens on this space */
-  players?: Array<{ name: string; color: string; avatarUrl?: string }>
+  players?: Array<{ name: string; color: string; avatarUrl?: string; id?: string; isActivePlayer?: boolean }>
+  /** Avatar profiles keyed by player ID */
+  avatarProfiles?: Record<string, AvatarProfile>
   isFirst?: boolean
   isLast?: boolean
   isActive?: boolean
@@ -54,6 +58,7 @@ export default function BoardSpace({
   label,
   color,
   players = [],
+  avatarProfiles,
   isFirst,
   isLast,
   isActive,
@@ -278,56 +283,121 @@ export default function BoardSpace({
         <Box
           sx={{
             position: 'absolute',
-            bottom: 3,
+            bottom: 2,
+            left: '50%',
+            transform: 'translateX(-50%)',
             display: 'flex',
-            // Offset-stack when multiple players share a space
-            '& > *:not(:first-of-type)': {
-              ml: players.length > 2 ? '-7px' : '-5px',
-            },
+            flexDirection: 'column',
+            alignItems: 'center',
           }}
         >
-          {players.map((player, pi) => (
-            <Box
-              key={player.name}
-              sx={{
-                width: 22,
-                height: 22,
-                borderRadius: '50%',
-                bgcolor: player.avatarUrl ? 'transparent' : player.color,
-                border: '2px solid white',
-                overflow: 'hidden',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '0.55rem',
-                fontWeight: 700,
-                color: 'white',
-                zIndex: pi,
-                boxShadow: '0 1px 3px rgba(0,0,0,0.35)',
-                // Bounce animation when landing
-                ...(isLanding
-                  ? {
-                      animation: 'tokenBounce 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                      '@keyframes tokenBounce': {
-                        '0%': { transform: 'scale(0.7) translateY(3px)' },
-                        '50%': { transform: 'scale(1.3) translateY(-2px)' },
-                        '100%': { transform: 'scale(1) translateY(0)' },
-                      },
-                    }
-                  : {}),
-              }}
-            >
-              {player.avatarUrl ? (
-                <img
-                  src={player.avatarUrl}
-                  alt={player.name}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              ) : (
-                player.name.charAt(0)
-              )}
+          <Box
+            sx={{
+              display: 'flex',
+              // Offset-stack when multiple players share a space
+              '& > *:not(:first-of-type)': {
+                ml: players.length > 2 ? '-7px' : '-5px',
+              },
+            }}
+          >
+            {players.map((player, pi) => {
+              const profile = player.id ? avatarProfiles?.[player.id] : undefined
+              const isActiveToken = player.isActivePlayer
+              const tokenSize = isActiveToken ? 34 : 26
+
+              return (
+                <Box
+                  key={player.name}
+                  sx={{
+                    width: tokenSize,
+                    height: tokenSize,
+                    borderRadius: profile ? '4px' : '50%',
+                    bgcolor: !profile && !player.avatarUrl ? player.color : 'transparent',
+                    border: isActiveToken ? '2px solid #ffd700' : '2px solid white',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.55rem',
+                    fontWeight: 700,
+                    color: 'white',
+                    zIndex: isActiveToken ? 10 : pi,
+                    boxShadow: isActiveToken
+                      ? '0 0 6px 2px rgba(255,215,0,0.6)'
+                      : '0 1px 3px rgba(0,0,0,0.35)',
+                    // Bounce animation when landing
+                    ...(isLanding
+                      ? {
+                          animation: 'tokenBounce 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                          '@keyframes tokenBounce': {
+                            '0%': { transform: 'scale(0.7) translateY(3px)' },
+                            '50%': { transform: 'scale(1.3) translateY(-2px)' },
+                            '100%': { transform: 'scale(1) translateY(0)' },
+                          },
+                        }
+                      : {}),
+                    // Active player pulse for non-3D tokens
+                    ...(isActiveToken && !profile
+                      ? {
+                          animation: 'activePulse 2s ease-in-out infinite',
+                          '@keyframes activePulse': {
+                            '0%, 100%': { boxShadow: '0 0 4px 1px rgba(255,215,0,0.4)' },
+                            '50%': { boxShadow: '0 0 8px 4px rgba(255,215,0,0.6)' },
+                          },
+                        }
+                      : {}),
+                    '@media (prefers-reduced-motion: reduce)': {
+                      animation: 'none !important',
+                    },
+                  }}
+                >
+                  {profile ? (
+                    <AvatarThumbnail
+                      features={profile.characterFeatures}
+                      ageGroup={profile.ageGroup ?? 'older'}
+                      equippedPieces={profile.equippedPieces ?? []}
+                      totalXp={profile.totalXp ?? 0}
+                      faceGrid={profile.faceGrid}
+                      size={tokenSize}
+                      animated={false}
+                      showArmor
+                    />
+                  ) : player.avatarUrl ? (
+                    <img
+                      src={player.avatarUrl}
+                      alt={player.name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    player.name.charAt(0)
+                  )}
+                </Box>
+              )
+            })}
+          </Box>
+          {/* Name labels */}
+          {players.length <= 2 && (
+            <Box sx={{ display: 'flex', gap: 0.25 }}>
+              {players.map((player) => (
+                <Typography
+                  key={player.name}
+                  variant="caption"
+                  sx={{
+                    fontSize: '0.5rem',
+                    fontWeight: player.isActivePlayer ? 700 : 400,
+                    lineHeight: 1,
+                    color: 'text.secondary',
+                    whiteSpace: 'nowrap',
+                    maxWidth: 40,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {player.name}
+                </Typography>
+              ))}
             </Box>
-          ))}
+          )}
         </Box>
       )}
     </Box>

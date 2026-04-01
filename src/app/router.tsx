@@ -22,6 +22,7 @@ import StoryGuidePage from '../features/books/StoryGuidePage'
 import MyAvatarPage from '../features/avatar/MyAvatarPage'
 import LaddersPage from '../features/ladders/LaddersPage'
 import WorkshopPage from '../features/workshop/WorkshopPage'
+import ShellyChatPage from '../features/shelly-chat/ShellyChatPage'
 
 const routes = [
   {
@@ -62,6 +63,7 @@ const routes = [
       { path: '/records/evaluations', element: <EvaluationsPage /> },
       { path: '/records/portfolio', element: <PortfolioPage /> },
       { path: '/settings', element: <SettingsPage /> },
+      { path: '/chat', element: <ShellyChatPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

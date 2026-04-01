@@ -239,8 +239,19 @@ Progress
 * Artifact gallery, compliance hours auto-logged on completion Settings
 * General family profile, AI usage dashboard
 * Avatar & XP tab — parent XP controls, piece management, force tier upgrade
-* Sticker Library tab — all generated stickers, tag editing, child profile assignment Cloud Functions (18 exported, 12 task types)
-1. `chat` — Task dispatch: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, chat, generate
+* Sticker Library tab — all generated stickers, tag editing, child profile assignment Shelly's AI Chat (Ask AI)
+* Persistent conversation threads saved to Firestore
+* Claude-powered responses with full family context (charter, children, skill snapshots, week theme)
+* Image generation via DALL-E (inline in conversation)
+* Mobile-first chat interface with message bubbles
+* Thread management — rename, archive, new thread
+* Suggestion buttons for common queries (sight words, quick activities, reading progress)
+* Pre-seeded chat utility — other features can open a chat with context via `openChatWithContext`
+* FAB on Today page for quick access
+* Parent nav: "Ask AI" (last item)
+* Auto-send for pre-seeded threads (sparkle buttons, future integration)
+* Saves to `families/{familyId}/shellyChatThreads` + messages subcollection Cloud Functions (18 exported, 13 task types)
+1. `chat` — Task dispatch: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate
 2. `weeklyReview` — Scheduled Sunday 7pm CT
 3. `generateWeeklyReviewNow` — Manual trigger
 4. `generateActivity` — Lesson card generation
@@ -256,12 +267,13 @@ Progress
 - Workshop: story inputs + skill snapshot for challenge calibration + game structure constraints + adventure tree generation + card game generation + card fix suggestions
 - Pattern analysis: child profile + skill snapshot + eval findings + conceptual blocks
 - Engagement data compressed to summary format (reduces tokens ~60%)
-- Token usage logged per task type to aiUsage collection Firestore Collections (27 in firestore.ts) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, dadLabReports, books, sightWordProgress, xpLedger, dailyArmorSessions, stickerLibrary, storyGames, evaluations, scans
+- Token usage logged per task type to aiUsage collection Firestore Collections (28 in firestore.ts) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, dadLabReports, books, sightWordProgress, xpLedger, dailyArmorSessions, stickerLibrary, storyGames, evaluations, scans, shellyChatThreads
 
 * `avatarProfiles` — per-child avatar data (features, XP, tier, equipped pieces, customization)
 * `xpLedger` — append-only XP event history per child
 
 * `scans` — curriculum photo scan records
+* `shellyChatThreads` — Shelly's AI chat conversation threads + messages subcollection
 
 **Note:** xpEventLog merged into xpLedger (dedup via dedupKey field on ledger entries). Interactive quest sessions stored in `evaluationSessions` with `sessionType: 'interactive'` field. Story games stored in `storyGames` with `gameType` field ('board' | 'adventure' | 'cards'). `wordProgress` is a child subcollection (`children/{childId}/wordProgress`) used by Knowledge Mine — not in `firestore.ts` collection helpers. What's Built but Untested with Real Users
 * Weekly Review (needs full week of data)
@@ -282,6 +294,7 @@ Progress
 * Customization UI (dye colors, emblems, crests)
 * AvatarThumbnail on other pages
 * Parent XP management UI
+* Shelly's AI Chat — thread persistence, family context quality, image generation in chat, mobile UX
 * Auto-XP from checklist/quest/book completion What's Not Built Yet Priority Queue (ready to prompt)
 * Lincoln Development Chat — dedicated AI chat mode reviewing evaluations, skill snapshot, recent progress → recommends what to work on this week
 * Planning improvements — activity ideas mode, engagement-based suggestions (PARTIALLY DONE: per-subject defaults and must-do/choose now built; engagement-based suggestions and activity ideas still TODO)
@@ -353,6 +366,7 @@ Cleanup Mar 24 Parent experience audit, dead code removal (5.6k+ lines), model u
 First Principles Mar 25 Weekly review rewrite (day logs + type alignment), disposition profile, teach-back (parent + kid), conundrum generation, extra activity logger, Firestore indexes, first principles alignment
 Business Prep Mar 28+ Creative timer, mini-book PDF, sketch-to-story pipeline
 Audit Mar 29-31 Architecture audit: dead code cleanup, TodayPage decomposition, error handling (SectionErrorBoundary), XP ledger perf, prompt consolidation, docs v14, first-week polish (evaluation nudge, minutes-logged indicator, HelpStrips, warmer empty states), materials theming (per-child), weekly review fixes (7PM schedule, CHARTER_PREAMBLE + addendum, empty-week guard), quest summary ethos fix, KidTodayView decomposition, PlannerChatPage decomposition, MyAvatarPage decomposition
+Shelly Chat Mar 31 Shelly's AI Chat: persistent threads, Claude with family context, inline DALL-E image gen, thread drawer (rename/archive), suggestion buttons, pre-seeded chat utility, FAB on Today, parent nav entry
 
 Removed Features (Cleanup Sprint, Mar 24-25)
 * Sessions (1,720 lines) — orphaned feature with no nav links; sessionsCollection removed
@@ -412,7 +426,7 @@ Key Design Decisions
 | `src/app/AppShell.tsx` | Nav structure (parent + kid) |
 | `src/app/router.tsx` | All routes (21 pages + 6 redirects) |
 | `src/core/types/index.ts` | Barrel re-export of split type files (common, family, planning, evaluation, xp, books, compliance, dadlab, workshop, skillTags) |
-| `src/core/firebase/firestore.ts` | All 27 collection references |
+| `src/core/firebase/firestore.ts` | All 28 collection references |
 | `src/core/ai/useAI.ts` | Chat + generateImage hooks |
 | `src/core/xp/addXpEvent.ts` | XP writer with dedup guards |
 | `src/core/xp/checkAndUnlockArmor.ts` | Tier unlock + sheet generation trigger |
@@ -420,7 +434,7 @@ Key Design Decisions
 | `src/core/utils/perf.ts` | Performance measurement helpers |
 | `functions/src/ai/chat.ts` | AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) |
 | `functions/src/ai/imageGen.ts` | DALL-E 3 + gpt-image-1 routing |
-| `functions/src/ai/tasks/` | Chat task registry (12 handlers: plan, chat, evaluate, quest, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, workshop, scan + analyzePatterns export) |
+| `functions/src/ai/tasks/` | Chat task registry (13 handlers: plan, chat, evaluate, quest, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, workshop, scan, shellyChat + analyzePatterns export) |
 | `functions/src/ai/imageTasks/` | Image task registry (11 handlers) |
 | `functions/src/ai/contextSlices.ts` | Task-specific context assembly + engagement compression |
 | `src/features/avatar/` | My Armor (MyAvatarPage + 8 extracted panels, VoxelCharacter, voxel/) |
@@ -428,6 +442,7 @@ Key Design Decisions
 | `src/features/quest/` | Knowledge Mine |
 | `src/features/today/` | Today page |
 | `src/features/records/` | Records + compliance |
+| `src/features/shelly-chat/` | Shelly's AI Chat (Ask AI page, thread drawer, pre-seeded chat utility) |
 | `src/features/workshop/` | Story Game Workshop |
 | `src/features/settings/` | Settings (AvatarAdminTab, StickerLibraryTab) |
 | `docs/FIRESTORE_AUDIT.md` | Firestore collection + index audit |
