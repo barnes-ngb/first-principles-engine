@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CreativeTimer from '../../components/CreativeTimer'
@@ -60,6 +60,9 @@ import {
   recordCardGamePlaySession,
 } from './workshopUtils'
 import MyGamesGallery from './MyGamesGallery'
+import WorldMap from './WorldMap'
+import { useWorkshopGames } from './useWorkshopGames'
+import { useTTS } from '../../core/hooks/useTTS'
 import GameCreationScreen from './GameCreationScreen'
 import VoiceRecordingStep from './VoiceRecordingStep'
 import { generateAllArt, generateAdventureArt, generateCardGameArt } from './workshopArt'
@@ -134,6 +137,23 @@ export default function WorkshopPage() {
 
   const isAdventure = currentGame?.gameType === GameType.Adventure
   const isCards = currentGame?.gameType === GameType.Cards
+
+  // ── World Map data + TTS announcement ────────────────────────────
+  const { games: allGames } = useWorkshopGames(familyId)
+  const tts = useTTS()
+  const childGames = useMemo(
+    () => allGames.filter((g) => g.childId === activeChildId && g.status !== 'draft'),
+    [allGames, activeChildId],
+  )
+  const mapAnnouncedRef = useRef(false)
+  useEffect(() => {
+    const key = `workshop-map-announced-${activeChildId}`
+    if (childGames.length >= 3 && activeChildId && !mapAnnouncedRef.current && localStorage.getItem(key) !== 'true') {
+      mapAnnouncedRef.current = true
+      localStorage.setItem(key, 'true')
+      tts.speak("Your world is growing! You've created 3 games. Tap the map to explore your worlds!")
+    }
+  }, [childGames.length, activeChildId, tts])
 
   // ── Draft auto-save helpers ──────────────────────────────────────
 
@@ -1074,6 +1094,15 @@ export default function WorkshopPage() {
           >
             Create a New Game
           </Button>
+
+          {/* World Map — appears after 3+ games */}
+          {familyId && activeChildId && (
+            <WorldMap
+              games={childGames}
+              childName={children.find((c) => c.id === activeChildId)?.name}
+              onSelectGame={handleSelectExistingGame}
+            />
+          )}
 
           {/* My Games gallery */}
           {familyId && activeChildId && (

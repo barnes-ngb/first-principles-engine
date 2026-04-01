@@ -21,4 +21,6 @@ export interface ShellyChatMessage {
   timestamp: string
   imageUrl?: string
   imagePrompt?: string
+  uploadedImageUrl?: string
+  imageAction?: 'analyze' | 'transform'
 }
