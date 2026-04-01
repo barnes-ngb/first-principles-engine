@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
 import CloseIcon from '@mui/icons-material/Close'
@@ -18,6 +19,9 @@ import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import IconButton from '@mui/material/IconButton'
 import LinearProgress from '@mui/material/LinearProgress'
+import List from '@mui/material/List'
+import ListItemButton from '@mui/material/ListItemButton'
+import ListItemText from '@mui/material/ListItemText'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
 import Tab from '@mui/material/Tab'
@@ -52,6 +56,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { ShellyChatMessage, ChatThread, ChatContext } from '../../core/types'
 import ChatMessageBubble from './ChatMessageBubble'
 import ChatThreadDrawer from './ChatThreadDrawer'
+import { formatRelativeTime } from './formatRelativeTime'
 
 const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: string; suggestions: ReadonlyArray<{ label: string; message: string }> }> = {
   lincoln: {
@@ -129,6 +134,7 @@ export default function ShellyChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const autoSendTriggered = useRef(false)
+  const imageIdeaTimeoutFired = useRef(false)
 
   const activeThread = threads.find((t) => t.id === activeThreadId)
 
@@ -484,9 +490,25 @@ export default function ShellyChatPage() {
             lastMessagePreview: '🎨 Image generated',
           },
         )
+      } else {
+        // Image generation failed — show error in chat so user knows what happened
+        console.error('[Chat] Image generation returned no result for prompt:', prompt.slice(0, 80))
+        await addDoc(shellyChatMessagesCollection(familyId, threadId), {
+          role: 'assistant',
+          content: 'Sorry, I wasn\'t able to generate that image. The AI image service may be busy or the prompt may need adjusting — try rephrasing or try again in a moment.',
+          timestamp: new Date().toISOString(),
+        })
+        await updateDoc(
+          doc(shellyChatThreadsCollection(familyId), threadId),
+          {
+            updatedAt: new Date().toISOString(),
+            messageCount: increment(1),
+            lastMessagePreview: '⚠️ Image generation failed',
+          },
+        )
       }
     } catch (err) {
-      console.error('Failed to generate image:', err)
+      console.error('[Chat] Image generation failed:', err)
     } finally {
       setGeneratingImage(false)
     }
@@ -520,11 +542,12 @@ export default function ShellyChatPage() {
 
     setLoadingQuestions(true)
     setImageFlowStep('questions')
+    imageIdeaTimeoutFired.current = false
 
-    // Set a 5-second timeout
+    // Set a 5-second timeout — skip refinement and generate directly if AI is slow
     const timeoutId = setTimeout(() => {
+      imageIdeaTimeoutFired.current = true
       setLoadingQuestions(false)
-      // Auto-skip to direct generation if too slow
       setImageFlowStep('generating')
       handleImageFlowClose()
       handleGenerateImageDirect(idea)
@@ -550,6 +573,8 @@ export default function ShellyChatPage() {
       })
 
       clearTimeout(timeoutId)
+      // If the timeout already fired, generation is in progress — don't duplicate
+      if (imageIdeaTimeoutFired.current) return
 
       if (response?.message) {
         try {
@@ -574,6 +599,8 @@ export default function ShellyChatPage() {
       handleGenerateImageDirect(idea)
     } catch {
       clearTimeout(timeoutId)
+      // If the timeout already fired, generation is in progress — don't duplicate
+      if (imageIdeaTimeoutFired.current) return
       setLoadingQuestions(false)
       handleImageFlowClose()
       handleGenerateImageDirect(idea)
@@ -754,7 +781,7 @@ export default function ShellyChatPage() {
       setUploadPreview(null)
       setUploading(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams])
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams, chatContext])
 
   const handleUploadAnalyze = useCallback(async () => {
     if (!uploadFile) return
@@ -850,7 +877,7 @@ export default function ShellyChatPage() {
       setUploading(false)
       setSending(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams])
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, chatContext])
 
   const handleUploadGenerate = useCallback(async () => {
     if (!uploadFile || !uploadPreview) return
@@ -899,7 +926,7 @@ export default function ShellyChatPage() {
       setUploadPreview(null)
       setUploading(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams])
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams, chatContext])
 
   // ── New thread ─────────────────────────────────────────────────
   const handleNewThread = useCallback(() => {
@@ -974,17 +1001,27 @@ export default function ShellyChatPage() {
     <Box data-page="chat" sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, flex: 1 }}>
       {/* Slim toolbar row */}
       <Box sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
-        <IconButton size="small" onClick={() => setDrawerOpen(true)} aria-label="Conversations">
+        <IconButton size="small" onClick={() => setDrawerOpen(true)} aria-label="All conversations">
           <HistoryIcon />
         </IconButton>
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          noWrap
-          sx={{ flex: 1, ml: 1 }}
-        >
-          {activeThread?.title || 'New conversation'}
-        </Typography>
+
+        {activeThreadId ? (
+          <>
+            <IconButton size="small" onClick={handleNewThread} aria-label="Back">
+              <ArrowBackIcon fontSize="small" />
+            </IconButton>
+            <Typography variant="body2" color="text.secondary" noWrap sx={{ flex: 1, ml: 0.5 }}>
+              {activeThread?.title || 'Conversation'}
+            </Typography>
+          </>
+        ) : (
+          <Typography variant="body2" color="text.secondary" sx={{ flex: 1, ml: 1 }}>
+            {chatContext === 'lincoln' ? "Lincoln's conversations" :
+             chatContext === 'london' ? "London's conversations" :
+             'Conversations'}
+          </Typography>
+        )}
+
         <Button size="small" startIcon={<AddIcon />} onClick={handleNewThread}>
           New
         </Button>
@@ -1021,34 +1058,70 @@ export default function ShellyChatPage() {
       {/* Messages area */}
       <Box sx={{ flex: 1, overflow: 'auto', px: 2, py: 2, minHeight: 0 }}>
         {showEmpty ? (
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              textAlign: 'center',
-              gap: 2,
-            }}
-          >
-            <Typography variant="h5">{SUGGESTIONS_BY_CONTEXT[chatContext].greeting}</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 320 }}>
-              {SUGGESTIONS_BY_CONTEXT[chatContext].subtitle}
-            </Typography>
-            <Stack spacing={1} sx={{ mt: 1, width: '100%', maxWidth: 360 }}>
-              {SUGGESTIONS_BY_CONTEXT[chatContext].suggestions.map((s) => (
-                <Button
-                  key={s.label}
-                  variant="outlined"
-                  size="small"
-                  onClick={() => setInput(s.message)}
-                  sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
-                >
-                  {s.label}
-                </Button>
-              ))}
-            </Stack>
+          <Box sx={{ px: 1, py: 3 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                textAlign: 'center',
+                gap: 2,
+              }}
+            >
+              <Typography variant="h5">{SUGGESTIONS_BY_CONTEXT[chatContext].greeting}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 320 }}>
+                {SUGGESTIONS_BY_CONTEXT[chatContext].subtitle}
+              </Typography>
+              <Stack spacing={1} sx={{ mt: 1, width: '100%', maxWidth: 360 }}>
+                {SUGGESTIONS_BY_CONTEXT[chatContext].suggestions.map((s) => (
+                  <Button
+                    key={s.label}
+                    variant="outlined"
+                    size="small"
+                    onClick={() => setInput(s.message)}
+                    sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+                  >
+                    {s.label}
+                  </Button>
+                ))}
+              </Stack>
+            </Box>
+
+            {threads.length > 0 && (
+              <Box sx={{ mt: 4 }}>
+                <Typography variant="overline" color="text.secondary" sx={{ px: 1 }}>
+                  Recent conversations
+                </Typography>
+                <List dense disablePadding>
+                  {threads.slice(0, 5).map((thread) => (
+                    <ListItemButton
+                      key={thread.id}
+                      onClick={() => handleSelectThread(thread.id)}
+                      sx={{ borderRadius: 1, mb: 0.5 }}
+                    >
+                      <ListItemText
+                        primary={thread.title}
+                        secondary={thread.lastMessagePreview}
+                        primaryTypographyProps={{ variant: 'body2', noWrap: true }}
+                        secondaryTypographyProps={{ variant: 'caption', noWrap: true }}
+                      />
+                      <Typography variant="caption" color="text.secondary" sx={{ ml: 1, whiteSpace: 'nowrap' }}>
+                        {formatRelativeTime(thread.updatedAt)}
+                      </Typography>
+                    </ListItemButton>
+                  ))}
+                </List>
+                {threads.length > 5 && (
+                  <Button
+                    size="small"
+                    onClick={() => setDrawerOpen(true)}
+                    sx={{ mt: 0.5 }}
+                  >
+                    View all conversations
+                  </Button>
+                )}
+              </Box>
+            )}
           </Box>
         ) : (
           <>

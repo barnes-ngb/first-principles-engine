@@ -262,7 +262,7 @@ ${item.subjectBucket === 'Reading' || item.subjectBucket === 'LanguageArts' ? 'G
     } finally {
       setPrintingWorksheet(false)
     }
-  }, [item, childId, childName, familyId, activeLessonCard, snapshot, aiChat])
+  }, [item, childId, childName, familyId, activeLessonCard, snapshot, aiChat, weekTheme])
 
   const supports = snapshot?.supports ?? []
   const stopRules = snapshot?.stopRules ?? []
