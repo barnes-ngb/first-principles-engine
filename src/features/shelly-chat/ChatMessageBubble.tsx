@@ -1,6 +1,6 @@
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
-import type { ChatMessage } from '../../core/types'
+import type { ShellyChatMessage } from '../../core/types'
 
 function formatTimestamp(timestamp: string): string {
   const date = new Date(timestamp)
@@ -52,7 +52,7 @@ function applyBold(text: string): React.ReactNode {
 }
 
 interface ChatMessageBubbleProps {
-  message: ChatMessage
+  message: ShellyChatMessage
 }
 
 export default function ChatMessageBubble({ message }: ChatMessageBubbleProps) {

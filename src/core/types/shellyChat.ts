@@ -14,7 +14,7 @@ export interface ChatThread {
   archived: boolean
 }
 
-export interface ChatMessage {
+export interface ShellyChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
