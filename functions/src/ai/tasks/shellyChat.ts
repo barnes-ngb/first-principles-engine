@@ -131,7 +131,14 @@ Guidelines:
 - Keep responses concise unless she asks for detail.
 - You can reference the week's theme if it's relevant.
 - If she asks you to generate an image, tell her to tap the image button.
-- For printable activities, format them clearly with sections she can screenshot or print.`;
+- For printable activities, format them clearly with sections she can screenshot or print.
+
+After your response, suggest 2-3 brief follow-up questions Shelly might want to ask. Format them on new lines at the very end of your response, each prefixed with "[FOLLOWUP] ". Keep each under 50 characters. These should be specific to what you just discussed, not generic.
+
+Example:
+[FOLLOWUP] How do I adapt this for London?
+[FOLLOWUP] What materials do I need?
+[FOLLOWUP] Can you make this a printable?`;
 
   const model = modelForTask("shellyChat" as never);
 
