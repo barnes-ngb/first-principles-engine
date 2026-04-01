@@ -23,6 +23,7 @@ import { playEquipSound } from './voxel/equipSound'
 import { buildShieldEmblem } from './voxel/buildShieldEmblem'
 import { buildHelmetCrest } from './voxel/buildHelmetCrest'
 import { buildRoom } from './voxel/buildRoom'
+import { addOutlinesToGroup, removeOutlinesFromGroup } from './voxel/blockOutline'
 import { buildAccessory, getAccessoryAttachPoint, animateAccessories, getHiddenAccessories } from './voxel/buildAccessory'
 import {
   getCurrentSeason,
@@ -673,6 +674,18 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     // Apply saved outfit colors
     applyProfileOutfit(character, customization)
 
+    // ── Edge outlines — Minecraft Legends block definition ──────────
+    // Body parts get standard outlines
+    addOutlinesToGroup(character, 0.25)
+    // Equipped armor pieces get slightly lighter outlines
+    for (const pieceId of equippedPieces) {
+      const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
+      if (group) addOutlinesToGroup(group, 0.2)
+    }
+    // Cape gets very subtle outlines (should feel soft)
+    const capeMesh = character.getObjectByName('cape') ?? scene.getObjectByName('cape')
+    if (capeMesh instanceof THREE.Group) addOutlinesToGroup(capeMesh, 0.15)
+
     // Apply helmet hair if helmet is initially equipped
     if (equippedPieces.includes('helmet')) {
       applyHelmHairStyle(character, true, resolvedFeatures)
@@ -1091,6 +1104,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         }
         applyTierToArmor(armorGroupsRef.current, currentTier, [pieceId], armorColors)
 
+        // Add edge outlines to newly equipped armor
+        if (group) addOutlinesToGroup(group, 0.2)
+
         // Add enchantment glow if tier qualifies (Iron+)
         if (tierHasGlow(currentTier) && group) {
           removeEnchantGlow(group) // clear any stale glow
@@ -1159,8 +1175,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         }
         const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
         if (group) {
-          // Remove glow from unequipped piece
+          // Remove glow + outlines from unequipped piece
           removeEnchantGlow(group)
+          removeOutlinesFromGroup(group)
 
           const isUnlocked = totalXp >= XP_THRESHOLDS[pieceId as VoxelArmorPieceId]
           const tierTint = getTierTint(currentTier)
