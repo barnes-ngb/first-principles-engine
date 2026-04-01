@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { AccessoryId } from '../../../core/types'
+import type { AccessoryId, CharacterProportions } from '../../../core/types'
 import { getBodyLayout } from './buildCharacter'
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -402,8 +402,9 @@ export function buildAccessory(
   type: AccessoryId,
   ageGroup: 'older' | 'younger',
   options?: AccessoryBuildOptions,
+  customProportions?: Partial<CharacterProportions>,
 ): THREE.Group {
-  const layout = getBodyLayout(ageGroup)
+  const layout = getBodyLayout(ageGroup, customProportions)
   const { U } = layout
   const hU = (U * layout.p.headPx) / 8 // head pixel unit — scales with head size
   const color = options?.color ?? 0x4488cc

@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { CharacterFeatures, OutfitCustomization } from '../../../core/types'
+import type { CharacterFeatures, CharacterProportions, OutfitCustomization } from '../../../core/types'
 import { buildHair } from './buildHair'
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -129,11 +129,13 @@ export const CHARACTER_PROPORTIONS = {
 } as const
 
 /** Compute key layout coordinates from proportions (shared with armor/cape/accessories) */
-export function getBodyLayout(ageGroup: 'older' | 'younger') {
+export function getBodyLayout(ageGroup: 'older' | 'younger', customProportions?: Partial<CharacterProportions>) {
   const scale = ageGroup === 'younger' ? 0.85 : 1.0
   const s = scale
   const U = 0.125 * s // Detail unit for armor/accessory padding
-  const cp = CHARACTER_PROPORTIONS
+  const cp = customProportions
+    ? { ...CHARACTER_PROPORTIONS, ...customProportions }
+    : CHARACTER_PROPORTIONS
 
   // World-unit dimensions (head NOT scaled — same absolute size for both)
   const headSize = cp.headSize
@@ -180,11 +182,12 @@ export function getBodyLayout(ageGroup: 'older' | 'younger') {
 export function buildCharacter(
   features: CharacterFeatures,
   ageGroup: 'older' | 'younger',
+  customProportions?: Partial<CharacterProportions>,
 ): THREE.Group {
   const character = new THREE.Group()
   character.name = 'character'
 
-  const layout = getBodyLayout(ageGroup)
+  const layout = getBodyLayout(ageGroup, customProportions)
   const s = layout.scale
   const outfit = LEGENDS_OUTFIT[ageGroup]
 
@@ -305,8 +308,11 @@ export function buildCharacter(
   // --- ARMS (Group: sleeve + forearm + wrist wrap) ---
   // Pivot at shoulder (Group origin). Geometry translated down from pivot.
   const shoulderY = torsoTop - 0.03 * s
-  const sleeveH = armH * CHARACTER_PROPORTIONS.sleeveRatio   // 70% of arm
-  const forearmH = armH * (1 - CHARACTER_PROPORTIONS.sleeveRatio) // 30% of arm
+  const cpUsed = customProportions
+    ? { ...CHARACTER_PROPORTIONS, ...customProportions }
+    : CHARACTER_PROPORTIONS
+  const sleeveH = armH * cpUsed.sleeveRatio   // 70% of arm
+  const forearmH = armH * (1 - cpUsed.sleeveRatio) // 30% of arm
   const forearmW = armW - 0.01 * s // slightly thinner than sleeve
 
   // Left arm
@@ -381,7 +387,7 @@ export function buildCharacter(
   character.add(legR)
 
   // BOOTS — cover lower 30% of each leg (slightly wider, leather material)
-  const bootH = legH * CHARACTER_PROPORTIONS.bootRatio
+  const bootH = legH * cpUsed.bootRatio
   const bootY = bootH / 2
 
   const bootL = new THREE.Mesh(

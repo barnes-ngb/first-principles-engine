@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { CharacterProportions } from '../../../core/types'
 import { LEGENDS_OUTFIT, getBodyLayout } from './buildCharacter'
 
 // ── Cape colors per tier (Gold+ override the base cape color) ───────
@@ -59,8 +60,8 @@ export function resolveCapeColor(
  *   Bottom: torsoW × 0.8 wide, torsoH × 0.3 tall, 0.04 deep (darkened 20%)
  *   Clasp:  0.08 × 0.05 × 0.05 gold
  */
-export function buildBaseCape(ageGroup: 'older' | 'younger', capeColor: number): THREE.Group {
-  const layout = getBodyLayout(ageGroup)
+export function buildBaseCape(ageGroup: 'older' | 'younger', capeColor: number, customProportions?: Partial<CharacterProportions>): THREE.Group {
+  const layout = getBodyLayout(ageGroup, customProportions)
   const s = layout.scale
   const { torsoW, torsoH, torsoD } = layout
 
