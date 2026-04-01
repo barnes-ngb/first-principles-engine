@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
+import AttachFileIcon from '@mui/icons-material/AttachFile'
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import CloseIcon from '@mui/icons-material/Close'
 import ForumIcon from '@mui/icons-material/Forum'
 import ImageIcon from '@mui/icons-material/Image'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
+import SearchIcon from '@mui/icons-material/Search'
 import SendIcon from '@mui/icons-material/Send'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -19,6 +22,8 @@ import LinearProgress from '@mui/material/LinearProgress'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
+import ToggleButton from '@mui/material/ToggleButton'
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import {
   addDoc,
@@ -70,7 +75,7 @@ interface RefinementQuestion {
 
 export default function ShellyChatPage() {
   const familyId = useFamilyId()
-  const { activeChild } = useActiveChild()
+  const { activeChild, activeChildId, setActiveChildId, children } = useActiveChild()
   const { chat, generateImage } = useAI()
 
   const [searchParams, setSearchParams] = useSearchParams()
@@ -89,6 +94,7 @@ export default function ShellyChatPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [pendingAttachment, setPendingAttachment] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Image refinement state (Prompt 9) ──────────────────────────
@@ -98,6 +104,9 @@ export default function ShellyChatPage() {
   const [imageQuestions, setImageQuestions] = useState<RefinementQuestion[]>([])
   const [imageAnswers, setImageAnswers] = useState<Record<number, string>>({})
   const [loadingQuestions, setLoadingQuestions] = useState(false)
+
+  // ── Follow-up suggestions state ─────────────────────────────────
+  const [followUps, setFollowUps] = useState<string[]>([])
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const autoSendTriggered = useRef(false)
@@ -171,6 +180,27 @@ export default function ShellyChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, activeThreadId])
 
+  // ── Follow-up parser ────────────────────────────────────────────
+  const parseFollowUps = (text: string): { cleanText: string; followUps: string[] } => {
+    const lines = text.split('\n')
+    const followUpItems: string[] = []
+    const contentLines: string[] = []
+
+    for (const line of lines) {
+      const match = line.match(/^\[FOLLOWUP\]\s*(.+)/)
+      if (match) {
+        followUpItems.push(match[1].trim())
+      } else {
+        contentLines.push(line)
+      }
+    }
+
+    return {
+      cleanText: contentLines.join('\n').trimEnd(),
+      followUps: followUpItems.slice(0, 3),
+    }
+  }
+
   // ── Send to AI (shared logic) ──────────────────────────────────
   const sendToAI = useCallback(
     async (currentMessages: ShellyChatMessage[]) => {
@@ -190,9 +220,11 @@ export default function ShellyChatPage() {
           messages: aiMessages,
         })
         if (response?.message) {
+          const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
+          setFollowUps(suggestions)
           await addDoc(shellyChatMessagesCollection(familyId, activeThreadId), {
             role: 'assistant',
-            content: response.message,
+            content: cleanText,
             timestamp: new Date().toISOString(),
           })
           await updateDoc(
@@ -200,7 +232,7 @@ export default function ShellyChatPage() {
             {
               updatedAt: new Date().toISOString(),
               messageCount: increment(1),
-              lastMessagePreview: response.message.slice(0, 100),
+              lastMessagePreview: cleanText.slice(0, 100),
             },
           )
         }
@@ -219,6 +251,7 @@ export default function ShellyChatPage() {
     if (!text || sending) return
 
     setInput('')
+    setFollowUps([])
     setSending(true)
 
     try {
@@ -239,12 +272,17 @@ export default function ShellyChatPage() {
         setSearchParams({ thread: threadId })
       }
 
-      // Add user message
-      await addDoc(shellyChatMessagesCollection(familyId, threadId), {
+      // Add user message (with optional pending attachment)
+      const userMsgData: Record<string, unknown> = {
         role: 'user',
         content: text,
         timestamp: new Date().toISOString(),
-      })
+      }
+      if (pendingAttachment) {
+        userMsgData.uploadedImageUrl = pendingAttachment
+        userMsgData.imageAction = 'context'
+      }
+      await addDoc(shellyChatMessagesCollection(familyId, threadId), userMsgData)
       await updateDoc(
         doc(shellyChatThreadsCollection(familyId), threadId),
         {
@@ -254,8 +292,13 @@ export default function ShellyChatPage() {
         },
       )
 
-      // Get AI response
-      const currentMsgs = [...messages, { id: '', role: 'user' as const, content: text, timestamp: new Date().toISOString() }]
+      // Get AI response — include image URL for vision if attached
+      const aiContent = pendingAttachment
+        ? `[IMAGE_URL:${pendingAttachment}]\n${text}`
+        : text
+      if (pendingAttachment) setPendingAttachment(null)
+
+      const currentMsgs = [...messages, { id: '', role: 'user' as const, content: aiContent, timestamp: new Date().toISOString() }]
       const aiMessages = currentMsgs.slice(-20).map((m) => ({
         role: m.role as 'user' | 'assistant',
         content: m.content,
@@ -269,9 +312,11 @@ export default function ShellyChatPage() {
       })
 
       if (response?.message) {
+        const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
+        setFollowUps(suggestions)
         await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
-          content: response.message,
+          content: cleanText,
           timestamp: new Date().toISOString(),
         })
         await updateDoc(
@@ -279,7 +324,7 @@ export default function ShellyChatPage() {
           {
             updatedAt: new Date().toISOString(),
             messageCount: increment(1),
-            lastMessagePreview: response.message.slice(0, 100),
+            lastMessagePreview: cleanText.slice(0, 100),
           },
         )
       }
@@ -288,7 +333,7 @@ export default function ShellyChatPage() {
     } finally {
       setSending(false)
     }
-  }, [input, sending, activeThreadId, familyId, messages, chat, activeChild?.id, setSearchParams])
+  }, [input, sending, activeThreadId, familyId, messages, chat, activeChild?.id, setSearchParams, pendingAttachment])
 
   // ── Image generation (refactored for Prompt 9) ─────────────────
   const handleGenerateImageDirect = useCallback(async (prompt: string) => {
@@ -501,6 +546,48 @@ export default function ShellyChatPage() {
     setUploadPreview(null)
   }, [uploadPreview])
 
+  const handleUploadContext = useCallback(async () => {
+    if (!uploadFile) return
+
+    setUploadDialogOpen(false)
+    setUploading(true)
+
+    try {
+      const compressed = await compressIfNeeded(uploadFile, 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
+
+      let threadId = activeThreadId
+
+      if (!threadId) {
+        const threadRef = await addDoc(shellyChatThreadsCollection(familyId), {
+          title: 'New conversation',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messageCount: 0,
+          lastMessagePreview: '',
+          archived: false,
+        })
+        threadId = threadRef.id
+        setActiveThreadId(threadId)
+        setSearchParams({ thread: threadId })
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const storagePath = `families/${familyId}/chat-uploads/${threadId}/${timestamp}.jpg`
+      const storageRef = ref(storage, storagePath)
+      await uploadBytes(storageRef, compressed)
+      const downloadUrl = await getDownloadURL(storageRef)
+
+      setPendingAttachment(downloadUrl)
+    } catch (err) {
+      console.error('Failed to upload image for attachment:', err)
+    } finally {
+      if (uploadPreview) URL.revokeObjectURL(uploadPreview)
+      setUploadFile(null)
+      setUploadPreview(null)
+      setUploading(false)
+    }
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams])
+
   const handleUploadAction = useCallback(async (action: 'analyze' | 'transform') => {
     if (!uploadFile) return
 
@@ -586,9 +673,11 @@ export default function ShellyChatPage() {
       })
 
       if (response?.message) {
+        const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
+        setFollowUps(suggestions)
         await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
-          content: response.message,
+          content: cleanText,
           timestamp: new Date().toISOString(),
         })
         await updateDoc(
@@ -596,7 +685,7 @@ export default function ShellyChatPage() {
           {
             updatedAt: new Date().toISOString(),
             messageCount: increment(1),
-            lastMessagePreview: response.message.slice(0, 100),
+            lastMessagePreview: cleanText.slice(0, 100),
           },
         )
       }
@@ -617,6 +706,7 @@ export default function ShellyChatPage() {
     setMessages([])
     setSearchParams({})
     setDrawerOpen(false)
+    setFollowUps([])
     autoSendTriggered.current = false
   }, [setSearchParams])
 
@@ -626,6 +716,7 @@ export default function ShellyChatPage() {
       setActiveThreadId(threadId)
       setSearchParams({ thread: threadId })
       setDrawerOpen(false)
+      setFollowUps([])
       autoSendTriggered.current = false
     },
     [setSearchParams],
@@ -692,6 +783,25 @@ export default function ShellyChatPage() {
         >
           {activeThread?.title || 'New conversation'}
         </Typography>
+        {children.length > 0 && (
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={activeChildId}
+            onChange={(_, val) => { if (val) setActiveChildId(val) }}
+            sx={{ mx: 1 }}
+          >
+            {children.map((child) => (
+              <ToggleButton
+                key={child.id}
+                value={child.id}
+                sx={{ py: 0.25, px: 1, textTransform: 'none', fontSize: '0.75rem' }}
+              >
+                {child.name}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+        )}
         <Button size="small" startIcon={<AddIcon />} onClick={handleNewThread}>
           New
         </Button>
@@ -891,9 +1001,44 @@ export default function ShellyChatPage() {
         </Paper>
       )}
 
+      {/* Follow-up suggestions */}
+      {followUps.length > 0 && !sending && (
+        <Box sx={{ px: 1, pb: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+          {followUps.map((q, i) => (
+            <Chip
+              key={i}
+              label={q}
+              size="small"
+              variant="outlined"
+              onClick={() => {
+                setInput(q)
+                setFollowUps([])
+              }}
+              sx={{ fontSize: '0.75rem' }}
+            />
+          ))}
+        </Box>
+      )}
+
       {/* Input area */}
       <Paper elevation={2} sx={{ p: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
         {uploading && <LinearProgress sx={{ mb: 1 }} />}
+        {pendingAttachment && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, px: 0.5 }}>
+            <Box
+              component="img"
+              src={pendingAttachment}
+              alt="Attached"
+              sx={{ width: 36, height: 36, borderRadius: 1, objectFit: 'cover' }}
+            />
+            <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
+              Image attached
+            </Typography>
+            <IconButton size="small" onClick={() => setPendingAttachment(null)} aria-label="Remove attachment">
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Box>
+        )}
         <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 0.5 }}>
           {/* Hidden file input for image upload */}
           <input
@@ -927,7 +1072,7 @@ export default function ShellyChatPage() {
             size="small"
             placeholder="Ask Shelly's AI..."
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => { setInput(e.target.value); if (followUps.length) setFollowUps([]) }}
             onKeyDown={handleKeyDown}
             disabled={isBusy}
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
@@ -951,20 +1096,23 @@ export default function ShellyChatPage() {
         fullWidth
         maxWidth="xs"
       >
-        <DialogTitle>What would you like to do?</DialogTitle>
+        <DialogTitle>What should I do with this?</DialogTitle>
         <DialogContent>
           {uploadPreview && (
-            <Box
-              component="img"
-              src={uploadPreview}
-              alt="Upload preview"
-              sx={{ maxHeight: 120, maxWidth: '100%', borderRadius: 1, display: 'block', mx: 'auto', mb: 2 }}
-            />
+            <Box sx={{ textAlign: 'center', mb: 2 }}>
+              <Box
+                component="img"
+                src={uploadPreview}
+                alt="Upload preview"
+                sx={{ maxHeight: 150, borderRadius: 1 }}
+              />
+            </Box>
           )}
           <Stack spacing={1}>
             <Button
               variant="outlined"
               fullWidth
+              startIcon={<SearchIcon />}
               onClick={() => handleUploadAction('analyze')}
               sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
             >
@@ -973,10 +1121,20 @@ export default function ShellyChatPage() {
             <Button
               variant="outlined"
               fullWidth
+              startIcon={<AutoFixHighIcon />}
               onClick={() => handleUploadAction('transform')}
               sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
             >
-              Make something from this
+              Create something from this
+            </Button>
+            <Button
+              variant="outlined"
+              fullWidth
+              startIcon={<AttachFileIcon />}
+              onClick={handleUploadContext}
+              sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+            >
+              Attach to my next message
             </Button>
           </Stack>
         </DialogContent>

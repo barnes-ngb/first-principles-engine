@@ -115,6 +115,8 @@ export default function PageEditor({
                 height: img.position?.height ?? 100,
                 rotation: img.position?.rotation ?? 0,
                 zIndex: newZ,
+                flipH: img.position?.flipH ?? false,
+                flipV: img.position?.flipV ?? false,
               })
             }}
             style={{ zIndex: img.position?.zIndex ?? idx + 1 }}

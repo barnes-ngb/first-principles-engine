@@ -10,10 +10,14 @@ import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
+import Alert from '@mui/material/Alert'
 import AddIcon from '@mui/icons-material/Add'
+import FileUploadIcon from '@mui/icons-material/FileUpload'
 import { addDoc, getDocs, orderBy, query, doc, setDoc } from 'firebase/firestore'
+import { ref, deleteObject, uploadBytes, getDownloadURL } from 'firebase/storage'
 
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
+import { storage } from '../../core/firebase/storage'
 import { useAI } from '../../core/ai/useAI'
 import type { Sticker, StickerTag } from '../../core/types'
 import { StickerCategory } from '../../core/types/enums'
@@ -121,12 +125,16 @@ export default function StickerPicker({
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [createPrompt, setCreatePrompt] = useState('')
 
+  // Generation preview state (shown before saving to library)
+  const [generationPreview, setGenerationPreview] = useState<{ url: string; storagePath: string } | null>(null)
+  const [generationError, setGenerationError] = useState(false)
+
   // Post-generation tagging state
   const [pendingSticker, setPendingSticker] = useState<Sticker | null>(null)
   const [pendingTags, setPendingTags] = useState<StickerTag[]>([])
   const [pendingProfile, setPendingProfile] = useState<'lincoln' | 'london' | 'both'>('both')
 
-  const { generateImage, loading: generating } = useAI()
+  const { generateImage, loading: generating, error: generateError } = useAI()
 
   // Load stickers from Firestore
   useEffect(() => {
@@ -169,20 +177,29 @@ export default function StickerPicker({
 
   const handleCreateSticker = useCallback(async () => {
     if (!createPrompt.trim()) return
+    setGenerationError(false)
     const result = await generateImage({
       familyId,
       prompt: createPrompt.trim(),
       style: 'book-sticker',
       size: '1024x1024',
     })
-    if (!result) return
+    if (!result) {
+      setGenerationError(true)
+      return
+    }
+    // Show preview instead of saving immediately
+    setGenerationPreview({ url: result.url, storagePath: result.storagePath })
+  }, [createPrompt, familyId, generateImage])
 
+  const handleUseGeneratedSticker = useCallback(async () => {
+    if (!generationPreview) return
     const suggestedTags = suggestTagsFromPrompt(createPrompt)
     const autoProfile: 'lincoln' | 'london' | 'both' = childProfile ?? 'both'
 
     const newSticker: Omit<Sticker, 'id'> = {
-      url: result.url,
-      storagePath: result.storagePath,
+      url: generationPreview.url,
+      storagePath: generationPreview.storagePath,
       label: createPrompt.trim(),
       category: StickerCategory.Custom,
       childId: null,
@@ -196,13 +213,77 @@ export default function StickerPicker({
 
     setStickers((prev) => [saved, ...prev])
     setShowCreateDialog(false)
-    setCreatePrompt('')
+    setGenerationPreview(null)
 
     // Show quick tagging step
     setPendingSticker(saved)
     setPendingTags(suggestedTags)
     setPendingProfile(autoProfile)
-  }, [createPrompt, familyId, childProfile, generateImage])
+  }, [generationPreview, createPrompt, familyId, childProfile])
+
+  const handleTryAgain = useCallback(() => {
+    if (generationPreview) {
+      // Delete the generated image from Storage
+      try {
+        void deleteObject(ref(storage, generationPreview.storagePath))
+      } catch {
+        // Ignore deletion errors
+      }
+    }
+    setGenerationPreview(null)
+    setGenerationError(false)
+    // Keep the prompt pre-filled so they can tweak it
+  }, [generationPreview])
+
+  const [uploading, setUploading] = useState(false)
+
+  const handleUploadSticker = useCallback(async (file: File) => {
+    if (!familyId) return
+    setUploading(true)
+    try {
+      const ts = new Date().toISOString().replace(/[:.]/g, '-')
+      const ext = file.name.split('.').pop() ?? 'png'
+      const storagePath = `families/${familyId}/stickers/upload_${ts}.${ext}`
+      const storageRef = ref(storage, storagePath)
+      await uploadBytes(storageRef, file)
+      const url = await getDownloadURL(storageRef)
+
+      const autoProfile: 'lincoln' | 'london' | 'both' = childProfile ?? 'both'
+      const newSticker: Omit<Sticker, 'id'> = {
+        url,
+        storagePath,
+        label: file.name.replace(/\.[^.]+$/, ''),
+        category: StickerCategory.Custom,
+        childId: null,
+        createdAt: new Date().toISOString(),
+        tags: ['other'],
+        childProfile: autoProfile,
+      }
+      const docRef = await addDoc(stickerLibraryCollection(familyId), newSticker as Sticker)
+      const saved = { ...newSticker, id: docRef.id } as Sticker
+      setStickers((prev) => [saved, ...prev])
+
+      // Go straight to tagging
+      setPendingSticker(saved)
+      setPendingTags(['other'])
+      setPendingProfile(autoProfile)
+    } catch (err) {
+      console.error('Sticker upload failed:', err)
+    } finally {
+      setUploading(false)
+    }
+  }, [familyId, childProfile])
+
+  const triggerUpload = useCallback(() => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/png,image/jpeg,image/webp,image/gif'
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (file) void handleUploadSticker(file)
+    }
+    input.click()
+  }, [handleUploadSticker])
 
   const handleConfirmTagging = useCallback(async () => {
     if (!pendingSticker?.id) {
@@ -399,15 +480,26 @@ export default function StickerPicker({
             </Box>
           )}
 
-          {/* Make a sticker button */}
-          <Button
-            variant="outlined"
-            startIcon={<AddIcon />}
-            onClick={() => setShowCreateDialog(true)}
-            sx={{ minHeight: 48 }}
-          >
-            Make a sticker
-          </Button>
+          {/* Add sticker buttons */}
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="outlined"
+              startIcon={<FileUploadIcon />}
+              onClick={triggerUpload}
+              disabled={uploading}
+              sx={{ minHeight: 48, flex: 1 }}
+            >
+              {uploading ? 'Uploading...' : 'Upload'}
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<AddIcon />}
+              onClick={() => setShowCreateDialog(true)}
+              sx={{ minHeight: 48, flex: 1 }}
+            >
+              Generate
+            </Button>
+          </Stack>
         </Stack>
       </DialogContent>
       <DialogActions>
@@ -417,42 +509,89 @@ export default function StickerPicker({
       {/* Create sticker dialog */}
       <Dialog
         open={showCreateDialog}
-        onClose={() => setShowCreateDialog(false)}
+        onClose={() => { if (!generating) { setShowCreateDialog(false); setGenerationPreview(null); setGenerationError(false) } }}
         maxWidth="xs"
         fullWidth
       >
         <DialogTitle>Make a Sticker</DialogTitle>
         <DialogContent>
-          <TextField
-            label="Describe your sticker"
-            placeholder="A cute dragon..."
-            value={createPrompt}
-            onChange={(e) => setCreatePrompt(e.target.value)}
-            fullWidth
-            autoFocus
-            sx={{ mt: 1 }}
-            disabled={generating}
-          />
-          {generating && (
-            <Stack alignItems="center" spacing={1} sx={{ mt: 2 }}>
-              <CircularProgress size={24} />
-              <Typography variant="body2" color="text.secondary">
-                Creating your sticker...
-              </Typography>
+          {generationPreview ? (
+            <Stack spacing={2} alignItems="center" sx={{ pt: 1 }}>
+              <Box
+                component="img"
+                src={generationPreview.url}
+                alt="Generated sticker"
+                sx={{ width: 160, height: 160, objectFit: 'contain', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}
+              />
+              <Stack direction="row" spacing={1.5}>
+                <Button
+                  variant="outlined"
+                  onClick={handleTryAgain}
+                >
+                  Try Again
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={() => { void handleUseGeneratedSticker() }}
+                >
+                  Use This
+                </Button>
+              </Stack>
             </Stack>
+          ) : generationError ? (
+            <Stack spacing={2} alignItems="center" sx={{ pt: 1 }}>
+              <Typography variant="body2" color="text.secondary" textAlign="center">
+                Couldn&apos;t make that sticker. Try describing it differently.
+              </Typography>
+              <Button variant="outlined" onClick={handleTryAgain}>
+                Try Again
+              </Button>
+            </Stack>
+          ) : (
+            <>
+              <TextField
+                label="Describe your sticker"
+                placeholder="A cute dragon..."
+                value={createPrompt}
+                onChange={(e) => setCreatePrompt(e.target.value)}
+                fullWidth
+                autoFocus
+                sx={{ mt: 1 }}
+                disabled={generating}
+              />
+              {generating && (
+                <Stack alignItems="center" spacing={1} sx={{ mt: 2 }}>
+                  <CircularProgress size={24} />
+                  <Typography variant="body2" color="text.secondary">
+                    Creating your sticker...
+                  </Typography>
+                </Stack>
+              )}
+            </>
+          )}
+          {generateError && !generating && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              {generateError.message.includes('blocked') || generateError.message.includes('safety')
+                ? 'That description was blocked — try describing what it looks like instead of using a character name!'
+                : `Something went wrong: ${generateError.message}`}
+            </Alert>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowCreateDialog(false)} disabled={generating}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={() => { void handleCreateSticker() }}
-            disabled={!createPrompt.trim() || generating}
-          >
-            Create!
-          </Button>
+          {!generationPreview && !generationError && (
+            <>
+              <Button onClick={() => { setShowCreateDialog(false); setGenerationError(false) }} disabled={generating}>
+                Cancel
+              </Button>
+              <Button
+                variant="contained"
+                onClick={() => { void handleCreateSticker() }}
+                disabled={!createPrompt.trim() || generating}
+              >
+                Create!
+              </Button>
+            </>
+          )}
         </DialogActions>
       </Dialog>
     </Dialog>

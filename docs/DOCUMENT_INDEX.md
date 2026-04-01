@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-03-31.
+> Where everything lives. Updated 2026-04-01.
 
 ---
 
@@ -12,13 +12,13 @@
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
-| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — code now has 27 collections (scans added); `sessions` orphan removed; `wordProgress` subcollection still referenced in quest.ts |
+| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — code now has 29 collections (shellyChatThreads + messages added); `wordProgress` subcollection still referenced in quest.ts |
 | `WEEKLY_CONUNDRUM_ARC.md` | **CURRENT** | Weekly conundrum story arc design — Stonebridge narrative, recurring characters, ethical reasoning scenarios |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
 | `ENGINE_V2.md` | **CURRENT** | Engine framework (flywheel, stages, scoring) |
 | `FIRST_PRINCIPLES_ALIGNMENT.md` | **NEW** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
-| `SYSTEM_PROMPTS.md` | **STALE** (Mar 21) | Task dispatch, model selection, context slices — needs update for scan task handler (12 total), unified weekly focus, disposition prompts |
+| `SYSTEM_PROMPTS.md` | **CURRENT** (v4) | Task dispatch, model selection, context slices — 13 task types including scan + shellyChat |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
 | `00_MASTER_SCOPE.md` | HISTORICAL | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `01_MVP_V0_1.md` | HISTORICAL | Phase 1 — MVP (Today, artifacts, engine, records) |
@@ -76,7 +76,7 @@ These are family/values documents maintained outside the repo. They inform AI pr
 | File | Purpose |
 |---|---|
 | `CLAUDE.md` | AI assistant instructions: build commands, constraints, conventions, project context |
-| `src/core/types/` | Domain types split by area: `common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts` |
+| `src/core/types/` | Domain types split by area: `common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `zod.ts` |
 | `src/core/types/enums.ts` | All enum-like `as const` objects and companion types |
 | `functions/src/ai/chat.ts` | Cloud Function: system prompt assembly, enriched context, quest prompt |
 | `src/features/quest/questTypes.ts` | Knowledge Mine types (QuestState, SessionQuestion, InteractiveSessionData) |

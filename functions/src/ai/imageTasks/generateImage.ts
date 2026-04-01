@@ -61,6 +61,16 @@ export function buildImagePrompt(
   return `${prefix}${userPrompt}.${safetyPostfix}`;
 }
 
+// ── Fallback copyright name strip (used when Haiku rewriter fails) ──
+
+const COPYRIGHT_NAMES =
+  /\b(mario|luigi|princess peach|peach|bowser|toad|yoshi|donkey kong|link|zelda|ganon|kirby|samus|pikachu|pokemon|charizard|bulbasaur|squirtle|eevee|mewtwo|jigglypuff|snorlax|gengar|raichu|disney|mickey mouse|mickey|minnie|goofy|donald duck|elsa|anna|olaf|moana|rapunzel|ariel|mulan|simba|woody|buzz lightyear|nemo|dory|baymax|wall-e|spider-?man|spiderman|batman|superman|iron man|hulk|thor|captain america|wonder woman|wolverine|deadpool|thanos|joker|minecraft|creeper|enderman|steve|herobrine|fortnite|roblox|sonic|tails|knuckles|shadow|amy rose|among us|hello kitty|spongebob|patrick star|squidward|peppa pig|paw patrol|bluey|cocomelon|ryan|mr\.? beast|mrbeast)\b/gi;
+
+/** Regex-based fallback to strip copyrighted names when the AI rewriter is unavailable. */
+function fallbackCopyrightStrip(prompt: string): string {
+  return prompt.replace(COPYRIGHT_NAMES, "character").replace(/\s{2,}/g, " ").trim();
+}
+
 // ── Callable Cloud Function ─────────────────────────────────────
 
 export const generateImage = onCall(
@@ -135,13 +145,26 @@ export const generateImage = onCall(
         style === "book-sticker"
           ? `You rewrite children's sticker descriptions to avoid copyright issues.
 
-RULES:
-- NEVER include character names (Mario, Pikachu, Elsa, etc.) or franchise names
-- Instead describe the CHARACTER visually: "a red-hatted plumber with a mustache" → "a cheerful cartoon man in red overalls and a red cap"
-- Stickers CAN have characters (unlike scenes) — just describe them generically
+CRITICAL RULES:
+- NEVER output any character names, franchise names, game names, or brand names
+- Replace ALL named characters with visual descriptions of how they look
+- Replace ALL franchise/game names with genre descriptions
+- If the input is ONLY a character name with no other context, describe that character's iconic visual appearance without naming them
 - Keep it cute, simple, child-friendly
-- Output just the description, no preamble
-- Under 50 words`
+- Under 50 words
+
+EXAMPLES:
+- "Mario" → "a cheerful stocky cartoon man wearing red overalls, a red cap, brown shoes, and a big bushy mustache"
+- "Pikachu" → "a small round yellow cartoon creature with long pointy ears tipped in black, rosy red cheeks, and a lightning-bolt shaped tail"
+- "a Minecraft creeper" → "a tall green blocky pixelated creature with a frowning face"
+- "Elsa from Frozen" → "a graceful young woman with platinum blonde hair in a long braid, wearing a sparkling ice-blue gown"
+- "Spider-Man swinging" → "a superhero in a red and blue full-body suit with web patterns, swinging through the air"
+- "Lincoln's Minecraft skin" → "a blocky pixel-art video game character"
+- "Sonic" → "a speedy blue cartoon hedgehog with red shoes and white gloves"
+- "a cute puppy" → "a cute puppy"
+
+OUTPUT: Just the rewritten description. No preamble, no quotes, no explanation.
+If the input has no copyright concerns (like "a cute puppy"), output it unchanged.`
           : `You rewrite children's image generation prompts to avoid copyright issues while preserving the creative intent.
 
 RULES:
@@ -169,12 +192,16 @@ IMPORTANT: The child will overlay their own characters on top of this scene. So 
       });
 
       const firstBlock = rewriteResult.content[0];
-      if (firstBlock?.type === "text") {
+      if (firstBlock?.type === "text" && firstBlock.text.trim()) {
         safePrompt = firstBlock.text;
+      } else {
+        // Empty response from rewriter — use fallback
+        safePrompt = fallbackCopyrightStrip(prompt);
       }
     } catch (rewriteErr) {
-      // If rewrite fails, proceed with the original prompt
-      console.warn("Prompt rewrite failed, using original:", rewriteErr);
+      // If rewrite fails, use regex fallback instead of raw prompt
+      console.warn("Prompt rewrite failed, using fallback strip:", rewriteErr);
+      safePrompt = fallbackCopyrightStrip(prompt);
     }
 
     // ── Generate image ──────────────────────────────────────────
