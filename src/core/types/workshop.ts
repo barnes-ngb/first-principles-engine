@@ -150,6 +150,7 @@ export interface StoryPlayer {
   name: string
   avatarUrl?: string
   isCreator: boolean
+  isGuest?: boolean
 }
 
 export interface StoryChallenge {
