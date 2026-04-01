@@ -11,7 +11,10 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import EditIcon from '@mui/icons-material/Edit'
 import DownloadIcon from '@mui/icons-material/Download'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
+import MenuBookIcon from '@mui/icons-material/MenuBook'
+import StopIcon from '@mui/icons-material/Stop'
 import CircularProgress from '@mui/material/CircularProgress'
+import Tooltip from '@mui/material/Tooltip'
 
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -122,6 +125,9 @@ export default function BookReaderPage() {
   const [totalWordsEncountered, setTotalWordsEncountered] = useState(0)
   const seenPagesRef = useRef<Set<number>>(new Set())
 
+  // TTS read-aloud state
+  const [isReading, setIsReading] = useState(false)
+
   // Session tracking
   const sessionStartRef = useRef<number>(Date.now())
   const pagesViewedRef = useRef<Set<number>>(new Set())
@@ -228,6 +234,42 @@ export default function BookReaderPage() {
   const handleWordTap = useCallback((word: string, action: 'help' | 'known') => {
     void recordInteraction(word, action)
   }, [recordInteraction])
+
+  // ── TTS Read Aloud ─────────────────────────────────────────────
+  const handleReadPage = useCallback(() => {
+    if (typeof speechSynthesis === 'undefined') return
+    speechSynthesis.cancel()
+
+    if (isReading) {
+      setIsReading(false)
+      return
+    }
+
+    const contentIdx = currentPage - 1
+    if (!book || contentIdx < 0 || contentIdx >= book.pages.length) return
+    const pageText = book.pages[contentIdx].text || ''
+    if (!pageText.trim()) return
+
+    const utterance = new SpeechSynthesisUtterance(pageText)
+    utterance.rate = 0.85
+    utterance.onend = () => setIsReading(false)
+    utterance.onerror = () => setIsReading(false)
+    setIsReading(true)
+    speechSynthesis.speak(utterance)
+  }, [isReading, currentPage, book])
+
+  // Cancel TTS on page change
+  useEffect(() => {
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
+    setIsReading(false)
+  }, [currentPage])
+
+  // Cancel TTS on unmount
+  useEffect(() => {
+    return () => {
+      if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
+    }
+  }, [])
 
   const handleDownloadPdf = useCallback(async (settings: PrintSettings) => {
     if (!book) return
@@ -406,6 +448,10 @@ export default function BookReaderPage() {
                 >
                   {contentPage.images.map((img) => {
                     const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+                    const transforms: string[] = []
+                    if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
+                    if (pos.flipH) transforms.push('scaleX(-1)')
+                    if (pos.flipV) transforms.push('scaleY(-1)')
                     return (
                       <Box
                         key={img.id}
@@ -419,6 +465,9 @@ export default function BookReaderPage() {
                           height: `${pos.height}%`,
                           objectFit: img.type === 'sticker' ? 'contain' : 'cover',
                           borderRadius: 1,
+                          zIndex: pos.zIndex ?? 0,
+                          transform: transforms.length > 0 ? transforms.join(' ') : undefined,
+                          transformOrigin: 'center center',
                         }}
                       />
                     )
@@ -445,18 +494,34 @@ export default function BookReaderPage() {
                 </Typography>
               )}
 
-              {/* Audio */}
-              {contentPage.audioUrl && (
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ px: 1 }}>
-                  <VolumeUpIcon sx={{ color: 'primary.main' }} />
-                  <Box
-                    component="audio"
-                    controls
-                    src={contentPage.audioUrl}
-                    sx={{ flex: 1, height: 36 }}
-                  />
-                </Stack>
-              )}
+              {/* Audio + Read Aloud */}
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ px: 1 }}>
+                {contentPage.audioUrl && (
+                  <>
+                    <VolumeUpIcon sx={{ color: 'primary.main' }} />
+                    <Box
+                      component="audio"
+                      controls
+                      src={contentPage.audioUrl}
+                      sx={{ flex: 1, height: 36 }}
+                    />
+                  </>
+                )}
+                {contentPage.text?.trim() && typeof speechSynthesis !== 'undefined' && (
+                  <Tooltip title={isReading ? 'Stop reading' : 'Read aloud'}>
+                    <IconButton
+                      onClick={handleReadPage}
+                      sx={{
+                        color: isReading ? 'error.main' : accentColor,
+                        minWidth: 44,
+                        minHeight: 44,
+                      }}
+                    >
+                      {isReading ? <StopIcon /> : <MenuBookIcon />}
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Stack>
             </Stack>
           )}
 
