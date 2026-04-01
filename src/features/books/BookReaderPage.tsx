@@ -438,9 +438,7 @@ export default function BookReaderPage() {
                   sx={{
                     position: 'relative',
                     width: '100%',
-                    minHeight: 200,
-                    maxHeight: 350,
-                    height: 280,
+                    aspectRatio: '3 / 2',
                     borderRadius: 2,
                     overflow: 'hidden',
                     bgcolor: isLincoln ? 'rgba(255,255,255,0.05)' : 'grey.100',

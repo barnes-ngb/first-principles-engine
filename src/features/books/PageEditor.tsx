@@ -86,8 +86,7 @@ export default function PageEditor({
       ref={imageContainerRef}
       sx={{
         width: isImageLeft ? '50%' : '100%',
-        minHeight: isFullImage ? 300 : 200,
-        height: isFullImage ? 400 : 250,
+        aspectRatio: '3 / 2',
         bgcolor: 'grey.100',
         borderRadius: 2,
         position: 'relative',
