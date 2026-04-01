@@ -5,7 +5,7 @@ import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
 import CloseIcon from '@mui/icons-material/Close'
-import ForumIcon from '@mui/icons-material/Forum'
+import HistoryIcon from '@mui/icons-material/History'
 import ImageIcon from '@mui/icons-material/Image'
 import SendIcon from '@mui/icons-material/Send'
 import VisibilityIcon from '@mui/icons-material/Visibility'
@@ -20,13 +20,14 @@ import IconButton from '@mui/material/IconButton'
 import LinearProgress from '@mui/material/LinearProgress'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
+import Tab from '@mui/material/Tab'
+import Tabs from '@mui/material/Tabs'
 import TextField from '@mui/material/TextField'
-import ToggleButton from '@mui/material/ToggleButton'
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import {
   addDoc,
   doc,
+  getDocs,
   increment,
   limit,
   onSnapshot,
@@ -34,6 +35,7 @@ import {
   query,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
@@ -41,29 +43,45 @@ import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { compressIfNeeded } from '../../core/utils/compressImage'
 import {
+  db,
   shellyChatMessagesCollection,
   shellyChatThreadsCollection,
 } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { ShellyChatMessage, ChatThread } from '../../core/types'
+import type { ShellyChatMessage, ChatThread, ChatContext } from '../../core/types'
 import ChatMessageBubble from './ChatMessageBubble'
 import ChatThreadDrawer from './ChatThreadDrawer'
 
-const SUGGESTIONS = [
-  {
-    label: 'Sight word activity ideas',
-    message: 'What are some fun ways to practice sight words with Lincoln?',
+const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: string; suggestions: ReadonlyArray<{ label: string; message: string }> }> = {
+  lincoln: {
+    greeting: "Lincoln's Learning Space \u{1F3AE}",
+    subtitle: "Ask about Lincoln's reading progress, activity ideas, skill recommendations, or anything related to his learning.",
+    suggestions: [
+      { label: 'Reading progress check', message: "How is Lincoln doing with reading? What should we focus on this week based on his evaluations?" },
+      { label: 'Sight word activities', message: 'What are some fun, hands-on ways to practice sight words with Lincoln?' },
+      { label: 'What to work on next', message: "Based on Lincoln's skill snapshot and recent evaluations, what should be our priority this week?" },
+    ],
   },
-  {
-    label: 'Quick London activity',
-    message: 'I need a quick 10-minute activity for London while I work with Lincoln',
+  london: {
+    greeting: "London's Creative Corner \u{1F3A8}",
+    subtitle: "Ask about London's progress, story ideas, creative activities, or anything related to his learning.",
+    suggestions: [
+      { label: 'Story activity ideas', message: 'What are some creative story or drawing activities for London this week?' },
+      { label: 'Learning through art', message: "How can I tie London's love of drawing into our academic goals?" },
+      { label: 'Quick independent activity', message: 'I need a quick 10-minute activity for London while I work with Lincoln.' },
+    ],
   },
-  {
-    label: 'Reading progress check',
-    message: 'Help me understand where Lincoln is with reading and what to focus on',
+  general: {
+    greeting: "Hi Shelly \u{1F44B}",
+    subtitle: "Ask me anything \u2014 teaching ideas, curriculum questions, scheduling, or just vent about your day.",
+    suggestions: [
+      { label: 'Weekly planning help', message: "Help me think through this week's plan. What should I prioritize?" },
+      { label: 'Low energy day ideas', message: "I'm having a low energy day. What's the most important thing to cover with the boys?" },
+      { label: 'Curriculum question', message: 'I have a question about our curriculum approach.' },
+    ],
   },
-] as const
+}
 
 // ── Image refinement types ─────────────────────────────────────
 
@@ -74,10 +92,11 @@ interface RefinementQuestion {
 
 export default function ShellyChatPage() {
   const familyId = useFamilyId()
-  const { activeChild, activeChildId, setActiveChildId, children } = useActiveChild()
+  const { activeChildId, children } = useActiveChild()
   const { chat, generateImage } = useAI()
 
   const [searchParams, setSearchParams] = useSearchParams()
+  const [chatContext, setChatContext] = useState<ChatContext>('general')
   const [threads, setThreads] = useState<ChatThread[]>([])
   const [activeThreadId, setActiveThreadId] = useState<string | null>(
     searchParams.get('thread'),
@@ -113,11 +132,75 @@ export default function ShellyChatPage() {
 
   const activeThread = threads.find((t) => t.id === activeThreadId)
 
-  // ── Real-time thread list ──────────────────────────────────────
+  // ── Initialize context from URL param or active child ─────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const contextParam = params.get('context') as ChatContext | null
+
+    if (contextParam && ['lincoln', 'london', 'general'].includes(contextParam)) {
+      setChatContext(contextParam)
+    } else if (activeChildId) {
+      const child = children.find(c => c.id === activeChildId)
+      if (child) {
+        const name = child.name.toLowerCase()
+        if (name === 'lincoln' || name === 'london') {
+          setChatContext(name)
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only on mount
+
+  // ── Migrate old threads without chatContext ────────────────────
+  useEffect(() => {
+    const migrateOldThreads = async () => {
+      try {
+        const oldThreads = await getDocs(
+          query(shellyChatThreadsCollection(familyId), where('archived', '==', false))
+        )
+        const batch = writeBatch(db)
+        let needsMigration = false
+        for (const threadDoc of oldThreads.docs) {
+          if (!threadDoc.data().chatContext) {
+            batch.update(threadDoc.ref, { chatContext: 'general' })
+            needsMigration = true
+          }
+        }
+        if (needsMigration) {
+          await batch.commit()
+          console.log('[shellyChat] Migrated old threads to general context')
+        }
+      } catch (err) {
+        console.warn('[shellyChat] Thread migration error:', err)
+      }
+    }
+    migrateOldThreads()
+  }, [familyId])
+
+  // ── Context change handler ────────────────────────────────────
+  const handleContextChange = useCallback((_: unknown, val: ChatContext | null) => {
+    if (!val) return
+    setChatContext(val)
+    setActiveThreadId(null)
+    setMessages([])
+    setFollowUps([])
+    setSearchParams({})
+    autoSendTriggered.current = false
+  }, [setSearchParams])
+
+  // ── Map chatContext to childId for AI calls ───────────────────
+  const getChildIdForContext = useCallback((): string => {
+    if (chatContext === 'general') return ''
+    const child = children.find(c => c.name.toLowerCase() === chatContext)
+    return child?.id || ''
+  }, [chatContext, children])
+
+  // ── Real-time thread list (filtered by chatContext) ───────────
   useEffect(() => {
     const q = query(
       shellyChatThreadsCollection(familyId),
       where('archived', '==', false),
+      where('chatContext', '==', chatContext),
       orderBy('updatedAt', 'desc'),
       limit(20),
     )
@@ -133,7 +216,7 @@ export default function ShellyChatPage() {
       (err) => console.error('Thread list listener error:', err),
     )
     return unsub
-  }, [familyId])
+  }, [familyId, chatContext])
 
   // ── Real-time messages ─────────────────────────────────────────
   useEffect(() => {
@@ -215,7 +298,7 @@ export default function ShellyChatPage() {
         }))
         const response = await chat({
           familyId,
-          childId: activeChild?.id ?? '',
+          childId: getChildIdForContext(),
           taskType: TaskType.ShellyChat,
           messages: aiMessages,
         })
@@ -242,7 +325,7 @@ export default function ShellyChatPage() {
         setSending(false)
       }
     },
-    [activeThreadId, chat, familyId, activeChild?.id],
+    [activeThreadId, chat, familyId, getChildIdForContext],
   )
 
   // ── Send handler ───────────────────────────────────────────────
@@ -265,6 +348,7 @@ export default function ShellyChatPage() {
           updatedAt: new Date().toISOString(),
           messageCount: 0,
           lastMessagePreview: text.slice(0, 100),
+          chatContext,
           archived: false,
         })
         threadId = threadRef.id
@@ -309,7 +393,7 @@ export default function ShellyChatPage() {
 
       const response = await chat({
         familyId,
-        childId: activeChild?.id ?? '',
+        childId: getChildIdForContext(),
         taskType: TaskType.ShellyChat,
         messages: aiMessages,
       })
@@ -336,7 +420,7 @@ export default function ShellyChatPage() {
     } finally {
       setSending(false)
     }
-  }, [input, sending, activeThreadId, familyId, messages, chat, activeChild?.id, setSearchParams, pendingAttachment])
+  }, [input, sending, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, pendingAttachment, chatContext])
 
   // ── Image generation (refactored for Prompt 9) ─────────────────
   const handleGenerateImageDirect = useCallback(async (prompt: string) => {
@@ -354,6 +438,7 @@ export default function ShellyChatPage() {
           updatedAt: new Date().toISOString(),
           messageCount: 0,
           lastMessagePreview: `🎨 ${prompt.slice(0, 90)}`,
+          chatContext,
           archived: false,
         })
         threadId = threadRef.id
@@ -405,7 +490,7 @@ export default function ShellyChatPage() {
     } finally {
       setGeneratingImage(false)
     }
-  }, [activeThreadId, familyId, generateImage, setSearchParams])
+  }, [activeThreadId, familyId, generateImage, setSearchParams, chatContext])
 
   // ── Image refinement flow (Prompt 9) ───────────────────────────
 
@@ -448,7 +533,7 @@ export default function ShellyChatPage() {
     try {
       const response = await chat({
         familyId,
-        childId: activeChild?.id ?? '',
+        childId: getChildIdForContext(),
         taskType: TaskType.ShellyChat,
         messages: [{
           role: 'user',
@@ -493,7 +578,7 @@ export default function ShellyChatPage() {
       handleImageFlowClose()
       handleGenerateImageDirect(idea)
     }
-  }, [imageIdea, chat, familyId, activeChild?.id, handleImageFlowClose, handleGenerateImageDirect])
+  }, [imageIdea, chat, familyId, getChildIdForContext, handleImageFlowClose, handleGenerateImageDirect])
 
   const handleImageRefinementGenerate = useCallback(async () => {
     setImageFlowStep('generating')
@@ -509,7 +594,7 @@ export default function ShellyChatPage() {
     try {
       const response = await chat({
         familyId,
-        childId: activeChild?.id ?? '',
+        childId: getChildIdForContext(),
         taskType: TaskType.ShellyChat,
         messages: [{
           role: 'user',
@@ -525,7 +610,7 @@ export default function ShellyChatPage() {
         try {
           const descResult = await chat({
             familyId,
-            childId: activeChild?.id ?? '',
+            childId: getChildIdForContext(),
             taskType: TaskType.ShellyChat,
             messages: [{
               role: 'user',
@@ -564,7 +649,7 @@ export default function ShellyChatPage() {
       setLoadingQuestions(false)
       await handleGenerateImageDirect(imageIdea)
     }
-  }, [imageAnswers, imageQuestions, imageIdea, chat, familyId, activeChild?.id, handleGenerateImageDirect, pendingReferenceImage])
+  }, [imageAnswers, imageQuestions, imageIdea, chat, familyId, getChildIdForContext, handleGenerateImageDirect, pendingReferenceImage])
 
   const handleJustGenerate = useCallback(async () => {
     const idea = imageIdea.trim()
@@ -579,7 +664,7 @@ export default function ShellyChatPage() {
       try {
         const descResult = await chat({
           familyId,
-          childId: activeChild?.id ?? '',
+          childId: getChildIdForContext(),
           taskType: TaskType.ShellyChat,
           messages: [{
             role: 'user',
@@ -605,7 +690,7 @@ export default function ShellyChatPage() {
     setLoadingQuestions(false)
 
     await handleGenerateImageDirect(finalPrompt)
-  }, [imageIdea, handleGenerateImageDirect, pendingReferenceImage, chat, familyId, activeChild?.id])
+  }, [imageIdea, handleGenerateImageDirect, pendingReferenceImage, chat, familyId, getChildIdForContext])
 
   // ── Image upload handlers (Prompt 8) ───────────────────────────
 
@@ -645,6 +730,7 @@ export default function ShellyChatPage() {
           updatedAt: new Date().toISOString(),
           messageCount: 0,
           lastMessagePreview: '',
+          chatContext,
           archived: false,
         })
         threadId = threadRef.id
@@ -688,6 +774,7 @@ export default function ShellyChatPage() {
           updatedAt: new Date().toISOString(),
           messageCount: 0,
           lastMessagePreview: '📷 Analyzing image...',
+          chatContext,
           archived: false,
         })
         threadId = threadRef.id
@@ -732,7 +819,7 @@ export default function ShellyChatPage() {
 
       const response = await chat({
         familyId,
-        childId: activeChild?.id ?? '',
+        childId: getChildIdForContext(),
         taskType: TaskType.ShellyChat,
         messages: aiMessages,
       })
@@ -763,7 +850,7 @@ export default function ShellyChatPage() {
       setUploading(false)
       setSending(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, activeChild?.id, setSearchParams])
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams])
 
   const handleUploadGenerate = useCallback(async () => {
     if (!uploadFile || !uploadPreview) return
@@ -783,6 +870,7 @@ export default function ShellyChatPage() {
           updatedAt: new Date().toISOString(),
           messageCount: 0,
           lastMessagePreview: '🎨 Using as reference...',
+          chatContext,
           archived: false,
         })
         threadId = threadRef.id
@@ -884,41 +972,38 @@ export default function ShellyChatPage() {
 
   return (
     <Box data-page="chat" sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, flex: 1 }}>
-      {/* Slim inline toolbar (replaces AppBar — Prompt 7) */}
+      {/* Slim toolbar row */}
       <Box sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
         <IconButton size="small" onClick={() => setDrawerOpen(true)} aria-label="Conversations">
-          <ForumIcon />
+          <HistoryIcon />
         </IconButton>
         <Typography
           variant="body2"
           color="text.secondary"
-          sx={{ flex: 1, ml: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          noWrap
+          sx={{ flex: 1, ml: 1 }}
         >
           {activeThread?.title || 'New conversation'}
         </Typography>
-        {children.length > 0 && (
-          <ToggleButtonGroup
-            size="small"
-            exclusive
-            value={activeChildId}
-            onChange={(_, val) => { if (val) setActiveChildId(val) }}
-            sx={{ mx: 1 }}
-          >
-            {children.map((child) => (
-              <ToggleButton
-                key={child.id}
-                value={child.id}
-                sx={{ py: 0.25, px: 1, textTransform: 'none', fontSize: '0.75rem' }}
-              >
-                {child.name}
-              </ToggleButton>
-            ))}
-          </ToggleButtonGroup>
-        )}
         <Button size="small" startIcon={<AddIcon />} onClick={handleNewThread}>
           New
         </Button>
       </Box>
+
+      {/* Context tabs */}
+      <Tabs
+        value={chatContext}
+        onChange={handleContextChange}
+        variant="fullWidth"
+        sx={{
+          minHeight: 36,
+          '& .MuiTab-root': { minHeight: 36, py: 0.5, textTransform: 'none', fontSize: '0.875rem' },
+        }}
+      >
+        <Tab value="lincoln" label="Lincoln" />
+        <Tab value="london" label="London" />
+        <Tab value="general" label="General" />
+      </Tabs>
 
       {/* Thread drawer */}
       <ChatThreadDrawer
@@ -926,6 +1011,7 @@ export default function ShellyChatPage() {
         onClose={() => setDrawerOpen(false)}
         threads={threads}
         activeThreadId={activeThreadId}
+        chatContext={chatContext}
         onSelectThread={handleSelectThread}
         onNewThread={handleNewThread}
         onArchiveThread={handleArchiveThread}
@@ -946,12 +1032,12 @@ export default function ShellyChatPage() {
               gap: 2,
             }}
           >
-            <Typography variant="h5">Hi Shelly 👋</Typography>
+            <Typography variant="h5">{SUGGESTIONS_BY_CONTEXT[chatContext].greeting}</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 320 }}>
-              Ask me anything about teaching, activities, curriculum ideas, or just chat.
+              {SUGGESTIONS_BY_CONTEXT[chatContext].subtitle}
             </Typography>
             <Stack spacing={1} sx={{ mt: 1, width: '100%', maxWidth: 360 }}>
-              {SUGGESTIONS.map((s) => (
+              {SUGGESTIONS_BY_CONTEXT[chatContext].suggestions.map((s) => (
                 <Button
                   key={s.label}
                   variant="outlined"
