@@ -10,6 +10,7 @@ import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
+import Alert from '@mui/material/Alert'
 import AddIcon from '@mui/icons-material/Add'
 import { addDoc, getDocs, orderBy, query, doc, setDoc } from 'firebase/firestore'
 
@@ -126,7 +127,7 @@ export default function StickerPicker({
   const [pendingTags, setPendingTags] = useState<StickerTag[]>([])
   const [pendingProfile, setPendingProfile] = useState<'lincoln' | 'london' | 'both'>('both')
 
-  const { generateImage, loading: generating } = useAI()
+  const { generateImage, loading: generating, error: generateError } = useAI()
 
   // Load stickers from Firestore
   useEffect(() => {
@@ -440,6 +441,13 @@ export default function StickerPicker({
                 Creating your sticker...
               </Typography>
             </Stack>
+          )}
+          {generateError && !generating && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              {generateError.message.includes('blocked') || generateError.message.includes('safety')
+                ? 'That description was blocked — try describing what it looks like instead of using a character name!'
+                : `Something went wrong: ${generateError.message}`}
+            </Alert>
           )}
         </DialogContent>
         <DialogActions>
