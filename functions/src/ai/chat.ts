@@ -991,6 +991,7 @@ RULES:
 ${hasWords ? "- You MUST use every word from the word list at least once in the story." : ""}
 ${hasWords ? "- On each page, list which provided words appear on that page." : ""}
 - Do NOT use words significantly above ${level} level unless they are in the word list.
+- Do NOT use copyrighted character names (Mario, Luigi, Peach, Bowser, Pikachu, Elsa, Spider-Man, etc.) or franchise names (Nintendo, Disney, Marvel, Pokemon, etc.). Create original characters inspired by the same archetype instead (e.g. a brave plumber named Marco, a kind princess named Meadow).
 
 OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
 {

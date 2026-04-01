@@ -234,6 +234,7 @@ function renderText(
   sightWordSet: Set<string>,
   sightWordStyle: PrintSettings['sightWordStyle'],
   sightWordBgColor: [number, number, number],
+  maxY?: number,
 ): number {
   const lineSpacing = fontSizePt * lineHeightRatio * PT_TO_MM
 
@@ -245,6 +246,7 @@ function renderText(
   if (sightWordSet.size === 0 || sightWordStyle === 'plain') {
     const lines: string[] = pdf.splitTextToSize(text, maxWidth)
     for (const line of lines) {
+      if (maxY && y > maxY) break
       pdf.text(line, x, y)
       y += lineSpacing
     }
@@ -256,6 +258,8 @@ function renderText(
   let curX = x
 
   for (const word of words) {
+    if (maxY && y > maxY) break
+
     // Check if the core word (without punctuation) is a sight word
     const coreMatch = word.match(/^([^a-zA-Z]*)([a-zA-Z]+)([^a-zA-Z]*)$/)
     const coreWord = coreMatch ? coreMatch[2] : ''
@@ -270,6 +274,7 @@ function renderText(
     if (curX + wordWidth > x + maxWidth && curX > x) {
       curX = x
       y += lineSpacing
+      if (maxY && y > maxY) break
     }
 
     // Draw highlight background for sight words
@@ -392,7 +397,13 @@ async function drawContentPage(
 
   // Render page images
   if (page.images.length > 0) {
-    const imgAreaH = area.h * 0.5
+    // Match the editor's image container aspect ratio (~3:2, i.e. 375×250 on mobile).
+    // Without this, percentage-based sticker positions compress/expand and overlap.
+    const EDITOR_ASPECT_RATIO = 3 / 2
+    const imgAreaH = Math.min(area.w / EDITOR_ASPECT_RATIO, area.h * 0.5)
+    const imgAreaW = imgAreaH * EDITOR_ASPECT_RATIO
+    const imgAreaX = area.x + (area.w - imgAreaW) / 2 // center horizontally
+
     // Sort by zIndex for proper stacking
     const sortedImages = [...page.images].sort(
       (a, b) => (a.position?.zIndex ?? 0) - (b.position?.zIndex ?? 0),
@@ -400,7 +411,7 @@ async function drawContentPage(
 
     // Draw container background
     pdf.setFillColor(...hexToRgb(colors.imgBg))
-    pdf.roundedRect(area.x - 1.5, curY - 1.5, area.w + 3, imgAreaH + 3, 2, 2, 'F')
+    pdf.roundedRect(imgAreaX - 1.5, curY - 1.5, imgAreaW + 3, imgAreaH + 3, 2, 2, 'F')
 
     for (const img of sortedImages) {
       const dataUri = resolveUrl(img.url)
@@ -409,10 +420,10 @@ async function drawContentPage(
         const dims = await getImageDimensions(dataUri)
         const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
 
-        // Convert percentage position to mm within the image area
-        const imgX = area.x + (pos.x / 100) * area.w
+        // Convert percentage position to mm within the image area (using consistent aspect ratio)
+        const imgX = imgAreaX + (pos.x / 100) * imgAreaW
         const imgY = curY + (pos.y / 100) * imgAreaH
-        const imgW = (pos.width / 100) * area.w
+        const imgW = (pos.width / 100) * imgAreaW
         const imgH = (pos.height / 100) * imgAreaH
 
         const fit = fitInBox(dims.width, dims.height, imgW, imgH)
@@ -436,20 +447,24 @@ async function drawContentPage(
     curY += imgAreaH + 6
   }
 
-  // Render text
+  // Render text with dynamic font sizing to prevent overflow
   if (page.text) {
+    const textLen = page.text.length
+    const fontSize = textLen > 300 ? 11 : textLen > 200 ? 12 : textLen > 120 ? 14 : 16
+    const maxTextY = area.y + area.h - (settings.includePageNumbers ? 6 : 0)
     curY = renderText(
       pdf,
       page.text,
       area.x,
       curY,
       area.w,
-      16, // 16pt body text for readability
+      fontSize,
       1.6,
       textColor,
       sightWordSet,
       settings.sightWordStyle,
       hexToRgb(colors.sightWordBg),
+      maxTextY,
     )
   }
 
