@@ -22,6 +22,7 @@ import StoryGuidePage from '../features/books/StoryGuidePage'
 import MyAvatarPage from '../features/avatar/MyAvatarPage'
 import LaddersPage from '../features/ladders/LaddersPage'
 import WorkshopPage from '../features/workshop/WorkshopPage'
+import LaddersPage from '../features/ladders/LaddersPage'
 
 const routes = [
   {
