@@ -1,3 +1,5 @@
+export type ChatContext = 'lincoln' | 'london' | 'general'
+
 export interface ChatThread {
   id: string
   title: string
@@ -5,11 +7,11 @@ export interface ChatThread {
   updatedAt: string
   messageCount: number
   lastMessagePreview: string
+  chatContext: ChatContext
   context?: {
     source: 'sparkle' | 'planner' | 'evaluation' | 'general'
     itemTitle?: string
     weekTheme?: string
-    childId?: string
   }
   archived: boolean
 }
