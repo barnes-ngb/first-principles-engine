@@ -85,7 +85,8 @@ const items = snapshot.docs.map((doc) => ({
 - `src/core/xp/` — XP ledger, armor tiers, armor unlock logic
 - `src/core/avatar/` — Daily armor session management (`getDailyArmorSession.ts`)
 - `src/core/data/` — Database seed data
-- `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, decomposed panels (ArmorPieceGallery, ArmorVerseCard, AvatarPhotoUpload, AvatarHeroBanner, AvatarCharacterDisplay, ArmorSuitUpPanel, AvatarCustomizer, speakVerse), `voxel/` sub-module (Three.js character, armor, poses, materials, camera)
+- `src/features/auth/` — Auth guard route wrapper
+- `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, decomposed panels (ArmorPieceGallery, ArmorVerseCard, AvatarPhotoUpload, AvatarHeroBanner, AvatarCharacterDisplay, ArmorSuitUpPanel, AvatarCustomizer, speakVerse), VoxelCharacter (Three.js character, armor, poses, materials, camera), `voxel/` sub-module (armor meshes, pose definitions)
 - `src/features/books/` — Bookshelf, book editor/reader, sight word dashboard, story guide
 - `src/features/dad-lab/` — Dad Lab lifecycle (plan, start, contribute, complete)
 - `src/features/engine/` — Engine page and engine logic
@@ -102,7 +103,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/quest/` — Knowledge Mine (interactive reading quest)
 - `src/features/records/` — Hours, compliance, evaluations, portfolio
 - `src/features/settings/` — AI usage, account, avatar admin, sticker library
-- `src/features/shelly-chat/` — Shelly AI chat assistant (ShellyChatPage, ChatThreadDrawer, ChatMessageBubble, openChatWithContext)
+- `src/features/shelly-chat/` — Shelly AI chat assistant (ShellyChatPage, ChatThreadDrawer, ChatMessageBubble, openChatWithContext, formatRelativeTime)
 - `src/components/ScanButton.tsx` — Camera capture for curriculum photo scanning
 - `src/components/ScanResultsPanel.tsx` — AI scan results display
 - `src/features/today/` — Parent Today (decomposed: TodayPage shell + TodayChecklist, WeekFocusCard, QuickCaptureSection, TeachBackSection, ChapterQuestionCard) + Kid Today (decomposed: KidTodayView shell + KidChecklist, KidTeachBack, KidChapterResponse, KidConundrumResponse, KidExtraLogger, KidCelebration) + routine sync, XP
@@ -228,7 +229,7 @@ All under `families/{familyId}/`:
    - Image generation: DALL-E 3 (scenes, armor sheets) + gpt-image-1 (transparent stickers, photo transform)
 
 ### Testing AI Logic
-- Co-locate tests with logic files (e.g., `chatPlanner.logic.test.ts`)
+- Co-locate tests with logic files (e.g., `skipAdvisor.logic.test.ts`, `pace.logic.test.ts`)
 - Mock AI API responses in tests — never call real APIs in test suite
 - Test prompt assembly separately from API calls
 - Snapshot test system prompts to catch unintended changes
@@ -237,14 +238,14 @@ All under `families/{familyId}/`:
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
 - `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns)
 
-### Cloud Functions (18 exported)
+### Cloud Functions (19 exported)
 - `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate)
+- `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
 - `generateWeeklyReviewNow` — Manual review trigger
 - `generateActivity` — Lesson card generation
 - `healthCheck` — Diagnostic endpoint
 - 12 image functions: `generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`, `enhanceSketch`
-- `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 
 ### Cloud Functions Structure
 - `functions/src/index.ts` — Main entry point, exports all Cloud Functions
@@ -280,7 +281,7 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 - **PlannerChatPage.tsx (2,112L)** — Decomposed render (800→500L) but state management is still ~1,600L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
 - **WorkshopPage.tsx (1,578L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
 - **BookEditorPage.tsx (1,419L)** — Stable, handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
-- **VoxelCharacter.tsx (1,290L)** — Three.js render code. Splitting the render loop is risky. Leave as-is.
+- **VoxelCharacter.tsx (1,290L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
 - **MyAvatarPage.tsx (1,293L)** — Decomposed from 1,862L. Remaining code is state management + ceremony flow. Stable.
 - **Ladder system** — Partially deprecated. Disposition system replacing it. 5 files have TODO comments marking ladder references for removal.
 - **evaluate.ts (weekly review)** — Now uses CHARTER_PREAMBLE + addendum, but still separate from the task system. Not in task registry.

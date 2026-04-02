@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-04-01.
+> Where everything lives. Updated 2026-04-02.
 
 ---
 
@@ -12,22 +12,16 @@
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
-| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — code now has 29 collections (shellyChatThreads + messages added); `wordProgress` subcollection still referenced in quest.ts |
+| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — lists 31 collections but 6 are legacy/removed (`sessions`, `projects`, `weeklyScores`, `labSessions`, `plannerSessions`, `sightWordLists`); missing 3 newer collections (`storyGames`, `scans`, `shellyChatThreads`). CLAUDE.md table is now authoritative at 28 collections + 2 subcollections. |
 | `WEEKLY_CONUNDRUM_ARC.md` | **CURRENT** | Weekly conundrum story arc design — Stonebridge narrative, recurring characters, ethical reasoning scenarios |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
-| `ENGINE_V2.md` | **CURRENT** | Engine framework (flywheel, stages, scoring) |
+| `ENGINE_V2.md` | **CURRENT** | Learning framework: family snapshot, curriculum mapping, energy modes, weekly rhythm |
 | `FIRST_PRINCIPLES_ALIGNMENT.md` | **NEW** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
 | `SYSTEM_PROMPTS.md` | **CURRENT** (v4) | Task dispatch, model selection, context slices — 13 task types including scan + shellyChat |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
-| `00_MASTER_SCOPE.md` | HISTORICAL | Original phased scope from Feb 2026. Phases 1-5 complete. |
-| `01_MVP_V0_1.md` | HISTORICAL | Phase 1 — MVP (Today, artifacts, engine, records) |
-| `02_ENGINE_LADDERS.md` | HISTORICAL | Phase 2 — Engine + Ladders |
-| `03_RECORDS_COMPLIANCE.md` | HISTORICAL | Phase 3 — Records + Compliance |
-| `04_MEDIA_CAPTURE.md` | HISTORICAL | Phase 4 — Media Capture |
-| `05_DEPLOYMENT_OPERATIONS.md` | HISTORICAL | Phase 5 — Deployment + Ops |
-| `06_TESTING_PLAN.md` | HISTORICAL | Phase testing plan |
-| `07_SATURDAY_LAB_RUNBOOK.md` | HISTORICAL | Saturday lab runbook |
+| `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
+| `archive/01–07_*.md` | ARCHIVED | Phase 1–5 specs, original testing plan, Saturday lab runbook — all superseded by current docs |
 | `08_RUNBOOK.md` | **CURRENT** (Reference) | Operational runbook: deploy, backups, key rotation, troubleshooting |
 | `archive/` | HISTORICAL | Old reference docs |
 
@@ -52,7 +46,9 @@
 | `barnes-story-game-workshop-design.md` | Working on workshop feature |
 | `ENGINE_V2.md` | Working on engine/flywheel framework |
 | `FIRESTORE_AUDIT.md` | Working on data model, indexes, collections |
-| `barnes-testing-guide-v2.md` | Working on tests |
+| `WEEKLY_CONUNDRUM_ARC.md` | Working on conundrums, weekly theme integration |
+| `08_RUNBOOK.md` | Working on deployment, backups, operations |
+| `barnes-testing-guide-v2.md` | Working on tests (stale — needs Knowledge Mine, Workshop, Books, Armor coverage) |
 
 ---
 

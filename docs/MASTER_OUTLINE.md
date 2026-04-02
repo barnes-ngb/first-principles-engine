@@ -211,6 +211,10 @@ My Books (Book Builder + AI Story Generator)
 - Fixed CORS image rendering (fetch as blob → base64 embed)
 - White background default (ink-saving for physical product printing)
 - jsPDF direct generation replaces html2canvas approach
+- Sticker rotation fix: jsPDF rotates around bottom-left (not top-left); corrected `adjustForCenterRotation` so stickers rotate in-place matching CSS `transform-origin: center`
+- Sticker overflow clipping: PDF clip rect (`beginClipRect`) + position clamping prevents stickers from rendering outside the image container in all PDF viewers
+- All print formats maintain 3:2 image container aspect ratio matching the BookReader
+- Dynamic font sizing for narrow page formats (half-letter, mini-5x7) prevents text clipping
 
 ### Sketch-to-Story Pipeline
 - "Add my drawing" camera capture on book page editor
