@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import { app } from '../firebase/firebase'
 
@@ -130,7 +130,9 @@ const chatFn = httpsCallable<ChatRequest, ChatResponse>(functions, 'chat', {
   timeout: 300_000, // 5 min — match server-side timeoutSeconds to avoid client-side timeout on large generations (adventure trees)
 })
 const generateFn = httpsCallable<GenerateRequest, GenerateResponse>(functions, 'generateActivity')
-const imageGenFn = httpsCallable<ImageGenRequest, ImageGenResponse>(functions, 'generateImage')
+const imageGenFn = httpsCallable<ImageGenRequest, ImageGenResponse>(functions, 'generateImage', {
+  timeout: 120_000,
+})
 const enhanceSketchFn = httpsCallable<EnhanceSketchRequest, EnhanceSketchResponse>(
   functions,
   'enhanceSketch',
@@ -144,6 +146,7 @@ const analyzePatternsFn = httpsCallable<AnalyzePatternsRequest, AnalyzePatternsR
 export function useAI() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
+  const lastErrorRef = useRef<string | null>(null)
 
   const chat = useCallback(async (request: ChatRequest): Promise<ChatResponse | null> => {
     setLoading(true)
@@ -168,6 +171,7 @@ export function useAI() {
     async (request: ImageGenRequest): Promise<ImageGenResponse | null> => {
       setLoading(true)
       setError(null)
+      lastErrorRef.current = null
       try {
         const result = await imageGenFn(request)
         return result.data
@@ -176,6 +180,7 @@ export function useAI() {
         const message =
           fireErr.details || fireErr.message || (err instanceof Error ? err.message : String(err))
         setError(new Error(message))
+        lastErrorRef.current = message
         return null
       } finally {
         setLoading(false)
@@ -224,7 +229,7 @@ export function useAI() {
     [],
   )
 
-  return { chat, generateImage, enhanceSketch, analyzePatterns, loading, error } as const
+  return { chat, generateImage, enhanceSketch, analyzePatterns, loading, error, lastErrorRef } as const
 }
 
 export function useGenerateActivity() {

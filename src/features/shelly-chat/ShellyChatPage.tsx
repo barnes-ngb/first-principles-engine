@@ -98,7 +98,7 @@ interface RefinementQuestion {
 export default function ShellyChatPage() {
   const familyId = useFamilyId()
   const { activeChildId, children } = useActiveChild()
-  const { chat, generateImage } = useAI()
+  const { chat, generateImage, lastErrorRef } = useAI()
 
   const [searchParams, setSearchParams] = useSearchParams()
   const [chatContext, setChatContext] = useState<ChatContext>('general')
@@ -491,11 +491,17 @@ export default function ShellyChatPage() {
           },
         )
       } else {
-        // Image generation failed — show error in chat so user knows what happened
-        console.error('[Chat] Image generation returned no result for prompt:', prompt.slice(0, 80))
+        // Surface the actual error from the AI hook ref (synchronously available, unlike state)
+        const errorDetail = lastErrorRef.current || 'unknown error'
+        console.error('[Chat] Image generation failed:', errorDetail, '| prompt:', prompt.slice(0, 80))
+        const userMessage = errorDetail.includes('safety') || errorDetail.includes('content_policy')
+          ? `That prompt was blocked by the image safety filter — try describing the scene differently.`
+          : errorDetail.includes('rate') || errorDetail.includes('busy')
+            ? `Image generation is busy right now. Wait a moment and try again.`
+            : `Sorry, I wasn't able to generate that image. ${errorDetail.includes('deadline') || errorDetail.includes('timeout') ? 'The request timed out — try again.' : 'Try rephrasing or try again in a moment.'}`
         await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
-          content: 'Sorry, I wasn\'t able to generate that image. The AI image service may be busy or the prompt may need adjusting — try rephrasing or try again in a moment.',
+          content: userMessage,
           timestamp: new Date().toISOString(),
         })
         await updateDoc(
@@ -512,7 +518,7 @@ export default function ShellyChatPage() {
     } finally {
       setGeneratingImage(false)
     }
-  }, [activeThreadId, familyId, generateImage, setSearchParams, chatContext])
+  }, [activeThreadId, familyId, generateImage, setSearchParams, chatContext, lastErrorRef])
 
   // ── Image refinement flow (Prompt 9) ───────────────────────────
 
