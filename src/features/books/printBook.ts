@@ -370,11 +370,20 @@ function toFixed(n: number): string {
 
 /**
  * Adjust (x, y) so that a jsPDF image rotation pivots around the image center
- * instead of the top-left corner. jsPDF rotates clockwise around (x, y), but
- * CSS `transform-origin: center center` rotates around the element's center.
+ * instead of the default pivot point.
  *
- * Given the desired top-left position (x, y) and image size (w, h), returns
- * the adjusted (x, y) that makes the center stay in place after rotation.
+ * jsPDF internally translates to the BOTTOM-LEFT of the image in user
+ * coordinates (x, y + h) before applying the rotation matrix.  CSS
+ * `transform-origin: center center` rotates around the element's center, so we
+ * need to solve for the (x, y) that keeps the visual center at (cx, cy) after
+ * jsPDF's bottom-left-pivot rotation.
+ *
+ * Derivation (PDF y-up coords, user y-down coords):
+ *   center_x_user = adjX + cos·w/2 − sin·h/2
+ *   center_y_user = adjY + h − sin·w/2 − cos·h/2
+ * Setting these equal to the desired center (cx, cy):
+ *   adjX = cx − cos·w/2 + sin·h/2
+ *   adjY = cy − h + sin·w/2 + cos·h/2
  */
 function adjustForCenterRotation(
   x: number,
@@ -388,10 +397,8 @@ function adjustForCenterRotation(
   const sin = Math.sin(rad)
   const cx = x + w / 2
   const cy = y + h / 2
-  // Solve for the top-left position that places the center at (cx, cy) after
-  // clockwise rotation around the top-left: center' = pivot + R * (w/2, h/2)
-  const adjX = cx - (w / 2) * cos - (h / 2) * sin
-  const adjY = cy + (w / 2) * sin - (h / 2) * cos
+  const adjX = cx - (w / 2) * cos + (h / 2) * sin
+  const adjY = cy - h + (w / 2) * sin + (h / 2) * cos
   return [adjX, adjY]
 }
 
@@ -520,11 +527,20 @@ async function drawContentPage(
         const dims = await getImageDimensions(dataUri)
         const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
 
-        // Convert percentage position to mm within the image area (using consistent aspect ratio)
-        const imgX = imgAreaX + (pos.x / 100) * imgAreaW
-        const imgY = curY + (pos.y / 100) * imgAreaH
-        const imgW = (pos.width / 100) * imgAreaW
-        const imgH = (pos.height / 100) * imgAreaH
+        // Convert percentage position to mm within the image area (using consistent aspect ratio).
+        // Clamp negative positions so stickers don't render outside the container
+        // even if a PDF viewer doesn't honour the clip rectangle.
+        const rawX = pos.x
+        const rawY = pos.y
+        const clampedX = Math.max(0, rawX)
+        const clampedY = Math.max(0, rawY)
+        const clampedW = Math.min(pos.width, 100 - clampedX)
+        const clampedH = Math.min(pos.height, 100 - clampedY)
+
+        const imgX = imgAreaX + (clampedX / 100) * imgAreaW
+        const imgY = curY + (clampedY / 100) * imgAreaH
+        const imgW = (clampedW / 100) * imgAreaW
+        const imgH = (clampedH / 100) * imgAreaH
 
         // Negate rotation: CSS rotate() treats positive as clockwise, but
         // jsPDF follows the PDF spec where positive rotation is counterclockwise.
@@ -544,8 +560,8 @@ async function drawContentPage(
           let drawX = imgX + (imgW - fit.w) / 2
           let drawY = imgY + (imgH - fit.h) / 2
           if (rotation !== 0) {
-            // jsPDF rotates around top-left corner. Adjust coordinates so the
-            // rotation pivots around the center, matching CSS transform-origin: center.
+            // jsPDF rotates around the bottom-left corner. Adjust coordinates so
+            // the rotation pivots around the center, matching CSS transform-origin: center.
             ;[drawX, drawY] = adjustForCenterRotation(drawX, drawY, fit.w, fit.h, rotation)
           }
           pdf.addImage({ imageData: dataUri, x: drawX, y: drawY, width: fit.w, height: fit.h, rotation })
