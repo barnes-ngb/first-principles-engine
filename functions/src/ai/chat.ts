@@ -1003,7 +1003,7 @@ OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
   "pages": [
     {
       "pageNumber": 1,
-      "text": "${isYounger ? "A little cat sat in the sun." : "The sun was up. Link and his cat were at the park."}",
+      "text": "${isYounger ? "A little cat sat in the sun." : "The sun was up. Max and his cat were at the park."}",
       "sceneDescription": "${isYounger ? "A cozy sunny garden with flowers and a fluffy orange cat curled up on a stone path." : "A bright sunny park with green grass, a wooden bench, and tall trees."}"${hasWords ? ',\n      "wordsOnPage": ["the", "sun", "cat"]' : ""}
     }
   ]${hasWords ? ',\n  "allWordsUsed": ["the", "sun", "cat"],\n  "missedWords": []' : ""}

@@ -527,20 +527,14 @@ async function drawContentPage(
         const dims = await getImageDimensions(dataUri)
         const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
 
-        // Convert percentage position to mm within the image area (using consistent aspect ratio).
-        // Clamp negative positions so stickers don't render outside the container
-        // even if a PDF viewer doesn't honour the clip rectangle.
-        const rawX = pos.x
-        const rawY = pos.y
-        const clampedX = Math.max(0, rawX)
-        const clampedY = Math.max(0, rawY)
-        const clampedW = Math.min(pos.width, 100 - clampedX)
-        const clampedH = Math.min(pos.height, 100 - clampedY)
-
-        const imgX = imgAreaX + (clampedX / 100) * imgAreaW
-        const imgY = curY + (clampedY / 100) * imgAreaH
-        const imgW = (clampedW / 100) * imgAreaW
-        const imgH = (clampedH / 100) * imgAreaH
+        // Convert percentage position to mm within the image area.
+        // Use raw positions (including negative values) to match the reader's
+        // CSS positioning exactly. The PDF clip rectangle (beginClipRect above)
+        // handles overflow, replicating CSS overflow:hidden.
+        const imgX = imgAreaX + (pos.x / 100) * imgAreaW
+        const imgY = curY + (pos.y / 100) * imgAreaH
+        const imgW = (pos.width / 100) * imgAreaW
+        const imgH = (pos.height / 100) * imgAreaH
 
         // Negate rotation: CSS rotate() treats positive as clockwise, but
         // jsPDF follows the PDF spec where positive rotation is counterclockwise.
