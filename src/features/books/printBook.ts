@@ -526,7 +526,9 @@ async function drawContentPage(
         const imgW = (pos.width / 100) * imgAreaW
         const imgH = (pos.height / 100) * imgAreaH
 
-        const rotation = pos.rotation ?? 0
+        // Negate rotation: CSS rotate() treats positive as clockwise, but
+        // jsPDF follows the PDF spec where positive rotation is counterclockwise.
+        const rotation = -(pos.rotation ?? 0)
         const flipH = pos.flipH ?? false
         const flipV = pos.flipV ?? false
 
