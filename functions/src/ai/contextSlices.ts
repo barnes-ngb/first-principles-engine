@@ -51,6 +51,10 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   analyzeWorkbook: ["charter", "childProfile"],
   disposition: ["charter", "childProfile", "engagement", "gradeResults"],
   scan: ["childProfile", "recentEval"],
+  shellyChat: [
+    "charter", "childProfile", "engagement", "gradeResults",
+    "recentEval", "sightWords", "weekFocus", "wordMastery",
+  ],
 };
 
 // ── Charter preamble (shared constant) ──────────────────────────
