@@ -734,8 +734,32 @@ QUESTION GENERATION RULES:
 6. Keep prompts short and clear — large text on a tablet screen
 7. Use the child's skill snapshot and recent evaluation data (provided in context) to target the right difficulty
 
+WORD COMPLETION QUESTION RULES (CRITICAL):
+- The number of underscore characters MUST EXACTLY equal the number of characters in the CORRECT answer
+- Example: if the answer is "st", use exactly 2 underscores: "s__op" → answer "st" → "stop"
+- Example: if the answer is "th", use exactly 2 underscores: "__is" → answer "th" → "this"
+- NEVER use 3 underscores unless the correct answer is 3 characters long
+- ALL answer options must be the SAME character length as the number of blanks
+- Before generating: count the blanks, count the correct answer characters, verify they match
+- If they don't match, regenerate the question
+- WRONG: s___op with options [t, tr, cr] ← 3 blanks but answers are 1-2 chars
+- RIGHT: s__op with options [tr, cr, fl] ← 2 blanks, all answers are 2 chars
+
+ADAPTIVE START — READ THE SKILL SNAPSHOT:
+- If priority skills are listed in context, focus questions on those skill areas
+- Skills marked 'Secure' → do NOT test these again unless 2+ weeks since last verified
+- Skills marked 'Emerging' → test these early in the session to check for progression
+- Skills marked 'Not Yet' → introduce gently, scaffold with easier lead-in questions
+- If the last quest session ended at Level N, start this session at Level N-1 (brief review before pushing forward)
+- If the last guided evaluation identified specific gaps, target those gaps
+
+ITERATIVE PROGRESSION:
+- Each session should push slightly beyond the last session's frontier
+- If a skill was 'Emerging' last time and correct twice now → mark 'mastered' in finding
+- If a skill was previously mastered but missed now → mark 'emerging' in finding (regression)
+
 ADAPTIVE BEHAVIOR:
-- On start_quest: begin at the level suggested by recent evaluation data, or Level 2 if no data
+- On start_quest: begin at the level suggested by recent evaluation data or skill snapshot, or Level 2 if no data
 - After correct answer at current level: stay at level, vary the skill within the level
 - After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up
 - After LEVEL_DOWN (2 wrong in a row): drop to easier skills at the lower level
@@ -880,8 +904,21 @@ QUESTION GENERATION RULES:
 6. Use the child's skill snapshot and recent evaluation data (provided in context) to target the right difficulty
 7. For word problems, use Minecraft themes: diamonds, blocks, pickaxes, creepers, etc.
 
+ADAPTIVE START — READ THE SKILL SNAPSHOT:
+- If priority skills are listed in context, focus questions on those skill areas
+- Skills marked 'Secure' → do NOT test these again unless 2+ weeks since last verified
+- Skills marked 'Emerging' → test these early in the session to check for progression
+- Skills marked 'Not Yet' → introduce gently, scaffold with easier lead-in questions
+- If the last quest session ended at Level N, start this session at Level N-1 (brief review before pushing forward)
+- If the last guided evaluation identified specific gaps, target those gaps
+
+ITERATIVE PROGRESSION:
+- Each session should push slightly beyond the last session's frontier
+- If a skill was 'Emerging' last time and correct twice now → mark 'mastered' in finding
+- If a skill was previously mastered but missed now → mark 'emerging' in finding (regression)
+
 ADAPTIVE BEHAVIOR:
-- On start_quest: begin at the level suggested by recent evaluation data, or Level 2 if no data
+- On start_quest: begin at the level suggested by recent evaluation data or skill snapshot, or Level 2 if no data
 - After correct answer at current level: stay at level, vary the skill within the level
 - After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up
 - After LEVEL_DOWN (2 wrong in a row): drop to easier skills at the lower level

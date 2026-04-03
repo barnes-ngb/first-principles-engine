@@ -29,6 +29,7 @@ export const ContextSlice = {
   GeneratedContent: "generatedContent",
   WorkshopGames: "workshopGames",
   Mastery: "mastery",
+  SkillSnapshot: "skillSnapshot",
 } as const;
 export type ContextSlice = (typeof ContextSlice)[keyof typeof ContextSlice];
 
@@ -39,12 +40,12 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
     "charter", "childProfile", "workbookPaces",
     "weekFocus", "hoursProgress", "engagement", "gradeResults",
     "bookStatus", "sightWords", "recentEval", "wordMastery", "generatedContent",
-    "workshopGames", "mastery",
+    "workshopGames", "mastery", "skillSnapshot",
   ],
   chat: ["charter", "childProfile"],
   generate: ["charter", "childProfile"],
   evaluate: ["charter", "childProfile", "sightWords", "wordMastery"],
-  quest: ["childProfile", "sightWords", "recentEval", "wordMastery"],
+  quest: ["childProfile", "sightWords", "recentEval", "wordMastery", "skillSnapshot"],
   generateStory: ["childProfile", "sightWords", "wordMastery"],
   analyzePatterns: ["childProfile"],
   workshop: ["charter", "childProfile", "workshopGames"],
@@ -354,6 +355,9 @@ export async function buildContextForTask(
   if (slices.includes("mastery")) {
     fetches.push({ slice: "mastery", promise: loadMasterySummary(db, familyId, childId) });
   }
+  if (slices.includes("skillSnapshot")) {
+    fetches.push({ slice: "skillSnapshot", promise: loadSkillSnapshotContext(db, familyId, childId) });
+  }
 
   // Await all in parallel
   const results = await Promise.allSettled(fetches.map((f) => f.promise));
@@ -482,6 +486,12 @@ export async function buildContextForTask(
     if (masteryText) sections.push(masteryText);
   }
 
+  // Skill snapshot (evaluation-derived skill priorities, supports, stop rules, conceptual blocks)
+  if (sliceData.has("skillSnapshot")) {
+    const snapshotText = sliceData.get("skillSnapshot") as string;
+    if (snapshotText) sections.push(snapshotText);
+  }
+
   return sections;
 }
 
@@ -556,6 +566,86 @@ async function loadGeneratedContent(
 }
 
 // ── Workshop games loader ─────────────────────────────────────
+
+/** Load skill snapshot (evaluation-derived priorities, supports, stop rules, conceptual blocks). */
+async function loadSkillSnapshotContext(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<string> {
+  const snap = await db
+    .collection(`families/${familyId}/skillSnapshots`)
+    .doc(childId)
+    .get();
+
+  if (!snap.exists) return "";
+
+  const data = snap.data() as {
+    prioritySkills?: Array<{ tag: string; label: string; level: string; notes?: string; masteryGate?: number }>;
+    supports?: Array<{ label: string; description: string }>;
+    stopRules?: Array<{ label: string; trigger: string; action: string }>;
+    conceptualBlocks?: Array<{
+      name: string;
+      affectedSkills: string[];
+      recommendation: string;
+      rationale: string;
+      strategies?: string[];
+    }>;
+  };
+
+  const lines: string[] = ["SKILL SNAPSHOT (from evaluations):"];
+
+  // Priority skills
+  const skills = data.prioritySkills || [];
+  if (skills.length > 0) {
+    lines.push("Priority Skills:");
+    for (const s of skills) {
+      lines.push(`- ${s.label} (${s.tag}): ${s.level}${s.notes ? ` — ${s.notes}` : ""}`);
+    }
+  }
+
+  // Stop rules
+  const stops = data.stopRules || [];
+  if (stops.length > 0) {
+    lines.push("Stop Rules (DO NOT include these in plans):");
+    for (const r of stops) {
+      lines.push(`- ${r.label}: when "${r.trigger}" → ${r.action}`);
+    }
+  }
+
+  // Supports
+  const supports = data.supports || [];
+  if (supports.length > 0) {
+    lines.push("Supports (how this child learns best):");
+    for (const s of supports) {
+      lines.push(`- ${s.label}: ${s.description}`);
+    }
+  }
+
+  // Conceptual blocks
+  const blocks = data.conceptualBlocks || [];
+  const addressNow = blocks.filter((b) => b.recommendation === "ADDRESS_NOW");
+  if (addressNow.length > 0) {
+    lines.push("Conceptual Blocks (ADDRESS NOW):");
+    for (const b of addressNow) {
+      const strategies = b.strategies?.length ? ` — Strategies: ${b.strategies.join("; ")}` : "";
+      lines.push(`- ${b.name} (affects: ${b.affectedSkills.join(", ")}): ${b.rationale}${strategies}`);
+    }
+  }
+
+  // Planning guidance
+  if (skills.length > 0 || stops.length > 0 || addressNow.length > 0) {
+    lines.push("");
+    lines.push("Use the Skill Snapshot to calibrate plans and questions:");
+    lines.push("- Skills at 'Secure' level → SKIP. Do not create activities for these.");
+    lines.push("- Skills at 'Emerging' → include short daily practice (5-10 min)");
+    lines.push("- Skills at 'Not Yet' → include direct instruction blocks");
+    lines.push("- Stop Rules → never include these topics");
+    lines.push("- Conceptual Blocks marked ADDRESS_NOW → create targeted activities");
+  }
+
+  return lines.length > 1 ? lines.join("\n") : "";
+}
 
 /** Load recently created workshop games that can be included as plan activities. */
 async function loadWorkshopGames(
