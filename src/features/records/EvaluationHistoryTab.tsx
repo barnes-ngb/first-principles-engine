@@ -2,9 +2,13 @@ import { useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import Collapse from '@mui/material/Collapse'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import { getDocs, query, where } from 'firebase/firestore'
+import { useNavigate } from 'react-router-dom'
 
 import { useFamilyId } from '../../core/auth/useAuth'
 import { evaluationSessionsCollection } from '../../core/firebase/firestore'
@@ -45,13 +49,31 @@ function sessionSubtitle(session: AnySession): string {
   return `${session.findings.length} findings \u00B7 ${session.recommendations.length} recommendations`
 }
 
-function QuestDetailView({ session }: { session: AnySession }) {
+/** Extract words from missed questions for practice suggestions. */
+function getStrugglingWords(questions: SessionQuestion[]): string[] {
+  const words: string[] = []
+  for (const q of questions) {
+    if (q.correct || q.skipped || q.flaggedAsError) continue
+    // Pull target word from the correct answer or stimulus
+    const word = q.correctAnswer?.trim()
+    if (word && !words.includes(word)) words.push(word)
+  }
+  return words
+}
+
+function QuestDetailView({ session, childName }: { session: AnySession; childName: string }) {
+  const navigate = useNavigate()
   const questions: SessionQuestion[] = session.questions || []
+  const [questionsOpen, setQuestionsOpen] = useState(false)
+  const strugglingWords = getStrugglingWords(questions)
 
   return (
     <>
-      {/* Stats box */}
+      {/* Summary header */}
       <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
+        <Typography variant="body1" sx={{ mb: 1 }}>
+          {childName} explored {session.totalQuestions ?? questions.length} questions and reached <strong>Level {session.finalLevel ?? '?'}</strong>
+        </Typography>
         <Stack direction="row" spacing={3} flexWrap="wrap">
           <Box>
             <Typography variant="caption" color="text.secondary">Diamonds</Typography>
@@ -80,47 +102,10 @@ function QuestDetailView({ session }: { session: AnySession }) {
         </Box>
       )}
 
-      {/* Per-question breakdown */}
-      {questions.length > 0 && (
-        <>
-          <Typography variant="subtitle2">Question Breakdown</Typography>
-          <Stack spacing={1}>
-            {questions.map((q, i) => (
-              <Box
-                key={q.id || i}
-                sx={{
-                  p: 1.5,
-                  borderRadius: 1,
-                  border: '1px solid',
-                  borderColor: q.correct ? 'success.light' : 'error.light',
-                  bgcolor: q.correct ? 'success.50' : 'error.50',
-                }}
-              >
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography sx={{ fontSize: '1rem' }}>
-                    {q.correct ? '\u2705' : '\u274C'}
-                  </Typography>
-                  <Box sx={{ flex: 1 }}>
-                    <Typography variant="body2">{q.prompt}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Answer: {q.childAnswer}
-                      {!q.correct && ` (correct: ${q.correctAnswer})`}
-                      {q.skill && ` \u00B7 ${q.skill}`}
-                      {' \u00B7 Level '}
-                      {q.level}
-                    </Typography>
-                  </Box>
-                </Stack>
-              </Box>
-            ))}
-          </Stack>
-        </>
-      )}
-
-      {/* Findings section (same as guided) */}
+      {/* Skills Found */}
       {session.findings.length > 0 && (
         <>
-          <Typography variant="subtitle2">Skill Map</Typography>
+          <Typography variant="subtitle2">Skills Found</Typography>
           <Stack spacing={0.5}>
             {session.findings.map((f, i) => (
               <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
@@ -140,6 +125,93 @@ function QuestDetailView({ session }: { session: AnySession }) {
               </Stack>
             ))}
           </Stack>
+        </>
+      )}
+
+      {/* Recommendations */}
+      {session.recommendations.length > 0 && (
+        <>
+          <Typography variant="subtitle2">Recommendations</Typography>
+          {session.recommendations.map((rec, i) => (
+            <Box key={i} sx={{ pl: 1.5, borderLeft: '3px solid', borderColor: 'primary.main', mb: 1 }}>
+              <Typography variant="body2">
+                <strong>{rec.priority}. {rec.skill}</strong>
+              </Typography>
+              <Typography variant="body2">{rec.action}</Typography>
+              <Typography variant="caption" color="text.secondary">
+                {rec.frequency} &middot; {rec.duration}
+                {rec.materials?.length ? ` \u00B7 Materials: ${rec.materials.join(', ')}` : ''}
+              </Typography>
+            </Box>
+          ))}
+        </>
+      )}
+      {session.recommendations.length === 0 && session.findings.length > 0 && (
+        <Typography variant="body2" color="text.secondary">
+          No specific recommendations from this session.
+        </Typography>
+      )}
+
+      {/* Words needing practice */}
+      {strugglingWords.length > 0 && (
+        <Box sx={{ p: 2, bgcolor: 'warning.50', borderRadius: 2, border: '1px solid', borderColor: 'warning.light' }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Words Needing Practice</Typography>
+          <Typography variant="body2" sx={{ mb: 1.5 }}>
+            {strugglingWords.join(', ')}
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => navigate('/books/create-story', { state: { prefillWords: strugglingWords } })}
+          >
+            Generate a practice story
+          </Button>
+        </Box>
+      )}
+
+      {/* Per-question breakdown (collapsible) */}
+      {questions.length > 0 && (
+        <>
+          <Button
+            size="small"
+            onClick={() => setQuestionsOpen(!questionsOpen)}
+            endIcon={questionsOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            sx={{ alignSelf: 'flex-start' }}
+          >
+            {questionsOpen ? 'Hide' : 'Show'} Question Breakdown ({questions.length})
+          </Button>
+          <Collapse in={questionsOpen}>
+            <Stack spacing={1}>
+              {questions.map((q, i) => (
+                <Box
+                  key={q.id || i}
+                  sx={{
+                    p: 1.5,
+                    borderRadius: 1,
+                    border: '1px solid',
+                    borderColor: q.correct ? 'success.light' : 'error.light',
+                    bgcolor: q.correct ? 'success.50' : 'error.50',
+                  }}
+                >
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Typography sx={{ fontSize: '1rem' }}>
+                      {q.correct ? '\u2705' : '\u274C'}
+                    </Typography>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2">{q.prompt}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Answer: {q.childAnswer}
+                        {!q.correct && ` (correct: ${q.correctAnswer})`}
+                        {q.skill && ` \u00B7 ${q.skill}`}
+                        {' \u00B7 Level '}
+                        {q.level}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Box>
+              ))}
+            </Stack>
+          </Collapse>
         </>
       )}
     </>
@@ -209,14 +281,23 @@ function GuidedDetailView({ session }: { session: AnySession }) {
   )
 }
 
+type SessionFilter = 'all' | 'guided' | 'interactive'
+
 export default function EvaluationHistoryTab() {
   const familyId = useFamilyId()
   const { activeChildId, activeChild } = useActiveChild()
   const [sessions, setSessions] = useState<AnySession[]>([])
   const [selectedSession, setSelectedSession] = useState<AnySession | null>(null)
   const [loadedKey, setLoadedKey] = useState<string | null>(null)
+  const [filter, setFilter] = useState<SessionFilter>('all')
   const currentKey = activeChildId ? `${familyId}:${activeChildId}` : null
   const loading = !!currentKey && loadedKey !== currentKey
+
+  const filteredSessions = sessions.filter((s) => {
+    if (filter === 'all') return true
+    if (filter === 'interactive') return isInteractive(s)
+    return !isInteractive(s)
+  })
 
   useEffect(() => {
     if (!activeChildId) return
@@ -266,7 +347,7 @@ export default function EvaluationHistoryTab() {
         </Typography>
 
         {isInteractive(selectedSession) ? (
-          <QuestDetailView session={selectedSession} />
+          <QuestDetailView session={selectedSession} childName={activeChild?.name ?? 'Child'} />
         ) : (
           <GuidedDetailView session={selectedSession} />
         )}
@@ -283,7 +364,27 @@ export default function EvaluationHistoryTab() {
         </Button>
       </Stack>
 
-      {sessions.length === 0 ? (
+      {/* Filter chips — shown when there are both session types */}
+      {sessions.some(isInteractive) && sessions.some((s) => !isInteractive(s)) && (
+        <Stack direction="row" spacing={1}>
+          {(['all', 'guided', 'interactive'] as const).map((f) => (
+            <Chip
+              key={f}
+              label={f === 'all' ? 'All' : f === 'guided' ? 'Guided' : 'Knowledge Mine'}
+              variant={filter === f ? 'filled' : 'outlined'}
+              color={filter === f ? 'primary' : 'default'}
+              size="small"
+              onClick={() => setFilter(f)}
+            />
+          ))}
+        </Stack>
+      )}
+
+      {filteredSessions.length === 0 && sessions.length > 0 ? (
+        <Typography color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+          No {filter === 'interactive' ? 'Knowledge Mine' : 'guided'} sessions yet.
+        </Typography>
+      ) : sessions.length === 0 ? (
         <Box sx={{ textAlign: 'center', py: 4 }}>
           <Typography color="text.secondary" gutterBottom>
             No evaluations yet.
@@ -297,7 +398,7 @@ export default function EvaluationHistoryTab() {
         </Box>
       ) : (
         <Stack spacing={1}>
-          {sessions.map((session) => (
+          {filteredSessions.map((session) => (
             <Box
               key={session.id}
               sx={{
