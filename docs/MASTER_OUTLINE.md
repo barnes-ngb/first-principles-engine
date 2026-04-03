@@ -20,7 +20,8 @@ Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — Apr
 * **HelpStrip guidance** — contextual help on Records, Weekly Review, and Progress pages
 * **Per-child materials theming** — Lincoln gets Minecraft-themed worksheets, London gets story/adventure-themed worksheets
 * **Decomposition (completed):** TodayPage shell (816L) + TodayChecklist (720L) + QuickCaptureSection (285L) + WeekFocusCard (163L) + TeachBackSection (97L) + ChapterQuestionCard (60L) + ReadingRoutineItems + MathRoutineItems + SpeechRoutineItems + RoutineSection + ExplorerMap + WorkshopGameCards + KidCaptureForm + CreativeTimeLog + LadderQuickLog + HelperPanel
-* **Kid Today View decomposition (completed):** KidTodayView shell (805L) + KidChecklist (484L) + KidTeachBack (167L) + KidChapterResponse (159L) + KidConundrumResponse (209L) + KidExtraLogger (163L) + KidCelebration (117L)
+* **Kid Today View decomposition (completed):** KidTodayView shell + KidChecklist (484L) + KidTeachBack (167L) + KidChapterResponse (159L) + KidConundrumResponse (209L) + KidExtraLogger (163L) + KidCelebration (117L)
+* **Diamonds Mined card** — Kid Today shows today's quest summary (diamonds, level, domain, streak) or "Ready to mine?" invite with navigation to Knowledge Mine
 
 ### Curriculum Photo Scanning
 * ScanButton component — camera capture of workbook/worksheet pages
@@ -242,7 +243,7 @@ Progress
 * Hours & Compliance — additive computation (day logs + hours entries + adjustments)
 * Add Historical Hours backfill tool
 * MO compliance dashboard (1000h total / 600h core), hours by subject
-* Evaluations tab — AI evaluation history
+* Evaluations tab — AI evaluation history (guided + Knowledge Mine quest sessions, filter chips, quest detail with collapsible question breakdown, struggling words, recommendations)
 * Portfolio tab — artifact gallery with photo thumbnails + audio playback Dad Lab
 * Full lifecycle: Plan → Start → Lincoln Contributes → Nathan Completes
 * "Suggest a Lab" AI, "I Have an Idea", "Plan a Lab" manual
@@ -331,7 +332,7 @@ Knowledge Mine Phase 2-4
 * Phase 2: Voice input (Web Speech API) + type-to-answer questions — **NOTE: `useSpeechRecognition`, `useTTS`, and `useAudioRecorder` hooks now exist from Workshop build, reuse them**
 * Phase 3: Pre-generated question bank (zero latency)
 * Phase 4: Full avatar integration (quest → mine → armor XP)
-* Parent review view for interactive sessions in Records
+* Parent review view for interactive sessions in Records — **DONE** (quest sessions in Evaluations tab with detail view, filter chips, collapsible questions)
 * Math Quest + Speech Quest domains Avatar System — Remaining
 * **Parent XP Management** — Quick award buttons, XP history, tier-up notifications (HIGH)
 * **Tier-Up Animation** — Old armor shatters, new tier announced, ghost pieces appear (HIGH)
