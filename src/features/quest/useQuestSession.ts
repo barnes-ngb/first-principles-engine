@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { collection, doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, limit as firestoreLimit, orderBy, query, setDoc, where } from 'firebase/firestore'
 
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { addXpEvent } from '../../core/xp/addXpEvent'
@@ -11,7 +11,7 @@ import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot
 import type { EvaluationDomain } from '../../core/types/enums'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
 import { calculateStreak, computeNextState, formatSkillLabel, shouldEndSession } from './questAdaptive'
-import { checkAnswer, extractPattern, extractTargetWord, shouldFlagAsError } from './questHelpers'
+import { checkAnswer, extractPattern, extractTargetWord, shouldFlagAsError, validateQuestion } from './questHelpers'
 import type {
   AnswerInputMethod,
   InteractiveSessionData,
@@ -237,7 +237,7 @@ function generateFallbackRecommendations(
 export function useQuestSession() {
   const familyId = useFamilyId()
   const { activeChildId, activeChild } = useActiveChild()
-  const { chat, loading: aiLoading, error: aiError } = useAI()
+  const { chat, analyzePatterns, loading: aiLoading, error: aiError } = useAI()
 
   const [screen, setScreen] = useState<QuestScreen>(QuestScreen.Intro)
   const [questState, setQuestState] = useState<QuestState | null>(null)
@@ -397,9 +397,12 @@ export function useQuestSession() {
 
       conversationRef.current.push({ role: 'assistant', content: response.message })
 
-      const question = parseQuestBlock(response.message)
+      let question = parseQuestBlock(response.message)
+      if (question) {
+        question = validateQuestion(question)
+      }
       if (!question) {
-        console.error('[startQuest] parseQuestBlock returned null. Response:', response.message.substring(0, 500))
+        console.error('[startQuest] parseQuestBlock returned null or validation failed. Response:', response.message.substring(0, 500))
         setStartQuestError('Quest response was unreadable. Tap to try again!')
         setScreen(QuestScreen.Intro)
         if (timerRef.current) clearInterval(timerRef.current)
@@ -682,8 +685,35 @@ export function useQuestSession() {
           }
         }
       })()
+
+      // Trigger pattern detection if 3+ evaluation sessions exist (fire-and-forget)
+      try {
+        const sessionsQuery = query(
+          evaluationSessionsCollection(familyId),
+          where('childId', '==', activeChildId),
+          orderBy('evaluatedAt', 'desc'),
+          firestoreLimit(10),
+        )
+        const sessionsSnap = await getDocs(sessionsQuery)
+
+        if (sessionsSnap.size >= 3) {
+          analyzePatterns({
+            familyId,
+            childId: activeChildId,
+            evaluationSessionId: docId,
+            currentFindings: findings.map((f) => ({
+              skill: f.skill,
+              status: f.status,
+              evidence: f.evidence,
+              notes: f.notes,
+            })),
+          }).catch((err) => console.warn('Pattern detection failed (non-blocking):', err))
+        }
+      } catch (err) {
+        console.warn('Pattern detection trigger check failed:', err)
+      }
     },
-    [activeChildId, familyId, findings, previousSessions, chat],
+    [activeChildId, familyId, findings, previousSessions, chat, analyzePatterns],
   )
 
   // ── Submit answer ─────────────────────────────────────────────
@@ -800,9 +830,12 @@ export function useQuestSession() {
         setFindings((prev) => [...prev, finding])
       }
 
-      const question = parseQuestBlock(response.message)
+      let question = parseQuestBlock(response.message)
+      if (question) {
+        question = validateQuestion(question)
+      }
       if (!question) {
-        // Parse failed — end session
+        // Parse or validation failed — end session
         await endSession(updatedQuestions, newState, false)
         return
       }
@@ -900,7 +933,10 @@ export function useQuestSession() {
         setFindings((prev) => [...prev, finding])
       }
 
-      const question = parseQuestBlock(response.message)
+      let question = parseQuestBlock(response.message)
+      if (question) {
+        question = validateQuestion(question)
+      }
       if (!question) {
         await endSession(updatedQuestions, questState, false)
         return

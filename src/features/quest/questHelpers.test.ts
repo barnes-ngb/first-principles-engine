@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkAnswer, extractPattern, extractTargetWord, sanitizeStimulus, shouldFlagAsError } from './questHelpers'
+import { checkAnswer, extractPattern, extractTargetWord, sanitizeStimulus, shouldFlagAsError, validateQuestion } from './questHelpers'
 import type { QuestQuestion, SessionQuestion } from './questTypes'
 
 function makeQuestion(overrides: Partial<QuestQuestion> = {}): QuestQuestion {
@@ -240,5 +240,60 @@ describe('extractPattern', () => {
 
   it('falls back to question type', () => {
     expect(extractPattern(makeSessionQ(''))).toBe('multiple-choice')
+  })
+})
+
+// ── validateQuestion ──────────────────────────────────────────
+
+describe('validateQuestion', () => {
+  function makeQ(overrides: Partial<QuestQuestion>) {
+    return {
+      id: 'q1',
+      type: 'multiple-choice' as const,
+      level: 3,
+      skill: 'phonics.blends.st',
+      prompt: 'Complete the word:',
+      stimulus: 's__op',
+      options: ['tr', 'cr', 'st'],
+      correctAnswer: 'st',
+      ...overrides,
+    }
+  }
+
+  it('passes valid fill-in-blank question', () => {
+    const q = makeQ({})
+    expect(validateQuestion(q)).not.toBeNull()
+  })
+
+  it('rejects when blank count does not match answer length', () => {
+    // 3 blanks but answer is 2 chars
+    const q = makeQ({ stimulus: 's___op', correctAnswer: 'st' })
+    expect(validateQuestion(q)).toBeNull()
+  })
+
+  it('rejects when correct answer is not in options', () => {
+    const q = makeQ({ correctAnswer: 'xx' })
+    expect(validateQuestion(q)).toBeNull()
+  })
+
+  it('rejects when options have wrong length for blanks', () => {
+    // 2 blanks but one option is 1 char
+    const q = makeQ({ options: ['t', 'cr', 'st'] })
+    expect(validateQuestion(q)).toBeNull()
+  })
+
+  it('passes non-fill-in-blank question without stimulus underscores', () => {
+    const q = makeQ({
+      prompt: 'What word is this?',
+      stimulus: 'stop',
+      options: ['stop', 'step', 'shop'],
+      correctAnswer: 'stop',
+    })
+    expect(validateQuestion(q)).not.toBeNull()
+  })
+
+  it('rejects question with empty options', () => {
+    const q = makeQ({ options: [] })
+    expect(validateQuestion(q)).toBeNull()
   })
 })
