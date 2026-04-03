@@ -118,6 +118,52 @@ export async function callClaudeWithVision(opts: {
   };
 }
 
+/** Call Claude API with a URL-based image and return response text and usage. */
+export async function callClaudeWithVisionUrl(opts: {
+  apiKey: string;
+  model: string;
+  maxTokens: number;
+  systemPrompt: string;
+  imageUrl: string;
+  textPrompt: string;
+  messages?: Array<{ role: string; content: string }>;
+}): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  const client = new Anthropic({ apiKey: opts.apiKey });
+
+  // Prior messages (everything except the last, which becomes the image message)
+  const priorMessages = (opts.messages || []).map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  }));
+
+  const completion = await client.messages.create({
+    model: opts.model,
+    max_tokens: opts.maxTokens,
+    system: opts.systemPrompt,
+    messages: [
+      ...priorMessages,
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "url", url: opts.imageUrl } },
+          { type: "text", text: opts.textPrompt },
+        ],
+      },
+    ],
+  });
+
+  const firstBlock = completion.content[0];
+  const text =
+    firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
+
+  return {
+    text,
+    inputTokens: completion.usage.input_tokens,
+    outputTokens: completion.usage.output_tokens,
+  };
+}
+
 /** Log AI usage to Firestore (non-throwing). */
 export async function logAiUsage(
   db: Firestore,
