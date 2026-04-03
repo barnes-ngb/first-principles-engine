@@ -72,7 +72,14 @@ Evaluation Chat
 * 24 unit tests for adaptive logic
 * Quest diamonds → 2 XP each → avatar progression
 * Quest summary ethos fix — "questions explored" not "correct/total" (disposition over content mastery)
-* Math Quest + Speech Quest shown as "coming soon"
+* Math Quest enabled (was "coming soon"), Speech Quest still coming soon
+* **Skill Snapshot → Quest pipeline** — quest context slices include skillSnapshot; adaptive start reads priority skills, emerging/secure levels, stop rules, and conceptual blocks
+* **Skill Snapshot → Planner pipeline** — plan context slices include skillSnapshot with calibration guidance (skip Secure, practice Emerging, direct-instruct Not Yet, ADDRESS_NOW blocks)
+* **Pattern detection from quest sessions** — after endSession, if 3+ evaluation sessions exist, fires analyzeEvaluationPatterns (non-blocking) to detect conceptual blocks
+* **Word completion blank validation** — prompt rules require blank count === answer length; client-side `validateQuestion()` rejects mismatched questions before display
+* **TTS on math questions** — auto-reads question text on appear; tap prompt or options to replay; mute toggle in header; reading quest TTS is selective (reads prompt for word-ID/rhyming, but not word-completion stimulus)
+* **Struggling words display fix** — summary shows reconstructed target words (not raw blanked stimuli)
+* 30 unit tests for quest helpers (including 6 new validateQuestion tests)
 
 ### Story Game Workshop
 - Kid nav item → `/workshop` route (London's creative space)
@@ -292,12 +299,12 @@ Progress
 * Print materials (quality varies — book PDFs and worksheets)
 * Skip guidance (depends on evaluation data quality)
 * Lincoln's kid Today view (Must-Do/Choose flow — needs real week)
-* Knowledge Mine reading quest — core bugs fixed Mar 22, needs Lincoln to verify question quality + adaptive pacing + XP accumulation
+* Knowledge Mine quest — Phase 2 pipeline fixes shipped (skill snapshot → planner/quest, pattern detection trigger, blank validation, math TTS). Needs Lincoln to verify: adaptive start from snapshot data, question quality with blank validation, math TTS auto-read, pattern detection after 3+ sessions
 * Story Game Workshop — needs London to test: voice recognition via keyboard dictation, wizard flow, all three game types, art generation quality, playtester flow with Lincoln
 * My Books full flow (needs Shelly + kids — AI story gen, sight word tracking, reading sessions)
 * Story Guide handoff to generator (questions work, generator handoff unverified)
 * Book theme filter row on bookshelf (auto-tagging unverified)
-* Evaluation pattern detection — Foundations section (needs 2+ prior evals, not yet tested)
+* Evaluation pattern detection — Foundations section (now triggered automatically from quest sessions when 3+ evals exist; needs verification that conceptual blocks appear in skill snapshot)
 * Armor piece overlays on character (in flight — overlay prompt just run)
 * Avatar XP adjustment (Firestore undefined error — fix prompt run, needs verification)
 * Armor attachment animation + verse TTS sync (prompt written, not yet run)

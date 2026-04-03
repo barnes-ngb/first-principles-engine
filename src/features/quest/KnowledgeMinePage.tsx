@@ -13,6 +13,7 @@ import MinecraftAvatar from '../avatar/MinecraftAvatar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
 import QuestQuestionScreen, { QuestFeedback, QuestLoading } from './ReadingQuest'
 import QuestSummary from './QuestSummary'
+import { extractTargetWord } from './questHelpers'
 import type { QuestDomainConfig } from './questTypes'
 import { QuestScreen } from './questTypes'
 import { useQuestSession } from './useQuestSession'
@@ -289,6 +290,7 @@ export default function KnowledgeMinePage() {
           onAnswerWithMethod={quest.submitAnswer}
           onSkip={quest.handleSkip}
           domainLabel={activeDomain?.label || 'Reading Quest'}
+          domain={activeDomain?.domain || 'reading'}
         />
       )}
 
@@ -316,8 +318,9 @@ export default function KnowledgeMinePage() {
           flaggedErrorCount={quest.answeredQuestions.filter((q) => q.flaggedAsError).length}
           strugglingWords={[...new Set(
             quest.answeredQuestions
-              .filter((q) => (!q.correct || q.skipped) && q.stimulus)
-              .map((q) => q.stimulus!),
+              .filter((q) => (!q.correct || q.skipped) && !q.flaggedAsError)
+              .map((q) => extractTargetWord(q))
+              .filter((w): w is string => w !== null),
           )]}
           onDone={quest.resetToIntro}
           onTryAgain={() => {

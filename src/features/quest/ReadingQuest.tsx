@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import CircularProgress from '@mui/material/CircularProgress'
+import IconButton from '@mui/material/IconButton'
 import LinearProgress from '@mui/material/LinearProgress'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import VolumeUpIcon from '@mui/icons-material/VolumeUp'
+import VolumeOffIcon from '@mui/icons-material/VolumeOff'
 import { useSpeechRecognition } from '../../core/hooks/useSpeechRecognition'
+import { useTTS } from '../../core/hooks/useTTS'
 import { sanitizeStimulus } from './questHelpers'
 import type { AnswerInputMethod, QuestQuestion, QuestState } from './questTypes'
 import { MAX_QUESTIONS } from './questTypes'
@@ -379,6 +383,8 @@ interface QuestQuestionScreenProps {
   onSkip: () => void
   /** Domain label for the header (defaults to "Reading Quest") */
   domainLabel?: string
+  /** Quest domain — enables TTS for math questions */
+  domain?: string
 }
 
 export default function QuestQuestionScreen({
@@ -389,8 +395,12 @@ export default function QuestQuestionScreen({
   onAnswerWithMethod,
   onSkip,
   domainLabel = 'Reading Quest',
+  domain = 'reading',
 }: QuestQuestionScreenProps) {
   const progress = (questState.totalQuestions / MAX_QUESTIONS) * 100
+  const isMathQuest = domain === 'math'
+  const tts = useTTS({ rate: 0.9 })
+  const [muted, setMuted] = useState(false)
 
   const [timerElapsed, setTimerElapsed] = useState(false)
   const [revealingAnswer, setRevealingAnswer] = useState(false)
@@ -402,6 +412,22 @@ export default function QuestQuestionScreen({
     setTimerElapsed(false)
     setRevealingAnswer(false)
   }
+
+  // Auto-read math questions when they appear
+  useEffect(() => {
+    if (!muted && isMathQuest && question) {
+      const timer = setTimeout(() => tts.speak(question.prompt), 500)
+      return () => clearTimeout(timer)
+    }
+  }, [question.id, isMathQuest, muted]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Determine TTS behavior based on domain and question type
+  const shouldReadQuestion = isMathQuest
+    || /which word is/i.test(question.prompt)
+    || /rhymes with/i.test(question.prompt)
+    || /complete the sentence/i.test(question.prompt)
+    || /belongs in this sentence/i.test(question.prompt)
+  const shouldReadOptions = isMathQuest // Only math — reading options defeats reading tests
 
   // Show skip button after 8 seconds on current question
   useEffect(() => {
@@ -475,18 +501,29 @@ export default function QuestQuestionScreen({
         }}
       />
 
-      {/* Diamond counter */}
-      <Typography
-        sx={{
-          fontFamily: MC.font,
-          fontSize: '0.5rem',
-          color: MC.diamond,
-          textAlign: 'right',
-          mb: 2,
-        }}
-      >
-        💎 {questState.totalCorrect}
-      </Typography>
+      {/* Diamond counter + mute toggle */}
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+        <IconButton
+          onClick={() => {
+            setMuted((m) => !m)
+            tts.cancel()
+          }}
+          size="small"
+          sx={{ color: muted ? MC.stone : MC.diamond, p: 0.5 }}
+          aria-label={muted ? 'Unmute' : 'Mute'}
+        >
+          {muted ? <VolumeOffIcon fontSize="small" /> : <VolumeUpIcon fontSize="small" />}
+        </IconButton>
+        <Typography
+          sx={{
+            fontFamily: MC.font,
+            fontSize: '0.5rem',
+            color: MC.diamond,
+          }}
+        >
+          💎 {questState.totalCorrect}
+        </Typography>
+      </Stack>
 
       {/* Bonus round banner */}
       {question.isBonusRound && (
@@ -517,19 +554,33 @@ export default function QuestQuestionScreen({
         </Box>
       )}
 
-      {/* Prompt */}
-      <Typography
+      {/* Prompt — tappable for TTS on math and some reading question types */}
+      <Box
+        onClick={shouldReadQuestion && !muted ? () => tts.speak(question.prompt) : undefined}
         sx={{
-          fontFamily: MC.font,
-          fontSize: '0.7rem',
-          color: MC.white,
-          textAlign: 'center',
+          cursor: shouldReadQuestion && !muted ? 'pointer' : 'default',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 1,
           mb: 2,
-          lineHeight: 1.8,
         }}
       >
-        🧱 {question.prompt}
-      </Typography>
+        <Typography
+          sx={{
+            fontFamily: MC.font,
+            fontSize: '0.7rem',
+            color: MC.white,
+            textAlign: 'center',
+            lineHeight: 1.8,
+          }}
+        >
+          🧱 {question.prompt}
+        </Typography>
+        {shouldReadQuestion && !muted && (
+          <VolumeUpIcon sx={{ fontSize: '1rem', color: MC.stone, opacity: 0.5, flexShrink: 0 }} />
+        )}
+      </Box>
 
       {/* Stimulus word — large, centered, Minecraft-style */}
       {displayStimulus && (
@@ -615,16 +666,27 @@ export default function QuestQuestionScreen({
                 },
               }}
             >
-              <Typography
-                sx={{
-                  fontFamily: MC.font,
-                  fontSize: '0.7rem',
-                  color: revealCorrect ? MC.green : MC.white,
-                  textAlign: 'center',
-                }}
-              >
-                {revealCorrect ? `✅ ${option}` : option}
-              </Typography>
+              <Stack direction="row" spacing={1} alignItems="center" justifyContent="center">
+                <Typography
+                  sx={{
+                    fontFamily: MC.font,
+                    fontSize: '0.7rem',
+                    color: revealCorrect ? MC.green : MC.white,
+                    textAlign: 'center',
+                  }}
+                >
+                  {revealCorrect ? `✅ ${option}` : option}
+                </Typography>
+                {shouldReadOptions && !muted && !revealingAnswer && (
+                  <VolumeUpIcon
+                    sx={{ fontSize: '0.9rem', color: MC.stone, opacity: 0.4, flexShrink: 0 }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      tts.speak(option)
+                    }}
+                  />
+                )}
+              </Stack>
             </Box>
           )
         })}

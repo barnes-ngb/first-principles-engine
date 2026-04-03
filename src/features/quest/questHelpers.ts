@@ -134,6 +134,51 @@ export function shouldFlagAsError(question: QuestQuestion): boolean {
   return false
 }
 
+// ── Question validation ───────────────────────────────────────
+
+/**
+ * Validate that a word-completion question's blank count matches the answer length,
+ * and that a correct answer exists in the options.
+ * Returns null if the question is invalid and should be skipped.
+ */
+export function validateQuestion(question: QuestQuestion): QuestQuestion | null {
+  // Check correct answer exists in options
+  if (!question.options || question.options.length === 0) return null
+  const hasCorrect = question.options.some(
+    (o) => o.trim().toLowerCase() === question.correctAnswer.trim().toLowerCase(),
+  )
+  if (!hasCorrect) {
+    console.warn('Question has no correct answer in options:', question.correctAnswer, question.options)
+    return null
+  }
+
+  // Validate blank count matches answer length for fill-in-blank questions
+  const stimulus = question.stimulus || question.prompt || ''
+  const blankMatch = /_+/.exec(stimulus)
+  if (blankMatch) {
+    const blankCount = blankMatch[0].length
+    const correctAnswer = question.correctAnswer.trim()
+    if (correctAnswer.length !== blankCount) {
+      console.warn(
+        `Question blank validation failed: ${blankCount} blanks but answer "${correctAnswer}" is ${correctAnswer.length} chars`,
+      )
+      return null
+    }
+
+    // Also check all options are the same length as blanks
+    const wrongLengthOptions = question.options.filter((o) => o.trim().length !== blankCount)
+    if (wrongLengthOptions.length > 0) {
+      console.warn(
+        `Question options have wrong lengths for ${blankCount} blanks:`,
+        wrongLengthOptions,
+      )
+      return null
+    }
+  }
+
+  return question
+}
+
 // ── Word extraction helpers ────────────────────────────────────
 
 /**
