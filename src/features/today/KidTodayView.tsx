@@ -36,7 +36,7 @@ import ArmorGateScreen from '../avatar/ArmorGateScreen'
 import MinecraftXpBar from '../avatar/MinecraftXpBar'
 import XpDiamondBar from '../../components/XpDiamondBar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
-import { useDraftBook } from '../books/useBook'
+import { useDraftBook, useCompletedBook } from '../books/useBook'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import ExplorerMap from './ExplorerMap'
 import KidExtraLogger from './KidExtraLogger'
@@ -364,8 +364,9 @@ export default function KidTodayView({
   // XP toast state
   const [xpToast, setXpToast] = useState<{ amount: number; reason: string } | null>(null)
 
-  // Draft book for "Continue your book" card
+  // Draft book for "Continue your book" card + completed book for "Read your books" card
   const { draftBook } = useDraftBook(familyId, child.id)
+  const { completedBook } = useCompletedBook(familyId, child.id)
   const { children: allChildren } = useActiveChild()
 
   const checklist = useMemo(() => dayLog.checklist ?? [], [dayLog.checklist])
@@ -867,6 +868,65 @@ export default function KidTodayView({
                 }}
               >
                 Open
+              </Typography>
+            </Stack>
+          </Box>
+        ) : (
+          <Chip label="🔒 Finish quests first" variant="outlined" />
+        )
+      )}
+
+      {/* ── READ YOUR BOOKS (gated, only if no draft) ── */}
+      {!draftBook && completedBook && (
+        gateUnlocked ? (
+          <Box
+            onClick={() => navigate(`/books/${completedBook.id}/read`)}
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              border: '1px solid',
+              borderColor: isLincoln ? 'grey.700' : 'success.200',
+              bgcolor: isLincoln ? 'rgba(0,0,0,0.6)' : 'success.50',
+              cursor: 'pointer',
+              '&:hover': { borderColor: 'primary.main' },
+            }}
+          >
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <MenuBookIcon sx={{ color: isLincoln ? '#5BFCEE' : 'success.main', fontSize: 28 }} />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography
+                  variant="body1"
+                  sx={{
+                    fontWeight: 600,
+                    ...(isLincoln
+                      ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.55rem', color: '#FFFFFF' }
+                      : {}),
+                  }}
+                >
+                  {isLincoln ? 'Read your book' : 'Read your book'}
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.secondary',
+                    ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.4rem' } : {}),
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  &ldquo;{completedBook.title}&rdquo;
+                </Typography>
+              </Box>
+              <Typography
+                variant="body2"
+                sx={{
+                  color: isLincoln ? '#5BFCEE' : 'success.main',
+                  fontWeight: 600,
+                  ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.45rem' } : {}),
+                }}
+              >
+                Read
               </Typography>
             </Stack>
           </Box>

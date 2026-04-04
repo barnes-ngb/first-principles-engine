@@ -234,6 +234,7 @@ export const XP_EVENTS = {
   CHECKLIST_DAY_COMPLETE: 10,   // all must-do items checked off
   DAILY_ALL_COMPLETE: 15,       // bonus: ALL items for the day finished
   WEEKLY_ALL_COMPLETE: 50,      // bonus: all 5 days completed
+  BOOK_COMPLETE: 25,             // finished creating a book (lifetime dedup per book)
   BOOK_READ: 15,                // finished reading a book
   BOOK_PAGE_READ: 1,            // per page read (partial progress)
   EVALUATION_COMPLETE: 25,      // full evaluation chat completed
