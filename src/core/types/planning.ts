@@ -568,6 +568,15 @@ export interface PlanModification {
 
 // ── Curriculum Scan ──────────────────────────────────────────
 
+/** Detected curriculum info from a scanned workbook page */
+export interface CurriculumDetected {
+  provider: 'gatb' | 'reading-eggs' | 'other' | null
+  name: string | null
+  lessonNumber: number | null
+  pageNumber: number | null
+  levelDesignation: string | null
+}
+
 export interface ScanSkillResult {
   skill: string
   level: 'introductory' | 'practice' | 'mastery' | 'review'
@@ -584,6 +593,7 @@ export interface WorksheetScanResult {
   recommendationReason: string
   estimatedMinutes: number
   teacherNotes: string
+  curriculumDetected?: CurriculumDetected
 }
 
 export interface CertificateScanResult {
@@ -602,6 +612,7 @@ export interface CertificateScanResult {
     recommendedStartLevel: number | null
     notes: string
   }
+  curriculumDetected?: CurriculumDetected
 }
 
 export type ScanResult = WorksheetScanResult | CertificateScanResult

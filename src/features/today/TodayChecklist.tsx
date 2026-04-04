@@ -27,6 +27,7 @@ import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
 import type {
   ChecklistItem as ChecklistItemType,
+  CurriculumDetected,
   DayLog,
   SkillSnapshot,
 } from '../../core/types'
@@ -128,6 +129,7 @@ interface TodayChecklistProps {
   onScanAddToPlan: () => void
   onScanSkip: () => void
   onClearScan: () => void
+  onUpdatePosition?: (curriculum: CurriculumDetected) => void
   onPrintMaterials: () => void
   printingMaterials: boolean
 }
@@ -148,6 +150,7 @@ export default function TodayChecklist({
   onScanAddToPlan,
   onScanSkip,
   onClearScan,
+  onUpdatePosition,
   onPrintMaterials,
   printingMaterials,
 }: TodayChecklistProps) {
@@ -503,6 +506,7 @@ export default function TodayChecklist({
                     imageUrl={scanResult.imageUrl}
                     onAddToPlan={onScanAddToPlan}
                     onSkip={onScanSkip}
+                    onUpdatePosition={onUpdatePosition}
                     onScanAnother={() => { onClearScan() }}
                   />
                 )}
