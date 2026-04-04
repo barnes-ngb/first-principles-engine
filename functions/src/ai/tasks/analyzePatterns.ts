@@ -2,6 +2,8 @@ import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { requireEmailAuth } from "../authGuard.js";
 import { claudeApiKey } from "../aiConfig.js";
+import { callClaude, logAiUsage } from "../chatTypes.js";
+import { modelForTask } from "../chat.js";
 
 /**
  * Task: analyzePatterns
@@ -202,7 +204,7 @@ ${historicalContext}
 Please identify any conceptual blocks in the pattern above.`;
 
     const systemPrompt = buildPatternAnalysisPrompt(childName, childAge, neurodivergentDesc);
-    const model = "claude-sonnet-4-6";
+    const model = modelForTask("analyzePatterns");
 
     const apiKey = claudeApiKey.value();
     if (!apiKey) {
@@ -212,35 +214,26 @@ Please identify any conceptual blocks in the pattern above.`;
       );
     }
 
-    const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const client = new Anthropic({ apiKey });
-
-    const completion = await client.messages.create({
+    const result = await callClaude({
+      apiKey,
       model,
-      max_tokens: 2048,
-      system: systemPrompt,
+      maxTokens: 2048,
+      systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     });
 
-    const firstBlock = completion.content[0];
-    const responseText =
-      firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
+    const responseText = result.text;
 
-    console.log(`[AI] taskType=analyzePatterns inputTokens≈${completion.usage.input_tokens} outputTokens≈${completion.usage.output_tokens}`);
+    console.log(`[AI] taskType=analyzePatterns inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`);
 
     // Log usage
-    try {
-      await db.collection(`families/${familyId}/aiUsage`).add({
-        childId,
-        taskType: "analyzePatterns",
-        model,
-        inputTokens: completion.usage.input_tokens,
-        outputTokens: completion.usage.output_tokens,
-        createdAt: new Date().toISOString(),
-      });
-    } catch (logErr) {
-      console.warn("Failed to log AI usage:", logErr);
-    }
+    await logAiUsage(db, familyId, {
+      childId,
+      taskType: "analyzePatterns",
+      model,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+    });
 
     // Parse the response
     let parsed: { blocks: ConceptualBlockResult[]; summary: string };
