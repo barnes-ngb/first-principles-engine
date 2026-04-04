@@ -561,7 +561,7 @@ Family business workstream layered on top of the homeschool system. London (art/
 ### What's Built
 - Creative time tracking (auto-logs art/writing/making hours as school)
 - Mini-book PDF export (London's AI books → printable physical products)
-- Sketch-to-story pipeline (paper drawings → book illustrations → sticker source material)
+- Sketch-to-story pipeline (paper drawings → book illustrations → sticker source material). `enhanceSketch` now filters captions through the same copyright rewriter pipeline as `generateImage` (shared via `copyrightUtils.ts`)
 
 ### What's Planned
 - Barnes Bros Dashboard (kid nav page): sales log, earnings tracker, goal thermometer

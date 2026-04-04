@@ -28,5 +28,12 @@ export type { MinecraftSkinRequest, MinecraftSkinResponse } from "./minecraftSki
 export { generateMinecraftFace } from "./minecraftFace.js";
 export type { MinecraftFaceRequest, MinecraftFaceResponse } from "./minecraftFace.js";
 
-export { enhanceSketch } from "./enhanceSketch.js";
+export { enhanceSketch, buildEnhancePrompt } from "./enhanceSketch.js";
 export type { EnhanceSketchRequest, EnhanceSketchResponse } from "./enhanceSketch.js";
+
+export {
+  COPYRIGHT_NAMES,
+  fallbackCopyrightStrip,
+  rewriteForCopyright,
+} from "./copyrightUtils.js";
+export type { RewriteMode } from "./copyrightUtils.js";

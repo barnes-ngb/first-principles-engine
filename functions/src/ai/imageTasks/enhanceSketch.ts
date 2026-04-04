@@ -2,8 +2,9 @@ import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { requireApprovedUser } from "../authGuard.js";
-import { openaiApiKey } from "../aiConfig.js";
+import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 import { createOpenAiProvider } from "../providers/openai.js";
+import { rewriteForCopyright } from "./copyrightUtils.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -13,6 +14,8 @@ export interface EnhanceSketchRequest {
   sketchStoragePath: string;
   /** Optional style hint for the enhancement prompt. */
   style?: "storybook" | "comic" | "realistic" | "minecraft";
+  /** Optional caption/description of the sketch (e.g. "my dragon drawing"). Filtered for copyright. */
+  caption?: string;
 }
 
 export interface EnhanceSketchResponse {
@@ -33,12 +36,16 @@ const STYLE_HINTS: Record<string, string> = {
   minecraft: "in a colorful blocky pixel art style",
 };
 
-function buildEnhancePrompt(style?: string): string {
+export function buildEnhancePrompt(style?: string, caption?: string): string {
   const styleHint =
     STYLE_HINTS[style ?? "storybook"] ?? STYLE_HINTS["storybook"];
+  const captionClause = caption
+    ? `The child described this as: "${caption}". `
+    : "";
   return (
     `Create a polished children's book illustration ${styleHint}, ` +
     `inspired by this child's hand-drawn sketch. ` +
+    `${captionClause}` +
     `Keep the same composition, characters, and scene layout from the original drawing. ` +
     `Make it colorful, detailed, and full of charm. ` +
     `Maintain the creativity and spirit of the original sketch. ` +
@@ -49,12 +56,12 @@ function buildEnhancePrompt(style?: string): string {
 // ── Callable Cloud Function ─────────────────────────────────────
 
 export const enhanceSketch = onCall(
-  { secrets: [openaiApiKey], timeoutSeconds: 60 },
+  { secrets: [openaiApiKey, claudeApiKey], timeoutSeconds: 120 },
   async (request): Promise<EnhanceSketchResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
     const { uid } = requireApprovedUser(request);
 
-    const { familyId, sketchStoragePath, style } =
+    const { familyId, sketchStoragePath, style, caption } =
       request.data as EnhanceSketchRequest;
 
     // ── Input validation ───────────────────────────────────────
@@ -76,6 +83,27 @@ export const enhanceSketch = onCall(
       );
     }
 
+    // ── Caption validation ──────────────────────────────────────
+    if (caption !== undefined && typeof caption !== "string") {
+      throw new HttpsError("invalid-argument", "caption must be a string.");
+    }
+    if (caption && caption.length > 500) {
+      throw new HttpsError(
+        "invalid-argument",
+        "caption must be 500 characters or fewer.",
+      );
+    }
+
+    // ── Copyright-filter the caption via Claude rewriter ───────
+    let safeCaption: string | undefined;
+    if (caption && caption.trim()) {
+      safeCaption = await rewriteForCopyright(
+        caption.trim(),
+        "sketch",
+        claudeApiKey.value(),
+      );
+    }
+
     // ── Download original sketch from Storage ──────────────────
     const bucket = getStorage().bucket();
     const sketchFile = bucket.file(sketchStoragePath);
@@ -89,7 +117,7 @@ export const enhanceSketch = onCall(
 
     // ── Enhance via gpt-image-1 edit endpoint ──────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
-    const prompt = buildEnhancePrompt(style);
+    const prompt = buildEnhancePrompt(style, safeCaption);
 
     let imageResponse;
     try {
@@ -113,7 +141,7 @@ export const enhanceSketch = onCall(
       ) {
         throw new HttpsError(
           "invalid-argument",
-          "The sketch enhancement was blocked by the safety filter. Try a different drawing.",
+          "The sketch enhancement was blocked by the safety filter. Try describing what the character looks like instead of using their name!",
         );
       }
       if (errMsg.includes("rate_limit") || errMsg.includes("429")) {
