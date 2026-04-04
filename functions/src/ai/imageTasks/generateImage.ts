@@ -5,6 +5,7 @@ import { requireApprovedUser, checkRateLimit } from "../authGuard.js";
 import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 import { createOpenAiProvider } from "../providers/openai.js";
 import type { ImageOptions } from "../aiService.js";
+import { rewriteForCopyright } from "./copyrightUtils.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -59,16 +60,6 @@ export function buildImagePrompt(
   const safetyPostfix =
     " Safe for children, family-friendly, no text overlays.";
   return `${prefix}${userPrompt}.${safetyPostfix}`;
-}
-
-// ── Fallback copyright name strip (used when Haiku rewriter fails) ──
-
-const COPYRIGHT_NAMES =
-  /\b(mario|luigi|princess peach|peach|bowser|toad|yoshi|donkey kong|link|zelda|ganon|kirby|samus|pikachu|pokemon|charizard|bulbasaur|squirtle|eevee|mewtwo|jigglypuff|snorlax|gengar|raichu|disney|mickey mouse|mickey|minnie|goofy|donald duck|elsa|anna|olaf|moana|rapunzel|ariel|mulan|simba|woody|buzz lightyear|nemo|dory|baymax|wall-e|spider-?man|spiderman|batman|superman|iron man|hulk|thor|captain america|wonder woman|wolverine|deadpool|thanos|joker|minecraft|creeper|enderman|steve|herobrine|fortnite|roblox|sonic|tails|knuckles|shadow|amy rose|among us|hello kitty|spongebob|patrick star|squidward|peppa pig|paw patrol|bluey|cocomelon|ryan|mr\.? beast|mrbeast)\b/gi;
-
-/** Regex-based fallback to strip copyrighted names when the AI rewriter is unavailable. */
-function fallbackCopyrightStrip(prompt: string): string {
-  return prompt.replace(COPYRIGHT_NAMES, "character").replace(/\s{2,}/g, " ").trim();
 }
 
 // ── Callable Cloud Function ─────────────────────────────────────
@@ -136,73 +127,8 @@ export const generateImage = onCall(
     await checkRateLimit(uid, "image-generation", 20, 60);
 
     // ── Rewrite prompt for DALL-E safety via Claude ─────────────
-    let safePrompt = prompt;
-    try {
-      const { default: Anthropic } = await import("@anthropic-ai/sdk");
-      const claude = new Anthropic({ apiKey: claudeApiKey.value() });
-
-      const rewriteSystemPrompt =
-        style === "book-sticker"
-          ? `You rewrite children's sticker descriptions to avoid copyright issues.
-
-CRITICAL RULES:
-- NEVER output any character names, franchise names, game names, or brand names
-- Replace ALL named characters with visual descriptions of how they look
-- Replace ALL franchise/game names with genre descriptions
-- If the input is ONLY a character name with no other context, describe that character's iconic visual appearance without naming them
-- Keep it cute, simple, child-friendly
-- Under 50 words
-
-EXAMPLES:
-- "Mario" → "a cheerful stocky cartoon man wearing red overalls, a red cap, brown shoes, and a big bushy mustache"
-- "Pikachu" → "a small round yellow cartoon creature with long pointy ears tipped in black, rosy red cheeks, and a lightning-bolt shaped tail"
-- "a Minecraft creeper" → "a tall green blocky pixelated creature with a frowning face"
-- "Elsa from Frozen" → "a graceful young woman with platinum blonde hair in a long braid, wearing a sparkling ice-blue gown"
-- "Spider-Man swinging" → "a superhero in a red and blue full-body suit with web patterns, swinging through the air"
-- "Lincoln's Minecraft skin" → "a blocky pixel-art video game character"
-- "Sonic" → "a speedy blue cartoon hedgehog with red shoes and white gloves"
-- "a cute puppy" → "a cute puppy"
-
-OUTPUT: Just the rewritten description. No preamble, no quotes, no explanation.
-If the input has no copyright concerns (like "a cute puppy"), output it unchanged.`
-          : `You rewrite children's image generation prompts to avoid copyright issues while preserving the creative intent.
-
-RULES:
-- NEVER include character names (Mario, Luigi, Pikachu, Elsa, Spider-Man, Steve, etc.)
-- NEVER include franchise names (Minecraft, Pokemon, Mario Bros, Disney, Marvel, etc.)
-- Instead, describe the VISUAL STYLE and WORLD without naming the IP:
-  - "Minecraft" → "blocky pixel art voxel world"
-  - "Mario" → "colorful platformer video game world with brick blocks, green pipes, golden coins"
-  - "Pokemon" → "cute cartoon creatures in a grassy meadow"
-  - "Frozen/Elsa" → "magical ice palace with snowflakes and northern lights"
-  - "Spider-Man" → "comic book city rooftop scene at sunset"
-- ALWAYS describe a SCENE or ENVIRONMENT, not a character doing something
-- If the kid describes a character action ("Mario jumps over a pit"), convert to a scene ("a deep pit with lava below in a colorful platformer world, brick platforms floating above")
-- Keep the output under 100 words
-- Maintain the kid's creative intent — just make it about the WORLD not the CHARACTER
-- The output should start directly with the scene description, no preamble
-
-IMPORTANT: The child will overlay their own characters on top of this scene. So generate a BACKGROUND, not a character portrait.`;
-
-      const rewriteResult = await claude.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 300,
-        system: rewriteSystemPrompt,
-        messages: [{ role: "user", content: prompt }],
-      });
-
-      const firstBlock = rewriteResult.content[0];
-      if (firstBlock?.type === "text" && firstBlock.text.trim()) {
-        safePrompt = firstBlock.text;
-      } else {
-        // Empty response from rewriter — use fallback
-        safePrompt = fallbackCopyrightStrip(prompt);
-      }
-    } catch (rewriteErr) {
-      // If rewrite fails, use regex fallback instead of raw prompt
-      console.warn("Prompt rewrite failed, using fallback strip:", rewriteErr);
-      safePrompt = fallbackCopyrightStrip(prompt);
-    }
+    const rewriteMode = style === "book-sticker" ? "sticker" as const : "scene" as const;
+    const safePrompt = await rewriteForCopyright(prompt, rewriteMode, claudeApiKey.value());
 
     // ── Generate image ──────────────────────────────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
