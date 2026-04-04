@@ -1,3 +1,21 @@
+// ── Currency types ────────────────────────────────────────────
+
+/** Two-currency system: XP (progression, never decreases) and Diamonds (inventory, earned & spent) */
+export const CurrencyType = {
+  Xp: 'xp',
+  Diamond: 'diamond',
+} as const
+export type CurrencyType = (typeof CurrencyType)[keyof typeof CurrencyType]
+
+/** Category for diamond transactions */
+export const DiamondCategory = {
+  Earn: 'earn',
+  Forge: 'forge',
+  Cosmetic: 'cosmetic',
+  Decoration: 'decoration',
+} as const
+export type DiamondCategory = (typeof DiamondCategory)[keyof typeof DiamondCategory]
+
 // ── XP Ledger (cumulative XP tracking) ────────────────────────
 
 export interface XpLedgerSources {
@@ -21,6 +39,12 @@ export interface XpLedger {
   meta?: Record<string, string>
   /** ISO timestamp of when XP was awarded (per-event docs only). */
   awardedAt?: string
+  /** Currency type: 'xp' (default/legacy) or 'diamond'. Missing = 'xp' for backward compat. */
+  currencyType?: CurrencyType
+  /** Diamond transaction category (only for diamond entries). */
+  category?: DiamondCategory
+  /** Reference to what was purchased (e.g., armor piece ID). */
+  itemId?: string
 }
 
 // ── Avatar + Armor of God ─────────────────────────────────────────

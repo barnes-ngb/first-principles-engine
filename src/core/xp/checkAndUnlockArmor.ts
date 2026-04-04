@@ -121,7 +121,9 @@ export async function checkAndUnlockArmor(
     ? normalizeAvatarProfile(profileSnap.data())
     : normalizeAvatarProfile({ childId })
 
-  // Read XP from xpLedger (source of truth) when not passed explicitly
+  // Read XP from xpLedger cumulative doc (source of truth) when not passed explicitly.
+  // The cumulative doc only includes XP entries (diamond entries are event-only),
+  // so this correctly excludes diamonds from tier/armor calculations.
   let xp = totalXp ?? 0
   if (totalXp === undefined) {
     const ledgerRef = doc(xpLedgerCollection(familyId), childId)

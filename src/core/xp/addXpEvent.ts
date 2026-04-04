@@ -7,6 +7,7 @@ import {
   xpLedgerDocId,
 } from '../firebase/firestore'
 import type { AvatarProfile, XP_EVENTS } from '../types'
+import type { CurrencyType, DiamondCategory } from '../types'
 import { checkAndUnlockArmor } from './checkAndUnlockArmor'
 import { calculateTier } from '../../features/avatar/voxel/tierMaterials'
 
@@ -31,15 +32,24 @@ function mapTypeToSource(type: keyof typeof XP_EVENTS): 'routines' | 'quests' | 
   return 'routines'
 }
 
+/** Options for currency-specific fields when awarding XP or diamonds. */
+export interface AddXpEventOptions {
+  currencyType?: CurrencyType
+  category?: DiamondCategory
+  itemId?: string
+}
+
 /**
- * Award XP to a child, with dedup guard.
+ * Award XP or diamonds to a child, with dedup guard.
  *
  * Dedup and event tracking are handled via per-event docs in xpLedger
  * (doc ID: {childId}_{dedupKey}). The cumulative doc (doc ID: {childId})
- * is also updated atomically.
+ * is also updated atomically for XP entries. Diamond entries are stored
+ * as individual events only (balance computed from sum).
  *
  * @param dedupKey - Unique key for this event (e.g., `checklist_2026-03-20`,
  *   `book_${bookId}_2026-03-20`, `eval_${sessionId}`)
+ * @param options - Optional currency fields (currencyType defaults to 'xp')
  */
 export async function addXpEvent(
   familyId: string,
@@ -48,9 +58,11 @@ export async function addXpEvent(
   amount: number,
   dedupKey: string,
   meta?: Record<string, string>,
+  options?: AddXpEventOptions,
 ): Promise<number> {
   if (!familyId || !childId || amount === 0) return 0
-  console.log(`[XP] Awarding ${amount} XP to ${childId} for ${type}`)
+  const currencyType = options?.currencyType ?? 'xp'
+  console.log(`[XP] Awarding ${amount} ${currencyType} to ${childId} for ${type}`)
 
   // ── Dedup check (per-event doc in xpLedger) ────────────────
   const eventDocId = xpLedgerDocId(childId, dedupKey)
@@ -74,7 +86,15 @@ export async function addXpEvent(
     meta: meta ?? {},
     awardedAt: new Date().toISOString(),
     lastUpdatedAt: new Date().toISOString(),
+    currencyType,
+    ...(options?.category ? { category: options.category } : {}),
+    ...(options?.itemId ? { itemId: options.itemId } : {}),
   })
+
+  // Diamond entries are event-only — no cumulative doc or armor check needed
+  if (currencyType === 'diamond') {
+    return amount
+  }
 
   // ── Update cumulative XP ledger doc ────────────────────────
   const ledgerRef = doc(xpLedgerCollection(familyId), childId)
