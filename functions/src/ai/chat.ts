@@ -92,9 +92,6 @@ interface WorkbookPace {
   unitLabel: string;
   currentPosition: number;
   totalUnits: number;
-  unitsPerDayNeeded: number;
-  targetFinishDate: string;
-  status: "ahead" | "on-track" | "behind";
   subjectBucket?: string;
   curriculum?: CurriculumMeta;
 }
@@ -144,7 +141,7 @@ function schoolYearStart(d: Date): string {
 
 // ── Enriched context loaders ────────────────────────────────────
 
-/** Load workbook configs and calculate pace for each. */
+/** Load workbook configs as coverage data (no pace/deadline computation). */
 export async function loadWorkbookPaces(
   db: Firestore,
   familyId: string,
@@ -155,7 +152,6 @@ export async function loadWorkbookPaces(
     .where("childId", "==", childId)
     .get();
 
-  const today = new Date();
   const paces: WorkbookPace[] = [];
 
   for (const doc of snap.docs) {
@@ -164,39 +160,15 @@ export async function loadWorkbookPaces(
       unitLabel: string;
       currentPosition: number;
       totalUnits: number;
-      targetFinishDate: string;
-      schoolDaysPerWeek: number;
       subjectBucket?: string;
       curriculum?: CurriculumMeta;
     };
-
-    const remaining = data.totalUnits - data.currentPosition;
-    const targetDate = new Date(data.targetFinishDate + "T00:00:00");
-    const msPerDay = 86_400_000;
-    const calendarDaysLeft = Math.max(
-      1,
-      Math.ceil((targetDate.getTime() - today.getTime()) / msPerDay),
-    );
-    // Approximate school days: (calendarDays / 7) * schoolDaysPerWeek
-    const schoolDaysLeft = Math.max(
-      1,
-      Math.round((calendarDaysLeft / 7) * (data.schoolDaysPerWeek || 5)),
-    );
-    const unitsPerDay = remaining / schoolDaysLeft;
-
-    let status: WorkbookPace["status"];
-    if (unitsPerDay <= 0.8) status = "ahead";
-    else if (unitsPerDay <= 1.2) status = "on-track";
-    else status = "behind";
 
     paces.push({
       name: data.name,
       unitLabel: data.unitLabel || "lesson",
       currentPosition: data.currentPosition,
       totalUnits: data.totalUnits,
-      unitsPerDayNeeded: Math.round(unitsPerDay * 10) / 10,
-      targetFinishDate: data.targetFinishDate,
-      status,
       subjectBucket: data.subjectBucket,
       curriculum: data.curriculum,
     });

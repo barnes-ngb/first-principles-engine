@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, getDocs, query, setDoc, updateDoc, where, serverTimestamp } from 'firebase/firestore'
 
-import { workbookConfigsCollection, workbookConfigDocId } from '../firebase/firestore'
+import { workbookConfigsCollection, workbookConfigDocId, normalizeCurriculumKey } from '../firebase/firestore'
 import type { CertificateScanResult, WorkbookConfig, CurriculumMeta } from '../types'
 import { SubjectBucket } from '../types/enums'
 import type { SubjectBucket as SubjectBucketType } from '../types/enums'
@@ -52,11 +52,13 @@ export function useCertificateProgress(): UseCertificateProgressResult {
       result: CertificateScanResult,
     ): Promise<CertificatePreview> => {
       const workbookName = result.curriculumName
-      const docId = workbookConfigDocId(childId, workbookName)
       const colRef = workbookConfigsCollection(familyId)
-      const docRef = doc(colRef, docId)
-      const snap = await getDoc(docRef)
-      const existingConfig = snap.exists() ? snap.data() : null
+
+      // Match by normalized curriculum key to avoid duplicates
+      const normalizedKey = normalizeCurriculumKey(workbookName)
+      const allSnap = await getDocs(query(colRef, where('childId', '==', childId)))
+      const matchingDoc = allSnap.docs.find(d => normalizeCurriculumKey(d.data().name) === normalizedKey)
+      const existingConfig = matchingDoc?.data() ?? null
 
       // Parse lesson range end number as new position if available
       let newPosition: number | null = null
@@ -99,10 +101,12 @@ export function useCertificateProgress(): UseCertificateProgressResult {
 
       try {
         const workbookName = result.curriculumName
-        const docId = workbookConfigDocId(childId, workbookName)
         const colRef = workbookConfigsCollection(familyId)
-        const docRef = doc(colRef, docId)
-        const snap = await getDoc(docRef)
+
+        // Match by normalized curriculum key to find existing config
+        const normalizedKey = normalizeCurriculumKey(workbookName)
+        const allSnap = await getDocs(query(colRef, where('childId', '==', childId)))
+        const matchingDoc = allSnap.docs.find(d => normalizeCurriculumKey(d.data().name) === normalizedKey)
 
         // Parse lesson range end number as new position
         let newPosition: number | null = null
@@ -119,9 +123,9 @@ export function useCertificateProgress(): UseCertificateProgressResult {
         const newMasteredSkills = result.suggestedSnapshotUpdate?.masteredSkills ?? result.skillsCovered
         const milestoneDate = result.date || new Date().toISOString().slice(0, 10)
 
-        if (snap.exists()) {
-          // Update existing workbook config
-          const existing = snap.data()
+        if (matchingDoc) {
+          // Update existing workbook config (regardless of exact name)
+          const existing = matchingDoc.data()
           const existingMastered = existing.curriculum?.masteredSkills ?? []
           const mergedSkills = [...new Set([...existingMastered, ...newMasteredSkills])]
 
@@ -151,9 +155,11 @@ export function useCertificateProgress(): UseCertificateProgressResult {
             updates.currentPosition = newPosition
           }
 
-          await updateDoc(docRef, updates)
+          await updateDoc(matchingDoc.ref, updates)
         } else {
           // Create new workbook config from certificate data
+          const docId = workbookConfigDocId(childId, workbookName)
+          const docRef = doc(colRef, docId)
           const subjectBucket = inferSubjectBucket(result.curriculum, result.curriculumName)
 
           const milestoneText = (result.milestone ?? '').toLowerCase()

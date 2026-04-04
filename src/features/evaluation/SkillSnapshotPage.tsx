@@ -79,28 +79,16 @@ const CURRICULUM_PROVIDERS = [
   'other',
 ] as const
 
-function computePaceText(wb: WorkbookConfig): { text: string; color: string } | null {
-  if (!wb.totalUnits || !wb.targetFinishDate || !wb.currentPosition) return null
-  const remaining = wb.totalUnits - wb.currentPosition
-  if (remaining <= 0) return { text: 'Complete!', color: 'success.main' }
+function computeCoverageText(wb: WorkbookConfig): { text: string; color: string } | null {
+  if (!wb.totalUnits || !wb.currentPosition) return null
+  if (wb.currentPosition >= wb.totalUnits) return { text: 'Complete!', color: 'success.main' }
 
-  const today = new Date()
-  const target = new Date(wb.targetFinishDate + 'T00:00:00')
-  const msPerDay = 86_400_000
-  const totalDays = Math.max(1, Math.ceil((target.getTime() - today.getTime()) / msPerDay))
-  const totalWeeks = totalDays / 7
-  const schoolDays = Math.max(1, Math.round(totalWeeks * (wb.schoolDaysPerWeek || 5)))
-  const perDay = remaining / schoolDays
-
+  const covered = wb.currentPosition
   const unit = wb.unitLabel || 'lesson'
-  const targetMonth = target.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-  const text = `${unit.charAt(0).toUpperCase() + unit.slice(1)} ${wb.currentPosition} of ${wb.totalUnits} — ${perDay.toFixed(1)} ${unit}s/school day to finish by ${targetMonth}`
-
-  let color = 'success.main'
-  if (perDay > 2.5) color = 'error.main'
-  else if (perDay > 1.5) color = 'warning.main'
-
-  return { text, color }
+  return {
+    text: `${unit.charAt(0).toUpperCase() + unit.slice(1)} ${covered} of ${wb.totalUnits} covered`,
+    color: 'text.secondary',
+  }
 }
 
 const emptySnapshot = (childId: string): SkillSnapshot => ({
@@ -668,7 +656,7 @@ export default function SkillSnapshotPage() {
                 <Typography color="text.secondary">No workbooks configured.</Typography>
               ) : (
                 workbooks.map((wb, index) => {
-                  const pace = computePaceText(wb)
+                  const pace = computeCoverageText(wb)
                   return (
                     <Stack
                       key={wb.id ?? index}

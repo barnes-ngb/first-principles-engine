@@ -268,6 +268,25 @@ export const workbookConfigsCollection = (
 export const workbookConfigDocId = (childId: string, workbookName: string): string =>
   `${childId}_${workbookName.toLowerCase().replace(/\s+/g, '-')}`
 
+/** Normalize curriculum names for consistent matching.
+ * "GATB LA", "Good and the Beautiful Language Arts", "TGTB Level 1" all → "gatb-la" base key.
+ */
+export function normalizeCurriculumKey(name: string): string {
+  const lower = name.toLowerCase()
+  // GATB variants
+  if (/good.*beautiful|gatb|tgtb/.test(lower)) {
+    if (/math/.test(lower)) return 'gatb-math'
+    if (/lang|la\b|reading|phonics/.test(lower)) return 'gatb-la'
+    if (/science/.test(lower)) return 'gatb-science'
+    if (/handwriting/.test(lower)) return 'gatb-handwriting'
+    return 'gatb'
+  }
+  // Reading Eggs
+  if (/reading.*egg/.test(lower)) return 'reading-eggs'
+  // Fallback: slugify
+  return lower.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
 // ── Weekly Reviews (AI-generated adaptive reviews) ──────────────
 
 export const weeklyReviewsCollection = (

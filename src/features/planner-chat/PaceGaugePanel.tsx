@@ -3,7 +3,6 @@ import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
 import LinearProgress from '@mui/material/LinearProgress'
 import Stack from '@mui/material/Stack'
-import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
 import type { PaceGaugeResult } from '../../core/types'
@@ -13,25 +12,25 @@ interface PaceGaugePanelProps {
   gauges: PaceGaugeResult[]
 }
 
-const statusColor: Record<PaceStatus, 'success' | 'info' | 'warning' | 'error'> = {
-  [PaceStatus.Ahead]: 'success',
-  [PaceStatus.OnTrack]: 'info',
-  [PaceStatus.Behind]: 'warning',
-  [PaceStatus.Critical]: 'error',
+const statusColor: Record<PaceStatus, 'success' | 'info' | 'warning' | 'default'> = {
+  [PaceStatus.Explored]: 'success',
+  [PaceStatus.Current]: 'info',
+  [PaceStatus.Upcoming]: 'default',
+  [PaceStatus.NotStarted]: 'default',
 }
 
 const statusLabel: Record<PaceStatus, string> = {
-  [PaceStatus.Ahead]: 'Ahead',
-  [PaceStatus.OnTrack]: 'On Track',
-  [PaceStatus.Behind]: 'Behind',
-  [PaceStatus.Critical]: 'Critical',
+  [PaceStatus.Explored]: 'Explored',
+  [PaceStatus.Current]: 'Working On',
+  [PaceStatus.Upcoming]: 'Coming Up',
+  [PaceStatus.NotStarted]: 'Not Started',
 }
 
 export default function PaceGaugePanel({ gauges }: PaceGaugePanelProps) {
   if (gauges.length === 0) {
     return (
       <Alert severity="info" variant="outlined">
-        Add workbook configs to see pace tracking.
+        Add workbook configs to see curriculum coverage.
       </Alert>
     )
   }
@@ -48,22 +47,22 @@ export default function PaceGaugePanel({ gauges }: PaceGaugePanelProps) {
     >
       <Stack spacing={1.5}>
         <Typography variant="subtitle2" color="text.secondary">
-          Pace Gauge
+          What We've Covered
         </Typography>
 
         {gauges.map((gauge) => (
-          <PaceRow key={gauge.workbookName} gauge={gauge} />
+          <CoverageRow key={gauge.workbookName} gauge={gauge} />
         ))}
       </Stack>
     </Box>
   )
 }
 
-function PaceRow({ gauge }: { gauge: PaceGaugeResult }) {
+function CoverageRow({ gauge }: { gauge: PaceGaugeResult }) {
   const color = statusColor[gauge.status]
-  const progress = gauge.requiredPerWeek > 0
-    ? Math.min(100, (gauge.plannedPerWeek / gauge.requiredPerWeek) * 100)
-    : 100
+  const progress = gauge.totalUnits > 0
+    ? Math.min(100, (gauge.currentPosition / gauge.totalUnits) * 100)
+    : 0
 
   return (
     <Stack spacing={0.5}>
@@ -77,39 +76,19 @@ function PaceRow({ gauge }: { gauge: PaceGaugeResult }) {
           color={color}
           variant="outlined"
         />
-        {gauge.bufferDays > 0 && (
-          <Tooltip title={`${gauge.bufferDays} buffer days available`}>
-            <Chip
-              label={`${gauge.bufferDays}d buffer`}
-              size="small"
-              variant="outlined"
-              color="success"
-            />
-          </Tooltip>
-        )}
       </Stack>
 
-      <LinearProgress
-        variant="determinate"
-        value={progress}
-        color={color}
-        sx={{ height: 6, borderRadius: 3 }}
-      />
+      {gauge.totalUnits > 0 && (
+        <LinearProgress
+          variant="determinate"
+          value={progress}
+          color={color === 'default' ? 'inherit' : color}
+          sx={{ height: 6, borderRadius: 3 }}
+        />
+      )}
 
-      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-        <Typography variant="caption" color="text.secondary">
-          Need: {gauge.requiredPerWeek}/wk
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Planned: {gauge.plannedPerWeek}/wk
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Finish: {gauge.projectedFinishDate}
-        </Typography>
-      </Stack>
-
-      <Typography variant="caption" color={`${color}.main`}>
-        {gauge.suggestion}
+      <Typography variant="caption" color="text.secondary">
+        {gauge.coverageText}
       </Typography>
     </Stack>
   )
