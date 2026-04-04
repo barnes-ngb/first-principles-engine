@@ -371,6 +371,49 @@ function OpenResponseInput({ onSubmit, disabled, questionId }: OpenResponseInput
   )
 }
 
+// ── Blend pronunciation guide for TTS ─────────────────────────
+// Short letter combos like "ch" or "th" get spelled out by Web Speech API.
+// Append a guide word so the TTS says the sound, not individual letters.
+
+const BLEND_GUIDES: Record<string, string> = {
+  ch: 'ch, as in cheese',
+  sh: 'sh, as in shoe',
+  th: 'th, as in this',
+  wh: 'wh, as in when',
+  fl: 'fl, as in flat',
+  bl: 'bl, as in blue',
+  cr: 'cr, as in crab',
+  tr: 'tr, as in tree',
+  st: 'st, as in stop',
+  sn: 'sn, as in snake',
+  gr: 'gr, as in green',
+  br: 'br, as in bring',
+  cl: 'cl, as in clap',
+  dr: 'dr, as in drum',
+  fr: 'fr, as in frog',
+  gl: 'gl, as in glad',
+  pl: 'pl, as in play',
+  pr: 'pr, as in prize',
+  sk: 'sk, as in skip',
+  sl: 'sl, as in slide',
+  sm: 'sm, as in smile',
+  sp: 'sp, as in spin',
+  sw: 'sw, as in swim',
+  tw: 'tw, as in twin',
+  nd: 'nd, as in and',
+  nk: 'nk, as in think',
+}
+
+/** Get a TTS-friendly pronunciation for short blend/digraph options. */
+function blendForTTS(text: string): string {
+  // Only apply to short options (1-3 chars) that are blends, not full words
+  if (text.length <= 3) {
+    const guide = BLEND_GUIDES[text.toLowerCase()]
+    if (guide) return guide
+  }
+  return text
+}
+
 // ── QuestQuestionScreen ───────────────────────────────────────
 
 interface QuestQuestionScreenProps {
@@ -427,7 +470,17 @@ export default function QuestQuestionScreen({
     || /rhymes with/i.test(question.prompt)
     || /complete the sentence/i.test(question.prompt)
     || /belongs in this sentence/i.test(question.prompt)
-  const shouldReadOptions = isMathQuest // Only math — reading options defeats reading tests
+  // Options should be readable for math (always) and reading question types where
+  // hearing the sound/word helps but reading it isn't the skill being tested
+  const shouldReadOptions = isMathQuest
+    || /complete the word/i.test(question.prompt)
+    || /finish the word/i.test(question.prompt)
+    || /fill in/i.test(question.prompt)
+    || /rhymes with/i.test(question.prompt)
+    || /same sound/i.test(question.prompt)
+    || /starts with the/i.test(question.prompt)
+    || /begins with/i.test(question.prompt)
+    || /does NOT rhyme/i.test(question.prompt)
 
   // Show skip button after 8 seconds on current question
   useEffect(() => {
@@ -678,13 +731,17 @@ export default function QuestQuestionScreen({
                   {revealCorrect ? `✅ ${option}` : option}
                 </Typography>
                 {shouldReadOptions && !muted && !revealingAnswer && (
-                  <VolumeUpIcon
-                    sx={{ fontSize: '0.9rem', color: MC.stone, opacity: 0.4, flexShrink: 0 }}
+                  <IconButton
+                    size="small"
                     onClick={(e) => {
                       e.stopPropagation()
-                      tts.speak(option)
+                      tts.speak(blendForTTS(option))
                     }}
-                  />
+                    sx={{ ml: 0.5, p: 0.5, color: MC.stone, opacity: 0.5, flexShrink: 0 }}
+                    aria-label={`Hear ${option}`}
+                  >
+                    <VolumeUpIcon sx={{ fontSize: '0.9rem' }} />
+                  </IconButton>
                 )}
               </Stack>
             </Box>

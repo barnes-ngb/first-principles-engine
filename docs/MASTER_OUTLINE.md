@@ -300,7 +300,7 @@ Progress
 * Print materials (quality varies — book PDFs and worksheets)
 * Skip guidance (depends on evaluation data quality)
 * Lincoln's kid Today view (Must-Do/Choose flow — needs real week)
-* Knowledge Mine quest — Phase 2 pipeline fixes shipped (skill snapshot → planner/quest, pattern detection trigger, blank validation, math TTS). Needs Lincoln to verify: adaptive start from snapshot data, question quality with blank validation, math TTS auto-read, pattern detection after 3+ sessions
+* Knowledge Mine quest — Phase 2 pipeline fixes shipped (skill snapshot → planner/quest, pattern detection trigger, blank validation, math TTS). Kid-friendly question language — no metalanguage (consonant blend, digraph, phoneme). Single valid answer enforcement — word completion verified for unique solutions. TTS on answer options — speaker icon per option, blend pronunciation guides for digraphs/blends. Question variety rules — max 2 word-completion per session, 7 format types rotating (word ID, rhyming, sound matching, word building, sentence completion, odd-one-out, fill-in-blank). Needs Lincoln to verify: adaptive start from snapshot data, question quality with blank validation, math TTS auto-read, pattern detection after 3+ sessions
 * Story Game Workshop — needs London to test: voice recognition via keyboard dictation, wizard flow, all three game types, art generation quality, playtester flow with Lincoln
 * My Books full flow (needs Shelly + kids — AI story gen, sight word tracking, reading sessions)
 * Story Guide handoff to generator (questions work, generator handoff unverified)

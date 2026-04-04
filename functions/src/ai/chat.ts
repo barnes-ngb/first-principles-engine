@@ -677,34 +677,83 @@ CRITICAL QUESTION FORMAT RULES:
 - Every question must be answerable from TEXT information alone
 - The question text, stimulus word, and all answer options must be plain text strings
 
-QUESTION TYPE VARIETY:
+KID-FRIENDLY LANGUAGE RULES — Lincoln is 10 and neurodivergent:
+
+NEVER use these terms in questions:
+- "consonant blend" → instead test directly: "Which word starts with 'fl'?"
+- "digraph" → instead test directly: "Which word starts with 'ch'?"
+- "vowel" → instead say "the sound in the middle" or name it: "Which word has the /a/ sound?"
+- "consonant" → don't use this word at all
+- "phoneme" → don't use this word at all
+- "syllable" → instead say "parts" or "beats" ("How many beats in 'butterfly'?")
+- "onset" / "rime" → never use these
+- "CVC" / "CVCe" → never use these
+- "initial blend" / "final blend" → never use these
+
+GOOD question phrasing:
+- "Which word starts with 'fl'?" (direct, concrete)
+- "Which word rhymes with 'cat'?" (kids understand rhyming)
+- "Finish the word: ch__p — what letters go in the blank?" (clear task)
+- "Which word starts with the same sound as 'tree'?" (comparison, concrete)
+
+BAD question phrasing:
+- "Which word starts with a consonant blend?" (metalanguage)
+- "Identify the digraph in this word" (metalanguage)
+- "Which word contains a short vowel?" (metalanguage)
+- "Select the word with an initial consonant cluster" (academic jargon)
+
+RULE: If you wouldn't say it to a 10-year-old while reading together on the couch, don't put it in a question.
+
+ANSWER VALIDITY RULES (CRITICAL):
+
+For word completion questions (fill in the blank):
+- There must be EXACTLY ONE answer option that creates a real, common English word
+- The other options must create nonsense words OR words so uncommon a child wouldn't know them
+- BEFORE generating: mentally complete the word with EACH option. If more than one makes a real word, CHANGE THE QUESTION.
+
+WRONG: __in → [ch, th, wh] because chin, thin, and whin are ALL real words
+RIGHT: __ug → [sn, zh, bl] because "snug" is real, "zhug" and "blug" are not — CORRECT, one valid answer
+
+BETTER APPROACH for testing sounds: Don't use fill-in-the-blank when multiple options would make real words. Instead:
+- "Which word starts with the 'ch' sound?" → [chip, ship, tip] (only "chip" starts with ch)
+- "Tap the word that begins with 'th'" → [them, stem, dem] (only "them" starts with th)
+
+For ALL question types:
+- Every question must have EXACTLY ONE correct answer
+- Verify: could a child reasonably argue a different answer is correct? If yes → rewrite the question
+
+QUESTION TYPE VARIETY & DISTRIBUTION:
 You MUST use a DIFFERENT question type for each question. Never repeat the same format twice in a row.
+Max 2 word-completion (fill-in-blank) questions per 10-question session — they're the least fun and most error-prone.
 
 Level 1-2 question types (rotate through these):
-- "What sound does the letter ___ make?" (letter-to-sound)
-- "Which word starts with the /_/ sound?" (initial sound match)
-- "Tap the word that rhymes with ___" (rhyming)
-- "Which word has the short /_/ sound?" (vowel sound ID)
-- "What word is this?" + stimulus word (word reading — include stimulus field)
-- "Sound it out: /_/ /_/ /_/ — which word is it?" (blending from phonemes)
+1. WORD IDENTIFICATION — "Tap the word 'stop'" with 3 word options (tests sight recognition) — include stimulus field
+2. RHYMING — "Tap the word that rhymes with ___" (fun, pattern-based)
+3. SOUND MATCHING — "Which word starts with the same sound as 'tree'?" (auditory pattern, concrete)
+4. WORD BUILDING — "Put these sounds together: /s/ /t/ /o/ /p/ — what word?" with options (blending from phonemes)
+5. "What sound does the letter ___ make?" (letter-to-sound)
+6. "What word is this?" + stimulus word (word reading — include stimulus field)
 
 Level 3-4 question types (rotate through these):
-- "Which word has the /sh/ sound?" (digraph/blend identification)
-- "Complete the word: s_op" (fill in blend/digraph)
-- "Which word belongs in this sentence: 'The boy can ___ fast.'" (context clue)
-- "Which of these is a real word?" (real vs nonsense word)
-- "Tap the word that means the opposite of ___" (antonym)
-- "What word is this?" + stimulus word (word reading — include stimulus field)
+1. "Which word starts with the 'sh' sound?" (direct sound identification — no metalanguage)
+2. "Complete the word: s__op" (fill in blend — use sparingly, max 2 per session, MUST have only one valid answer)
+3. "Which word belongs in this sentence: 'The boy can ___ fast.'" (context clue)
+4. ODD ONE OUT — "Which word does NOT rhyme with 'dog'?" (fun, eliminative)
+5. "Which of these is a real word?" (real vs nonsense word)
+6. "What word is this?" + stimulus word (word reading — include stimulus field)
 
 Level 5-6 question types (rotate through these):
-- "Which word has a silent e?" (CVCe identification)
-- "Which word rhymes with 'cake'?" (rhyming with long vowels)
-- "Complete the sentence: 'She ___ the ball to her friend.'" (context clue)
-- "Which word means the same as ___?" (synonym)
-- "What word is this?" + stimulus word (word reading — include stimulus field)
-- "Which word has the /ee/ sound?" (vowel team identification)
+1. "Which word has a silent e?" (CVCe identification)
+2. "Which word rhymes with 'cake'?" (rhyming with long vowels)
+3. SENTENCE COMPLETION — "The dog sat on the ___" with word options (tests meaning + decoding)
+4. "Which word means the same as ___?" (synonym)
+5. "What word is this?" + stimulus word (word reading — include stimulus field)
+6. "Which word has the /ee/ sound?" (vowel team identification)
 
 VARIETY RULE: Track which question types you have used in this conversation. Pick the LEAST recently used type for the current level. The child should feel like discovering different gems in the mine, not hitting the same rock repeatedly.
+For Levels 1-2: Focus on word ID, rhyming, word building (simpler, more concrete).
+For Levels 3-4: Mix in sentence completion, odd-one-out, sound ID (more analytical).
+For Levels 5-6: Add harder versions of all types.
 
 STIMULUS FIELD:
 - When the question asks "What word is this?" or presents a word to read, set "stimulus" to the target word (e.g., "stimulus": "stop")
