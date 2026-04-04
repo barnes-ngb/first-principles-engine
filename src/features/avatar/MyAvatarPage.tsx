@@ -1143,6 +1143,7 @@ export default function MyAvatarPage() {
             profile={profile}
             appliedPieces={appliedPieces}
             selectedPiece={selectedPiece}
+            activeForgeTier={getActiveForgeTier(profile)}
             isLincoln={isLincoln}
             accentColor={accentColor}
             textColor={textColor}
@@ -1155,7 +1156,7 @@ export default function MyAvatarPage() {
         {selectedPiece && (
           <ArmorVerseCard
             piece={selectedPiece}
-            isUnlocked={profile.totalXp >= XP_THRESHOLDS[selectedPiece.id]}
+            isUnlocked={true}
             isEquipped={appliedVoxel.includes(selectedPiece.id)}
             isForged={Boolean(profile.forgedPieces?.[getActiveForgeTier(profile)]?.[selectedPiece.id])}
             forgeCost={getForgeCost(getActiveForgeTier(profile), selectedPiece.id)}
