@@ -25,6 +25,48 @@ export const handleQuest = async (
     db, familyId, childId, childData, snapshotData,
   });
 
+  // Determine starting level from curriculum completion data
+  let suggestedStartLevel: number | undefined;
+  if (domain === "reading" || !domain) {
+    try {
+      const wbSnap = await db
+        .collection(`families/${familyId}/workbookConfigs`)
+        .where("childId", "==", childId)
+        .get();
+
+      for (const wbDoc of wbSnap.docs) {
+        const config = wbDoc.data() as {
+          subjectBucket?: string;
+          curriculum?: {
+            completed?: boolean;
+            masteredSkills?: string[];
+          };
+        };
+        if (config.subjectBucket !== "Reading") continue;
+        if (!config.curriculum) continue;
+
+        // Completed reading curriculum → start past basic phonics
+        if (config.curriculum.completed) {
+          suggestedStartLevel = Math.max(suggestedStartLevel ?? 0, 5);
+        }
+        // Check specific mastered skills for finer-grained level
+        const mastered = config.curriculum.masteredSkills ?? [];
+        if (mastered.includes("vowel-teams-ea-ai-oa-ee-oo")) {
+          suggestedStartLevel = Math.max(suggestedStartLevel ?? 0, 6);
+        }
+        if (mastered.includes("diphthongs-ear-ue") || mastered.includes("le-endings")) {
+          suggestedStartLevel = Math.max(suggestedStartLevel ?? 0, 7);
+        }
+      }
+
+      if (suggestedStartLevel) {
+        console.log(`[quest] Curriculum data suggests starting level: ${suggestedStartLevel}`);
+      }
+    } catch (err) {
+      console.warn("[quest] Failed to load workbook configs for starting level", err);
+    }
+  }
+
   // Load word progress for this child to inform question generation
   try {
     const wordProgressRef = db
@@ -68,7 +110,7 @@ export const handleQuest = async (
   }
 
   // Append quest-specific interactive prompt
-  sections.push(buildQuestPrompt(domain || "reading"));
+  sections.push(buildQuestPrompt(domain || "reading", suggestedStartLevel));
 
   const systemPrompt = sections.join("\n\n");
   const model = modelForTask("quest");

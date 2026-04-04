@@ -435,6 +435,24 @@ export interface LessonCard {
 
 // ── Workbook Config (Pace Gauge) ──────────────────────────────
 
+/** Curriculum-specific metadata for a workbook */
+export interface CurriculumMeta {
+  /** Curriculum provider: 'gatb' | 'reading-eggs' | 'other' */
+  provider: string
+  /** Provider's level designation (e.g., 'Level 1', 'Level 4') */
+  level?: string
+  /** Most recent milestone achieved (e.g., 'Map 13 complete', 'Lesson 47') */
+  lastMilestone?: string
+  /** Date of last milestone (YYYY-MM-DD) */
+  milestoneDate?: string
+  /** Whether the program is fully completed */
+  completed?: boolean
+  /** Skills confirmed mastered by this curriculum */
+  masteredSkills?: string[]
+  /** Skills currently being worked on */
+  activeSkills?: string[]
+}
+
 export interface WorkbookConfig {
   id?: string
   childId: string
@@ -453,6 +471,8 @@ export interface WorkbookConfig {
   schoolDaysPerWeek: number
   /** Default minutes per day for this workbook/subject (used by AI planner as baseline) */
   defaultMinutes?: number
+  /** Curriculum-specific metadata */
+  curriculum?: CurriculumMeta
   createdAt?: string
   updatedAt?: string
 }

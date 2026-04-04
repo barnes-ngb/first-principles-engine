@@ -5,7 +5,7 @@ import { useAI, TaskType } from '../../core/ai/useAI'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { db, evaluationSessionsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { db, evaluationSessionsCollection, skillSnapshotsCollection, workbookConfigsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'
 import type { EvaluationDomain } from '../../core/types/enums'
@@ -219,13 +219,29 @@ function generateFallbackRecommendations(
         duration: '2 weeks',
         frequency: 'Daily, 8-10 minutes',
       })
-    } else {
+    } else if (finalLevel <= 6) {
       recs.push({
         priority: priority++,
         skill: 'phonics.cvce',
         action: 'Ready for long vowels and CVCe — focus on silent-e patterns',
         duration: '2 weeks',
         frequency: 'Daily, 8-10 minutes',
+      })
+    } else if (finalLevel <= 8) {
+      recs.push({
+        priority: priority++,
+        skill: 'reading.multisyllable',
+        action: 'Practice multi-syllable words, prefixes, and suffixes — un-, re-, -ing, -ed, -ly',
+        duration: '2 weeks',
+        frequency: 'Daily, 10-15 minutes',
+      })
+    } else {
+      recs.push({
+        priority: priority++,
+        skill: 'reading.comprehension',
+        action: 'Focus on reading comprehension — short passages with inference and vocabulary-in-context questions',
+        duration: '2 weeks',
+        frequency: 'Daily, 10-15 minutes',
       })
     }
   }
@@ -306,9 +322,38 @@ export function useQuestSession() {
     async (domain: EvaluationDomain) => {
       if (!activeChildId || !activeChild) return
 
+      // Determine starting level from curriculum completion data
+      let startLevel = 2
+      if (domain === 'reading') {
+        try {
+          const wbQuery = query(
+            workbookConfigsCollection(familyId),
+            where('childId', '==', activeChildId),
+          )
+          const wbSnap = await getDocs(wbQuery)
+          for (const wbDoc of wbSnap.docs) {
+            const config = wbDoc.data()
+            if (config.subjectBucket !== 'Reading') continue
+            if (!config.curriculum) continue
+            if (config.curriculum.completed) {
+              startLevel = Math.max(startLevel, 5)
+            }
+            const mastered = config.curriculum.masteredSkills ?? []
+            if (mastered.includes('vowel-teams-ea-ai-oa-ee-oo')) {
+              startLevel = Math.max(startLevel, 6)
+            }
+            if (mastered.includes('diphthongs-ear-ue') || mastered.includes('le-endings')) {
+              startLevel = Math.max(startLevel, 7)
+            }
+          }
+        } catch (err) {
+          console.warn('[startQuest] Failed to load curriculum data for starting level', err)
+        }
+      }
+
       const now = new Date().toISOString()
       const initialState: QuestState = {
-        currentLevel: 2,
+        currentLevel: startLevel,
         consecutiveCorrect: 0,
         consecutiveWrong: 0,
         levelDownsInARow: 0,

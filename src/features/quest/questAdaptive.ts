@@ -25,7 +25,7 @@ export function computeNextState(prev: QuestState, correct: boolean): QuestState
     consecutiveCorrect = prev.consecutiveCorrect + 1
     consecutiveWrong = 0
     levelDownsInARow = 0
-    if (consecutiveCorrect >= LEVEL_UP_STREAK && currentLevel < 6) {
+    if (consecutiveCorrect >= LEVEL_UP_STREAK && currentLevel < 10) {
       currentLevel = prev.currentLevel + 1
       consecutiveCorrect = 0
       questionsThisLevel = 0
