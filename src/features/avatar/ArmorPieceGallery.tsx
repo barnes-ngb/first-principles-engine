@@ -4,6 +4,7 @@ import Typography from '@mui/material/Typography'
 
 import type { ArmorPiece, AvatarProfile } from '../../core/types'
 import { VOXEL_TO_ARMOR_PIECE } from '../../core/types'
+import { getForgeCost } from '../../core/xp/forgeCosts'
 import { ArmorIcon } from './icons/ArmorIcons'
 import type { ArmorTierColor } from './icons/ArmorIcons'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
@@ -59,6 +60,12 @@ export default function ArmorPieceGallery({
         const isSelected = selectedPiece?.id === piece.id
         const xpAway = XP_THRESHOLDS[piece.id] - profile.totalXp
         const unlockProgress = isUnlocked ? 100 : Math.max(0, Math.min(100, (profile.totalXp / XP_THRESHOLDS[piece.id]) * 100))
+
+        // Forge state: check if piece is forged in current tier
+        const currentTier = (profile.currentTier ?? 'wood') as string
+        const activeTier = currentTier === 'stone' ? 'wood' : currentTier // normalize legacy
+        const isForged = Boolean(profile.forgedPieces?.[activeTier]?.[piece.id])
+        const forgeCost = getForgeCost(activeTier, piece.id)
 
         return (
           <Box
@@ -209,7 +216,7 @@ export default function ArmorPieceGallery({
               {piece.shortName}
             </Typography>
 
-            {/* Status / XP progress */}
+            {/* Status / XP progress / Forge cost */}
             {isApplied ? (
               <Typography
                 sx={{
@@ -221,7 +228,7 @@ export default function ArmorPieceGallery({
               >
                 Equipped
               </Typography>
-            ) : isUnlocked ? (
+            ) : isForged ? (
               <Typography
                 sx={{
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
@@ -230,6 +237,17 @@ export default function ArmorPieceGallery({
                 }}
               >
                 Tap to equip
+              </Typography>
+            ) : isUnlocked ? (
+              <Typography
+                sx={{
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                  fontSize: isLincoln ? '12px' : '13px',
+                  color: '#00BCD4',
+                  fontWeight: 600,
+                }}
+              >
+                {'\u25C6'} {forgeCost} Forge
               </Typography>
             ) : (
               <Box sx={{ width: '85%' }}>

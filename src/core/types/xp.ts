@@ -1,3 +1,21 @@
+// ── Currency types ────────────────────────────────────────────
+
+/** Two-currency system: XP (progression, never decreases) and Diamonds (inventory, earned & spent) */
+export const CurrencyType = {
+  Xp: 'xp',
+  Diamond: 'diamond',
+} as const
+export type CurrencyType = (typeof CurrencyType)[keyof typeof CurrencyType]
+
+/** Category for diamond transactions */
+export const DiamondCategory = {
+  Earn: 'earn',
+  Forge: 'forge',
+  Cosmetic: 'cosmetic',
+  Decoration: 'decoration',
+} as const
+export type DiamondCategory = (typeof DiamondCategory)[keyof typeof DiamondCategory]
+
 // ── XP Ledger (cumulative XP tracking) ────────────────────────
 
 export interface XpLedgerSources {
@@ -21,6 +39,12 @@ export interface XpLedger {
   meta?: Record<string, string>
   /** ISO timestamp of when XP was awarded (per-event docs only). */
   awardedAt?: string
+  /** Currency type: 'xp' (default/legacy) or 'diamond'. Missing = 'xp' for backward compat. */
+  currencyType?: CurrencyType
+  /** Diamond transaction category (only for diamond entries). */
+  category?: DiamondCategory
+  /** Reference to what was purchased (e.g., armor piece ID). */
+  itemId?: string
 }
 
 // ── Avatar + Armor of God ─────────────────────────────────────────
@@ -375,6 +399,13 @@ export interface OutfitCustomization {
   proportions?: CharacterProportions  // Custom character body proportions
 }
 
+/** Record of a single forged armor piece */
+export interface ForgedPieceEntry {
+  forgedAt: string  // ISO timestamp
+  verseResponse?: string  // Text response to verse prompt
+  verseResponseAudio?: string  // Audio URL of verse response
+}
+
 export interface AvatarProfile {
   childId: string
   themeStyle: 'minecraft' | 'platformer'
@@ -414,8 +445,20 @@ export interface AvatarProfile {
   /** @deprecated No longer used — armor is 3D geometry */
   croppedRegionUrls?: Partial<Record<ArmorPiece, string>>
 
-  /** Armor pieces unlocked by XP (voxel piece IDs) */
+  /** Armor pieces unlocked by XP (voxel piece IDs) — legacy, superseded by forgedPieces */
   unlockedPieces?: string[]
+
+  /**
+   * Tiers unlocked by XP threshold (e.g., ['wood', 'stone']).
+   * Unlocking a tier grants ACCESS to forge pieces in that material.
+   */
+  unlockedTiers?: string[]
+
+  /**
+   * Individually forged armor pieces. Outer key = tier, inner key = voxel piece ID.
+   * Each entry records when forged and optional verse response.
+   */
+  forgedPieces?: Record<string, Record<string, ForgedPieceEntry>>
 
   /** Date string (YYYY-MM-DD) when armor was last equipped — for daily reset */
   lastArmorEquipDate?: string

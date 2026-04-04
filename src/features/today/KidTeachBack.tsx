@@ -13,6 +13,7 @@ import { artifactsCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import type { Child, DayLog } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { addXpEvent } from '../../core/xp/addXpEvent'
 
 interface KidTeachBackProps {
   child: Child
@@ -89,6 +90,27 @@ export default function KidTeachBack({
         notes: `Lincoln taught London about ${teachSubject}`,
         createdAt: new Date().toISOString(),
       })
+
+      // Award 15 XP for teach-back
+      void addXpEvent(
+        familyId,
+        child.id,
+        'MANUAL_AWARD',
+        15,
+        `teachback_${today}-xp`,
+        { reason: `Teach-back: ${teachSubject}` },
+      ).catch((err) => console.error('[XP] Teach-back award failed:', err))
+
+      // Award 5 diamonds for teach-back
+      void addXpEvent(
+        familyId,
+        child.id,
+        'MANUAL_AWARD',
+        5,
+        `teachback_${today}-diamond`,
+        { reason: `Teach-back: ${teachSubject}` },
+        { currencyType: 'diamond', category: 'earn' },
+      ).catch((err) => console.error('[Diamond] Teach-back award failed:', err))
 
       persistDayLogImmediate({ ...dayLog, teachBackDone: true })
       setShowTeachBack(false)

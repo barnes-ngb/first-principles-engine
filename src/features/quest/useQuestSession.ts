@@ -622,6 +622,22 @@ export function useQuestSession() {
         ).catch((err) => console.warn('Failed to award quest diamond XP', err))
       }
 
+      // 3) Award diamonds: 1 per correct answer
+      if (finalState.totalCorrect > 0) {
+        addXpEvent(
+          familyId,
+          activeChildId,
+          'QUEST_DIAMOND',
+          finalState.totalCorrect,
+          `quest-complete_${docId}-diamond`,
+          {
+            domain,
+            questionsCorrect: String(finalState.totalCorrect),
+          },
+          { currencyType: 'diamond', category: 'earn' },
+        ).catch((err) => console.warn('Failed to award quest diamonds', err))
+      }
+
       // Auto-apply findings to skill snapshot
       if (findings.length > 0) {
         try {

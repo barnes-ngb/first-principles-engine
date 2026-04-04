@@ -18,6 +18,7 @@
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
 | `ENGINE_V2.md` | **CURRENT** | Learning framework: family snapshot, curriculum mapping, energy modes, weekly rhythm |
 | `FIRST_PRINCIPLES_ALIGNMENT.md` | **NEW** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
+| `GAME_WORLD_ECONOMY.md` | **NEW** | Two-currency economy design (XP + Diamonds), choice-based armor forging, Stonebridge world |
 | `SYSTEM_PROMPTS.md` | **CURRENT** (v4) | Task dispatch, model selection, context slices — 13 task types including scan + shellyChat |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
@@ -47,6 +48,7 @@
 | `ENGINE_V2.md` | Working on engine/flywheel framework |
 | `FIRESTORE_AUDIT.md` | Working on data model, indexes, collections |
 | `WEEKLY_CONUNDRUM_ARC.md` | Working on conundrums, weekly theme integration |
+| `GAME_WORLD_ECONOMY.md` | Working on XP/Diamond economy, armor forging, tier progression |
 | `08_RUNBOOK.md` | Working on deployment, backups, operations |
 | `barnes-testing-guide-v2.md` | Working on tests (stale — needs Knowledge Mine, Workshop, Books, Armor coverage) |
 
