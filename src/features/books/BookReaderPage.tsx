@@ -226,6 +226,17 @@ export default function BookReaderPage() {
         15,
         `book_${book.id ?? 'unknown'}_${date}`,
       ).catch((err) => console.error('[XP] Award failed:', err))
+
+      // Award 3 diamonds for reading a book
+      void addXpEvent(
+        familyId,
+        book.childId,
+        'BOOK_READ',
+        3,
+        `book_${book.id ?? 'unknown'}_${date}-diamond`,
+        undefined,
+        { currencyType: 'diamond', category: 'earn' },
+      ).catch((err) => console.error('[Diamond] Award failed:', err))
     }
     // Only run cleanup on unmount
     // eslint-disable-next-line react-hooks/exhaustive-deps

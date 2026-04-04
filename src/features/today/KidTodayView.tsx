@@ -743,6 +743,9 @@ export default function KidTodayView({
         <KidExtraLogger
           dayLog={dayLog}
           persistDayLogImmediate={persistDayLogImmediate}
+          familyId={familyId}
+          childId={child.id}
+          today={today}
         />
       )}
 

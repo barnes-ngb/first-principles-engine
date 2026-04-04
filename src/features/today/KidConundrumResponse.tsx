@@ -12,6 +12,7 @@ import { storage } from '../../core/firebase/storage'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import type { Child } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { addXpEvent } from '../../core/xp/addXpEvent'
 
 interface KidConundrumResponseProps {
   conundrum: {
@@ -93,6 +94,21 @@ export default function KidConundrumResponse({
         ...(mediaUrl ? { mediaUrl } : {}),
         createdAt: new Date().toISOString(),
       })
+
+      // Award 5 XP for conundrum response
+      const conundrumDate = new Date().toISOString().slice(0, 10)
+      void addXpEvent(
+        familyId, child.id, 'MANUAL_AWARD', 5, `conundrum_${conundrumDate}-xp`,
+        { reason: `Conundrum: ${conundrum.title}` },
+      ).catch((err) => console.error('[XP] Conundrum award failed:', err))
+
+      // Award 5 diamonds for conundrum response
+      void addXpEvent(
+        familyId, child.id, 'MANUAL_AWARD', 5, `conundrum_${conundrumDate}-diamond`,
+        { reason: `Conundrum: ${conundrum.title}` },
+        { currencyType: 'diamond', category: 'earn' },
+      ).catch((err) => console.error('[Diamond] Conundrum award failed:', err))
+
       setConundrumSaved(true)
     } catch (err) {
       console.error('Conundrum response save failed:', err)
@@ -118,6 +134,21 @@ export default function KidConundrumResponse({
       })
       const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
       await updateDoc(docRef, { mediaUrl: downloadUrl })
+
+      // Award 5 XP for conundrum drawing
+      const conundrumDate = new Date().toISOString().slice(0, 10)
+      void addXpEvent(
+        familyId, child.id, 'MANUAL_AWARD', 5, `conundrum_${conundrumDate}-xp`,
+        { reason: `Conundrum drawing: ${conundrum.title}` },
+      ).catch((err) => console.error('[XP] Conundrum drawing award failed:', err))
+
+      // Award 5 diamonds for conundrum drawing
+      void addXpEvent(
+        familyId, child.id, 'MANUAL_AWARD', 5, `conundrum_${conundrumDate}-diamond`,
+        { reason: `Conundrum drawing: ${conundrum.title}` },
+        { currencyType: 'diamond', category: 'earn' },
+      ).catch((err) => console.error('[Diamond] Conundrum drawing award failed:', err))
+
       setConundrumPhotoSaved(true)
       setShowConundrumPhoto(false)
     } catch (err) {

@@ -103,6 +103,11 @@ export function useDadLabReports() {
           void addXpEvent(familyId, child.id, 'DAD_LAB_COMPLETE', 20, `dadlab-${reportId}`, {
             reason: `Dad Lab: ${report.title || 'experiment'}`,
           }).catch((err) => console.error('[XP] Award failed:', err))
+
+          // Award 10 diamonds for Dad Lab completion
+          void addXpEvent(familyId, child.id, 'DAD_LAB_COMPLETE', 10, `dadlab-${reportId}-diamond`, {
+            reason: `Dad Lab: ${report.title || 'experiment'}`,
+          }, { currencyType: 'diamond', category: 'earn' }).catch((err) => console.error('[Diamond] Award failed:', err))
         }
       }
 
@@ -127,6 +132,11 @@ export function useDadLabReports() {
             void addXpEvent(familyId, child.id, 'DAD_LAB_COMPLETE', 20, `dadlab-${reportId}`, {
               reason: `Dad Lab: ${report.title || 'experiment'}`,
             }).catch((err) => console.error('[XP] Award failed:', err))
+
+            // Award 10 diamonds for Dad Lab completion
+            void addXpEvent(familyId, child.id, 'DAD_LAB_COMPLETE', 10, `dadlab-${reportId}-diamond`, {
+              reason: `Dad Lab: ${report.title || 'experiment'}`,
+            }, { currencyType: 'diamond', category: 'earn' }).catch((err) => console.error('[Diamond] Award failed:', err))
           }
         }
       }
