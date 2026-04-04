@@ -125,6 +125,13 @@ export function useCertificateProgress(): UseCertificateProgressResult {
           const existingMastered = existing.curriculum?.masteredSkills ?? []
           const mergedSkills = [...new Set([...existingMastered, ...newMasteredSkills])]
 
+          const milestoneText = (result.milestone ?? '').toLowerCase()
+          const isComplete =
+            milestoneText.includes('100%') ||
+            milestoneText.includes('complete') ||
+            milestoneText.includes('finished') ||
+            milestoneText.includes('gold')
+
           const curriculumUpdate: CurriculumMeta = {
             ...existing.curriculum,
             provider: result.curriculum,
@@ -132,6 +139,7 @@ export function useCertificateProgress(): UseCertificateProgressResult {
             lastMilestone: result.milestone,
             milestoneDate,
             masteredSkills: mergedSkills,
+            ...(isComplete && { completed: true }),
           }
 
           const updates: Record<string, unknown> = {
@@ -148,6 +156,13 @@ export function useCertificateProgress(): UseCertificateProgressResult {
           // Create new workbook config from certificate data
           const subjectBucket = inferSubjectBucket(result.curriculum, result.curriculumName)
 
+          const milestoneText = (result.milestone ?? '').toLowerCase()
+          const isComplete =
+            milestoneText.includes('100%') ||
+            milestoneText.includes('complete') ||
+            milestoneText.includes('finished') ||
+            milestoneText.includes('gold')
+
           const newConfig: WorkbookConfig = {
             childId,
             name: workbookName,
@@ -163,6 +178,7 @@ export function useCertificateProgress(): UseCertificateProgressResult {
               lastMilestone: result.milestone,
               milestoneDate,
               masteredSkills: newMasteredSkills,
+              ...(isComplete && { completed: true }),
             },
           }
 
