@@ -4,6 +4,8 @@ import { claudeApiKey } from "./aiConfig.js";
 import { requireEmailAuth } from "./authGuard.js";
 import { CHARTER_PREAMBLE } from "./contextSlices.js";
 import { sanitizeAndParseJson } from "./sanitizeJson.js";
+import { callClaude, logAiUsage } from "./chatTypes.js";
+import { modelForTask } from "./chat.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -494,28 +496,24 @@ export const generateActivity = onCall(
     const userMessage = buildGenerateUserMessage(ctx);
 
     // ── Call Claude (Haiku for routine generation) ──────────────
-    const model = "claude-haiku-4-5-20251001";
+    const model = modelForTask("generate");
 
     let responseText: string;
     let usage: { inputTokens: number; outputTokens: number };
 
     try {
-      const { default: Anthropic } = await import("@anthropic-ai/sdk");
-      const client = new Anthropic({ apiKey: claudeApiKey.value() });
-
-      const completion = await client.messages.create({
+      const result = await callClaude({
+        apiKey: claudeApiKey.value(),
         model,
-        max_tokens: 1024,
-        system: systemPrompt,
+        maxTokens: 1024,
+        systemPrompt,
         messages: [{ role: "user", content: userMessage }],
       });
 
-      const textBlock = completion.content.find((c) => c.type === "text");
-      responseText = textBlock?.text ?? "";
-
+      responseText = result.text;
       usage = {
-        inputTokens: completion.usage.input_tokens,
-        outputTokens: completion.usage.output_tokens,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
       };
     } catch (err: unknown) {
       const msg =
@@ -543,7 +541,7 @@ export const generateActivity = onCall(
     }
 
     // ── Log usage to Firestore ─────────────────────────────────
-    await db.collection(`families/${familyId}/aiUsage`).add({
+    await logAiUsage(db, familyId, {
       childId,
       taskType: "generate",
       activityType,
@@ -551,7 +549,6 @@ export const generateActivity = onCall(
       model,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      createdAt: new Date().toISOString(),
     });
 
     return { activity, model, usage };
