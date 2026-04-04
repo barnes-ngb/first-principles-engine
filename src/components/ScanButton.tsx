@@ -36,7 +36,6 @@ export default function ScanButton({ onCapture, loading, variant = 'button' }: S
         ref={inputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         onChange={handleChange}
         style={{ display: 'none' }}
       />
