@@ -67,6 +67,8 @@ export interface SkillSnapshot {
   /** Conceptual blocks detected by pattern analysis (most recent evaluation only) */
   conceptualBlocks?: ConceptualBlock[]
   blocksUpdatedAt?: string
+  /** Completed curriculum programs (e.g., ['reading-eggs']) */
+  completedPrograms?: string[]
   createdAt?: string
   updatedAt?: string
 }

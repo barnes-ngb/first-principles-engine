@@ -127,8 +127,19 @@ export const handleQuest = async (
     console.warn("Failed to load word progress for quest context", err);
   }
 
+  // Detect questMode from the first user message
+  let questMode: string | undefined;
+  if (messages.length > 0) {
+    try {
+      const firstMsg = JSON.parse(messages[0].content);
+      questMode = firstMsg.questMode;
+    } catch {
+      // Not JSON or missing questMode — use default
+    }
+  }
+
   // Append quest-specific interactive prompt
-  sections.push(buildQuestPrompt(domain || "reading", suggestedStartLevel));
+  sections.push(buildQuestPrompt(domain || "reading", suggestedStartLevel, questMode));
 
   const systemPrompt = sections.join("\n\n");
   const model = modelForTask("quest");

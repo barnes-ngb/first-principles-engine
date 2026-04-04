@@ -14,7 +14,10 @@ import { calculateStreak, computeNextState, formatSkillLabel, shouldEndSession }
 import { checkAnswer, extractPattern, extractTargetWord, generateFallbackQuestion, shouldFlagAsError, validateQuestion } from './questHelpers'
 import type {
   AnswerInputMethod,
+  FluencyPassage,
+  FluencySessionData,
   InteractiveSessionData,
+  QuestMode,
   QuestQuestion,
   QuestState,
   QuestStreak,
@@ -140,6 +143,54 @@ function parseQuestSummaryBlock(text: string): QuestSummaryBlock | null {
 
 function getDateString(d: Date): string {
   return d.toISOString().slice(0, 10)
+}
+
+// ── Fluency passage parser ──────────────────────────────────────
+
+interface ParsedFluencyPassage {
+  passage: string
+  targetWords?: string[]
+  speechWords?: string[]
+  wordCount?: number
+  readingLevel?: string
+}
+
+function parseFluencyPassage(text: string): ParsedFluencyPassage | null {
+  // Try <fluency-passage>...</fluency-passage> tags
+  const tagMatch = /<fluency-passage>([\s\S]*?)<\/fluency-passage>/.exec(text)
+  let jsonStr = tagMatch?.[1]?.trim() ?? null
+
+  // Fallback: ```json fences
+  if (!jsonStr) {
+    const fenceMatch = /```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/.exec(text)
+    if (fenceMatch) jsonStr = fenceMatch[1].trim()
+  }
+
+  // Fallback: first { ... }
+  if (!jsonStr) {
+    const firstBrace = text.indexOf('{')
+    const lastBrace = text.lastIndexOf('}')
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      jsonStr = text.slice(firstBrace, lastBrace + 1)
+    }
+  }
+
+  if (!jsonStr) return null
+
+  try {
+    jsonStr = jsonStr.replace(/,\s*}/g, '}').replace(/,\s*\]/g, ']')
+    const parsed = JSON.parse(jsonStr)
+    if (!parsed.passage) return null
+    return {
+      passage: parsed.passage,
+      targetWords: parsed.targetWords || [],
+      speechWords: parsed.speechWords || [],
+      wordCount: parsed.wordCount || parsed.passage.split(/\s+/).length,
+      readingLevel: parsed.readingLevel || '',
+    }
+  } catch {
+    return null
+  }
 }
 
 // ── Fallback recommendation generator ────────────────────────────
@@ -268,6 +319,16 @@ export function useQuestSession() {
   const [startQuestError, setStartQuestError] = useState<string | null>(null)
   const [previousSessions, setPreviousSessions] = useState<Array<{ evaluatedAt: string }>>([])
   const activeDomainRef = useRef<EvaluationDomain>('reading')
+  const activeQuestModeRef = useRef<QuestMode | undefined>(undefined)
+
+  // Fluency-specific state
+  const [fluencyPassages, setFluencyPassages] = useState<FluencyPassage[]>([])
+  const [currentPassageText, setCurrentPassageText] = useState<string>('')
+  const [currentPassageTargetWords, setCurrentPassageTargetWords] = useState<string[]>([])
+  const [currentPassageSpeechWords, setCurrentPassageSpeechWords] = useState<string[]>([])
+  const [currentPassageWordCount, setCurrentPassageWordCount] = useState(0)
+  const [currentPassageReadingLevel, setCurrentPassageReadingLevel] = useState('')
+  const [fluencyDiamonds, setFluencyDiamonds] = useState(0)
 
   const conversationRef = useRef<AIChatMessage[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -319,8 +380,10 @@ export function useQuestSession() {
   // ── Start quest ───────────────────────────────────────────────
 
   const startQuest = useCallback(
-    async (domain: EvaluationDomain) => {
+    async (domain: EvaluationDomain, questMode?: QuestMode) => {
       if (!activeChildId || !activeChild) return
+
+      activeQuestModeRef.current = questMode
 
       // Determine starting level from curriculum completion data
       let startLevel = 2
@@ -398,9 +461,75 @@ export function useQuestSession() {
       setCurrentQuestion(null)
       setLastAnswer(null)
       setSessionSaved(false)
-      setScreen(QuestScreen.Loading)
+      setFluencyPassages([])
+      setFluencyDiamonds(0)
+      setCurrentPassageText('')
       conversationRef.current = []
       bonusRoundUsedRef.current = false
+
+      // Fluency mode has a different flow
+      if (questMode === 'fluency') {
+        setScreen(QuestScreen.Loading)
+        try {
+          const fluencyMessage: AIChatMessage = {
+            role: 'user',
+            content: JSON.stringify({
+              action: 'fluency_passage',
+              domain,
+              questMode: 'fluency',
+              childName: activeChild.name,
+            }),
+          }
+          conversationRef.current = [fluencyMessage]
+
+          const response = await chat({
+            familyId,
+            childId: activeChildId,
+            taskType: TaskType.Quest,
+            messages: [fluencyMessage],
+            domain,
+          })
+
+          if (!response) {
+            setStartQuestError('Failed to generate passage. Tap to try again!')
+            setScreen(QuestScreen.Intro)
+            return
+          }
+
+          conversationRef.current.push({ role: 'assistant', content: response.message })
+          const parsed = parseFluencyPassage(response.message)
+          if (!parsed) {
+            setStartQuestError('Passage was unreadable. Tap to try again!')
+            setScreen(QuestScreen.Intro)
+            return
+          }
+
+          setCurrentPassageText(parsed.passage)
+          setCurrentPassageTargetWords(parsed.targetWords || [])
+          setCurrentPassageSpeechWords(parsed.speechWords || [])
+          setCurrentPassageWordCount(parsed.wordCount || 0)
+          setCurrentPassageReadingLevel(parsed.readingLevel || '')
+
+          // Start timer
+          if (timerRef.current) clearInterval(timerRef.current)
+          const startTime = Date.now()
+          timerRef.current = setInterval(() => {
+            setQuestState((prev) => {
+              if (!prev) return prev
+              return { ...prev, elapsedSeconds: Math.floor((Date.now() - startTime) / 1000) }
+            })
+          }, 1000)
+
+          setScreen(QuestScreen.FluencyPassage)
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err)
+          setStartQuestError(`Fluency failed: ${errMsg}`)
+          setScreen(QuestScreen.Intro)
+        }
+        return
+      }
+
+      setScreen(QuestScreen.Loading)
 
       // Start timer
       if (timerRef.current) clearInterval(timerRef.current)
@@ -418,6 +547,7 @@ export function useQuestSession() {
         content: JSON.stringify({
           action: 'start_quest',
           domain,
+          questMode: questMode || (domain === 'reading' ? 'phonics' : domain),
           childName: activeChild.name,
           currentLevel: initialState.currentLevel,
           consecutiveCorrect: 0,
@@ -587,6 +717,7 @@ export function useQuestSession() {
       const skippedCount = questions.filter((q) => q.skipped).length
       const flaggedErrorCount = questions.filter((q) => q.flaggedAsError).length
 
+      const questMode = activeQuestModeRef.current
       const session: EvaluationSession & InteractiveSessionData = {
         childId: activeChildId,
         domain,
@@ -597,6 +728,7 @@ export function useQuestSession() {
         summary: summaryText,
         evaluatedAt: new Date().toISOString(),
         sessionType: 'interactive',
+        questMode,
         questions,
         finalLevel: finalState.currentLevel,
         totalCorrect: finalState.totalCorrect,
@@ -1126,6 +1258,152 @@ export function useQuestSession() {
     [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
   )
 
+  // ── Fluency: record attempt and advance ───────────────────────
+
+  const recordFluencyAttempt = useCallback(
+    (selfRating: 'easy' | 'medium' | 'hard', recordingUrl: string | null, durationSeconds: number) => {
+      const attempt = {
+        recordingUrl,
+        selfRating,
+        durationSeconds,
+        timestamp: new Date().toISOString(),
+      }
+
+      const existing = fluencyPassages.find((p) => p.text === currentPassageText)
+      if (existing) {
+        existing.attempts.push(attempt)
+        setFluencyPassages([...fluencyPassages])
+        if (fluencyDiamonds < 5) setFluencyDiamonds((d) => Math.min(d + 1, 5))
+      } else {
+        const passage: FluencyPassage = {
+          text: currentPassageText,
+          targetWords: currentPassageTargetWords,
+          speechWords: currentPassageSpeechWords,
+          wordCount: currentPassageWordCount,
+          readingLevel: currentPassageReadingLevel,
+          attempts: [attempt],
+        }
+        setFluencyPassages((prev) => [...prev, passage])
+        if (fluencyDiamonds < 5) setFluencyDiamonds((d) => Math.min(d + 1, 5))
+      }
+    },
+    [currentPassageText, currentPassageTargetWords, currentPassageSpeechWords, currentPassageWordCount, currentPassageReadingLevel, fluencyPassages, fluencyDiamonds],
+  )
+
+  const requestNewFluencyPassage = useCallback(
+    async () => {
+      if (!activeChildId || !activeChild) return
+      setScreen(QuestScreen.Loading)
+
+      try {
+        const msg: AIChatMessage = {
+          role: 'user',
+          content: JSON.stringify({
+            action: 'fluency_passage',
+            domain: 'reading',
+            questMode: 'fluency',
+            childName: activeChild.name,
+            instruction: 'Generate a NEW, DIFFERENT passage. Different topic and vocabulary from the previous one.',
+          }),
+        }
+        conversationRef.current.push(msg)
+
+        const response = await chat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.Quest,
+          messages: [...conversationRef.current],
+          domain: 'reading',
+        })
+
+        if (!response) {
+          setScreen(QuestScreen.FluencyPassage)
+          return
+        }
+
+        conversationRef.current.push({ role: 'assistant', content: response.message })
+        const parsed = parseFluencyPassage(response.message)
+        if (!parsed) {
+          setScreen(QuestScreen.FluencyPassage)
+          return
+        }
+
+        setCurrentPassageText(parsed.passage)
+        setCurrentPassageTargetWords(parsed.targetWords || [])
+        setCurrentPassageSpeechWords(parsed.speechWords || [])
+        setCurrentPassageWordCount(parsed.wordCount || 0)
+        setCurrentPassageReadingLevel(parsed.readingLevel || '')
+        setScreen(QuestScreen.FluencyPassage)
+      } catch {
+        setScreen(QuestScreen.FluencyPassage)
+      }
+    },
+    [activeChildId, activeChild, familyId, chat],
+  )
+
+  const endFluencySession = useCallback(
+    async () => {
+      if (!activeChildId) return
+
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+
+      const totalTime = questState?.elapsedSeconds || 0
+      const diamonds = fluencyDiamonds
+      const docId = `fluency_${activeChildId}_${Date.now()}`
+
+      const session: EvaluationSession & FluencySessionData = {
+        childId: activeChildId,
+        domain: 'reading',
+        status: 'complete',
+        messages: [],
+        findings: [],
+        recommendations: [],
+        summary: `Fluency practice: ${fluencyPassages.length} passages read`,
+        evaluatedAt: new Date().toISOString(),
+        sessionType: 'fluency',
+        questMode: 'fluency',
+        passages: fluencyPassages,
+        totalReadingTimeSeconds: totalTime,
+        diamondsEarned: diamonds,
+      }
+
+      try {
+        const ref = doc(evaluationSessionsCollection(familyId), docId)
+        await setDoc(ref, JSON.parse(JSON.stringify(session)))
+      } catch (err) {
+        console.error('Failed to save fluency session', err)
+      }
+
+      if (diamonds > 0) {
+        const XP_PER_DIAMOND = 2
+        addXpEvent(
+          familyId,
+          activeChildId,
+          'QUEST_DIAMOND',
+          diamonds * XP_PER_DIAMOND,
+          `fluency_${docId}`,
+          { domain: 'reading', source: 'fluency' },
+        ).catch((err) => console.warn('Failed to award fluency XP', err))
+
+        addXpEvent(
+          familyId,
+          activeChildId,
+          'QUEST_DIAMOND',
+          diamonds,
+          `fluency_${docId}-diamond`,
+          { domain: 'reading', source: 'fluency' },
+          { currencyType: 'diamond', category: 'earn' },
+        ).catch((err) => console.warn('Failed to award fluency diamonds', err))
+      }
+
+      setScreen(QuestScreen.FluencySummary)
+    },
+    [activeChildId, familyId, questState, fluencyPassages, fluencyDiamonds],
+  )
+
   // ── Reset to intro ────────────────────────────────────────────
 
   const resetToIntro = useCallback(() => {
@@ -1142,8 +1420,12 @@ export function useQuestSession() {
     setSessionSaved(false)
     setSummarizing(false)
     setStartQuestError(null)
+    setFluencyPassages([])
+    setFluencyDiamonds(0)
+    setCurrentPassageText('')
     conversationRef.current = []
     bonusRoundUsedRef.current = false
+    activeQuestModeRef.current = undefined
   }, [])
 
   return {
@@ -1163,5 +1445,14 @@ export function useQuestSession() {
     submitAnswer,
     handleSkip,
     resetToIntro,
+    // Fluency-specific
+    currentPassageText,
+    currentPassageTargetWords,
+    currentPassageSpeechWords,
+    fluencyPassages,
+    fluencyDiamonds,
+    recordFluencyAttempt,
+    requestNewFluencyPassage,
+    endFluencySession,
   }
 }

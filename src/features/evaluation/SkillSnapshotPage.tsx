@@ -11,6 +11,11 @@ import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import IconButton from '@mui/material/IconButton'
 import MenuItem from '@mui/material/MenuItem'
@@ -936,6 +941,46 @@ export default function SkillSnapshotPage() {
         </>
       )}
 
+      {/* ── Completed Programs ──────────────────────────────── */}
+      {isParent && snapshot && (
+        <SectionCard title="Completed Programs">
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Mark curriculum programs as complete to help the system recommend appropriate quest modes.
+          </Typography>
+          <Stack spacing={1}>
+            {(snapshot.completedPrograms || []).map((prog, i) => (
+              <Chip
+                key={i}
+                label={COMPLETED_PROGRAM_LABELS[prog] || prog}
+                onDelete={() => {
+                  const updated = (snapshot.completedPrograms || []).filter((_, j) => j !== i)
+                  const newSnapshot = { ...snapshot, completedPrograms: updated, updatedAt: new Date().toISOString() }
+                  setSnapshot(newSnapshot)
+                  if (snapshotRef) {
+                    void withSave(async () => {
+                      await setDoc(snapshotRef, JSON.parse(JSON.stringify(newSnapshot)))
+                    })
+                  }
+                }}
+              />
+            ))}
+            <CompletedProgramAdder
+              existingPrograms={snapshot.completedPrograms || []}
+              onAdd={(prog) => {
+                const updated = [...(snapshot.completedPrograms || []), prog]
+                const newSnapshot = { ...snapshot, completedPrograms: updated, updatedAt: new Date().toISOString() }
+                setSnapshot(newSnapshot)
+                if (snapshotRef) {
+                  void withSave(async () => {
+                    await setDoc(snapshotRef, JSON.parse(JSON.stringify(newSnapshot)))
+                  })
+                }
+              }}
+            />
+          </Stack>
+        </SectionCard>
+      )}
+
       <Snackbar
         open={snack !== null}
         autoHideDuration={4000}
@@ -952,5 +997,94 @@ export default function SkillSnapshotPage() {
         </Alert>
       </Snackbar>
     </Page>
+  )
+}
+
+// ── Completed programs helpers ───────────────────────────────
+
+const COMPLETED_PROGRAM_OPTIONS = [
+  { value: 'reading-eggs', label: 'Reading Eggs (Full Program)' },
+  { value: 'explode-the-code', label: 'Explode the Code' },
+  { value: '100-easy-lessons', label: 'Teach Your Child to Read in 100 Easy Lessons' },
+] as const
+
+const COMPLETED_PROGRAM_LABELS: Record<string, string> = {
+  'reading-eggs': 'Reading Eggs (Full Program)',
+  'explode-the-code': 'Explode the Code',
+  '100-easy-lessons': '100 Easy Lessons',
+}
+
+function CompletedProgramAdder({
+  existingPrograms,
+  onAdd,
+}: {
+  existingPrograms: string[]
+  onAdd: (prog: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [customValue, setCustomValue] = useState('')
+
+  const availableOptions = COMPLETED_PROGRAM_OPTIONS.filter(
+    (o) => !existingPrograms.includes(o.value),
+  )
+
+  return (
+    <>
+      <Button startIcon={<AddIcon />} size="small" onClick={() => setOpen(true)}>
+        Add completed program
+      </Button>
+      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Which program was completed?</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            This tells the system foundational phonics is mastered. Quests will focus on comprehension and fluency instead.
+          </DialogContentText>
+          <Stack spacing={1}>
+            {availableOptions.map((opt) => (
+              <Button
+                key={opt.value}
+                variant="outlined"
+                fullWidth
+                onClick={() => {
+                  onAdd(opt.value)
+                  setOpen(false)
+                }}
+              >
+                {opt.label}
+              </Button>
+            ))}
+            <TextField
+              label="Other program"
+              size="small"
+              value={customValue}
+              onChange={(e) => setCustomValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && customValue.trim()) {
+                  onAdd(customValue.trim())
+                  setCustomValue('')
+                  setOpen(false)
+                }
+              }}
+            />
+            {customValue.trim() && (
+              <Button
+                variant="contained"
+                size="small"
+                onClick={() => {
+                  onAdd(customValue.trim())
+                  setCustomValue('')
+                  setOpen(false)
+                }}
+              >
+                Add "{customValue.trim()}"
+              </Button>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpen(false)}>Cancel</Button>
+        </DialogActions>
+      </Dialog>
+    </>
   )
 }
