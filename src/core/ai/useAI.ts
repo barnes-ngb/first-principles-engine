@@ -72,6 +72,8 @@ export interface ImageGenRequest {
   prompt: string
   style?: 'schedule-card' | 'reward-chart' | 'theme-illustration' | 'book-illustration-minecraft' | 'book-illustration-storybook' | 'book-illustration-comic' | 'book-illustration-realistic' | 'book-illustration-garden-warfare' | 'book-illustration-platformer' | 'book-sticker' | 'general'
   size?: '1024x1024' | '1024x1792' | '1792x1024'
+  /** Optional theme ID — theme's imageStylePrefix overrides default style prefix for book illustrations. */
+  themeId?: string
 }
 
 export interface ImageGenResponse {

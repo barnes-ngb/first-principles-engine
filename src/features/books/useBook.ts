@@ -18,6 +18,7 @@ import { useDebounce } from '../../core/hooks/useDebounce'
 import type { Artifact, Book, BookPage, PageImage, StickerTag } from '../../core/types'
 import type { SaveState } from '../../components/SaveIndicator'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { addXpEvent } from '../../core/xp/addXpEvent'
 import { createEmptyPage, generateImageId } from './bookTypes'
 import { cleanSketchBackground } from './cleanSketch'
 
@@ -248,14 +249,33 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme'>>) => {
       applyUpdate((prev) => {
         const next = { ...prev, ...changes }
-        // If status changes to 'complete', create portfolio artifact
+        // If status changes to 'complete', create portfolio artifact + award XP
         if (changes.status === 'complete' && prev.status !== 'complete') {
           void createBookArtifact(familyId, next)
+          // 25 XP for finishing a book (lifetime dedup per book)
+          void addXpEvent(
+            familyId,
+            prev.childId,
+            'BOOK_COMPLETE',
+            25,
+            `book_complete_${bookId}`,
+            { title: next.title },
+          )
+          // 5 diamonds for finishing a book
+          void addXpEvent(
+            familyId,
+            prev.childId,
+            'BOOK_COMPLETE',
+            5,
+            `book_complete_${bookId}-diamond`,
+            { title: next.title },
+            { currencyType: 'diamond', category: 'earn' },
+          )
         }
         return next
       })
     },
-    [applyUpdate, familyId],
+    [applyUpdate, familyId, bookId],
   )
 
   const addImageToPage = useCallback(
@@ -689,4 +709,34 @@ export function useDraftBook(familyId: string, childId: string): { draftBook: Bo
   }, [familyId, childId])
 
   return { draftBook, loading }
+}
+
+/** Hook to load the most recent completed book for a child (for "Read your books" card). */
+export function useCompletedBook(familyId: string, childId: string): { completedBook: Book | null; loading: boolean } {
+  const [completedBook, setCompletedBook] = useState<Book | null>(null)
+  const [loading, setLoading] = useState(!!familyId && !!childId)
+
+  useEffect(() => {
+    if (!familyId || !childId) return
+    let cancelled = false
+    const load = async () => {
+      const q = query(
+        booksCollection(familyId),
+        where('childId', '==', childId),
+        where('status', '==', 'complete'),
+        orderBy('updatedAt', 'desc'),
+      )
+      const snap = await getDocs(q)
+      if (cancelled) return
+      if (!snap.empty) {
+        const d = snap.docs[0]
+        setCompletedBook({ ...d.data(), id: d.id })
+      }
+      setLoading(false)
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [familyId, childId])
+
+  return { completedBook, loading }
 }

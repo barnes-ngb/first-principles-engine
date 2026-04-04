@@ -88,6 +88,7 @@ function makeContext(overrides?: Partial<WeekContext>): WeekContext {
       },
     ],
     missedDays: 2,
+    bookActivity: [],
     ...overrides,
   };
 }

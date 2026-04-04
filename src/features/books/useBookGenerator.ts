@@ -154,7 +154,7 @@ export function useBookGenerator() {
         messages: [
           {
             role: 'user',
-            content: JSON.stringify({ storyIdea, words, pageCount }),
+            content: JSON.stringify({ storyIdea, words, pageCount, theme: bookTheme }),
           },
         ],
       })
@@ -274,6 +274,7 @@ export function useBookGenerator() {
             prompt: page.sceneDescription,
             style: illustrationStyle,
             size: '1024x1024',
+            ...(bookTheme ? { themeId: bookTheme } : {}),
           })
 
           if (imgResult) {

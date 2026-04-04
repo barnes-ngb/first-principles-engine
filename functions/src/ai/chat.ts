@@ -1082,6 +1082,13 @@ export interface StoryGenInput {
   childAge?: number;
   childInterests?: string;
   readingLevel?: string;
+  /** Theme-engine guidance (injected from BookThemeConfig) */
+  themeGuidance?: {
+    storyTone?: string;
+    storyWorldDescription?: string;
+    storyVocabularyLevel?: string;
+    imageStylePrefix?: string;
+  };
 }
 
 export function buildStoryPrompt(input: StoryGenInput): string {
@@ -1093,6 +1100,7 @@ export function buildStoryPrompt(input: StoryGenInput): string {
     childAge,
     childInterests,
     readingLevel,
+    themeGuidance,
   } = input;
   const hasWords = words.length > 0;
 
@@ -1109,10 +1117,21 @@ export function buildStoryPrompt(input: StoryGenInput): string {
     ? `\nWORDS TO INCLUDE (use every word at least once, common words multiple times):\n${words.join(", ")}\n`
     : "";
 
+  const themeSection = themeGuidance
+    ? `
+THEME GUIDANCE:
+${themeGuidance.storyWorldDescription ? `STORY WORLD: ${themeGuidance.storyWorldDescription}` : ""}
+${themeGuidance.storyTone ? `STORY TONE: ${themeGuidance.storyTone}` : ""}
+${themeGuidance.storyVocabularyLevel ? `VOCABULARY STYLE: ${themeGuidance.storyVocabularyLevel}` : ""}
+${themeGuidance.imageStylePrefix ? `IMAGE STYLE: ${themeGuidance.imageStylePrefix}` : ""}
+Write the story as if it takes place in this world with this tone. Scene descriptions should match the image style.
+`
+    : "";
+
   return `You are a children's story writer creating an illustrated book for ${childName}, a ${childAge ?? 10}-year-old child who loves ${interests}.
 
 STORY IDEA: ${storyIdea || (isYounger ? "A fun story with animals and a happy ending" : "A fun adventure — surprise me!")}
-${wordSection}
+${wordSection}${themeSection}
 RULES:
 - Write a ${pageCount}-page story. Each page has ${isYounger ? "1-2 short sentences" : "2-4 short sentences"}.
 - ${isYounger ? "Use very simple words. Short sentences only. Lots of repetition is good." : "Keep sentences simple and readable. CVC words are great."}

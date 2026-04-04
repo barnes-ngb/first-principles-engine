@@ -28,7 +28,7 @@ function defaultAvatarProfile(childId: string): AvatarProfile {
 /** Map XP event types to XpLedger source buckets. */
 function mapTypeToSource(type: keyof typeof XP_EVENTS): 'routines' | 'quests' | 'books' {
   if (type === 'QUEST_DIAMOND' || type === 'QUEST_COMPLETE') return 'quests'
-  if (type === 'BOOK_READ' || type === 'BOOK_PAGE_READ') return 'books'
+  if (type === 'BOOK_COMPLETE' || type === 'BOOK_READ' || type === 'BOOK_PAGE_READ') return 'books'
   return 'routines'
 }
 
