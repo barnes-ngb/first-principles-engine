@@ -8,6 +8,10 @@ import type { XP_EVENTS } from '../types'
 /**
  * Compute diamond balance for a child by summing all diamond ledger entries.
  * Positive amounts = earned, negative amounts = spent.
+ *
+ * TODO: O(n) computation — sums entire diamond ledger on every call.
+ * For a single family this is fine. At scale, cache balance on avatar
+ * profile (same pattern as totalXp cached on xpLedger cumulative doc).
  */
 export async function getDiamondBalance(
   familyId: string,

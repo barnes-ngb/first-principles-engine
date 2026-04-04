@@ -14,6 +14,27 @@ import type {
 import { ACCESSORY_XP_THRESHOLDS, AvatarBackground as AvatarBackgroundValues, ShieldEmblem as ShieldEmblemValues, HelmetCrest as HelmetCrestValues } from '../../core/types'
 
 /**
+ * Auto-migrate: treat all previously equipped pieces as forged in 'wood' tier.
+ * This ensures children don't lose pieces they earned under the old (pre-forge) system.
+ */
+function migrateEquippedToForged(
+  equippedPieces: string[],
+  forgedPieces: Record<string, Record<string, { forgedAt: string }>> | undefined,
+): { forgedPieces?: Record<string, Record<string, { forgedAt: string }>> } {
+  const hasForgedPieces = forgedPieces && typeof forgedPieces === 'object' &&
+    Object.keys(forgedPieces).length > 0
+
+  if (equippedPieces.length > 0 && !hasForgedPieces) {
+    const woodForged: Record<string, { forgedAt: string }> = {}
+    for (const pieceId of equippedPieces) {
+      woodForged[pieceId] = { forgedAt: new Date().toISOString() }
+    }
+    return { forgedPieces: { wood: woodForged } }
+  }
+  return {}
+}
+
+/**
  * Normalize raw Firestore data into a safe AvatarProfile.
  * Every array field is guaranteed to be an array, every nullable field has a default.
  * Run this on EVERY profile read from Firestore.
@@ -37,6 +58,7 @@ export function normalizeAvatarProfile(raw: unknown): AvatarProfile {
     forgedPieces: (r.forgedPieces && typeof r.forgedPieces === 'object' && !Array.isArray(r.forgedPieces))
       ? r.forgedPieces as Record<string, Record<string, { forgedAt: string }>>
       : undefined,
+    lastPortalTier: (r.lastPortalTier as string) || undefined,
     customization: normalizeCustomization(r.customization),
     photoUrl: (r.photoUrl as string) || undefined,
     skinTextureUrl: (r.skinTextureUrl as string) || undefined,
@@ -50,6 +72,12 @@ export function normalizeAvatarProfile(raw: unknown): AvatarProfile {
     armorStreak: typeof r.armorStreak === 'number' ? r.armorStreak : 0,
     updatedAt: (r.updatedAt as string) || new Date().toISOString(),
     // Preserve legacy fields if present
+    ...migrateEquippedToForged(
+      Array.isArray(r.equippedPieces) ? r.equippedPieces as string[] : [],
+      (r.forgedPieces && typeof r.forgedPieces === 'object' && !Array.isArray(r.forgedPieces))
+        ? r.forgedPieces as Record<string, Record<string, { forgedAt: string }>>
+        : undefined,
+    ),
     ...(r.baseCharacterUrl ? { baseCharacterUrl: r.baseCharacterUrl as string } : {}),
     ...(r.photoTransformUrl ? { photoTransformUrl: r.photoTransformUrl as string } : {}),
     ...(r.armorSheetUrls ? { armorSheetUrls: r.armorSheetUrls as Record<string, string> } : {}),

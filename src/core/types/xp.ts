@@ -460,6 +460,9 @@ export interface AvatarProfile {
    */
   forgedPieces?: Record<string, Record<string, ForgedPieceEntry>>
 
+  /** Tier key where portal transition last played — prevents re-trigger on reload */
+  lastPortalTier?: string
+
   /** Date string (YYYY-MM-DD) when armor was last equipped — for daily reset */
   lastArmorEquipDate?: string
   /** Consecutive days with all earned pieces equipped */
