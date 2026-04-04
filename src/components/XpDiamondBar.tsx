@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import { getDocs, query, where } from 'firebase/firestore'
@@ -38,7 +38,7 @@ function getNextTier(totalXp: number): { label: string; xpNeeded: number; progre
 export default function XpDiamondBar({ familyId, childId, compact }: XpDiamondBarProps) {
   const { totalXp, loading: xpLoading } = useXpLedger(familyId, childId)
   const [diamondBalance, setDiamondBalance] = useState(0)
-  const [prevDiamonds, setPrevDiamonds] = useState(0)
+  const prevDiamondsRef = useRef(0)
   const [diamondBump, setDiamondBump] = useState(false)
 
   // Fetch diamond balance
@@ -60,7 +60,14 @@ export default function XpDiamondBar({ familyId, childId, compact }: XpDiamondBa
           const data = doc.data()
           balance += data.amount ?? 0
         })
-        if (!cancelled) setDiamondBalance(balance)
+        if (!cancelled) {
+          if (balance > prevDiamondsRef.current && prevDiamondsRef.current > 0) {
+            setDiamondBump(true)
+            setTimeout(() => setDiamondBump(false), 600)
+          }
+          prevDiamondsRef.current = balance
+          setDiamondBalance(balance)
+        }
       } catch (err) {
         console.warn('Failed to fetch diamond balance:', err)
       }
@@ -71,16 +78,6 @@ export default function XpDiamondBar({ familyId, childId, compact }: XpDiamondBa
     const interval = setInterval(() => void fetchBalance(), 10000)
     return () => { cancelled = true; clearInterval(interval) }
   }, [familyId, childId])
-
-  // Diamond bump animation
-  useEffect(() => {
-    if (diamondBalance > prevDiamonds && prevDiamonds > 0) {
-      setDiamondBump(true)
-      const timer = setTimeout(() => setDiamondBump(false), 600)
-      return () => clearTimeout(timer)
-    }
-    setPrevDiamonds(diamondBalance)
-  }, [diamondBalance, prevDiamonds])
 
   const nextTier = getNextTier(totalXp)
 
