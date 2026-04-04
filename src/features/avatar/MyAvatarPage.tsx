@@ -77,16 +77,44 @@ function normalizeDailyArmorSession(raw: DailyArmorSession): DailyArmorSession {
   }
 }
 
-function getUnlockedVoxelPieces(profile: AvatarProfile): VoxelArmorPieceId[] {
+/** Pieces visible in gallery (XP meets threshold — for display, not equip) */
+function getVisiblePieces(profile: AvatarProfile): VoxelArmorPieceId[] {
   const xp = profile.totalXp
   return VOXEL_ARMOR_PIECES
     .filter((p) => xp >= XP_THRESHOLDS[p.id])
     .map((p) => p.id)
 }
 
+/** @deprecated Use getVisiblePieces or getEquippablePieces instead */
+function getUnlockedVoxelPieces(profile: AvatarProfile): VoxelArmorPieceId[] {
+  return getVisiblePieces(profile)
+}
+
+/** Get the tier the child is currently forging in (lowest unlocked tier with unforged pieces). */
+function getActiveForgeTier(profile: AvatarProfile): string {
+  const tiers = profile.unlockedTiers ?? ['wood']
+  const forged = profile.forgedPieces ?? {}
+  const allPieceIds: VoxelArmorPieceId[] = ['belt', 'shoes', 'breastplate', 'shield', 'helmet', 'sword']
+
+  for (const tier of tiers) {
+    const tierForged = forged[tier] ?? {}
+    const allForgedInTier = allPieceIds.every(id => tierForged[id])
+    if (!allForgedInTier) return tier
+  }
+
+  return tiers[tiers.length - 1] ?? 'wood'
+}
+
+/** Pieces that can be equipped (forged in active tier) */
+function getEquippablePieces(profile: AvatarProfile): VoxelArmorPieceId[] {
+  const activeTier = getActiveForgeTier(profile)
+  const forged = profile.forgedPieces?.[activeTier] ?? {}
+  return Object.keys(forged) as VoxelArmorPieceId[]
+}
+
 function getNextUnlock(profile: AvatarProfile): { piece: ArmorPieceMeta; xpNeeded: number } | null {
-  const unlocked = new Set(getUnlockedVoxelPieces(profile))
-  const next = VOXEL_ARMOR_PIECES.find((p) => !unlocked.has(p.id))
+  const visible = new Set(getVisiblePieces(profile))
+  const next = VOXEL_ARMOR_PIECES.find((p) => !visible.has(p.id))
   if (!next) return null
   return { piece: next, xpNeeded: Math.max(XP_THRESHOLDS[next.id] - profile.totalXp, 0) }
 }
@@ -555,8 +583,7 @@ export default function MyAvatarPage() {
   const handleForgePiece = useCallback(
     async (voxelPieceId: VoxelArmorPieceId, verseResponse?: string, verseResponseAudio?: string) => {
       if (!profile || !familyId || !childId) return
-      const tier = (profile.currentTier ?? 'wood') as string
-      const activeTier = tier === 'stone' ? 'wood' : tier
+      const activeTier = getActiveForgeTier(profile)
       const result = await forgeArmorPiece(familyId, childId, activeTier, voxelPieceId, verseResponse, verseResponseAudio)
       if (result.success) {
         setSelectedPiece(null)
@@ -570,7 +597,7 @@ export default function MyAvatarPage() {
 
         if (forgedCount >= 6) {
           const nextTier = getNextTierKey(activeTier)
-          if (nextTier && (profile.unlockedTiers ?? []).includes(nextTier)) {
+          if (nextTier && (profile.unlockedTiers ?? []).includes(nextTier) && profile.lastPortalTier !== activeTier) {
             // Delay portal to let forge animation play
             setTimeout(() => setPortalTransition({ from: activeTier, to: nextTier }), 1500)
           }
@@ -597,8 +624,8 @@ export default function MyAvatarPage() {
       setAnimateEquipId(voxelPieceId)
 
       const updatedApplied = [...(session.appliedPieces ?? []), armorPieceId]
-      const unlockedVoxel = getUnlockedVoxelPieces(profile)
-      const allApplied = unlockedVoxel.every((vid) => {
+      const equippable = getEquippablePieces(profile)
+      const allApplied = equippable.length > 0 && equippable.every((vid) => {
         const aid = ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id
         return aid && updatedApplied.includes(aid)
       })
@@ -710,20 +737,21 @@ export default function MyAvatarPage() {
         (p) => ARMOR_PIECE_TO_VOXEL[p.id] === piece.id,
       )?.id
 
-      const isUnlocked = profile.totalXp >= XP_THRESHOLDS[piece.id]
       const isApplied = armorPieceId && (session.appliedPieces ?? []).includes(armorPieceId)
+      const activeTier = getActiveForgeTier(profile)
+      const isForged = Boolean(profile.forgedPieces?.[activeTier]?.[piece.id])
 
       if (isApplied) {
-        // Tap equipped piece → directly unequip (toggle off)
+        // Equipped → unequip (toggle off)
         setUnequipPiece(piece.id)
-        // Immediately trigger unequip without dialog
         void handleUnequipDirect(piece.id)
-      } else if (isUnlocked) {
-        // Tap unlocked piece → equip immediately + read verse aloud
+      } else if (isForged) {
+        // Forged → equip immediately + read verse aloud
         speakVerse(piece.name, piece.verseText)
         void handleApplyPiece(piece.id)
       } else {
-        // Locked pieces: show verse card (info only), read aloud
+        // Not forged (whether XP-unlocked or locked) → show verse card
+        // The verse card will show forge button if unlocked, info-only if locked
         setSelectedPiece((prev) => {
           if (prev?.id === piece.id) return null
           speakVerse(piece.name, piece.verseText)
@@ -734,15 +762,14 @@ export default function MyAvatarPage() {
     [profile, session, ceremonyActive, handleApplyPiece, handleUnequipDirect],
   )
 
-  // ── Suit Up! — equip all unlocked pieces with staggered animation ──
+  // ── Suit Up! — equip all forged pieces with staggered animation ──
   const suitUpAll = useCallback(() => {
     if (!profile || !session || !familyId || !childId) return
-    const unlockedIds = getUnlockedVoxelPieces(profile)
-    const currentApplied = session.appliedPieces ?? []
-    const currentVoxel = sessionToVoxelPieces(currentApplied)
+    const forgedIds = getEquippablePieces(profile)
+    const currentVoxel = sessionToVoxelPieces(session.appliedPieces ?? [])
     // Canonical equip order: belt → breastplate → shoes → shield → helmet → sword
     const equipOrder: VoxelArmorPieceId[] = ['belt', 'breastplate', 'shoes', 'shield', 'helmet', 'sword']
-    const toEquip = equipOrder.filter((vid) => unlockedIds.includes(vid) && !currentVoxel.includes(vid))
+    const toEquip = equipOrder.filter((vid) => forgedIds.includes(vid) && !currentVoxel.includes(vid))
     if (toEquip.length === 0) return
 
     toEquip.forEach((voxelId, i) => {
@@ -808,8 +835,9 @@ export default function MyAvatarPage() {
   // ── Computed values ────────────────────────────────────────────
   const appliedPieces = Array.isArray(session?.appliedPieces) ? session.appliedPieces : []
   const appliedVoxel = sessionToVoxelPieces(appliedPieces)
-  const unlockedVoxel = profile ? getUnlockedVoxelPieces(profile) : []
-  const allEarnedApplied = unlockedVoxel.length > 0 && unlockedVoxel.every((v) => appliedVoxel.includes(v))
+  const unlockedVoxel = profile ? getVisiblePieces(profile) : []
+  const equippableVoxel = profile ? getEquippablePieces(profile) : []
+  const allEarnedApplied = equippableVoxel.length > 0 && equippableVoxel.every((v) => appliedVoxel.includes(v))
   const nextUnlock = profile ? getNextUnlock(profile) : null
   const allSixUnlocked = unlockedVoxel.length === 6
 
@@ -967,7 +995,14 @@ export default function MyAvatarPage() {
         <PortalTransition
           fromTier={portalTransition.from}
           toTier={portalTransition.to}
-          onComplete={() => setPortalTransition(null)}
+          onComplete={() => {
+            // Save guard so portal doesn't re-fire on reload
+            if (familyId && childId && portalTransition) {
+              const profileRef = doc(avatarProfilesCollection(familyId), childId)
+              void safeUpdateProfile(profileRef, { lastPortalTier: portalTransition.from })
+            }
+            setPortalTransition(null)
+          }}
         />
       )}
       <Page>
@@ -1122,8 +1157,8 @@ export default function MyAvatarPage() {
             piece={selectedPiece}
             isUnlocked={profile.totalXp >= XP_THRESHOLDS[selectedPiece.id]}
             isEquipped={appliedVoxel.includes(selectedPiece.id)}
-            isForged={Boolean(profile.forgedPieces?.[(profile.currentTier === 'stone' ? 'wood' : profile.currentTier ?? 'wood') as string]?.[selectedPiece.id])}
-            forgeCost={getForgeCost((profile.currentTier === 'stone' ? 'wood' : profile.currentTier ?? 'wood') as string, selectedPiece.id)}
+            isForged={Boolean(profile.forgedPieces?.[getActiveForgeTier(profile)]?.[selectedPiece.id])}
+            forgeCost={getForgeCost(getActiveForgeTier(profile), selectedPiece.id)}
             isLincoln={isLincoln}
             accentColor={accentColor}
             textColor={textColor}
