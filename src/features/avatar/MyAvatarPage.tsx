@@ -581,8 +581,8 @@ export default function MyAvatarPage() {
 
   // ── Forge a piece (spend diamonds) ─────────────────────────────
   const handleForgePiece = useCallback(
-    async (voxelPieceId: VoxelArmorPieceId, verseResponse?: string, verseResponseAudio?: string) => {
-      if (!profile || !familyId || !childId) return
+    async (voxelPieceId: VoxelArmorPieceId, verseResponse?: string, verseResponseAudio?: string): Promise<boolean> => {
+      if (!profile || !familyId || !childId) return false
       const activeTier = getActiveForgeTier(profile)
       const result = await forgeArmorPiece(familyId, childId, activeTier, voxelPieceId, verseResponse, verseResponseAudio)
       if (result.success) {
@@ -602,8 +602,10 @@ export default function MyAvatarPage() {
             setTimeout(() => setPortalTransition({ from: activeTier, to: nextTier }), 1500)
           }
         }
+        return true
       } else {
         console.warn(`[Forge] Failed: ${result.error}`)
+        return false
       }
     },
     [profile, familyId, childId],
@@ -1164,7 +1166,7 @@ export default function MyAvatarPage() {
             accentColor={accentColor}
             textColor={textColor}
             onEquip={() => void handleApplyPiece(selectedPiece.id)}
-            onForge={(verseResponse, verseResponseAudio) => void handleForgePiece(selectedPiece.id, verseResponse, verseResponseAudio)}
+            onForge={(verseResponse, verseResponseAudio) => handleForgePiece(selectedPiece.id, verseResponse, verseResponseAudio)}
             onClose={() => setSelectedPiece(null)}
           />
         )}

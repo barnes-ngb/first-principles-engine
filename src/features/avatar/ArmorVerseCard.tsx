@@ -22,7 +22,7 @@ interface ArmorVerseCardProps {
   accentColor: string
   textColor: string
   onEquip: () => void
-  onForge: (verseResponse?: string, verseResponseAudio?: string) => void
+  onForge: (verseResponse?: string, verseResponseAudio?: string) => Promise<boolean>
   onClose: () => void
 }
 
@@ -56,6 +56,7 @@ export default function ArmorVerseCard({
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [forging, setForging] = useState(false)
+  const [forgeError, setForgeError] = useState<string | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
 
   const startRecording = useCallback(async () => {
@@ -85,9 +86,19 @@ export default function ArmorVerseCard({
 
   const handleForge = useCallback(async () => {
     setForging(true)
-    // Pass response text (from chip or audio presence)
-    const response = chipResponse ?? (audioBlob ? '(audio response)' : undefined)
-    onForge(response, audioUrl ?? undefined)
+    setForgeError(null)
+    try {
+      const response = chipResponse ?? (audioBlob ? '(audio response)' : undefined)
+      const success = await onForge(response, audioUrl ?? undefined)
+      if (!success) {
+        setForgeError('Not enough diamonds — keep mining!')
+      }
+    } catch (err) {
+      console.error('[Forge] Error:', err)
+      setForgeError('Something went wrong. Try again.')
+    } finally {
+      setForging(false)
+    }
   }, [chipResponse, audioBlob, audioUrl, onForge])
 
   return (
@@ -273,6 +284,20 @@ export default function ArmorVerseCard({
           >
             {forging ? 'Forging...' : `\u25C6 ${forgeCost} Forge it!`}
           </Button>
+
+          {forgeError && (
+            <Typography
+              sx={{
+                color: '#FF5252',
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                fontSize: isLincoln ? '10px' : '13px',
+                textAlign: 'center',
+                mt: 1,
+              }}
+            >
+              {forgeError}
+            </Typography>
+          )}
         </Box>
       )}
 
