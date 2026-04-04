@@ -28,6 +28,7 @@ export interface WeekPlan {
   scriptureText?: string
   heartQuestion: string
   formationPrompt?: string
+  focusGeneratedAt?: string
   tracks: TrackType[]
   flywheelPlan: string
   buildLab: {

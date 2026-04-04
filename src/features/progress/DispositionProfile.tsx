@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -8,11 +8,13 @@ import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import { doc, getDoc, updateDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useAI, TaskType } from '../../core/ai/useAI'
+import { db } from '../../core/firebase/firestore'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -63,6 +65,16 @@ const trendDisplay: Record<string, { symbol: string; color: string }> = {
   'insufficient-data': { symbol: '?', color: '#9ca3af' },
 }
 
+function formatCacheAge(isoDate: string): string {
+  const ms = Date.now() - new Date(isoDate).getTime()
+  const minutes = Math.floor(ms / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
 // ── Component ──────────────────────────────────────────────────
 
 export default function DispositionProfile() {
@@ -80,9 +92,44 @@ export default function DispositionProfile() {
   const [result, setResult] = useState<DispositionResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [cacheAge, setCacheAge] = useState<string | null>(null)
 
-  const handleGenerate = useCallback(async () => {
+  // Load cached disposition on mount / child change
+  useEffect(() => {
     if (!familyId || !activeChildId) return
+    const childRef = doc(db, `families/${familyId}/children/${activeChildId}`)
+    void getDoc(childRef).then((snap) => {
+      const cached = snap.data()?.dispositionCache as { result: DispositionResult; generatedAt: string } | undefined
+      if (cached?.generatedAt && cached.result) {
+        const age = Date.now() - new Date(cached.generatedAt).getTime()
+        const ONE_DAY = 24 * 60 * 60 * 1000
+        if (age < ONE_DAY) {
+          setResult(cached.result)
+          setCacheAge(cached.generatedAt)
+        }
+      }
+    })
+  }, [familyId, activeChildId])
+
+  const handleGenerate = useCallback(async (bypassCache?: boolean) => {
+    if (!familyId || !activeChildId) return
+
+    // Check cache first (unless bypassing)
+    if (!bypassCache) {
+      const childRef = doc(db, `families/${familyId}/children/${activeChildId}`)
+      const snap = await getDoc(childRef)
+      const cached = snap.data()?.dispositionCache as { result: DispositionResult; generatedAt: string } | undefined
+      if (cached?.generatedAt && cached.result) {
+        const age = Date.now() - new Date(cached.generatedAt).getTime()
+        const ONE_DAY = 24 * 60 * 60 * 1000
+        if (age < ONE_DAY) {
+          setResult(cached.result)
+          setCacheAge(cached.generatedAt)
+          return
+        }
+      }
+    }
+
     setLoading(true)
     setError(null)
 
@@ -107,6 +154,17 @@ export default function DispositionProfile() {
       }
       const parsed = JSON.parse(jsonMatch[0]) as DispositionResult
       setResult(parsed)
+
+      // Cache the result to Firestore
+      const now = new Date().toISOString()
+      setCacheAge(now)
+      const childRef = doc(db, `families/${familyId}/children/${activeChildId}`)
+      await updateDoc(childRef, {
+        dispositionCache: {
+          result: parsed,
+          generatedAt: now,
+        },
+      })
     } catch (err) {
       console.error('Disposition generation failed:', err)
       setError('Failed to generate profile. Please try again.')
@@ -133,7 +191,7 @@ export default function DispositionProfile() {
           </Typography>
           <Button
             variant="contained"
-            onClick={handleGenerate}
+            onClick={() => handleGenerate()}
             disabled={!activeChildId}
             size="large"
           >
@@ -153,7 +211,7 @@ export default function DispositionProfile() {
 
       {error && (
         <Alert severity="error" sx={{ my: 2 }} action={
-          <Button color="inherit" size="small" onClick={handleGenerate}>Retry</Button>
+          <Button color="inherit" size="small" onClick={() => handleGenerate(true)}>Retry</Button>
         }>
           {error}
         </Alert>
@@ -217,9 +275,14 @@ export default function DispositionProfile() {
             {result.parentNote}
           </Typography>
 
-          {/* Refresh */}
+          {/* Cache age indicator + Refresh */}
           <Box sx={{ textAlign: 'center', pt: 1 }}>
-            <Button variant="outlined" onClick={handleGenerate} disabled={loading}>
+            {cacheAge && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Generated {formatCacheAge(cacheAge)} ago · Tap Refresh for latest
+              </Typography>
+            )}
+            <Button variant="outlined" onClick={() => handleGenerate(true)} disabled={loading}>
               Refresh Profile
             </Button>
           </Box>
