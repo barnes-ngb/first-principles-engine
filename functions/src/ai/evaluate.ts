@@ -222,19 +222,20 @@ export async function assembleWeekContext(
     .map((d) => {
       const b = d.data();
       if (b.childId !== childId) return null;
-      return {
+      const activity: BookActivity = {
         title: b.title as string,
         childId: b.childId as string,
         status: b.status as string,
         pageCount: (b.pages as unknown[])?.length ?? 0,
         bookType: (b.bookType as string) ?? "creative",
-        theme: b.theme as string | undefined,
         completedThisWeek:
           b.status === "complete" &&
           (b.updatedAt as string) >= weekKey,
       };
+      if (b.theme) activity.theme = b.theme as string;
+      return activity;
     })
-    .filter((b): b is BookActivity => b !== null);
+    .filter((b): b is BookActivity => !!b);
 
   // Count school days (Sun–Thu) with no day logs and no daily plan
   const activeDates = new Set([
