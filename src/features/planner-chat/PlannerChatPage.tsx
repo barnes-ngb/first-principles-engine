@@ -41,7 +41,6 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useDebounce } from '../../core/hooks/useDebounce'
 import type {
   AppBlock,
-  AssignmentCandidate,
   ChatMessage,
   ChecklistItem,
   DayBlock,
@@ -59,25 +58,31 @@ import type {
 import { DEFAULT_SUBJECT_MINUTES } from '../../core/types/planning'
 import type { SubjectTimeDefaults } from '../../core/types/planning'
 import {
-  AssignmentAction,
   ChatMessageRole,
-  DayBlockType,
   EngineStage,
   EvidenceType,
   PlannerConversationStatus,
   SubjectBucket,
 } from '../../core/types/enums'
-import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
-import { defaultAppBlocks, defaultDailyRoutine, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
+  buildPhotoContextSection,
   buildPlannerPrompt,
+  defaultAppBlocks,
+  defaultDailyRoutine,
   fillMissingDaysFromRoutine,
+  formatSkillLabel,
   generateDraftPlanFromInputs,
   generateItemId,
+  LIGHTER_WEEK_BUDGET_MULTIPLIER,
+  looksLikePlanJson,
   parseAIResponse,
+  parseRoutineTotalMinutes,
+  photoLabelsToAssignments,
+  subjectToDayBlockType,
+  TOUGH_WEEK_FIXED_MINUTES,
   WEEK_DAYS,
 } from './chatPlanner.logic'
 import type { AdjustmentIntent } from './chatPlanner.logic'
@@ -94,85 +99,6 @@ import WeekFocusPanel from './WeekFocusPanel'
 import PlanDayCards from './PlanDayCards'
 import PlannerChatMessages from './PlannerChatMessages'
 
-
-/** Detect if an AI response looks like it was trying to return plan JSON (contains days/items structure). */
-function looksLikePlanJson(text: string): boolean {
-  return /["']days["']\s*:/.test(text) && /["']items["']\s*:/.test(text)
-}
-
-function subjectToDayBlockType(subject: SubjectBucket): DayBlockType {
-  switch (subject) {
-    case SubjectBucket.Reading: return DayBlockType.Reading
-    case SubjectBucket.Math: return DayBlockType.Math
-    case SubjectBucket.LanguageArts: return DayBlockType.Reading
-    case SubjectBucket.Science: return DayBlockType.Project
-    case SubjectBucket.SocialStudies: return DayBlockType.Together
-    default: return DayBlockType.Other
-  }
-}
-
-function photoLabelsToAssignments(labels: PhotoLabel[]): AssignmentCandidate[] {
-  return labels.map((label) => {
-    const extracted = label.extractedContent
-    const workbookName = extracted?.workbookMatch?.workbookName ?? label.subjectBucket
-    const lessonName = extracted
-      ? `${extracted.lessonNumber ? `${extracted.workbookMatch?.unitLabel ?? 'lesson'} ${extracted.lessonNumber}` : label.lessonOrPages || 'Workbook page'}${extracted.topic && extracted.topic !== workbookName ? ` (${extracted.topic})` : ''}`
-      : label.lessonOrPages || 'Workbook page'
-
-    return {
-      id: generateItemId(),
-      subjectBucket: label.subjectBucket,
-      workbookName,
-      lessonName,
-      estimatedMinutes: extracted?.estimatedMinutes || label.estimatedMinutes,
-      difficultyCues: extracted?.difficulty ? [extracted.difficulty] : [],
-      sourcePhotoId: label.artifactId,
-      action: AssignmentAction.Keep,
-    }
-  })
-}
-
-/** Build a text description of photo context for inclusion in AI plan prompts. */
-function buildPhotoContextSection(labels: PhotoLabel[]): string {
-  const labelsWithContent = labels.filter((l) => l.extractedContent || l.lessonOrPages)
-  if (labelsWithContent.length === 0) return ''
-
-  const lines = ['Photos uploaded this session:']
-  for (const label of labelsWithContent) {
-    const ex = label.extractedContent
-    if (ex?.workbookMatch) {
-      const parts = [
-        ex.workbookMatch.workbookName,
-        ex.lessonNumber ? `${ex.workbookMatch.unitLabel} ${ex.lessonNumber} of ${ex.workbookMatch.totalUnits}` : null,
-        ex.topic && ex.topic !== ex.workbookMatch.workbookName ? ex.topic : null,
-        `~${ex.estimatedMinutes || label.estimatedMinutes} min`,
-      ].filter(Boolean)
-      lines.push(`- ${parts.join(', ')}`)
-      if (ex.difficulty) {
-        lines.push(`  Difficulty note: ${ex.difficulty}`)
-      }
-      if (ex.modifications) {
-        lines.push(`  Suggested modification: ${ex.modifications}`)
-      }
-    } else {
-      lines.push(`- ${label.subjectBucket}: ${label.lessonOrPages || 'workbook page'} (~${label.estimatedMinutes} min)`)
-    }
-  }
-  lines.push('Please incorporate these specific materials into the plan.')
-  return lines.join('\n')
-}
-
-const LIGHTER_WEEK_BUDGET_MULTIPLIER = 0.7
-const TOUGH_WEEK_FIXED_MINUTES = 90
-
-function formatSkillLabel(tag: string): string {
-  const mapped = SKILL_TAG_MAP[tag]?.label
-  if (mapped) return mapped
-  const fallback = tag.split('.').pop() ?? tag
-  return fallback
-    .replace(/[_-]+/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase())
-}
 
 type MasteryCounts = { gotIt: number; working: number; stuck: number }
 type PlannerMasterySummary = {
@@ -451,14 +377,6 @@ export default function PlannerChatPage() {
 
   const masteryPromptContext = useMemo(() => {
     if (!masterySummary) return ''
-    const formatSkillLabel = (tag: string) => {
-      const mapped = SKILL_TAG_MAP[tag]?.label
-      if (mapped) return mapped
-      const fallback = tag.split('.').pop() ?? tag
-      return fallback
-        .replace(/[_-]+/g, ' ')
-        .replace(/\b\w/g, (char) => char.toUpperCase())
-    }
     const formatTags = (tags: string[]) =>
       tags
         .slice(0, 8)
@@ -476,14 +394,6 @@ export default function PlannerChatPage() {
 
   const masteryReviewLine = useMemo(() => {
     if (!masterySummary) return ''
-    const formatSkillLabel = (tag: string) => {
-      const mapped = SKILL_TAG_MAP[tag]?.label
-      if (mapped) return mapped
-      const fallback = tag.split('.').pop() ?? tag
-      return fallback
-        .replace(/[_-]+/g, ' ')
-        .replace(/\b\w/g, (char) => char.toUpperCase())
-    }
     const short = (tags: string[]) =>
       tags.slice(0, 2).map((tag) => formatSkillLabel(tag)).join(', ')
     const hasFocus = masterySummary.needsFocus.length > 0
