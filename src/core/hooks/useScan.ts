@@ -116,9 +116,9 @@ export function useScan(): UseScanResult {
           childId: record.childId,
           imageUrl: record.imageUrl,
           storagePath: record.storagePath,
-          results: record.results,
+          results: record.results ?? null,
           action: record.action,
-          error: record.error,
+          ...(record.error ? { error: record.error } : {}),
           createdAt: serverTimestamp(),
         } as unknown as ScanRecord)
         record.id = docRef.id
