@@ -482,6 +482,60 @@ async function drawCover(
   }
 }
 
+function drawSightWordsPage(
+  pdf: jsPDF,
+  sightWords: string[],
+  colors: Colors,
+  isLincoln: boolean,
+  area: ContentArea,
+): void {
+  if (sightWords.length === 0) return
+  const textColor = hexToRgb(colors.text)
+  const centerX = area.x + area.w / 2
+
+  // Title
+  pdf.setFont('times', 'bold')
+  pdf.setFontSize(20)
+  pdf.setTextColor(...textColor)
+  const title = isLincoln ? 'Words to Mine' : 'Words to Watch For'
+  pdf.text(title, centerX, area.y + 20, { align: 'center' })
+
+  // Word chips as rounded rectangles with text
+  const chipH = 8
+  const chipPadX = 4
+  const chipGap = 3
+  const startY = area.y + 35
+  let curX = area.x
+  let curY = startY
+
+  pdf.setFontSize(12)
+  pdf.setFont('times', 'bold')
+
+  for (const word of sightWords) {
+    const textW = pdf.getTextWidth(word)
+    const chipW = textW + chipPadX * 2
+    // Wrap to next line if chip overflows
+    if (curX + chipW > area.x + area.w) {
+      curX = area.x
+      curY += chipH + chipGap
+    }
+    // Draw chip background
+    const bgColor = isLincoln ? hexToRgb('#1a3a4a') : hexToRgb('#fce4ec')
+    pdf.setFillColor(...bgColor)
+    pdf.roundedRect(curX, curY, chipW, chipH, 2, 2, 'F')
+    // Draw word text centered in chip
+    pdf.setTextColor(...textColor)
+    pdf.text(word, curX + chipPadX, curY + chipH * 0.7)
+    curX += chipW + chipGap
+  }
+
+  // Footer hint
+  pdf.setFont('times', 'italic')
+  pdf.setFontSize(10)
+  pdf.setTextColor(128, 128, 128)
+  pdf.text('Look for these words as you read!', centerX, curY + chipH + 15, { align: 'center' })
+}
+
 async function drawContentPage(
   pdf: jsPDF,
   page: BookPage,
@@ -504,10 +558,13 @@ async function drawContentPage(
     const imgAreaH = Math.min(area.w / IMAGE_ASPECT_RATIO, area.h * 0.55)
     const imgAreaX = area.x
 
-    // Sort by zIndex for proper stacking
-    const sortedImages = [...page.images].sort(
-      (a, b) => (a.position?.zIndex ?? 0) - (b.position?.zIndex ?? 0),
-    )
+    // Sort: backgrounds first (non-stickers), then stickers on top, each sub-group by zIndex
+    const sortedImages = [...page.images].sort((a, b) => {
+      const aIsSticker = a.type === 'sticker' ? 1 : 0
+      const bIsSticker = b.type === 'sticker' ? 1 : 0
+      if (aIsSticker !== bIsSticker) return aIsSticker - bIsSticker
+      return (a.position?.zIndex ?? 0) - (b.position?.zIndex ?? 0)
+    })
 
     // Draw container background
     pdf.setFillColor(...hexToRgb(colors.imgBg))
@@ -672,6 +729,7 @@ function drawBackCover(
 
 type LogicalPage =
   | { type: 'cover' }
+  | { type: 'sight-words' }
   | { type: 'content'; page: BookPage; index: number }
   | { type: 'back' }
 
@@ -685,10 +743,14 @@ async function drawLogicalPage(
   sightWordSet: Set<string>,
   resolveUrl: (url: string) => string,
   area: ContentArea,
+  isLincoln: boolean,
 ): Promise<void> {
   switch (logicalPage.type) {
     case 'cover':
       await drawCover(pdf, book, childName, colors, settings, resolveUrl, area)
+      break
+    case 'sight-words':
+      drawSightWordsPage(pdf, [...sightWordSet], colors, isLincoln, area)
       break
     case 'content':
       await drawContentPage(pdf, logicalPage.page, logicalPage.index, colors, settings, sightWordSet, resolveUrl, area)
@@ -708,6 +770,7 @@ async function renderBooklet(
   sightWordSet: Set<string>,
   resolveUrl: (url: string) => string,
   bleedOffset: number,
+  isLincoln: boolean,
 ): Promise<void> {
   const config = PAGE_CONFIGS.booklet
   const halfW = config.widthMM / 2
@@ -715,6 +778,7 @@ async function renderBooklet(
   // Build logical page sequence
   const logicalPages: LogicalPage[] = []
   if (settings.includeCover) logicalPages.push({ type: 'cover' })
+  if (sightWordSet.size > 0) logicalPages.push({ type: 'sight-words' })
   book.pages.forEach((page, i) => logicalPages.push({ type: 'content', page, index: i }))
   if (settings.includeBackCover) logicalPages.push({ type: 'back' })
 
@@ -731,7 +795,7 @@ async function renderBooklet(
       w: halfW - MARGIN_MM * 2,
       h: config.heightMM - MARGIN_MM * 2,
     }
-    await drawLogicalPage(pdf, logicalPages[i], book, childName, colors, settings, sightWordSet, resolveUrl, leftArea)
+    await drawLogicalPage(pdf, logicalPages[i], book, childName, colors, settings, sightWordSet, resolveUrl, leftArea, isLincoln)
 
     // Right half
     if (i + 1 < logicalPages.length) {
@@ -741,7 +805,7 @@ async function renderBooklet(
         w: halfW - MARGIN_MM * 2,
         h: config.heightMM - MARGIN_MM * 2,
       }
-      await drawLogicalPage(pdf, logicalPages[i + 1], book, childName, colors, settings, sightWordSet, resolveUrl, rightArea)
+      await drawLogicalPage(pdf, logicalPages[i + 1], book, childName, colors, settings, sightWordSet, resolveUrl, rightArea, isLincoln)
     }
 
     // Fold line (dashed)
@@ -808,7 +872,7 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
   const endRender = startStep('printBook.renderPages')
 
   if (isBooklet) {
-    await renderBooklet(pdf, book, childName, colors, settings, sightWordSet, resolveUrl, bleedOffset)
+    await renderBooklet(pdf, book, childName, colors, settings, sightWordSet, resolveUrl, bleedOffset, opts.isLincoln)
   } else {
     let pageAdded = false
 
@@ -816,6 +880,15 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
     if (settings.includeCover) {
       drawBackground(pdf, colors.bg, config.widthMM, config.heightMM, bleedOffset, bleedOffset)
       await drawCover(pdf, book, childName, colors, settings, resolveUrl, contentArea)
+      if (settings.trimMarks) drawTrimMarks(pdf, pdfW, pdfH)
+      pageAdded = true
+    }
+
+    // Sight words page (after cover, before content)
+    if (sightWordSet.size > 0) {
+      if (pageAdded) pdf.addPage()
+      drawBackground(pdf, colors.bg, config.widthMM, config.heightMM, bleedOffset, bleedOffset)
+      drawSightWordsPage(pdf, [...sightWordSet], colors, opts.isLincoln ?? false, contentArea)
       if (settings.trimMarks) drawTrimMarks(pdf, pdfW, pdfH)
       pageAdded = true
     }

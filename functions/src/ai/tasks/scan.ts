@@ -39,7 +39,14 @@ Analyze this page and respond ONLY with valid JSON (no markdown fences, no comme
   "recommendation": "do|skip|quick-review|modify",
   "recommendationReason": "string — why this recommendation based on student's current level",
   "estimatedMinutes": number,
-  "teacherNotes": "string — tips for the parent on how to present this page"
+  "teacherNotes": "string — tips for the parent on how to present this page",
+  "curriculumDetected": {
+    "provider": "gatb|reading-eggs|other|null",
+    "name": "string — full curriculum name if identifiable (e.g., 'The Good and the Beautiful Language Arts Level 1'), or null",
+    "lessonNumber": "number — the lesson number if visible, or null",
+    "pageNumber": "number — the page number if visible, or null",
+    "levelDesignation": "string — e.g., 'Level 1', 'Level K', 'Level 4', or null"
+  }
 }
 
 CERTIFICATE / PROGRESS DOCUMENT DETECTION:
@@ -62,10 +69,29 @@ If the image is NOT a workbook page but IS a curriculum certificate, progress re
     "masteredSkills": ["string — skills to mark as mastered based on this certificate"],
     "recommendedStartLevel": number | null,
     "notes": "string — what this means for the child's current level"
+  },
+  "curriculumDetected": {
+    "provider": "gatb|reading-eggs|other|null",
+    "name": "string — full curriculum name, or null",
+    "lessonNumber": "number — the last lesson number from the range, or null",
+    "pageNumber": null,
+    "levelDesignation": "string — e.g., 'Level 1', or null"
   }
 }
 
 Look for indicators like: award logos, "is awarded to", "for achieving", level/map/lesson numbers, skills lists, completion dates, curriculum branding (Reading Eggs mascot, GATB nature imagery).
+
+CURRICULUM IDENTIFICATION:
+When analyzing a workbook page, also try to identify which curriculum it belongs to.
+Look for:
+- "The Good and the Beautiful" or TGTB branding, level indicators, lesson numbers in headers/footers
+- "Reading Eggs" branding, map/lesson numbers
+- Any other curriculum branding with identifiable lesson/page numbers
+
+If you can identify the curriculum, fill in the curriculumDetected object.
+The lessonNumber is the most important field — look for "Lesson 47", "L47", page headers with lesson numbers, etc.
+If you can only identify the curriculum but not the exact lesson, set lessonNumber to null.
+If you cannot identify any curriculum, set all curriculumDetected fields to null.
 
 RULES:
 - Be specific about skills. Don't say "math" — say "two-digit addition with regrouping" or "consonant blends: bl, cl, fl."

@@ -6,8 +6,9 @@ import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
-import type { ScanResult, CertificateScanResult } from '../core/types'
+import type { ScanResult, CertificateScanResult, CurriculumDetected } from '../core/types'
 import { isCertificateScan } from '../core/types/planning'
+import GatbLessonInfo from './GatbLessonInfo'
 
 const ALIGNMENT_ICON: Record<string, string> = {
   'ahead': '🟢',
@@ -45,6 +46,8 @@ interface ScanResultsPanelProps {
   onScanAnother?: () => void
   /** Called when user wants to apply certificate data to workbook config. */
   onApplyCertificate?: (result: CertificateScanResult) => void
+  /** Called when user wants to update workbook position from detected curriculum. */
+  onUpdatePosition?: (curriculum: CurriculumDetected) => void
   /** Child name for the "Update Progress" button label. */
   childName?: string
   /** Hide action buttons (e.g. when viewing history). */
@@ -58,6 +61,7 @@ export default function ScanResultsPanel({
   onSkip,
   onScanAnother,
   onApplyCertificate,
+  onUpdatePosition,
   childName,
   hideActions,
 }: ScanResultsPanelProps) {
@@ -177,6 +181,33 @@ export default function ScanResultsPanel({
           <Alert severity="info" sx={{ '& .MuiAlert-message': { fontSize: '0.875rem' } }}>
             <strong>Teacher tip:</strong> {results.teacherNotes}
           </Alert>
+        )}
+
+        {/* Curriculum position detection */}
+        {results.curriculumDetected?.lessonNumber && (
+          <Alert severity="info" sx={{ mt: 1 }}>
+            <Typography variant="body2" fontWeight={500}>
+              Detected: {results.curriculumDetected.name ?? results.curriculumDetected.provider ?? 'Unknown curriculum'} — Lesson {results.curriculumDetected.lessonNumber}
+            </Typography>
+            {onUpdatePosition && (
+              <Button
+                size="small"
+                variant="outlined"
+                sx={{ mt: 1 }}
+                onClick={() => onUpdatePosition(results.curriculumDetected!)}
+              >
+                Update workbook position to Lesson {results.curriculumDetected.lessonNumber}
+              </Button>
+            )}
+          </Alert>
+        )}
+
+        {/* GATB scope-and-sequence context */}
+        {results.curriculumDetected?.provider === 'gatb' && results.curriculumDetected.lessonNumber && (
+          <GatbLessonInfo
+            level={results.curriculumDetected.levelDesignation}
+            lessonNumber={results.curriculumDetected.lessonNumber}
+          />
         )}
 
         {/* Action buttons */}

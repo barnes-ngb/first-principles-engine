@@ -81,6 +81,10 @@ export default function PageEditor({
   const isTextOnly = page.layout === 'text-only'
   const isImageLeft = page.layout === 'image-left'
 
+  // Separate background images (scenes, photos, sketches, AI-generated) from stickers
+  const backgroundImages = page.images.filter((img) => img.type !== 'sticker')
+  const stickerImages = page.images.filter((img) => img.type === 'sticker')
+
   const imageSection = !isTextOnly && (
     <Box
       ref={imageContainerRef}
@@ -96,31 +100,106 @@ export default function PageEditor({
       onClick={() => setSelectedImageId(null)}
     >
       {page.images.length > 0 ? (
-        page.images.map((img, idx) => (
-          <DraggableImage
-            key={img.id}
-            image={img}
-            selected={selectedImageId === img.id}
-            onSelect={() => setSelectedImageId(img.id)}
-            onPositionChange={(pos) => onImagePositionChange?.(img.id, pos)}
-            onRemove={onRemoveImage ? () => onRemoveImage(img.id) : undefined}
-            onZIndexChange={(delta) => {
-              const currentZ = img.position?.zIndex ?? idx
-              const newZ = Math.max(0, Math.min(page.images.length - 1, currentZ + delta))
-              onImagePositionChange?.(img.id, {
-                x: img.position?.x ?? 0,
-                y: img.position?.y ?? 0,
-                width: img.position?.width ?? 100,
-                height: img.position?.height ?? 100,
-                rotation: img.position?.rotation ?? 0,
-                zIndex: newZ,
-                flipH: img.position?.flipH ?? false,
-                flipV: img.position?.flipV ?? false,
-              })
-            }}
-            style={{ zIndex: img.position?.zIndex ?? idx + 1 }}
-          />
-        ))
+        <>
+          {/* Layer 1: Background — locked, not draggable */}
+          <Box sx={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+            {backgroundImages.map((img) => {
+              const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+              const transforms: string[] = []
+              if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
+              if (pos.flipH) transforms.push('scaleX(-1)')
+              if (pos.flipV) transforms.push('scaleY(-1)')
+              return (
+                <Box
+                  key={img.id}
+                  component="img"
+                  src={img.url}
+                  onClick={(e: React.MouseEvent) => {
+                    e.stopPropagation()
+                    setSelectedImageId(img.id)
+                  }}
+                  sx={{
+                    position: 'absolute',
+                    left: `${pos.x}%`,
+                    top: `${pos.y}%`,
+                    width: `${pos.width}%`,
+                    height: `${pos.height}%`,
+                    objectFit: 'cover',
+                    pointerEvents: 'auto',
+                    transform: transforms.length > 0 ? transforms.join(' ') : undefined,
+                    transformOrigin: 'center center',
+                    border: selectedImageId === img.id ? '2px dashed' : 'none',
+                    borderColor: 'warning.main',
+                    cursor: 'pointer',
+                  }}
+                />
+              )
+            })}
+          </Box>
+
+          {/* Background toolbar — shown when a background image is selected */}
+          {selectedImageId && backgroundImages.some((img) => img.id === selectedImageId) && (
+            <Box
+              sx={{
+                position: 'absolute',
+                bottom: 8,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 100,
+                bgcolor: 'background.paper',
+                borderRadius: 2,
+                boxShadow: 3,
+                px: 1,
+                py: 0.5,
+                display: 'flex',
+                gap: 0.5,
+              }}
+            >
+              {onRemoveImage && (
+                <Button
+                  size="small"
+                  color="error"
+                  onClick={() => {
+                    onRemoveImage(selectedImageId)
+                    setSelectedImageId(null)
+                  }}
+                  sx={{ textTransform: 'none', minWidth: 0, px: 1 }}
+                >
+                  Remove
+                </Button>
+              )}
+            </Box>
+          )}
+
+          {/* Layer 2: Stickers — interactive, draggable, always on top */}
+          <Box sx={{ position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none' }}>
+            {stickerImages.map((img, idx) => (
+              <DraggableImage
+                key={img.id}
+                image={img}
+                selected={selectedImageId === img.id}
+                onSelect={() => setSelectedImageId(img.id)}
+                onPositionChange={(pos) => onImagePositionChange?.(img.id, pos)}
+                onRemove={onRemoveImage ? () => onRemoveImage(img.id) : undefined}
+                onZIndexChange={(delta) => {
+                  const currentZ = img.position?.zIndex ?? idx
+                  const newZ = Math.max(0, Math.min(stickerImages.length - 1, currentZ + delta))
+                  onImagePositionChange?.(img.id, {
+                    x: img.position?.x ?? 0,
+                    y: img.position?.y ?? 0,
+                    width: img.position?.width ?? 100,
+                    height: img.position?.height ?? 100,
+                    rotation: img.position?.rotation ?? 0,
+                    zIndex: newZ,
+                    flipH: img.position?.flipH ?? false,
+                    flipV: img.position?.flipV ?? false,
+                  })
+                }}
+                style={{ zIndex: (img.position?.zIndex ?? idx) + 1, pointerEvents: 'auto' }}
+              />
+            ))}
+          </Box>
+        </>
       ) : (
         <label style={{ cursor: 'pointer', textAlign: 'center', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <input

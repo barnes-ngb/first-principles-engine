@@ -333,7 +333,7 @@ export function useQuestSession() {
           const wbSnap = await getDocs(wbQuery)
           for (const wbDoc of wbSnap.docs) {
             const config = wbDoc.data()
-            if (config.subjectBucket !== 'Reading') continue
+            if (config.subjectBucket !== 'Reading' && config.subjectBucket !== 'LanguageArts') continue
             if (!config.curriculum) continue
             if (config.curriculum.completed) {
               startLevel = Math.max(startLevel, 5)

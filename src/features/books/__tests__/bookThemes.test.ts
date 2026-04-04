@@ -74,8 +74,9 @@ describe('inferBookTheme', () => {
 // ── BOOK_THEMES array ─────────────────────────────────────────────
 
 describe('BOOK_THEMES', () => {
-  it('has exactly 9 items', () => {
-    expect(BOOK_THEMES).toHaveLength(9)
+  it('has all preset themes plus "other"', () => {
+    // 14 presets + 1 "other"
+    expect(BOOK_THEMES).toHaveLength(15)
   })
 
   it('has all unique IDs', () => {

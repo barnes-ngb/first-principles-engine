@@ -92,6 +92,16 @@ function addDays(dateStr: string, n: number): string {
 
 // ── Context assembly ────────────────────────────────────────────
 
+interface BookActivity {
+  title: string;
+  childId: string;
+  status: string;
+  pageCount: number;
+  bookType: string;
+  theme?: string;
+  completedThisWeek: boolean;
+}
+
 export interface WeekContext {
   child: ChildProfile;
   weekKey: string;
@@ -99,6 +109,7 @@ export interface WeekContext {
   hours: HoursRecord[];
   dailyPlans: DailyPlanRecord[];
   missedDays: number;
+  bookActivity: BookActivity[];
 }
 
 export async function assembleWeekContext(
@@ -200,6 +211,32 @@ export async function assembleWeekContext(
     };
   });
 
+  // Load book activity for the week
+  const booksSnap = await familyRef
+    .collection("books")
+    .where("updatedAt", ">=", weekKey)
+    .where("updatedAt", "<=", weekEnd + "T23:59:59")
+    .get();
+
+  const bookActivity: BookActivity[] = booksSnap.docs
+    .map((d) => {
+      const b = d.data();
+      if (b.childId !== childId) return null;
+      const activity: BookActivity = {
+        title: b.title as string,
+        childId: b.childId as string,
+        status: b.status as string,
+        pageCount: (b.pages as unknown[])?.length ?? 0,
+        bookType: (b.bookType as string) ?? "creative",
+        completedThisWeek:
+          b.status === "complete" &&
+          (b.updatedAt as string) >= weekKey,
+      };
+      if (b.theme) activity.theme = b.theme as string;
+      return activity;
+    })
+    .filter((b): b is BookActivity => !!b);
+
   // Count school days (Sun–Thu) with no day logs and no daily plan
   const activeDates = new Set([
     ...dayLogs.map((d) => d.date),
@@ -213,7 +250,7 @@ export async function assembleWeekContext(
     }
   }
 
-  return { child, weekKey, dayLogs, hours, dailyPlans, missedDays };
+  return { child, weekKey, dayLogs, hours, dailyPlans, missedDays, bookActivity };
 }
 
 // ── Prompt building ─────────────────────────────────────────────
@@ -314,6 +351,12 @@ ${hoursSummary || "  (none)"}
 - Plan types: ${planTypeSummary || "no data"}
 - Missed school days (Sun–Thu): ${ctx.missedDays}
 
+## Book Activity This Week
+${(ctx.bookActivity ?? []).length === 0 ? "No book activity this week." :
+  (ctx.bookActivity ?? []).map((b) =>
+    `- "${b.title}" (${b.bookType}, ${b.pageCount} pages, ${b.status}${b.completedThisWeek ? " — FINISHED THIS WEEK!" : ""})`
+  ).join("\n")}
+
 Per-day breakdown:
 ${perDayBreakdown.join("\n") || "  (no day logs)"}
 
@@ -333,6 +376,8 @@ TONE:
 - No shame. Rest by design. MVD is real school.
 - Portfolio over grades — evidence of growth matters more than scores.
 - If data is thin, say so honestly and keep recommendations light.
+- Celebrate any books created or completed — they represent significant creative effort.
+- Mention reading sessions and book creation as evidence of language arts engagement.
 
 Respond ONLY with valid JSON. No markdown, no preamble, no explanation outside the JSON structure.`;
 }

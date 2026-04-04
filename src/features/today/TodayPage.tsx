@@ -29,6 +29,8 @@ import {
   getDoc,
   getDocs,
   query,
+  serverTimestamp,
+  setDoc,
   updateDoc,
   where,
 } from 'firebase/firestore'
@@ -47,13 +49,15 @@ import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   artifactsCollection,
   skillSnapshotsCollection,
+  workbookConfigsCollection,
+  workbookConfigDocId,
 } from '../../core/firebase/firestore'
 import {
   generateFilename,
   uploadArtifactFile,
 } from '../../core/firebase/upload'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, ChecklistItem as ChecklistItemType, DraftDayPlan, DraftPlanItem, LadderCardDefinition, SkillSnapshot } from '../../core/types'
+import type { Artifact, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, LadderCardDefinition, SkillSnapshot } from '../../core/types'
 import { getLaddersForChild } from '../ladders/laddersCatalog'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
@@ -426,6 +430,63 @@ export default function TodayPage() {
     setScanItemIndex(null)
   }, [clearScan])
 
+  const handleScanUpdatePosition = useCallback(
+    async (curriculum: CurriculumDetected) => {
+      if (!familyId || !selectedChildId || !curriculum.lessonNumber) return
+
+      try {
+        const name = curriculum.name || `${curriculum.provider ?? 'unknown'} curriculum`
+        const docId = workbookConfigDocId(selectedChildId, name)
+        const colRef = workbookConfigsCollection(familyId)
+        const docRef = doc(colRef, docId)
+        const snap = await getDoc(docRef)
+
+        if (snap.exists()) {
+          const existing = snap.data()
+          if (curriculum.lessonNumber > (existing.currentPosition ?? 0)) {
+            await updateDoc(docRef, {
+              currentPosition: curriculum.lessonNumber,
+              updatedAt: serverTimestamp(),
+            })
+          }
+        } else {
+          const lower = (curriculum.name ?? '').toLowerCase()
+          const subjectBucket: SubjectBucket =
+            curriculum.provider === 'reading-eggs' || lower.includes('reading')
+              ? SubjectBucket.Reading
+              : lower.includes('language arts')
+                ? SubjectBucket.LanguageArts
+                : lower.includes('math')
+                  ? SubjectBucket.Math
+                  : SubjectBucket.Other
+
+          await setDoc(docRef, {
+            childId: selectedChildId,
+            name,
+            subjectBucket,
+            totalUnits: curriculum.provider === 'gatb' ? 120 : 0,
+            currentPosition: curriculum.lessonNumber,
+            unitLabel: 'lesson',
+            targetFinishDate: '',
+            schoolDaysPerWeek: 4,
+            curriculum: {
+              provider: curriculum.provider ?? 'other',
+              level: curriculum.levelDesignation ?? '',
+            },
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        }
+
+        setSnackMessage({ text: `Position updated to Lesson ${curriculum.lessonNumber}!`, severity: 'success' })
+      } catch (err) {
+        console.error('[TodayPage] Failed to update position', err)
+        setSnackMessage({ text: 'Failed to update position', severity: 'error' })
+      }
+    },
+    [familyId, selectedChildId, setSnackMessage],
+  )
+
   // --- Loading state ---
 
   const scrollToArtifacts = useCallback(() => {
@@ -704,6 +765,7 @@ export default function TodayPage() {
           onScanAddToPlan={handleScanAddToPlan}
           onScanSkip={handleScanSkip}
           onClearScan={handleClearScan}
+          onUpdatePosition={handleScanUpdatePosition}
           onPrintMaterials={handlePrintTodayMaterials}
           printingMaterials={printingMaterials}
         />

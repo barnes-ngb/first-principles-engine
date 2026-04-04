@@ -14,6 +14,8 @@ export interface ImageGenRequest {
   prompt: string;
   style?: "schedule-card" | "reward-chart" | "theme-illustration" | "book-illustration-minecraft" | "book-illustration-storybook" | "book-illustration-comic" | "book-illustration-realistic" | "book-illustration-garden-warfare" | "book-illustration-platformer" | "book-sticker" | "general";
   size?: "1024x1024" | "1024x1792" | "1792x1024";
+  /** Optional theme ID — if provided, theme's imageStylePrefix overrides the default style prefix. */
+  themeId?: string;
 }
 
 export interface ImageGenResponse {
@@ -51,12 +53,18 @@ const STYLE_PREFIXES: Record<string, string> = {
   general: "",
 };
 
-/** Build the final DALL-E prompt with style context and safety guardrails. */
+/** Build the final DALL-E prompt with style context and safety guardrails.
+ *  If a themeImagePrefix is provided (from BookThemeConfig), it takes precedence
+ *  over the default STYLE_PREFIXES for book illustrations. */
 export function buildImagePrompt(
   userPrompt: string,
   style: string | undefined,
+  themeImagePrefix?: string,
 ): string {
-  const prefix = STYLE_PREFIXES[style ?? "general"] ?? "";
+  // Theme prefix overrides default style prefix for book illustrations
+  const prefix = themeImagePrefix && style?.startsWith("book-illustration")
+    ? themeImagePrefix + " "
+    : (STYLE_PREFIXES[style ?? "general"] ?? "");
   const safetyPostfix =
     " Safe for children, family-friendly, no text overlays.";
   return `${prefix}${userPrompt}.${safetyPostfix}`;
@@ -70,7 +78,7 @@ export const generateImage = onCall(
     // ── Auth gate ──────────────────────────────────────────────
     const { uid } = requireApprovedUser(request);
 
-    const { familyId, prompt, style, size } =
+    const { familyId, prompt, style, size, themeId } =
       request.data as ImageGenRequest;
 
     // ── Input validation ───────────────────────────────────────
@@ -130,9 +138,41 @@ export const generateImage = onCall(
     const rewriteMode = style === "book-sticker" ? "sticker" as const : "scene" as const;
     const safePrompt = await rewriteForCopyright(prompt, rewriteMode, claudeApiKey.value());
 
+    // ── Resolve theme image prefix ──────────────────────────────
+    let themeImagePrefix: string | undefined;
+    if (themeId) {
+      // Check preset themes first (server-side map)
+      const PRESET_IMAGE_PREFIXES: Record<string, string> = {
+        adventure: "A colorful adventure scene for a children's book.",
+        animals: "A warm, friendly children's book illustration of animals in nature.",
+        fantasy: "A magical fantasy scene for a children's book.",
+        minecraft: "A blocky pixel-art Minecraft-style scene. Cubic blocks, pixelated textures, bright colors.",
+        space: "A vivid space scene for a children's book. Colorful planets, stars, rockets.",
+        dinosaurs: "A prehistoric children's book illustration. Friendly dinosaurs, lush vegetation.",
+        ocean: "An underwater children's book illustration. Colorful coral reefs, friendly sea creatures.",
+        superheroes: "A bold, colorful superhero scene for a children's book.",
+        cooking: "A warm, cheerful kitchen scene for a children's book.",
+        sports: "A bright, energetic children's book illustration of kids playing sports.",
+      };
+      themeImagePrefix = PRESET_IMAGE_PREFIXES[themeId];
+
+      // Check custom theme in Firestore if not a preset
+      if (!themeImagePrefix) {
+        try {
+          const db = getFirestore();
+          const themeDoc = await db.doc(`families/${familyId}/bookThemes/${themeId}`).get();
+          if (themeDoc.exists) {
+            themeImagePrefix = (themeDoc.data() as Record<string, unknown>).imageStylePrefix as string | undefined;
+          }
+        } catch {
+          // Ignore — use default style prefix
+        }
+      }
+    }
+
     // ── Generate image ──────────────────────────────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
-    const dallePrompt = buildImagePrompt(safePrompt, style);
+    const dallePrompt = buildImagePrompt(safePrompt, style, themeImagePrefix);
 
     // Use gpt-image-1 for stickers (native transparent bg), DALL-E 3 for everything else
     const isSticker = style === "book-sticker";

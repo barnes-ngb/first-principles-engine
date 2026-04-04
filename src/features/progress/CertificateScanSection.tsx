@@ -8,16 +8,21 @@ import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
 
 import ScanButton from '../../components/ScanButton'
 import ScanResultsPanel from '../../components/ScanResultsPanel'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { workbookConfigsCollection, workbookConfigDocId } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useCertificateProgress } from '../../core/hooks/useCertificateProgress'
 import { useScan } from '../../core/hooks/useScan'
-import type { CertificateScanResult } from '../../core/types'
+import type { CertificateScanResult, CurriculumDetected } from '../../core/types'
+import { SubjectBucket } from '../../core/types/enums'
+import type { SubjectBucket as SubjectBucketType } from '../../core/types/enums'
 import { isCertificateScan } from '../../core/types/planning'
 
 export default function CertificateScanSection() {
@@ -35,6 +40,7 @@ export default function CertificateScanSection() {
   } = useCertificateProgress()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pendingResult, setPendingResult] = useState<CertificateScanResult | null>(null)
+  const [snack, setSnack] = useState<string | null>(null)
 
   const handleCapture = useCallback(
     async (file: File) => {
@@ -73,6 +79,54 @@ export default function CertificateScanSection() {
     setConfirmOpen(false)
   }, [clearScan, clearCertState])
 
+  const handleUpdatePosition = useCallback(
+    async (curriculum: CurriculumDetected) => {
+      if (!familyId || !activeChildId || !curriculum.lessonNumber) return
+
+      try {
+        const name = curriculum.name || `${curriculum.provider ?? 'unknown'} curriculum`
+        const docId = workbookConfigDocId(activeChildId, name)
+        const colRef = workbookConfigsCollection(familyId)
+        const docRef = doc(colRef, docId)
+        const snap = await getDoc(docRef)
+
+        if (snap.exists()) {
+          const existing = snap.data()
+          if (curriculum.lessonNumber > (existing.currentPosition ?? 0)) {
+            await updateDoc(docRef, {
+              currentPosition: curriculum.lessonNumber,
+              updatedAt: serverTimestamp(),
+            })
+          }
+        } else {
+          const subjectBucket = inferSubjectFromCurriculum(curriculum)
+          await setDoc(docRef, {
+            childId: activeChildId,
+            name,
+            subjectBucket,
+            totalUnits: curriculum.provider === 'gatb' ? 120 : 0,
+            currentPosition: curriculum.lessonNumber,
+            unitLabel: 'lesson',
+            targetFinishDate: '',
+            schoolDaysPerWeek: 4,
+            curriculum: {
+              provider: curriculum.provider ?? 'other',
+              level: curriculum.levelDesignation ?? '',
+            },
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        }
+
+        setSnack(`Position updated to Lesson ${curriculum.lessonNumber}!`)
+      } catch (err) {
+        console.error('[CertificateScanSection] Failed to update position', err)
+        setSnack('Failed to update position')
+      }
+    },
+    [familyId, activeChildId],
+  )
+
   const childName = activeChild?.name ?? ''
 
   return (
@@ -107,6 +161,7 @@ export default function CertificateScanSection() {
           onApplyCertificate={
             isCertificateScan(scanResult.results) ? handleApplyCertificate : undefined
           }
+          onUpdatePosition={handleUpdatePosition}
           onScanAnother={handleScanAnother}
           childName={childName}
         />
@@ -189,6 +244,23 @@ export default function CertificateScanSection() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Position update snackbar */}
+      <Snackbar
+        open={!!snack}
+        autoHideDuration={3000}
+        onClose={() => setSnack(null)}
+        message={snack}
+      />
     </Box>
   )
+}
+
+function inferSubjectFromCurriculum(curriculum: CurriculumDetected): SubjectBucketType {
+  const lower = (curriculum.name ?? '').toLowerCase()
+  if (curriculum.provider === 'reading-eggs' || lower.includes('reading')) return SubjectBucket.Reading
+  if (lower.includes('language arts')) return SubjectBucket.LanguageArts
+  if (lower.includes('math')) return SubjectBucket.Math
+  if (lower.includes('science')) return SubjectBucket.Science
+  return SubjectBucket.Other
 }
