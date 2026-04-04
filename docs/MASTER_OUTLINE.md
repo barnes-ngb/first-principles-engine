@@ -206,6 +206,32 @@ My Books (Book Builder + AI Story Generator)
 
 **XP System:** xpLedger collection, separate tracks per child, checkAndUnlockArmor on XP change
 
+**Two-Currency Economy (v1):**
+* **XP** (experience) — progression currency, never decreases. Unlocks tier access.
+* **Diamonds** — inventory currency, earned from active effort, spent to forge armor and buy cosmetics.
+* Both stored in xpLedger with `currencyType` field ('xp' | 'diamond')
+* Diamond balance computed from ledger sum (positive = earn, negative = spend)
+* Active effort (quests, teach-back, Dad Lab, workshops, conundrums) earns both XP + Diamonds
+* Routine activities (daily checklist, armor ritual) earn XP only
+
+**Choice-Based Armor Forging:**
+* XP unlocks the TIER (access to forge pieces in that material)
+* Lincoln chooses which piece to forge and pays diamonds
+* Each forge includes verse engagement (response chips or audio recording)
+* Forge costs scale by tier: Wood (5-10), Stone (15-30), up to Netherite (120-200) per piece
+* ArmorVerseCard shows verse prompt + "Why does a warrior need [piece]?" + forge button
+
+**Tier Biomes:**
+* Wood = Stonebridge Village, Stone = The Caves, Iron = The Mountains
+* Gold = The Desert Temple, Diamond = The End, Netherite = The Nether
+* Portal transition moment when completing a tier's armor set (all 6 forged + next tier XP reached)
+* Subtle background tinting per active biome
+
+**XP + Diamond HUD:**
+* XpDiamondBar component: green Minecraft-style XP progress bar + cyan diamond count
+* Shown on Kid Today view and My Armor page
+* Diamond count with bump animation on balance increase
+
 ### Creative Time Tracking
 - "Start creating" timer on Bookshelf, Book Editor, My Stuff pages
 - Auto-logs to hours system (Art, Language Arts, Math, Practical Arts subject buckets)
@@ -289,8 +315,8 @@ Progress
 - Engagement data compressed to summary format (reduces tokens ~60%)
 - Token usage logged per task type to aiUsage collection Firestore Collections (28 in firestore.ts) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, dadLabReports, books, sightWordProgress, xpLedger, dailyArmorSessions, stickerLibrary, storyGames, evaluations, scans, shellyChatThreads
 
-* `avatarProfiles` — per-child avatar data (features, XP, tier, equipped pieces, customization)
-* `xpLedger` — append-only XP event history per child
+* `avatarProfiles` — per-child avatar data (features, XP, tier, equipped pieces, customization, forgedPieces, unlockedTiers)
+* `xpLedger` — append-only XP/Diamond event history per child (currencyType: 'xp' | 'diamond', category, itemId fields)
 
 * `scans` — curriculum photo scan records
 * `shellyChatThreads` — Shelly's AI chat threads tagged with `chatContext` (`'lincoln'` | `'london'` | `'general'`) + messages subcollection. Messages may include `uploadedImageUrl` (Firebase Storage) and `imageAction` (`'analyze'` | `'transform'`).
@@ -346,6 +372,16 @@ Knowledge Mine Phase 2-4
 * Memorization mode on verse card (hide words, speak from memory, major XP reward)
 * Daily streak counter
 * Piece order guidance (canonical Ephesians 6 order hints)
+
+Game World Economy — Future
+* Stonebridge world map (2.5D isometric, regions unlock with tiers)
+* Diamond shop for cosmetics (dyes, emblems, capes, particles — gated by tier)
+* World decorations (place items in Stonebridge with diamonds)
+* Pet companion system (wolf/cat/parrot/Sunny)
+* London's Workshop games as map locations
+* Dad Lab discoveries on map
+* Streak bonuses (consecutive day diamonds)
+* Verse journal subcollection (track all verse responses across forges)
 * Kid-friendly verse explanation (1-sentence plain language, Shelly-editable)
 * Nathan notification on tier upgrade
 * Verse progress tracking (reads → memorized gold star) My Books Backlog
@@ -388,6 +424,7 @@ Business Prep Mar 28+ Creative timer, mini-book PDF, sketch-to-story pipeline
 Audit Mar 29-31 Architecture audit: dead code cleanup, TodayPage decomposition, error handling (SectionErrorBoundary), XP ledger perf, prompt consolidation, docs v14, first-week polish (evaluation nudge, minutes-logged indicator, HelpStrips, warmer empty states), materials theming (per-child), weekly review fixes (7PM schedule, CHARTER_PREAMBLE + addendum, empty-week guard), quest summary ethos fix, KidTodayView decomposition, PlannerChatPage decomposition, MyAvatarPage decomposition
 Shelly Chat  Mar 31  Shelly's AI Chat: persistent threads, Claude with family context, inline DALL-E image gen, image upload + Claude vision analysis, prompt refinement flow with tappable options, thread drawer (rename/archive), suggestion buttons, pre-seeded chat utility, FAB on Today, parent nav entry
 Shelly Chat  Apr 1  Shelly's AI Chat: context tabs (Lincoln/London/General), persistent threads, deep child context (skill snapshot + evals + engagement + disposition + sight words + today's plan), markdown rendering, follow-up suggestions, DALL-E with prompt refinement, image upload + Claude vision, thread drawer, pre-seeded chat utility, FAB on Today, parent nav entry
+Economy v1  Apr 4  Two-currency system (XP + Diamonds), choice-based armor forging with verse engagement, diamond earn sources (quest/teach-back/Dad Lab/workshop/conundrum/extra activity/books), forge costs per tier, XP bar + diamond count HUD, portal moments between tier biomes
 
 Removed Features (Cleanup Sprint, Mar 24-25)
 * Sessions (1,720 lines) — orphaned feature with no nav links; sessionsCollection removed
@@ -443,6 +480,11 @@ Key Design Decisions
 39. **Refine before generating** — image generation asks clarifying questions with tappable options before spending an API call. Better results without prompt engineering skill.
 40. **Camera-first on mobile** — image upload uses standard file picker (camera + gallery) so Shelly can photograph worksheets or pick from saved images.
 41. **Follow-ups reduce friction** — every assistant response suggests 2-3 specific follow-up questions as tappable chips. Shelly keeps the conversation going without typing.
+42. **Two currencies, like Minecraft** — XP is your level (always climbing, unlocks access). Diamonds are your inventory (earned from active effort, spent to forge and craft). Lincoln already understands this from Minecraft.
+43. **Forge, don't unlock** — armor pieces are individually forged with diamonds, not auto-given. Lincoln chooses his build order. Each forge includes verse engagement.
+44. **Tiers are biomes** — each armor tier is a Minecraft-like world (Caves, Plains, Mountains, Desert Temple, The End, The Nether). Portal moments between them.
+45. **Active effort earns diamonds** — quests, teach-back, Dad Lab, and creative engagement earn diamonds. Routine activities (checklist, daily ritual) earn XP only.
+46. **Spending is placing, not losing** — diamonds become permanent things (forged armor, cosmetics, world decorations). Nothing disappears.
 
 ### Key Files Reference
 
@@ -553,6 +595,14 @@ Key Design Decisions
 - `equippedPieces` React state → `useEffect` syncs to Three.js mesh materials
 - Consider extracting Three.js lifecycle into custom `useThreeScene` hook
 - `DailyArmorSession` and `AvatarProfile` both track equipped pieces — potential drift
+
+#### Two-Currency Economy Architecture
+- XP (progression) + Diamonds (spending) both stored in xpLedger with `currencyType` field
+- Diamond balance computed from ledger sum (positive = earn, negative = spend)
+- Forge flow: tier unlock (XP) → piece selection → diamond payment → verse engagement → forge
+- `forgedPieces` on avatarProfile tracks per-tier per-piece forge state with verse responses
+- `unlockedTiers` computed from TIERS thresholds on XP change
+- Legacy backward compat: existing unlocked pieces auto-migrated to forgedPieces at wood tier
 
 ## Barnes Bros Business Integration
 
