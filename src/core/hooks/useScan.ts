@@ -3,6 +3,7 @@ import { addDoc, serverTimestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 
 import { useAI, TaskType } from '../ai/useAI'
+import { compressIfNeeded } from '../utils/compressImage'
 import { scansCollection } from '../firebase/firestore'
 import { storage } from '../firebase/storage'
 import type { ScanRecord, ScanResult } from '../types'
@@ -62,36 +63,55 @@ export function useScan(): UseScanResult {
       setScanResult(null)
 
       try {
-        // 1. Upload to Firebase Storage (temp scans folder)
+        // 1. Compress large images to stay within CF payload limits (~10MB)
+        const compressed = await compressIfNeeded(file, 1_000_000, {
+          maxWidth: 2048,
+          maxHeight: 2048,
+          quality: 0.85,
+        })
+        const uploadFile =
+          compressed instanceof File
+            ? compressed
+            : new File([compressed], file.name, { type: file.type })
+
+        // 2. Upload compressed image to Firebase Storage
         const ts = new Date().toISOString().replace(/[:.]/g, '-')
         const ext = file.name.split('.').pop() ?? 'jpg'
         const storagePath = `families/${familyId}/scans/${ts}.${ext}`
         const storageRef = ref(storage, storagePath)
-        await uploadBytes(storageRef, file)
+        await uploadBytes(storageRef, compressed)
         const imageUrl = await getDownloadURL(storageRef)
 
-        // 2. Convert to base64 for the vision API
-        const imageBase64 = await fileToBase64(file)
-        const mediaType = inferMediaType(file)
+        // 3. Convert compressed image to base64 for the vision API
+        const imageBase64 = await fileToBase64(uploadFile)
+        const mediaType = inferMediaType(uploadFile)
 
-        // 3. Call the scan Cloud Function
-        const response = await chat({
-          familyId,
-          childId,
-          taskType: TaskType.Scan,
-          messages: [
-            {
-              role: 'user',
-              content: JSON.stringify({ imageBase64, mediaType }),
-            },
-          ],
-        })
-
-        if (!response) {
-          throw new Error('Scan failed — no response from AI')
+        // 4. Call the scan Cloud Function
+        let response
+        try {
+          response = await chat({
+            familyId,
+            childId,
+            taskType: TaskType.Scan,
+            messages: [
+              {
+                role: 'user',
+                content: JSON.stringify({ imageBase64, mediaType }),
+              },
+            ],
+          })
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          throw new Error(`Scan failed — ${msg}`)
         }
 
-        // 4. Parse the AI response
+        if (!response) {
+          throw new Error(
+            'Scan failed — no response from AI. The image may be too large or the AI service is temporarily unavailable.',
+          )
+        }
+
+        // 5. Parse the AI response
         let results: ScanResult | null = null
         let parseError: string | undefined
         try {
@@ -101,7 +121,7 @@ export function useScan(): UseScanResult {
           parseError = response.message
         }
 
-        // 5. Save to Firestore
+        // 6. Save to Firestore
         const record: ScanRecord = {
           childId,
           imageUrl,
