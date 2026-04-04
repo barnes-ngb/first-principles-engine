@@ -644,7 +644,7 @@ export default function EvaluateChatPage() {
 
   // ── Render ──────────────────────────────────────────────────
 
-  const isDomainReady = domain === EvaluationDomain.Reading
+  const isDomainReady = domain === EvaluationDomain.Reading || domain === EvaluationDomain.Speech
   const hasMessages = messages.length > 0
 
   return (
@@ -674,8 +674,8 @@ export default function EvaluateChatPage() {
             <Tab
               key={tab.value}
               value={tab.value}
-              label={tab.value === EvaluationDomain.Reading ? tab.label : `${tab.label} (coming soon)`}
-              disabled={tab.value !== EvaluationDomain.Reading}
+              label={tab.value === EvaluationDomain.Reading || tab.value === EvaluationDomain.Speech ? tab.label : `${tab.label} (coming soon)`}
+              disabled={tab.value !== EvaluationDomain.Reading && tab.value !== EvaluationDomain.Speech}
             />
           ))}
         </Tabs>

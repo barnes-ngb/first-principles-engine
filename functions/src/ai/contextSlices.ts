@@ -629,6 +629,7 @@ async function loadSkillSnapshotContext(
       rationale: string;
       strategies?: string[];
     }>;
+    completedPrograms?: string[];
   };
 
   const lines: string[] = ["SKILL SNAPSHOT (from evaluations):"];
@@ -669,6 +670,15 @@ async function loadSkillSnapshotContext(
       const strategies = b.strategies?.length ? ` — Strategies: ${b.strategies.join("; ")}` : "";
       lines.push(`- ${b.name} (affects: ${b.affectedSkills.join(", ")}): ${b.rationale}${strategies}`);
     }
+  }
+
+  // Completed programs
+  const completedPrograms = data.completedPrograms || [];
+  if (completedPrograms.length > 0) {
+    lines.push(`COMPLETED PROGRAMS: ${completedPrograms.join(", ")}`);
+    lines.push("→ Foundational phonics is mastered. Do not test basic letter sounds, CVC, blends, or digraphs.");
+    lines.push("→ For reading quests, focus on comprehension and fluency.");
+    lines.push("→ Recommend Comprehension Quest and Fluency Practice modes.");
   }
 
   // Planning guidance
