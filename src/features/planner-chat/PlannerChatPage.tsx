@@ -659,6 +659,8 @@ export default function PlannerChatPage() {
   const handleScanAccept = useCallback(() => {
     if (!scanRecord?.results) return
     const r = scanRecord.results
+    // Only worksheet/workbook scans can become photo labels — skip certificates
+    if (r.pageType === 'certificate') return
     // Map scan subject to SubjectBucket
     const subjectMap: Record<string, SubjectBucket> = {
       math: SubjectBucket.Math,
