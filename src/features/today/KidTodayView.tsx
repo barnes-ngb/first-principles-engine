@@ -10,7 +10,7 @@ import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import TextField from '@mui/material/TextField'
-import { addDoc, doc, getDocs, query, updateDoc, where } from 'firebase/firestore'
+import { addDoc, doc, getDocs, query, updateDoc, where, orderBy } from 'firebase/firestore'
 
 import { useNavigate } from 'react-router-dom'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
@@ -21,7 +21,7 @@ import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
-import { artifactsCollection } from '../../core/firebase/firestore'
+import { artifactsCollection, evaluationSessionsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import type { Artifact, ChecklistItem, Child, DayLog } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
@@ -47,6 +47,201 @@ import KidChapterResponse from './KidChapterResponse'
 import KidConundrumResponse from './KidConundrumResponse'
 import KidTeachBack from './KidTeachBack'
 import { calculateXp } from './xp'
+import type { EvaluationSession } from '../../core/types'
+import type { InteractiveSessionData } from '../quest/questTypes'
+
+type QuestSession = EvaluationSession & Partial<InteractiveSessionData>
+
+/** Query today's completed quest sessions for a child. */
+function useTodayQuests(familyId: string, childId: string, today: string) {
+  const [quests, setQuests] = useState<QuestSession[]>([])
+  const [streakDays, setStreakDays] = useState(0)
+
+  useEffect(() => {
+    if (!childId || !familyId) return
+    const todayStart = today + 'T00:00:00'
+    const todayEnd = today + 'T23:59:59'
+    const q = query(
+      evaluationSessionsCollection(familyId),
+      where('childId', '==', childId),
+      where('sessionType', '==', 'interactive'),
+      where('status', '==', 'complete'),
+      where('evaluatedAt', '>=', todayStart),
+      where('evaluatedAt', '<=', todayEnd),
+      orderBy('evaluatedAt', 'desc'),
+    )
+    getDocs(q).then((snap) => {
+      const sessions = snap.docs.map((d) => ({ ...(d.data() as QuestSession), id: d.id }))
+      setQuests(sessions)
+      // Use the streak from the most recent session
+      if (sessions.length > 0 && sessions[0].streakDays) {
+        setStreakDays(sessions[0].streakDays)
+      }
+    }).catch((err) => console.error('[Quests] Load failed:', err))
+  }, [familyId, childId, today])
+
+  const totalDiamonds = quests.reduce((sum, s) => sum + (s.diamondsMined ?? 0), 0)
+  const domains = [...new Set(quests.map((s) => s.domain).filter(Boolean))]
+  const maxLevel = quests.reduce((max, s) => Math.max(max, s.finalLevel ?? 0), 0)
+
+  return { quests, totalDiamonds, domains, maxLevel, streakDays }
+}
+
+/** Compact Minecraft-styled card showing today's quest results or an invite to mine. */
+function DiamondsMined({
+  totalDiamonds,
+  domains,
+  maxLevel,
+  streakDays,
+  hasQuests,
+  isLincoln,
+  onMineMore,
+}: {
+  totalDiamonds: number
+  domains: string[]
+  maxLevel: number
+  streakDays: number
+  hasQuests: boolean
+  isLincoln: boolean
+  onMineMore: () => void
+}) {
+  const mcFont = isLincoln ? '"Press Start 2P", monospace' : 'monospace'
+
+  if (!hasQuests) {
+    return (
+      <Box
+        onClick={onMineMore}
+        sx={{
+          p: 2,
+          borderRadius: 2,
+          bgcolor: isLincoln ? 'rgba(0,0,0,0.6)' : 'grey.50',
+          border: '1px solid',
+          borderColor: isLincoln ? 'grey.700' : 'divider',
+          cursor: 'pointer',
+          '&:hover': { borderColor: 'primary.main' },
+        }}
+      >
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          <Typography sx={{ fontSize: '1.5rem' }}>⛏️</Typography>
+          <Box sx={{ flex: 1 }}>
+            <Typography
+              variant="body1"
+              sx={{
+                fontWeight: 600,
+                ...(isLincoln ? { fontFamily: mcFont, fontSize: '0.55rem', color: '#FFFFFF' } : {}),
+              }}
+            >
+              Ready to mine?
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{
+                color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.secondary',
+                ...(isLincoln ? { fontFamily: mcFont, fontSize: '0.4rem' } : {}),
+              }}
+            >
+              Start a Knowledge Mine quest
+            </Typography>
+          </Box>
+          <Typography
+            sx={{
+              color: isLincoln ? '#5BFCEE' : 'primary.main',
+              fontWeight: 600,
+              ...(isLincoln ? { fontFamily: mcFont, fontSize: '0.45rem' } : {}),
+            }}
+          >
+            Go
+          </Typography>
+        </Stack>
+      </Box>
+    )
+  }
+
+  const domainLabel = domains.map((d) => d.charAt(0).toUpperCase() + d.slice(1)).join(' · ')
+
+  return (
+    <Box
+      sx={{
+        p: 2,
+        borderRadius: 2,
+        bgcolor: isLincoln ? 'rgba(0,0,0,0.75)' : 'grey.50',
+        border: '1px solid',
+        borderColor: isLincoln ? '#5BFCEE' : 'info.light',
+      }}
+    >
+      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1 }}>
+        <Typography sx={{ fontSize: '1.2rem' }}>⛏️</Typography>
+        <Typography
+          variant="body2"
+          sx={{
+            fontWeight: 600,
+            ...(isLincoln ? { fontFamily: mcFont, fontSize: '0.5rem', color: '#FFFFFF' } : {}),
+          }}
+        >
+          Today&apos;s Mining
+        </Typography>
+        {streakDays > 1 && (
+          <Chip
+            label={`\uD83D\uDD25 ${streakDays} day streak!`}
+            size="small"
+            sx={{
+              bgcolor: isLincoln ? 'rgba(252,219,91,0.2)' : 'warning.50',
+              color: isLincoln ? '#FCDB5B' : 'warning.dark',
+              fontWeight: 600,
+              ...(isLincoln ? { fontFamily: mcFont, fontSize: '0.35rem' } : {}),
+            }}
+          />
+        )}
+      </Stack>
+      <Typography
+        sx={{
+          fontSize: '1.2rem',
+          letterSpacing: 2,
+          mb: 0.5,
+        }}
+      >
+        {'💎'.repeat(Math.min(totalDiamonds, 10))}
+        {totalDiamonds > 10 && ' ...'}
+      </Typography>
+      <Typography
+        sx={{
+          fontFamily: mcFont,
+          fontSize: isLincoln ? '0.5rem' : '0.85rem',
+          color: isLincoln ? '#5BFCEE' : 'info.main',
+          fontWeight: 700,
+          mb: 0.5,
+        }}
+      >
+        {totalDiamonds} diamond{totalDiamonds !== 1 ? 's' : ''} mined!
+      </Typography>
+      <Typography
+        variant="caption"
+        sx={{
+          color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.secondary',
+          ...(isLincoln ? { fontFamily: mcFont, fontSize: '0.35rem' } : {}),
+        }}
+      >
+        {domainLabel} · Level {maxLevel}
+      </Typography>
+      <Box sx={{ mt: 1.5 }}>
+        <Button
+          size="small"
+          variant={isLincoln ? 'contained' : 'outlined'}
+          onClick={onMineMore}
+          sx={isLincoln ? {
+            fontFamily: mcFont,
+            fontSize: '0.4rem',
+            bgcolor: '#3C3C3C',
+            color: '#5BFCEE',
+            '&:hover': { bgcolor: '#4C4C4C' },
+          } : {}}
+        >
+          Mine More →
+        </Button>
+      </Box>
+    </Box>
+  )
+}
 
 interface KidTodayViewProps {
   dayLog: DayLog
@@ -200,6 +395,8 @@ export default function KidTodayView({
   const todayXp = useMemo(() => calculateXp(dayLog), [dayLog])
   const xpLedger = useXpLedger(familyId, child.id)
   const avatarProfile = useAvatarProfile(familyId, child.id)
+
+  const { totalDiamonds, domains, maxLevel, streakDays, quests: todayQuests } = useTodayQuests(familyId, child.id, today)
 
   const greeting = useMemo(() => getGreeting(child.name, isLincoln), [child.name, isLincoln])
   const celebrationMessage = useMemo(() => getCelebration(today, isLincoln), [today, isLincoln])
@@ -494,6 +691,19 @@ export default function KidTodayView({
           </Typography>
         </Box>
       )}
+
+      {/* Diamonds Mined — today's quest summary */}
+      <SectionErrorBoundary section="diamonds-mined">
+        <DiamondsMined
+          totalDiamonds={totalDiamonds}
+          domains={domains}
+          maxLevel={maxLevel}
+          streakDays={streakDays}
+          hasQuests={todayQuests.length > 0}
+          isLincoln={isLincoln}
+          onMineMore={() => navigate('/quest')}
+        />
+      </SectionErrorBoundary>
 
       {/* Workshop game cards — gated behind must-do progress */}
       {familyId && allChildren.length > 0 && (

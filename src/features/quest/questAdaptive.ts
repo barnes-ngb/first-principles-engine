@@ -5,6 +5,7 @@ import {
   LEVEL_UP_STREAK,
   MAX_QUESTIONS,
   MAX_SECONDS,
+  MIN_QUESTIONS,
 } from './questTypes'
 
 /**
@@ -57,10 +58,12 @@ export function computeNextState(prev: QuestState, correct: boolean): QuestState
  */
 export function shouldEndSession(state: QuestState): { end: boolean; timedOut: boolean } {
   const timedOut = state.elapsedSeconds >= MAX_SECONDS
+  // Hard minimum: never end before MIN_QUESTIONS unless timed out
+  const pastMinimum = state.totalQuestions >= MIN_QUESTIONS
   const end =
     state.totalQuestions >= MAX_QUESTIONS ||
     timedOut ||
-    state.levelDownsInARow >= FRUSTRATION_LIMIT
+    (pastMinimum && state.levelDownsInARow >= FRUSTRATION_LIMIT)
   return { end, timedOut }
 }
 

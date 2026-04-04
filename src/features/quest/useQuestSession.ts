@@ -11,7 +11,7 @@ import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot
 import type { EvaluationDomain } from '../../core/types/enums'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
 import { calculateStreak, computeNextState, formatSkillLabel, shouldEndSession } from './questAdaptive'
-import { checkAnswer, extractPattern, extractTargetWord, shouldFlagAsError, validateQuestion } from './questHelpers'
+import { checkAnswer, extractPattern, extractTargetWord, generateFallbackQuestion, shouldFlagAsError, validateQuestion } from './questHelpers'
 import type {
   AnswerInputMethod,
   InteractiveSessionData,
@@ -23,6 +23,7 @@ import type {
 import {
   FRUSTRATION_LIMIT,
   QuestScreen,
+  VALIDATION_RETRIES,
 } from './questTypes'
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -834,10 +835,54 @@ export function useQuestSession() {
       if (question) {
         question = validateQuestion(question)
       }
+
+      // Retry if validation failed — request a new question from AI
       if (!question) {
-        // Parse or validation failed — end session
-        await endSession(updatedQuestions, newState, false)
-        return
+        for (let retry = 0; retry < VALIDATION_RETRIES; retry++) {
+          console.warn(`[submitAnswer] Question validation failed, retry ${retry + 1}/${VALIDATION_RETRIES}`)
+          const retryMessage: AIChatMessage = {
+            role: 'user',
+            content: JSON.stringify({
+              action: 'answer',
+              instruction: 'The previous question had a formatting error. Please generate a NEW, DIFFERENT question. Ensure correctAnswer exactly matches one option and blank counts match answer length.',
+              currentLevel: needsBonusRound ? bonusLevel : newState.currentLevel,
+              consecutiveCorrect: newState.consecutiveCorrect,
+              consecutiveWrong: newState.consecutiveWrong,
+              totalQuestions: newState.totalQuestions,
+              totalCorrect: newState.totalCorrect,
+              questionsThisLevel: newState.questionsThisLevel,
+              levelDownsInARow: newState.levelDownsInARow,
+            }),
+          }
+          conversationRef.current.push(retryMessage)
+
+          const retryResponse = await chat({
+            familyId,
+            childId: activeChildId,
+            taskType: TaskType.Quest,
+            messages: [...conversationRef.current],
+            domain: activeDomainRef.current,
+          })
+
+          if (retryResponse) {
+            conversationRef.current.push({ role: 'assistant', content: retryResponse.message })
+            const retryFinding = extractQuestFinding(retryResponse.message)
+            if (retryFinding) {
+              setFindings((prev) => [...prev, retryFinding])
+            }
+            question = parseQuestBlock(retryResponse.message)
+            if (question) {
+              question = validateQuestion(question)
+            }
+            if (question) break
+          }
+        }
+      }
+
+      // All retries failed — use a client-side fallback question
+      if (!question) {
+        console.warn('[submitAnswer] All validation retries failed, using fallback question')
+        question = generateFallbackQuestion(newState.currentLevel, activeDomainRef.current)
       }
 
       setCurrentQuestion(question)
@@ -937,9 +982,54 @@ export function useQuestSession() {
       if (question) {
         question = validateQuestion(question)
       }
+
+      // Retry if validation failed — request a new question from AI
       if (!question) {
-        await endSession(updatedQuestions, questState, false)
-        return
+        for (let retry = 0; retry < VALIDATION_RETRIES; retry++) {
+          console.warn(`[handleSkip] Question validation failed, retry ${retry + 1}/${VALIDATION_RETRIES}`)
+          const retryMessage: AIChatMessage = {
+            role: 'user',
+            content: JSON.stringify({
+              action: 'answer',
+              instruction: 'The previous question had a formatting error. Please generate a NEW, DIFFERENT question. Ensure correctAnswer exactly matches one option and blank counts match answer length.',
+              currentLevel: questState.currentLevel,
+              consecutiveCorrect: questState.consecutiveCorrect,
+              consecutiveWrong: questState.consecutiveWrong,
+              totalQuestions: questState.totalQuestions,
+              totalCorrect: questState.totalCorrect,
+              questionsThisLevel: questState.questionsThisLevel,
+              levelDownsInARow: questState.levelDownsInARow,
+            }),
+          }
+          conversationRef.current.push(retryMessage)
+
+          const retryResponse = await chat({
+            familyId,
+            childId: activeChildId,
+            taskType: TaskType.Quest,
+            messages: [...conversationRef.current],
+            domain: activeDomainRef.current,
+          })
+
+          if (retryResponse) {
+            conversationRef.current.push({ role: 'assistant', content: retryResponse.message })
+            const retryFinding = extractQuestFinding(retryResponse.message)
+            if (retryFinding) {
+              setFindings((prev) => [...prev, retryFinding])
+            }
+            question = parseQuestBlock(retryResponse.message)
+            if (question) {
+              question = validateQuestion(question)
+            }
+            if (question) break
+          }
+        }
+      }
+
+      // All retries failed — use a client-side fallback question
+      if (!question) {
+        console.warn('[handleSkip] All validation retries failed, using fallback question')
+        question = generateFallbackQuestion(questState.currentLevel, activeDomainRef.current)
       }
 
       setCurrentQuestion(question)
