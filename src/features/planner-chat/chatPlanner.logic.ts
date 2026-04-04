@@ -4,12 +4,13 @@ import type {
   DraftDayPlan,
   DraftPlanItem,
   DraftWeeklyPlan,
+  PhotoLabel,
   SkillSnapshot,
   SkipSuggestion,
 } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
-import { AssignmentAction, SubjectBucket } from '../../core/types/enums'
-import { autoSuggestTags } from '../../core/types/skillTags'
+import { AssignmentAction, DayBlockType, SubjectBucket } from '../../core/types/enums'
+import { autoSuggestTags, SKILL_TAG_MAP } from '../../core/types/skillTags'
 
 /** Default app blocks that run "on rails" */
 export const defaultAppBlocks: AppBlock[] = [
@@ -1171,4 +1172,83 @@ function parseRoutineText(dailyRoutine: string): DraftPlanItem[] {
   }
 
   return items
+}
+
+/** Detect if an AI response looks like it was trying to return plan JSON (contains days/items structure). */
+export function looksLikePlanJson(text: string): boolean {
+  return /["']days["']\s*:/.test(text) && /["']items["']\s*:/.test(text)
+}
+
+export function subjectToDayBlockType(subject: SubjectBucket): DayBlockType {
+  switch (subject) {
+    case SubjectBucket.Reading: return DayBlockType.Reading
+    case SubjectBucket.Math: return DayBlockType.Math
+    case SubjectBucket.LanguageArts: return DayBlockType.Reading
+    case SubjectBucket.Science: return DayBlockType.Project
+    case SubjectBucket.SocialStudies: return DayBlockType.Together
+    default: return DayBlockType.Other
+  }
+}
+
+export function photoLabelsToAssignments(labels: PhotoLabel[]): AssignmentCandidate[] {
+  return labels.map((label) => {
+    const extracted = label.extractedContent
+    const workbookName = extracted?.workbookMatch?.workbookName ?? label.subjectBucket
+    const lessonName = extracted
+      ? `${extracted.lessonNumber ? `${extracted.workbookMatch?.unitLabel ?? 'lesson'} ${extracted.lessonNumber}` : label.lessonOrPages || 'Workbook page'}${extracted.topic && extracted.topic !== workbookName ? ` (${extracted.topic})` : ''}`
+      : label.lessonOrPages || 'Workbook page'
+
+    return {
+      id: generateItemId(),
+      subjectBucket: label.subjectBucket,
+      workbookName,
+      lessonName,
+      estimatedMinutes: extracted?.estimatedMinutes || label.estimatedMinutes,
+      difficultyCues: extracted?.difficulty ? [extracted.difficulty] : [],
+      sourcePhotoId: label.artifactId,
+      action: AssignmentAction.Keep,
+    }
+  })
+}
+
+/** Build a text description of photo context for inclusion in AI plan prompts. */
+export function buildPhotoContextSection(labels: PhotoLabel[]): string {
+  const labelsWithContent = labels.filter((l) => l.extractedContent || l.lessonOrPages)
+  if (labelsWithContent.length === 0) return ''
+
+  const lines = ['Photos uploaded this session:']
+  for (const label of labelsWithContent) {
+    const ex = label.extractedContent
+    if (ex?.workbookMatch) {
+      const parts = [
+        ex.workbookMatch.workbookName,
+        ex.lessonNumber ? `${ex.workbookMatch.unitLabel} ${ex.lessonNumber} of ${ex.workbookMatch.totalUnits}` : null,
+        ex.topic && ex.topic !== ex.workbookMatch.workbookName ? ex.topic : null,
+        `~${ex.estimatedMinutes || label.estimatedMinutes} min`,
+      ].filter(Boolean)
+      lines.push(`- ${parts.join(', ')}`)
+      if (ex.difficulty) {
+        lines.push(`  Difficulty note: ${ex.difficulty}`)
+      }
+      if (ex.modifications) {
+        lines.push(`  Suggested modification: ${ex.modifications}`)
+      }
+    } else {
+      lines.push(`- ${label.subjectBucket}: ${label.lessonOrPages || 'workbook page'} (~${label.estimatedMinutes} min)`)
+    }
+  }
+  lines.push('Please incorporate these specific materials into the plan.')
+  return lines.join('\n')
+}
+
+export const LIGHTER_WEEK_BUDGET_MULTIPLIER = 0.7
+export const TOUGH_WEEK_FIXED_MINUTES = 90
+
+export function formatSkillLabel(tag: string): string {
+  const mapped = SKILL_TAG_MAP[tag]?.label
+  if (mapped) return mapped
+  const fallback = tag.split('.').pop() ?? tag
+  return fallback
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
 }
