@@ -74,6 +74,12 @@ const PRESET_THEME_MAP: Record<string, {
     storyVocabularyLevel: "simple action words with sports terminology",
     imageStylePrefix: "A bright, energetic children's book illustration of kids playing sports.",
   },
+  holidays: {
+    storyTone: "warm, festive, and joyful with celebration themes",
+    storyWorldDescription: "a world of holiday celebrations — Christmas, Easter, Thanksgiving, birthdays, and seasonal traditions",
+    storyVocabularyLevel: "simple sentences with holiday and celebration vocabulary",
+    imageStylePrefix: "A festive, joyful children's book illustration. Holiday decorations, seasonal scenes.",
+  },
 };
 
 async function resolveThemeGuidance(
