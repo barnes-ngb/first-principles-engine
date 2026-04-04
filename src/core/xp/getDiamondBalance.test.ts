@@ -2,9 +2,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 // ── Mock Firestore ─────────────────────────────────────────────
 const mockGetDocs = vi.fn()
-const mockQuery = vi.fn((..._args: unknown[]) => 'mock-query')
-const mockWhere = vi.fn((..._args: unknown[]) => 'mock-where')
-const mockDoc = vi.fn((..._args: unknown[]) => 'mock-doc')
+const mockQuery = vi.fn((...args: unknown[]) => { void args; return 'mock-query' })
+const mockWhere = vi.fn((...args: unknown[]) => { void args; return 'mock-where' })
+const mockDoc = vi.fn((...args: unknown[]) => { void args; return 'mock-doc' })
 const mockGetDoc = vi.fn()
 const mockSetDoc = vi.fn()
 
@@ -18,9 +18,9 @@ vi.mock('firebase/firestore', () => ({
 }))
 
 vi.mock('../firebase/firestore', () => ({
-  xpLedgerCollection: (_familyId: string) => 'mock-collection',
+  xpLedgerCollection: () => 'mock-collection',
   xpLedgerDocId: (childId: string, dedupKey: string) => `${childId}_${dedupKey}`,
-  avatarProfilesCollection: (_familyId: string) => 'mock-avatar-collection',
+  avatarProfilesCollection: () => 'mock-avatar-collection',
   stripUndefined: (obj: unknown) => obj,
 }))
 
