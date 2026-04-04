@@ -573,7 +573,7 @@ export interface ScanSkillResult {
   alignsWithSnapshot: 'ahead' | 'at-level' | 'behind' | 'unknown'
 }
 
-export interface ScanResult {
+export interface WorksheetScanResult {
   pageType: 'worksheet' | 'textbook' | 'test' | 'activity' | 'other'
   subject: string
   specificTopic: string
@@ -583,6 +583,36 @@ export interface ScanResult {
   recommendationReason: string
   estimatedMinutes: number
   teacherNotes: string
+}
+
+export interface CertificateScanResult {
+  pageType: 'certificate'
+  curriculum: 'reading-eggs' | 'gatb' | 'other'
+  curriculumName: string
+  level: string
+  milestone: string
+  lessonRange: string
+  skillsCovered: string[]
+  wordsRead: string[]
+  date: string
+  childName: string
+  suggestedSnapshotUpdate: {
+    masteredSkills: string[]
+    recommendedStartLevel: number | null
+    notes: string
+  }
+}
+
+export type ScanResult = WorksheetScanResult | CertificateScanResult
+
+/** Type guard for certificate scan results */
+export function isCertificateScan(result: ScanResult): result is CertificateScanResult {
+  return result.pageType === 'certificate'
+}
+
+/** Type guard for worksheet scan results */
+export function isWorksheetScan(result: ScanResult): result is WorksheetScanResult {
+  return result.pageType !== 'certificate'
 }
 
 export interface ScanRecord {

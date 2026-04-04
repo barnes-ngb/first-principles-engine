@@ -6,7 +6,8 @@ import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
-import type { ScanResult } from '../core/types'
+import type { ScanResult, CertificateScanResult } from '../core/types'
+import { isCertificateScan } from '../core/types/planning'
 
 const ALIGNMENT_ICON: Record<string, string> = {
   'ahead': '🟢',
@@ -42,6 +43,10 @@ interface ScanResultsPanelProps {
   onAddToPlan?: () => void
   onSkip?: () => void
   onScanAnother?: () => void
+  /** Called when user wants to apply certificate data to workbook config. */
+  onApplyCertificate?: (result: CertificateScanResult) => void
+  /** Child name for the "Update Progress" button label. */
+  childName?: string
   /** Hide action buttons (e.g. when viewing history). */
   hideActions?: boolean
 }
@@ -52,8 +57,23 @@ export default function ScanResultsPanel({
   onAddToPlan,
   onSkip,
   onScanAnother,
+  onApplyCertificate,
+  childName,
   hideActions,
 }: ScanResultsPanelProps) {
+  if (isCertificateScan(results)) {
+    return (
+      <CertificateResultsView
+        results={results}
+        imageUrl={imageUrl}
+        onApplyCertificate={onApplyCertificate}
+        onScanAnother={onScanAnother}
+        childName={childName}
+        hideActions={hideActions}
+      />
+    )
+  }
+
   const isUnreadable = results.pageType === 'other'
 
   if (isUnreadable) {
@@ -172,6 +192,121 @@ export default function ScanResultsPanel({
               {onSkip && (
                 <Button size="small" variant="outlined" color="inherit" onClick={onSkip}>
                   Skip
+                </Button>
+              )}
+              {onScanAnother && (
+                <Button size="small" variant="text" onClick={onScanAnother}>
+                  Scan Another
+                </Button>
+              )}
+            </Stack>
+          </>
+        )}
+      </Stack>
+    </Box>
+  )
+}
+
+// ── Certificate Results Sub-component ───────────────────────────
+
+interface CertificateResultsViewProps {
+  results: CertificateScanResult
+  imageUrl?: string
+  onApplyCertificate?: (result: CertificateScanResult) => void
+  onScanAnother?: () => void
+  childName?: string
+  hideActions?: boolean
+}
+
+function CertificateResultsView({
+  results,
+  imageUrl,
+  onApplyCertificate,
+  onScanAnother,
+  childName,
+  hideActions,
+}: CertificateResultsViewProps) {
+  return (
+    <Box
+      sx={{
+        mt: 1,
+        p: 2,
+        border: '1px solid',
+        borderColor: 'divider',
+        borderRadius: 2,
+        bgcolor: 'background.paper',
+      }}
+    >
+      <Stack spacing={1.5}>
+        <Alert severity="success" icon={false}>
+          <strong>Certificate detected:</strong> {results.curriculumName} — {results.milestone}
+        </Alert>
+
+        {imageUrl && (
+          <Box
+            component="img"
+            src={imageUrl}
+            alt="Scanned certificate"
+            sx={{
+              width: '100%',
+              maxHeight: 180,
+              objectFit: 'contain',
+              borderRadius: 1,
+              border: '1px solid',
+              borderColor: 'divider',
+            }}
+          />
+        )}
+
+        <Divider />
+
+        {/* Level + Lesson range */}
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          {results.level && (
+            <Chip size="small" label={results.level} color="primary" variant="outlined" />
+          )}
+          {results.lessonRange && (
+            <Chip size="small" label={results.lessonRange} variant="outlined" />
+          )}
+          {results.date && (
+            <Chip size="small" label={results.date} variant="outlined" />
+          )}
+        </Stack>
+
+        {/* Skills covered */}
+        {results.skillsCovered.length > 0 && (
+          <Typography variant="body2">
+            <strong>Skills covered:</strong> {results.skillsCovered.join(', ')}
+          </Typography>
+        )}
+
+        {/* Words read */}
+        {results.wordsRead.length > 0 && (
+          <Typography variant="body2">
+            <strong>Words read:</strong> {results.wordsRead.join(', ')}
+          </Typography>
+        )}
+
+        {/* Snapshot update notes */}
+        {results.suggestedSnapshotUpdate?.notes && (
+          <Alert severity="info" sx={{ '& .MuiAlert-message': { fontSize: '0.875rem' } }}>
+            {results.suggestedSnapshotUpdate.notes}
+          </Alert>
+        )}
+
+        {/* Action buttons */}
+        {!hideActions && (
+          <>
+            <Divider />
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {onApplyCertificate && (
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="success"
+                  onClick={() => onApplyCertificate(results)}
+                >
+                  Update {childName ? `${childName}'s` : ''} Progress
                 </Button>
               )}
               {onScanAnother && (

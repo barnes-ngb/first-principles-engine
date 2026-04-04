@@ -3,8 +3,11 @@ import Box from '@mui/material/Box'
 import Container from '@mui/material/Container'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
+import Typography from '@mui/material/Typography'
 
 import HelpStrip from '../../components/HelpStrip'
+import SectionCard from '../../components/SectionCard'
+import CertificateScanSection from './CertificateScanSection'
 import DispositionProfile from './DispositionProfile'
 import SkillSnapshotPage from '../evaluation/SkillSnapshotPage'
 import WordWall from './WordWall'
@@ -38,7 +41,19 @@ export default function ProgressPage() {
         </Box>
       </Container>
       {tab === 0 && <DispositionProfile />}
-      {tab === 1 && <SkillSnapshotPage />}
+      {tab === 1 && (
+        <>
+          <SkillSnapshotPage />
+          <Container maxWidth="lg" sx={{ pb: 3 }}>
+            <SectionCard title="Scan Certificate or Progress Report">
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Photograph a curriculum certificate or progress report to automatically update workbook progress.
+              </Typography>
+              <CertificateScanSection />
+            </SectionCard>
+          </Container>
+        </>
+      )}
       {tab === 2 && <WordWall />}
     </>
   )
