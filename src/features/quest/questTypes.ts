@@ -14,10 +14,12 @@ export type QuestScreen = (typeof QuestScreen)[keyof typeof QuestScreen]
 // ── Constants ─────────────────────────────────────────────────
 
 export const MAX_QUESTIONS = 10
+export const MIN_QUESTIONS = 5 // never end before 5 questions unless child manually exits
 export const MAX_SECONDS = 480 // 8 minutes
 export const LEVEL_UP_STREAK = 3 // 3 correct → harder
 export const LEVEL_DOWN_STREAK = 2 // 2 wrong → easier
 export const FRUSTRATION_LIMIT = 2 // 2 level-downs in a row → end
+export const VALIDATION_RETRIES = 2 // retry AI calls when question validation fails
 
 // ── Quest adaptive state ──────────────────────────────────────
 

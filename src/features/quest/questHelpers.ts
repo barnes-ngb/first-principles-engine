@@ -179,6 +179,60 @@ export function validateQuestion(question: QuestQuestion): QuestQuestion | null 
   return question
 }
 
+// ── Fallback question generator ───────────────────────────────
+
+/**
+ * Generate a simple client-side fallback question when AI validation
+ * fails repeatedly. Guaranteed to pass validateQuestion().
+ */
+export function generateFallbackQuestion(level: number, domain: string): QuestQuestion {
+  if (domain === 'math') {
+    const a = Math.floor(Math.random() * 10) + 1
+    const b = Math.floor(Math.random() * (level + 2)) + 1
+    const correct = a + b
+    const distractors = [correct + 1, correct - 1, correct + 2]
+      .filter((d) => d !== correct && d > 0)
+      .slice(0, 2)
+    const options = [String(correct), ...distractors.map(String)]
+      .sort(() => Math.random() - 0.5)
+    return {
+      id: `q_fallback_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      type: 'multiple-choice',
+      level,
+      skill: 'math.addition',
+      prompt: `What is ${a} + ${b}?`,
+      options,
+      correctAnswer: String(correct),
+    }
+  }
+
+  // Reading fallback: simple word identification
+  const wordSets: Record<number, string[]> = {
+    1: ['cat', 'dog', 'sun', 'hat', 'pig', 'cup', 'bed', 'map'],
+    2: ['stop', 'frog', 'clap', 'drum', 'grin', 'step', 'jump', 'help'],
+    3: ['ship', 'chat', 'thin', 'wish', 'much', 'them', 'bath', 'when'],
+    4: ['cake', 'bike', 'home', 'tune', 'lake', 'hide', 'rope', 'cute'],
+    5: ['train', 'sleep', 'float', 'cream', 'snail', 'beach', 'toast', 'green'],
+    6: ['night', 'bright', 'could', 'would', 'friend', 'caught', 'thought', 'through'],
+  }
+  const words = wordSets[Math.min(level, 6)] || wordSets[1]
+  const shuffled = [...words].sort(() => Math.random() - 0.5)
+  const target = shuffled[0]
+  const distractors = shuffled.slice(1, 3)
+  const options = [target, ...distractors].sort(() => Math.random() - 0.5)
+
+  return {
+    id: `q_fallback_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    type: 'multiple-choice',
+    level,
+    skill: 'phonics.word-reading',
+    prompt: 'What word is this?',
+    stimulus: target,
+    options,
+    correctAnswer: target,
+  }
+}
+
 // ── Word extraction helpers ────────────────────────────────────
 
 /**

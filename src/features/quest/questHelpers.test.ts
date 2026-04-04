@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkAnswer, extractPattern, extractTargetWord, sanitizeStimulus, shouldFlagAsError, validateQuestion } from './questHelpers'
+import { checkAnswer, extractPattern, extractTargetWord, generateFallbackQuestion, sanitizeStimulus, shouldFlagAsError, validateQuestion } from './questHelpers'
 import type { QuestQuestion, SessionQuestion } from './questTypes'
 
 function makeQuestion(overrides: Partial<QuestQuestion> = {}): QuestQuestion {
@@ -240,6 +240,36 @@ describe('extractPattern', () => {
 
   it('falls back to question type', () => {
     expect(extractPattern(makeSessionQ(''))).toBe('multiple-choice')
+  })
+})
+
+// ── generateFallbackQuestion ──────────────────────────────────
+
+describe('generateFallbackQuestion', () => {
+  it('generates a valid math question', () => {
+    const q = generateFallbackQuestion(2, 'math')
+    expect(q.skill).toBe('math.addition')
+    expect(q.options.length).toBe(3)
+    expect(q.options).toContain(q.correctAnswer)
+    expect(validateQuestion(q)).not.toBeNull()
+  })
+
+  it('generates a valid reading question', () => {
+    const q = generateFallbackQuestion(3, 'reading')
+    expect(q.skill).toBe('phonics.word-reading')
+    expect(q.stimulus).toBeTruthy()
+    expect(q.options.length).toBe(3)
+    expect(q.options).toContain(q.correctAnswer)
+    expect(validateQuestion(q)).not.toBeNull()
+  })
+
+  it('always passes validateQuestion', () => {
+    for (let i = 0; i < 20; i++) {
+      const level = Math.floor(Math.random() * 6) + 1
+      const domain = Math.random() > 0.5 ? 'math' : 'reading'
+      const q = generateFallbackQuestion(level, domain)
+      expect(validateQuestion(q)).not.toBeNull()
+    }
   })
 })
 

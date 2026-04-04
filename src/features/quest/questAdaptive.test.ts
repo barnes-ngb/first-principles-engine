@@ -119,9 +119,19 @@ describe('shouldEndSession', () => {
     expect(shouldEndSession(state)).toEqual({ end: true, timedOut: true })
   })
 
-  it('ends when levelDownsInARow >= 2 (frustration)', () => {
-    const state = makeState({ levelDownsInARow: 2 })
+  it('ends when levelDownsInARow >= 2 after MIN_QUESTIONS reached', () => {
+    const state = makeState({ levelDownsInARow: 2, totalQuestions: 5 })
     expect(shouldEndSession(state)).toEqual({ end: true, timedOut: false })
+  })
+
+  it('does not end on frustration before MIN_QUESTIONS', () => {
+    const state = makeState({ levelDownsInARow: 2, totalQuestions: 3 })
+    expect(shouldEndSession(state)).toEqual({ end: false, timedOut: false })
+  })
+
+  it('still ends on timeout before MIN_QUESTIONS', () => {
+    const state = makeState({ totalQuestions: 2, elapsedSeconds: 480 })
+    expect(shouldEndSession(state)).toEqual({ end: true, timedOut: true })
   })
 
   it('does not end when no conditions met', () => {
