@@ -34,6 +34,7 @@ import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../avatar/voxel/buildArmorPie
 import { calculateTier } from '../avatar/voxel/tierMaterials'
 import ArmorGateScreen from '../avatar/ArmorGateScreen'
 import MinecraftXpBar from '../avatar/MinecraftXpBar'
+import XpDiamondBar from '../../components/XpDiamondBar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
 import { useDraftBook } from '../books/useBook'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -646,9 +647,12 @@ export default function KidTodayView({
         </Box>
       </Stack>
 
-      {/* XP bar (Lincoln only) */}
+      {/* XP bar + Diamond count (Lincoln only) */}
       {isLincoln && !xpLedger.loading && (
-        <MinecraftXpBar totalXp={xpLedger.totalXp} todayXp={todayXp} compact />
+        <>
+          <XpDiamondBar familyId={familyId} childId={child.id} compact />
+          <MinecraftXpBar totalXp={xpLedger.totalXp} todayXp={todayXp} compact />
+        </>
       )}
 
       {/* Gate banner */}

@@ -52,6 +52,7 @@ import ArmorVerseCard from './ArmorVerseCard'
 import { speakVerse } from './speakVerse'
 import { forgeArmorPiece } from '../../core/xp/forgeArmorPiece'
 import { getForgeCost } from '../../core/xp/forgeCosts'
+import XpDiamondBar from '../../components/XpDiamondBar'
 import ArmorPieceGallery from './ArmorPieceGallery'
 import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
@@ -1050,6 +1051,13 @@ export default function MyAvatarPage() {
             })
           }}
         />
+
+        {/* ── XP + Diamond HUD ────────────────────────────────── */}
+        {familyId && childId && (
+          <Box sx={{ mx: 2, mb: 1 }}>
+            <XpDiamondBar familyId={familyId} childId={childId} />
+          </Box>
+        )}
 
         {/* ── Morning reset + Armor status + Suit Up ────────────── */}
         <ArmorSuitUpPanel
