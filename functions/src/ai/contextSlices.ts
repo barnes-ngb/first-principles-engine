@@ -11,6 +11,7 @@ import {
   loadWordMasterySummary,
 } from "./chat.js";
 import { loadRecentEvalContext } from "./chatTypes.js";
+import { getGatbProgress } from "./data/gatbCurriculum.js";
 
 // ── Slice definitions ───────────────────────────────────────────
 
@@ -396,6 +397,22 @@ export async function buildContextForTask(
           }
           if (c.activeSkills?.length) {
             lines.push(`  Currently working on: ${c.activeSkills.join(", ")}`);
+          }
+        }
+        // Enrich GATB workbooks with scope-and-sequence data
+        if (w.name.match(/good.*beautiful|gatb/i) && w.currentPosition) {
+          const subjectKey = (w as { subjectBucket?: string }).subjectBucket === "Math" ? "math" : "la";
+          const levelMatch = (w as { curriculum?: { level?: string } }).curriculum?.level?.match(/\d+/);
+          const levelKey = levelMatch ? levelMatch[0] : "k";
+          const key = `gatb-${subjectKey}-${levelKey}`.toLowerCase();
+          const progress = getGatbProgress(key, w.currentPosition);
+          if (progress) {
+            lines.push(`  Covered skills: ${progress.coveredSkills.join(", ")}`);
+            lines.push(`  Current unit: ${progress.currentUnit?.topic ?? "unknown"}`);
+            if (progress.upcomingUnits.length > 0) {
+              lines.push(`  Upcoming: ${progress.upcomingUnits.slice(0, 2).map(u => u.topic).join(", ")}`);
+            }
+            lines.push(`  Progress: ${progress.percentComplete}% complete`);
           }
         }
       }
