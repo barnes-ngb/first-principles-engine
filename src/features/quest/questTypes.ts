@@ -1,5 +1,22 @@
 import type { EvaluationDomain } from '../../core/types/enums'
 
+// ── Quest domain and mode ────────────────────────────────────
+
+export const QuestDomain = {
+  Reading: 'reading',
+  Math: 'math',
+  Speech: 'speech',
+} as const
+export type QuestDomain = (typeof QuestDomain)[keyof typeof QuestDomain]
+
+export const QuestMode = {
+  Phonics: 'phonics',
+  Comprehension: 'comprehension',
+  Fluency: 'fluency',
+  Math: 'math',
+} as const
+export type QuestMode = (typeof QuestMode)[keyof typeof QuestMode]
+
 // ── Quest screen state machine ────────────────────────────────
 
 export const QuestScreen = {
@@ -8,6 +25,11 @@ export const QuestScreen = {
   Question: 'question',
   Feedback: 'feedback',
   Summary: 'summary',
+  // Fluency-specific screens
+  FluencyPassage: 'fluency-passage',
+  FluencyRecording: 'fluency-recording',
+  FluencySelfCheck: 'fluency-self-check',
+  FluencySummary: 'fluency-summary',
 } as const
 export type QuestScreen = (typeof QuestScreen)[keyof typeof QuestScreen]
 
@@ -96,6 +118,41 @@ export interface InteractiveSessionData {
   timedOut?: boolean
   skippedCount?: number
   flaggedErrorCount?: number
+  /** Distinguishes phonics quests from comprehension quests */
+  questMode?: QuestMode
+}
+
+// ── Fluency practice types ───────────────────────────────────
+
+export const FluencySelfRating = {
+  Easy: 'easy',
+  Medium: 'medium',
+  Hard: 'hard',
+} as const
+export type FluencySelfRating = (typeof FluencySelfRating)[keyof typeof FluencySelfRating]
+
+export interface FluencyPassage {
+  text: string
+  targetWords: string[]
+  speechWords: string[]
+  wordCount: number
+  readingLevel: string
+  attempts: FluencyAttempt[]
+}
+
+export interface FluencyAttempt {
+  recordingUrl: string | null // Firebase Storage path
+  selfRating: FluencySelfRating
+  durationSeconds: number
+  timestamp: string
+}
+
+export interface FluencySessionData {
+  sessionType: 'fluency'
+  questMode: 'fluency'
+  passages: FluencyPassage[]
+  totalReadingTimeSeconds: number
+  diamondsEarned: number
 }
 
 // ── Quest streak ──────────────────────────────────────────────
@@ -111,6 +168,10 @@ export interface QuestDomainConfig {
   domain: EvaluationDomain
   label: string
   icon: string
-  enabled: boolean // only 'reading' for Phase 1
+  enabled: boolean
   description?: string
+  /** Quest mode within a domain (e.g., phonics vs comprehension within reading) */
+  questMode?: QuestMode
+  /** Whether to show a "Recommended" badge based on skill snapshot */
+  recommended?: boolean
 }

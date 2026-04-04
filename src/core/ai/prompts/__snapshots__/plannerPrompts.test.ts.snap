@@ -20,7 +20,7 @@ You are generating a weekly plan for a homeschool child. Your job is to distribu
 3. **Stop rules**: If an assignment matches a stop-rule trigger, modify or shorten it per the rule's action.
 4. **Skill priorities**: Emerging skills get daily micro reps (5–8 min). Developing/supported skills get 3×/week practice (15 min).
 5. **Energy awareness**: On low-energy or overwhelmed days, reduce load — prefer minimum viable day items.
-6. **Pace data**: If a workbook is behind pace, front-load new lessons Mon/Tue. If ahead, allow lighter days.
+6. **Curriculum coverage**: Use coverage data to calibrate what skills the child has covered and what's coming up next. Focus on readiness, not pace.
 7. **App blocks**: These are fixed daily items (e.g., Reading Eggs) that must appear every day.
 
 Your output must be valid JSON matching the DraftWeeklyPlan schema.
@@ -48,8 +48,8 @@ Available hours/day: 2.5 (150m)
 
 ## Session Context
 
-### Pace Data
-- Saxon Math 3: status=behind, 4/5 per week (delta -1). Behind by ~1 lesson/week. Sprint Mon/Tue or skip review sets.
+### Curriculum Coverage
+- Saxon Math 3: Lesson 40 of 100 covered
 
 ## Assignments
 
@@ -116,7 +116,7 @@ You are generating a weekly plan for a homeschool child. Your job is to distribu
 3. **Stop rules**: If an assignment matches a stop-rule trigger, modify or shorten it per the rule's action.
 4. **Skill priorities**: Emerging skills get daily micro reps (5–8 min). Developing/supported skills get 3×/week practice (15 min).
 5. **Energy awareness**: On low-energy or overwhelmed days, reduce load — prefer minimum viable day items.
-6. **Pace data**: If a workbook is behind pace, front-load new lessons Mon/Tue. If ahead, allow lighter days.
+6. **Curriculum coverage**: Use coverage data to calibrate what skills the child has covered and what's coming up next. Focus on readiness, not pace.
 7. **App blocks**: These are fixed daily items (e.g., Reading Eggs) that must appear every day.
 
 Your output must be valid JSON matching the DraftWeeklyPlan schema.
@@ -133,7 +133,7 @@ No skill snapshot available. Use generic scheduling defaults.
 
 ## Session Context
 
-No session history or pace data available.
+No session history or curriculum coverage data available.
 
 ## Assignments
 
@@ -232,7 +232,7 @@ exports[`prompt constants > task instructions snapshot 1`] = `
 3. **Stop rules**: If an assignment matches a stop-rule trigger, modify or shorten it per the rule's action.
 4. **Skill priorities**: Emerging skills get daily micro reps (5–8 min). Developing/supported skills get 3×/week practice (15 min).
 5. **Energy awareness**: On low-energy or overwhelmed days, reduce load — prefer minimum viable day items.
-6. **Pace data**: If a workbook is behind pace, front-load new lessons Mon/Tue. If ahead, allow lighter days.
+6. **Curriculum coverage**: Use coverage data to calibrate what skills the child has covered and what's coming up next. Focus on readiness, not pace.
 7. **App blocks**: These are fixed daily items (e.g., Reading Eggs) that must appear every day.
 
 Your output must be valid JSON matching the DraftWeeklyPlan schema."

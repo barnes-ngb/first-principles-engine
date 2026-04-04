@@ -48,6 +48,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   artifactsCollection,
+  normalizeCurriculumKey,
   skillSnapshotsCollection,
   workbookConfigsCollection,
   workbookConfigDocId,
@@ -436,20 +437,24 @@ export default function TodayPage() {
 
       try {
         const name = curriculum.name || `${curriculum.provider ?? 'unknown'} curriculum`
-        const docId = workbookConfigDocId(selectedChildId, name)
         const colRef = workbookConfigsCollection(familyId)
-        const docRef = doc(colRef, docId)
-        const snap = await getDoc(docRef)
 
-        if (snap.exists()) {
-          const existing = snap.data()
+        // Match by normalized curriculum key to find existing config
+        const normalizedKey = normalizeCurriculumKey(name)
+        const allSnap = await getDocs(query(colRef, where('childId', '==', selectedChildId)))
+        const matchingDoc = allSnap.docs.find(d => normalizeCurriculumKey(d.data().name) === normalizedKey)
+
+        if (matchingDoc) {
+          const existing = matchingDoc.data()
           if (curriculum.lessonNumber > (existing.currentPosition ?? 0)) {
-            await updateDoc(docRef, {
+            await updateDoc(matchingDoc.ref, {
               currentPosition: curriculum.lessonNumber,
               updatedAt: serverTimestamp(),
             })
           }
         } else {
+          const docId = workbookConfigDocId(selectedChildId, name)
+          const docRef = doc(colRef, docId)
           const lower = (curriculum.name ?? '').toLowerCase()
           const subjectBucket: SubjectBucket =
             curriculum.provider === 'reading-eggs' || lower.includes('reading')

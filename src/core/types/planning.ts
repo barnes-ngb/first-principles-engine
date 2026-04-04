@@ -495,19 +495,15 @@ export const DEFAULT_SUBJECT_MINUTES: Record<string, number> = {
 
 export interface PaceGaugeResult {
   workbookName: string
-  /** Units required per week to stay on target */
-  requiredPerWeek: number
-  /** Units currently planned per week */
-  plannedPerWeek: number
-  /** Positive = ahead, negative = behind */
-  delta: number
+  /** Current position in the workbook */
+  currentPosition: number
+  /** Total units in the workbook */
+  totalUnits: number
+  /** Unit label (lesson, page, chapter) */
+  unitLabel: string
   status: PaceStatus
-  /** Human-readable suggestion */
-  suggestion: string
-  /** Projected completion date at current pace */
-  projectedFinishDate: string
-  /** Number of buffer days available */
-  bufferDays: number
+  /** Human-readable coverage summary */
+  coverageText: string
 }
 
 // ── Light Day Template (Appointment Resilience) ───────────────

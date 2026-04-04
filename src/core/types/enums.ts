@@ -231,10 +231,10 @@ export const MasteryGateLabel: Record<MasteryGate, string> = {
 }
 
 export const PaceStatus = {
-  Ahead: 'ahead',
-  OnTrack: 'on_track',
-  Behind: 'behind',
-  Critical: 'critical',
+  Explored: 'explored',
+  Current: 'current',
+  Upcoming: 'upcoming',
+  NotStarted: 'not_started',
 } as const
 export type PaceStatus = (typeof PaceStatus)[keyof typeof PaceStatus]
 
