@@ -49,13 +49,31 @@ export const handleQuest = async (
         if (config.curriculum.completed) {
           suggestedStartLevel = Math.max(suggestedStartLevel ?? 0, 5);
         }
-        // Check specific mastered skills for finer-grained level
-        const mastered = config.curriculum.masteredSkills ?? [];
-        if (mastered.includes("vowel-teams-ea-ai-oa-ee-oo")) {
+        // Check specific mastered skills for finer-grained level (flexible matching)
+        const masteredLower = (config.curriculum.masteredSkills ?? []).map((s) => s.toLowerCase());
+        const hasVowelTeams = masteredLower.some(
+          (s) => s.includes("vowel-team") || s.includes("vowel-digraph") || s.includes("vowel_team") || s === "vowel-teams-ea-ai-oa-ee-oo",
+        );
+        const hasDiphthongs = masteredLower.some(
+          (s) => s.includes("diphthong") || s.includes("ear") || s.includes("ue") || s === "diphthongs-ear-ue",
+        );
+        const hasLeEndings = masteredLower.some(
+          (s) => s.includes("final-stable") || s.includes("le-ending") || s.includes("le_ending") || s === "le-endings",
+        );
+        const hasRControlled = masteredLower.some(
+          (s) => s.includes("r-controlled") || s.includes("r_controlled"),
+        );
+        const hasMultiSyllable = masteredLower.some(
+          (s) => s.includes("multisyllab") || s.includes("multi-syllab"),
+        );
+        if (hasVowelTeams) {
           suggestedStartLevel = Math.max(suggestedStartLevel ?? 0, 6);
         }
-        if (mastered.includes("diphthongs-ear-ue") || mastered.includes("le-endings")) {
+        if (hasDiphthongs || hasLeEndings) {
           suggestedStartLevel = Math.max(suggestedStartLevel ?? 0, 7);
+        }
+        if (hasRControlled && hasMultiSyllable) {
+          suggestedStartLevel = Math.max(suggestedStartLevel ?? 0, 8);
         }
       }
 
