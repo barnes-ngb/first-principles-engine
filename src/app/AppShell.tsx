@@ -22,6 +22,7 @@ const navItems = [
   { label: 'Weekly Review', to: '/weekly-review', parentOnly: true },
   { label: 'Progress', to: '/progress', parentOnly: true },
   { label: 'Records', to: '/records', parentOnly: true },
+  { label: 'Books', to: '/books' },
   { label: 'Game Workshop', to: '/workshop' },
   { label: 'Dad Lab', to: '/dad-lab' },
   { label: 'Settings', to: '/settings', parentOnly: true },

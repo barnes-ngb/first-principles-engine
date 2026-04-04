@@ -153,6 +153,7 @@ export const generateImage = onCall(
         superheroes: "A bold, colorful superhero scene for a children's book.",
         cooking: "A warm, cheerful kitchen scene for a children's book.",
         sports: "A bright, energetic children's book illustration of kids playing sports.",
+        holidays: "A festive, joyful children's book illustration. Holiday decorations, seasonal scenes, warm family celebrations.",
       };
       themeImagePrefix = PRESET_IMAGE_PREFIXES[themeId];
 
