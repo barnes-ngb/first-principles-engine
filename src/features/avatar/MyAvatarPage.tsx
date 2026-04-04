@@ -53,6 +53,8 @@ import { speakVerse } from './speakVerse'
 import { forgeArmorPiece } from '../../core/xp/forgeArmorPiece'
 import { getForgeCost } from '../../core/xp/forgeCosts'
 import XpDiamondBar from '../../components/XpDiamondBar'
+import PortalTransition from './PortalTransition'
+import { getNextTierKey } from './tierBiomes'
 import ArmorPieceGallery from './ArmorPieceGallery'
 import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
@@ -143,6 +145,7 @@ export default function MyAvatarPage() {
 
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
+  const [portalTransition, setPortalTransition] = useState<{ from: string; to: string } | null>(null)
   const [ceremonyActive, setCeremonyActive] = useState(false)
   const [ceremonyTier, setCeremonyTier] = useState<string | null>(null)
 
@@ -556,8 +559,22 @@ export default function MyAvatarPage() {
       const activeTier = tier === 'stone' ? 'wood' : tier
       const result = await forgeArmorPiece(familyId, childId, activeTier, voxelPieceId, verseResponse, verseResponseAudio)
       if (result.success) {
-        // Refresh profile will happen via onSnapshot listener
         setSelectedPiece(null)
+
+        // Check if this completed the tier (all 6 forged) and next tier is unlocked
+        // We need to simulate the updated forgedPieces since profile hasn't refreshed yet
+        const updatedForged = { ...(profile.forgedPieces ?? {}) }
+        if (!updatedForged[activeTier]) updatedForged[activeTier] = {}
+        updatedForged[activeTier] = { ...updatedForged[activeTier], [voxelPieceId]: { forgedAt: new Date().toISOString() } }
+        const forgedCount = Object.keys(updatedForged[activeTier] ?? {}).length
+
+        if (forgedCount >= 6) {
+          const nextTier = getNextTierKey(activeTier)
+          if (nextTier && (profile.unlockedTiers ?? []).includes(nextTier)) {
+            // Delay portal to let forge animation play
+            setTimeout(() => setPortalTransition({ from: activeTier, to: nextTier }), 1500)
+          }
+        }
       } else {
         console.warn(`[Forge] Failed: ${result.error}`)
       }
@@ -945,6 +962,14 @@ export default function MyAvatarPage() {
 
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3, maxWidth: '100vw', overflowX: 'hidden', boxSizing: 'border-box' }}>
+      {/* ── Portal Transition Overlay ────────────────────────── */}
+      {portalTransition && (
+        <PortalTransition
+          fromTier={portalTransition.from}
+          toTier={portalTransition.to}
+          onComplete={() => setPortalTransition(null)}
+        />
+      )}
       <Page>
         {/* ── Child Switcher + XP/Tier Header ────── */}
         <Box sx={{ textAlign: 'center', pt: 1.5, pb: 0.5 }}>
