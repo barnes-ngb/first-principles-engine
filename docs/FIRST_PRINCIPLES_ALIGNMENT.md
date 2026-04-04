@@ -196,3 +196,18 @@ But the **philosophical alignment** is real:
 - Never shame — struggles are data, not failure
 
 The daily flow stays structured. The compliance stays. The Minecraft framing stays. But the **growth story** shifts from "what rung are you on?" to "how are you showing up as a learner?"
+
+---
+
+## Curriculum Tracking — Coverage, Not Pace
+
+Curriculum position data (workbook configs) is used for **skill calibration**:
+- "Lincoln has covered consonant blends through GATB Lesson 47 — suggest vowel teams next"
+- "Reading Eggs complete — don't suggest basic phonics"
+
+It is NEVER used for **pace pressure**:
+- ~~"Lincoln is behind — needs 1.5 lessons/day to finish by June"~~
+- ~~"39% complete, should be at 50%"~~
+
+The AI context pipeline sends covered skills and upcoming topics.
+It does NOT send pace status, deadline math, or completion percentages.

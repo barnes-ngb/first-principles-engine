@@ -46,7 +46,7 @@ export const PLANNER_TASK_INSTRUCTIONS = `You are generating a weekly plan for a
 3. **Stop rules**: If an assignment matches a stop-rule trigger, modify or shorten it per the rule's action.
 4. **Skill priorities**: Emerging skills get daily micro reps (5–8 min). Developing/supported skills get 3×/week practice (15 min).
 5. **Energy awareness**: On low-energy or overwhelmed days, reduce load — prefer minimum viable day items.
-6. **Pace data**: If a workbook is behind pace, front-load new lessons Mon/Tue. If ahead, allow lighter days.
+6. **Curriculum coverage**: Use coverage data to calibrate what skills the child has covered and what's coming up next. Focus on readiness, not pace.
 7. **App blocks**: These are fixed daily items (e.g., Reading Eggs) that must appear every day.
 
 Your output must be valid JSON matching the DraftWeeklyPlan schema.`
@@ -142,12 +142,9 @@ export function formatAppBlocksForPrompt(appBlocks: AppBlock[]): string {
 }
 
 export function formatPaceDataForPrompt(paceData: PaceGaugeResult[]): string {
-  if (paceData.length === 0) return 'No pace data available.'
+  if (paceData.length === 0) return 'No curriculum coverage data available.'
   return paceData
-    .map(
-      (p) =>
-        `- ${p.workbookName}: status=${p.status}, ${p.plannedPerWeek}/${p.requiredPerWeek} per week (delta ${p.delta > 0 ? '+' : ''}${p.delta}). ${p.suggestion}`,
-    )
+    .map((p) => `- ${p.workbookName}: ${p.coverageText}`)
     .join('\n')
 }
 
@@ -199,11 +196,11 @@ export function buildSessionContextSection(inputs: PlannerPromptInputs): string 
   const lines: string[] = ['## Session Context']
 
   if (inputs.paceData && inputs.paceData.length > 0) {
-    lines.push('', '### Pace Data', formatPaceDataForPrompt(inputs.paceData))
+    lines.push('', '### Curriculum Coverage', formatPaceDataForPrompt(inputs.paceData))
   }
 
   if (lines.length === 1) {
-    lines.push('', 'No session history or pace data available.')
+    lines.push('', 'No session history or curriculum coverage data available.')
   }
 
   return lines.join('\n')

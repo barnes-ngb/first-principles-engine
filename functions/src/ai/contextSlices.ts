@@ -376,33 +376,41 @@ export async function buildContextForTask(
 
   // ── Format each slice into prompt text ────────────────────────
 
-  // Workbook paces
+  // Curriculum coverage (was "WORKBOOK PACE")
   if (sliceData.has("workbookPaces")) {
-    const paces = sliceData.get("workbookPaces") as Array<{ name: string; unitLabel: string; currentPosition: number; totalUnits: number; unitsPerDayNeeded: number; targetFinishDate: string; status: string; curriculum?: { provider: string; level?: string; lastMilestone?: string; milestoneDate?: string; completed?: boolean; masteredSkills?: string[]; activeSkills?: string[] } }>;
-    const lines = ["WORKBOOK PACE:"];
+    const paces = sliceData.get("workbookPaces") as Array<{ name: string; unitLabel: string; currentPosition: number; totalUnits: number; subjectBucket?: string; curriculum?: { provider: string; level?: string; lastMilestone?: string; milestoneDate?: string; completed?: boolean; masteredSkills?: string[]; activeSkills?: string[] } }>;
+    const lines = ["CURRICULUM COVERAGE:"];
     if (paces.length === 0) {
-      lines.push("No workbook data available.");
+      lines.push("No curriculum data available.");
     } else {
       for (const w of paces) {
-        lines.push(`- ${w.name} — ${w.unitLabel} ${w.currentPosition} of ${w.totalUnits}, ${w.unitsPerDayNeeded} ${w.unitLabel}s/day needed to finish by ${w.targetFinishDate}. Status: ${w.status}`);
+        // Coverage summary — no pace/deadline language
+        if (w.totalUnits > 0) {
+          lines.push(`- ${w.name}: ${w.unitLabel} ${w.currentPosition} of ${w.totalUnits} covered`);
+        } else {
+          lines.push(`- ${w.name}: position ${w.currentPosition}`);
+        }
+
+        // Curriculum metadata
         if (w.curriculum) {
           const c = w.curriculum;
           if (c.completed) {
-            lines.push(`  ✅ COMPLETED — ${c.provider} ${c.level || ""} (${c.milestoneDate || "date unknown"})`);
+            lines.push(`  ✅ COMPLETED — ${c.provider} ${c.level || ""} (${c.milestoneDate || ""})`);
           } else if (c.lastMilestone) {
             lines.push(`  📍 ${c.provider} ${c.level || ""} — ${c.lastMilestone} (${c.milestoneDate || "date unknown"})`);
           }
           if (c.masteredSkills?.length) {
-            lines.push(`  Mastered: ${c.masteredSkills.join(", ")}`);
+            lines.push(`  Skills covered: ${c.masteredSkills.join(", ")}`);
           }
           if (c.activeSkills?.length) {
             lines.push(`  Currently working on: ${c.activeSkills.join(", ")}`);
           }
         }
-        // Enrich GATB workbooks with scope-and-sequence data
+
+        // GATB scope-and-sequence enrichment
         if (w.name.match(/good.*beautiful|gatb/i) && w.currentPosition) {
-          const subjectKey = (w as { subjectBucket?: string }).subjectBucket === "Math" ? "math" : "la";
-          const levelMatch = (w as { curriculum?: { level?: string } }).curriculum?.level?.match(/\d+/);
+          const subjectKey = w.subjectBucket === "Math" ? "math" : "la";
+          const levelMatch = w.curriculum?.level?.match(/\d+/);
           const levelKey = levelMatch ? levelMatch[0] : "k";
           const key = `gatb-${subjectKey}-${levelKey}`.toLowerCase();
           const progress = getGatbProgress(key, w.currentPosition);
@@ -412,7 +420,6 @@ export async function buildContextForTask(
             if (progress.upcomingUnits.length > 0) {
               lines.push(`  Upcoming: ${progress.upcomingUnits.slice(0, 2).map(u => u.topic).join(", ")}`);
             }
-            lines.push(`  Progress: ${progress.percentComplete}% complete`);
           }
         }
       }

@@ -11,12 +11,12 @@ import DialogTitle from '@mui/material/DialogTitle'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, getDocs, query, setDoc, updateDoc, where, serverTimestamp } from 'firebase/firestore'
 
 import ScanButton from '../../components/ScanButton'
 import ScanResultsPanel from '../../components/ScanResultsPanel'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { workbookConfigsCollection, workbookConfigDocId } from '../../core/firebase/firestore'
+import { workbookConfigsCollection, workbookConfigDocId, normalizeCurriculumKey } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useCertificateProgress } from '../../core/hooks/useCertificateProgress'
 import { useScan } from '../../core/hooks/useScan'
@@ -85,20 +85,24 @@ export default function CertificateScanSection() {
 
       try {
         const name = curriculum.name || `${curriculum.provider ?? 'unknown'} curriculum`
-        const docId = workbookConfigDocId(activeChildId, name)
         const colRef = workbookConfigsCollection(familyId)
-        const docRef = doc(colRef, docId)
-        const snap = await getDoc(docRef)
 
-        if (snap.exists()) {
-          const existing = snap.data()
+        // Match by normalized curriculum key to find existing config
+        const normalizedKey = normalizeCurriculumKey(name)
+        const allSnap = await getDocs(query(colRef, where('childId', '==', activeChildId)))
+        const matchingDoc = allSnap.docs.find(d => normalizeCurriculumKey(d.data().name) === normalizedKey)
+
+        if (matchingDoc) {
+          const existing = matchingDoc.data()
           if (curriculum.lessonNumber > (existing.currentPosition ?? 0)) {
-            await updateDoc(docRef, {
+            await updateDoc(matchingDoc.ref, {
               currentPosition: curriculum.lessonNumber,
               updatedAt: serverTimestamp(),
             })
           }
         } else {
+          const docId = workbookConfigDocId(activeChildId, name)
+          const docRef = doc(colRef, docId)
           const subjectBucket = inferSubjectFromCurriculum(curriculum)
           await setDoc(docRef, {
             childId: activeChildId,
