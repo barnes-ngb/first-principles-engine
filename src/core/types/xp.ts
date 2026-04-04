@@ -474,19 +474,6 @@ export interface AvatarProfile {
   updatedAt: string
 }
 
-/**
- * Maps each armor piece to its 0-indexed position in the 3×2 sheet image.
- * Order (left-to-right, top-to-bottom): belt, breastplate, shoes, shield, helmet, sword.
- */
-export const ARMOR_PIECE_SHEET_INDEX: Record<ArmorPiece, number> = {
-  belt_of_truth: 0,
-  breastplate_of_righteousness: 1,
-  shoes_of_peace: 2,
-  shield_of_faith: 3,
-  helmet_of_salvation: 4,
-  sword_of_the_spirit: 5,
-}
-
 export interface DailyArmorSession {
   familyId: string
   childId: string
@@ -496,28 +483,3 @@ export interface DailyArmorSession {
   completedAt?: string  // ISO string — set when all earned pieces applied
 }
 
-/** Pixel-percentage positions for overlaying each piece on the base character image. */
-export const PIECE_POSITIONS: Record<
-  ArmorPiece,
-  { topPct: number; leftPct: number; widthPct: number; heightPct: number }
-> = {
-  helmet_of_salvation:           { topPct: 2,  leftPct: 28, widthPct: 44, heightPct: 22 },
-  breastplate_of_righteousness:  { topPct: 24, leftPct: 18, widthPct: 64, heightPct: 28 },
-  belt_of_truth:                 { topPct: 50, leftPct: 22, widthPct: 56, heightPct: 12 },
-  shoes_of_peace:                { topPct: 78, leftPct: 8,  widthPct: 84, heightPct: 20 },
-  shield_of_faith:               { topPct: 28, leftPct: 2,  widthPct: 34, heightPct: 38 },
-  sword_of_the_spirit:           { topPct: 28, leftPct: 64, widthPct: 34, heightPct: 42 },
-}
-
-/**
- * @deprecated Use XpLedger with dedupKey instead. Kept for migration compatibility.
- * Append-only log for XP dedup. Doc ID: {childId}_{dedupKey}
- */
-export interface XpEventLogEntry {
-  childId: string
-  type: string
-  amount: number
-  dedupKey: string
-  meta?: Record<string, string>
-  awardedAt: string
-}
