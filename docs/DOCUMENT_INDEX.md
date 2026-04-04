@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-04-02.
+> Where everything lives. Updated 2026-04-04.
 
 ---
 
@@ -12,14 +12,14 @@
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
-| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — lists 31 collections but 6 are legacy/removed (`sessions`, `projects`, `weeklyScores`, `labSessions`, `plannerSessions`, `sightWordLists`); missing 3 newer collections (`storyGames`, `scans`, `shellyChatThreads`). CLAUDE.md table is now authoritative at 28 collections + 2 subcollections. |
+| `archive/FIRESTORE_AUDIT.md` | **ARCHIVED** (Mar 21) | Superseded by CLAUDE.md Firestore Collections table (28 collections + 2 subcollections). Original audit had stale collection list. |
 | `WEEKLY_CONUNDRUM_ARC.md` | **CURRENT** | Weekly conundrum story arc design — Stonebridge narrative, recurring characters, ethical reasoning scenarios |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
 | `ENGINE_V2.md` | **CURRENT** | Learning framework: family snapshot, curriculum mapping, energy modes, weekly rhythm |
 | `FIRST_PRINCIPLES_ALIGNMENT.md` | **NEW** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
 | `GAME_WORLD_ECONOMY.md` | **NEW** | Two-currency economy design (XP + Diamonds), choice-based armor forging, Stonebridge world |
-| `SYSTEM_PROMPTS.md` | **CURRENT** (v4) | Task dispatch, model selection, context slices — 13 task types including scan + shellyChat |
+| `SYSTEM_PROMPTS.md` | **CURRENT** (v4) | Task dispatch, model selection, context slices — 15 task types including scan, shellyChat, weeklyReview, analyzePatterns |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `archive/01–07_*.md` | ARCHIVED | Phase 1–5 specs, original testing plan, Saturday lab runbook — all superseded by current docs |
@@ -46,7 +46,7 @@
 | `KNOWLEDGE_MINE_BRIEF.md` | Working on quest/interactive evaluation |
 | `barnes-story-game-workshop-design.md` | Working on workshop feature |
 | `ENGINE_V2.md` | Working on engine/flywheel framework |
-| `FIRESTORE_AUDIT.md` | Working on data model, indexes, collections |
+| `CLAUDE.md` (Firestore Collections) | Working on data model, indexes, collections |
 | `WEEKLY_CONUNDRUM_ARC.md` | Working on conundrums, weekly theme integration |
 | `GAME_WORLD_ECONOMY.md` | Working on XP/Diamond economy, armor forging, tier progression |
 | `08_RUNBOOK.md` | Working on deployment, backups, operations |

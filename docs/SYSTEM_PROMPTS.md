@@ -31,7 +31,7 @@ src/core/ai/useAI.ts              functions/src/ai/
      childId,                         → dispatches to CHAT_TASKS[taskType]
      familyId                              ↓
                                   tasks/index.ts
-                                    CHAT_TASKS registry:
+                                    CHAT_TASKS registry (15 task types):
                                       plan       → handlePlan
                                       chat       → handleChat
                                       generate   → handleChat
@@ -45,6 +45,8 @@ src/core/ai/useAI.ts              functions/src/ai/
                                       weeklyFocus → handleWeeklyFocus
                                       scan       → handleScan
                                       shellyChat → handleShellyChat
+                                      weeklyReview → handleWeeklyReview
+                                      analyzePatterns → handleAnalyzePatterns
                                            ↓
                                   tasks/<handler>.ts
                                     → buildContextForTask(taskType, ...)  [contextSlices.ts]
@@ -95,6 +97,8 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `weeklyFocus` | `claude-sonnet-4-6` | Unified weekly focus + conundrum |
 | `scan` | `claude-sonnet-4-6` | Curriculum photo analysis (vision) |
 | `shellyChat` | `claude-sonnet-4-6` | Parent AI assistant (family context) |
+| `weeklyReview` | `claude-sonnet-4-6` | Weekly adaptive review generation |
+| `analyzePatterns` | `claude-sonnet-4-6` | Cross-session pattern detection |
 | `generate` | `claude-haiku-4-5-20251001` | Activity/lesson generation |
 | `chat` | `claude-haiku-4-5-20251001` | General chat |
 

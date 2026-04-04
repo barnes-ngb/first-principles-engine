@@ -77,7 +77,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/components/` — Shared UI components (includes SectionErrorBoundary for per-section crash isolation)
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
-- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useSpeechRecognition, useTTS)
+- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCertificateProgress, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useSpeechRecognition, useTTS)
 - `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
 - `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns
 - `src/core/ai/` — AI service layer, feature flags, useAI hook, prompt templates
@@ -224,7 +224,7 @@ All under `families/{familyId}/`:
 4. **Child context is assembled per-request** from Firestore (skill snapshot, pace data, recent sessions).
 5. **Cost tracking:** Log token usage and model used to Firestore for monitoring.
 6. **Model selection by task:**
-   - Complex reasoning (plan, evaluate, quest, generateStory, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat): Claude Sonnet (`claude-sonnet-4-6`)
+   - Complex reasoning (plan, evaluate, quest, generateStory, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, weeklyReview, analyzePatterns): Claude Sonnet (`claude-sonnet-4-6`)
    - Routine generation (generate, chat): Claude Haiku (`claude-haiku-4-5-20251001`)
    - Image generation: DALL-E 3 (scenes, armor sheets) + gpt-image-1 (transparent stickers, photo transform)
 
@@ -236,10 +236,10 @@ All under `families/{familyId}/`:
 
 ### Prompt Files
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
-- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns)
+- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, weeklyReview, analyzePatterns, chat)
 
-### Cloud Functions (19 exported)
-- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate)
+### Cloud Functions (18 exported)
+- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, weeklyReview, analyzePatterns, chat, generate)
 - `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
 - `generateWeeklyReviewNow` — Manual review trigger
@@ -256,11 +256,11 @@ All under `families/{familyId}/`:
 - `functions/src/ai/aiService.ts` — Core AI service orchestration
 - `functions/src/ai/sanitizeJson.ts` — JSON response sanitization
 - `functions/src/ai/health.ts` — Health check endpoint
-- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns
+- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, weeklyReview, analyzePatterns, chat
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/imageGen.ts` — Image generation routing
-- `functions/src/ai/imageTasks/` — 13 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, enhanceSketch, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar, + index)
+- `functions/src/ai/imageTasks/` — 14 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, copyrightUtils, enhanceSketch, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar, + index)
 - `functions/src/ai/providers/` — Claude + OpenAI provider adapters (with `__stubs__/` for test mocking)
 
 ## Family Context (for AI prompt reference)
@@ -278,11 +278,11 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 
 ## Known Technical Debt
 
-- **PlannerChatPage.tsx (2,112L)** — Decomposed render (800→500L) but state management is still ~1,600L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
-- **WorkshopPage.tsx (1,578L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
+- **PlannerChatPage.tsx (2,184L)** — Decomposed render (800→500L) but state management is still ~1,700L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **WorkshopPage.tsx (1,606L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
 - **BookEditorPage.tsx (1,419L)** — Stable, handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
 - **VoxelCharacter.tsx (1,290L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
-- **MyAvatarPage.tsx (1,293L)** — Decomposed from 1,862L. Remaining code is state management + ceremony flow. Stable.
+- **MyAvatarPage.tsx (1,386L)** — Decomposed from 1,862L. Remaining code is state management + ceremony flow. Stable.
 - **Ladder system** — Partially deprecated. Disposition system replacing it. 5 files have TODO comments marking ladder references for removal.
 - **evaluate.ts (weekly review)** — Now uses CHARTER_PREAMBLE + addendum, but still separate from the task system. Not in task registry.
 - **ShellyChatPage.tsx (1,456L)** — New feature, 23+ useState hooks. Image generation, thread management, follow-up suggestions, image refinement flow. Decomposition candidate after usage patterns stabilize.
