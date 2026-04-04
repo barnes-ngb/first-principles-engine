@@ -86,6 +86,8 @@ export interface EnhanceSketchRequest {
   familyId: string
   sketchStoragePath: string
   style?: 'storybook' | 'comic' | 'realistic' | 'minecraft'
+  /** Optional caption/description of the sketch (e.g. "my dragon drawing"). Filtered for copyright. */
+  caption?: string
 }
 
 export interface EnhanceSketchResponse {

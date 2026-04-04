@@ -3,9 +3,15 @@ import { useNavigate } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AssessmentIcon from '@mui/icons-material/Assessment'
 import DeleteIcon from '@mui/icons-material/Delete'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import Accordion from '@mui/material/Accordion'
+import AccordionDetails from '@mui/material/AccordionDetails'
+import AccordionSummary from '@mui/material/AccordionSummary'
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
+import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
+import FormControlLabel from '@mui/material/FormControlLabel'
 import IconButton from '@mui/material/IconButton'
 import MenuItem from '@mui/material/MenuItem'
 import Snackbar from '@mui/material/Snackbar'
@@ -28,6 +34,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useSaveState } from '../../core/hooks/useSaveState'
 import { useProfile } from '../../core/profile/useProfile'
 import type {
+  CurriculumMeta,
   EvidenceDefinition,
   PrioritySkill,
   SkillSnapshot,
@@ -44,6 +51,33 @@ import {
 } from './lincolnDefaults'
 import FoundationsSection from '../evaluate/FoundationsSection'
 import QuickCheckPanel from './QuickCheckPanel'
+
+/** Predefined reading skills for curriculum milestone tracking */
+const READING_SKILL_OPTIONS = [
+  'letter-sounds',
+  'short-vowels',
+  'cvc-words',
+  'consonant-blends',
+  'digraphs',
+  'long-vowels',
+  'cvce-pattern',
+  'vowel-teams-ea-ai-oa-ee-oo',
+  'r-controlled-ar-ur-er',
+  'double-consonants-ll-ff-mm',
+  'le-endings',
+  'diphthongs-ear-ue',
+  'multi-syllable-words',
+  'prefixes-suffixes',
+  'reading-comprehension',
+  'vocabulary-in-context',
+] as const
+
+/** Known curriculum providers */
+const CURRICULUM_PROVIDERS = [
+  'reading-eggs',
+  'gatb',
+  'other',
+] as const
 
 function computePaceText(wb: WorkbookConfig): { text: string; color: string } | null {
   if (!wb.totalUnits || !wb.targetFinishDate || !wb.currentPosition) return null
@@ -742,6 +776,154 @@ export default function SkillSnapshotPage() {
                           {pace.text}
                         </Typography>
                       )}
+
+                      {/* Curriculum Details */}
+                      <Accordion
+                        disableGutters
+                        elevation={0}
+                        sx={{ border: '1px solid', borderColor: 'divider', '&:before': { display: 'none' } }}
+                      >
+                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                          <Typography variant="body2" fontWeight={500}>
+                            Curriculum Details
+                            {wb.curriculum?.completed && ' \u2705'}
+                          </Typography>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          <Stack spacing={1.5}>
+                            <TextField
+                              label="Provider"
+                              select
+                              size="small"
+                              fullWidth
+                              value={wb.curriculum?.provider ?? ''}
+                              onChange={(e) => {
+                                const curriculum: CurriculumMeta = {
+                                  ...wb.curriculum,
+                                  provider: e.target.value,
+                                }
+                                const updated = { ...wb, curriculum }
+                                setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                                void handleSaveWorkbook(index, updated)
+                              }}
+                            >
+                              <MenuItem value="">None</MenuItem>
+                              {CURRICULUM_PROVIDERS.map((p) => (
+                                <MenuItem key={p} value={p}>{p}</MenuItem>
+                              ))}
+                            </TextField>
+                            <Stack direction="row" spacing={1}>
+                              <TextField
+                                label="Level"
+                                size="small"
+                                sx={{ flex: 1 }}
+                                value={wb.curriculum?.level ?? ''}
+                                onChange={(e) => {
+                                  const curriculum: CurriculumMeta = {
+                                    ...wb.curriculum,
+                                    provider: wb.curriculum?.provider ?? '',
+                                    level: e.target.value,
+                                  }
+                                  const updated = { ...wb, curriculum }
+                                  setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                                }}
+                                onBlur={() => void handleSaveWorkbook(index, wb)}
+                              />
+                              <TextField
+                                label="Last Milestone"
+                                size="small"
+                                sx={{ flex: 2 }}
+                                value={wb.curriculum?.lastMilestone ?? ''}
+                                onChange={(e) => {
+                                  const curriculum: CurriculumMeta = {
+                                    ...wb.curriculum,
+                                    provider: wb.curriculum?.provider ?? '',
+                                    lastMilestone: e.target.value,
+                                  }
+                                  const updated = { ...wb, curriculum }
+                                  setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                                }}
+                                onBlur={() => void handleSaveWorkbook(index, wb)}
+                              />
+                            </Stack>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <TextField
+                                label="Milestone Date"
+                                size="small"
+                                type="date"
+                                sx={{ flex: 1 }}
+                                slotProps={{ inputLabel: { shrink: true } }}
+                                value={wb.curriculum?.milestoneDate ?? ''}
+                                onChange={(e) => {
+                                  const curriculum: CurriculumMeta = {
+                                    ...wb.curriculum,
+                                    provider: wb.curriculum?.provider ?? '',
+                                    milestoneDate: e.target.value,
+                                  }
+                                  const updated = { ...wb, curriculum }
+                                  setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                                  void handleSaveWorkbook(index, updated)
+                                }}
+                              />
+                              <FormControlLabel
+                                control={
+                                  <Checkbox
+                                    checked={wb.curriculum?.completed ?? false}
+                                    onChange={(e) => {
+                                      const curriculum: CurriculumMeta = {
+                                        ...wb.curriculum,
+                                        provider: wb.curriculum?.provider ?? '',
+                                        completed: e.target.checked,
+                                      }
+                                      const updated = { ...wb, curriculum }
+                                      setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                                      void handleSaveWorkbook(index, updated)
+                                    }}
+                                  />
+                                }
+                                label="Completed"
+                              />
+                            </Stack>
+
+                            {/* Mastered Skills chips */}
+                            {wb.subjectBucket === 'Reading' && (
+                              <>
+                                <Typography variant="caption" color="text.secondary">
+                                  Mastered Skills
+                                </Typography>
+                                <Stack direction="row" flexWrap="wrap" gap={0.5}>
+                                  {READING_SKILL_OPTIONS.map((skill) => {
+                                    const selected = wb.curriculum?.masteredSkills?.includes(skill) ?? false
+                                    return (
+                                      <Chip
+                                        key={skill}
+                                        label={skill}
+                                        size="small"
+                                        color={selected ? 'success' : 'default'}
+                                        variant={selected ? 'filled' : 'outlined'}
+                                        onClick={() => {
+                                          const current = wb.curriculum?.masteredSkills ?? []
+                                          const masteredSkills = selected
+                                            ? current.filter((s) => s !== skill)
+                                            : [...current, skill]
+                                          const curriculum: CurriculumMeta = {
+                                            ...wb.curriculum,
+                                            provider: wb.curriculum?.provider ?? '',
+                                            masteredSkills,
+                                          }
+                                          const updated = { ...wb, curriculum }
+                                          setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+                                          void handleSaveWorkbook(index, updated)
+                                        }}
+                                      />
+                                    )
+                                  })}
+                                </Stack>
+                              </>
+                            )}
+                          </Stack>
+                        </AccordionDetails>
+                      </Accordion>
                     </Stack>
                   )
                 })

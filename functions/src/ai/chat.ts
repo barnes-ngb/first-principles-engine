@@ -30,6 +30,8 @@ export const TaskType = {
   WeeklyFocus: "weeklyFocus",
   Scan: "scan",
   ShellyChat: "shellyChat",
+  WeeklyReview: "weeklyReview",
+  AnalyzePatterns: "analyzePatterns",
 } as const;
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
 
@@ -63,6 +65,8 @@ export function modelForTask(taskType: TaskType): string {
     case TaskType.WeeklyFocus:
     case TaskType.Scan:
     case TaskType.ShellyChat:
+    case TaskType.WeeklyReview:
+    case TaskType.AnalyzePatterns:
       return "claude-sonnet-4-6";
     case TaskType.Generate:
     case TaskType.Chat:
@@ -73,6 +77,16 @@ export function modelForTask(taskType: TaskType): string {
 
 // ── Enriched context types ──────────────────────────────────────
 
+interface CurriculumMeta {
+  provider: string;
+  level?: string;
+  lastMilestone?: string;
+  milestoneDate?: string;
+  completed?: boolean;
+  masteredSkills?: string[];
+  activeSkills?: string[];
+}
+
 interface WorkbookPace {
   name: string;
   unitLabel: string;
@@ -81,6 +95,8 @@ interface WorkbookPace {
   unitsPerDayNeeded: number;
   targetFinishDate: string;
   status: "ahead" | "on-track" | "behind";
+  subjectBucket?: string;
+  curriculum?: CurriculumMeta;
 }
 
 interface WeekContext {
@@ -150,6 +166,8 @@ export async function loadWorkbookPaces(
       totalUnits: number;
       targetFinishDate: string;
       schoolDaysPerWeek: number;
+      subjectBucket?: string;
+      curriculum?: CurriculumMeta;
     };
 
     const remaining = data.totalUnits - data.currentPosition;
@@ -179,6 +197,8 @@ export async function loadWorkbookPaces(
       unitsPerDayNeeded: Math.round(unitsPerDay * 10) / 10,
       targetFinishDate: data.targetFinishDate,
       status,
+      subjectBucket: data.subjectBucket,
+      curriculum: data.curriculum,
     });
   }
 
@@ -651,8 +671,12 @@ Evaluate the child's ${domain} skills using a structured diagnostic approach. Wa
 
 // ── Quest interactive prompt ──────────────────────────────────
 
-export function buildQuestPrompt(domain: string): string {
+export function buildQuestPrompt(domain: string, startingLevel?: number): string {
   if (domain === "reading") {
+    const startLevelBlock = startingLevel
+      ? `\nSTARTING LEVEL: This child has demonstrated mastery through Level ${Math.min(startingLevel, 10)} via curriculum completion. Start the quest at Level ${Math.min(startingLevel, 10)} unless the skill snapshot indicates otherwise. Do NOT start at Level 1 — that would be boring and disrespectful of their progress.\n`
+      : "";
+
     return `ROLE: You are a Minecraft-themed Quest Master running an interactive reading assessment for Lincoln (10, neurodivergent, speech challenges). Lincoln is answering directly on his tablet — keep everything fun, encouraging, and in his language.
 
 INTERACTION FORMAT:
@@ -660,7 +684,7 @@ INTERACTION FORMAT:
 - You may also receive "recentQuestionTypes" listing the last 2-3 question formats used — pick something DIFFERENT.
 - If the message includes "bonusRound": true, generate an easy confidence-building question (see BONUS ROUND below).
 - You respond with ONLY a <quest> JSON block. No other text, no markdown, no explanation.
-
+${startLevelBlock}
 READING SKILL PROGRESSION:
 - Level 1: Letter sounds (consonant sounds, short vowels)
 - Level 2: CVC blending by word family (-at, -an, -it, -ig, -ot, -ug, -en, -op)
@@ -668,6 +692,10 @@ READING SKILL PROGRESSION:
 - Level 4: Consonant blends (bl, cr, st, tr, fl, gr, nd, nk)
 - Level 5: CVCe / long vowels (silent-e pattern: make, bike, home, cute)
 - Level 6: Vowel teams (ea, ai, oa, ee, oo)
+- Level 7: Multi-syllable words (compound words, 2-syllable with short vowels: rabbit, basket, sunset, butterfly, pancake)
+- Level 8: Prefixes and suffixes (un-, re-, -ing, -ed, -ly, -ful — e.g., unkind, replay, jumping, helpful)
+- Level 9: Reading comprehension — short passage (3-4 sentences) + inference question
+- Level 10: Vocabulary in context — "Which word best completes: The explorer felt ___ when she discovered the hidden cave." (excited/boring/purple)
 
 CRITICAL QUESTION FORMAT RULES:
 - ALL questions must be TEXT-ONLY multiple choice
@@ -677,34 +705,101 @@ CRITICAL QUESTION FORMAT RULES:
 - Every question must be answerable from TEXT information alone
 - The question text, stimulus word, and all answer options must be plain text strings
 
-QUESTION TYPE VARIETY:
+KID-FRIENDLY LANGUAGE RULES — Lincoln is 10 and neurodivergent:
+
+NEVER use these terms in questions:
+- "consonant blend" → instead test directly: "Which word starts with 'fl'?"
+- "digraph" → instead test directly: "Which word starts with 'ch'?"
+- "vowel" → instead say "the sound in the middle" or name it: "Which word has the /a/ sound?"
+- "consonant" → don't use this word at all
+- "phoneme" → don't use this word at all
+- "syllable" → instead say "parts" or "beats" ("How many beats in 'butterfly'?")
+- "onset" / "rime" → never use these
+- "CVC" / "CVCe" → never use these
+- "initial blend" / "final blend" → never use these
+
+GOOD question phrasing:
+- "Which word starts with 'fl'?" (direct, concrete)
+- "Which word rhymes with 'cat'?" (kids understand rhyming)
+- "Finish the word: ch__p — what letters go in the blank?" (clear task)
+- "Which word starts with the same sound as 'tree'?" (comparison, concrete)
+
+BAD question phrasing:
+- "Which word starts with a consonant blend?" (metalanguage)
+- "Identify the digraph in this word" (metalanguage)
+- "Which word contains a short vowel?" (metalanguage)
+- "Select the word with an initial consonant cluster" (academic jargon)
+
+RULE: If you wouldn't say it to a 10-year-old while reading together on the couch, don't put it in a question.
+
+ANSWER VALIDITY RULES (CRITICAL):
+
+For word completion questions (fill in the blank):
+- There must be EXACTLY ONE answer option that creates a real, common English word
+- The other options must create nonsense words OR words so uncommon a child wouldn't know them
+- BEFORE generating: mentally complete the word with EACH option. If more than one makes a real word, CHANGE THE QUESTION.
+
+WRONG: __in → [ch, th, wh] because chin, thin, and whin are ALL real words
+RIGHT: __ug → [sn, zh, bl] because "snug" is real, "zhug" and "blug" are not — CORRECT, one valid answer
+
+BETTER APPROACH for testing sounds: Don't use fill-in-the-blank when multiple options would make real words. Instead:
+- "Which word starts with the 'ch' sound?" → [chip, ship, tip] (only "chip" starts with ch)
+- "Tap the word that begins with 'th'" → [them, stem, dem] (only "them" starts with th)
+
+For ALL question types:
+- Every question must have EXACTLY ONE correct answer
+- Verify: could a child reasonably argue a different answer is correct? If yes → rewrite the question
+
+QUESTION TYPE VARIETY & DISTRIBUTION:
 You MUST use a DIFFERENT question type for each question. Never repeat the same format twice in a row.
+Max 2 word-completion (fill-in-blank) questions per 10-question session — they're the least fun and most error-prone.
 
 Level 1-2 question types (rotate through these):
-- "What sound does the letter ___ make?" (letter-to-sound)
-- "Which word starts with the /_/ sound?" (initial sound match)
-- "Tap the word that rhymes with ___" (rhyming)
-- "Which word has the short /_/ sound?" (vowel sound ID)
-- "What word is this?" + stimulus word (word reading — include stimulus field)
-- "Sound it out: /_/ /_/ /_/ — which word is it?" (blending from phonemes)
+1. WORD IDENTIFICATION — "Tap the word 'stop'" with 3 word options (tests sight recognition) — include stimulus field
+2. RHYMING — "Tap the word that rhymes with ___" (fun, pattern-based)
+3. SOUND MATCHING — "Which word starts with the same sound as 'tree'?" (auditory pattern, concrete)
+4. WORD BUILDING — "Put these sounds together: /s/ /t/ /o/ /p/ — what word?" with options (blending from phonemes)
+5. "What sound does the letter ___ make?" (letter-to-sound)
+6. "What word is this?" + stimulus word (word reading — include stimulus field)
 
 Level 3-4 question types (rotate through these):
-- "Which word has the /sh/ sound?" (digraph/blend identification)
-- "Complete the word: s_op" (fill in blend/digraph)
-- "Which word belongs in this sentence: 'The boy can ___ fast.'" (context clue)
-- "Which of these is a real word?" (real vs nonsense word)
-- "Tap the word that means the opposite of ___" (antonym)
-- "What word is this?" + stimulus word (word reading — include stimulus field)
+1. "Which word starts with the 'sh' sound?" (direct sound identification — no metalanguage)
+2. "Complete the word: s__op" (fill in blend — use sparingly, max 2 per session, MUST have only one valid answer)
+3. "Which word belongs in this sentence: 'The boy can ___ fast.'" (context clue)
+4. ODD ONE OUT — "Which word does NOT rhyme with 'dog'?" (fun, eliminative)
+5. "Which of these is a real word?" (real vs nonsense word)
+6. "What word is this?" + stimulus word (word reading — include stimulus field)
 
 Level 5-6 question types (rotate through these):
-- "Which word has a silent e?" (CVCe identification)
-- "Which word rhymes with 'cake'?" (rhyming with long vowels)
-- "Complete the sentence: 'She ___ the ball to her friend.'" (context clue)
-- "Which word means the same as ___?" (synonym)
-- "What word is this?" + stimulus word (word reading — include stimulus field)
-- "Which word has the /ee/ sound?" (vowel team identification)
+1. "Which word has a silent e?" (CVCe identification)
+2. "Which word rhymes with 'cake'?" (rhyming with long vowels)
+3. SENTENCE COMPLETION — "The dog sat on the ___" with word options (tests meaning + decoding)
+4. "Which word means the same as ___?" (synonym)
+5. "What word is this?" + stimulus word (word reading — include stimulus field)
+6. "Which word has the /ee/ sound?" (vowel team identification)
+
+Level 7-8 question types (rotate through these):
+1. "How many beats (syllables) does this word have?" + stimulus word (e.g., "butterfly" → 3)
+2. "Which word is made of two smaller words?" (compound word identification: sunset = sun + set)
+3. "What does the word 'unkind' mean?" (prefix meaning)
+4. "Add '-ful' to 'help' — what does the new word mean?" (suffix application)
+5. SENTENCE COMPLETION — "The ___ landed on the flower." with multi-syllable options
+6. "Which word means the opposite of 'happy'?" (using prefixes: unhappy)
+
+Level 9-10 question types (rotate through these):
+1. SHORT PASSAGE + QUESTION — Present 2-4 sentences, then ask "What happened?" or "Why did the character...?"
+2. INFERENCE — "Sam grabbed his umbrella before leaving. What can you guess about the weather?"
+3. VOCABULARY IN CONTEXT — "The cave was enormous. That means it was very ___" (big/small/dark)
+4. BEST WORD — "Which word best completes: The explorer felt ___ when she found the treasure." (excited/purple/loud)
+5. CAUSE AND EFFECT — "The plant didn't get water for a week. What probably happened?"
+6. MAIN IDEA — After a short passage: "What is this mostly about?"
 
 VARIETY RULE: Track which question types you have used in this conversation. Pick the LEAST recently used type for the current level. The child should feel like discovering different gems in the mine, not hitting the same rock repeatedly.
+For Levels 1-2: Focus on word ID, rhyming, word building (simpler, more concrete).
+For Levels 3-4: Mix in sentence completion, odd-one-out, sound ID (more analytical).
+For Levels 5-6: Add harder versions of all types.
+For Levels 7-8: Multi-syllable words, prefixes/suffixes, word building.
+For Levels 9-10: Comprehension passages, inference, vocabulary in context.
 
 STIMULUS FIELD:
 - When the question asks "What word is this?" or presents a word to read, set "stimulus" to the target word (e.g., "stimulus": "stop")
@@ -759,7 +854,7 @@ ITERATIVE PROGRESSION:
 - If a skill was previously mastered but missed now → mark 'emerging' in finding (regression)
 
 ADAPTIVE BEHAVIOR:
-- On start_quest: begin at the level suggested by recent evaluation data or skill snapshot, or Level 2 if no data
+- On start_quest: begin at the STARTING LEVEL if specified above, otherwise the level suggested by recent evaluation data or skill snapshot, or Level 2 if no data
 - After correct answer at current level: stay at level, vary the skill within the level
 - After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up
 - After LEVEL_DOWN (2 wrong in a row): drop to easier skills at the lower level

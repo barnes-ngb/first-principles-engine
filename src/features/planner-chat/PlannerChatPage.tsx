@@ -15,7 +15,7 @@ import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
+import { addDoc, doc, getDoc, getDocs, limit as fsLimit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { useNavigate } from 'react-router-dom'
 import ChildSelector from '../../components/ChildSelector'
@@ -27,6 +27,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   daysCollection,
+  evaluationSessionsCollection,
   lessonCardsCollection,
   plannerConversationDocId,
   plannerConversationsCollection,
@@ -200,6 +201,7 @@ export default function PlannerChatPage() {
   const navigate = useNavigate()
   const weekRange = useMemo(() => getWeekRange(new Date()), [])
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const autoSuggestTriggered = useRef(false)
 
   // State
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -365,6 +367,29 @@ export default function PlannerChatPage() {
       }
     })
     return unsubscribe
+  }, [familyId, activeChildId])
+
+  // Check for recent evaluation sessions (for nudge suppression)
+  const [recentEvalDate, setRecentEvalDate] = useState<string | null>(null)
+  useEffect(() => {
+    if (!activeChildId) {
+      setRecentEvalDate(null)
+      return
+    }
+    const q = query(
+      evaluationSessionsCollection(familyId),
+      where('childId', '==', activeChildId),
+      orderBy('evaluatedAt', 'desc'),
+      fsLimit(1),
+    )
+    void getDocs(q).then((snap) => {
+      if (!snap.empty) {
+        const latest = snap.docs[0].data()
+        setRecentEvalDate(latest.evaluatedAt)
+      } else {
+        setRecentEvalDate(null)
+      }
+    })
   }, [familyId, activeChildId])
 
   // Load recent mastery states from last 2 weeks of day logs for active child
@@ -556,6 +581,25 @@ export default function PlannerChatPage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // Auto-suggest weekly focus: skip regeneration if focus was generated this week
+  useEffect(() => {
+    if (!weekPlan || !activeChildId || setupComplete) return
+    if (autoSuggestTriggered.current) return
+
+    const isEmpty = !weekPlan.theme && !weekPlan.virtue && !weekPlan.scriptureRef && !weekPlan.heartQuestion
+    const focusAge = weekPlan.focusGeneratedAt
+      ? Date.now() - new Date(weekPlan.focusGeneratedAt).getTime()
+      : Infinity
+    const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
+    const isStale = focusAge > SEVEN_DAYS
+
+    // If focus already exists and is fresh, no auto-trigger needed — wizard will reuse it
+    if (!isEmpty && !isStale) {
+      autoSuggestTriggered.current = true
+      return
+    }
+  }, [weekPlan, activeChildId, setupComplete])
+
   // Persist conversation
   const persistConversation = useCallback(
     async (updates: Partial<PlannerConversation>) => {
@@ -659,6 +703,8 @@ export default function PlannerChatPage() {
   const handleScanAccept = useCallback(() => {
     if (!scanRecord?.results) return
     const r = scanRecord.results
+    // Only worksheet/workbook scans can become photo labels — skip certificates
+    if (r.pageType === 'certificate') return
     // Map scan subject to SubjectBucket
     const subjectMap: Record<string, SubjectBucket> = {
       math: SubjectBucket.Math,
@@ -1216,9 +1262,19 @@ Return as JSON:
     }
   }, [])
 
-  const handleGenerateWeek = useCallback(async (kickoffText?: string) => {
+  const handleGenerateWeek = useCallback(async (kickoffText?: string, forceRefreshFocus?: boolean) => {
     if (!activeChildId || !weekPlan) return
     setGeneratingWeek(true)
+
+    // Check if weekly focus (theme/virtue/scripture) is still fresh
+    const hasFocus = !!(weekPlan.theme && weekPlan.virtue && weekPlan.scriptureRef)
+    const focusAge = weekPlan.focusGeneratedAt
+      ? Date.now() - new Date(weekPlan.focusGeneratedAt).getTime()
+      : Infinity
+    const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
+    const focusIsFresh = hasFocus && focusAge < SEVEN_DAYS
+    const skipFocusGeneration = focusIsFresh && !forceRefreshFocus
+
     try {
       const assignments = photoLabelsToAssignments(photoLabels)
       const userMsg: ChatMessage = {
@@ -1234,13 +1290,15 @@ Return as JSON:
 
       if (isEnabled(AIFeatureFlag.AiPlanning)) {
         const prompt = buildPlannerPrompt(inputs)
+        const focusInstruction = skipFocusGeneration
+          ? `Reuse this existing weekly focus (do NOT regenerate theme fields):\ntheme: ${weekPlan.theme}\nvirtue: ${weekPlan.virtue}\nscriptureRef: ${weekPlan.scriptureRef}\nheartQuestion: ${weekPlan.heartQuestion}\nGenerate ONLY the daily plan schedule (days[].items[]).`
+          : 'Return one JSON payload that includes BOTH weekly themed content and the complete daily plan.\nInclude fields: theme, virtue, scriptureRef, scriptureText, heartQuestion, formationPrompt, conundrum, weekSkipSummary, days[].items[].'
         const fullPrompt = [
           prompt,
           masteryPromptContext,
           `Weekly focus context:\n${buildWeekFocusContext()}`,
           `Daily routine context:\n${dailyRoutine}`,
-          'Return one JSON payload that includes BOTH weekly themed content and the complete daily plan.',
-          'Include fields: theme, virtue, scriptureRef, scriptureText, heartQuestion, formationPrompt, conundrum, weekSkipSummary, days[].items[].',
+          focusInstruction,
           readAloudBook && readAloudChapters
             ? `Read-aloud: ${readAloudBook} (${readAloudChapters}). Generate ONE chapterQuestion per school day for these SPECIFIC chapters in order. Do NOT start from Chapter 1 unless the parent specified it. The "chapter" field must use the actual chapter numbers from the entered range.`
             : '',
@@ -1256,11 +1314,14 @@ Return as JSON:
         if (aiDraft) {
           draft = aiDraft
           usedAI = true
-          const themedFields = response ? parsePlanThemeFields(response.message) : null
-          if (themedFields) {
-            const nextWeekPlan = { ...weekPlan, ...themedFields }
-            setWeekPlan(nextWeekPlan)
-            await setDoc(weekPlanRef, themedFields, { merge: true })
+          if (!skipFocusGeneration) {
+            const themedFields = response ? parsePlanThemeFields(response.message) : null
+            if (themedFields) {
+              const withTimestamp = { ...themedFields, focusGeneratedAt: new Date().toISOString() }
+              const nextWeekPlan = { ...weekPlan, ...withTimestamp }
+              setWeekPlan(nextWeekPlan)
+              await setDoc(weekPlanRef, withTimestamp, { merge: true })
+            }
           }
         } else {
           draft = generateDraftPlanFromInputs(inputs)
@@ -1351,7 +1412,7 @@ ${weekNotes ? `\nNotes: ${weekNotes}` : ''}
 
 Generate a plan for Monday through Friday.`.trim()
 
-    await handleGenerateWeek(contextMessage)
+    await handleGenerateWeek(contextMessage, true)
   }, [weekEnergy, hoursPerDay, workbookConfigs, readAloudBook, readAloudChapters, weekNotes, activeChild, dailyRoutine, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek])
 
   // Toggle plan item
@@ -1789,6 +1850,7 @@ ${dayPrompts}`
     setPhotoLabels([])
     setAdjustments([])
     setSetupComplete(false)
+    autoSuggestTriggered.current = false
     setWeekEnergy('full')
     setWeekNotes('')
 
@@ -1892,6 +1954,16 @@ ${dayPrompts}`
             currentDraft={currentDraft}
             masteryReviewLine={masteryReviewLine}
           />
+
+          {phase === 'setup' && (!snapshot || snapshot.prioritySkills.length === 0) && (() => {
+            const hasRecentEval = recentEvalDate &&
+              (Date.now() - new Date(recentEvalDate).getTime()) < 7 * 24 * 60 * 60 * 1000
+            return !hasRecentEval ? (
+              <Alert severity="info" sx={{ mb: 1 }}>
+                No skill snapshot yet for {activeChild?.name ?? 'this child'}. Run a Knowledge Mine evaluation first for better plan personalization.
+              </Alert>
+            ) : null
+          })()}
 
           {phase === 'setup' && (
             <PlannerSetupWizard

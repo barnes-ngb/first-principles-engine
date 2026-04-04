@@ -44,10 +44,10 @@ describe('computeNextState', () => {
       expect(next.levelDownsInARow).toBe(0)
     })
 
-    it('does not level up past 6', () => {
-      const state = makeState({ currentLevel: 6, consecutiveCorrect: 2 })
+    it('does not level up past 10', () => {
+      const state = makeState({ currentLevel: 10, consecutiveCorrect: 2 })
       const next = computeNextState(state, true)
-      expect(next.currentLevel).toBe(6)
+      expect(next.currentLevel).toBe(10)
       expect(next.consecutiveCorrect).toBe(3) // streak not reset since no level-up
     })
   })

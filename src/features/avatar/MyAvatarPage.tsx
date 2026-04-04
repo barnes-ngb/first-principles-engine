@@ -50,6 +50,11 @@ import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import ArmorVerseCard from './ArmorVerseCard'
 import { speakVerse } from './speakVerse'
+import { forgeArmorPiece } from '../../core/xp/forgeArmorPiece'
+import { getForgeCost } from '../../core/xp/forgeCosts'
+import XpDiamondBar from '../../components/XpDiamondBar'
+import PortalTransition from './PortalTransition'
+import { getNextTierKey } from './tierBiomes'
 import ArmorPieceGallery from './ArmorPieceGallery'
 import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
@@ -140,6 +145,7 @@ export default function MyAvatarPage() {
 
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
+  const [portalTransition, setPortalTransition] = useState<{ from: string; to: string } | null>(null)
   const [ceremonyActive, setCeremonyActive] = useState(false)
   const [ceremonyTier, setCeremonyTier] = useState<string | null>(null)
 
@@ -545,6 +551,37 @@ export default function MyAvatarPage() {
     })
   }, [familyId, childId, today])
 
+  // ── Forge a piece (spend diamonds) ─────────────────────────────
+  const handleForgePiece = useCallback(
+    async (voxelPieceId: VoxelArmorPieceId, verseResponse?: string, verseResponseAudio?: string) => {
+      if (!profile || !familyId || !childId) return
+      const tier = (profile.currentTier ?? 'wood') as string
+      const activeTier = tier === 'stone' ? 'wood' : tier
+      const result = await forgeArmorPiece(familyId, childId, activeTier, voxelPieceId, verseResponse, verseResponseAudio)
+      if (result.success) {
+        setSelectedPiece(null)
+
+        // Check if this completed the tier (all 6 forged) and next tier is unlocked
+        // We need to simulate the updated forgedPieces since profile hasn't refreshed yet
+        const updatedForged = { ...(profile.forgedPieces ?? {}) }
+        if (!updatedForged[activeTier]) updatedForged[activeTier] = {}
+        updatedForged[activeTier] = { ...updatedForged[activeTier], [voxelPieceId]: { forgedAt: new Date().toISOString() } }
+        const forgedCount = Object.keys(updatedForged[activeTier] ?? {}).length
+
+        if (forgedCount >= 6) {
+          const nextTier = getNextTierKey(activeTier)
+          if (nextTier && (profile.unlockedTiers ?? []).includes(nextTier)) {
+            // Delay portal to let forge animation play
+            setTimeout(() => setPortalTransition({ from: activeTier, to: nextTier }), 1500)
+          }
+        }
+      } else {
+        console.warn(`[Forge] Failed: ${result.error}`)
+      }
+    },
+    [profile, familyId, childId],
+  )
+
   // ── Apply a piece (equip) ───────────────────────────────────────
   const handleApplyPiece = useCallback(
     async (voxelPieceId: VoxelArmorPieceId) => {
@@ -925,6 +962,14 @@ export default function MyAvatarPage() {
 
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3, maxWidth: '100vw', overflowX: 'hidden', boxSizing: 'border-box' }}>
+      {/* ── Portal Transition Overlay ────────────────────────── */}
+      {portalTransition && (
+        <PortalTransition
+          fromTier={portalTransition.from}
+          toTier={portalTransition.to}
+          onComplete={() => setPortalTransition(null)}
+        />
+      )}
       <Page>
         {/* ── Child Switcher + XP/Tier Header ────── */}
         <Box sx={{ textAlign: 'center', pt: 1.5, pb: 0.5 }}>
@@ -1032,6 +1077,13 @@ export default function MyAvatarPage() {
           }}
         />
 
+        {/* ── XP + Diamond HUD ────────────────────────────────── */}
+        {familyId && childId && (
+          <Box sx={{ mx: 2, mb: 1 }}>
+            <XpDiamondBar familyId={familyId} childId={childId} />
+          </Box>
+        )}
+
         {/* ── Morning reset + Armor status + Suit Up ────────────── */}
         <ArmorSuitUpPanel
           profile={profile}
@@ -1070,10 +1122,13 @@ export default function MyAvatarPage() {
             piece={selectedPiece}
             isUnlocked={profile.totalXp >= XP_THRESHOLDS[selectedPiece.id]}
             isEquipped={appliedVoxel.includes(selectedPiece.id)}
+            isForged={Boolean(profile.forgedPieces?.[(profile.currentTier === 'stone' ? 'wood' : profile.currentTier ?? 'wood') as string]?.[selectedPiece.id])}
+            forgeCost={getForgeCost((profile.currentTier === 'stone' ? 'wood' : profile.currentTier ?? 'wood') as string, selectedPiece.id)}
             isLincoln={isLincoln}
             accentColor={accentColor}
             textColor={textColor}
             onEquip={() => void handleApplyPiece(selectedPiece.id)}
+            onForge={(verseResponse, verseResponseAudio) => void handleForgePiece(selectedPiece.id, verseResponse, verseResponseAudio)}
             onClose={() => setSelectedPiece(null)}
           />
         )}

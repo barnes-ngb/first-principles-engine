@@ -16,7 +16,7 @@ function buildScanSystemPrompt(
 ): string {
   const childLine = `Student: ${childName}${childGrade ? `, grade ${childGrade}` : ""}`;
 
-  return `You are analyzing a photo of a workbook or worksheet page for a homeschool student.
+  return `You are analyzing a photo of a workbook page, worksheet, certificate, or progress document for a homeschool student.
 
 ${childLine}
 
@@ -42,10 +42,35 @@ Analyze this page and respond ONLY with valid JSON (no markdown fences, no comme
   "teacherNotes": "string — tips for the parent on how to present this page"
 }
 
+CERTIFICATE / PROGRESS DOCUMENT DETECTION:
+If the image is NOT a workbook page but IS a curriculum certificate, progress report, or completion document, respond with this alternative JSON format:
+
+{
+  "pageType": "certificate",
+  "curriculum": "reading-eggs|gatb|other",
+  "curriculumName": "string — full name (e.g., 'Reading Eggs', 'The Good and the Beautiful Language Arts Level 1')",
+  "level": "string — level designation (e.g., 'Level 4', 'Level 1')",
+  "milestone": "string — what was achieved (e.g., 'Map 13 complete — 100% Gold')",
+  "lessonRange": "string — lesson numbers if visible (e.g., 'Lessons 121-130')",
+  "skillsCovered": [
+    "string — each skill or phonics pattern visible on the certificate"
+  ],
+  "wordsRead": ["string — any specific words listed"],
+  "date": "string — date on the certificate if visible (e.g., '2026-03-11'), or empty string if not visible",
+  "childName": "string — child name on the certificate, or empty string if not visible",
+  "suggestedSnapshotUpdate": {
+    "masteredSkills": ["string — skills to mark as mastered based on this certificate"],
+    "recommendedStartLevel": number | null,
+    "notes": "string — what this means for the child's current level"
+  }
+}
+
+Look for indicators like: award logos, "is awarded to", "for achieving", level/map/lesson numbers, skills lists, completion dates, curriculum branding (Reading Eggs mascot, GATB nature imagery).
+
 RULES:
 - Be specific about skills. Don't say "math" — say "two-digit addition with regrouping" or "consonant blends: bl, cl, fl."
 - Compare against the student's skill snapshot to determine if this is review, at-level, or advancement work.
-- If the image is blurry, upside-down, or not a workbook page, set pageType to "other" and explain in recommendationReason.
+- If the image is blurry, upside-down, or not a workbook page or certificate, set pageType to "other" and explain in recommendationReason.
 - For neurodivergent learners, note if the page has too many problems, dense text, or other potential barriers in teacherNotes.`;
 }
 
@@ -109,11 +134,11 @@ export const handleScan = async (
   const result = await callClaudeWithVision({
     apiKey,
     model,
-    maxTokens: 1024,
+    maxTokens: 1536,
     systemPrompt,
     imageBase64,
     mediaType,
-    textPrompt: "Analyze this workbook page. Identify the skills it targets and compare against the student's current skill levels to make a recommendation.",
+    textPrompt: "Analyze this image. It may be a workbook page, certificate, or progress document. Identify the skills it targets or certifies and compare against the student's current skill levels.",
   });
 
   console.log(

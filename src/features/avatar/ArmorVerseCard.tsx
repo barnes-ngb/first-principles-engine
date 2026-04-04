@@ -1,7 +1,11 @@
+import { useCallback, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
 import Typography from '@mui/material/Typography'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
+import MicIcon from '@mui/icons-material/Mic'
+import StopIcon from '@mui/icons-material/Stop'
 
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import { speakVerse } from './speakVerse'
@@ -12,25 +16,79 @@ interface ArmorVerseCardProps {
   piece: ArmorPieceMeta
   isUnlocked: boolean
   isEquipped: boolean
+  isForged: boolean
+  forgeCost: number
   isLincoln: boolean
   accentColor: string
   textColor: string
   onEquip: () => void
+  onForge: (verseResponse?: string, verseResponseAudio?: string) => void
   onClose: () => void
 }
+
+const VERSE_RESPONSE_CHIPS = [
+  'It protects me',
+  'It gives me strength',
+  'God made it for me',
+  'To fight evil',
+  'To be brave',
+]
 
 // ── Component ──────────────────────────────────────────────────────
 
 export default function ArmorVerseCard({
   piece,
   isUnlocked,
+  isForged,
+  forgeCost,
   isLincoln,
   accentColor,
   textColor,
   onEquip,
+  onForge,
   onClose,
 }: ArmorVerseCardProps) {
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
+
+  // Forge response state
+  const [chipResponse, setChipResponse] = useState<string | null>(null)
+  const [isRecording, setIsRecording] = useState(false)
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [forging, setForging] = useState(false)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      const chunks: Blob[] = []
+      recorder.ondataavailable = (e) => chunks.push(e.data)
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' })
+        setAudioBlob(blob)
+        setAudioUrl(URL.createObjectURL(blob))
+        stream.getTracks().forEach((t) => t.stop())
+      }
+      recorder.start()
+      recorderRef.current = recorder
+      setIsRecording(true)
+    } catch (err) {
+      console.error('Mic access failed:', err)
+    }
+  }, [])
+
+  const stopRecording = useCallback(() => {
+    recorderRef.current?.stop()
+    setIsRecording(false)
+  }, [])
+
+  const handleForge = useCallback(async () => {
+    setForging(true)
+    // Pass response text (from chip or audio presence)
+    const response = chipResponse ?? (audioBlob ? '(audio response)' : undefined)
+    onForge(response, audioUrl ?? undefined)
+  }, [chipResponse, audioBlob, audioUrl, onForge])
 
   return (
     <Box
@@ -88,7 +146,7 @@ export default function ArmorVerseCard({
             '&:hover': { color: isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)' },
           }}
         >
-          ✕
+          {'\u2715'}
         </Box>
       </Box>
 
@@ -137,8 +195,89 @@ export default function ArmorVerseCard({
         </Typography>
       </Box>
 
-      {/* Equip button — only for unlocked pieces */}
-      {isUnlocked && (
+      {/* Forge flow — for unlocked but unforged pieces */}
+      {isUnlocked && !isForged && (
+        <Box sx={{ mt: 2 }}>
+          {/* Verse response prompt */}
+          <Typography sx={{
+            fontFamily: titleFont,
+            fontSize: isLincoln ? '12px' : '14px',
+            color: isLincoln ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
+            mb: 1.5,
+            textAlign: 'center',
+          }}>
+            Why does a warrior need the {piece.shortName.toLowerCase()}?
+          </Typography>
+
+          {/* Response chips */}
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, justifyContent: 'center', mb: 1.5 }}>
+            {VERSE_RESPONSE_CHIPS.map((chip) => (
+              <Chip
+                key={chip}
+                label={chip}
+                onClick={() => setChipResponse(chipResponse === chip ? null : chip)}
+                color={chipResponse === chip ? 'primary' : 'default'}
+                variant={chipResponse === chip ? 'filled' : 'outlined'}
+                sx={{
+                  fontFamily: titleFont,
+                  fontSize: isLincoln ? '10px' : '12px',
+                }}
+              />
+            ))}
+          </Box>
+
+          {/* Voice record button */}
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={isRecording ? stopRecording : startRecording}
+              color={isRecording ? 'error' : 'primary'}
+              startIcon={isRecording ? <StopIcon /> : <MicIcon />}
+              sx={{
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '10px' : '12px',
+                textTransform: 'none',
+              }}
+            >
+              {isRecording ? 'Stop' : 'Record answer'}
+            </Button>
+          </Box>
+
+          {audioUrl && (
+            <Box sx={{ mb: 1.5 }}>
+              <audio src={audioUrl} controls style={{ width: '100%', height: 36 }} />
+            </Box>
+          )}
+
+          {/* Forge button */}
+          <Button
+            variant="contained"
+            fullWidth
+            onClick={handleForge}
+            disabled={forging}
+            sx={{
+              bgcolor: '#00BCD4',
+              color: '#fff',
+              fontFamily: titleFont,
+              fontSize: isLincoln ? '12px' : '16px',
+              fontWeight: 700,
+              py: 1.5,
+              minHeight: '48px',
+              borderRadius: isLincoln ? '4px' : '12px',
+              textTransform: 'none',
+              boxShadow: '0 2px 10px rgba(0,188,212,0.3)',
+              '&:hover': { bgcolor: '#00ACC1' },
+              '&:disabled': { opacity: 0.7 },
+            }}
+          >
+            {forging ? 'Forging...' : `\u25C6 ${forgeCost} Forge it!`}
+          </Button>
+        </Box>
+      )}
+
+      {/* Equip button — only for forged pieces */}
+      {isUnlocked && isForged && (
         <Button
           variant="contained"
           fullWidth

@@ -7,15 +7,22 @@ import Typography from '@mui/material/Typography'
 import SectionCard from '../../components/SectionCard'
 import type { ChecklistItem, DayLog } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
+import { addXpEvent } from '../../core/xp/addXpEvent'
 
 interface KidExtraLoggerProps {
   dayLog: DayLog
   persistDayLogImmediate: (updated: DayLog) => void
+  familyId: string
+  childId: string
+  today: string
 }
 
 export default function KidExtraLogger({
   dayLog,
   persistDayLogImmediate,
+  familyId,
+  childId,
+  today,
 }: KidExtraLoggerProps) {
   const [showExtraLog, setShowExtraLog] = useState(false)
   const [extraActivity, setExtraActivity] = useState<{ label: string; subject: string } | null>(null)
@@ -51,6 +58,22 @@ export default function KidExtraLogger({
       const updatedChecklist = [...(dayLog.checklist ?? []), newItem]
       persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
 
+      // Award 5 XP for extra activity
+      const dedupBase = `extra_${extraActivity.label}_${today}`
+      if (familyId && childId) {
+        void addXpEvent(
+          familyId, childId, 'MANUAL_AWARD', 5, `${dedupBase}-xp`,
+          { reason: extraActivity.label },
+        ).catch((err) => console.error('[XP] Extra activity award failed:', err))
+
+        // Award 2 diamonds for extra activity
+        void addXpEvent(
+          familyId, childId, 'MANUAL_AWARD', 2, `${dedupBase}-diamond`,
+          { reason: extraActivity.label },
+          { currencyType: 'diamond', category: 'earn' },
+        ).catch((err) => console.error('[Diamond] Extra activity award failed:', err))
+      }
+
       setShowExtraLog(false)
       setExtraActivity(null)
       setExtraMinutes(null)
@@ -58,7 +81,7 @@ export default function KidExtraLogger({
       console.error('Extra activity save failed:', err)
     }
     setSavingExtra(false)
-  }, [extraActivity, extraMinutes, dayLog, persistDayLogImmediate])
+  }, [extraActivity, extraMinutes, dayLog, persistDayLogImmediate, familyId, childId, today])
 
   return (
     <SectionCard title="⛏️ I Did More Mining!">

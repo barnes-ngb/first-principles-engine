@@ -24,7 +24,7 @@ export const VALIDATION_RETRIES = 2 // retry AI calls when question validation f
 // ── Quest adaptive state ──────────────────────────────────────
 
 export interface QuestState {
-  currentLevel: number // difficulty tier (1-6 for reading)
+  currentLevel: number // difficulty tier (1-10 for reading)
   consecutiveCorrect: number
   consecutiveWrong: number
   levelDownsInARow: number // 2 in a row = frustration → end session

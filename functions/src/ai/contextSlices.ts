@@ -11,6 +11,7 @@ import {
   loadWordMasterySummary,
 } from "./chat.js";
 import { loadRecentEvalContext } from "./chatTypes.js";
+import { getGatbProgress } from "./data/gatbCurriculum.js";
 
 // ── Slice definitions ───────────────────────────────────────────
 
@@ -45,7 +46,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   chat: ["charter", "childProfile"],
   generate: ["charter", "childProfile"],
   evaluate: ["charter", "childProfile", "sightWords", "wordMastery"],
-  quest: ["childProfile", "sightWords", "recentEval", "wordMastery", "skillSnapshot"],
+  quest: ["childProfile", "sightWords", "recentEval", "wordMastery", "skillSnapshot", "workbookPaces"],
   generateStory: ["childProfile", "sightWords", "wordMastery"],
   analyzePatterns: ["childProfile"],
   workshop: ["charter", "childProfile", "workshopGames"],
@@ -54,7 +55,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   scan: ["childProfile", "recentEval"],
   shellyChat: [
     "charter", "childProfile", "engagement", "gradeResults",
-    "recentEval", "sightWords", "weekFocus", "wordMastery",
+    "recentEval", "sightWords", "weekFocus", "wordMastery", "workbookPaces",
   ],
 };
 
@@ -377,13 +378,43 @@ export async function buildContextForTask(
 
   // Workbook paces
   if (sliceData.has("workbookPaces")) {
-    const paces = sliceData.get("workbookPaces") as Array<{ name: string; unitLabel: string; currentPosition: number; totalUnits: number; unitsPerDayNeeded: number; targetFinishDate: string; status: string }>;
+    const paces = sliceData.get("workbookPaces") as Array<{ name: string; unitLabel: string; currentPosition: number; totalUnits: number; unitsPerDayNeeded: number; targetFinishDate: string; status: string; curriculum?: { provider: string; level?: string; lastMilestone?: string; milestoneDate?: string; completed?: boolean; masteredSkills?: string[]; activeSkills?: string[] } }>;
     const lines = ["WORKBOOK PACE:"];
     if (paces.length === 0) {
       lines.push("No workbook data available.");
     } else {
       for (const w of paces) {
         lines.push(`- ${w.name} — ${w.unitLabel} ${w.currentPosition} of ${w.totalUnits}, ${w.unitsPerDayNeeded} ${w.unitLabel}s/day needed to finish by ${w.targetFinishDate}. Status: ${w.status}`);
+        if (w.curriculum) {
+          const c = w.curriculum;
+          if (c.completed) {
+            lines.push(`  ✅ COMPLETED — ${c.provider} ${c.level || ""} (${c.milestoneDate || "date unknown"})`);
+          } else if (c.lastMilestone) {
+            lines.push(`  📍 ${c.provider} ${c.level || ""} — ${c.lastMilestone} (${c.milestoneDate || "date unknown"})`);
+          }
+          if (c.masteredSkills?.length) {
+            lines.push(`  Mastered: ${c.masteredSkills.join(", ")}`);
+          }
+          if (c.activeSkills?.length) {
+            lines.push(`  Currently working on: ${c.activeSkills.join(", ")}`);
+          }
+        }
+        // Enrich GATB workbooks with scope-and-sequence data
+        if (w.name.match(/good.*beautiful|gatb/i) && w.currentPosition) {
+          const subjectKey = (w as { subjectBucket?: string }).subjectBucket === "Math" ? "math" : "la";
+          const levelMatch = (w as { curriculum?: { level?: string } }).curriculum?.level?.match(/\d+/);
+          const levelKey = levelMatch ? levelMatch[0] : "k";
+          const key = `gatb-${subjectKey}-${levelKey}`.toLowerCase();
+          const progress = getGatbProgress(key, w.currentPosition);
+          if (progress) {
+            lines.push(`  Covered skills: ${progress.coveredSkills.join(", ")}`);
+            lines.push(`  Current unit: ${progress.currentUnit?.topic ?? "unknown"}`);
+            if (progress.upcomingUnits.length > 0) {
+              lines.push(`  Upcoming: ${progress.upcomingUnits.slice(0, 2).map(u => u.topic).join(", ")}`);
+            }
+            lines.push(`  Progress: ${progress.percentComplete}% complete`);
+          }
+        }
       }
     }
     sections.push(lines.join("\n"));

@@ -28,6 +28,7 @@ export interface WeekPlan {
   scriptureText?: string
   heartQuestion: string
   formationPrompt?: string
+  focusGeneratedAt?: string
   tracks: TrackType[]
   flywheelPlan: string
   buildLab: {
@@ -435,6 +436,24 @@ export interface LessonCard {
 
 // ── Workbook Config (Pace Gauge) ──────────────────────────────
 
+/** Curriculum-specific metadata for a workbook */
+export interface CurriculumMeta {
+  /** Curriculum provider: 'gatb' | 'reading-eggs' | 'other' */
+  provider: string
+  /** Provider's level designation (e.g., 'Level 1', 'Level 4') */
+  level?: string
+  /** Most recent milestone achieved (e.g., 'Map 13 complete', 'Lesson 47') */
+  lastMilestone?: string
+  /** Date of last milestone (YYYY-MM-DD) */
+  milestoneDate?: string
+  /** Whether the program is fully completed */
+  completed?: boolean
+  /** Skills confirmed mastered by this curriculum */
+  masteredSkills?: string[]
+  /** Skills currently being worked on */
+  activeSkills?: string[]
+}
+
 export interface WorkbookConfig {
   id?: string
   childId: string
@@ -453,6 +472,8 @@ export interface WorkbookConfig {
   schoolDaysPerWeek: number
   /** Default minutes per day for this workbook/subject (used by AI planner as baseline) */
   defaultMinutes?: number
+  /** Curriculum-specific metadata */
+  curriculum?: CurriculumMeta
   createdAt?: string
   updatedAt?: string
 }
@@ -553,7 +574,7 @@ export interface ScanSkillResult {
   alignsWithSnapshot: 'ahead' | 'at-level' | 'behind' | 'unknown'
 }
 
-export interface ScanResult {
+export interface WorksheetScanResult {
   pageType: 'worksheet' | 'textbook' | 'test' | 'activity' | 'other'
   subject: string
   specificTopic: string
@@ -563,6 +584,36 @@ export interface ScanResult {
   recommendationReason: string
   estimatedMinutes: number
   teacherNotes: string
+}
+
+export interface CertificateScanResult {
+  pageType: 'certificate'
+  curriculum: 'reading-eggs' | 'gatb' | 'other'
+  curriculumName: string
+  level: string
+  milestone: string
+  lessonRange: string
+  skillsCovered: string[]
+  wordsRead: string[]
+  date: string
+  childName: string
+  suggestedSnapshotUpdate: {
+    masteredSkills: string[]
+    recommendedStartLevel: number | null
+    notes: string
+  }
+}
+
+export type ScanResult = WorksheetScanResult | CertificateScanResult
+
+/** Type guard for certificate scan results */
+export function isCertificateScan(result: ScanResult): result is CertificateScanResult {
+  return result.pageType === 'certificate'
+}
+
+/** Type guard for worksheet scan results */
+export function isWorksheetScan(result: ScanResult): result is WorksheetScanResult {
+  return result.pageType !== 'certificate'
 }
 
 export interface ScanRecord {

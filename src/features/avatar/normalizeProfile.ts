@@ -33,6 +33,10 @@ export function normalizeAvatarProfile(raw: unknown): AvatarProfile {
     equippedPieces: Array.isArray(r.equippedPieces) ? r.equippedPieces : [],
     pieces: Array.isArray(r.pieces) ? r.pieces.map(normalizePiece) : [],
     unlockedPieces: Array.isArray(r.unlockedPieces) ? r.unlockedPieces : [],
+    unlockedTiers: Array.isArray(r.unlockedTiers) ? r.unlockedTiers : ['wood'],
+    forgedPieces: (r.forgedPieces && typeof r.forgedPieces === 'object' && !Array.isArray(r.forgedPieces))
+      ? r.forgedPieces as Record<string, Record<string, { forgedAt: string }>>
+      : undefined,
     customization: normalizeCustomization(r.customization),
     photoUrl: (r.photoUrl as string) || undefined,
     skinTextureUrl: (r.skinTextureUrl as string) || undefined,

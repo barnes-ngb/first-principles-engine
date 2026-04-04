@@ -393,6 +393,8 @@ export default function TodayPage() {
   const handleScanAddToPlan = useCallback(() => {
     if (!scanResult?.results || scanItemIndex == null || !dayLog?.checklist) return
     const r = scanResult.results
+    // Only worksheet/workbook scans can be added to plan — skip certificates
+    if (r.pageType === 'certificate') return
     const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
       i === scanItemIndex
         ? {
@@ -400,7 +402,7 @@ export default function TodayPage() {
             subjectBucket: (r.subject.charAt(0).toUpperCase() + r.subject.slice(1)) as SubjectBucket,
             estimatedMinutes: r.estimatedMinutes,
             plannedMinutes: r.estimatedMinutes,
-            skillTags: r.skillsTargeted.map((s) => s.skill),
+            skillTags: r.skillsTargeted.map((s: { skill: string }) => s.skill),
             skipGuidance: r.recommendation === 'skip' || r.recommendation === 'quick-review'
               ? `${r.recommendation}: ${r.recommendationReason}`
               : undefined,

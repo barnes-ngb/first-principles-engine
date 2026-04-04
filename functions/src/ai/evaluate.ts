@@ -5,6 +5,8 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { claudeApiKey } from "./aiConfig.js";
 import { CHARTER_PREAMBLE } from "./contextSlices.js";
 import { sanitizeAndParseJson } from "./sanitizeJson.js";
+import { callClaude, logAiUsage } from "./chatTypes.js";
+import { modelForTask } from "./chat.js";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -411,27 +413,23 @@ export async function generateReviewForChild(
     return emptyReview;
   }
 
-  const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  const client = new Anthropic({ apiKey });
-  const model = "claude-sonnet-4-6";
+  const model = modelForTask("weeklyReview");
 
   const userPrompt = buildEvaluationPrompt(ctx);
 
-  const completion = await client.messages.create({
+  const result = await callClaude({
+    apiKey,
     model,
-    max_tokens: 2048,
-    system: WEEKLY_REVIEW_SYSTEM_PROMPT,
+    maxTokens: 2048,
+    systemPrompt: WEEKLY_REVIEW_SYSTEM_PROMPT,
     messages: [{ role: "user", content: userPrompt }],
   });
 
-  const responseText =
-    completion.content[0].type === "text" ? completion.content[0].text : "";
-
-  const payload = parseReviewResponse(responseText);
+  const payload = parseReviewResponse(result.text);
 
   const usage = {
-    inputTokens: completion.usage.input_tokens,
-    outputTokens: completion.usage.output_tokens,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
   };
 
   // Store review in Firestore
@@ -461,13 +459,12 @@ export async function generateReviewForChild(
     .set(reviewData);
 
   // Log AI usage
-  await db.collection(`families/${familyId}/aiUsage`).add({
+  await logAiUsage(db, familyId, {
     childId: ctx.child.id,
-    taskType: "weekly-review",
+    taskType: "weeklyReview",
     model,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
-    createdAt: new Date().toISOString(),
   });
 
   return reviewData;
