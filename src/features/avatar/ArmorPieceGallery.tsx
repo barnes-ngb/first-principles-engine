@@ -7,13 +7,14 @@ import { VOXEL_TO_ARMOR_PIECE } from '../../core/types'
 import { getForgeCost } from '../../core/xp/forgeCosts'
 import { ArmorIcon } from './icons/ArmorIcons'
 import type { ArmorTierColor } from './icons/ArmorIcons'
-import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
+import { VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 
 interface ArmorPieceGalleryProps {
   profile: AvatarProfile
   appliedPieces: ArmorPiece[]
   selectedPiece: ArmorPieceMeta | null
+  activeForgeTier: string
   isLincoln: boolean
   accentColor: string
   textColor: string
@@ -25,6 +26,7 @@ export default function ArmorPieceGallery({
   profile,
   appliedPieces,
   selectedPiece,
+  activeForgeTier,
   isLincoln,
   accentColor,
   textColor,
@@ -54,18 +56,13 @@ export default function ArmorPieceGallery({
       }}
     >
       {VOXEL_ARMOR_PIECES.map((piece) => {
-        const isUnlocked = profile.totalXp >= XP_THRESHOLDS[piece.id]
         const armorPieceId = VOXEL_TO_ARMOR_PIECE[piece.id]
         const isApplied = armorPieceId ? appliedPieces.includes(armorPieceId) : false
         const isSelected = selectedPiece?.id === piece.id
-        const xpAway = XP_THRESHOLDS[piece.id] - profile.totalXp
-        const unlockProgress = isUnlocked ? 100 : Math.max(0, Math.min(100, (profile.totalXp / XP_THRESHOLDS[piece.id]) * 100))
 
-        // Forge state: check if piece is forged in current tier
-        const currentTier = (profile.currentTier ?? 'wood') as string
-        const activeTier = currentTier === 'stone' ? 'wood' : currentTier // normalize legacy
-        const isForged = Boolean(profile.forgedPieces?.[activeTier]?.[piece.id])
-        const forgeCost = getForgeCost(activeTier, piece.id)
+        // Forge state: all 6 pieces are available in the active forge tier
+        const isForged = Boolean(profile.forgedPieces?.[activeForgeTier]?.[piece.id])
+        const forgeCost = getForgeCost(activeForgeTier, piece.id)
 
         return (
           <Box
@@ -82,20 +79,16 @@ export default function ArmorPieceGallery({
                 ? `2px solid ${accentColor}`
                 : isSelected
                   ? `2px solid ${accentColor}88`
-                  : isUnlocked
-                    ? `1.5px solid ${isLincoln ? 'rgba(126,252,32,0.2)' : 'rgba(232,160,191,0.25)'}`
-                    : `1px solid ${isLincoln ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
+                  : `1.5px solid ${isLincoln ? 'rgba(126,252,32,0.2)' : 'rgba(232,160,191,0.25)'}`,
               background: isApplied
                 ? (isLincoln
                     ? 'linear-gradient(180deg, rgba(126,252,32,0.12) 0%, rgba(13,17,23,0.95) 100%)'
                     : 'linear-gradient(180deg, rgba(232,160,191,0.12) 0%, rgba(255,254,249,0.95) 100%)')
-                : isUnlocked
-                  ? (isLincoln
-                      ? 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)'
-                      : 'linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.005) 100%)')
-                  : 'transparent',
+                : (isLincoln
+                    ? 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)'
+                    : 'linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.005) 100%)'),
               cursor: 'pointer',
-              opacity: isUnlocked ? 1 : 0.45,
+              opacity: 1,
               transition: 'all 0.25s ease',
               textAlign: 'center',
               display: 'flex',
@@ -108,7 +101,7 @@ export default function ArmorPieceGallery({
                 ? `0 0 8px rgba(76,175,80,0.4), 0 4px 16px ${accentColor}22`
                 : isSelected
                   ? `0 0 12px ${accentColor}33`
-                  : (isUnlocked ? `0 2px 8px ${isLincoln ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.06)'}` : 'none'),
+                  : `0 2px 8px ${isLincoln ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.06)'}`,
               // Pulsing border when verse card is showing for this piece
               ...(isSelected ? {
                 animation: 'cardPulse 1.5s ease-in-out infinite',
@@ -153,7 +146,7 @@ export default function ArmorPieceGallery({
                 borderRadius: isLincoln ? '8px' : '50%',
                 background: isApplied
                   ? (isLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
-                  : (isUnlocked ? (isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)') : 'transparent'),
+                  : (isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'),
                 boxShadow: isApplied
                   ? `0 0 16px ${accentColor}33, inset 0 0 8px ${accentColor}11`
                   : 'none',
@@ -165,7 +158,7 @@ export default function ArmorPieceGallery({
                 pieceId={armorPieceId}
                 size={46}
                 tier={(profile.currentTier ?? 'stone') as ArmorTierColor}
-                locked={!isUnlocked}
+                locked={false}
               />
 
               {/* Equipped check overlay */}
@@ -184,19 +177,6 @@ export default function ArmorPieceGallery({
                 </Box>
               )}
 
-              {/* Lock overlay */}
-              {!isUnlocked && (
-                <Box sx={{
-                  position: 'absolute', bottom: -3, right: -3,
-                  width: 20, height: 20, borderRadius: '50%',
-                  bgcolor: isLincoln ? '#2a2a2a' : '#ddd',
-                  border: `2px solid ${bgColor}`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 10,
-                }}>
-                  🔒
-                </Box>
-              )}
             </Box>
 
             {/* Piece name */}
@@ -205,18 +185,14 @@ export default function ArmorPieceGallery({
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
                 fontSize: isLincoln ? '12px' : '14px',
                 fontWeight: 700,
-                color: isApplied
-                  ? accentColor
-                  : isUnlocked
-                    ? textColor
-                    : (isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)'),
+                color: isApplied ? accentColor : textColor,
                 lineHeight: 1.2,
               }}
             >
               {piece.shortName}
             </Typography>
 
-            {/* Status / XP progress / Forge cost */}
+            {/* Status / Forge cost */}
             {isApplied ? (
               <Typography
                 sx={{
@@ -238,7 +214,7 @@ export default function ArmorPieceGallery({
               >
                 Tap to equip
               </Typography>
-            ) : isUnlocked ? (
+            ) : (
               <Typography
                 sx={{
                   fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
@@ -249,37 +225,6 @@ export default function ArmorPieceGallery({
               >
                 {'\u25C6'} {forgeCost} Forge
               </Typography>
-            ) : (
-              <Box sx={{ width: '85%' }}>
-                <Box
-                  sx={{
-                    height: 6,
-                    borderRadius: '3px',
-                    bgcolor: isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <Box
-                    sx={{
-                      height: '100%',
-                      width: `${unlockProgress}%`,
-                      borderRadius: 'inherit',
-                      bgcolor: isLincoln ? 'rgba(126,252,32,0.35)' : 'rgba(232,160,191,0.4)',
-                      transition: 'width 0.5s ease',
-                    }}
-                  />
-                </Box>
-                <Typography
-                  sx={{
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '12px' : '12px',
-                    color: isLincoln ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
-                    mt: 0.5,
-                  }}
-                >
-                  {xpAway > 0 ? `${xpAway} XP` : `${XP_THRESHOLDS[piece.id]} XP`}
-                </Typography>
-              </Box>
             )}
           </Box>
         )

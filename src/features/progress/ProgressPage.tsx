@@ -40,20 +40,16 @@ export default function ProgressPage() {
           </Tabs>
         </Box>
       </Container>
+      <Container maxWidth="lg" sx={{ py: 2 }}>
+        <SectionCard title="Scan Certificate or Progress Report">
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Photograph a curriculum certificate or progress report to automatically update workbook progress.
+          </Typography>
+          <CertificateScanSection />
+        </SectionCard>
+      </Container>
       {tab === 0 && <DispositionProfile />}
-      {tab === 1 && (
-        <>
-          <SkillSnapshotPage />
-          <Container maxWidth="lg" sx={{ pb: 3 }}>
-            <SectionCard title="Scan Certificate or Progress Report">
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Photograph a curriculum certificate or progress report to automatically update workbook progress.
-              </Typography>
-              <CertificateScanSection />
-            </SectionCard>
-          </Container>
-        </>
-      )}
+      {tab === 1 && <SkillSnapshotPage />}
       {tab === 2 && <WordWall />}
     </>
   )
