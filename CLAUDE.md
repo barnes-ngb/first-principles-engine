@@ -285,4 +285,5 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 - **MyAvatarPage.tsx (1,293L)** — Decomposed from 1,862L. Remaining code is state management + ceremony flow. Stable.
 - **Ladder system** — Partially deprecated. Disposition system replacing it. 5 files have TODO comments marking ladder references for removal.
 - **evaluate.ts (weekly review)** — Now uses CHARTER_PREAMBLE + addendum, but still separate from the task system. Not in task registry.
+- **ShellyChatPage.tsx (1,456L)** — New feature, 23+ useState hooks. Image generation, thread management, follow-up suggestions, image refinement flow. Decomposition candidate after usage patterns stabilize.
 - **Hours partial-day edge** — If a day has some blocks with actualMinutes and others without, only tracked blocks count. By design but undocumented.
