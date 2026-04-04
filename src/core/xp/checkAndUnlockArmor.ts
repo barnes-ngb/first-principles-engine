@@ -12,6 +12,7 @@ import type {
 } from '../types'
 import { ARMOR_PIECE_TO_VOXEL } from '../types'
 import { XP_THRESHOLDS } from '../../features/avatar/voxel/buildArmorPiece'
+import { TIERS } from '../../features/avatar/voxel/tierMaterials'
 import { normalizeAvatarProfile } from '../../features/avatar/normalizeProfile'
 import { safeSetProfile } from '../../features/avatar/safeProfileWrite'
 
@@ -94,6 +95,8 @@ export interface ArmorUnlockResult {
   newlyUnlockedPieces: ArmorPiece[]
   /** Voxel piece IDs newly unlocked */
   newlyUnlockedVoxelPieces: VoxelArmorPieceId[]
+  /** Tiers newly unlocked by XP threshold */
+  newlyUnlockedTiers?: string[]
   /** Set if a full-set tier upgrade happened */
   tierUpgrade?: {
     from: ArmorTier | PlatformerTier
@@ -160,20 +163,46 @@ export async function checkAndUnlockArmor(
     }
   }
 
+  // ── Compute unlocked tiers from XP thresholds ──────────────────
+  const prevUnlockedTiers = profile.unlockedTiers ?? ['wood']
+  const unlockedTiers: string[] = []
+  for (const [tierKey, tierDef] of Object.entries(TIERS)) {
+    if (xp >= tierDef.minXp) {
+      unlockedTiers.push(tierKey.toLowerCase())
+    }
+  }
+  // Ensure wood is always unlocked
+  if (!unlockedTiers.includes('wood')) unlockedTiers.unshift('wood')
+
   // ── Compute unlocked voxel pieces from XP thresholds ──────────
+  // Legacy: still track unlockedPieces for backward compat
   const unlockedVoxelPieces: VoxelArmorPieceId[] = []
   const equippedPieces: string[] = profile.equippedPieces ?? []
   for (const [voxelId, threshold] of Object.entries(XP_THRESHOLDS)) {
     if (xp >= threshold) {
       unlockedVoxelPieces.push(voxelId as VoxelArmorPieceId)
-      // Auto-equip newly unlocked pieces
-      if (!equippedPieces.includes(voxelId)) {
+      // Auto-equip newly unlocked pieces (only if already forged or legacy)
+      const isForged = Boolean(profile.forgedPieces?.[profile.currentTier ?? 'wood']?.[voxelId])
+      const isLegacyUnlocked = (profile.unlockedPieces ?? []).includes(voxelId) && !profile.forgedPieces
+      if ((isForged || isLegacyUnlocked) && !equippedPieces.includes(voxelId)) {
         equippedPieces.push(voxelId)
       }
     }
   }
 
+  // ── Migrate existing unlocked pieces to forgedPieces if needed ─
+  let forgedPieces = profile.forgedPieces ?? {}
+  if (!profile.forgedPieces && (profile.unlockedPieces ?? []).length > 0) {
+    // Legacy migration: treat already-unlocked pieces as forged at wood tier
+    const woodForged: Record<string, { forgedAt: string }> = {}
+    for (const pieceId of profile.unlockedPieces ?? []) {
+      woodForged[pieceId] = { forgedAt: profile.updatedAt || new Date().toISOString() }
+    }
+    forgedPieces = { wood: woodForged }
+  }
+
   const newlyUnlockedVoxel = newlyUnlocked.map((id) => ARMOR_PIECE_TO_VOXEL[id])
+  const newlyUnlockedTiers = unlockedTiers.filter((t) => !prevUnlockedTiers.includes(t))
 
   // ── Save updated profile (no image generation needed!) ────────
   await safeSetProfile(profileRef, {
@@ -181,11 +210,14 @@ export async function checkAndUnlockArmor(
     pieces,
     totalXp: xp,
     unlockedPieces: unlockedVoxelPieces,
+    unlockedTiers,
+    forgedPieces,
     equippedPieces,
   } as unknown as Record<string, unknown>)
 
   return {
     newlyUnlockedPieces: newlyUnlocked,
     newlyUnlockedVoxelPieces: newlyUnlockedVoxel,
+    ...(newlyUnlockedTiers.length > 0 ? { newlyUnlockedTiers } : {}),
   }
 }

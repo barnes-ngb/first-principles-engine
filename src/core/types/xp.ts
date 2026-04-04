@@ -399,6 +399,13 @@ export interface OutfitCustomization {
   proportions?: CharacterProportions  // Custom character body proportions
 }
 
+/** Record of a single forged armor piece */
+export interface ForgedPieceEntry {
+  forgedAt: string  // ISO timestamp
+  verseResponse?: string  // Text response to verse prompt
+  verseResponseAudio?: string  // Audio URL of verse response
+}
+
 export interface AvatarProfile {
   childId: string
   themeStyle: 'minecraft' | 'platformer'
@@ -438,8 +445,20 @@ export interface AvatarProfile {
   /** @deprecated No longer used — armor is 3D geometry */
   croppedRegionUrls?: Partial<Record<ArmorPiece, string>>
 
-  /** Armor pieces unlocked by XP (voxel piece IDs) */
+  /** Armor pieces unlocked by XP (voxel piece IDs) — legacy, superseded by forgedPieces */
   unlockedPieces?: string[]
+
+  /**
+   * Tiers unlocked by XP threshold (e.g., ['wood', 'stone']).
+   * Unlocking a tier grants ACCESS to forge pieces in that material.
+   */
+  unlockedTiers?: string[]
+
+  /**
+   * Individually forged armor pieces. Outer key = tier, inner key = voxel piece ID.
+   * Each entry records when forged and optional verse response.
+   */
+  forgedPieces?: Record<string, Record<string, ForgedPieceEntry>>
 
   /** Date string (YYYY-MM-DD) when armor was last equipped — for daily reset */
   lastArmorEquipDate?: string

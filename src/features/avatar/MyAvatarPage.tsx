@@ -50,6 +50,8 @@ import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import ArmorVerseCard from './ArmorVerseCard'
 import { speakVerse } from './speakVerse'
+import { forgeArmorPiece } from '../../core/xp/forgeArmorPiece'
+import { getForgeCost } from '../../core/xp/forgeCosts'
 import ArmorPieceGallery from './ArmorPieceGallery'
 import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
@@ -544,6 +546,23 @@ export default function MyAvatarPage() {
       lastFullArmorDate: today,
     })
   }, [familyId, childId, today])
+
+  // ── Forge a piece (spend diamonds) ─────────────────────────────
+  const handleForgePiece = useCallback(
+    async (voxelPieceId: VoxelArmorPieceId, verseResponse?: string, verseResponseAudio?: string) => {
+      if (!profile || !familyId || !childId) return
+      const tier = (profile.currentTier ?? 'wood') as string
+      const activeTier = tier === 'stone' ? 'wood' : tier
+      const result = await forgeArmorPiece(familyId, childId, activeTier, voxelPieceId, verseResponse, verseResponseAudio)
+      if (result.success) {
+        // Refresh profile will happen via onSnapshot listener
+        setSelectedPiece(null)
+      } else {
+        console.warn(`[Forge] Failed: ${result.error}`)
+      }
+    },
+    [profile, familyId, childId],
+  )
 
   // ── Apply a piece (equip) ───────────────────────────────────────
   const handleApplyPiece = useCallback(
@@ -1070,10 +1089,13 @@ export default function MyAvatarPage() {
             piece={selectedPiece}
             isUnlocked={profile.totalXp >= XP_THRESHOLDS[selectedPiece.id]}
             isEquipped={appliedVoxel.includes(selectedPiece.id)}
+            isForged={Boolean(profile.forgedPieces?.[(profile.currentTier === 'stone' ? 'wood' : profile.currentTier ?? 'wood') as string]?.[selectedPiece.id])}
+            forgeCost={getForgeCost((profile.currentTier === 'stone' ? 'wood' : profile.currentTier ?? 'wood') as string, selectedPiece.id)}
             isLincoln={isLincoln}
             accentColor={accentColor}
             textColor={textColor}
             onEquip={() => void handleApplyPiece(selectedPiece.id)}
+            onForge={(verseResponse, verseResponseAudio) => void handleForgePiece(selectedPiece.id, verseResponse, verseResponseAudio)}
             onClose={() => setSelectedPiece(null)}
           />
         )}
