@@ -35,12 +35,12 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.evaluate).not.toContain("hoursProgress");
   });
 
-  it("quest does not include charter or enriched context", () => {
+  it("quest includes workbookPaces but not charter or enriched context", () => {
     expect(TASK_CONTEXT.quest).toContain("childProfile");
     expect(TASK_CONTEXT.quest).toContain("sightWords");
     expect(TASK_CONTEXT.quest).toContain("recentEval");
+    expect(TASK_CONTEXT.quest).toContain("workbookPaces");
     expect(TASK_CONTEXT.quest).not.toContain("charter");
-    expect(TASK_CONTEXT.quest).not.toContain("workbookPaces");
     expect(TASK_CONTEXT.quest).not.toContain("engagement");
   });
 });

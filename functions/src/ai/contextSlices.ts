@@ -45,7 +45,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   chat: ["charter", "childProfile"],
   generate: ["charter", "childProfile"],
   evaluate: ["charter", "childProfile", "sightWords", "wordMastery"],
-  quest: ["childProfile", "sightWords", "recentEval", "wordMastery", "skillSnapshot"],
+  quest: ["childProfile", "sightWords", "recentEval", "wordMastery", "skillSnapshot", "workbookPaces"],
   generateStory: ["childProfile", "sightWords", "wordMastery"],
   analyzePatterns: ["childProfile"],
   workshop: ["charter", "childProfile", "workshopGames"],
@@ -54,7 +54,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   scan: ["childProfile", "recentEval"],
   shellyChat: [
     "charter", "childProfile", "engagement", "gradeResults",
-    "recentEval", "sightWords", "weekFocus", "wordMastery",
+    "recentEval", "sightWords", "weekFocus", "wordMastery", "workbookPaces",
   ],
 };
 
@@ -377,13 +377,27 @@ export async function buildContextForTask(
 
   // Workbook paces
   if (sliceData.has("workbookPaces")) {
-    const paces = sliceData.get("workbookPaces") as Array<{ name: string; unitLabel: string; currentPosition: number; totalUnits: number; unitsPerDayNeeded: number; targetFinishDate: string; status: string }>;
+    const paces = sliceData.get("workbookPaces") as Array<{ name: string; unitLabel: string; currentPosition: number; totalUnits: number; unitsPerDayNeeded: number; targetFinishDate: string; status: string; curriculum?: { provider: string; level?: string; lastMilestone?: string; milestoneDate?: string; completed?: boolean; masteredSkills?: string[]; activeSkills?: string[] } }>;
     const lines = ["WORKBOOK PACE:"];
     if (paces.length === 0) {
       lines.push("No workbook data available.");
     } else {
       for (const w of paces) {
         lines.push(`- ${w.name} — ${w.unitLabel} ${w.currentPosition} of ${w.totalUnits}, ${w.unitsPerDayNeeded} ${w.unitLabel}s/day needed to finish by ${w.targetFinishDate}. Status: ${w.status}`);
+        if (w.curriculum) {
+          const c = w.curriculum;
+          if (c.completed) {
+            lines.push(`  ✅ COMPLETED — ${c.provider} ${c.level || ""} (${c.milestoneDate || "date unknown"})`);
+          } else if (c.lastMilestone) {
+            lines.push(`  📍 ${c.provider} ${c.level || ""} — ${c.lastMilestone} (${c.milestoneDate || "date unknown"})`);
+          }
+          if (c.masteredSkills?.length) {
+            lines.push(`  Mastered: ${c.masteredSkills.join(", ")}`);
+          }
+          if (c.activeSkills?.length) {
+            lines.push(`  Currently working on: ${c.activeSkills.join(", ")}`);
+          }
+        }
       }
     }
     sections.push(lines.join("\n"));
