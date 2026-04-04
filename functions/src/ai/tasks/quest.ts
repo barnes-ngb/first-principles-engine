@@ -42,7 +42,7 @@ export const handleQuest = async (
             masteredSkills?: string[];
           };
         };
-        if (config.subjectBucket !== "Reading") continue;
+        if (config.subjectBucket !== "Reading" && config.subjectBucket !== "LanguageArts") continue;
         if (!config.curriculum) continue;
 
         // Completed reading curriculum → start past basic phonics
