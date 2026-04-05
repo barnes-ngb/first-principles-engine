@@ -325,11 +325,12 @@ Progress
 - Workshop: story inputs + skill snapshot for challenge calibration + game structure constraints + adventure tree generation + card game generation + card fix suggestions
 - Pattern analysis: child profile + skill snapshot + eval findings + conceptual blocks
 - Engagement data compressed to summary format (reduces tokens ~60%)
-- Token usage logged per task type to aiUsage collection Firestore Collections (28 in firestore.ts) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, dadLabReports, books, sightWordProgress, xpLedger, dailyArmorSessions, stickerLibrary, storyGames, evaluations, scans, shellyChatThreads
+- Token usage logged per task type to aiUsage collection Firestore Collections (29 in firestore.ts) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, activityConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, dadLabReports, books, sightWordProgress, xpLedger, dailyArmorSessions, stickerLibrary, storyGames, evaluations, scans, shellyChatThreads
 
 * `avatarProfiles` — per-child avatar data (features, XP, tier, equipped pieces, customization, forgedPieces, unlockedTiers)
 * `xpLedger` — append-only XP/Diamond event history per child (currencyType: 'xp' | 'diamond', category, itemId fields)
 
+* `activityConfigs` — structured activity definitions per child (replaces routine text + workbook configs). Each doc has: name, type (formation/workbook/routine/activity/app/evaluation), subjectBucket, defaultMinutes, frequency (daily/3x/2x/1x/as-needed), sortOrder, scannable flag, optional curriculum/position tracking. Completed activities auto-filter from planner context. Scans update currentPosition. Migration auto-creates from existing workbookConfigs on first load.
 * `scans` — curriculum photo scan records
 * `shellyChatThreads` — Shelly's AI chat threads tagged with `chatContext` (`'lincoln'` | `'london'` | `'general'`) + messages subcollection. Messages may include `uploadedImageUrl` (Firebase Storage) and `imageAction` (`'analyze'` | `'transform'`).
 * `chapterResponses` — read-aloud chapter discussion responses per child. Stores full question context (book, chapter, question text, questionType), audio recording URL, week theme/virtue/scripture. Powers the Book Responses tab in Records and feeds into the disposition profile narrative.

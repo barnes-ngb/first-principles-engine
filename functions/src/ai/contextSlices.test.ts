@@ -20,6 +20,7 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.plan).toContain("bookStatus");
     expect(TASK_CONTEXT.plan).toContain("sightWords");
     expect(TASK_CONTEXT.plan).toContain("recentEval");
+    expect(TASK_CONTEXT.plan).toContain("activityConfigs");
   });
 
   it("chat only includes charter and childProfile", () => {

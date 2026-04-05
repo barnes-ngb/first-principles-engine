@@ -305,6 +305,34 @@ export const RoutineItemKey = {
 } as const
 export type RoutineItemKey = (typeof RoutineItemKey)[keyof typeof RoutineItemKey]
 
+export const ActivityType = {
+  Formation: 'formation',
+  Workbook: 'workbook',
+  Routine: 'routine',
+  Activity: 'activity',
+  App: 'app',
+  Evaluation: 'evaluation',
+} as const
+export type ActivityType = (typeof ActivityType)[keyof typeof ActivityType]
+
+export const ActivityFrequency = {
+  Daily: 'daily',
+  ThreePerWeek: '3x',
+  TwoPerWeek: '2x',
+  OnePerWeek: '1x',
+  AsNeeded: 'as-needed',
+} as const
+export type ActivityFrequency = (typeof ActivityFrequency)[keyof typeof ActivityFrequency]
+
+/** Human-readable label for each activity frequency. */
+export const ActivityFrequencyLabel: Record<ActivityFrequency, string> = {
+  [ActivityFrequency.Daily]: 'daily',
+  [ActivityFrequency.ThreePerWeek]: '3x/week',
+  [ActivityFrequency.TwoPerWeek]: '2x/week',
+  [ActivityFrequency.OnePerWeek]: '1x/week',
+  [ActivityFrequency.AsNeeded]: 'as needed',
+}
+
 export const StickerCategory = {
   Animals: 'animals',
   Minecraft: 'minecraft',
