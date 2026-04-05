@@ -25,6 +25,8 @@ interface DrawingChoiceDialogProps {
   onChoose: (choice: DrawingChoice, reimagineIntensity?: number) => void
   processing: boolean
   processingLabel?: string
+  /** Elapsed seconds while processing (for progress feedback) */
+  elapsedSeconds?: number
   /** Preview result from processing (cleanup/reimagine/sticker/scene) */
   resultPreviewUrl?: string | null
   onAcceptResult?: () => void
@@ -53,6 +55,7 @@ export default function DrawingChoiceDialog({
   onChoose,
   processing,
   processingLabel,
+  elapsedSeconds = 0,
   resultPreviewUrl,
   onAcceptResult,
   onRetryResult,
@@ -119,6 +122,12 @@ export default function DrawingChoiceDialog({
           <Stack alignItems="center" spacing={2} sx={{ py: 4 }}>
             <CircularProgress size={36} />
             <Typography>{processingLabel ?? 'Processing...'}</Typography>
+            {elapsedSeconds > 15 && (
+              <Typography variant="body2" color="text.secondary">
+                {elapsedSeconds}s
+                {elapsedSeconds > 90 ? ' — taking longer than usual...' : elapsedSeconds > 60 ? ' — almost there!' : ' — AI is creating your image'}
+              </Typography>
+            )}
           </Stack>
         </DialogContent>
       </Dialog>
