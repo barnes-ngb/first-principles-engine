@@ -1,4 +1,6 @@
 import type {
+  ActivityFrequency,
+  ActivityType,
   AdjustmentDecision,
   AssignmentAction,
   ChatMessageRole,
@@ -705,4 +707,52 @@ export interface WeeklyReview {
   reviewedAt?: string
   createdAt?: string
   updatedAt?: string
+}
+
+// ── Activity Configs (structured routine + workbook replacement) ──
+
+export interface ActivityConfig {
+  id: string
+  /** Activity display name (e.g., "Good and the Beautiful Reading") */
+  name: string
+  /** Activity category */
+  type: ActivityType
+  /** Subject for color-coding and grouping */
+  subjectBucket: SubjectBucket
+  /** Default duration in minutes */
+  defaultMinutes: number
+  /** How often this activity appears in a weekly plan */
+  frequency: ActivityFrequency
+  /** Which child, or 'both' for shared activities */
+  childId: string | 'both'
+  /** Explicit ordering (lower = earlier in day) */
+  sortOrder: number
+
+  // Workbook-specific fields (optional)
+  /** Curriculum provider (e.g., "GATB", "Explode the Code") */
+  curriculum?: string
+  /** Total lessons/chapters/units */
+  totalUnits?: number
+  /** Current position (lesson/page number) */
+  currentPosition?: number
+  /** Unit label: "lesson", "chapter", "unit" */
+  unitLabel?: string
+
+  // Completion tracking
+  /** Whether this program is finished */
+  completed: boolean
+  /** ISO date when marked complete */
+  completedDate?: string
+
+  // Scan/map connection
+  /** Whether Shelly can scan pages from this activity */
+  scannable: boolean
+  /** Curriculum map node IDs this feeds */
+  linkedCurriculumNodes?: string[]
+
+  // Metadata
+  /** Shelly's notes */
+  notes?: string
+  createdAt: string
+  updatedAt: string
 }

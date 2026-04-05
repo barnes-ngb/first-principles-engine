@@ -26,6 +26,8 @@ interface UseBookResult {
   book: Book | null
   loading: boolean
   saveState: SaveState
+  /** When saveState is 'error', contains the actual error message for debugging. */
+  saveErrorMessage: string | null
   updatePage: (pageId: string, changes: Partial<BookPage>) => void
   addPage: () => void
   deletePage: (pageId: string) => void
@@ -118,6 +120,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   const [book, setBook] = useState<Book | null>(null)
   const [loading, setLoading] = useState(!!familyId && !!bookId)
   const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null)
   const [usedAiGeneration, setUsedAiGeneration] = useState(false)
 
   // Session time tracking
@@ -171,6 +174,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     async (updated: Book) => {
       if (!familyId || !bookId) return
       setSaveState('saving')
+      setSaveErrorMessage(null)
       try {
         const docRef = doc(booksCollection(familyId), bookId)
         const { id, ...data } = updated
@@ -179,8 +183,10 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
         await setDoc(docRef, { ...sanitized, updatedAt: new Date().toISOString() })
         setSaveState('saved')
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Book save failed:', err)
         setSaveState('error')
+        setSaveErrorMessage(`Save failed: ${errMsg}`)
       }
     },
     [familyId, bookId],
@@ -339,8 +345,10 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           ),
         }))
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Image upload failed:', err)
         setSaveState('error')
+        setSaveErrorMessage(`Image upload failed: ${errMsg}`)
       }
     },
     [familyId, bookId, applyUpdate, book],
@@ -493,8 +501,10 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
 
         return { imageId, storagePath }
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Sketch upload failed:', err)
         setSaveState('error')
+        setSaveErrorMessage(`Sketch upload failed: ${errMsg}`)
         return undefined
       }
     },
@@ -575,6 +585,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     book,
     loading,
     saveState,
+    saveErrorMessage,
     updatePage,
     addPage,
     deletePage,

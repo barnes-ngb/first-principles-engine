@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore'
 
 import type {
+  ActivityConfig,
   AIUsageEntry,
   Artifact,
   AvatarProfile,
@@ -269,6 +270,24 @@ export const workbookConfigsCollection = (
 
 export const workbookConfigDocId = (childId: string, workbookName: string): string =>
   `${childId}_${workbookName.toLowerCase().replace(/\s+/g, '-')}`
+
+// ── Activity Configs (structured routine + workbook replacement) ──
+
+const activityConfigConverter: FirestoreDataConverter<ActivityConfig> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as ActivityConfig
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/** Activity configs per family. One doc per activity. */
+export const activityConfigsCollection = (
+  familyId: string,
+): CollectionReference<ActivityConfig> =>
+  collection(db, `families/${familyId}/activityConfigs`).withConverter(
+    activityConfigConverter,
+  ) as CollectionReference<ActivityConfig>
 
 /** Normalize curriculum names for consistent matching.
  * "GATB LA", "Good and the Beautiful Language Arts", "TGTB Level 1" all → "gatb-la" base key.

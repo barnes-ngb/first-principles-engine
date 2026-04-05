@@ -121,6 +121,7 @@ export default function BookEditorPage() {
     book,
     loading,
     saveState,
+    saveErrorMessage,
     updatePage,
     addPage,
     deletePage,
@@ -178,6 +179,9 @@ export default function BookEditorPage() {
 
   // Sketch background cleanup toggle (default ON when page has existing images)
   const [autoCleanSketch, setAutoCleanSketch] = useState(true)
+
+  // Reimagine error surfacing (visible in UI for mobile debugging)
+  const [reimagineError, setReimagineError] = useState<string | null>(null)
 
   // Background replacement tracking
   const [replacingBackgroundIds, setReplacingBackgroundIds] = useState<string[]>([])
@@ -255,6 +259,7 @@ export default function BookEditorPage() {
     if (!img?.storagePath) return
 
     setSketchEnhancing(true)
+    setReimagineError(null)
     try {
       const result = await enhanceSketch({
         familyId,
@@ -262,16 +267,21 @@ export default function BookEditorPage() {
         style: sketchEnhanceStyle,
       })
 
-      if (result) {
+      if (result?.url) {
         applySketchEnhancement(sketchComparePageId, sketchImageId, result.url, result.storagePath)
         setShowSketchCompare(true)
+      } else {
+        const aiMsg = aiError?.message || 'AI enhancement returned no image'
+        setReimagineError(`Enhancement failed: ${aiMsg}`)
       }
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err)
       console.error('Sketch enhancement failed:', err)
+      setReimagineError(`Enhancement failed: ${errMsg}`)
     } finally {
       setSketchEnhancing(false)
     }
-  }, [sketchImageId, sketchComparePageId, book, enhanceSketch, familyId, sketchEnhanceStyle, applySketchEnhancement])
+  }, [sketchImageId, sketchComparePageId, book, enhanceSketch, familyId, sketchEnhanceStyle, applySketchEnhancement, aiError])
 
   const handlePickSketchVersion = useCallback(
     (version: 'original' | 'enhanced') => {
@@ -336,42 +346,51 @@ export default function BookEditorPage() {
 
     if (choice === 'reimagine') {
       setDrawingProcessing(true)
+      setReimagineError(null)
       const intensityLabel = (reimagineIntensity ?? 50) <= 25 ? 'Light touch-up' : (reimagineIntensity ?? 50) >= 75 ? 'Full reimagine' : 'Enhancement'
       setDrawingProcessingLabel(`${intensityLabel} in progress...`)
       try {
         // Upload sketch first, then enhance
         const sketchResult = await addSketchToPage(activePage.id, drawingFile)
-        if (sketchResult) {
-          const { imageId, storagePath } = sketchResult
-          // Map intensity to style
-          const style: EnhanceSketchRequest['style'] = (reimagineIntensity ?? 50) <= 25 ? 'storybook' : (reimagineIntensity ?? 50) >= 75 ? 'comic' : 'storybook'
-          // Build caption from intensity
-          const caption = (reimagineIntensity ?? 50) <= 25
-            ? 'Lightly clean up this child\'s drawing, keeping their art style and line work. Just smooth edges and brighten colors.'
-            : (reimagineIntensity ?? 50) >= 75
-              ? 'Reimagine this child\'s drawing as a professional illustration. Keep the subject matter but create it in a polished cartoon style.'
-              : 'Enhance this child\'s drawing into a polished illustration while keeping the original composition and character design.'
+        if (!sketchResult) {
+          setReimagineError('Sketch upload failed — check your connection and try again.')
+          setDrawingProcessing(false)
+          resetDrawingFlow()
+          return
+        }
+        const { imageId, storagePath } = sketchResult
+        // Map intensity to style
+        const style: EnhanceSketchRequest['style'] = (reimagineIntensity ?? 50) <= 25 ? 'storybook' : (reimagineIntensity ?? 50) >= 75 ? 'comic' : 'storybook'
+        // Build caption from intensity
+        const caption = (reimagineIntensity ?? 50) <= 25
+          ? 'Lightly clean up this child\'s drawing, keeping their art style and line work. Just smooth edges and brighten colors.'
+          : (reimagineIntensity ?? 50) >= 75
+            ? 'Reimagine this child\'s drawing as a professional illustration. Keep the subject matter but create it in a polished cartoon style.'
+            : 'Enhance this child\'s drawing into a polished illustration while keeping the original composition and character design.'
 
-          const result = await enhanceSketch({
-            familyId,
-            sketchStoragePath: storagePath,
-            style,
-            caption,
-          })
-          if (result?.url) {
-            applySketchEnhancement(activePage.id, imageId, result.url, result.storagePath)
-            setSketchImageId(imageId)
-            setSketchComparePageId(activePage.id)
-            setShowSketchCompare(true)
-          } else {
-            // Enhancement failed or returned no URL — keep sketch as-is
-            console.warn('Reimagine returned no image URL, keeping original sketch')
-            setSketchImageId(imageId)
-            setSketchComparePageId(activePage.id)
-          }
+        const result = await enhanceSketch({
+          familyId,
+          sketchStoragePath: storagePath,
+          style,
+          caption,
+        })
+        if (result?.url) {
+          applySketchEnhancement(activePage.id, imageId, result.url, result.storagePath)
+          setSketchImageId(imageId)
+          setSketchComparePageId(activePage.id)
+          setShowSketchCompare(true)
+        } else {
+          // Enhancement failed or returned no URL — keep sketch as-is, show why
+          const aiMsg = aiError?.message || 'AI enhancement returned no image'
+          console.warn('Reimagine returned no image URL, keeping original sketch:', aiMsg)
+          setReimagineError(`Enhancement failed: ${aiMsg}. Original sketch kept.`)
+          setSketchImageId(imageId)
+          setSketchComparePageId(activePage.id)
         }
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Reimagine failed:', err)
+        setReimagineError(`Reimagine failed: ${errMsg}`)
       }
       setDrawingProcessing(false)
       resetDrawingFlow()
@@ -404,7 +423,7 @@ export default function BookEditorPage() {
       setShowAiDialog(true)
       return
     }
-  }, [activePage, drawingFile, drawingPreviewUrl, addImageToPage, addSketchToPage, enhanceSketch, applySketchEnhancement, familyId, resetDrawingFlow])
+  }, [activePage, drawingFile, drawingPreviewUrl, addImageToPage, addSketchToPage, enhanceSketch, applySketchEnhancement, familyId, resetDrawingFlow, aiError])
 
   const handleAcceptDrawingResult = useCallback(() => {
     if (!activePage || !drawingResultFile) return
@@ -697,8 +716,14 @@ export default function BookEditorPage() {
             </Typography>
           )}
         </Box>
-        <SaveIndicator state={saveState} />
+        <SaveIndicator state={saveState} errorMessage={saveErrorMessage} />
       </Box>
+
+      {reimagineError && (
+        <Alert severity="error" onClose={() => setReimagineError(null)} sx={{ mx: 2, mt: 0.5 }}>
+          {reimagineError}
+        </Alert>
+      )}
 
       {/* Row 2: Action chips */}
       <Box
