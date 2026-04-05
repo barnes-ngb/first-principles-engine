@@ -18,6 +18,7 @@ import AddIcon from '@mui/icons-material/Add'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import EditIcon from '@mui/icons-material/Edit'
 import MicIcon from '@mui/icons-material/Mic'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import StarIcon from '@mui/icons-material/Star'
@@ -167,6 +168,9 @@ export default function BookEditorPage() {
 
   // Sketch background cleanup toggle (default ON when page has existing images)
   const [autoCleanSketch, setAutoCleanSketch] = useState(true)
+
+  // Background replacement tracking
+  const [replacingBackgroundIds, setReplacingBackgroundIds] = useState<string[]>([])
 
   // Overlay guidance (shown after placing an AI scene)
   const [showOverlayGuide, setShowOverlayGuide] = useState(false)
@@ -330,6 +334,22 @@ export default function BookEditorPage() {
     setIsDictating(false)
   }, [])
 
+  // ── Change background ───────────────────────────────────────────
+  const handleChangeBackground = useCallback(() => {
+    if (!activePage) return
+    const bgIds = activePage.images
+      .filter((img) => img.type !== 'sticker')
+      .map((img) => img.id)
+    setReplacingBackgroundIds(bgIds)
+    // Open the AI scene dialog pre-filled from current page text
+    const prefill = activePage.text
+      ? `Illustrate: ${activePage.text.slice(0, 100)}`
+      : ''
+    setAiPrompt(prefill)
+    setAiResult(null)
+    setShowAiDialog(true)
+  }, [activePage])
+
   // ── AI Scene generation ─────────────────────────────────────────
   const openAiDialog = useCallback(() => {
     const prefill = activePage?.text
@@ -355,11 +375,16 @@ export default function BookEditorPage() {
 
   const handleUseAiImage = useCallback(() => {
     if (!activePage || !aiResult) return
+    // If replacing an existing background, remove old background images first
+    if (replacingBackgroundIds.length > 0) {
+      replacingBackgroundIds.forEach((id) => removeImageFromPage(activePage.id, id))
+      setReplacingBackgroundIds([])
+    }
     addAiImageToPage(activePage.id, aiResult.url, aiResult.storagePath, aiPrompt)
     setShowAiDialog(false)
     setAiResult(null)
     setShowOverlayGuide(true)
-  }, [activePage, aiResult, aiPrompt, addAiImageToPage])
+  }, [activePage, aiResult, aiPrompt, addAiImageToPage, replacingBackgroundIds, removeImageFromPage])
 
   // ── Sticker ─────────────────────────────────────────────────────
   const autoSuggestTheme = useCallback((updatedBook: Book): BookTheme | null => {
@@ -508,23 +533,36 @@ export default function BookEditorPage() {
               }}
             />
           ) : (
-            <Typography
-              variant="h5"
+            <Box
               onClick={() => setEditingTitle(true)}
               sx={{
-                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 0.5,
                 cursor: 'pointer',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                '&:hover': { color: 'primary.main' },
-                ...(isLincoln
-                  ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.85rem' }
-                  : {}),
+                borderBottom: '1px dashed',
+                borderColor: 'action.disabled',
+                '&:hover': { borderColor: 'primary.main' },
+                py: 0.25,
+                minWidth: 0,
               }}
             >
-              {book.title}
-            </Typography>
+              <Typography
+                variant="h5"
+                sx={{
+                  fontWeight: 700,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  ...(isLincoln
+                    ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.85rem' }
+                    : {}),
+                }}
+              >
+                {book.title}
+              </Typography>
+              <EditIcon sx={{ fontSize: 16, opacity: 0.4, flexShrink: 0 }} />
+            </Box>
           )}
         </Box>
         <SaveIndicator state={saveState} />
@@ -607,6 +645,7 @@ export default function BookEditorPage() {
             onUpdate={handlePageUpdate}
             onAddImage={handleAddImageFile}
             onRemoveImage={handleRemoveImage}
+            onChangeBackground={handleChangeBackground}
             onImagePositionChange={handleImagePositionChange}
             onReRecord={() => { setShowVoicePanel(true); setVoiceMode('record') }}
             childName={childName}
@@ -1095,7 +1134,7 @@ export default function BookEditorPage() {
       )}
 
       {/* AI Scene generation dialog */}
-      <Dialog open={showAiDialog} onClose={() => setShowAiDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={showAiDialog} onClose={() => { setShowAiDialog(false); setReplacingBackgroundIds([]) }} maxWidth="sm" fullWidth>
         <DialogTitle>Make a Scene</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
@@ -1246,7 +1285,7 @@ export default function BookEditorPage() {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowAiDialog(false)} disabled={aiLoading}>
+          <Button onClick={() => { setShowAiDialog(false); setReplacingBackgroundIds([]) }} disabled={aiLoading}>
             Cancel
           </Button>
           {aiResult ? (
