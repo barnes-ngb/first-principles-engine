@@ -74,13 +74,6 @@ export interface LabSession {
   finishSummary?: string
 }
 
-export interface LabStageCapture {
-  stage: EngineStage
-  notes?: string
-  artifactIds?: string[]
-  completedAt?: string
-}
-
 // ── Dad Lab Reports ─────────────────────────────────────────────
 
 export interface ChildLabReport {
