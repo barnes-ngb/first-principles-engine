@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import CloseIcon from '@mui/icons-material/Close'
@@ -44,8 +44,7 @@ interface PlanPreviewCardProps {
 const TIME_PRESETS = [5, 10, 15, 20, 30, 45, 60]
 
 function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editable: boolean; onUpdate: (mins: number) => void }) {
-  const [open, setOpen] = useState(false)
-  const anchorRef = useRef<HTMLSpanElement>(null)
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
 
   if (!editable) {
     return (
@@ -58,10 +57,9 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
   return (
     <>
       <Typography
-        ref={anchorRef}
         variant="caption"
         color="text.secondary"
-        onClick={() => setOpen(true)}
+        onClick={(e) => setAnchorEl(e.currentTarget)}
         sx={{
           cursor: 'pointer',
           minWidth: '40px',
@@ -72,9 +70,9 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
         {minutes}m
       </Typography>
       <Popover
-        open={open}
-        anchorEl={anchorRef.current}
-        onClose={() => setOpen(false)}
+        open={!!anchorEl}
+        anchorEl={anchorEl}
+        onClose={() => setAnchorEl(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         transformOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
@@ -88,7 +86,7 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
               color={mins === minutes ? 'primary' : 'default'}
               onClick={() => {
                 onUpdate(mins)
-                setOpen(false)
+                setAnchorEl(null)
               }}
             />
           ))}
