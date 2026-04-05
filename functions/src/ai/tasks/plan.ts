@@ -148,6 +148,102 @@ export const handlePlan = async (
     "INCLUDE skipGuidance ON EVERY WORKBOOK ITEM in the JSON output.",
   ].join("\n"));
 
+  // Append daily item ordering rules
+  sections.push([
+    "DAILY ITEM ORDERING — FOLLOW THIS EXACTLY:",
+    "",
+    "Every day's ROUTINE section must follow this order:",
+    "1. FORMATION FIRST: Prayer and Scripture (always first, every day)",
+    "2. CORE READING: Good and the Beautiful reading or primary reading workbook (always second)",
+    "3. CORE MATH: Good and the Beautiful Math or primary math workbook (third)",
+    "4. READ-ALOUD: Family read-aloud book placed after core academics but before support skills (see READ-ALOUD PLACEMENT below)",
+    "5. SUPPORT SKILLS: Handwriting, sight word games, booster cards, memory cards, language arts workbook (rotate — see DAILY VARIATION below)",
+    "6. TABLET/APP TIME: Reading Eggs, Math apps, Typing (if scheduled for this day)",
+    "7. ENRICHMENT: Any choose items, creative time, evaluation sessions",
+    "",
+    "This order reflects the family's priorities:",
+    "- Formation is non-negotiable and sets the tone",
+    "- Reading is Lincoln's biggest growth area — do it when energy is highest (right after formation)",
+    "- Math next while focus is still strong",
+    "- Support skills when attention naturally dips",
+    "- Apps and enrichment as the day winds down",
+    "",
+    "DO NOT put Handwriting or Booster Cards before Reading.",
+    "DO NOT put apps before core workbook time.",
+  ].join("\n"));
+
+  // Append daily variation / rotation rules
+  sections.push([
+    "DAILY VARIATION — NOT EVERY ITEM EVERY DAY:",
+    "",
+    "These items appear EVERY day (5 days/week):",
+    "- Prayer and Scripture (10m)",
+    "- Primary reading workbook (30m)",
+    "- Primary math workbook (30m)",
+    "- Read-aloud / chapter reading (15m)",
+    "",
+    "These items ROTATE across the week (2-3 days each):",
+    "- Handwriting (3x/week — MWF is typical)",
+    "- Sight word games (2-3x/week)",
+    "- Booster cards (2-3x/week)",
+    "- Memory cards (2x/week)",
+    "- Language arts workbook (3x/week — TTh + one other day)",
+    "",
+    "These items appear 1-2 days per week:",
+    "- Knowledge Mine quests (2x/week, different days)",
+    "- Fluency Practice (2-3x/week)",
+    "",
+    "ROTATION RULES:",
+    "- Monday should be a FULL day (all core + most support) — start of week energy",
+    "- Wednesday can be lighter on support skills",
+    "- Friday should be lighter overall — end of week",
+    "- Never put ALL support skills on the same day — spread them out",
+    "- Each support skill should appear on at least 2 different days",
+    "",
+    "EXAMPLE ROTATION:",
+    "Monday: Prayer → Reading → Math → Handwriting → Sight Words → Booster Cards → Apps → Knowledge Mine",
+    "Tuesday: Prayer → Reading → Math → Language Arts → Memory Card → Fluency Practice → Apps",
+    "Wednesday: Prayer → Reading → Math → Handwriting → Sight Words → Apps",
+    "Thursday: Prayer → Reading → Math → Language Arts → Booster Cards → Knowledge Mine → Apps",
+    "Friday: Prayer → Reading → Math → Handwriting → Fluency Practice → Apps (lighter day)",
+    "",
+    "The point: each day feels slightly different, not copy-paste.",
+  ].join("\n"));
+
+  // Append per-day time budgets
+  sections.push([
+    "TIME BUDGETS BY DAY:",
+    "- Monday: Full day (3-3.5 hours) — fresh start",
+    "- Tuesday: Full day (3-3.5 hours)",
+    "- Wednesday: Standard (2.5-3 hours)",
+    "- Thursday: Standard (2.5-3 hours)",
+    "- Friday: Lighter (2-2.5 hours) — review and wrap up",
+    "",
+    "Adjust item count and minutes to fit the day's budget.",
+    "Don't exceed the budget — if adding a support skill pushes over, drop it to another day.",
+  ].join("\n"));
+
+  // Append read-aloud placement rules
+  sections.push([
+    "READ-ALOUD PLACEMENT:",
+    "The family read-aloud book (e.g. Chronicles of Narnia) should appear as a distinct item:",
+    "- Placed AFTER core academics (Reading + Math) but BEFORE support skills",
+    '- Labeled clearly: "Read Aloud: [Book Title] — Chapter [N]"',
+    "- Include the chapter question in the item's contentGuide field",
+    "- Duration: 15-20m (reading + discussion)",
+    '- Use subjectBucket: "Reading" and itemType: "readaloud"',
+    "",
+    "Example item:",
+    '{',
+    '  "title": "Read Aloud: Narnia Ch 6",',
+    '  "estimatedMinutes": 20,',
+    '  "subjectBucket": "Reading",',
+    '  "category": "must-do",',
+    '  "mvdEssential": false,',
+    '  "skipGuidance": null',
+    '}',
+  ].join("\n"));
+
   // Append plan-specific output format instructions
   sections.push(buildPlanOutputInstructions());
 
