@@ -1,5 +1,8 @@
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import CloseIcon from '@mui/icons-material/Close'
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
 import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
@@ -31,9 +34,11 @@ interface PlanPreviewCardProps {
   onToggleItem?: (dayIndex: number, itemId: string) => void
   onGenerateActivity?: (item: DraftPlanItem) => void
   generatingItemId?: string
+  onMoveItem?: (dayIndex: number, itemIndex: number, direction: -1 | 1) => void
+  onRemoveItem?: (dayIndex: number, itemIndex: number) => void
 }
 
-export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, onToggleItem, onGenerateActivity, generatingItemId }: PlanPreviewCardProps) {
+export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
 
   const isRoutineItem = (item: DraftPlanItem) => item.category === 'must-do' || item.mvdEssential === true
@@ -72,82 +77,115 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
         const additionsBudget = Math.max(0, budgetMinutes - routineTotal)
         const generatedOverBudget = generatedTotal > additionsBudget && additionsBudget > 0
 
-        const renderItem = (item: DraftPlanItem, isRoutine: boolean) => (
-          <Box key={item.id}>
-            <Stack
-              direction="row"
-              spacing={0.5}
-              alignItems="center"
-              sx={{
-                py: 0.25,
-                opacity: item.accepted ? 1 : 0.4,
-              }}
-            >
-              {onToggleItem ? (
-                <IconButton
-                  size="small"
-                  onClick={() => onToggleItem(dayIndex, item.id)}
-                  sx={{ p: 0.25 }}
-                >
-                  {item.accepted ? (
-                    <CheckCircleIcon fontSize="small" color={isRoutine ? 'action' : 'success'} />
-                  ) : (
-                    <RadioButtonUncheckedIcon fontSize="small" />
-                  )}
-                </IconButton>
-              ) : (
-                item.accepted ? (
-                  <CheckCircleIcon fontSize="small" color={isRoutine ? 'action' : 'success'} sx={{ mr: 0.5 }} />
-                ) : (
-                  <RadioButtonUncheckedIcon fontSize="small" sx={{ mr: 0.5, opacity: 0.4 }} />
-                )
-              )}
-              <Typography
-                variant="body2"
+        const totalItems = day.items.length
+
+        const renderItem = (item: DraftPlanItem, isRoutine: boolean) => {
+          const itemIndex = day.items.indexOf(item)
+
+          return (
+            <Box key={item.id}>
+              <Stack
+                direction="row"
+                spacing={0.5}
+                alignItems="center"
                 sx={{
-                  flex: 1,
-                  textDecoration: item.accepted ? 'none' : 'line-through',
-                  color: isRoutine ? 'text.secondary' : 'text.primary',
-                  fontWeight: isRoutine ? 400 : 500,
+                  py: 0.25,
+                  opacity: item.accepted ? 1 : 0.4,
                 }}
               >
-                {item.title}
-              </Typography>
-              {item.isAppBlock && (
-                <Chip label="App" size="small" variant="outlined" sx={{ height: 20 }} />
-              )}
-              {item.skipSuggestion && (
-                <Tooltip
-                  title={`${item.skipSuggestion.reason} \u2014 ${item.skipSuggestion.replacement}`}
-                  arrow
-                >
-                  <Chip
-                    label={item.skipSuggestion.action}
-                    size="small"
-                    color={item.skipSuggestion.action === 'skip' ? 'error' : 'warning'}
-                    sx={{ height: 20 }}
-                  />
-                </Tooltip>
-              )}
-              <Typography variant="caption" color="text.secondary">
-                {item.estimatedMinutes}m
-              </Typography>
-              {onGenerateActivity && item.accepted && !item.isAppBlock && !isRoutine && (
-                <Tooltip title="Generate activity" arrow>
+                {onToggleItem ? (
                   <IconButton
                     size="small"
-                    onClick={() => onGenerateActivity(item)}
-                    disabled={generatingItemId === item.id}
-                    sx={{ p: 0.25, ml: 0.25 }}
-                    color="secondary"
+                    onClick={() => onToggleItem(dayIndex, item.id)}
+                    sx={{ p: 0.25 }}
                   >
-                    <AutoAwesomeIcon sx={{ fontSize: 16 }} />
+                    {item.accepted ? (
+                      <CheckCircleIcon fontSize="small" color={isRoutine ? 'action' : 'success'} />
+                    ) : (
+                      <RadioButtonUncheckedIcon fontSize="small" />
+                    )}
                   </IconButton>
-                </Tooltip>
-              )}
-            </Stack>
-          </Box>
-        )
+                ) : (
+                  item.accepted ? (
+                    <CheckCircleIcon fontSize="small" color={isRoutine ? 'action' : 'success'} sx={{ mr: 0.5 }} />
+                  ) : (
+                    <RadioButtonUncheckedIcon fontSize="small" sx={{ mr: 0.5, opacity: 0.4 }} />
+                  )
+                )}
+                <Typography
+                  variant="body2"
+                  sx={{
+                    flex: 1,
+                    textDecoration: item.accepted ? 'none' : 'line-through',
+                    color: isRoutine ? 'text.secondary' : 'text.primary',
+                    fontWeight: isRoutine ? 400 : 500,
+                  }}
+                >
+                  {item.title}
+                </Typography>
+                {item.isAppBlock && (
+                  <Chip label="App" size="small" variant="outlined" sx={{ height: 20 }} />
+                )}
+                {item.skipSuggestion && (
+                  <Tooltip
+                    title={`${item.skipSuggestion.reason} \u2014 ${item.skipSuggestion.replacement}`}
+                    arrow
+                  >
+                    <Chip
+                      label={item.skipSuggestion.action}
+                      size="small"
+                      color={item.skipSuggestion.action === 'skip' ? 'error' : 'warning'}
+                      sx={{ height: 20 }}
+                    />
+                  </Tooltip>
+                )}
+                <Typography variant="caption" color="text.secondary">
+                  {item.estimatedMinutes}m
+                </Typography>
+                {onGenerateActivity && item.accepted && !item.isAppBlock && !isRoutine && (
+                  <Tooltip title="Generate activity" arrow>
+                    <IconButton
+                      size="small"
+                      onClick={() => onGenerateActivity(item)}
+                      disabled={generatingItemId === item.id}
+                      sx={{ p: 0.25, ml: 0.25 }}
+                      color="secondary"
+                    >
+                      <AutoAwesomeIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {onMoveItem && onRemoveItem && (
+                  <Box sx={{ display: 'flex', gap: 0, ml: 0.5, opacity: 0.6 }}>
+                    <IconButton
+                      size="small"
+                      onClick={() => onMoveItem(dayIndex, itemIndex, -1)}
+                      disabled={itemIndex === 0}
+                      sx={{ p: 0.25 }}
+                    >
+                      <KeyboardArrowUpIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      onClick={() => onMoveItem(dayIndex, itemIndex, 1)}
+                      disabled={itemIndex === totalItems - 1}
+                      sx={{ p: 0.25 }}
+                    >
+                      <KeyboardArrowDownIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      onClick={() => onRemoveItem(dayIndex, itemIndex)}
+                      sx={{ p: 0.25 }}
+                    >
+                      <CloseIcon sx={{ fontSize: 14 }} />
+                    </IconButton>
+                  </Box>
+                )}
+              </Stack>
+            </Box>
+          )
+        }
 
         return (
           <Box key={day.day} sx={{ mb: 2 }}>
