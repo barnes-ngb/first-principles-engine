@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import CloseIcon from '@mui/icons-material/Close'
@@ -7,6 +8,7 @@ import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
 import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
 import IconButton from '@mui/material/IconButton'
+import Popover from '@mui/material/Popover'
 import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
@@ -36,9 +38,67 @@ interface PlanPreviewCardProps {
   generatingItemId?: string
   onMoveItem?: (dayIndex: number, itemIndex: number, direction: -1 | 1) => void
   onRemoveItem?: (dayIndex: number, itemIndex: number) => void
+  onUpdateTime?: (dayIndex: number, itemIndex: number, newMinutes: number) => void
 }
 
-export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem }: PlanPreviewCardProps) {
+const TIME_PRESETS = [5, 10, 15, 20, 30, 45, 60]
+
+function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editable: boolean; onUpdate: (mins: number) => void }) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLSpanElement>(null)
+
+  if (!editable) {
+    return (
+      <Typography variant="caption" color="text.secondary">
+        {minutes}m
+      </Typography>
+    )
+  }
+
+  return (
+    <>
+      <Typography
+        ref={anchorRef}
+        variant="caption"
+        color="text.secondary"
+        onClick={() => setOpen(true)}
+        sx={{
+          cursor: 'pointer',
+          minWidth: '40px',
+          textAlign: 'right',
+          '&:hover': { textDecoration: 'underline', color: 'primary.main' },
+        }}
+      >
+        {minutes}m
+      </Typography>
+      <Popover
+        open={open}
+        anchorEl={anchorRef.current}
+        onClose={() => setOpen(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Box sx={{ display: 'flex', gap: 0.5, p: 1 }}>
+          {TIME_PRESETS.map(mins => (
+            <Chip
+              key={mins}
+              label={`${mins}m`}
+              size="small"
+              variant={mins === minutes ? 'filled' : 'outlined'}
+              color={mins === minutes ? 'primary' : 'default'}
+              onClick={() => {
+                onUpdate(mins)
+                setOpen(false)
+              }}
+            />
+          ))}
+        </Box>
+      </Popover>
+    </>
+  )
+}
+
+export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
 
   const isRoutineItem = (item: DraftPlanItem) => item.category === 'must-do' || item.mvdEssential === true
@@ -139,9 +199,11 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                     />
                   </Tooltip>
                 )}
-                <Typography variant="caption" color="text.secondary">
-                  {item.estimatedMinutes}m
-                </Typography>
+                <EditableTime
+                  minutes={item.estimatedMinutes}
+                  editable={!!onUpdateTime}
+                  onUpdate={(mins) => onUpdateTime?.(dayIndex, itemIndex, mins)}
+                />
                 {onGenerateActivity && item.accepted && !item.isAppBlock && !isRoutine && (
                   <Tooltip title="Generate activity" arrow>
                     <IconButton

@@ -513,6 +513,20 @@ function applyCapSubjectTime(days: DraftDayPlan[], intent: CapSubjectTimeIntent)
 
 // ── Helpers ────────────────────────────────────────────────────
 
+/** Filter out daily routine lines that match completed programs (e.g., Reading Eggs). */
+export function filterRoutineForCompletedPrograms(routine: string, completedPrograms: string[]): string {
+  if (!completedPrograms || completedPrograms.length === 0) return routine
+  const lines = routine.split('\n')
+  const filtered = lines.filter(line => {
+    const lineLower = line.toLowerCase().replace(/[^a-z0-9]/g, '')
+    return !completedPrograms.some(prog => {
+      const progLower = prog.toLowerCase().replace(/[^a-z0-9]/g, '')
+      return lineLower.includes(progLower)
+    })
+  })
+  return filtered.join('\n')
+}
+
 export function dayTotalMinutes(day: DraftDayPlan): number {
   return day.items
     .filter((item) => item.accepted)

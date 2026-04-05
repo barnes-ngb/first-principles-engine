@@ -537,6 +537,33 @@ export default function TodayChecklist({
                     {item.skipGuidance}
                   </Typography>
                 )}
+                {/* Scan-to-skip: prompt to scan lesson page when skip guidance says "check lesson" */}
+                {item.skipGuidance && /check lesson/i.test(item.skipGuidance) && !item.completed && (
+                  <Box sx={{ ml: 5, mt: 0.5 }}>
+                    <Button
+                      size="small"
+                      variant="text"
+                      startIcon={scanLoading && scanItemIndex === index
+                        ? <CircularProgress size={14} />
+                        : <CameraAltIcon sx={{ fontSize: 16 }} />}
+                      disabled={scanLoading && scanItemIndex === index}
+                      onClick={() => {
+                        const input = document.createElement('input')
+                        input.type = 'file'
+                        input.accept = 'image/*'
+                        input.capture = 'environment'
+                        input.onchange = (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0]
+                          if (file) onScanCapture(file, index)
+                        }
+                        input.click()
+                      }}
+                      sx={{ fontSize: '0.7rem', color: 'text.secondary', textTransform: 'none' }}
+                    >
+                      Scan lesson to check if you should skip
+                    </Button>
+                  </Box>
+                )}
                 {/* Start Mining button for evaluation items */}
                 {item.itemType === 'evaluation' && item.link && !item.completed && (
                   <Button
