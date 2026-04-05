@@ -45,8 +45,10 @@ import type { Book, BookPage, BookTheme, Sticker } from '../../core/types'
 import { BOOK_THEMES } from '../../core/types'
 import type { EnhanceSketchRequest, ImageGenRequest } from '../../core/ai/useAI'
 import PageEditor from './PageEditor'
-import SketchScanner from './SketchScanner'
 import StickerPicker from './StickerPicker'
+import DrawingChoiceDialog from './DrawingChoiceDialog'
+import type { DrawingChoice } from './DrawingChoiceDialog'
+import { cleanSketchBackground } from './cleanSketch'
 import type { ImagePosition } from './DraggableImage'
 import { useBook } from './useBook'
 import { printBook } from './printBook'
@@ -138,7 +140,6 @@ export default function BookEditorPage() {
   const { generateImage, enhanceSketch, loading: aiLoading, error: aiError } = useAI()
 
   const [activePageIndex, setActivePageIndex] = useState(0)
-  const [showPhotoCapture, setShowPhotoCapture] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
 
   // Voice state
@@ -156,21 +157,34 @@ export default function BookEditorPage() {
 
   // Sticker state
   const [showStickerPicker, setShowStickerPicker] = useState(false)
-  const [showSketchScanner, setShowSketchScanner] = useState(false)
 
-  // Sketch capture + enhance state
-  const [showSketchCapture, setShowSketchCapture] = useState(false)
+  // Sketch enhance state
   const [sketchImageId, setSketchImageId] = useState<string | null>(null)
   const [sketchEnhancing, setSketchEnhancing] = useState(false)
   const [sketchEnhanceStyle, setSketchEnhanceStyle] = useState<EnhanceSketchRequest['style']>('storybook')
   const [showSketchCompare, setShowSketchCompare] = useState(false)
   const [sketchComparePageId, setSketchComparePageId] = useState<string | null>(null)
 
+  // Combined drawing flow state
+  const [showDrawingCapture, setShowDrawingCapture] = useState(false)
+  const [drawingFile, setDrawingFile] = useState<File | null>(null)
+  const [drawingPreviewUrl, setDrawingPreviewUrl] = useState<string | null>(null)
+  const [showDrawingChoice, setShowDrawingChoice] = useState(false)
+  const [drawingProcessing, setDrawingProcessing] = useState(false)
+  const [drawingProcessingLabel, setDrawingProcessingLabel] = useState<string>('')
+  const [drawingResultUrl, setDrawingResultUrl] = useState<string | null>(null)
+  const [drawingResultFile, setDrawingResultFile] = useState<File | null>(null)
+  const [pendingDrawingChoice, setPendingDrawingChoice] = useState<DrawingChoice | null>(null)
+
   // Sketch background cleanup toggle (default ON when page has existing images)
   const [autoCleanSketch, setAutoCleanSketch] = useState(true)
 
   // Background replacement tracking
   const [replacingBackgroundIds, setReplacingBackgroundIds] = useState<string[]>([])
+
+  // Deselect signal — increment to tell PageEditor to deselect all images
+  const [deselectSignal, setDeselectSignal] = useState(0)
+  const deselect = useCallback(() => setDeselectSignal((n) => n + 1), [])
 
   // Overlay guidance (shown after placing an AI scene)
   const [showOverlayGuide, setShowOverlayGuide] = useState(false)
@@ -209,15 +223,6 @@ export default function BookEditorPage() {
     setActivePageIndex((prev) => Math.max(0, prev - 1))
   }, [activePage, book, deletePage])
 
-  const handlePhotoCapture = useCallback(
-    async (file: File) => {
-      if (!activePage) return
-      await addImageToPage(activePage.id, file, { cleanBackground: autoCleanSketch })
-      setShowPhotoCapture(false)
-    },
-    [activePage, addImageToPage, autoCleanSketch],
-  )
-
   const handleRemoveImage = useCallback(
     (imageId: string) => {
       if (!activePage) return
@@ -242,20 +247,7 @@ export default function BookEditorPage() {
     [activePage, addImageToPage, autoCleanSketch],
   )
 
-  // ── Sketch: capture + enhance ────────────────────────────────────
-  const handleSketchCapture = useCallback(
-    async (file: File) => {
-      if (!activePage) return
-      const imageId = await addSketchToPage(activePage.id, file)
-      if (imageId) {
-        setSketchImageId(imageId)
-        setSketchComparePageId(activePage.id)
-      }
-      setShowSketchCapture(false)
-    },
-    [activePage, addSketchToPage],
-  )
-
+  // ── Sketch: enhance ─────────────────────────────────────────────
   const handleEnhanceSketch = useCallback(async () => {
     if (!sketchImageId || !sketchComparePageId || !book) return
     const page = book.pages.find((p) => p.id === sketchComparePageId)
@@ -286,6 +278,146 @@ export default function BookEditorPage() {
     },
     [sketchImageId, sketchComparePageId, pickSketchVersion],
   )
+
+  // ── Combined drawing flow ───────────────────────────────────────
+  const handleDrawingCapture = useCallback((file: File) => {
+    setDrawingFile(file)
+    setDrawingPreviewUrl(URL.createObjectURL(file))
+    setShowDrawingCapture(false)
+    setShowDrawingChoice(true)
+    setDrawingResultUrl(null)
+    setDrawingResultFile(null)
+    setPendingDrawingChoice(null)
+  }, [])
+
+  const resetDrawingFlow = useCallback(() => {
+    setShowDrawingChoice(false)
+    setDrawingFile(null)
+    setDrawingPreviewUrl(null)
+    setDrawingProcessing(false)
+    setDrawingResultUrl(null)
+    setDrawingResultFile(null)
+    setPendingDrawingChoice(null)
+  }, [])
+
+  const handleDrawingChoice = useCallback(async (choice: DrawingChoice, reimagineIntensity?: number) => {
+    if (!activePage || !drawingFile) return
+
+    if (choice === 'as-is') {
+      await addImageToPage(activePage.id, drawingFile, { cleanBackground: false })
+      resetDrawingFlow()
+      return
+    }
+
+    setPendingDrawingChoice(choice)
+
+    if (choice === 'cleanup') {
+      setDrawingProcessing(true)
+      setDrawingProcessingLabel('Removing paper background...')
+      try {
+        const cleaned = await cleanSketchBackground(drawingFile)
+        const url = URL.createObjectURL(cleaned)
+        setDrawingResultUrl(url)
+        setDrawingResultFile(cleaned)
+      } catch {
+        // Fallback: add as-is
+        await addImageToPage(activePage.id, drawingFile, { cleanBackground: false })
+        resetDrawingFlow()
+        return
+      }
+      setDrawingProcessing(false)
+      return
+    }
+
+    if (choice === 'reimagine') {
+      setDrawingProcessing(true)
+      const intensityLabel = (reimagineIntensity ?? 50) <= 25 ? 'Light touch-up' : (reimagineIntensity ?? 50) >= 75 ? 'Full reimagine' : 'Enhancement'
+      setDrawingProcessingLabel(`${intensityLabel} in progress...`)
+      try {
+        // Upload sketch first, then enhance
+        const imageId = await addSketchToPage(activePage.id, drawingFile)
+        if (imageId) {
+          // Map intensity to style
+          const style: EnhanceSketchRequest['style'] = (reimagineIntensity ?? 50) <= 25 ? 'storybook' : (reimagineIntensity ?? 50) >= 75 ? 'comic' : 'storybook'
+          // Build caption from intensity
+          const caption = (reimagineIntensity ?? 50) <= 25
+            ? 'Lightly clean up this child\'s drawing, keeping their art style and line work. Just smooth edges and brighten colors.'
+            : (reimagineIntensity ?? 50) >= 75
+              ? 'Reimagine this child\'s drawing as a professional illustration. Keep the subject matter but create it in a polished cartoon style.'
+              : 'Enhance this child\'s drawing into a polished illustration while keeping the original composition and character design.'
+
+          const page = book?.pages.find((p) => p.id === activePage.id)
+          const img = page?.images.find((i) => i.id === imageId)
+          if (img?.storagePath) {
+            const result = await enhanceSketch({
+              familyId,
+              sketchStoragePath: img.storagePath,
+              style,
+              caption,
+            })
+            if (result) {
+              applySketchEnhancement(activePage.id, imageId, result.url, result.storagePath)
+              setSketchImageId(imageId)
+              setSketchComparePageId(activePage.id)
+              setShowSketchCompare(true)
+            }
+          }
+        }
+      } catch {
+        // Sketch already added, user can enhance later
+      }
+      setDrawingProcessing(false)
+      resetDrawingFlow()
+      return
+    }
+
+    if (choice === 'sticker') {
+      setDrawingProcessing(true)
+      setDrawingProcessingLabel('Creating sticker...')
+      try {
+        const cleaned = await cleanSketchBackground(drawingFile)
+        const url = URL.createObjectURL(cleaned)
+        setDrawingResultUrl(url)
+        setDrawingResultFile(cleaned)
+      } catch {
+        // Fallback: use original as sticker
+        setDrawingResultUrl(drawingPreviewUrl)
+        setDrawingResultFile(drawingFile)
+      }
+      setDrawingProcessing(false)
+      return
+    }
+
+    if (choice === 'scene') {
+      // Open the AI scene dialog with the drawing as inspiration
+      resetDrawingFlow()
+      const prefill = 'Create a full illustrated scene inspired by this child\'s drawing'
+      setAiPrompt(prefill)
+      setAiResult(null)
+      setShowAiDialog(true)
+      return
+    }
+  }, [activePage, drawingFile, drawingPreviewUrl, addImageToPage, addSketchToPage, enhanceSketch, applySketchEnhancement, familyId, book, resetDrawingFlow])
+
+  const handleAcceptDrawingResult = useCallback(() => {
+    if (!activePage || !drawingResultFile) return
+    if (pendingDrawingChoice === 'sticker') {
+      // Add as sticker — upload and add to sticker library implicitly via addStickerToPage
+      const url = drawingResultUrl ?? ''
+      addStickerToPage(activePage.id, url, '', drawingFile?.name ?? 'Drawing sticker')
+    } else {
+      // cleanup result — add as image
+      void addImageToPage(activePage.id, drawingResultFile, { cleanBackground: false })
+    }
+    resetDrawingFlow()
+  }, [activePage, drawingResultFile, drawingResultUrl, drawingFile, pendingDrawingChoice, addImageToPage, addStickerToPage, resetDrawingFlow])
+
+  const handleRetryDrawingResult = useCallback(() => {
+    setDrawingResultUrl(null)
+    setDrawingResultFile(null)
+    // Re-show choice dialog
+    setPendingDrawingChoice(null)
+  }, [])
 
   // ── Voice: Audio recording ──────────────────────────────────────
   const handleAudioCapture = useCallback(
@@ -507,12 +639,12 @@ export default function BookEditorPage() {
         defaultSubject={SubjectBucket.LanguageArts}
         defaultDescription="Book editing"
       />
-      {/* Header */}
-      <Stack direction="row" alignItems="center" spacing={1}>
+      {/* Row 1: Navigation + Title */}
+      <Box sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.5 }}>
         <IconButton onClick={() => navigate('/books')} sx={{ minWidth: 48, minHeight: 48 }}>
           <ArrowBackIcon />
         </IconButton>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Box sx={{ flex: 1, minWidth: 0, mx: 1 }}>
           {editingTitle ? (
             <TextField
               value={book.title}
@@ -522,10 +654,11 @@ export default function BookEditorPage() {
               autoFocus
               size="small"
               fullWidth
+              variant="standard"
               sx={{
                 '& .MuiInputBase-input': {
                   fontWeight: 700,
-                  fontSize: '1.2rem',
+                  fontSize: '1.1rem',
                   ...(isLincoln
                     ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.75rem' }
                     : {}),
@@ -533,70 +666,68 @@ export default function BookEditorPage() {
               }}
             />
           ) : (
-            <Box
+            <Typography
+              variant="subtitle1"
               onClick={() => setEditingTitle(true)}
+              noWrap
               sx={{
-                display: 'inline-flex',
+                fontWeight: 700,
+                cursor: 'pointer',
+                px: 1,
+                py: 0.25,
+                borderRadius: 1,
+                bgcolor: 'action.hover',
+                display: 'flex',
                 alignItems: 'center',
                 gap: 0.5,
-                cursor: 'pointer',
-                borderBottom: '1px dashed',
-                borderColor: 'action.disabled',
-                '&:hover': { borderColor: 'primary.main' },
-                py: 0.25,
-                minWidth: 0,
+                ...(isLincoln
+                  ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.75rem' }
+                  : {}),
               }}
             >
-              <Typography
-                variant="h5"
-                sx={{
-                  fontWeight: 700,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  ...(isLincoln
-                    ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.85rem' }
-                    : {}),
-                }}
-              >
-                {book.title}
-              </Typography>
-              <EditIcon sx={{ fontSize: 16, opacity: 0.4, flexShrink: 0 }} />
-            </Box>
+              {book.title}
+              <EditIcon sx={{ fontSize: 14, opacity: 0.4, flexShrink: 0 }} />
+            </Typography>
           )}
         </Box>
         <SaveIndicator state={saveState} />
-        <Button
-          variant="outlined"
-          size="small"
-          startIcon={<AutoStoriesIcon />}
+      </Box>
+
+      {/* Row 2: Action chips */}
+      <Box
+        sx={{
+          display: 'flex',
+          gap: 1,
+          px: 2,
+          py: 0.5,
+          overflowX: 'auto',
+          '&::-webkit-scrollbar': { display: 'none' },
+        }}
+      >
+        <Chip
+          label="Read"
+          icon={<AutoStoriesIcon />}
           onClick={() => navigate(`/books/${bookId}/read`)}
-          sx={{ minHeight: 40 }}
-        >
-          Read
-        </Button>
-        <Button
           variant="outlined"
           size="small"
-          startIcon={printing ? <CircularProgress size={16} /> : <PrintIcon />}
+        />
+        <Chip
+          label={printing ? 'Building...' : 'Print'}
+          icon={printing ? <CircularProgress size={14} /> : <PrintIcon />}
           onClick={() => setShowPrintSettings(true)}
           disabled={printing}
-          sx={{ minHeight: 40 }}
-        >
-          {printing ? 'Building...' : 'Print'}
-        </Button>
-        <Button
-          variant="contained"
+          variant="outlined"
           size="small"
-          color="success"
-          startIcon={<CheckCircleIcon />}
+        />
+        <Chip
+          label={book.status === 'complete' ? 'Finished!' : 'Finish'}
+          icon={<CheckCircleIcon />}
           onClick={handleOpenFinishDialog}
           disabled={book.status === 'complete'}
-          sx={{ minHeight: 40 }}
-        >
-          {book.status === 'complete' ? 'Finished!' : 'Finish My Book'}
-        </Button>
-      </Stack>
+          color="success"
+          size="small"
+        />
+      </Box>
 
       {/* Together Book toggle + contributor display */}
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 0.5 }}>
@@ -649,6 +780,7 @@ export default function BookEditorPage() {
             onImagePositionChange={handleImagePositionChange}
             onReRecord={() => { setShowVoicePanel(true); setVoiceMode('record') }}
             childName={childName}
+            deselectSignal={deselectSignal}
           />
         </Box>
       )}
@@ -724,13 +856,16 @@ export default function BookEditorPage() {
         </Box>
       )}
 
-      {/* Photo capture dialog */}
-      {showPhotoCapture && (
-        <Box sx={{ mt: 1 }}>
-          <PhotoCapture onCapture={(file) => { void handlePhotoCapture(file) }} />
+      {/* Combined drawing capture panel */}
+      {showDrawingCapture && (
+        <Box sx={{ mt: 1, p: 2, border: '2px solid', borderColor: 'secondary.main', borderRadius: 2, bgcolor: 'secondary.50' }}>
+          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
+            Take a photo or pick from gallery
+          </Typography>
+          <PhotoCapture onCapture={handleDrawingCapture} />
           <Button
             size="small"
-            onClick={() => setShowPhotoCapture(false)}
+            onClick={() => setShowDrawingCapture(false)}
             sx={{ mt: 1 }}
           >
             Cancel
@@ -738,22 +873,19 @@ export default function BookEditorPage() {
         </Box>
       )}
 
-      {/* Sketch capture panel */}
-      {showSketchCapture && (
-        <Box sx={{ mt: 1, p: 2, border: '2px solid', borderColor: 'secondary.main', borderRadius: 2, bgcolor: 'secondary.50' }}>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
-            Photograph your drawing
-          </Typography>
-          <PhotoCapture onCapture={(file) => { void handleSketchCapture(file) }} />
-          <Button
-            size="small"
-            onClick={() => setShowSketchCapture(false)}
-            sx={{ mt: 1 }}
-          >
-            Cancel
-          </Button>
-        </Box>
-      )}
+      {/* Drawing choice dialog — shown after capture */}
+      <DrawingChoiceDialog
+        open={showDrawingChoice}
+        capturedFile={drawingFile}
+        capturedPreviewUrl={drawingPreviewUrl}
+        onClose={resetDrawingFlow}
+        onChoose={(choice, intensity) => { void handleDrawingChoice(choice, intensity) }}
+        processing={drawingProcessing}
+        processingLabel={drawingProcessingLabel}
+        resultPreviewUrl={drawingResultUrl}
+        onAcceptResult={handleAcceptDrawingResult}
+        onRetryResult={handleRetryDrawingResult}
+      />
 
       {/* Sketch: "Use my drawing" / "Make it fancy" choice */}
       {sketchImageId && !showSketchCompare && !sketchEnhancing && (
@@ -1017,23 +1149,15 @@ export default function BookEditorPage() {
           variant="contained"
           color="secondary"
           startIcon={<DrawIcon />}
-          onClick={() => setShowSketchCapture(true)}
+          onClick={() => { deselect(); setShowDrawingCapture(true) }}
           sx={{ minHeight: 48, fontWeight: 700, fontSize: '0.95rem' }}
         >
           Add My Drawing
         </Button>
         <Button
           variant="outlined"
-          startIcon={<PhotoCameraIcon />}
-          onClick={() => setShowPhotoCapture(true)}
-          sx={{ minHeight: 48 }}
-        >
-          Photo
-        </Button>
-        <Button
-          variant="outlined"
           startIcon={<MicIcon />}
-          onClick={() => setShowVoicePanel(true)}
+          onClick={() => { deselect(); setShowVoicePanel(true) }}
           sx={{ minHeight: 48 }}
         >
           {speechAvailable ? 'Speak / Record' : 'Record'}
@@ -1041,7 +1165,7 @@ export default function BookEditorPage() {
         <Button
           variant="outlined"
           startIcon={<AutoAwesomeIcon />}
-          onClick={openAiDialog}
+          onClick={() => { deselect(); openAiDialog() }}
           sx={{ minHeight: 48 }}
         >
           Make a scene
@@ -1049,18 +1173,10 @@ export default function BookEditorPage() {
         <Button
           variant="outlined"
           startIcon={<StarIcon />}
-          onClick={() => setShowStickerPicker(true)}
+          onClick={() => { deselect(); setShowStickerPicker(true) }}
           sx={{ minHeight: 48 }}
         >
           Sticker
-        </Button>
-        <Button
-          variant="outlined"
-          startIcon={<PhotoCameraIcon />}
-          onClick={() => setShowSketchScanner(true)}
-          sx={{ minHeight: 48 }}
-        >
-          Scan Drawing
         </Button>
 
         {/* Delete page (only if > 1 page) */}
@@ -1107,10 +1223,10 @@ export default function BookEditorPage() {
               size="small"
               variant="outlined"
               startIcon={<PhotoCameraIcon />}
-              onClick={() => { setShowOverlayGuide(false); setShowPhotoCapture(true) }}
+              onClick={() => { setShowOverlayGuide(false); setShowDrawingCapture(true) }}
               sx={{ minHeight: 36 }}
             >
-              Upload a photo
+              Add a drawing
             </Button>
             <Button
               size="small"
@@ -1233,10 +1349,10 @@ export default function BookEditorPage() {
                         startIcon={<PhotoCameraIcon />}
                         onClick={() => {
                           setShowAiDialog(false)
-                          setShowPhotoCapture(true)
+                          setShowDrawingCapture(true)
                         }}
                       >
-                        Upload a photo
+                        Add a drawing
                       </Button>
                       <Button
                         size="small"
@@ -1317,19 +1433,6 @@ export default function BookEditorPage() {
         childName={childName}
         childProfile={isLincoln ? 'lincoln' : 'london'}
         onSelectSticker={handleSelectSticker}
-      />
-
-      {/* Sketch scanner */}
-      <SketchScanner
-        open={showSketchScanner}
-        onClose={() => setShowSketchScanner(false)}
-        familyId={familyId}
-        childId={activeChild?.id ?? ''}
-        childName={childName}
-        onAddToBook={(file) => {
-          if (activePage) void addImageToPage(activePage.id, file)
-          setShowSketchScanner(false)
-        }}
       />
 
       {/* Finish dialog */}
