@@ -59,6 +59,7 @@ import { parseDateFromDocId } from '../today/daylog.model'
 import ComplianceDashboard from './ComplianceDashboard'
 import MonthlyTrend from './MonthlyTrend'
 import QuickAddHours from './QuickAddHours'
+import ChapterResponsesTab from './ChapterResponsesTab'
 import EvaluationHistoryTab from './EvaluationHistoryTab'
 import PortfolioPage from './PortfolioPage'
 import {
@@ -108,12 +109,14 @@ export default function RecordsPage() {
             <Tab label="Hours & Compliance" />
             <Tab label="Evaluations" />
             <Tab label="Portfolio" />
+            <Tab label="Book Responses" />
           </Tabs>
         </Box>
       </Container>
       {activeTab === 0 && <HoursComplianceTab />}
       {activeTab === 1 && <EvaluationHistoryTab />}
       {activeTab === 2 && <PortfolioPage />}
+      {activeTab === 3 && <ChapterResponsesTab />}
     </>
   )
 }

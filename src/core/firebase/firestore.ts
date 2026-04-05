@@ -13,6 +13,7 @@ import type {
   AvatarProfile,
   Book,
   BookThemeConfig,
+  ChapterResponse,
   Child,
   DadLabReport,
   DailyArmorSession,
@@ -428,3 +429,11 @@ export const childSkillMapsCollection = (
   familyId: string,
 ): CollectionReference<ChildSkillMap> =>
   collection(db, `families/${familyId}/childSkillMaps`) as CollectionReference<ChildSkillMap>
+
+// ── Chapter Responses (Read-Aloud Discussion Evidence) ──────────
+
+/** Chapter responses per child. Auto-ID documents. */
+export const chapterResponsesCollection = (
+  familyId: string,
+): CollectionReference<ChapterResponse> =>
+  collection(db, `families/${familyId}/chapterResponses`) as CollectionReference<ChapterResponse>

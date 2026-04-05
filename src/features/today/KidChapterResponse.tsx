@@ -6,7 +6,7 @@ import { addDoc } from 'firebase/firestore'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
 import SectionCard from '../../components/SectionCard'
-import { artifactsCollection } from '../../core/firebase/firestore'
+import { artifactsCollection, chapterResponsesCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import type { Child, DayLog } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
@@ -24,6 +24,11 @@ interface KidChapterResponseProps {
   child: Child
   familyId: string
   persistDayLogImmediate: (updated: DayLog) => void
+  weekFocus?: {
+    theme?: string
+    virtue?: string
+    scriptureRef?: string
+  } | null
 }
 
 export default function KidChapterResponse({
@@ -31,6 +36,7 @@ export default function KidChapterResponse({
   child,
   familyId,
   persistDayLogImmediate,
+  weekFocus,
 }: KidChapterResponseProps) {
   const [isRecordingChapter, setIsRecordingChapter] = useState(false)
   const [chapterAudioUrl, setChapterAudioUrl] = useState<string | null>(null)
@@ -75,6 +81,7 @@ export default function KidChapterResponse({
         mediaUrl = await getDownloadURL(storageRef)
       }
 
+      // Save artifact (existing behavior)
       await addDoc(artifactsCollection(familyId), {
         childId: child.id,
         type: EvidenceType.Audio,
@@ -90,6 +97,22 @@ export default function KidChapterResponse({
         createdAt: new Date().toISOString(),
       })
 
+      // Save to dedicated chapterResponses collection with full context
+      const today = new Date().toISOString().slice(0, 10)
+      await addDoc(chapterResponsesCollection(familyId), {
+        childId: child.id,
+        date: today,
+        bookTitle: dayLog.chapterQuestion.book,
+        chapter: dayLog.chapterQuestion.chapter,
+        questionType: dayLog.chapterQuestion.questionType,
+        question: dayLog.chapterQuestion.question,
+        audioUrl: mediaUrl ?? null,
+        weekTheme: weekFocus?.theme ?? '',
+        virtue: weekFocus?.virtue ?? '',
+        scripture: weekFocus?.scriptureRef ?? '',
+        createdAt: new Date().toISOString(),
+      })
+
       persistDayLogImmediate({
         ...dayLog,
         chapterQuestion: { ...dayLog.chapterQuestion, responded: true, responseUrl: mediaUrl },
@@ -98,7 +121,7 @@ export default function KidChapterResponse({
       console.error('Chapter response save failed:', err)
     }
     setSavingChapter(false)
-  }, [dayLog, child.id, familyId, chapterAudioBlob, persistDayLogImmediate])
+  }, [dayLog, child.id, familyId, chapterAudioBlob, persistDayLogImmediate, weekFocus])
 
   if (!dayLog.chapterQuestion) return null
 

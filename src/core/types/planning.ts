@@ -250,6 +250,24 @@ export interface ChecklistItem {
   actualMinutes?: number
   /** ISO timestamp when item was completed. */
   completedAt?: string
+  /** Brief content guide for workbook items (what to cover today). */
+  contentGuide?: string
+}
+
+export interface ChapterResponse {
+  id?: string
+  childId: string
+  date: string
+  bookTitle: string
+  chapter: string
+  questionType: string
+  question: string
+  audioUrl: string | null
+  textResponse?: string
+  weekTheme: string
+  virtue: string
+  scripture: string
+  createdAt: string
 }
 
 export interface Session {

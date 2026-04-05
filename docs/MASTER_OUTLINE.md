@@ -329,6 +329,7 @@ Progress
 
 * `scans` — curriculum photo scan records
 * `shellyChatThreads` — Shelly's AI chat threads tagged with `chatContext` (`'lincoln'` | `'london'` | `'general'`) + messages subcollection. Messages may include `uploadedImageUrl` (Firebase Storage) and `imageAction` (`'analyze'` | `'transform'`).
+* `chapterResponses` — read-aloud chapter discussion responses per child. Stores full question context (book, chapter, question text, questionType), audio recording URL, week theme/virtue/scripture. Powers the Book Responses tab in Records and feeds into the disposition profile narrative.
 
 **Note:** xpEventLog merged into xpLedger (dedup via dedupKey field on ledger entries). Interactive quest sessions stored in `evaluationSessions` with `sessionType: 'interactive'` field. Story games stored in `storyGames` with `gameType` field ('board' | 'adventure' | 'cards'). `wordProgress` is a child subcollection (`children/{childId}/wordProgress`) used by Knowledge Mine — not in `firestore.ts` collection helpers. What's Built but Untested with Real Users
 * Weekly Review (needs full week of data)
@@ -487,6 +488,7 @@ Key Design Decisions
 35. **Flexible triggers** — features activate based on meaningful work done (3+ items OR 50% must-do), not rigid thresholds. Lincoln's day isn't always linear.
 37. **School creates product** — London's books and art in the app ARE the business inventory
 38. **Sunny the brand** — family golden retriever is the mascot tying all products and content together
+39. **Chapter discussions are formation evidence** — the richest signal of how Lincoln thinks. Audio recordings of chapter question responses capture articulation, personal connection, and ethical reasoning in context. Stored in dedicated `chapterResponses` collection for easy querying and disposition narrative feeding.
 39. **Context tabs over toggle** — Lincoln/London/General tabs are the primary chat filter, not a small toggle. Changes which threads show, what data Claude loads, and which suggestions appear. Each child gets their own conversation space.
 40. **Refine before generating** — image generation asks clarifying questions with tappable options before spending an API call. Better results without prompt engineering skill.
 41. **Camera-first on mobile** — image upload uses standard file picker (camera + gallery) so Shelly can photograph worksheets or pick from saved images.
