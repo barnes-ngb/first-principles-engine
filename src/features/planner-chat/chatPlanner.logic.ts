@@ -1031,6 +1031,11 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
           mvdEssential: rawItem.mvdEssential === true ? true : rawItem.category === 'must-do' ? true : undefined,
           category: rawItem.category === 'choose' ? 'choose' as const : 'must-do' as const,
           skipGuidance: typeof rawItem.skipGuidance === 'string' ? rawItem.skipGuidance : undefined,
+          ...(typeof rawItem.itemType === 'string' && ['routine', 'workbook', 'evaluation', 'activity'].includes(rawItem.itemType)
+            ? { itemType: rawItem.itemType as 'routine' | 'workbook' | 'evaluation' | 'activity' } : {}),
+          ...(typeof rawItem.evaluationMode === 'string' && ['phonics', 'comprehension', 'fluency', 'math'].includes(rawItem.evaluationMode)
+            ? { evaluationMode: rawItem.evaluationMode as 'phonics' | 'comprehension' | 'fluency' | 'math' } : {}),
+          ...(typeof rawItem.link === 'string' ? { link: rawItem.link } : {}),
         })
       }
 

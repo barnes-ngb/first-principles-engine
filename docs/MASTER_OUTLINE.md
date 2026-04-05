@@ -23,6 +23,7 @@ Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — Apr
 * **Decomposition (completed):** TodayPage shell (816L) + TodayChecklist (720L) + QuickCaptureSection (285L) + WeekFocusCard (163L) + TeachBackSection (97L) + ChapterQuestionCard (60L) + ReadingRoutineItems + MathRoutineItems + SpeechRoutineItems + RoutineSection + ExplorerMap + WorkshopGameCards + KidCaptureForm + CreativeTimeLog + LadderQuickLog + HelperPanel
 * **Kid Today View decomposition (completed):** KidTodayView shell + KidChecklist (484L) + KidTeachBack (167L) + KidChapterResponse (159L) + KidConundrumResponse (209L) + KidExtraLogger (163L) + KidCelebration (117L)
 * **Diamonds Mined card** — Kid Today shows today's quest summary (diamonds, level, domain, streak) or "Ready to mine?" invite with navigation to Knowledge Mine
+* **Scheduled evaluations** — Knowledge Mine and Fluency Practice are scheduled as real checklist items in the weekly plan. Evaluation items have `itemType: 'evaluation'` and `evaluationMode` fields. Blue left border distinguishes them from workbook items. "Start Mining" button navigates directly to Knowledge Mine. Quest/fluency completion auto-marks the matching evaluation item as done with actual minutes logged. Evaluation time counts toward subject hours (Reading or Math).
 
 ### Curriculum Photo Scanning
 * ScanButton component — camera capture of workbook/worksheet pages
@@ -47,6 +48,7 @@ Plan My Week
 * "Go to Today →" shortcut after applying
 * Print Materials — per-day or all-week Minecraft-themed worksheet generation
 * "Repeat Last Week" shortcut for low-energy weeks
+* **Evaluation scheduling** — AI planner auto-includes Knowledge Mine and Fluency Practice sessions in the Choose section based on child's Skill Snapshot (emerging/not-yet skills). Max 1 quest + 1 fluency per day, spread across the week, not on heavy days (230m+).
 * AI feature flag defaults to ON (no manual Settings toggle needed)
 * Weekly Conundrum — AI-generated open-ended discussion scenario tied to week theme/virtue/subjects. No right answer. Separate prompts for Lincoln (deeper) and London (simpler). Saved to week plan, visible on Today.
 * **Plan My Week decomposition (completed):** PlannerChatPage (2,112L) + PlannerSetupWizard (201L) + WeekFocusPanel (88L) + PlanDayCards (104L) + PlannerChatMessages (65L). Render reduced 800→500L; state management still unified in main page.
@@ -471,6 +473,7 @@ Key Design Decisions
 27. London creates, Lincoln refines — Story Keeper / Playtester roles give both boys meaningful work from one feature
 28. Players ARE the family — game tokens are real people with real avatars, not fictional characters
 29. **Setup once, confirm weekly** — Shelly configures routine and subject times once. Weekly planning is: pick energy, note exceptions, generate, lock in. Under 2 minutes.
+30. **Evaluations are school** — Knowledge Mine and Fluency Practice are scheduled, counted toward hours, and checked off like any other activity. Not extra — real school.
 30. **Disposition over content mastery** — track how a child approaches learning (curiosity, persistence, articulation, self-awareness, ownership), not what they can pass
 31. **Teach-back is evidence** — Lincoln explaining to London is the richest learning signal
 32. **AI synthesizes growth narrative from existing data** — no additional tracking burden on Shelly

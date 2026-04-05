@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link as RouterLink } from 'react-router-dom'
+import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
@@ -154,6 +154,7 @@ export default function TodayChecklist({
   onPrintMaterials,
   printingMaterials,
 }: TodayChecklistProps) {
+  const navigate = useNavigate()
   const [editingPlan, setEditingPlan] = useState(false)
   const [addingItem, setAddingItem] = useState(false)
   const [newItemTitle, setNewItemTitle] = useState('')
@@ -433,7 +434,14 @@ export default function TodayChecklist({
             }
 
             return (
-              <Box key={index}>
+              <Box key={index} sx={{
+                ...(item.itemType === 'evaluation' ? {
+                  borderLeft: '3px solid',
+                  borderLeftColor: 'info.main',
+                  pl: 0.5,
+                  borderRadius: 1,
+                } : {}),
+              }}>
                 <Stack
                   direction="row"
                   spacing={0.5}
@@ -520,6 +528,23 @@ export default function TodayChecklist({
                      /frontier|focus/i.test(item.skipGuidance) ? '\uD83C\uDFAF ' : '\u2139\uFE0F '}
                     {item.skipGuidance}
                   </Typography>
+                )}
+                {/* Start Mining button for evaluation items */}
+                {item.itemType === 'evaluation' && item.link && !item.completed && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => navigate(item.link!)}
+                    sx={{
+                      mt: 0.5,
+                      ml: 5,
+                      borderColor: 'info.main',
+                      color: 'info.main',
+                      fontSize: '0.75rem',
+                    }}
+                  >
+                    ⛏️ Start Mining
+                  </Button>
                 )}
                 {/* Scan results panel */}
                 {scanItemIndex === index && scanResult?.results && (
