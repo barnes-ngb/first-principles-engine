@@ -358,11 +358,16 @@ export default function BookEditorPage() {
             style,
             caption,
           })
-          if (result) {
+          if (result?.url) {
             applySketchEnhancement(activePage.id, imageId, result.url, result.storagePath)
             setSketchImageId(imageId)
             setSketchComparePageId(activePage.id)
             setShowSketchCompare(true)
+          } else {
+            // Enhancement failed or returned no URL — keep sketch as-is
+            console.warn('Reimagine returned no image URL, keeping original sketch')
+            setSketchImageId(imageId)
+            setSketchComparePageId(activePage.id)
           }
         }
       } catch (err) {

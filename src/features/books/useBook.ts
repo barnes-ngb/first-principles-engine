@@ -12,7 +12,7 @@ import {
 } from 'firebase/firestore'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
-import { artifactsCollection, booksCollection, hoursCollection } from '../../core/firebase/firestore'
+import { artifactsCollection, booksCollection, hoursCollection, stripUndefined } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { useDebounce } from '../../core/hooks/useDebounce'
 import type { Artifact, Book, BookPage, PageImage, StickerTag } from '../../core/types'
@@ -175,7 +175,8 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
         const docRef = doc(booksCollection(familyId), bookId)
         const { id, ...data } = updated
         void id
-        await setDoc(docRef, { ...data, updatedAt: new Date().toISOString() })
+        const sanitized = stripUndefined(data as unknown as Record<string, unknown>) as Omit<Book, 'id'>
+        await setDoc(docRef, { ...sanitized, updatedAt: new Date().toISOString() })
         setSaveState('saved')
       } catch (err) {
         console.error('Book save failed:', err)
