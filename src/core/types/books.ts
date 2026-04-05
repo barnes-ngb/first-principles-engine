@@ -20,6 +20,7 @@ export type BookTheme =
   | 'superheroes'
   | 'cooking'
   | 'sports'
+  | 'holidays'
   | 'other'
   | (string & {})  // allow custom theme IDs
 
@@ -158,6 +159,14 @@ export const PRESET_THEMES: BookThemeConfig[] = [
     storyTone: 'energetic and encouraging with teamwork themes',
     storyWorldDescription: 'playgrounds, fields, and courts where kids play sports and learn teamwork',
     storyVocabularyLevel: 'simple action words with sports terminology',
+  },
+  {
+    id: 'holidays', name: 'Holiday Stories', emoji: '🎄', isPreset: true,
+    imageStylePrefix: 'A festive, joyful children\'s book illustration. Holiday decorations, seasonal scenes, warm family celebrations.',
+    coverStyle: 'storybook',
+    storyTone: 'warm, festive, and joyful with celebration themes',
+    storyWorldDescription: 'a world of holiday celebrations — Christmas, Easter, Thanksgiving, birthdays, and seasonal traditions',
+    storyVocabularyLevel: 'simple sentences with holiday and celebration vocabulary',
   },
 ]
 
