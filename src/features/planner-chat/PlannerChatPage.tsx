@@ -71,7 +71,7 @@ import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
-import { defaultAppBlocks, defaultDailyRoutine, parseRoutineTotalMinutes } from './chatPlanner.logic'
+import { defaultAppBlocks, defaultDailyRoutine, filterRoutineForCompletedPrograms, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
   buildPlannerPrompt,
   fillMissingDaysFromRoutine,
@@ -321,6 +321,12 @@ export default function PlannerChatPage() {
       }
     })
   }, [familyId, activeChildId])
+
+  // Filter out completed programs (e.g., Reading Eggs) from the routine
+  const filteredDailyRoutine = useMemo(
+    () => filterRoutineForCompletedPrograms(dailyRoutine, snapshot?.completedPrograms ?? []),
+    [dailyRoutine, snapshot?.completedPrograms],
+  )
 
   // Load per-child subject time defaults
   useEffect(() => {
@@ -865,7 +871,7 @@ Return as JSON:
     }
 
     const mergedPhotoDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine, subjectTimeDefaults: mergedPhotoDefaults }
+    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedPhotoDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -883,7 +889,7 @@ Return as JSON:
       })
 
       const rawAiDraft = response ? parseAIResponse(response) : null
-      const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, dailyRoutine, hoursPerDay) : null
+      const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
       if (aiDraft) {
         draft = aiDraft
         usedAI = true
@@ -917,7 +923,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -934,7 +940,7 @@ Return as JSON:
     }
 
     const mergedDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine, subjectTimeDefaults: mergedDefaults }
+    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -966,7 +972,7 @@ Return as JSON:
       }
 
       const rawAiDraft = response ? parseAIResponse(response) : null
-      const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, dailyRoutine, hoursPerDay) : null
+      const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
       if (aiDraft) {
         draft = aiDraft
         usedAI = true
@@ -1005,7 +1011,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext])
+  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -1113,7 +1119,7 @@ Return as JSON:
           // Recovery failed — fall back to local planner
           const assignments = photoLabelsToAssignments(photoLabels)
           const localDraft = generateDraftPlanFromInputs({
-            snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine,
+            snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine,
             subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
           })
           setCurrentDraft(localDraft)
@@ -1220,7 +1226,7 @@ Return as JSON:
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Applied } : {}),
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, dailyRoutine, handleGeneratePlan, subjectTimeDefaults])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, filteredDailyRoutine, handleGeneratePlan, subjectTimeDefaults])
 
   const buildWeekFocusContext = useCallback(() => {
     const contextParts: string[] = []
@@ -1284,7 +1290,7 @@ Return as JSON:
         createdAt: new Date().toISOString(),
       }
       const mergedDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
-      const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine, subjectTimeDefaults: mergedDefaults }
+      const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
       let draft: DraftWeeklyPlan
       let usedAI = false
 
@@ -1297,7 +1303,7 @@ Return as JSON:
           prompt,
           masteryPromptContext,
           `Weekly focus context:\n${buildWeekFocusContext()}`,
-          `Daily routine context:\n${dailyRoutine}`,
+          `Daily routine context:\n${filteredDailyRoutine}`,
           focusInstruction,
           readAloudBook && readAloudChapters
             ? `Read-aloud: ${readAloudBook} (${readAloudChapters}). Generate ONE chapterQuestion per school day for these SPECIFIC chapters in order. Do NOT start from Chapter 1 unless the parent specified it. The "chapter" field must use the actual chapter numbers from the entered range.`
@@ -1310,7 +1316,7 @@ Return as JSON:
           messages: [{ role: 'user', content: fullPrompt }],
         })
         const rawAiDraft = response ? parseAIResponse(response) : null
-        const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, dailyRoutine, hoursPerDay) : null
+        const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
         if (aiDraft) {
           draft = aiDraft
           usedAI = true
@@ -1345,7 +1351,7 @@ Return as JSON:
     } finally {
       setGeneratingWeek(false)
     }
-  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef, readAloudBook, readAloudChapters])
+  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, appBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef, readAloudBook, readAloudChapters])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
@@ -1404,7 +1410,7 @@ Each question must have a questionType: comprehension, application, connection, 
 Vary the question types across the week.
 The "chapter" field in each chapterQuestion must match the actual chapter numbers from the entered range, not auto-numbered from 1.
 Include the question in a "chapterQuestion" field on each day.` : ''}
-${dailyRoutine ? `\nDaily routine (use this as the base template for each day — keep these activities and times, vary them across the week as appropriate):\n${dailyRoutine}` : ''}
+${filteredDailyRoutine ? `\nDaily routine (use this as the base template for each day — keep these activities and times, vary them across the week as appropriate):\n${filteredDailyRoutine}` : ''}
 
 Subject time defaults (use these as the baseline for estimatedMinutes per item):
 ${subjectDefaultsLines}
@@ -1413,7 +1419,7 @@ ${weekNotes ? `\nNotes: ${weekNotes}` : ''}
 Generate a plan for Monday through Friday.`.trim()
 
     await handleGenerateWeek(contextMessage, true)
-  }, [weekEnergy, hoursPerDay, workbookConfigs, readAloudBook, readAloudChapters, weekNotes, activeChild, dailyRoutine, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek])
+  }, [weekEnergy, hoursPerDay, workbookConfigs, readAloudBook, readAloudChapters, weekNotes, activeChild, filteredDailyRoutine, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -1457,6 +1463,22 @@ Generate a plan for Monday through Friday.`.trim()
       days: currentDraft.days.map((day, i) => {
         if (i !== dayIndex) return day
         const newItems = day.items.filter((_, idx) => idx !== itemIndex)
+        return { ...day, items: newItems }
+      }),
+    }
+    setCurrentDraft(updated)
+  }, [currentDraft])
+
+  const handleUpdateTime = useCallback((dayIndex: number, itemIndex: number, newMinutes: number) => {
+    if (!currentDraft) return
+    const clamped = Math.max(5, Math.min(120, newMinutes))
+    const updated: DraftWeeklyPlan = {
+      ...currentDraft,
+      days: currentDraft.days.map((day, i) => {
+        if (i !== dayIndex) return day
+        const newItems = day.items.map((item, idx) =>
+          idx === itemIndex ? { ...item, estimatedMinutes: clamped } : item,
+        )
         return { ...day, items: newItems }
       }),
     }
@@ -2047,6 +2069,7 @@ ${dayPrompts}`
               applied={applied}
               onMoveItem={handleMoveItem}
               onRemoveItem={handleRemoveItem}
+              onUpdateTime={handleUpdateTime}
             />
           )}
 
