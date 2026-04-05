@@ -37,6 +37,7 @@ import type {
   WorkbookConfig,
   XpLedger,
 } from '../types'
+import type { ChildSkillMap } from '../curriculum/skillStatus'
 import { app } from './firebase'
 
 export const db = getFirestore(app)
@@ -419,3 +420,11 @@ export const shellyChatThreadsCollection = (familyId: string) =>
 
 export const shellyChatMessagesCollection = (familyId: string, threadId: string) =>
   collection(db, 'families', familyId, 'shellyChatThreads', threadId, 'messages')
+
+// ── Child Skill Maps (Learning Map) ─────────────────────────────
+
+/** Skill map per child. Doc ID: {childId} */
+export const childSkillMapsCollection = (
+  familyId: string,
+): CollectionReference<ChildSkillMap> =>
+  collection(db, `families/${familyId}/childSkillMaps`) as CollectionReference<ChildSkillMap>
