@@ -453,7 +453,10 @@ PLAN CONTENT RULES:
           "accepted": true,
           "mvdEssential": false,
           "category": "must-do",
-          "skipGuidance": "This is Lincoln's frontier — spend full time here. Focus on two-digit addition." // or null for non-workbook items
+          "skipGuidance": "This is Lincoln's frontier — spend full time here. Focus on two-digit addition.", // or null for non-workbook items
+          "itemType": "workbook", // "routine" | "workbook" | "evaluation" | "activity" — use "evaluation" for Knowledge Mine / Fluency Practice items
+          "evaluationMode": null, // "phonics" | "comprehension" | "fluency" | "math" — only set when itemType is "evaluation"
+          "link": null // route path (e.g. "/quest") — only set for in-app activities like evaluation items
         }
       ],
       "chapterQuestion": {

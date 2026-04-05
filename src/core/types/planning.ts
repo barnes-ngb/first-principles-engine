@@ -240,6 +240,16 @@ export interface ChecklistItem {
   skipGuidance?: string
   /** Whether this item was explicitly skipped by the child. */
   skipped?: boolean
+  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), or activity. */
+  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity'
+  /** Evaluation mode when itemType is 'evaluation'. */
+  evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
+  /** Route to navigate to (e.g., '/quest') for in-app activities. */
+  link?: string
+  /** Actual minutes spent (set on auto-complete from quest/fluency). */
+  actualMinutes?: number
+  /** ISO timestamp when item was completed. */
+  completedAt?: string
 }
 
 export interface Session {
@@ -382,6 +392,12 @@ export interface DraftPlanItem {
   category?: 'must-do' | 'choose'
   /** Guidance note when an item is skipped (from AI). */
   skipGuidance?: string
+  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), or activity. */
+  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity'
+  /** Evaluation mode when itemType is 'evaluation'. */
+  evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
+  /** Route to navigate to (e.g., '/quest') for in-app activities. */
+  link?: string
 }
 
 export interface PlannerConversation {

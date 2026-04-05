@@ -23,6 +23,7 @@ Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — Apr
 * **Decomposition (completed):** TodayPage shell (816L) + TodayChecklist (720L) + QuickCaptureSection (285L) + WeekFocusCard (163L) + TeachBackSection (97L) + ChapterQuestionCard (60L) + ReadingRoutineItems + MathRoutineItems + SpeechRoutineItems + RoutineSection + ExplorerMap + WorkshopGameCards + KidCaptureForm + CreativeTimeLog + LadderQuickLog + HelperPanel
 * **Kid Today View decomposition (completed):** KidTodayView shell + KidChecklist (484L) + KidTeachBack (167L) + KidChapterResponse (159L) + KidConundrumResponse (209L) + KidExtraLogger (163L) + KidCelebration (117L)
 * **Diamonds Mined card** — Kid Today shows today's quest summary (diamonds, level, domain, streak) or "Ready to mine?" invite with navigation to Knowledge Mine
+* **Scheduled evaluations** — Knowledge Mine and Fluency Practice are scheduled as real checklist items in the weekly plan. Evaluation items have `itemType: 'evaluation'` and `evaluationMode` fields. Blue left border distinguishes them from workbook items. "Start Mining" button navigates directly to Knowledge Mine. Quest/fluency completion auto-marks the matching evaluation item as done with actual minutes logged. Evaluation time counts toward subject hours (Reading or Math).
 
 ### Curriculum Photo Scanning
 * ScanButton component — camera capture of workbook/worksheet pages
@@ -47,6 +48,7 @@ Plan My Week
 * "Go to Today →" shortcut after applying
 * Print Materials — per-day or all-week Minecraft-themed worksheet generation
 * "Repeat Last Week" shortcut for low-energy weeks
+* **Evaluation scheduling** — AI planner auto-includes Knowledge Mine and Fluency Practice sessions in the Choose section based on child's Skill Snapshot (emerging/not-yet skills). Max 1 quest + 1 fluency per day, spread across the week, not on heavy days (230m+).
 * AI feature flag defaults to ON (no manual Settings toggle needed)
 * Weekly Conundrum — AI-generated open-ended discussion scenario tied to week theme/virtue/subjects. No right answer. Separate prompts for Lincoln (deeper) and London (simpler). Saved to week plan, visible on Today.
 * **Explicit daily item ordering** — AI prompt enforces: Formation → Core Reading → Core Math → Read-Aloud → Support Skills → Apps → Enrichment. Reading right after Scripture gets highest-energy slot.
@@ -476,22 +478,23 @@ Key Design Decisions
 28. Players ARE the family — game tokens are real people with real avatars, not fictional characters
 29. **Setup once, confirm weekly** — Shelly configures routine and subject times once. Weekly planning is: pick energy, note exceptions, generate, lock in. Under 2 minutes.
 30. **Reading right after Scripture** — highest priority gets highest energy. Reading is Lincoln's biggest growth area, so it goes second (right after Formation) while focus is fresh. Math third, support skills after.
-30. **Disposition over content mastery** — track how a child approaches learning (curiosity, persistence, articulation, self-awareness, ownership), not what they can pass
-31. **Teach-back is evidence** — Lincoln explaining to London is the richest learning signal
-32. **AI synthesizes growth narrative from existing data** — no additional tracking burden on Shelly
-33. **Conundrums build ethical reasoning** — weekly open-ended scenarios with no right answer, connected to what they're studying
-34. **Kid-initiated logging** — Lincoln logs his own extra tablet time and teach-back moments. All taps, no typing. Respects his speech/writing challenges.
+31. **Evaluations are school** — Knowledge Mine and Fluency Practice are scheduled, counted toward hours, and checked off like any other activity. Not extra — real school.
+32. **Disposition over content mastery** — track how a child approaches learning (curiosity, persistence, articulation, self-awareness, ownership), not what they can pass
+33. **Teach-back is evidence** — Lincoln explaining to London is the richest learning signal
+34. **AI synthesizes growth narrative from existing data** — no additional tracking burden on Shelly
+35. **Conundrums build ethical reasoning** — weekly open-ended scenarios with no right answer, connected to what they're studying
+36. **Kid-initiated logging** — Lincoln logs his own extra tablet time and teach-back moments. All taps, no typing. Respects his speech/writing challenges.
 35. **Flexible triggers** — features activate based on meaningful work done (3+ items OR 50% must-do), not rigid thresholds. Lincoln's day isn't always linear.
-36. **School creates product** — London's books and art in the app ARE the business inventory
-37. **Sunny the brand** — family golden retriever is the mascot tying all products and content together
-38. **Context tabs over toggle** — Lincoln/London/General tabs are the primary chat filter, not a small toggle. Changes which threads show, what data Claude loads, and which suggestions appear. Each child gets their own conversation space.
-39. **Refine before generating** — image generation asks clarifying questions with tappable options before spending an API call. Better results without prompt engineering skill.
-40. **Camera-first on mobile** — image upload uses standard file picker (camera + gallery) so Shelly can photograph worksheets or pick from saved images.
-41. **Follow-ups reduce friction** — every assistant response suggests 2-3 specific follow-up questions as tappable chips. Shelly keeps the conversation going without typing.
-42. **Two currencies, like Minecraft** — XP is your level (always climbing, unlocks access). Diamonds are your inventory (earned from active effort, spent to forge and craft). Lincoln already understands this from Minecraft.
-43. **Forge, don't unlock** — armor pieces are individually forged with diamonds, not auto-given. Lincoln chooses his build order. Each forge includes verse engagement.
-44. **Tiers are biomes** — each armor tier is a Minecraft-like world (Caves, Plains, Mountains, Desert Temple, The End, The Nether). Portal moments between them.
-45. **Active effort earns diamonds** — quests, teach-back, Dad Lab, and creative engagement earn diamonds. Routine activities (checklist, daily ritual) earn XP only.
+37. **School creates product** — London's books and art in the app ARE the business inventory
+38. **Sunny the brand** — family golden retriever is the mascot tying all products and content together
+39. **Context tabs over toggle** — Lincoln/London/General tabs are the primary chat filter, not a small toggle. Changes which threads show, what data Claude loads, and which suggestions appear. Each child gets their own conversation space.
+40. **Refine before generating** — image generation asks clarifying questions with tappable options before spending an API call. Better results without prompt engineering skill.
+41. **Camera-first on mobile** — image upload uses standard file picker (camera + gallery) so Shelly can photograph worksheets or pick from saved images.
+42. **Follow-ups reduce friction** — every assistant response suggests 2-3 specific follow-up questions as tappable chips. Shelly keeps the conversation going without typing.
+43. **Two currencies, like Minecraft** — XP is your level (always climbing, unlocks access). Diamonds are your inventory (earned from active effort, spent to forge and craft). Lincoln already understands this from Minecraft.
+44. **Forge, don't unlock** — armor pieces are individually forged with diamonds, not auto-given. Lincoln chooses his build order. Each forge includes verse engagement.
+45. **Tiers are biomes** — each armor tier is a Minecraft-like world (Caves, Plains, Mountains, Desert Temple, The End, The Nether). Portal moments between them.
+46. **Active effort earns diamonds** — quests, teach-back, Dad Lab, and creative engagement earn diamonds. Routine activities (checklist, daily ritual) earn XP only.
 46. **Spending is placing, not losing** — diamonds become permanent things (forged armor, cosmetics, world decorations). Nothing disappears.
 
 ### Key Files Reference
