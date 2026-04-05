@@ -983,7 +983,7 @@ export function useQuestSession() {
         console.warn('[Quest] Failed to auto-complete evaluation item (non-blocking):', err)
       }
     },
-    [activeChildId, familyId, findings, previousSessions, chat, analyzePatterns],
+    [activeChildId, familyId, findings, previousSessions, chat, analyzePatterns, questState?.elapsedSeconds],
   )
 
   // ── Submit answer ─────────────────────────────────────────────
