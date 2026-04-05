@@ -140,7 +140,7 @@ const imageGenFn = httpsCallable<ImageGenRequest, ImageGenResponse>(functions, '
 const enhanceSketchFn = httpsCallable<EnhanceSketchRequest, EnhanceSketchResponse>(
   functions,
   'enhanceSketch',
-  { timeout: 120_000 }, // match Cloud Function timeoutSeconds: 120
+  { timeout: 180_000 }, // match Cloud Function timeoutSeconds: 180
 )
 const analyzePatternsFn = httpsCallable<AnalyzePatternsRequest, AnalyzePatternsResponse>(
   functions,
