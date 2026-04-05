@@ -1569,6 +1569,10 @@ Generate a plan for Monday through Friday.`.trim()
           estimatedMinutes: item.estimatedMinutes,
           subjectBucket: item.subjectBucket,
           ...(lessonCardMap.get(item.title) ? { lessonCardId: lessonCardMap.get(item.title) } : {}),
+          ...(item.skipGuidance ? { skipGuidance: item.skipGuidance } : {}),
+          ...(item.itemType ? { itemType: item.itemType } : {}),
+          ...(item.evaluationMode ? { evaluationMode: item.evaluationMode } : {}),
+          ...(item.link ? { link: item.link } : {}),
         }))
 
         const blocks: DayBlock[] = dayItems

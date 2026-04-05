@@ -12,16 +12,18 @@ Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — Apr
 * Teach-Back prompt (parent view) — "Teach London" card appears after 3+ items completed or 50% must-do. Text capture, tags as Explain engine stage.
 * Teach-Back prompt (kid view) — Lincoln gets "I Taught London!" button with subject chips + audio recording. No text input — respects speech/writing challenges.
 * Extra Activity Logger (kid view) — "I Did More Mining!" lets Lincoln log tablet time (Reading Eggs, Math App, etc.) with activity + duration chips. All taps, no typing. Adds to checklist as completed item, counts toward hours and teach-back trigger.
-* Weekly Conundrum card — expandable discussion scenario from week plan
+* Weekly Conundrum card — short punchy scenario (80-120 words, 60s read-aloud), TTS auto-read, quick-pick response chips + audio record, expandable in parent view
 * Chapter Question card — Stonebridge narrative question from unified weekly focus
 * **SectionErrorBoundary** — per-section crash isolation prevents one broken section from taking down the whole page
 * **Evaluation nudge** — planner shows nudge when no skill snapshot exists
+* **Skip guidance display** — Parent checklist shows per-item AI skip/focus notes color-coded (green for mastered/skip, amber for frontier/focus, grey for info). Not shown in kid view.
 * **Minutes-logged indicator** — Today checklist shows tracked minutes per item
 * **HelpStrip guidance** — contextual help on Records, Weekly Review, and Progress pages
 * **Per-child materials theming** — Lincoln gets Minecraft-themed worksheets, London gets story/adventure-themed worksheets
 * **Decomposition (completed):** TodayPage shell (816L) + TodayChecklist (720L) + QuickCaptureSection (285L) + WeekFocusCard (163L) + TeachBackSection (97L) + ChapterQuestionCard (60L) + ReadingRoutineItems + MathRoutineItems + SpeechRoutineItems + RoutineSection + ExplorerMap + WorkshopGameCards + KidCaptureForm + CreativeTimeLog + LadderQuickLog + HelperPanel
 * **Kid Today View decomposition (completed):** KidTodayView shell + KidChecklist (484L) + KidTeachBack (167L) + KidChapterResponse (159L) + KidConundrumResponse (209L) + KidExtraLogger (163L) + KidCelebration (117L)
 * **Diamonds Mined card** — Kid Today shows today's quest summary (diamonds, level, domain, streak) or "Ready to mine?" invite with navigation to Knowledge Mine
+* **Scheduled evaluations** — Knowledge Mine and Fluency Practice are scheduled as real checklist items in the weekly plan. Evaluation items have `itemType: 'evaluation'` and `evaluationMode` fields. Blue left border distinguishes them from workbook items. "Start Mining" button navigates directly to Knowledge Mine. Quest/fluency completion auto-marks the matching evaluation item as done with actual minutes logged. Evaluation time counts toward subject hours (Reading or Math).
 
 ### Curriculum Photo Scanning
 * ScanButton component — camera capture of workbook/worksheet pages
@@ -37,15 +39,22 @@ Plan My Week
 * AI-powered plan generation (Sonnet) with full enriched context (snapshot, workbooks, evaluation findings, engagement data, subject defaults)
 * **Full-width plan preview** — renders outside chat area, day cards with Must-Do / Choose sections clearly labeled
 * Single set of quick adjustment chips (tap to apply immediately) + chat-based free-form adjustments
-* Skip guidance per item from evaluation data + week skip summary
+* Skip guidance per item from evaluation data + week skip summary + per-item skipGuidance color-coded on parent Today checklist (green=skip, amber=focus, grey=info; not shown in kid view)
+* Completed program exclusion — workbooks marked complete or matching completedPrograms are filtered from plan generation context
+* Recent scans context — planner receives last scan position per workbook to know what lesson to assign next
 * Plan generation intent detection — typing "generate a plan" in chat redirects to proper generation path
 * Robust JSON parsing — handles code-fenced responses, truncated JSON, fallback recovery
 * "Lock In This Plan" button → daily checklists with subjectBucket tagging + auto-generate lesson cards
 * "Go to Today →" shortcut after applying
 * Print Materials — per-day or all-week Minecraft-themed worksheet generation
 * "Repeat Last Week" shortcut for low-energy weeks
+* **Evaluation scheduling** — AI planner auto-includes Knowledge Mine and Fluency Practice sessions in the Choose section based on child's Skill Snapshot (emerging/not-yet skills). Max 1 quest + 1 fluency per day, spread across the week, not on heavy days (230m+).
 * AI feature flag defaults to ON (no manual Settings toggle needed)
-* Weekly Conundrum — AI-generated open-ended discussion scenario tied to week theme/virtue/subjects. No right answer. Separate prompts for Lincoln (deeper) and London (simpler). Saved to week plan, visible on Today.
+* Weekly Conundrum — AI-generated open-ended discussion scenario (80-120 words, under 60 seconds read-aloud). Tied to week theme/virtue/subjects. No right answer. Generates quickPicks (2-3 tappable response options). TTS auto-read in kid view. Separate prompts for Lincoln (deeper) and London (simpler). Audio + quick-pick response capture. Saved to week plan, visible on Today.
+* **Explicit daily item ordering** — AI prompt enforces: Formation → Core Reading → Core Math → Read-Aloud → Support Skills → Apps → Enrichment. Reading right after Scripture gets highest-energy slot.
+* **Daily variation / rotation** — Support skills (handwriting, sight words, booster cards, memory cards, language arts) rotate across the week (2-3 days each) instead of appearing identically every day. Monday is fullest, Friday is lightest.
+* **Day-aware time budgets** — Mon/Tue full day (3-3.5h), Wed/Thu standard (2.5-3h), Friday lighter (2-2.5h). Item count adjusts to fit.
+* **Read-aloud as distinct block** — Family read-aloud book (e.g. Narnia) placed after core academics, before support skills, with chapter question in contentGuide field.
 * **Plan My Week decomposition (completed):** PlannerChatPage (2,112L) + PlannerSetupWizard (201L) + WeekFocusPanel (88L) + PlanDayCards (104L) + PlannerChatMessages (65L). Render reduced 800→500L; state management still unified in main page.
 
 Evaluation Chat
@@ -263,7 +272,7 @@ Progress
 * **Learning Profile** — AI-generated disposition narrative (Curiosity, Persistence, Articulation, Self-Awareness, Ownership) from 4 weeks of day log data, evaluations, and Dad Lab reports. First tab in Progress.
   * Dispositions mapped to Wonder→Build→Explain→Reflect→Share learning loop
   * Replaces manual ladder logging as the primary growth visibility tool
-* Skill Snapshot — priority skills, supports, stop rules, evidence definitions, workbook configs
+* Skill Snapshot — priority skills, supports, stop rules, evidence definitions, workbook configs with Mark Complete (greyed card + reactivate) and visual completion indicator
 * Conceptual Blocks — conceptualBlocks[] on Skill Snapshot from pattern detection; ADDRESS_NOW vs DEFER; plain language rationale + strategies
 * "Evaluate Skills" button → evaluation chat Records
 * Hours & Compliance — additive computation (day logs + hours entries + adjustments)
@@ -272,7 +281,10 @@ Progress
 * Evaluations tab — AI evaluation history (guided + Knowledge Mine quest sessions, filter chips, quest detail with collapsible question breakdown, struggling words, recommendations)
 * Portfolio tab — artifact gallery with photo thumbnails + audio playback Dad Lab
 * Full lifecycle: Plan → Start → Lincoln Contributes → Nathan Completes
-* "Suggest a Lab" AI, "I Have an Idea", "Plan a Lab" manual
+* 5 lab types with frameworks: Experiment (Scientific Method: Question→Hypothesis→Test→Observe→Conclude), Build (Engineering Design: Problem→Design→Build→Test→Improve), Explore (Discovery: Wonder→Observe→Document→Research→Share), Create (Creative/Character: Inspiration→Plan→Make→Reflect→Display)
+* "Suggest a Lab" AI with framework-aware prompts (identifies type, lists phases, teaching moment, subject connection), "I Have an Idea", "Plan a Lab" manual
+* Framework display in LabReportForm — shows step chips for selected lab type
+* Scientific method step UI in KidLabView — for experiment-type labs, Lincoln gets guided 5-step flow (Question→Prediction→Test→Observe→Conclude+Teach) with step navigation, audio/photo capture per step
 * Kid view: prediction, explanation, photo + audio capture
 * Artifact gallery, compliance hours auto-logged on completion Settings
 * General family profile, AI usage dashboard
@@ -320,6 +332,7 @@ Progress
 
 * `scans` — curriculum photo scan records
 * `shellyChatThreads` — Shelly's AI chat threads tagged with `chatContext` (`'lincoln'` | `'london'` | `'general'`) + messages subcollection. Messages may include `uploadedImageUrl` (Firebase Storage) and `imageAction` (`'analyze'` | `'transform'`).
+* `chapterResponses` — read-aloud chapter discussion responses per child. Stores full question context (book, chapter, question text, questionType), audio recording URL, week theme/virtue/scripture. Powers the Book Responses tab in Records and feeds into the disposition profile narrative.
 
 **Note:** xpEventLog merged into xpLedger (dedup via dedupKey field on ledger entries). Interactive quest sessions stored in `evaluationSessions` with `sessionType: 'interactive'` field. Story games stored in `storyGames` with `gameType` field ('board' | 'adventure' | 'cards'). `wordProgress` is a child subcollection (`children/{childId}/wordProgress`) used by Knowledge Mine — not in `firestore.ts` collection helpers. What's Built but Untested with Real Users
 * Weekly Review (needs full week of data)
@@ -468,23 +481,29 @@ Key Design Decisions
 27. London creates, Lincoln refines — Story Keeper / Playtester roles give both boys meaningful work from one feature
 28. Players ARE the family — game tokens are real people with real avatars, not fictional characters
 29. **Setup once, confirm weekly** — Shelly configures routine and subject times once. Weekly planning is: pick energy, note exceptions, generate, lock in. Under 2 minutes.
-30. **Disposition over content mastery** — track how a child approaches learning (curiosity, persistence, articulation, self-awareness, ownership), not what they can pass
-31. **Teach-back is evidence** — Lincoln explaining to London is the richest learning signal
-32. **AI synthesizes growth narrative from existing data** — no additional tracking burden on Shelly
-33. **Conundrums build ethical reasoning** — weekly open-ended scenarios with no right answer, connected to what they're studying
-34. **Kid-initiated logging** — Lincoln logs his own extra tablet time and teach-back moments. All taps, no typing. Respects his speech/writing challenges.
+30. **Reading right after Scripture** — highest priority gets highest energy. Reading is Lincoln's biggest growth area, so it goes second (right after Formation) while focus is fresh. Math third, support skills after.
+31. **Evaluations are school** — Knowledge Mine and Fluency Practice are scheduled, counted toward hours, and checked off like any other activity. Not extra — real school.
+32. **Disposition over content mastery** — track how a child approaches learning (curiosity, persistence, articulation, self-awareness, ownership), not what they can pass
+33. **Teach-back is evidence** — Lincoln explaining to London is the richest learning signal
+34. **AI synthesizes growth narrative from existing data** — no additional tracking burden on Shelly
+35. **Conundrums build ethical reasoning** — weekly open-ended scenarios with no right answer, connected to what they're studying
+36. **Kid-initiated logging** — Lincoln logs his own extra tablet time and teach-back moments. All taps, no typing. Respects his speech/writing challenges.
 35. **Flexible triggers** — features activate based on meaningful work done (3+ items OR 50% must-do), not rigid thresholds. Lincoln's day isn't always linear.
-36. **School creates product** — London's books and art in the app ARE the business inventory
-37. **Sunny the brand** — family golden retriever is the mascot tying all products and content together
-38. **Context tabs over toggle** — Lincoln/London/General tabs are the primary chat filter, not a small toggle. Changes which threads show, what data Claude loads, and which suggestions appear. Each child gets their own conversation space.
-39. **Refine before generating** — image generation asks clarifying questions with tappable options before spending an API call. Better results without prompt engineering skill.
-40. **Camera-first on mobile** — image upload uses standard file picker (camera + gallery) so Shelly can photograph worksheets or pick from saved images.
-41. **Follow-ups reduce friction** — every assistant response suggests 2-3 specific follow-up questions as tappable chips. Shelly keeps the conversation going without typing.
-42. **Two currencies, like Minecraft** — XP is your level (always climbing, unlocks access). Diamonds are your inventory (earned from active effort, spent to forge and craft). Lincoln already understands this from Minecraft.
-43. **Forge, don't unlock** — armor pieces are individually forged with diamonds, not auto-given. Lincoln chooses his build order. Each forge includes verse engagement.
-44. **Tiers are biomes** — each armor tier is a Minecraft-like world (Caves, Plains, Mountains, Desert Temple, The End, The Nether). Portal moments between them.
-45. **Active effort earns diamonds** — quests, teach-back, Dad Lab, and creative engagement earn diamonds. Routine activities (checklist, daily ritual) earn XP only.
+37. **School creates product** — London's books and art in the app ARE the business inventory
+38. **Sunny the brand** — family golden retriever is the mascot tying all products and content together
+39. **Chapter discussions are formation evidence** — the richest signal of how Lincoln thinks. Audio recordings of chapter question responses capture articulation, personal connection, and ethical reasoning in context. Stored in dedicated `chapterResponses` collection for easy querying and disposition narrative feeding.
+39. **Context tabs over toggle** — Lincoln/London/General tabs are the primary chat filter, not a small toggle. Changes which threads show, what data Claude loads, and which suggestions appear. Each child gets their own conversation space.
+40. **Refine before generating** — image generation asks clarifying questions with tappable options before spending an API call. Better results without prompt engineering skill.
+41. **Camera-first on mobile** — image upload uses standard file picker (camera + gallery) so Shelly can photograph worksheets or pick from saved images.
+42. **Follow-ups reduce friction** — every assistant response suggests 2-3 specific follow-up questions as tappable chips. Shelly keeps the conversation going without typing.
+43. **Two currencies, like Minecraft** — XP is your level (always climbing, unlocks access). Diamonds are your inventory (earned from active effort, spent to forge and craft). Lincoln already understands this from Minecraft.
+44. **Forge, don't unlock** — armor pieces are individually forged with diamonds, not auto-given. Lincoln chooses his build order. Each forge includes verse engagement.
+45. **Tiers are biomes** — each armor tier is a Minecraft-like world (Caves, Plains, Mountains, Desert Temple, The End, The Nether). Portal moments between them.
+46. **Active effort earns diamonds** — quests, teach-back, Dad Lab, and creative engagement earn diamonds. Routine activities (checklist, daily ritual) earn XP only.
 46. **Spending is placing, not losing** — diamonds become permanent things (forged armor, cosmetics, world decorations). Nothing disappears.
+47. **Conundrums are 60 seconds, not 3 minutes** — short enough for low energy, engaging enough for discussion. 80-120 words with TTS auto-read. Quick-pick response chips reduce friction.
+48. **AI chat is a teaching mirror** — reflects real data back to Shelly (completion patterns, frustration rates, conundrum engagement), not generic advice. Data-driven suggestion chips surface actionable insights.
+49. **Dad Lab types match the activity** — experiments get scientific method, builds get engineering design, exploration gets discovery framework. Each type has its own step sequence in kid view.
 
 ### Key Files Reference
 
@@ -538,7 +557,7 @@ Key Design Decisions
 
 **KidTodayView** — Original: 1,813L → Shell: 805L + 6 extracted components
 - `KidChecklist.tsx` (484L) — kid daily checklist with must-do/choose sections
-- `KidConundrumResponse.tsx` (209L) — weekly conundrum response
+- `KidConundrumResponse.tsx` — weekly conundrum response with TTS, quick-pick chips, scenario display
 - `KidTeachBack.tsx` (167L) — "I Taught London!" capture
 - `KidExtraLogger.tsx` (163L) — extra activity logger ("I Did More Mining!")
 - `KidChapterResponse.tsx` (159L) — chapter question response
@@ -573,8 +592,9 @@ Key Design Decisions
 - Consolidation pending.
 
 #### shellyChat Context Loading
-- Lincoln/London tabs: loads 6 context sources per child (skill snapshot, eval findings, today's plan, engagement history, disposition profile, sight words)
+- Lincoln/London tabs: loads 6 context sources per child (skill snapshot, eval findings, today's plan, engagement history, disposition profile, sight words) + teaching reflection data (completion patterns by day, skipped activities, conundrum engagement, chapter response counts)
 - General tab: loads family charter, children overview, week theme only
+- Data-driven suggestion chips: shows contextual suggestions ("Lincoln seemed frustrated", "Completion drops late in the week") based on real engagement and completion data from last 14 days
 - Each context source wrapped in independent try/catch — partial failures don't block response
 - All queries use `.limit()` to bound cost
 

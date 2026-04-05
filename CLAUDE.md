@@ -199,6 +199,7 @@ All under `families/{familyId}/`:
 | `storyGames` | Story Game Workshop games |
 | `scans` | Curriculum photo scan records |
 | `shellyChatThreads` | Shelly AI chat thread roots |
+| `chapterResponses` | Read-aloud chapter discussion responses per child |
 
 **Subcollections:**
 - `shellyChatThreads/{threadId}/messages` — Messages within a Shelly chat thread

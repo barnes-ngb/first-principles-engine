@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AssessmentIcon from '@mui/icons-material/Assessment'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import DeleteIcon from '@mui/icons-material/Delete'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import Accordion from '@mui/material/Accordion'
@@ -379,6 +380,65 @@ export default function SkillSnapshotPage() {
     [familyId, workbooks, withSave],
   )
 
+  // --- Mark workbook as complete ---
+  const [confirmComplete, setConfirmComplete] = useState<{ index: number; wb: WorkbookConfig } | null>(null)
+
+  const handleMarkComplete = useCallback(
+    async (index: number) => {
+      const wb = workbooks[index]
+      if (!wb) return
+      const now = new Date().toISOString()
+      const updated = { ...wb, completed: true, completedDate: now, curriculum: { ...wb.curriculum, provider: wb.curriculum?.provider ?? '', completed: true } }
+      setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+      await handleSaveWorkbook(index, updated)
+
+      // Add to completedPrograms on Skill Snapshot
+      if (snapshot && snapshotRef) {
+        const programs = snapshot.completedPrograms || []
+        if (!programs.includes(wb.name)) {
+          const newSnapshot = { ...snapshot, completedPrograms: [...programs, wb.name], updatedAt: now }
+          setSnapshot(newSnapshot)
+          void withSave(async () => {
+            await setDoc(snapshotRef, JSON.parse(JSON.stringify(newSnapshot)))
+          })
+        }
+      }
+      // Also update Learning Map
+      if (activeChildId) {
+        markProgramCompleteOnSkillMap(familyId, activeChildId, wb.name)
+          .catch((err: unknown) => console.warn('[LearningMap] Failed to mark program complete', err))
+      }
+      setSnack({ text: `"${wb.name}" marked as complete.`, severity: 'success' })
+      setConfirmComplete(null)
+    },
+    [workbooks, handleSaveWorkbook, snapshot, snapshotRef, withSave, activeChildId, familyId],
+  )
+
+  const handleReactivate = useCallback(
+    async (index: number) => {
+      const wb = workbooks[index]
+      if (!wb) return
+      const updated = { ...wb, completed: false, completedDate: undefined, curriculum: wb.curriculum ? { ...wb.curriculum, completed: false } : undefined }
+      setWorkbooks((prev) => prev.map((w, i) => (i === index ? updated : w)))
+      await handleSaveWorkbook(index, updated)
+
+      // Remove from completedPrograms on Skill Snapshot
+      if (snapshot && snapshotRef) {
+        const programs = snapshot.completedPrograms || []
+        const filtered = programs.filter((p) => p !== wb.name)
+        if (filtered.length !== programs.length) {
+          const newSnapshot = { ...snapshot, completedPrograms: filtered, updatedAt: new Date().toISOString() }
+          setSnapshot(newSnapshot)
+          void withSave(async () => {
+            await setDoc(snapshotRef, JSON.parse(JSON.stringify(newSnapshot)))
+          })
+        }
+      }
+      setSnack({ text: `"${wb.name}" reactivated.`, severity: 'success' })
+    },
+    [workbooks, handleSaveWorkbook, snapshot, snapshotRef, withSave],
+  )
+
   // --- Evidence Definitions CRUD ---
   const handleAddEvidence = useCallback(() => {
     if (!snapshot) return
@@ -663,6 +723,36 @@ export default function SkillSnapshotPage() {
               ) : (
                 workbooks.map((wb, index) => {
                   const pace = computeCoverageText(wb)
+
+                  // Completed workbook — read-only greyed-out card
+                  if (wb.completed) {
+                    return (
+                      <Stack
+                        key={wb.id ?? index}
+                        spacing={0.5}
+                        sx={{ p: 1.5, border: '1px solid', borderColor: 'success.light', borderRadius: 1, opacity: 0.55, bgcolor: 'grey.50' }}
+                      >
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <CheckCircleOutlineIcon color="success" fontSize="small" />
+                          <Typography variant="body2" sx={{ flex: 1, fontWeight: 500 }}>
+                            {wb.name}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Completed {wb.completedDate ? new Date(wb.completedDate).toLocaleDateString() : ''}
+                          </Typography>
+                        </Stack>
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={() => void handleReactivate(index)}
+                          sx={{ alignSelf: 'flex-start', textTransform: 'none', fontSize: '0.75rem' }}
+                        >
+                          Reactivate
+                        </Button>
+                      </Stack>
+                    )
+                  }
+
                   return (
                     <Stack
                       key={wb.id ?? index}
@@ -697,6 +787,14 @@ export default function SkillSnapshotPage() {
                             <MenuItem key={val} value={val}>{val}</MenuItem>
                           ))}
                         </TextField>
+                        <IconButton
+                          size="small"
+                          onClick={() => setConfirmComplete({ index, wb })}
+                          title="Mark as complete"
+                          color="success"
+                        >
+                          <CheckCircleOutlineIcon fontSize="small" />
+                        </IconButton>
                         <IconButton size="small" onClick={() => void handleDeleteWorkbook(index)}>
                           <DeleteIcon fontSize="small" />
                         </IconButton>
@@ -974,6 +1072,28 @@ export default function SkillSnapshotPage() {
           </Stack>
         </SectionCard>
       )}
+
+      {/* Mark Complete confirmation dialog */}
+      <Dialog open={confirmComplete !== null} onClose={() => setConfirmComplete(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Mark as complete?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Mark &ldquo;{confirmComplete?.wb.name}&rdquo; as complete? It won&apos;t appear in future weekly plans but will stay in your records.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmComplete(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="success"
+            onClick={() => {
+              if (confirmComplete) void handleMarkComplete(confirmComplete.index)
+            }}
+          >
+            Mark Complete
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={snack !== null}

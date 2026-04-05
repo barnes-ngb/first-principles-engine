@@ -153,6 +153,8 @@ export default function KidChecklist({
                     bgcolor: item.completed ? 'success.50' : 'background.paper',
                     border: '1px solid',
                     borderColor: item.completed ? 'success.200' : 'divider',
+                    borderLeft: item.itemType === 'evaluation' ? '3px solid' : undefined,
+                    borderLeftColor: item.itemType === 'evaluation' ? 'info.main' : undefined,
                     minHeight: 56,
                     cursor: 'pointer',
                   }}
@@ -215,6 +217,24 @@ export default function KidChecklist({
                         🔒 Complete {gateThreshold - mustDoCompleted} more quest{gateThreshold - mustDoCompleted !== 1 ? 's' : ''}
                       </Button>
                     )}
+                  </Box>
+                )}
+                {/* Start Mining button for evaluation items */}
+                {item.itemType === 'evaluation' && item.link && !item.completed && (
+                  <Box sx={{ ml: 5, mt: 1 }}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={(e) => { e.stopPropagation(); navigate(item.link!) }}
+                      sx={{
+                        backgroundColor: '#4CAF50',
+                        fontFamily: 'monospace',
+                        fontSize: '0.85rem',
+                        '&:hover': { backgroundColor: '#388E3C' },
+                      }}
+                    >
+                      ⛏️ Start Mining
+                    </Button>
                   </Box>
                 )}
                 {/* Per-item capture for kids */}
@@ -338,6 +358,8 @@ export default function KidChecklist({
                         bgcolor: item.completed ? 'success.50' : 'info.50',
                         border: '1px solid',
                         borderColor: item.completed ? 'success.200' : 'info.200',
+                        borderLeft: item.itemType === 'evaluation' ? '3px solid' : undefined,
+                        borderLeftColor: item.itemType === 'evaluation' ? 'info.main' : undefined,
                         minHeight: 56,
                         cursor: 'pointer',
                       }}
@@ -389,6 +411,24 @@ export default function KidChecklist({
                             🔒 Complete {gateThreshold - mustDoCompleted} more quest{gateThreshold - mustDoCompleted !== 1 ? 's' : ''}
                           </Button>
                         )}
+                      </Box>
+                    )}
+                    {/* Start Mining button for evaluation items */}
+                    {item.itemType === 'evaluation' && item.link && !item.completed && (
+                      <Box sx={{ ml: 5, mt: 1 }}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          onClick={(e) => { e.stopPropagation(); navigate(item.link!) }}
+                          sx={{
+                            backgroundColor: '#4CAF50',
+                            fontFamily: 'monospace',
+                            fontSize: '0.85rem',
+                            '&:hover': { backgroundColor: '#388E3C' },
+                          }}
+                        >
+                          ⛏️ Start Mining
+                        </Button>
                       </Box>
                     )}
                     {/* Per-item capture for kids */}

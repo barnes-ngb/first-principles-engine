@@ -47,6 +47,7 @@ import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { compressIfNeeded } from '../../core/utils/compressImage'
 import {
+  daysCollection,
   db,
   shellyChatMessagesCollection,
   shellyChatThreadsCollection,
@@ -132,6 +133,9 @@ export default function ShellyChatPage() {
   // ── Follow-up suggestions state ─────────────────────────────────
   const [followUps, setFollowUps] = useState<string[]>([])
 
+  // ── Data-driven reflection suggestions ────────────────────────
+  const [reflectionSuggestions, setReflectionSuggestions] = useState<Array<{ label: string; message: string }>>([])
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const autoSendTriggered = useRef(false)
   const imageIdeaTimeoutFired = useRef(false)
@@ -156,6 +160,107 @@ export default function ShellyChatPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only on mount
+
+  // ── Load data-driven reflection suggestions ───────────────────
+  useEffect(() => {
+    if (!familyId) return
+    const childId = chatContext === 'lincoln'
+      ? children.find(c => c.name.toLowerCase() === 'lincoln')?.id
+      : chatContext === 'london'
+        ? children.find(c => c.name.toLowerCase() === 'london')?.id
+        : undefined
+
+    if (!childId) {
+      setReflectionSuggestions([])
+      return
+    }
+
+    const fourteenDaysAgo = new Date()
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14)
+    const startDate = fourteenDaysAgo.toISOString().slice(0, 10)
+
+    const loadReflectionData = async () => {
+      try {
+        const daysSnap = await getDocs(
+          query(
+            daysCollection(familyId),
+            where('childId', '==', childId),
+            where('date', '>=', startDate),
+            limit(50),
+          ),
+        )
+
+        const suggestions: Array<{ label: string; message: string }> = []
+        let totalItems = 0
+        let frustrationCount = 0
+        let engagedCount = 0
+        const dayCompletionMap: Record<string, { total: number; done: number }> = {}
+
+        for (const d of daysSnap.docs) {
+          const data = d.data()
+          const checklist = (data.checklist ?? []) as Array<{
+            completed?: boolean
+            engagement?: string
+            skipped?: boolean
+          }>
+          const dayOfWeek = new Date(data.date + 'T12:00:00').getDay()
+          const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayOfWeek]
+
+          if (!dayCompletionMap[dayName]) dayCompletionMap[dayName] = { total: 0, done: 0 }
+
+          for (const item of checklist) {
+            totalItems++
+            dayCompletionMap[dayName].total++
+            if (item.completed) {
+              dayCompletionMap[dayName].done++
+            }
+            if (item.engagement === 'struggled' || item.engagement === 'refused') frustrationCount++
+            if (item.engagement === 'engaged') engagedCount++
+          }
+        }
+
+        // Check for frustration pattern
+        if (frustrationCount > 0 && totalItems > 0 && frustrationCount / totalItems > 0.15) {
+          const childName = chatContext === 'lincoln' ? 'Lincoln' : 'London'
+          suggestions.push({
+            label: `${childName} seemed frustrated this week`,
+            message: `${childName} seemed frustrated with some activities this week. Based on the engagement data, what should I adjust or try differently?`,
+          })
+        }
+
+        // Check for late-week completion dropoff
+        const thFri = (dayCompletionMap['Thu']?.total ?? 0) + (dayCompletionMap['Fri']?.total ?? 0)
+        const thFriDone = (dayCompletionMap['Thu']?.done ?? 0) + (dayCompletionMap['Fri']?.done ?? 0)
+        const monTue = (dayCompletionMap['Mon']?.total ?? 0) + (dayCompletionMap['Tue']?.total ?? 0)
+        const monTueDone = (dayCompletionMap['Mon']?.done ?? 0) + (dayCompletionMap['Tue']?.done ?? 0)
+        if (thFri > 3 && monTue > 3) {
+          const lateRate = thFriDone / thFri
+          const earlyRate = monTueDone / monTue
+          if (earlyRate - lateRate > 0.2) {
+            suggestions.push({
+              label: 'Completion drops late in the week',
+              message: 'I notice completion drops on Thursdays and Fridays. Should I lighten those days or restructure the week?',
+            })
+          }
+        }
+
+        // High engagement note
+        if (engagedCount > 0 && totalItems > 0 && engagedCount / totalItems > 0.6) {
+          const childName = chatContext === 'lincoln' ? 'Lincoln' : 'London'
+          suggestions.push({
+            label: `${childName} is doing great this week`,
+            message: `${childName} has been really engaged this week! What should I build on? Are there areas to push or stretch?`,
+          })
+        }
+
+        setReflectionSuggestions(suggestions.slice(0, 3))
+      } catch (err) {
+        console.warn('[shellyChat] Failed to load reflection data:', err)
+      }
+    }
+
+    void loadReflectionData()
+  }, [familyId, chatContext, children])
 
   // ── Migrate old threads without chatContext ────────────────────
   useEffect(() => {
@@ -1151,6 +1256,26 @@ export default function ShellyChatPage() {
                 {SUGGESTIONS_BY_CONTEXT[chatContext].subtitle}
               </Typography>
               <Stack spacing={1} sx={{ mt: 1, width: '100%', maxWidth: 360 }}>
+                {/* Data-driven reflection suggestions */}
+                {reflectionSuggestions.length > 0 && (
+                  <>
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
+                      Based on recent data:
+                    </Typography>
+                    {reflectionSuggestions.map((s) => (
+                      <Button
+                        key={s.label}
+                        variant="outlined"
+                        size="small"
+                        color="secondary"
+                        onClick={() => setInput(s.message)}
+                        sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+                      >
+                        {s.label}
+                      </Button>
+                    ))}
+                  </>
+                )}
                 {SUGGESTIONS_BY_CONTEXT[chatContext].suggestions.map((s) => (
                   <Button
                     key={s.label}

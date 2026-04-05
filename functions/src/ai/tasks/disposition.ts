@@ -105,6 +105,96 @@ async function loadRecentEvaluations(
     .join("\n");
 }
 
+interface ChapterResponseEntry {
+  date: string;
+  book: string;
+  chapter: string;
+  question: string;
+  questionType: string;
+  virtue: string;
+  hasAudio: boolean;
+  hasText: boolean;
+}
+
+async function loadRecentChapterResponses(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+  weeks: number,
+): Promise<ChapterResponseEntry[]> {
+  const now = new Date();
+  const start = new Date(now);
+  start.setDate(start.getDate() - weeks * 7);
+  const startStr = start.toISOString().slice(0, 10);
+
+  const snap = await db
+    .collection(`families/${familyId}/chapterResponses`)
+    .where("childId", "==", childId)
+    .where("date", ">=", startStr)
+    .orderBy("date", "desc")
+    .limit(20)
+    .get();
+
+  return snap.docs.map((doc) => {
+    const d = doc.data();
+    return {
+      date: d.date as string,
+      book: d.bookTitle as string,
+      chapter: d.chapter as string,
+      question: d.question as string,
+      questionType: d.questionType as string ?? "unknown",
+      virtue: d.virtue as string ?? "",
+      hasAudio: !!d.audioUrl,
+      hasText: !!d.textResponse,
+    };
+  });
+}
+
+function formatChapterResponseSummary(responses: ChapterResponseEntry[]): string {
+  if (responses.length === 0) return "No chapter discussion responses recorded.";
+
+  // Group by book
+  const byBook = new Map<string, ChapterResponseEntry[]>();
+  for (const r of responses) {
+    const existing = byBook.get(r.book) ?? [];
+    existing.push(r);
+    byBook.set(r.book, existing);
+  }
+
+  // Count question types
+  const typeCounts: Record<string, number> = {};
+  const virtueCounts: Record<string, number> = {};
+  for (const r of responses) {
+    typeCounts[r.questionType] = (typeCounts[r.questionType] ?? 0) + 1;
+    if (r.virtue) virtueCounts[r.virtue] = (virtueCounts[r.virtue] ?? 0) + 1;
+  }
+
+  const lines: string[] = [];
+  lines.push(`${responses.length} chapter discussion responses recorded:`);
+
+  for (const [book, items] of byBook) {
+    const audioCount = items.filter((i) => i.hasAudio).length;
+    lines.push(`- ${book}: ${items.length} responses (${audioCount} audio recordings)`);
+  }
+
+  const types = Object.entries(typeCounts).map(([k, v]) => `${k}: ${v}`).join(", ");
+  lines.push(`Question types engaged: ${types}`);
+
+  if (Object.keys(virtueCounts).length > 0) {
+    const virtues = Object.entries(virtueCounts).map(([k, v]) => `${k} (${v})`).join(", ");
+    lines.push(`Virtues explored: ${virtues}`);
+  }
+
+  // Include sample questions for context
+  const samples = responses.slice(0, 3);
+  lines.push("Sample questions discussed:");
+  for (const s of samples) {
+    lines.push(`  - ${s.book} ${s.chapter}: "${s.question.slice(0, 100)}${s.question.length > 100 ? "..." : ""}"`);
+  }
+
+  return lines.join("\n");
+}
+
 async function loadRecentLabReports(
   db: Firestore,
   familyId: string,
@@ -204,11 +294,14 @@ export const handleDisposition = async (
   const familyContext = contextSections.join("\n\n");
 
   // Load specialized data in parallel (beyond what buildContextForTask provides)
-  const [dayLogs, evalSummary, labSummary] = await Promise.all([
+  const [dayLogs, evalSummary, labSummary, chapterResponses] = await Promise.all([
     loadRecentDayLogs(db, familyId, childId, 4),
     loadRecentEvaluations(db, familyId, childId),
     loadRecentLabReports(db, familyId, childId),
+    loadRecentChapterResponses(db, familyId, childId, 4),
   ]);
+
+  const chapterSummary = formatChapterResponseSummary(chapterResponses);
 
   const weekAggregates = aggregateByWeek(dayLogs);
 
@@ -232,7 +325,7 @@ FIVE DISPOSITIONS TO ASSESS:
    Observable signals: completion rates, engagement with struggled items (returning vs refusing), consistency across days, time spent on harder subjects.
 
 3. **Articulation (Explain)**: Can the child express what they've learned, teach others, narrate their thinking?
-   Observable signals: grade results with explanations, teach-back artifacts, narration quality, lab report explanations.
+   Observable signals: grade results with explanations, teach-back artifacts, narration quality, chapter discussion audio recordings, lab report explanations.
 
 4. **Self-Awareness (Reflect)**: Does the child recognize their own patterns, energy, and needs?
    Observable signals: engagement self-reports, retro notes, evidence of choosing appropriate difficulty, recognizing when to stop.
@@ -280,6 +373,9 @@ Respond ONLY with valid JSON.`;
 
 WEEKLY AGGREGATES (last 4 weeks):
 ${weekSummary || "(no day log data)"}
+
+CHAPTER DISCUSSION RESPONSES (last 4 weeks):
+${chapterSummary}
 
 RECENT EVALUATION SESSIONS:
 ${evalSummary}

@@ -939,6 +939,49 @@ export function useQuestSession() {
       } catch (err) {
         console.warn('Pattern detection trigger check failed:', err)
       }
+
+      // Auto-complete matching evaluation item on today's checklist
+      try {
+        const today = new Date().toISOString().split('T')[0]
+        const dayRef = doc(db, `families/${familyId}/days/${activeChildId}_${today}`)
+        const daySnap = await getDoc(dayRef)
+
+        if (daySnap.exists()) {
+          const dayData = daySnap.data()
+          const items = dayData.checklist || []
+          const questMode = activeQuestModeRef.current
+
+          const matchIdx = items.findIndex((item: Record<string, unknown>) =>
+            item.itemType === 'evaluation' &&
+            !item.completed &&
+            (
+              (questMode === 'comprehension' && item.evaluationMode === 'comprehension') ||
+              (questMode === 'phonics' && item.evaluationMode === 'phonics') ||
+              (questMode === 'fluency' && item.evaluationMode === 'fluency') ||
+              (domain === 'math' && item.evaluationMode === 'math') ||
+              (typeof item.title === 'string' && item.title.toLowerCase().includes(domain))
+            ),
+          )
+
+          if (matchIdx >= 0) {
+            const updatedItems = items.map((item: Record<string, unknown>, i: number) =>
+              i === matchIdx
+                ? {
+                    ...item,
+                    completed: true,
+                    completedAt: new Date().toISOString(),
+                    actualMinutes: Math.round((finalState.totalQuestions * 30 + (questState?.elapsedSeconds || 0)) / 60) || finalState.totalQuestions,
+                  }
+                : item,
+            )
+            const { updateDoc } = await import('firebase/firestore')
+            await updateDoc(dayRef, { checklist: updatedItems })
+            console.log('[Quest] Auto-completed evaluation item:', items[matchIdx].title)
+          }
+        }
+      } catch (err) {
+        console.warn('[Quest] Failed to auto-complete evaluation item (non-blocking):', err)
+      }
     },
     [activeChildId, familyId, findings, previousSessions, chat, analyzePatterns],
   )
@@ -1404,6 +1447,42 @@ export function useQuestSession() {
           { domain: 'reading', source: 'fluency' },
           { currencyType: 'diamond', category: 'earn' },
         ).catch((err) => console.warn('Failed to award fluency diamonds', err))
+      }
+
+      // Auto-complete matching fluency evaluation item on today's checklist
+      try {
+        const today = new Date().toISOString().split('T')[0]
+        const dayRef = doc(db, `families/${familyId}/days/${activeChildId}_${today}`)
+        const daySnap = await getDoc(dayRef)
+
+        if (daySnap.exists()) {
+          const dayData = daySnap.data()
+          const items = dayData.checklist || []
+
+          const matchIdx = items.findIndex((item: Record<string, unknown>) =>
+            item.itemType === 'evaluation' &&
+            !item.completed &&
+            item.evaluationMode === 'fluency',
+          )
+
+          if (matchIdx >= 0) {
+            const updatedItems = items.map((item: Record<string, unknown>, i: number) =>
+              i === matchIdx
+                ? {
+                    ...item,
+                    completed: true,
+                    completedAt: new Date().toISOString(),
+                    actualMinutes: Math.round(totalTime / 60) || 1,
+                  }
+                : item,
+            )
+            const { updateDoc } = await import('firebase/firestore')
+            await updateDoc(dayRef, { checklist: updatedItems })
+            console.log('[Fluency] Auto-completed evaluation item:', items[matchIdx].title)
+          }
+        }
+      } catch (err) {
+        console.warn('[Fluency] Failed to auto-complete evaluation item (non-blocking):', err)
       }
 
       setScreen(QuestScreen.FluencySummary)

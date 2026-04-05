@@ -42,8 +42,10 @@ export interface WeekPlan {
   }>
   conundrum?: {
     title: string
-    scenario: string          // Narrative story chapter, not a case study
+    scenario: string          // Short punchy narrative (80-120 words)
     question: string
+    /** 2-3 tappable quick-pick response options for kids */
+    quickPicks?: string[]
     lincolnPrompt: string
     londonPrompt: string
     virtueConnection: string
@@ -240,6 +242,34 @@ export interface ChecklistItem {
   skipGuidance?: string
   /** Whether this item was explicitly skipped by the child. */
   skipped?: boolean
+  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), or activity. */
+  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity'
+  /** Evaluation mode when itemType is 'evaluation'. */
+  evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
+  /** Route to navigate to (e.g., '/quest') for in-app activities. */
+  link?: string
+  /** Actual minutes spent (set on auto-complete from quest/fluency). */
+  actualMinutes?: number
+  /** ISO timestamp when item was completed. */
+  completedAt?: string
+  /** Brief content guide for workbook items (what to cover today). */
+  contentGuide?: string
+}
+
+export interface ChapterResponse {
+  id?: string
+  childId: string
+  date: string
+  bookTitle: string
+  chapter: string
+  questionType: string
+  question: string
+  audioUrl: string | null
+  textResponse?: string
+  weekTheme: string
+  virtue: string
+  scripture: string
+  createdAt: string
 }
 
 export interface Session {
@@ -303,22 +333,6 @@ export interface SkipSuggestion {
   reason: string
   replacement: string
   evidence: string
-}
-
-export interface WeeklyPlanItem {
-  id: string
-  day: string
-  title: string
-  subjectBucket: SubjectBucket
-  estimatedMinutes: number
-  /** Source assignment candidate ID */
-  assignmentId?: string
-  /** Whether this is an app block */
-  isAppBlock?: boolean
-  skillTags: SkillTag[]
-  ladderRef?: { ladderId: string; rungId: string }
-  skipSuggestion?: SkipSuggestion
-  accepted: boolean
 }
 
 // ── Planner Chat (Conversational Planner) ─────────────────────
@@ -398,6 +412,12 @@ export interface DraftPlanItem {
   category?: 'must-do' | 'choose'
   /** Guidance note when an item is skipped (from AI). */
   skipGuidance?: string
+  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), or activity. */
+  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity'
+  /** Evaluation mode when itemType is 'evaluation'. */
+  evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
+  /** Route to navigate to (e.g., '/quest') for in-app activities. */
+  link?: string
 }
 
 export interface PlannerConversation {
@@ -474,6 +494,10 @@ export interface WorkbookConfig {
   defaultMinutes?: number
   /** Curriculum-specific metadata */
   curriculum?: CurriculumMeta
+  /** Whether this workbook has been marked as complete (preserves record unlike delete) */
+  completed?: boolean
+  /** ISO date when workbook was marked complete */
+  completedDate?: string
   createdAt?: string
   updatedAt?: string
 }
