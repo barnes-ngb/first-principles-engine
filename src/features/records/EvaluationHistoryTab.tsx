@@ -14,25 +14,67 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { evaluationSessionsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { EvaluationSession } from '../../core/types'
-import type { InteractiveSessionData, SessionQuestion } from '../quest/questTypes'
+import type { FluencyPassage, SessionQuestion } from '../quest/questTypes'
+import type { QuestMode } from '../quest/questTypes'
 
-/** Merged type for sessions that may be interactive quests. */
-type AnySession = EvaluationSession & Partial<InteractiveSessionData>
+/** Merged type for sessions that may be interactive quests or fluency sessions. */
+interface AnySession extends EvaluationSession {
+  sessionType?: string
+  questMode?: QuestMode | 'fluency'
+  questions?: SessionQuestion[]
+  finalLevel?: number
+  totalCorrect?: number
+  totalQuestions?: number
+  diamondsMined?: number
+  streakDays?: number
+  timedOut?: boolean
+  skippedCount?: number
+  flaggedErrorCount?: number
+  passages?: FluencyPassage[]
+  totalReadingTimeSeconds?: number
+  diamondsEarned?: number
+}
 
 function isInteractive(session: AnySession): boolean {
   return session.sessionType === 'interactive'
+}
+
+function isFluency(session: AnySession): boolean {
+  return session.sessionType === 'fluency'
 }
 
 function domainLabel(domain: string): string {
   return domain.charAt(0).toUpperCase() + domain.slice(1)
 }
 
+function questModeLabel(session: AnySession): string {
+  if (session.questMode === 'comprehension') return 'Comprehension Quest'
+  if (session.questMode === 'fluency') return 'Fluency Practice'
+  return `${domainLabel(session.domain)} Quest`
+}
+
 function sessionTitle(session: AnySession): string {
-  if (isInteractive(session)) return `\u26CF\uFE0F ${domainLabel(session.domain)} Quest`
+  if (isFluency(session)) return `\uD83D\uDCD6 Fluency Practice \u2014 ${domainLabel(session.domain)}`
+  if (isInteractive(session)) return `\u26CF\uFE0F ${questModeLabel(session)}`
   return domainLabel(session.domain) + ' Evaluation'
 }
 
 function sessionSubtitle(session: AnySession): string {
+  if (isFluency(session)) {
+    const passages = session.passages || []
+    const ratings = passages.flatMap((p) => p.attempts.map((a) => a.selfRating))
+    const easy = ratings.filter((r) => r === 'easy').length
+    const medium = ratings.filter((r) => r === 'medium').length
+    const hard = ratings.filter((r) => r === 'hard').length
+    const parts: string[] = [`${passages.length} passage${passages.length !== 1 ? 's' : ''} read`]
+    const ratingParts: string[] = []
+    if (easy > 0) ratingParts.push(`${easy} easy`)
+    if (medium > 0) ratingParts.push(`${medium} medium`)
+    if (hard > 0) ratingParts.push(`${hard} hard`)
+    if (ratingParts.length > 0) parts.push(ratingParts.join(', '))
+    if (session.diamondsEarned) parts.push(`\uD83D\uDC8E ${session.diamondsEarned}`)
+    return parts.join(' \u00B7 ')
+  }
   if (isInteractive(session)) {
     const parts: string[] = []
     if (session.totalCorrect != null && session.totalQuestions != null) {
@@ -281,7 +323,144 @@ function GuidedDetailView({ session }: { session: AnySession }) {
   )
 }
 
-type SessionFilter = 'all' | 'guided' | 'interactive'
+function FluencyDetailView({ session, childName }: { session: AnySession; childName: string }) {
+  const passages = session.passages || []
+  const totalTime = session.totalReadingTimeSeconds || 0
+  const [expandedPassage, setExpandedPassage] = useState<number | null>(null)
+
+  return (
+    <>
+      {/* Summary header */}
+      <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
+        <Typography variant="body1" sx={{ mb: 1 }}>
+          {childName} read {passages.length} passage{passages.length !== 1 ? 's' : ''} aloud
+        </Typography>
+        <Stack direction="row" spacing={3} flexWrap="wrap">
+          <Box>
+            <Typography variant="caption" color="text.secondary">Passages</Typography>
+            <Typography variant="h6">{'\uD83D\uDCD6'} {passages.length}</Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary">Diamonds</Typography>
+            <Typography variant="h6">{'\uD83D\uDC8E'} {session.diamondsEarned ?? 0}</Typography>
+          </Box>
+          {totalTime > 0 && (
+            <Box>
+              <Typography variant="caption" color="text.secondary">Total Time</Typography>
+              <Typography variant="h6">{Math.ceil(totalTime / 60)} min</Typography>
+            </Box>
+          )}
+        </Stack>
+      </Box>
+
+      {/* Passages */}
+      {passages.map((passage, pi) => {
+        const targetSet = new Set(passage.targetWords.map((w) => w.toLowerCase()))
+        const speechSet = new Set(passage.speechWords.map((w) => w.toLowerCase()))
+
+        return (
+          <Box key={pi} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, overflow: 'hidden' }}>
+            <Box
+              sx={{ p: 2, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
+              onClick={() => setExpandedPassage(expandedPassage === pi ? null : pi)}
+            >
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="subtitle2">Passage {pi + 1}</Typography>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  {passage.attempts.map((a, ai) => (
+                    <Chip
+                      key={ai}
+                      label={a.selfRating}
+                      size="small"
+                      color={a.selfRating === 'easy' ? 'success' : a.selfRating === 'medium' ? 'warning' : 'error'}
+                      variant="outlined"
+                    />
+                  ))}
+                  {expandedPassage === pi ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                </Stack>
+              </Stack>
+            </Box>
+            <Collapse in={expandedPassage === pi}>
+              <Box sx={{ p: 2, pt: 0 }}>
+                {/* Passage text with highlighted target/speech words */}
+                <Box sx={{ p: 2, bgcolor: 'grey.100', borderRadius: 1, mb: 1.5, lineHeight: 1.8 }}>
+                  {passage.text.split(/\s+/).map((word, wi) => {
+                    const clean = word.replace(/[.,!?"']/g, '').toLowerCase()
+                    const isTarget = targetSet.has(clean)
+                    const isSpeech = speechSet.has(clean)
+                    return (
+                      <Typography
+                        key={wi}
+                        component="span"
+                        sx={{
+                          fontWeight: isTarget || isSpeech ? 700 : 400,
+                          color: isTarget ? 'info.main' : isSpeech ? 'success.main' : 'text.primary',
+                          textDecoration: isTarget || isSpeech ? 'underline' : 'none',
+                        }}
+                      >
+                        {word}{' '}
+                      </Typography>
+                    )
+                  })}
+                </Box>
+
+                {/* Word legend */}
+                {(passage.targetWords.length > 0 || passage.speechWords.length > 0) && (
+                  <Stack direction="row" spacing={2} sx={{ mb: 1.5 }}>
+                    {passage.targetWords.length > 0 && (
+                      <Typography variant="caption" color="info.main">
+                        Target words: {passage.targetWords.join(', ')}
+                      </Typography>
+                    )}
+                    {passage.speechWords.length > 0 && (
+                      <Typography variant="caption" color="success.main">
+                        Speech words: {passage.speechWords.join(', ')}
+                      </Typography>
+                    )}
+                  </Stack>
+                )}
+
+                {/* Attempts */}
+                {passage.attempts.map((attempt, ai) => (
+                  <Box key={ai} sx={{ p: 1.5, bgcolor: 'grey.50', borderRadius: 1, mb: 1 }}>
+                    <Stack direction="row" spacing={2} alignItems="center">
+                      <Typography variant="body2">
+                        Attempt {ai + 1}: <strong>{attempt.selfRating}</strong>
+                      </Typography>
+                      {attempt.durationSeconds > 0 && (
+                        <Typography variant="caption" color="text.secondary">
+                          {attempt.durationSeconds}s
+                        </Typography>
+                      )}
+                      {attempt.recordingUrl && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => {
+                            const audio = new Audio(attempt.recordingUrl!)
+                            void audio.play()
+                          }}
+                        >
+                          Play {'\uD83D\uDD0A'}
+                        </Button>
+                      )}
+                    </Stack>
+                  </Box>
+                ))}
+
+                <Typography variant="caption" color="text.secondary">
+                  {passage.wordCount} words &middot; Level {passage.readingLevel}
+                </Typography>
+              </Box>
+            </Collapse>
+          </Box>
+        )
+      })}
+    </>
+  )
+}
+
+type SessionFilter = 'all' | 'guided' | 'interactive' | 'fluency'
 
 export default function EvaluationHistoryTab() {
   const familyId = useFamilyId()
@@ -295,8 +474,9 @@ export default function EvaluationHistoryTab() {
 
   const filteredSessions = sessions.filter((s) => {
     if (filter === 'all') return true
+    if (filter === 'fluency') return isFluency(s)
     if (filter === 'interactive') return isInteractive(s)
-    return !isInteractive(s)
+    return !isInteractive(s) && !isFluency(s)
   })
 
   useEffect(() => {
@@ -341,12 +521,17 @@ export default function EvaluationHistoryTab() {
           {isInteractive(selectedSession) && (
             <Chip size="small" label={`${activeChild?.name}'s Quest`} color="secondary" />
           )}
+          {isFluency(selectedSession) && (
+            <Chip size="small" label="Fluency" color="info" />
+          )}
         </Stack>
         <Typography variant="caption" color="text.secondary">
           {new Date(selectedSession.evaluatedAt).toLocaleDateString()}
         </Typography>
 
-        {isInteractive(selectedSession) ? (
+        {isFluency(selectedSession) ? (
+          <FluencyDetailView session={selectedSession} childName={activeChild?.name ?? 'Child'} />
+        ) : isInteractive(selectedSession) ? (
           <QuestDetailView session={selectedSession} childName={activeChild?.name ?? 'Child'} />
         ) : (
           <GuidedDetailView session={selectedSession} />
@@ -364,13 +549,13 @@ export default function EvaluationHistoryTab() {
         </Button>
       </Stack>
 
-      {/* Filter chips — shown when there are both session types */}
-      {sessions.some(isInteractive) && sessions.some((s) => !isInteractive(s)) && (
-        <Stack direction="row" spacing={1}>
-          {(['all', 'guided', 'interactive'] as const).map((f) => (
+      {/* Filter chips — shown when there are multiple session types */}
+      {(sessions.some(isInteractive) || sessions.some(isFluency)) && sessions.length > 1 && (
+        <Stack direction="row" spacing={1} flexWrap="wrap">
+          {(['all', 'guided', 'interactive', 'fluency'] as const).map((f) => (
             <Chip
               key={f}
-              label={f === 'all' ? 'All' : f === 'guided' ? 'Guided' : 'Knowledge Mine'}
+              label={f === 'all' ? 'All' : f === 'guided' ? 'Guided' : f === 'fluency' ? 'Fluency' : 'Knowledge Mine'}
               variant={filter === f ? 'filled' : 'outlined'}
               color={filter === f ? 'primary' : 'default'}
               size="small"
