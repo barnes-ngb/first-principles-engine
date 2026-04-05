@@ -47,6 +47,12 @@ service firebase.storage {
       allow write: if isOwner(familyId) && isValidUpload();
     }
 
+    // Sketches (hand-drawn sketches uploaded for book pages + portfolio)
+    match /families/{familyId}/sketches/{allPaths=**} {
+      allow read: if isOwner(familyId);
+      allow write: if isOwner(familyId) && isValidUpload();
+    }
+
     // Generated images (AI-created via Cloud Functions — written server-side, read client-side)
     match /families/{familyId}/generated-images/{allPaths=**} {
       allow read: if isOwner(familyId);
