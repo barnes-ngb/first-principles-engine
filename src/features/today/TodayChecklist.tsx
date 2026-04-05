@@ -130,6 +130,7 @@ interface TodayChecklistProps {
   onScanSkip: () => void
   onClearScan: () => void
   onUpdatePosition?: (curriculum: CurriculumDetected) => void
+  onSkipToNext?: (nextLesson: number) => void
   onPrintMaterials: () => void
   printingMaterials: boolean
 }
@@ -151,6 +152,7 @@ export default function TodayChecklist({
   onScanSkip,
   onClearScan,
   onUpdatePosition,
+  onSkipToNext,
   onPrintMaterials,
   printingMaterials,
 }: TodayChecklistProps) {
@@ -589,7 +591,9 @@ export default function TodayChecklist({
                     onAddToPlan={onScanAddToPlan}
                     onSkip={onScanSkip}
                     onUpdatePosition={onUpdatePosition}
+                    onSkipToNext={onSkipToNext}
                     onScanAnother={() => { onClearScan() }}
+                    childName={selectedChild.name}
                   />
                 )}
                 {scanItemIndex === index && scanError && (

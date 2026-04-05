@@ -11,7 +11,7 @@ import {
 
 import { useFamilyId } from '../auth/useAuth'
 import { activityConfigsCollection, db } from '../firebase/firestore'
-import { migrateToActivityConfigs } from '../firebase/migrateActivityConfigs'
+import { ensureDefaultActivityConfigs, migrateToActivityConfigs } from '../firebase/migrateActivityConfigs'
 import type { ActivityConfig } from '../types'
 import type { ActivityFrequency, ActivityType, SubjectBucket } from '../types/enums'
 
@@ -50,10 +50,11 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
   const [error, setError] = useState<string | null>(null)
   const [migrationDone, setMigrationDone] = useState(false)
 
-  // Run migration on first load if needed
+  // Run migration on first load if needed, then ensure defaults exist
   useEffect(() => {
     if (!familyId || !childId) return
     migrateToActivityConfigs(familyId, childId)
+      .then(() => ensureDefaultActivityConfigs(familyId, childId))
       .then(() => setMigrationDone(true))
       .catch((err) => {
         console.error('[ActivityConfigs] Migration failed:', err)
