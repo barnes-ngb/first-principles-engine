@@ -48,6 +48,8 @@ interface ScanResultsPanelProps {
   onApplyCertificate?: (result: CertificateScanResult) => void
   /** Called when user wants to update workbook position from detected curriculum. */
   onUpdatePosition?: (curriculum: CurriculumDetected) => void
+  /** Called when user wants to skip ahead to the next lesson (for skip/quick-review). */
+  onSkipToNext?: (nextLesson: number) => void
   /** Child name for the "Update Progress" button label. */
   childName?: string
   /** Hide action buttons (e.g. when viewing history). */
@@ -64,6 +66,7 @@ export default function ScanResultsPanel({
   onScanAnother,
   onApplyCertificate,
   onUpdatePosition,
+  onSkipToNext,
   childName,
   hideActions,
   configSyncStatus,
@@ -178,6 +181,53 @@ export default function ScanResultsPanel({
         <Typography variant="body2" color="text.secondary">
           {results.recommendationReason}
         </Typography>
+
+        {/* Actionable recommendation guidance */}
+        {results.recommendation === 'skip' && (
+          <Alert severity="success" icon={false} sx={{ py: 0.5 }}>
+            <Typography variant="body2">
+              {childName || 'Your child'} has this mastered. Skip ahead to the next new content.
+            </Typography>
+            {onSkipToNext && results.curriculumDetected?.lessonNumber && (
+              <Button
+                size="small"
+                variant="outlined"
+                color="success"
+                onClick={() => onSkipToNext((results.curriculumDetected!.lessonNumber ?? 0) + 1)}
+                sx={{ mt: 0.5, textTransform: 'none' }}
+              >
+                Skip to lesson {(results.curriculumDetected.lessonNumber ?? 0) + 1}
+              </Button>
+            )}
+          </Alert>
+        )}
+
+        {results.recommendation === 'do' && (
+          <Alert severity="warning" icon={false} sx={{ py: 0.5 }}>
+            <Typography variant="body2">
+              New material — spend full time here. Estimated: ~{results.estimatedMinutes}m
+            </Typography>
+          </Alert>
+        )}
+
+        {results.recommendation === 'quick-review' && (
+          <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
+            <Typography variant="body2">
+              {childName || 'Your child'} knows most of this. Quick 5-minute review, then move on.
+            </Typography>
+            {onSkipToNext && results.curriculumDetected?.lessonNumber && (
+              <Button
+                size="small"
+                variant="outlined"
+                color="info"
+                onClick={() => onSkipToNext((results.curriculumDetected!.lessonNumber ?? 0) + 1)}
+                sx={{ mt: 0.5, textTransform: 'none' }}
+              >
+                Skip to lesson {(results.curriculumDetected.lessonNumber ?? 0) + 1}
+              </Button>
+            )}
+          </Alert>
+        )}
 
         {/* Teacher notes */}
         {results.teacherNotes && (
