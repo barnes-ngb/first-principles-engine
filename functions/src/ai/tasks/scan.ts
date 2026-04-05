@@ -49,6 +49,32 @@ Analyze this page and respond ONLY with valid JSON (no markdown fences, no comme
   }
 }
 
+COVER PAGE / TABLE OF CONTENTS DETECTION:
+If the scanned image is a workbook COVER page or TABLE OF CONTENTS (not a lesson page):
+- Extract the full curriculum name (e.g., "The Good and the Beautiful — Language Arts Level 2")
+- Identify the subject area
+- Count total lessons/units if a table of contents is visible
+- Note the grade level if stated
+Return the standard worksheet JSON but with these additions:
+{
+  "pageType": "textbook",
+  "isCover": true,
+  "totalUnits": <number of lessons/units if visible, or 0>,
+  "gradeLevel": "<grade level if stated, or null>",
+  "skillsTargeted": [],
+  "recommendation": "do",
+  "recommendationReason": "Cover page scanned — use this to set up workbook tracking.",
+  "estimatedMinutes": 0,
+  "teacherNotes": "",
+  "curriculumDetected": {
+    "provider": "<gatb|reading-eggs|other>",
+    "name": "<full curriculum name>",
+    "lessonNumber": null,
+    "pageNumber": null,
+    "levelDesignation": "<e.g. Level 2>"
+  }
+}
+
 CERTIFICATE / PROGRESS DOCUMENT DETECTION:
 If the image is NOT a workbook page but IS a curriculum certificate, progress report, or completion document, respond with this alternative JSON format:
 

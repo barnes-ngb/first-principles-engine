@@ -116,7 +116,7 @@ const ARMOR_SHEET_RAW_PROMPTS: Record<string, string> = {
  * Writes the URL into avatarProfile.armorSheetUrls[tier] in Firestore.
  */
 export const generateArmorSheet = onCall(
-  { secrets: [openaiApiKey, claudeApiKey] },
+  { secrets: [openaiApiKey, claudeApiKey], timeoutSeconds: 120, memory: "512MiB" },
   async (request): Promise<ArmorSheetResponse> => {
     const { uid } = requireApprovedUser(request);
 

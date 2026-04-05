@@ -40,7 +40,7 @@ const BASE_CHARACTER_RAW_PROMPTS: Record<"minecraft" | "platformer", string> = {
  * Storage path: families/{familyId}/avatars/{childId}/base-character.png
  */
 export const generateBaseCharacter = onCall(
-  { secrets: [openaiApiKey, claudeApiKey] },
+  { secrets: [openaiApiKey, claudeApiKey], timeoutSeconds: 120, memory: "512MiB" },
   async (request): Promise<BaseCharacterResponse> => {
     const { uid } = requireApprovedUser(request);
 

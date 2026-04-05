@@ -24,7 +24,7 @@ import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { deleteDoc, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore'
+import { deleteDoc, doc, getDocs, onSnapshot, query, setDoc, where, writeBatch } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -33,6 +33,8 @@ import SectionCard from '../../components/SectionCard'
 import { markProgramCompleteOnSkillMap } from '../../core/curriculum/updateSkillMapFromFindings'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
+  activityConfigsCollection,
+  db,
   skillSnapshotsCollection,
   workbookConfigDocId,
   workbookConfigsCollection,
@@ -438,6 +440,50 @@ export default function SkillSnapshotPage() {
     },
     [workbooks, handleSaveWorkbook, snapshot, snapshotRef, withSave],
   )
+
+  // --- Reset all workbook configs (clean start from scans) ---
+  const [resetting, setResetting] = useState(false)
+
+  const handleResetWorkbooks = useCallback(async () => {
+    if (!activeChildId) return
+    setResetting(true)
+    try {
+      // 1. Delete all workbook configs for this child
+      const wbSnap = await getDocs(
+        query(workbookConfigsCollection(familyId), where('childId', '==', activeChildId)),
+      )
+      if (wbSnap.size > 0) {
+        const batch = writeBatch(db)
+        wbSnap.docs.forEach((d) => batch.delete(d.ref))
+        await batch.commit()
+      }
+
+      // 2. Delete workbook/app type activity configs for this child (keep routine/formation)
+      const acSnap = await getDocs(
+        query(
+          activityConfigsCollection(familyId),
+          where('childId', 'in', [activeChildId, 'both']),
+        ),
+      )
+      const workbookAcs = acSnap.docs.filter((d) => {
+        const data = d.data()
+        return data.type === 'workbook' || data.type === 'app'
+      })
+      if (workbookAcs.length > 0) {
+        const batch2 = writeBatch(db)
+        workbookAcs.forEach((d) => batch2.delete(d.ref))
+        await batch2.commit()
+      }
+
+      const total = wbSnap.size + workbookAcs.length
+      setSnack({ text: `Cleared ${total} workbook configs. Scan a page to start tracking.`, severity: 'success' })
+    } catch (err) {
+      console.error('[ResetWorkbooks] Failed:', err)
+      setSnack({ text: 'Failed to reset workbooks.', severity: 'error' })
+    } finally {
+      setResetting(false)
+    }
+  }, [familyId, activeChildId])
 
   // --- Evidence Definitions CRUD ---
   const handleAddEvidence = useCallback(() => {
@@ -1020,9 +1066,29 @@ export default function SkillSnapshotPage() {
                   )
                 })
               )}
-              <Button startIcon={<AddIcon />} size="small" onClick={handleAddWorkbook}>
-                Add Workbook
-              </Button>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Button startIcon={<AddIcon />} size="small" onClick={handleAddWorkbook}>
+                  Add Workbook
+                </Button>
+                {workbooks.length > 0 && (
+                  <Button
+                    variant="outlined"
+                    color="warning"
+                    size="small"
+                    disabled={resetting}
+                    onClick={async () => {
+                      const confirmed = window.confirm(
+                        'Delete all workbook configs and start fresh from scans? Routine activities (Prayer, Handwriting, etc.) will be kept.',
+                      )
+                      if (confirmed) {
+                        await handleResetWorkbooks()
+                      }
+                    }}
+                  >
+                    {resetting ? 'Resetting...' : 'Reset Workbooks'}
+                  </Button>
+                )}
+              </Stack>
             </Stack>
           </SectionCard>
         </>
