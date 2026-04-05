@@ -162,7 +162,11 @@ export async function loadWorkbookPaces(
       totalUnits: number;
       subjectBucket?: string;
       curriculum?: CurriculumMeta;
+      completed?: boolean;
     };
+
+    // Skip workbooks marked as complete at the top level
+    if (data.completed) continue;
 
     paces.push({
       name: data.name,
@@ -448,7 +452,8 @@ PLAN CONTENT RULES:
           "isAppBlock": false,
           "accepted": true,
           "mvdEssential": false,
-          "category": "must-do"
+          "category": "must-do",
+          "skipGuidance": "This is Lincoln's frontier — spend full time here. Focus on two-digit addition." // or null for non-workbook items
         }
       ],
       "chapterQuestion": {
@@ -1516,6 +1521,7 @@ export const chat = onCall(
           prioritySkills?: ChildContext["prioritySkills"];
           supports?: ChildContext["supports"];
           stopRules?: ChildContext["stopRules"];
+          completedPrograms?: string[];
         }
       | undefined;
 
@@ -1540,6 +1546,7 @@ export const chat = onCall(
             prioritySkills?: ChildContext["prioritySkills"];
             supports?: ChildContext["supports"];
             stopRules?: ChildContext["stopRules"];
+            completedPrograms?: string[];
           })
         : undefined;
     }

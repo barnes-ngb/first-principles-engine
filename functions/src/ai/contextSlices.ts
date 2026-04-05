@@ -31,6 +31,7 @@ export const ContextSlice = {
   WorkshopGames: "workshopGames",
   Mastery: "mastery",
   SkillSnapshot: "skillSnapshot",
+  RecentScans: "recentScans",
 } as const;
 export type ContextSlice = (typeof ContextSlice)[keyof typeof ContextSlice];
 
@@ -41,7 +42,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
     "charter", "childProfile", "workbookPaces",
     "weekFocus", "hoursProgress", "engagement", "gradeResults",
     "bookStatus", "sightWords", "recentEval", "wordMastery", "generatedContent",
-    "workshopGames", "mastery", "skillSnapshot",
+    "workshopGames", "mastery", "skillSnapshot", "recentScans",
   ],
   chat: ["charter", "childProfile"],
   generate: ["charter", "childProfile"],
@@ -359,6 +360,9 @@ export async function buildContextForTask(
   if (slices.includes("skillSnapshot")) {
     fetches.push({ slice: "skillSnapshot", promise: loadSkillSnapshotContext(db, familyId, childId) });
   }
+  if (slices.includes("recentScans")) {
+    fetches.push({ slice: "recentScans", promise: loadRecentScansContext(db, familyId, childId) });
+  }
 
   // Await all in parallel
   const results = await Promise.allSettled(fetches.map((f) => f.promise));
@@ -376,9 +380,23 @@ export async function buildContextForTask(
 
   // ── Format each slice into prompt text ────────────────────────
 
+  // Load completed programs from skill snapshot for filtering
+  const completedPrograms: string[] = snapshotData?.completedPrograms ?? [];
+
   // Curriculum coverage (was "WORKBOOK PACE")
   if (sliceData.has("workbookPaces")) {
-    const paces = sliceData.get("workbookPaces") as Array<{ name: string; unitLabel: string; currentPosition: number; totalUnits: number; subjectBucket?: string; curriculum?: { provider: string; level?: string; lastMilestone?: string; milestoneDate?: string; completed?: boolean; masteredSkills?: string[]; activeSkills?: string[] } }>;
+    const rawPaces = sliceData.get("workbookPaces") as Array<{ name: string; unitLabel: string; currentPosition: number; totalUnits: number; subjectBucket?: string; curriculum?: { provider: string; level?: string; lastMilestone?: string; milestoneDate?: string; completed?: boolean; masteredSkills?: string[]; activeSkills?: string[] } }>;
+
+    // Filter out workbooks whose curriculum is marked completed OR whose name matches a completed program
+    const paces = rawPaces.filter((w) => {
+      if (w.curriculum?.completed) return false;
+      const wbName = w.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      return !completedPrograms.some((prog) => {
+        const progName = prog.toLowerCase().replace(/[^a-z0-9]/g, "");
+        return wbName.includes(progName) || progName.includes(wbName);
+      });
+    });
+
     const lines = ["CURRICULUM COVERAGE:"];
     if (paces.length === 0) {
       lines.push("No curriculum data available.");
@@ -530,6 +548,12 @@ export async function buildContextForTask(
     if (snapshotText) sections.push(snapshotText);
   }
 
+  // Recent scans (where the child left off in each workbook)
+  if (sliceData.has("recentScans")) {
+    const scansText = sliceData.get("recentScans") as string;
+    if (scansText) sections.push(scansText);
+  }
+
   return sections;
 }
 
@@ -673,9 +697,11 @@ async function loadSkillSnapshotContext(
   }
 
   // Completed programs
-  const completedPrograms = data.completedPrograms || [];
-  if (completedPrograms.length > 0) {
-    lines.push(`COMPLETED PROGRAMS: ${completedPrograms.join(", ")}`);
+  const snapshotCompletedPrograms = data.completedPrograms || [];
+  if (snapshotCompletedPrograms.length > 0) {
+    lines.push(`COMPLETED PROGRAMS: ${snapshotCompletedPrograms.join(", ")}`);
+    lines.push("These programs are FINISHED. Do NOT include them as checklist items in the weekly plan.");
+    lines.push("Do not schedule time for completed programs. The child has moved past this material.");
     lines.push("→ Foundational phonics is mastered. Do not test basic letter sounds, CVC, blends, or digraphs.");
     lines.push("→ For reading quests, focus on comprehension and fluency.");
     lines.push("→ Recommend Comprehension Quest and Fluency Practice modes.");
@@ -749,6 +775,56 @@ async function loadWorkshopGames(
     lines.push(`- ${type}: "${title}" — ${theme}${challengeInfo}${played}`);
   }
   lines.push('Include 1-2 of these as "choose" activities in the plan, like "Play: [title]" or "Workshop: create a new game".');
+
+  return lines.join("\n");
+}
+
+// ── Recent scans loader ─────────────────────────────────────
+
+/** Load recent curriculum scans to tell the planner where the child left off in each workbook. */
+async function loadRecentScansContext(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<string> {
+  const snap = await db
+    .collection(`families/${familyId}/scans`)
+    .where("childId", "==", childId)
+    .orderBy("createdAt", "desc")
+    .limit(10)
+    .get();
+
+  if (snap.empty) return "";
+
+  // Group by workbook, keep most recent per workbook
+  const byWorkbook = new Map<string, { topics: string; lesson: string; date: string }>();
+  for (const scanDoc of snap.docs) {
+    const scan = scanDoc.data() as {
+      createdAt?: string;
+      results?: {
+        pageType?: string;
+        specificTopic?: string;
+        curriculumDetected?: { name?: string; lessonNumber?: number; pageNumber?: number };
+      } | null;
+    };
+    if (!scan.results || scan.results.pageType === "certificate") continue;
+    const detected = scan.results.curriculumDetected;
+    const wb = detected?.name || "Unknown";
+    if (byWorkbook.has(wb)) continue; // already have a more recent one
+
+    const topics = scan.results.specificTopic || "unknown content";
+    const lesson = String(detected?.lessonNumber ?? detected?.pageNumber ?? "?");
+    const date = scan.createdAt ? new Date(scan.createdAt).toLocaleDateString() : "unknown date";
+    byWorkbook.set(wb, { topics, lesson, date });
+  }
+
+  if (byWorkbook.size === 0) return "";
+
+  const lines = ["RECENT WORKBOOK SCANS (where the child left off):"];
+  for (const [wb, info] of byWorkbook) {
+    lines.push(`- ${wb}: Last at lesson/page ${info.lesson} (${info.topics}) on ${info.date}`);
+  }
+  lines.push("Use this to know what lesson to assign next. Cross-reference with Skill Snapshot to determine skip guidance.");
 
   return lines.join("\n");
 }

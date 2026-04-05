@@ -499,6 +499,28 @@ export default function TodayChecklist({
                     )
                   })()}
                 </Stack>
+                {/* Skip guidance (parent-only, not shown in kid view) */}
+                {item.skipGuidance && !item.completed && (
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: /mastered|skip/i.test(item.skipGuidance)
+                        ? 'success.main'
+                        : /frontier|focus/i.test(item.skipGuidance)
+                        ? 'warning.main'
+                        : 'text.secondary',
+                      display: 'block',
+                      ml: 5,
+                      mt: 0.5,
+                      fontStyle: 'italic',
+                      fontSize: '0.75rem',
+                    }}
+                  >
+                    {/skip/i.test(item.skipGuidance) ? '\u23ED\uFE0F ' :
+                     /frontier|focus/i.test(item.skipGuidance) ? '\uD83C\uDFAF ' : '\u2139\uFE0F '}
+                    {item.skipGuidance}
+                  </Typography>
+                )}
                 {/* Scan results panel */}
                 {scanItemIndex === index && scanResult?.results && (
                   <ScanResultsPanel
