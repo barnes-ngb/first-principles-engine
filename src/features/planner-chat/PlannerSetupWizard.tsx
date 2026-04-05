@@ -13,10 +13,13 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 
 import type {
+  ActivityConfig,
   PhotoLabel,
   WorkbookConfig,
 } from '../../core/types'
 import type { ScanResult } from '../../core/types/planning'
+import { ActivityFrequencyLabel } from '../../core/types/enums'
+import type { ActivityFrequency } from '../../core/types/enums'
 import PhotoLabelForm from './PhotoLabelForm'
 
 type MasterySummary = {
@@ -50,6 +53,9 @@ interface PlannerSetupWizardProps {
   scanError: string | null
   onScanClear: () => void
   onScanAccept: () => void
+  // Activity configs
+  activityConfigs?: ActivityConfig[]
+  onViewActivities?: () => void
   // Actions
   onSubmitPhotos: () => void
   onSetupComplete: () => void
@@ -80,6 +86,8 @@ export default function PlannerSetupWizard({
   scanError,
   onScanClear,
   onScanAccept,
+  activityConfigs,
+  onViewActivities,
   onSubmitPhotos,
   onSetupComplete,
   generatingWeek,
@@ -133,6 +141,34 @@ export default function PlannerSetupWizard({
         multiline
         rows={2}
       />
+
+      {/* Activity configs summary */}
+      {activityConfigs && activityConfigs.length > 0 && (
+        <Box sx={{ p: 1.5, bgcolor: 'grey.50', borderRadius: 1.5 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              {childName}&apos;s Activities
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {activityConfigs.filter((c) => !c.completed).length} active
+              {activityConfigs.filter((c) => c.completed).length > 0 ? `, ${activityConfigs.filter((c) => c.completed).length} completed` : ''}
+            </Typography>
+          </Stack>
+          <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.6 }}>
+            {activityConfigs
+              .filter((c) => !c.completed)
+              .slice(0, 8)
+              .map((c) => `${c.name} (${ActivityFrequencyLabel[c.frequency as ActivityFrequency] ?? c.frequency})`)
+              .join(' · ')}
+            {activityConfigs.filter((c) => !c.completed).length > 8 ? ' · ...' : ''}
+          </Typography>
+          {onViewActivities && (
+            <Button size="small" variant="text" onClick={onViewActivities} sx={{ mt: 0.5, p: 0, minWidth: 0, textTransform: 'none' }}>
+              View/Edit Activities
+            </Button>
+          )}
+        </Box>
+      )}
 
       {/* Mastery context (read-only summary, not raw data) */}
       {masterySummary && (masterySummary.gotIt.length > 0 || masterySummary.needsFocus.length > 0 || masterySummary.stillWorking.length > 0) && (

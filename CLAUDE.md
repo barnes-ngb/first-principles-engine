@@ -187,7 +187,8 @@ All under `families/{familyId}/`:
 | `plannerConversations` | Planner chat conversations |
 | `lessonCards` | Lesson card definitions |
 | `weeklyReviews` | AI-generated weekly adaptive reviews |
-| `workbookConfigs` | Workbook pace/config per child |
+| `workbookConfigs` | Workbook pace/config per child (legacy — see activityConfigs) |
+| `activityConfigs` | Structured activity definitions per child (replaces routine text + workbook configs) |
 | `xpLedger` | XP event log for armor progression |
 | `books` | Kid-authored books (My Books) |
 | `stickerLibrary` | Family sticker assets |

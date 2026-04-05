@@ -32,6 +32,7 @@ export const ContextSlice = {
   Mastery: "mastery",
   SkillSnapshot: "skillSnapshot",
   RecentScans: "recentScans",
+  ActivityConfigs: "activityConfigs",
 } as const;
 export type ContextSlice = (typeof ContextSlice)[keyof typeof ContextSlice];
 
@@ -42,7 +43,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
     "charter", "childProfile", "workbookPaces",
     "weekFocus", "hoursProgress", "engagement", "gradeResults",
     "bookStatus", "sightWords", "recentEval", "wordMastery", "generatedContent",
-    "workshopGames", "mastery", "skillSnapshot", "recentScans",
+    "workshopGames", "mastery", "skillSnapshot", "recentScans", "activityConfigs",
   ],
   chat: ["charter", "childProfile"],
   generate: ["charter", "childProfile"],
@@ -363,6 +364,9 @@ export async function buildContextForTask(
   if (slices.includes("recentScans")) {
     fetches.push({ slice: "recentScans", promise: loadRecentScansContext(db, familyId, childId) });
   }
+  if (slices.includes("activityConfigs")) {
+    fetches.push({ slice: "activityConfigs", promise: loadActivityConfigsContext(db, familyId, childId) });
+  }
 
   // Await all in parallel
   const results = await Promise.allSettled(fetches.map((f) => f.promise));
@@ -552,6 +556,12 @@ export async function buildContextForTask(
   if (sliceData.has("recentScans")) {
     const scansText = sliceData.get("recentScans") as string;
     if (scansText) sections.push(scansText);
+  }
+
+  // Activity configs (structured routine + workbook replacement)
+  if (sliceData.has("activityConfigs")) {
+    const activityConfigsText = sliceData.get("activityConfigs") as string;
+    if (activityConfigsText) sections.push(activityConfigsText);
   }
 
   return sections;
@@ -777,6 +787,80 @@ async function loadWorkshopGames(
   lines.push('Include 1-2 of these as "choose" activities in the plan, like "Play: [title]" or "Workshop: create a new game".');
 
   return lines.join("\n");
+}
+
+// ── Recent scans loader ─────────────────────────────────────
+
+// ── Activity configs loader ──────────────────────────────────
+
+/** Activity config shape as stored in Firestore. */
+interface ActivityConfigDoc {
+  name: string;
+  type: string;
+  subjectBucket: string;
+  defaultMinutes: number;
+  frequency: string;
+  childId: string | "both";
+  sortOrder: number;
+  curriculum?: string;
+  totalUnits?: number;
+  currentPosition?: number;
+  unitLabel?: string;
+  completed: boolean;
+  completedDate?: string;
+  scannable: boolean;
+  notes?: string;
+}
+
+/**
+ * Load structured activity configs for a child.
+ * These replace the old routine text + workbook configs with one source of truth.
+ * Completed activities are filtered out so the planner never schedules them.
+ */
+async function loadActivityConfigsContext(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<string> {
+  const snap = await db
+    .collection(`families/${familyId}/activityConfigs`)
+    .where("childId", "in", [childId, "both"])
+    .get();
+
+  if (snap.empty) return "";
+
+  const configs = snap.docs
+    .map((doc) => doc.data() as ActivityConfigDoc)
+    .filter((c) => !c.completed)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  if (configs.length === 0) return "";
+
+  const lines = configs.map((c) => {
+    let line = `- ${c.name}: ${c.defaultMinutes}m, ${c.frequency}, ${c.subjectBucket}`;
+    if (c.currentPosition && c.totalUnits) {
+      line += ` (currently at ${c.unitLabel || "lesson"} ${c.currentPosition} of ${c.totalUnits})`;
+    }
+    if (c.type === "evaluation") {
+      line += " [AUTO-SCHEDULED — must include in plan]";
+    }
+    return line;
+  });
+
+  return [
+    "ACTIVITY CONFIGS (structured — use these instead of any routine text):",
+    ...lines,
+    "",
+    "SCHEDULING RULES:",
+    '- "daily" items appear every day',
+    '- "3x" items appear on 3 different days (e.g., MWF)',
+    '- "2x" items appear on 2 different days (e.g., TTh)',
+    '- "1x" items appear on 1 day',
+    '- "as-needed" items are optional — include if time allows',
+    "- Items are listed in priority order (formation first, core academics next, support skills, then apps)",
+    "- Respect the sortOrder — earlier items come first in each day's checklist",
+    "- COMPLETED items are already filtered out — everything listed here should be in the plan",
+  ].join("\n");
 }
 
 // ── Recent scans loader ─────────────────────────────────────
