@@ -49,6 +49,10 @@ Plan My Week
 * "Repeat Last Week" shortcut for low-energy weeks
 * AI feature flag defaults to ON (no manual Settings toggle needed)
 * Weekly Conundrum — AI-generated open-ended discussion scenario tied to week theme/virtue/subjects. No right answer. Separate prompts for Lincoln (deeper) and London (simpler). Saved to week plan, visible on Today.
+* **Explicit daily item ordering** — AI prompt enforces: Formation → Core Reading → Core Math → Read-Aloud → Support Skills → Apps → Enrichment. Reading right after Scripture gets highest-energy slot.
+* **Daily variation / rotation** — Support skills (handwriting, sight words, booster cards, memory cards, language arts) rotate across the week (2-3 days each) instead of appearing identically every day. Monday is fullest, Friday is lightest.
+* **Day-aware time budgets** — Mon/Tue full day (3-3.5h), Wed/Thu standard (2.5-3h), Friday lighter (2-2.5h). Item count adjusts to fit.
+* **Read-aloud as distinct block** — Family read-aloud book (e.g. Narnia) placed after core academics, before support skills, with chapter question in contentGuide field.
 * **Plan My Week decomposition (completed):** PlannerChatPage (2,112L) + PlannerSetupWizard (201L) + WeekFocusPanel (88L) + PlanDayCards (104L) + PlannerChatMessages (65L). Render reduced 800→500L; state management still unified in main page.
 
 Evaluation Chat
@@ -471,6 +475,7 @@ Key Design Decisions
 27. London creates, Lincoln refines — Story Keeper / Playtester roles give both boys meaningful work from one feature
 28. Players ARE the family — game tokens are real people with real avatars, not fictional characters
 29. **Setup once, confirm weekly** — Shelly configures routine and subject times once. Weekly planning is: pick energy, note exceptions, generate, lock in. Under 2 minutes.
+30. **Reading right after Scripture** — highest priority gets highest energy. Reading is Lincoln's biggest growth area, so it goes second (right after Formation) while focus is fresh. Math third, support skills after.
 30. **Disposition over content mastery** — track how a child approaches learning (curiosity, persistence, articulation, self-awareness, ownership), not what they can pass
 31. **Teach-back is evidence** — Lincoln explaining to London is the richest learning signal
 32. **AI synthesizes growth narrative from existing data** — no additional tracking burden on Shelly
