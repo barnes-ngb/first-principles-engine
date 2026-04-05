@@ -507,6 +507,14 @@ export default function TodayChecklist({
                     )
                   })()}
                 </Stack>
+                {/* Content guide (what to cover today) */}
+                {item.contentGuide && !item.completed && (
+                  <Box sx={{ mt: 0.5, ml: 5, pl: 1, borderLeft: '2px solid', borderLeftColor: 'divider' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.4 }}>
+                      {item.contentGuide}
+                    </Typography>
+                  </Box>
+                )}
                 {/* Skip guidance (parent-only, not shown in kid view) */}
                 {item.skipGuidance && !item.completed && (
                   <Typography
@@ -648,6 +656,35 @@ export default function TodayChecklist({
                       <Chip size="small" label="Captured" variant="outlined" color="success" sx={{ height: 22 }} />
                     )}
                   </Stack>
+                )}
+
+                {/* Scan nudge for workbook items after completion */}
+                {item.completed && item.itemType === 'workbook' && !item.evidenceArtifactId && (
+                  <Box sx={{ ml: 5, mt: 0.5 }}>
+                    <Button
+                      size="small"
+                      variant="text"
+                      startIcon={scanLoading && scanItemIndex === index
+                        ? <CircularProgress size={14} />
+                        : <CameraAltIcon sx={{ fontSize: 16 }} />}
+                      disabled={scanLoading && scanItemIndex === index}
+                      onClick={() => {
+                        // Trigger the camera input for scan
+                        const input = document.createElement('input')
+                        input.type = 'file'
+                        input.accept = 'image/*'
+                        input.capture = 'environment'
+                        input.onchange = (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0]
+                          if (file) onScanCapture(file, index)
+                        }
+                        input.click()
+                      }}
+                      sx={{ fontSize: '0.7rem', color: 'text.secondary', textTransform: 'none' }}
+                    >
+                      Scan the page to track progress
+                    </Button>
+                  </Box>
                 )}
 
                 {/* Scan & Review: manual quick-check after capture */}

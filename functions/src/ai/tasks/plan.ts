@@ -240,8 +240,33 @@ export const handlePlan = async (
     '  "subjectBucket": "Reading",',
     '  "category": "must-do",',
     '  "mvdEssential": false,',
+    '  "skipGuidance": null,',
+    '  "contentGuide": "Read chapter 6 aloud. Discussion question: Why did Edmund keep Narnia a secret?"',
+    '}',
+  ].join("\n"));
+
+  // Append content guide instructions for workbook items
+  sections.push([
+    "CONTENT GUIDES:",
+    "For workbook-based checklist items, include a \"contentGuide\" field with:",
+    "- What lesson/content to cover today (based on recent scans or workbook position)",
+    "- Whether this is review, frontier, or new material",
+    "- A brief note on what Shelly should watch for",
+    "",
+    "Example:",
+    '{',
+    '  "title": "Good and the Beautiful reading",',
+    '  "estimatedMinutes": 30,',
+    '  "subjectBucket": "Reading",',
+    '  "contentGuide": "Continue from lesson 53. Content: multisyllable words — this is Lincoln\'s frontier. Watch for him breaking words into parts.",',
     '  "skipGuidance": null',
     '}',
+    "",
+    "If you don't know the exact lesson number (no scan data), say:",
+    '"contentGuide": "Continue where you left off. Current focus area: [skill from Skill Snapshot]."',
+    "",
+    "Keep contentGuide to 1-2 sentences. Shelly reads this on her phone while teaching.",
+    "For routine items (Prayer, Handwriting, etc.) set contentGuide to null.",
   ].join("\n"));
 
   // Append plan-specific output format instructions

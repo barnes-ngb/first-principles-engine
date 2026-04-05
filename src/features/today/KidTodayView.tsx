@@ -790,6 +790,7 @@ export default function KidTodayView({
             child={child}
             familyId={familyId}
             persistDayLogImmediate={persistDayLogImmediate}
+            weekFocus={weekFocus}
           />
         </SectionErrorBoundary>
       )}
