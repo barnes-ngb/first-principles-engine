@@ -3,7 +3,7 @@ import { doc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestor
 
 import { useFamilyId } from '../auth/useAuth'
 import { activityConfigsCollection } from '../firebase/firestore'
-import type { ActivityConfig, CurriculumDetected, WorksheetScanResult } from '../types'
+import type { ActivityConfig, WorksheetScanResult } from '../types'
 import { ActivityType, SubjectBucket } from '../types/enums'
 import type { SubjectBucket as SubjectBucketType } from '../types/enums'
 
