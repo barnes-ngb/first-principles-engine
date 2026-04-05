@@ -9,6 +9,7 @@ import HelpStrip from '../../components/HelpStrip'
 import SectionCard from '../../components/SectionCard'
 import CertificateScanSection from './CertificateScanSection'
 import DispositionProfile from './DispositionProfile'
+import LearningMap from './learning-map/LearningMap'
 import SkillSnapshotPage from '../evaluation/SkillSnapshotPage'
 import WordWall from './WordWall'
 
@@ -35,6 +36,7 @@ export default function ProgressPage() {
             scrollButtons="auto"
           >
             <Tab label="Learning Profile" />
+            <Tab label="Learning Map" />
             <Tab label="Skill Snapshot" />
             <Tab label="Word Wall" />
           </Tabs>
@@ -49,8 +51,9 @@ export default function ProgressPage() {
         </SectionCard>
       </Container>
       {tab === 0 && <DispositionProfile />}
-      {tab === 1 && <SkillSnapshotPage />}
-      {tab === 2 && <WordWall />}
+      {tab === 1 && <LearningMap />}
+      {tab === 2 && <SkillSnapshotPage />}
+      {tab === 3 && <WordWall />}
     </>
   )
 }
