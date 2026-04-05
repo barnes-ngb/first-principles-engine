@@ -23,3 +23,15 @@ export type {
   ChildSkillMap,
   DomainSummary,
 } from './skillStatus'
+
+export {
+  mapFindingToNode,
+  findingStatusToSkillStatus,
+  getNodesForProgram,
+} from './mapFindingToNode'
+
+export {
+  updateSkillMapFromFindings,
+  initializeSkillMapFromHistory,
+  markProgramCompleteOnSkillMap,
+} from './updateSkillMapFromFindings'

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { collection, doc, getDoc, getDocs, limit as firestoreLimit, orderBy, query, setDoc, where } from 'firebase/firestore'
 
 import { useAI, TaskType } from '../../core/ai/useAI'
+import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -851,6 +852,12 @@ export function useQuestSession() {
           // Don't block session save if snapshot update fails
           console.warn('Failed to auto-apply quest findings to skill snapshot', err)
         }
+      }
+
+      // Update Learning Map from findings (fire-and-forget)
+      if (findings.length > 0) {
+        updateSkillMapFromFindings(familyId, activeChildId, findings)
+          .catch((err) => console.warn('[LearningMap] Failed to update from quest findings', err))
       }
 
       // Track per-word progress (fire-and-forget)

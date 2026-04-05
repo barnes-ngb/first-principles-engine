@@ -29,6 +29,7 @@ import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import SaveIndicator from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
+import { markProgramCompleteOnSkillMap } from '../../core/curriculum/updateSkillMapFromFindings'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   skillSnapshotsCollection,
@@ -962,6 +963,11 @@ export default function SkillSnapshotPage() {
                   void withSave(async () => {
                     await setDoc(snapshotRef, JSON.parse(JSON.stringify(newSnapshot)))
                   })
+                }
+                // Also update Learning Map — mark linked curriculum nodes as mastered
+                if (activeChildId) {
+                  markProgramCompleteOnSkillMap(familyId, activeChildId, prog)
+                    .catch((err) => console.warn('[LearningMap] Failed to mark program complete', err))
                 }
               }}
             />
