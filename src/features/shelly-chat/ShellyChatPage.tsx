@@ -324,9 +324,23 @@ export default function ShellyChatPage() {
               lastMessagePreview: cleanText.slice(0, 100),
             },
           )
+        } else {
+          console.warn('[Chat] sendToAI got null/empty response')
+          await addDoc(shellyChatMessagesCollection(familyId, activeThreadId), {
+            role: 'assistant',
+            content: 'I wasn\'t able to respond — the AI service returned an empty response. Please try again.',
+            timestamp: new Date().toISOString(),
+          })
         }
       } catch (err) {
         console.error('Failed to get AI response:', err)
+        if (activeThreadId) {
+          await addDoc(shellyChatMessagesCollection(familyId, activeThreadId), {
+            role: 'assistant',
+            content: `Something went wrong: ${err instanceof Error ? err.message : 'Unknown error'}. Try again or start a new conversation.`,
+            timestamp: new Date().toISOString(),
+          }).catch(() => {})
+        }
       } finally {
         setSending(false)
       }
@@ -397,12 +411,22 @@ export default function ShellyChatPage() {
         content: m.content,
       }))
 
+      console.log('[Chat] Calling aiChat with:', {
+        familyId,
+        childId: getChildIdForContext(),
+        taskType: 'shellyChat',
+        messageCount: aiMessages.length,
+        lastMessage: aiMessages[aiMessages.length - 1]?.content?.slice(0, 80),
+      })
+
       const response = await chat({
         familyId,
         childId: getChildIdForContext(),
         taskType: TaskType.ShellyChat,
         messages: aiMessages,
       })
+
+      console.log('[Chat] aiChat response:', response ? 'got response' : 'null/undefined', response?.message?.slice(0, 50))
 
       if (response?.message) {
         const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
@@ -420,9 +444,24 @@ export default function ShellyChatPage() {
             lastMessagePreview: cleanText.slice(0, 100),
           },
         )
+      } else {
+        console.warn('[Chat] handleSend got null/empty response')
+        await addDoc(shellyChatMessagesCollection(familyId, threadId), {
+          role: 'assistant',
+          content: 'I wasn\'t able to respond right now. Please try again.',
+          timestamp: new Date().toISOString(),
+        })
       }
     } catch (err) {
       console.error('Failed to send message:', err)
+      const threadId = activeThreadId
+      if (threadId) {
+        await addDoc(shellyChatMessagesCollection(familyId, threadId), {
+          role: 'assistant',
+          content: `Something went wrong: ${err instanceof Error ? err.message : 'Unknown error'}. Try again or start a new conversation.`,
+          timestamp: new Date().toISOString(),
+        }).catch(() => {})
+      }
     } finally {
       setSending(false)
     }
@@ -850,12 +889,21 @@ export default function ShellyChatPage() {
         content: m.content,
       }))
 
+      console.log('[Chat] Calling aiChat for image analysis:', {
+        familyId,
+        childId: getChildIdForContext(),
+        messageCount: aiMessages.length,
+        hasImageUrl: aiMessages[aiMessages.length - 1]?.content?.startsWith('[IMAGE_URL:'),
+      })
+
       const response = await chat({
         familyId,
         childId: getChildIdForContext(),
         taskType: TaskType.ShellyChat,
         messages: aiMessages,
       })
+
+      console.log('[Chat] Image analysis response:', response ? 'got response' : 'null/undefined', response?.message?.slice(0, 50))
 
       if (response?.message) {
         const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
@@ -873,9 +921,24 @@ export default function ShellyChatPage() {
             lastMessagePreview: cleanText.slice(0, 100),
           },
         )
+      } else {
+        console.warn('[Chat] handleUploadAnalyze got null/empty response')
+        await addDoc(shellyChatMessagesCollection(familyId, threadId), {
+          role: 'assistant',
+          content: 'I wasn\'t able to analyze that image right now. Please try again.',
+          timestamp: new Date().toISOString(),
+        })
       }
     } catch (err) {
       console.error('Failed to analyze image:', err)
+      const threadId = activeThreadId
+      if (threadId) {
+        await addDoc(shellyChatMessagesCollection(familyId, threadId), {
+          role: 'assistant',
+          content: `Something went wrong analyzing the image: ${err instanceof Error ? err.message : 'Unknown error'}. Try again or start a new conversation.`,
+          timestamp: new Date().toISOString(),
+        }).catch(() => {})
+      }
     } finally {
       if (uploadPreview) URL.revokeObjectURL(uploadPreview)
       setUploadFile(null)
