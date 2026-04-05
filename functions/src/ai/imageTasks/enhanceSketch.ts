@@ -56,7 +56,7 @@ export function buildEnhancePrompt(style?: string, caption?: string): string {
 // ── Callable Cloud Function ─────────────────────────────────────
 
 export const enhanceSketch = onCall(
-  { secrets: [openaiApiKey, claudeApiKey], timeoutSeconds: 120 },
+  { secrets: [openaiApiKey, claudeApiKey], timeoutSeconds: 180, memory: "1GiB" },
   async (request): Promise<EnhanceSketchResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
     const { uid } = requireApprovedUser(request);

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -183,6 +183,14 @@ export default function BookEditorPage() {
   // Reimagine error surfacing (visible in UI for mobile debugging)
   const [reimagineError, setReimagineError] = useState<string | null>(null)
 
+  // Elapsed timer for drawing processing feedback
+  const [drawingElapsed, setDrawingElapsed] = useState(0)
+  useEffect(() => {
+    if (!drawingProcessing) { setDrawingElapsed(0); return }
+    const interval = setInterval(() => setDrawingElapsed((s) => s + 1), 1000)
+    return () => clearInterval(interval)
+  }, [drawingProcessing])
+
   // Background replacement tracking
   const [replacingBackgroundIds, setReplacingBackgroundIds] = useState<string[]>([])
 
@@ -261,11 +269,18 @@ export default function BookEditorPage() {
     setSketchEnhancing(true)
     setReimagineError(null)
     try {
-      const result = await enhanceSketch({
-        familyId,
-        sketchStoragePath: img.storagePath,
-        style: sketchEnhanceStyle,
-      })
+      const result = await Promise.race([
+        enhanceSketch({
+          familyId,
+          sketchStoragePath: img.storagePath,
+          style: sketchEnhanceStyle,
+        }),
+        new Promise<null>((_, reject) =>
+          setTimeout(() => reject(new Error(
+            'Enhancement is taking too long — the image service may be busy. Please try again.'
+          )), 120_000),
+        ),
+      ])
 
       if (result?.url) {
         applySketchEnhancement(sketchComparePageId, sketchImageId, result.url, result.storagePath)
@@ -368,12 +383,19 @@ export default function BookEditorPage() {
             ? 'Reimagine this child\'s drawing as a professional illustration. Keep the subject matter but create it in a polished cartoon style.'
             : 'Enhance this child\'s drawing into a polished illustration while keeping the original composition and character design.'
 
-        const result = await enhanceSketch({
-          familyId,
-          sketchStoragePath: storagePath,
-          style,
-          caption,
-        })
+        const result = await Promise.race([
+          enhanceSketch({
+            familyId,
+            sketchStoragePath: storagePath,
+            style,
+            caption,
+          }),
+          new Promise<null>((_, reject) =>
+            setTimeout(() => reject(new Error(
+              'Reimagine is taking too long — the image service may be busy. Please try again.'
+            )), 120_000),
+          ),
+        ])
         if (result?.url) {
           applySketchEnhancement(activePage.id, imageId, result.url, result.storagePath)
           setSketchImageId(imageId)
@@ -914,6 +936,7 @@ export default function BookEditorPage() {
         onChoose={(choice, intensity) => { void handleDrawingChoice(choice, intensity) }}
         processing={drawingProcessing}
         processingLabel={drawingProcessingLabel}
+        elapsedSeconds={drawingElapsed}
         resultPreviewUrl={drawingResultUrl}
         onAcceptResult={handleAcceptDrawingResult}
         onRetryResult={handleRetryDrawingResult}
