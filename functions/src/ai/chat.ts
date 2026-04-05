@@ -1463,7 +1463,12 @@ export const chat = onCall(
     if (!familyId || typeof familyId !== "string") {
       throw new HttpsError("invalid-argument", "familyId is required.");
     }
-    if (!childId || typeof childId !== "string") {
+    // shellyChat supports general (no-child) mode — childId may be empty
+    const childIdOptionalTasks = ["shellyChat"];
+    if (
+      !childIdOptionalTasks.includes(taskType) &&
+      (!childId || typeof childId !== "string")
+    ) {
       throw new HttpsError("invalid-argument", "childId is required.");
     }
     // ── Validate task type via registry ──────────────────────────
@@ -1504,32 +1509,40 @@ export const chat = onCall(
 
     const db = getFirestore();
 
-    // ── Load child profile ─────────────────────────────────────
-    const childSnap = await db
-      .doc(`families/${familyId}/children/${childId}`)
-      .get();
-
-    if (!childSnap.exists) {
-      throw new HttpsError("not-found", "Child not found.");
-    }
-
-    const childData = childSnap.data() as {
-      name: string;
-      grade?: string;
-    };
-
-    // ── Load skill snapshot (optional — may not exist yet) ─────
-    const snapshotSnap = await db
-      .doc(`families/${familyId}/skillSnapshots/${childId}`)
-      .get();
-
-    const snapshotData = snapshotSnap.exists
-      ? (snapshotSnap.data() as {
+    // ── Load child profile (skip if no childId — e.g. shellyChat general mode) ──
+    let childData: { name: string; grade?: string } = { name: "" };
+    let snapshotData:
+      | {
           prioritySkills?: ChildContext["prioritySkills"];
           supports?: ChildContext["supports"];
           stopRules?: ChildContext["stopRules"];
-        })
-      : undefined;
+        }
+      | undefined;
+
+    if (childId) {
+      const childSnap = await db
+        .doc(`families/${familyId}/children/${childId}`)
+        .get();
+
+      if (!childSnap.exists) {
+        throw new HttpsError("not-found", "Child not found.");
+      }
+
+      childData = childSnap.data() as { name: string; grade?: string };
+
+      // ── Load skill snapshot (optional — may not exist yet) ─────
+      const snapshotSnap = await db
+        .doc(`families/${familyId}/skillSnapshots/${childId}`)
+        .get();
+
+      snapshotData = snapshotSnap.exists
+        ? (snapshotSnap.data() as {
+            prioritySkills?: ChildContext["prioritySkills"];
+            supports?: ChildContext["supports"];
+            stopRules?: ChildContext["stopRules"];
+          })
+        : undefined;
+    }
 
     // ── Dispatch to handler ────────────────────────────────────
     try {
