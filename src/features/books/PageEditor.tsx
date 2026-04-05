@@ -7,7 +7,12 @@ import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogTitle from '@mui/material/DialogTitle'
 
 import type { BookPage } from '../../core/types'
 import { PAGE_LAYOUTS, TEXT_SIZES, TEXT_FONTS, TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
@@ -19,6 +24,7 @@ interface PageEditorProps {
   onUpdate: (changes: Partial<BookPage>) => void
   onAddImage: (file: File) => void
   onRemoveImage?: (imageId: string) => void
+  onChangeBackground?: () => void
   onReRecord?: () => void
   onImagePositionChange?: (imageId: string, position: ImagePosition) => void
   childName: string
@@ -29,12 +35,14 @@ export default function PageEditor({
   onUpdate,
   onAddImage,
   onRemoveImage,
+  onChangeBackground,
   onReRecord,
   onImagePositionChange,
   childName,
 }: PageEditorProps) {
   const isLincoln = childName.toLowerCase() === 'lincoln'
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
+  const [confirmRemoveBg, setConfirmRemoveBg] = useState(false)
   const imageContainerRef = useRef<HTMLDivElement>(null)
 
   const handleTextChange = useCallback(
@@ -137,8 +145,8 @@ export default function PageEditor({
             })}
           </Box>
 
-          {/* Background toolbar — shown when a background image is selected */}
-          {selectedImageId && backgroundImages.some((img) => img.id === selectedImageId) && (
+          {/* Background toolbar — shown when page has a background and no sticker is selected */}
+          {backgroundImages.length > 0 && !stickerImages.some((img) => img.id === selectedImageId) && (
             <Box
               sx={{
                 position: 'absolute',
@@ -155,14 +163,22 @@ export default function PageEditor({
                 gap: 0.5,
               }}
             >
+              {onChangeBackground && (
+                <Button
+                  size="small"
+                  startIcon={<AutoFixHighIcon />}
+                  onClick={onChangeBackground}
+                  sx={{ textTransform: 'none', minWidth: 0, px: 1 }}
+                >
+                  Change
+                </Button>
+              )}
               {onRemoveImage && (
                 <Button
                   size="small"
                   color="error"
-                  onClick={() => {
-                    onRemoveImage(selectedImageId)
-                    setSelectedImageId(null)
-                  }}
+                  startIcon={<DeleteOutlineIcon />}
+                  onClick={() => setConfirmRemoveBg(true)}
                   sx={{ textTransform: 'none', minWidth: 0, px: 1 }}
                 >
                   Remove
@@ -354,6 +370,27 @@ export default function PageEditor({
           ))}
         </ToggleButtonGroup>
       </Box>
+
+      {/* Remove background confirmation dialog */}
+      <Dialog open={confirmRemoveBg} onClose={() => setConfirmRemoveBg(false)}>
+        <DialogTitle>Remove the background?</DialogTitle>
+        <DialogActions>
+          <Button onClick={() => setConfirmRemoveBg(false)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => {
+              if (onRemoveImage) {
+                backgroundImages.forEach((img) => onRemoveImage(img.id))
+              }
+              setSelectedImageId(null)
+              setConfirmRemoveBg(false)
+            }}
+          >
+            Remove
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   )
 }
