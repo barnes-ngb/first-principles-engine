@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Rounded green background -->
+  <rect width="512" height="512" rx="80" ry="80" fill="#4a7c59"/>
+
+  <!-- Left ear (floppy, hanging down) -->
+  <ellipse cx="148" cy="300" rx="62" ry="100" transform="rotate(-10 148 300)" fill="#B8862D"/>
+  <ellipse cx="152" cy="300" rx="48" ry="85" transform="rotate(-10 152 300)" fill="#D4A04A"/>
+
+  <!-- Right ear (floppy, hanging down) -->
+  <ellipse cx="364" cy="300" rx="62" ry="100" transform="rotate(10 364 300)" fill="#B8862D"/>
+  <ellipse cx="360" cy="300" rx="48" ry="85" transform="rotate(10 360 300)" fill="#D4A04A"/>
+
+  <!-- Head (main circle) -->
+  <circle cx="256" cy="250" r="140" fill="#D4A04A"/>
+
+  <!-- Forehead tuft -->
+  <ellipse cx="256" cy="135" rx="55" ry="30" fill="#C49035"/>
+
+  <!-- Muzzle area -->
+  <ellipse cx="256" cy="300" rx="90" ry="70" fill="#F5E4BA"/>
+
+  <!-- Nose -->
+  <ellipse cx="256" cy="280" rx="18" ry="14" fill="#3D2B1F"/>
+
+  <!-- Nose highlight -->
+  <ellipse cx="250" cy="276" rx="5" ry="3" fill="#5C4033" opacity="0.5"/>
+
+  <!-- Mouth line -->
+  <path d="M256 294 Q240 315 230 310" stroke="#8B6914" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M256 294 Q272 315 282 310" stroke="#8B6914" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+  <!-- Tongue -->
+  <ellipse cx="256" cy="335" rx="22" ry="30" fill="#E8737A"/>
+  <ellipse cx="256" cy="330" rx="18" ry="22" fill="#F09098"/>
+  <line x1="256" y1="310" x2="256" y2="350" stroke="#D4636A" stroke-width="2"/>
+
+  <!-- Left eye white -->
+  <ellipse cx="210" cy="235" rx="28" ry="30" fill="white"/>
+  <!-- Left eye iris -->
+  <circle cx="213" cy="238" r="16" fill="#5C3A1E"/>
+  <!-- Left eye pupil -->
+  <circle cx="215" cy="236" r="8" fill="#2B1810"/>
+  <!-- Left eye highlight -->
+  <circle cx="220" cy="230" r="5" fill="white"/>
+
+  <!-- Right eye white -->
+  <ellipse cx="302" cy="235" rx="28" ry="30" fill="white"/>
+  <!-- Right eye iris -->
+  <circle cx="299" cy="238" r="16" fill="#5C3A1E"/>
+  <!-- Right eye pupil -->
+  <circle cx="297" cy="236" r="8" fill="#2B1810"/>
+  <!-- Right eye highlight -->
+  <circle cx="304" cy="230" r="5" fill="white"/>
+
+  <!-- Eyebrows (friendly) -->
+  <path d="M185 210 Q210 198 235 208" stroke="#B8862D" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M277 208 Q302 198 327 210" stroke="#B8862D" stroke-width="4" fill="none" stroke-linecap="round"/>
+
+  <!-- Cheek blush -->
+  <ellipse cx="175" cy="280" rx="20" ry="12" fill="#E8A87C" opacity="0.3"/>
+  <ellipse cx="337" cy="280" rx="20" ry="12" fill="#E8A87C" opacity="0.3"/>
+</svg>

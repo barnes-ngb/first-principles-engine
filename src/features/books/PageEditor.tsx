@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
@@ -6,10 +6,17 @@ import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
+import IconButton from '@mui/material/IconButton'
+import Menu from '@mui/material/Menu'
+import MenuItem from '@mui/material/MenuItem'
+import ListItemIcon from '@mui/material/ListItemIcon'
+import ListItemText from '@mui/material/ListItemText'
+import Tooltip from '@mui/material/Tooltip'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
+import WallpaperIcon from '@mui/icons-material/Wallpaper'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogTitle from '@mui/material/DialogTitle'
@@ -28,6 +35,8 @@ interface PageEditorProps {
   onReRecord?: () => void
   onImagePositionChange?: (imageId: string, position: ImagePosition) => void
   childName: string
+  /** Increment to deselect all images from parent (e.g. when action buttons are clicked) */
+  deselectSignal?: number
 }
 
 export default function PageEditor({
@@ -39,11 +48,17 @@ export default function PageEditor({
   onReRecord,
   onImagePositionChange,
   childName,
+  deselectSignal,
 }: PageEditorProps) {
   const isLincoln = childName.toLowerCase() === 'lincoln'
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
   const [confirmRemoveBg, setConfirmRemoveBg] = useState(false)
+  const [bgMenuAnchor, setBgMenuAnchor] = useState<HTMLElement | null>(null)
   const imageContainerRef = useRef<HTMLDivElement>(null)
+
+  // Deselect when parent signals (action buttons, dialogs, etc.)
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- signal-driven deselect from parent
+  useEffect(() => { setSelectedImageId(null) }, [deselectSignal])
 
   const handleTextChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -94,100 +109,92 @@ export default function PageEditor({
   const stickerImages = page.images.filter((img) => img.type === 'sticker')
 
   const imageSection = !isTextOnly && (
-    <Box
-      ref={imageContainerRef}
-      sx={{
-        width: isImageLeft ? '50%' : '100%',
-        aspectRatio: '3 / 2',
-        bgcolor: 'grey.100',
-        borderRadius: 2,
-        position: 'relative',
-        overflow: 'hidden',
-        touchAction: 'none',
-      }}
-      onClick={() => setSelectedImageId(null)}
-    >
-      {page.images.length > 0 ? (
-        <>
-          {/* Layer 1: Background — locked, not draggable */}
-          <Box sx={{ position: 'absolute', inset: 0, zIndex: 0 }}>
-            {backgroundImages.map((img) => {
-              const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
-              const transforms: string[] = []
-              if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
-              if (pos.flipH) transforms.push('scaleX(-1)')
-              if (pos.flipV) transforms.push('scaleY(-1)')
-              return (
-                <Box
-                  key={img.id}
-                  component="img"
-                  src={img.url}
-                  onClick={(e: React.MouseEvent) => {
-                    e.stopPropagation()
-                    setSelectedImageId(img.id)
-                  }}
-                  sx={{
-                    position: 'absolute',
-                    left: `${pos.x}%`,
-                    top: `${pos.y}%`,
-                    width: `${pos.width}%`,
-                    height: `${pos.height}%`,
-                    objectFit: 'cover',
-                    pointerEvents: 'auto',
-                    transform: transforms.length > 0 ? transforms.join(' ') : undefined,
-                    transformOrigin: 'center center',
-                    border: selectedImageId === img.id ? '2px dashed' : 'none',
-                    borderColor: 'warning.main',
-                    cursor: 'pointer',
-                  }}
-                />
-              )
-            })}
-          </Box>
-
-          {/* Background toolbar — shown when page has a background and no sticker is selected */}
-          {backgroundImages.length > 0 && !stickerImages.some((img) => img.id === selectedImageId) && (
-            <Box
-              sx={{
-                position: 'absolute',
-                bottom: 8,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                zIndex: 100,
-                bgcolor: 'background.paper',
-                borderRadius: 2,
-                boxShadow: 3,
-                px: 1,
-                py: 0.5,
-                display: 'flex',
-                gap: 0.5,
-              }}
+    <Box sx={{ width: isImageLeft ? '50%' : '100%' }}>
+      {/* Background edit icon — sits above the image container */}
+      {backgroundImages.length > 0 && (onChangeBackground || onRemoveImage) && (
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.5, px: 1 }}>
+          <Tooltip title="Change background">
+            <IconButton
+              size="small"
+              onClick={(e) => setBgMenuAnchor(e.currentTarget)}
+              sx={{ opacity: 0.6, '&:hover': { opacity: 1 } }}
             >
-              {onChangeBackground && (
-                <Button
-                  size="small"
-                  startIcon={<AutoFixHighIcon />}
-                  onClick={onChangeBackground}
-                  sx={{ textTransform: 'none', minWidth: 0, px: 1 }}
-                >
-                  Change
-                </Button>
-              )}
-              {onRemoveImage && (
-                <Button
-                  size="small"
-                  color="error"
-                  startIcon={<DeleteOutlineIcon />}
-                  onClick={() => setConfirmRemoveBg(true)}
-                  sx={{ textTransform: 'none', minWidth: 0, px: 1 }}
-                >
-                  Remove
-                </Button>
-              )}
-            </Box>
-          )}
+              <WallpaperIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Menu
+            anchorEl={bgMenuAnchor}
+            open={Boolean(bgMenuAnchor)}
+            onClose={() => setBgMenuAnchor(null)}
+          >
+            {onChangeBackground && (
+              <MenuItem onClick={() => { setBgMenuAnchor(null); onChangeBackground() }}>
+                <ListItemIcon><AutoFixHighIcon fontSize="small" /></ListItemIcon>
+                <ListItemText>Change background</ListItemText>
+              </MenuItem>
+            )}
+            {onRemoveImage && (
+              <MenuItem onClick={() => { setBgMenuAnchor(null); setConfirmRemoveBg(true) }}>
+                <ListItemIcon><DeleteOutlineIcon fontSize="small" color="error" /></ListItemIcon>
+                <ListItemText>Remove background</ListItemText>
+              </MenuItem>
+            )}
+          </Menu>
+        </Box>
+      )}
 
-          {/* Layer 2: Stickers — interactive, draggable, always on top */}
+      {/* Image container — clean, no overlays */}
+      <Box
+        ref={imageContainerRef}
+        sx={{
+          aspectRatio: '3 / 2',
+          bgcolor: 'grey.100',
+          borderRadius: 2,
+          position: 'relative',
+          overflow: 'hidden',
+          touchAction: 'none',
+        }}
+        onClick={() => setSelectedImageId(null)}
+      >
+        {page.images.length > 0 ? (
+          <>
+            {/* Layer 1: Background — locked, not draggable */}
+            <Box sx={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+              {backgroundImages.map((img) => {
+                const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+                const transforms: string[] = []
+                if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
+                if (pos.flipH) transforms.push('scaleX(-1)')
+                if (pos.flipV) transforms.push('scaleY(-1)')
+                return (
+                  <Box
+                    key={img.id}
+                    component="img"
+                    src={img.url}
+                    onClick={(e: React.MouseEvent) => {
+                      e.stopPropagation()
+                      setSelectedImageId(img.id)
+                    }}
+                    sx={{
+                      position: 'absolute',
+                      left: `${pos.x}%`,
+                      top: `${pos.y}%`,
+                      width: `${pos.width}%`,
+                      height: `${pos.height}%`,
+                      objectFit: 'cover',
+                      pointerEvents: 'auto',
+                      transform: transforms.length > 0 ? transforms.join(' ') : undefined,
+                      transformOrigin: 'center center',
+                      border: selectedImageId === img.id ? '2px dashed' : 'none',
+                      borderColor: 'warning.main',
+                      cursor: 'pointer',
+                    }}
+                  />
+                )
+              })}
+            </Box>
+
+            {/* Layer 2: Stickers — interactive, draggable, always on top */}
           <Box sx={{ position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none' }}>
             {stickerImages.map((img, idx) => (
               <DraggableImage
@@ -232,6 +239,7 @@ export default function PageEditor({
           </Stack>
         </label>
       )}
+      </Box>
     </Box>
   )
 
@@ -243,6 +251,7 @@ export default function PageEditor({
       fullWidth
       value={page.text ?? ''}
       onChange={handleTextChange}
+      onFocus={() => setSelectedImageId(null)}
       placeholder={
         isLincoln
           ? 'Write your story...'
