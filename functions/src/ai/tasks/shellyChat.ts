@@ -15,6 +15,13 @@ export const handleShellyChat = async (
 ): Promise<ChatTaskResult> => {
   const { db, familyId, childId, messages, apiKey } = ctx;
 
+  const lastMsg = messages[messages.length - 1];
+  console.log("[shellyChat] Messages received:", messages.length, {
+    lastRole: lastMsg?.role,
+    contentLength: lastMsg?.content?.length,
+    contentPreview: lastMsg?.content?.slice(0, 80),
+  });
+
   // ── Step A: Shared context via buildContextForTask (parallel) ──
   const contextSections = await buildContextForTask("shellyChat", {
     db,
@@ -182,6 +189,7 @@ Example:
 
   if (imageUrlMatch) {
     // Vision path: use shared helper for URL-based images
+    console.log("[shellyChat] Vision path — image URL detected:", imageUrlMatch[1]?.slice(0, 60));
     const imageUrl = imageUrlMatch[1];
     const textContent =
       imageUrlMatch[2] || "What can you tell me about this image?";
@@ -201,6 +209,7 @@ Example:
       messages: priorMessages,
     });
   } else {
+    console.log("[shellyChat] Text path — no image URL detected");
     result = await callClaude({
       apiKey,
       model,
