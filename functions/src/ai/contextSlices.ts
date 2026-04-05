@@ -54,7 +54,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   workshop: ["charter", "childProfile", "workshopGames"],
   analyzeWorkbook: ["charter", "childProfile"],
   disposition: ["charter", "childProfile", "engagement", "gradeResults"],
-  scan: ["childProfile", "recentEval"],
+  scan: ["childProfile", "recentEval", "skillSnapshot", "activityConfigs"],
   shellyChat: [
     "charter", "childProfile", "engagement", "gradeResults",
     "recentEval", "sightWords", "weekFocus", "wordMastery", "workbookPaces",
