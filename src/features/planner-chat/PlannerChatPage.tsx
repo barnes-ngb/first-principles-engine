@@ -1433,7 +1433,7 @@ ${weekNotes ? `\nNotes: ${weekNotes}` : ''}
 Generate a plan for Monday through Friday.`.trim()
 
     await handleGenerateWeek(contextMessage, true)
-  }, [weekEnergy, hoursPerDay, workbookConfigs, readAloudBook, readAloudChapters, weekNotes, activeChild, filteredDailyRoutine, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek])
+  }, [weekEnergy, hoursPerDay, workbookConfigs, readAloudBook, readAloudChapters, weekNotes, activeChild, filteredDailyRoutine, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek, dailyRoutine])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
