@@ -71,9 +71,11 @@ import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
-import { defaultAppBlocks, defaultDailyRoutine, filterRoutineForCompletedPrograms, parseRoutineTotalMinutes } from './chatPlanner.logic'
+import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
+import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
   buildPlannerPrompt,
+  ensureEvaluationItems,
   fillMissingDaysFromRoutine,
   generateDraftPlanFromInputs,
   generateItemId,
@@ -272,8 +274,12 @@ export default function PlannerChatPage() {
   const [generatingWeek, setGeneratingWeek] = useState(false)
   const [masterySummary, setMasterySummary] = useState<PlannerMasterySummary | null>(null)
 
-  // Daily routine state — initialized with default template
-  const [dailyRoutine, setDailyRoutine] = useState(defaultDailyRoutine)
+  // Activity configs → routine text (replaces old free-text dailyRoutine)
+  const { configs: activityConfigs } = useActivityConfigs(activeChildId ?? '')
+  const dailyRoutine = useMemo(
+    () => activityConfigsToRoutineText(activityConfigs),
+    [activityConfigs],
+  )
 
   // Adjust hoursPerDay based on energy selection and routine total
   useEffect(() => {
@@ -306,27 +312,9 @@ export default function PlannerChatPage() {
     })
   }, [familyId])
 
-  // Load per-child daily routine (falls back to default template)
-  useEffect(() => {
-    if (!familyId || !activeChildId) {
-      setDailyRoutine(defaultDailyRoutine)
-      return
-    }
-    const childSettingsRef = doc(db, `families/${familyId}/settings/plannerDefaults_${activeChildId}`)
-    void getDoc(childSettingsRef).then((snap) => {
-      if (snap.exists() && snap.data().dailyRoutine) {
-        setDailyRoutine(snap.data().dailyRoutine)
-      } else {
-        setDailyRoutine(defaultDailyRoutine)
-      }
-    })
-  }, [familyId, activeChildId])
-
-  // Filter out completed programs (e.g., Reading Eggs) from the routine and app blocks
-  const filteredDailyRoutine = useMemo(
-    () => filterRoutineForCompletedPrograms(dailyRoutine, snapshot?.completedPrograms ?? []),
-    [dailyRoutine, snapshot?.completedPrograms],
-  )
+  // dailyRoutine is now derived from activity configs (already filtered for completed)
+  // No need to filter for completed programs — activity configs handle that via `completed` flag
+  const filteredDailyRoutine = dailyRoutine
   const filteredAppBlocks = useMemo(
     () => {
       const completed = snapshot?.completedPrograms ?? []
@@ -750,7 +738,13 @@ export default function PlannerChatPage() {
         rawDescription: `${r.specificTopic} (${r.recommendation}: ${r.recommendationReason})`,
       },
     }
-    setPhotoLabels((prev) => [...prev, newLabel])
+    setPhotoLabels((prev) => {
+      // Deduplicate by artifactId
+      if (prev.some((l) => l.artifactId === newLabel.artifactId)) {
+        return prev
+      }
+      return [...prev, newLabel]
+    })
     void recordScanAction(familyId, scanRecord, 'added')
     clearScan()
   }, [scanRecord, familyId, recordScanAction, clearScan])
@@ -905,16 +899,16 @@ Return as JSON:
       const rawAiDraft = response ? parseAIResponse(response) : null
       const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
       if (aiDraft) {
-        draft = aiDraft
+        draft = ensureEvaluationItems(aiDraft)
         usedAI = true
       } else {
         // Fallback to local logic
-        draft = generateDraftPlanFromInputs(inputs)
+        draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
         setSnack({ text: 'AI planning unavailable — used local planner.', severity: 'info' })
       }
     } else {
       // Local path (flag off)
-      draft = generateDraftPlanFromInputs(inputs)
+      draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
     }
 
     setCurrentDraft(draft)
@@ -988,10 +982,10 @@ Return as JSON:
       const rawAiDraft = response ? parseAIResponse(response) : null
       const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
       if (aiDraft) {
-        draft = aiDraft
+        draft = ensureEvaluationItems(aiDraft)
         usedAI = true
       } else {
-        draft = generateDraftPlanFromInputs(inputs)
+        draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
         if (!response) {
           // AI call threw — snack already set above
         } else {
@@ -1003,7 +997,7 @@ Return as JSON:
         }
       }
     } else {
-      draft = generateDraftPlanFromInputs(inputs)
+      draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
     }
 
     setCurrentDraft(draft)
@@ -1097,7 +1091,8 @@ Return as JSON:
       })
 
       // Try to parse as structured DraftWeeklyPlan JSON
-      const aiDraft = response ? parseAIResponse(response) : null
+      const rawAiDraft = response ? parseAIResponse(response) : null
+      const aiDraft = rawAiDraft ? ensureEvaluationItems(rawAiDraft) : null
       let assistantMsg: ChatMessage
       if (aiDraft) {
         setCurrentDraft(aiDraft)
@@ -1110,16 +1105,17 @@ Return as JSON:
         }
       } else if (response?.message && looksLikePlanJson(response.message)) {
         // AI returned plan-like JSON but parseAIResponse failed — try aggressive recovery
-        let recovered: DraftWeeklyPlan | null = null
+        let rawRecovered: DraftWeeklyPlan | null = null
         try {
           const msg = response.message.trim()
           const stripped = msg.replace(/```(?:json)?\s*/g, '').replace(/\s*```/g, '').trim()
           const directParse = JSON.parse(stripped)
           if (directParse.days && Array.isArray(directParse.days)) {
-            recovered = parseAIResponse({ ...response, message: JSON.stringify(directParse) })
+            rawRecovered = parseAIResponse({ ...response, message: JSON.stringify(directParse) })
           }
         } catch { /* fall through to local planner */ }
 
+        const recovered = rawRecovered ? ensureEvaluationItems(rawRecovered) : null
         if (recovered) {
           setCurrentDraft(recovered)
           assistantMsg = {
@@ -1132,10 +1128,10 @@ Return as JSON:
         } else {
           // Recovery failed — fall back to local planner
           const assignments = photoLabelsToAssignments(photoLabels)
-          const localDraft = generateDraftPlanFromInputs({
+          const localDraft = ensureEvaluationItems(generateDraftPlanFromInputs({
             snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine,
             subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
-          })
+          }))
           setCurrentDraft(localDraft)
           assistantMsg = {
             id: generateItemId(),
@@ -1187,14 +1183,14 @@ Return as JSON:
       // Apply adjustment and regenerate
       const newAdjustments = [...adjustments, intent]
       const assignments = photoLabelsToAssignments(photoLabels)
-      const draft = generateDraftPlanFromInputs({
+      const draft = ensureEvaluationItems(generateDraftPlanFromInputs({
         snapshot,
         hoursPerDay,
         appBlocks: filteredAppBlocks,
         assignments,
         adjustments: newAdjustments,
         subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
-      })
+      }))
 
       setCurrentDraft(draft)
       setAdjustments(newAdjustments)
@@ -1332,7 +1328,7 @@ Return as JSON:
         const rawAiDraft = response ? parseAIResponse(response) : null
         const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
         if (aiDraft) {
-          draft = aiDraft
+          draft = ensureEvaluationItems(aiDraft)
           usedAI = true
           if (!skipFocusGeneration) {
             const themedFields = response ? parsePlanThemeFields(response.message) : null
@@ -1344,10 +1340,10 @@ Return as JSON:
             }
           }
         } else {
-          draft = generateDraftPlanFromInputs(inputs)
+          draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
         }
       } else {
-        draft = generateDraftPlanFromInputs(inputs)
+        draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
       }
 
       setCurrentDraft(draft)
@@ -1390,10 +1386,9 @@ Return as JSON:
       updatedAt: new Date().toISOString(),
     }, { merge: true })
 
-    // Save per-child daily routine and subject time defaults
+    // Save per-child subject time defaults (dailyRoutine no longer saved — activity configs are the source of truth)
     if (activeChildId) {
       void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults_${activeChildId}`), {
-        dailyRoutine,
         subjectTimeDefaults,
         updatedAt: new Date().toISOString(),
       }, { merge: true })
@@ -1424,7 +1419,6 @@ Each question must have a questionType: comprehension, application, connection, 
 Vary the question types across the week.
 The "chapter" field in each chapterQuestion must match the actual chapter numbers from the entered range, not auto-numbered from 1.
 Include the question in a "chapterQuestion" field on each day.` : ''}
-${filteredDailyRoutine ? `\nDaily routine (use this as the base template for each day — keep these activities and times, vary them across the week as appropriate):\n${filteredDailyRoutine}` : ''}
 
 Subject time defaults (use these as the baseline for estimatedMinutes per item):
 ${subjectDefaultsLines}
@@ -1433,7 +1427,7 @@ ${weekNotes ? `\nNotes: ${weekNotes}` : ''}
 Generate a plan for Monday through Friday.`.trim()
 
     await handleGenerateWeek(contextMessage, true)
-  }, [weekEnergy, hoursPerDay, workbookConfigs, readAloudBook, readAloudChapters, weekNotes, activeChild, filteredDailyRoutine, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek, dailyRoutine])
+  }, [weekEnergy, hoursPerDay, workbookConfigs, readAloudBook, readAloudChapters, weekNotes, activeChild, filteredDailyRoutine, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -1728,14 +1722,14 @@ Generate a plan for Monday through Friday.`.trim()
     if (intent && currentDraft) {
       const newAdjustments = [...adjustments, intent]
       const assignments = photoLabelsToAssignments(photoLabels)
-      const draft = generateDraftPlanFromInputs({
+      const draft = ensureEvaluationItems(generateDraftPlanFromInputs({
         snapshot,
         hoursPerDay,
         appBlocks: filteredAppBlocks,
         assignments,
         adjustments: newAdjustments,
         subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
-      })
+      }))
       setCurrentDraft(draft)
       setAdjustments(newAdjustments)
       assistantReply = {
@@ -2060,6 +2054,7 @@ ${dayPrompts}`
               scanError={scanError ?? null}
               onScanClear={clearScan}
               onScanAccept={handleScanAccept}
+              activityConfigs={activityConfigs}
               onSubmitPhotos={handleSubmitPhotos}
               onSetupComplete={handleSetupComplete}
               generatingWeek={generatingWeek}
