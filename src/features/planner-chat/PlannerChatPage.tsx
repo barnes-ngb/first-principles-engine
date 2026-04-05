@@ -1433,6 +1433,36 @@ Generate a plan for Monday through Friday.`.trim()
     setCurrentDraft(updated)
   }, [currentDraft])
 
+  const handleMoveItem = useCallback((dayIndex: number, itemIndex: number, direction: -1 | 1) => {
+    if (!currentDraft) return
+    const newIndex = itemIndex + direction
+    const items = currentDraft.days[dayIndex].items
+    if (newIndex < 0 || newIndex >= items.length) return
+    const updated: DraftWeeklyPlan = {
+      ...currentDraft,
+      days: currentDraft.days.map((day, i) => {
+        if (i !== dayIndex) return day
+        const newItems = [...day.items]
+        ;[newItems[itemIndex], newItems[newIndex]] = [newItems[newIndex], newItems[itemIndex]]
+        return { ...day, items: newItems }
+      }),
+    }
+    setCurrentDraft(updated)
+  }, [currentDraft])
+
+  const handleRemoveItem = useCallback((dayIndex: number, itemIndex: number) => {
+    if (!currentDraft) return
+    const updated: DraftWeeklyPlan = {
+      ...currentDraft,
+      days: currentDraft.days.map((day, i) => {
+        if (i !== dayIndex) return day
+        const newItems = day.items.filter((_, idx) => idx !== itemIndex)
+        return { ...day, items: newItems }
+      }),
+    }
+    setCurrentDraft(updated)
+  }, [currentDraft])
+
   // Map SubjectBucket to activity type for the generate Cloud Function
   const subjectToActivityType = useCallback((subject: SubjectBucket): string => {
     switch (subject) {
@@ -2015,6 +2045,8 @@ ${dayPrompts}`
               onGenerateActivity={handleGenerateActivity}
               generatingItemId={generatingItemId}
               applied={applied}
+              onMoveItem={handleMoveItem}
+              onRemoveItem={handleRemoveItem}
             />
           )}
 

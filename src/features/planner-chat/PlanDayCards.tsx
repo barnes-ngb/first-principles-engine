@@ -33,6 +33,8 @@ interface PlanDayCardsProps {
   onGenerateActivity?: (item: DraftPlanItem) => void
   generatingItemId: string | null
   applied: boolean
+  onMoveItem?: (dayIndex: number, itemIndex: number, direction: -1 | 1) => void
+  onRemoveItem?: (dayIndex: number, itemIndex: number) => void
 }
 
 export default function PlanDayCards({
@@ -45,6 +47,8 @@ export default function PlanDayCards({
   onGenerateActivity,
   generatingItemId,
   applied,
+  onMoveItem,
+  onRemoveItem,
 }: PlanDayCardsProps) {
   return (
     <>
@@ -97,6 +101,8 @@ export default function PlanDayCards({
           onToggleItem={onToggleItem}
           onGenerateActivity={!applied ? onGenerateActivity : undefined}
           generatingItemId={generatingItemId ?? undefined}
+          onMoveItem={!applied ? onMoveItem : undefined}
+          onRemoveItem={!applied ? onRemoveItem : undefined}
         />
       </Box>
     </>
