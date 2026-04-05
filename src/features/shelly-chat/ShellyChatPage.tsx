@@ -357,8 +357,8 @@ export default function ShellyChatPage() {
     setFollowUps([])
     setSending(true)
 
+    let threadId = activeThreadId
     try {
-      let threadId = activeThreadId
 
       // Create new thread if needed
       if (!threadId) {
@@ -411,22 +411,30 @@ export default function ShellyChatPage() {
         content: m.content,
       }))
 
-      console.log('[Chat] Calling aiChat with:', {
+      const chatChildId = getChildIdForContext()
+      console.log('[Chat] About to call aiChat...', {
         familyId,
-        childId: getChildIdForContext(),
+        childId: chatChildId || '(general mode)',
         taskType: 'shellyChat',
         messageCount: aiMessages.length,
         lastMessage: aiMessages[aiMessages.length - 1]?.content?.slice(0, 80),
       })
 
+      const startTime = Date.now()
       const response = await chat({
         familyId,
-        childId: getChildIdForContext(),
+        childId: chatChildId,
         taskType: TaskType.ShellyChat,
         messages: aiMessages,
       })
 
-      console.log('[Chat] aiChat response:', response ? 'got response' : 'null/undefined', response?.message?.slice(0, 50))
+      console.log('[Chat] aiChat returned after', Date.now() - startTime, 'ms')
+      console.log('[Chat] Response type:', typeof response)
+      console.log('[Chat] Response keys:', response ? Object.keys(response) : 'null')
+      console.log('[Chat] Response message preview:', response?.message?.slice(0, 100))
+      if (!response?.message) {
+        console.error('[Chat] No message in response:', JSON.stringify(response)?.slice(0, 500))
+      }
 
       if (response?.message) {
         const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
@@ -453,8 +461,9 @@ export default function ShellyChatPage() {
         })
       }
     } catch (err) {
-      console.error('Failed to send message:', err)
-      const threadId = activeThreadId
+      console.error('[Chat] handleSend error:', err)
+      console.error('[Chat] Error details:', err instanceof Error ? err.message : String(err))
+      // Use the local threadId (not activeThreadId from closure, which may be stale for new threads)
       if (threadId) {
         await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
