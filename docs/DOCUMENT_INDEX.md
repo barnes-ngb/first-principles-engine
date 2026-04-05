@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-04-02.
+> Where everything lives. Updated 2026-04-05.
 
 ---
 
@@ -12,7 +12,8 @@
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
-| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — lists 31 collections but 6 are legacy/removed (`sessions`, `projects`, `weeklyScores`, `labSessions`, `plannerSessions`, `sightWordLists`); missing 3 newer collections (`storyGames`, `scans`, `shellyChatThreads`). CLAUDE.md table is now authoritative at 28 collections + 2 subcollections. |
+| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — lists 31 collections but 6 are legacy/removed (`sessions`, `projects`, `weeklyScores`, `labSessions`, `plannerSessions`, `sightWordLists`); missing newer collections. CLAUDE.md table is now authoritative at 30 collections + 2 subcollections. |
+| `PROFILE_LIMITS_AUDIT.md` | **CURRENT** (Apr 4) | Rate limits, profile detection, route guards, cost awareness — identifies critical gaps (rate limit fails open, missing image task limits, no budget cap) |
 | `WEEKLY_CONUNDRUM_ARC.md` | **CURRENT** | Weekly conundrum story arc design — Stonebridge narrative, recurring characters, ethical reasoning scenarios |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
@@ -49,6 +50,7 @@
 | `FIRESTORE_AUDIT.md` | Working on data model, indexes, collections |
 | `WEEKLY_CONUNDRUM_ARC.md` | Working on conundrums, weekly theme integration |
 | `GAME_WORLD_ECONOMY.md` | Working on XP/Diamond economy, armor forging, tier progression |
+| `PROFILE_LIMITS_AUDIT.md` | Working on rate limits, auth guards, cost controls, profile-based access |
 | `08_RUNBOOK.md` | Working on deployment, backups, operations |
 | `barnes-testing-guide-v2.md` | Working on tests (stale — needs Knowledge Mine, Workshop, Books, Armor coverage) |
 

@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — April 1, 2026 **Status:** Updated — Shelly Chat context tabs (Lincoln/London/General), deep child context loading, follow-up suggestions, markdown rendering Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~100k lines TypeScript (src/ ~91k + functions/ ~9k), 52 test files, 600+ tests, 113 commits, 28 Firestore collections, 18 Cloud Functions, 13 chat task types, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — April 1, 2026 **Status:** Updated — Shelly Chat context tabs (Lincoln/London/General), deep child context loading, follow-up suggestions, markdown rendering Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~100k lines TypeScript (src/ ~91k + functions/ ~9k), 52 test files, 600+ tests, 113 commits, 30 Firestore collections, 18 Cloud Functions, 13 chat task types, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -46,7 +46,7 @@ Plan My Week
 * "Repeat Last Week" shortcut for low-energy weeks
 * AI feature flag defaults to ON (no manual Settings toggle needed)
 * Weekly Conundrum — AI-generated open-ended discussion scenario tied to week theme/virtue/subjects. No right answer. Separate prompts for Lincoln (deeper) and London (simpler). Saved to week plan, visible on Today.
-* **Plan My Week decomposition (completed):** PlannerChatPage (2,112L) + PlannerSetupWizard (201L) + WeekFocusPanel (88L) + PlanDayCards (104L) + PlannerChatMessages (65L). Render reduced 800→500L; state management still unified in main page.
+* **Plan My Week decomposition (completed):** PlannerChatPage (2,184L) + PlannerSetupWizard (201L) + WeekFocusPanel (88L) + PlanDayCards (104L) + PlannerChatMessages (65L). Render reduced 800→500L; state management still unified in main page.
 
 Evaluation Chat
 * Shelly-guided reading diagnostic, AI walks through structured assessment levels
@@ -544,7 +544,7 @@ Key Design Decisions
 - `KidChapterResponse.tsx` (159L) — chapter question response
 - `KidCelebration.tsx` (117L) — completion celebration
 
-**PlannerChatPage** — Original: 2,363L → Shell: 2,112L + 4 extracted components (render 800→500L)
+**PlannerChatPage** — Original: 2,363L → Shell: 2,184L + 4 extracted components (render 800→500L)
 - `PlannerSetupWizard.tsx` (201L) — first-visit setup wizard
 - `PlanDayCards.tsx` (104L) — day card rendering in plan preview
 - `WeekFocusPanel.tsx` (88L) — week focus display panel
@@ -582,8 +582,10 @@ Key Design Decisions
 - `families/{familyId}/chat-uploads/{threadId}/{timestamp}.jpg` — user-uploaded chat images (Shelly's AI Chat)
 
 #### Known Technical Debt
-- **PlannerChatPage.tsx (2,112L)** — Decomposed render (800→500L) but state management is still ~1,600L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **PlannerChatPage.tsx (2,184L)** — Decomposed render (800→500L) but state management is still ~1,600L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **14 files over 1,000 lines** — See CLAUDE.md "Known Technical Debt" for full list. Key additions since last review: useQuestSession.ts (1,458L), ShellyChatPage.tsx (1,528L), chat.ts (1,589L).
 - **evaluate.ts (weekly review)** — Now uses CHARTER_PREAMBLE + addendum, but still separate from the task system. Not in task registry.
+- **Rate limit gaps** — See `PROFILE_LIMITS_AUDIT.md`. 11 of 12 image tasks lack rate limiting. Rate limit fails open on errors. No monthly budget cap.
 - **Hours partial-day edge** — If a day has some blocks with actualMinutes and others without, only tracked blocks count. By design but undocumented.
 - **Dead `sessions` collection** — Fully removed (PR #651). No orphaned references remain.
 
@@ -639,11 +641,11 @@ Architecture Review Notes (March 29, 2026) The following areas are flagged for a
 * XP system — xpLedger uses dedup guard pattern; totalXp computed from full ledger on every award (O(n), fix pending)
 * Avatar generation costs — DALL-E 3 sheet generation per tier per child; when to generate vs cache; cost implications at scale
 * Cloud Function sprawl — chat function handles 13 task types; generateImage handles 12 image tasks; whether these should be split into separate functions
-* Firestore collection count — 27 formal collections + `wordProgress` raw subcollection reference in quest.ts
+* Firestore collection count — 30 formal collections + 2 subcollections (see CLAUDE.md authoritative table)
 * Client-side image processing — cropArmorSheet, sketch cleanup, and print PDF all do heavy canvas work client-side; perf on low-end devices
 * AI context pipeline size — system prompt includes many data sources; token cost and latency implications
 * AI prompt drift — 3 different patterns for system prompt construction across task handlers; consolidation pending
-* Type safety — types split across 10 files (common, family, planning, evaluation, xp, books, compliance, dadlab, workshop, skillTags) with barrel re-export via index.ts
-* Decomposition queue — all 4 targets completed (TodayPage, KidTodayView, PlannerChatPage, MyAvatarPage). Next largest files are WorkshopPage (1,549L) and BookEditorPage (1,419L), both stable.
+* Decomposition queue — all 4 targets completed (TodayPage, KidTodayView, PlannerChatPage, MyAvatarPage). 14 files now over 1,000 lines (see CLAUDE.md). Top candidates: WorkshopPage (1,606L), chat.ts (1,589L), ShellyChatPage (1,528L), useQuestSession (1,458L).
+* Type safety — types split across 12 files (common, family, planning, evaluation, xp, books, compliance, dadlab, workshop, skillTags, shellyChat, zod) with barrel re-export via index.ts
 
-Last updated: April 1, 2026
+Last updated: April 5, 2026

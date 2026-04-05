@@ -77,7 +77,8 @@ const items = snapshot.docs.map((doc) => ({
 - `src/components/` — Shared UI components (includes SectionErrorBoundary for per-section crash isolation)
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
-- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useSpeechRecognition, useTTS)
+- `src/core/curriculum/` — Curriculum map, skill status helpers, useSkillMap hook
+- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCertificateProgress, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useSpeechRecognition, useTTS)
 - `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
 - `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns
 - `src/core/ai/` — AI service layer, feature flags, useAI hook, prompt templates
@@ -98,7 +99,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/not-found/` — 404 page
 - `src/features/planner/` — TeachHelperDialog (shared)
 - `src/features/planner-chat/` — Plan My Week (AI chat planner, decomposed: PlannerChatPage + PlannerSetupWizard, WeekFocusPanel, PlanDayCards, PlannerChatMessages)
-- `src/features/progress/` — Progress tabs (learning profile, ladders, engine, snapshot, milestones, word wall, armor)
+- `src/features/progress/` — Progress tabs (learning profile, ladders, engine, snapshot, milestones, word wall, armor), `learning-map/` sub-module (visual skill map)
 - `src/features/progress/DispositionProfile.tsx` — AI disposition narrative from day log data
 - `src/features/quest/` — Knowledge Mine (interactive reading quest)
 - `src/features/records/` — Hours, compliance, evaluations, portfolio
@@ -108,7 +109,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/components/ScanResultsPanel.tsx` — AI scan results display
 - `src/features/today/` — Parent Today (decomposed: TodayPage shell + TodayChecklist, WeekFocusCard, QuickCaptureSection, TeachBackSection, ChapterQuestionCard) + Kid Today (decomposed: KidTodayView shell + KidChecklist, KidTeachBack, KidChapterResponse, KidConundrumResponse, KidExtraLogger, KidCelebration) + routine sync, XP
 - `src/features/weekly-review/` — Weekly review page
-- `src/features/workshop/` — Story Game Workshop (board/adventure/card games)
+- `src/features/workshop/` — Story Game Workshop (board/adventure/card games), `steps/` sub-module (wizard step components)
 - `functions/src/` — Firebase Cloud Functions (AI endpoints)
 
 ## North Star
@@ -199,6 +200,8 @@ All under `families/{familyId}/`:
 | `storyGames` | Story Game Workshop games |
 | `scans` | Curriculum photo scan records |
 | `shellyChatThreads` | Shelly AI chat thread roots |
+| `bookThemes` | Book theme configurations |
+| `childSkillMaps` | Per-child learning/skill maps |
 
 **Subcollections:**
 - `shellyChatThreads/{threadId}/messages` — Messages within a Shelly chat thread
@@ -238,7 +241,7 @@ All under `families/{familyId}/`:
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
 - `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns)
 
-### Cloud Functions (19 exported)
+### Cloud Functions (18 exported)
 - `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate)
 - `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
@@ -254,7 +257,9 @@ All under `families/{familyId}/`:
 - `functions/src/ai/contextSlices.ts` — Per-task context loading (charter, child, engagement, etc.)
 - `functions/src/ai/aiConfig.ts` — AI configuration (model selection, tokens, etc.)
 - `functions/src/ai/aiService.ts` — Core AI service orchestration
+- `functions/src/ai/authGuard.ts` — Authentication + rate limiting (checkRateLimit, requireApprovedUser)
 - `functions/src/ai/sanitizeJson.ts` — JSON response sanitization
+- `functions/src/ai/data/` — Curriculum data (GATB curriculum map)
 - `functions/src/ai/health.ts` — Health check endpoint
 - `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
@@ -278,12 +283,26 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 
 ## Known Technical Debt
 
-- **PlannerChatPage.tsx (2,112L)** — Decomposed render (800→500L) but state management is still ~1,600L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
-- **WorkshopPage.tsx (1,578L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
-- **BookEditorPage.tsx (1,419L)** — Stable, handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
+### Large files (over 1,000 lines)
+
+- **PlannerChatPage.tsx (2,184L)** — Decomposed render but state management is still ~1,600L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **WorkshopPage.tsx (1,606L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
+- **chat.ts (1,589L)** — `functions/src/ai/chat.ts`. Main Cloud Function with task routing + prompt builders. Candidate for extracting prompt builders into task files.
+- **ShellyChatPage.tsx (1,528L)** — 23+ useState hooks. Image generation, thread management, follow-up suggestions, image refinement flow. Decomposition candidate after usage patterns stabilize.
+- **useQuestSession.ts (1,458L)** — `src/features/quest/useQuestSession.ts`. Complex session state management for Knowledge Mine. Tightly coupled adaptive logic + Firestore persistence.
+- **BookEditorPage.tsx (1,458L)** — Stable, handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
+- **MyAvatarPage.tsx (1,386L)** — Decomposed from 1,862L. Remaining code is state management + ceremony flow. Stable.
 - **VoxelCharacter.tsx (1,290L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
-- **MyAvatarPage.tsx (1,293L)** — Decomposed from 1,862L. Remaining code is state management + ceremony flow. Stable.
+- **chatPlanner.logic.ts (1,174L)** — `src/features/planner-chat/chatPlanner.logic.ts`. Pure logic file with good test coverage (1,051L test). Stable.
+- **RecordsPage.tsx (1,124L)** — `src/features/records/RecordsPage.tsx`. Multiple export tabs. Could extract tab panels.
+- **KidTodayView.tsx (1,082L)** — `src/features/today/KidTodayView.tsx`. Decomposed from parent TodayPage. Further decomposition possible.
+- **SkillSnapshotPage.tsx (1,078L)** — `src/features/evaluation/SkillSnapshotPage.tsx`. Complex evaluation display.
+- **EvaluateChatPage.tsx (1,055L)** — `src/features/evaluate/EvaluateChatPage.tsx`. Chat-based evaluation flow.
+- **BookshelfPage.tsx (1,006L)** — `src/features/books/BookshelfPage.tsx`. Multiple views (shelf, sight words, story guide).
+
+### Systemic debt
+
 - **Ladder system** — Partially deprecated. Disposition system replacing it. 5 files have TODO comments marking ladder references for removal.
 - **evaluate.ts (weekly review)** — Now uses CHARTER_PREAMBLE + addendum, but still separate from the task system. Not in task registry.
-- **ShellyChatPage.tsx (1,456L)** — New feature, 23+ useState hooks. Image generation, thread management, follow-up suggestions, image refinement flow. Decomposition candidate after usage patterns stabilize.
 - **Hours partial-day edge** — If a day has some blocks with actualMinutes and others without, only tracked blocks count. By design but undocumented.
+- **Rate limit gaps** — See `docs/PROFILE_LIMITS_AUDIT.md`. 11 of 12 image tasks lack rate limiting. Rate limit fails open on errors. No monthly budget cap.
