@@ -29,7 +29,6 @@ import {
   getDoc,
   getDocs,
   query,
-  serverTimestamp,
   setDoc,
   updateDoc,
   where,
@@ -48,10 +47,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   artifactsCollection,
-  normalizeCurriculumKey,
   skillSnapshotsCollection,
-  workbookConfigsCollection,
-  workbookConfigDocId,
 } from '../../core/firebase/firestore'
 import {
   generateFilename,
@@ -84,6 +80,7 @@ import TodayChecklist from './TodayChecklist'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
 import { useScan } from '../../core/hooks/useScan'
+import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
 import QuickAddHours from '../records/QuickAddHours'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import WeekFocusCard from './WeekFocusCard'
@@ -168,6 +165,7 @@ export default function TodayPage() {
   const [printingMaterials, setPrintingMaterials] = useState(false)
   const [todaySnapshot, setTodaySnapshot] = useState<SkillSnapshot | null>(null)
   const { scan: runScan, recordAction: recordScanAction, scanResult, scanning: scanLoading, error: scanError, clearScan } = useScan()
+  const { syncScanToConfig } = useScanToActivityConfig()
   const [scanItemIndex, setScanItemIndex] = useState<number | null>(null)
   // Per-item capture state
   const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
@@ -392,8 +390,22 @@ export default function TodayPage() {
 
   const handleScanCapture = useCallback(async (file: File, index: number) => {
     setScanItemIndex(index)
-    await runScan(file, familyId, selectedChildId)
-  }, [runScan, familyId, selectedChildId])
+    const record = await runScan(file, familyId, selectedChildId)
+
+    // Auto-sync worksheet scans to activity configs
+    if (record?.results && record.results.pageType !== 'certificate') {
+      try {
+        const result = await syncScanToConfig(selectedChildId, record.results)
+        if (result.action === 'created') {
+          setSnackMessage({ text: `New workbook added: ${result.configName}`, severity: 'success' })
+        } else if (result.action === 'updated' && result.position) {
+          setSnackMessage({ text: `Updated ${result.configName} to lesson ${result.position}`, severity: 'success' })
+        }
+      } catch (err) {
+        console.error('[TodayPage] Failed to sync scan to config:', err)
+      }
+    }
+  }, [runScan, familyId, selectedChildId, syncScanToConfig, setSnackMessage])
 
   const handleScanAddToPlan = useCallback(() => {
     if (!scanResult?.results || scanItemIndex == null || !dayLog?.checklist) return
@@ -436,60 +448,30 @@ export default function TodayPage() {
       if (!familyId || !selectedChildId || !curriculum.lessonNumber) return
 
       try {
-        const name = curriculum.name || `${curriculum.provider ?? 'unknown'} curriculum`
-        const colRef = workbookConfigsCollection(familyId)
+        const result = await syncScanToConfig(selectedChildId, {
+          pageType: 'worksheet',
+          subject: curriculum.name || 'unknown',
+          specificTopic: '',
+          skillsTargeted: [],
+          estimatedDifficulty: 'appropriate',
+          recommendation: 'do',
+          recommendationReason: '',
+          estimatedMinutes: 30,
+          teacherNotes: '',
+          curriculumDetected: curriculum,
+        })
 
-        // Match by normalized curriculum key to find existing config
-        const normalizedKey = normalizeCurriculumKey(name)
-        const allSnap = await getDocs(query(colRef, where('childId', '==', selectedChildId)))
-        const matchingDoc = allSnap.docs.find(d => normalizeCurriculumKey(d.data().name) === normalizedKey)
-
-        if (matchingDoc) {
-          const existing = matchingDoc.data()
-          if (curriculum.lessonNumber > (existing.currentPosition ?? 0)) {
-            await updateDoc(matchingDoc.ref, {
-              currentPosition: curriculum.lessonNumber,
-              updatedAt: serverTimestamp(),
-            })
-          }
+        if (result.action === 'created') {
+          setSnackMessage({ text: `New workbook "${result.configName}" created at Lesson ${curriculum.lessonNumber}!`, severity: 'success' })
         } else {
-          const docId = workbookConfigDocId(selectedChildId, name)
-          const docRef = doc(colRef, docId)
-          const lower = (curriculum.name ?? '').toLowerCase()
-          const subjectBucket: SubjectBucket =
-            curriculum.provider === 'reading-eggs' || lower.includes('reading')
-              ? SubjectBucket.Reading
-              : lower.includes('language arts')
-                ? SubjectBucket.LanguageArts
-                : lower.includes('math')
-                  ? SubjectBucket.Math
-                  : SubjectBucket.Other
-
-          await setDoc(docRef, {
-            childId: selectedChildId,
-            name,
-            subjectBucket,
-            totalUnits: curriculum.provider === 'gatb' ? 120 : 0,
-            currentPosition: curriculum.lessonNumber,
-            unitLabel: 'lesson',
-            targetFinishDate: '',
-            schoolDaysPerWeek: 4,
-            curriculum: {
-              provider: curriculum.provider ?? 'other',
-              level: curriculum.levelDesignation ?? '',
-            },
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          })
+          setSnackMessage({ text: `Position updated to Lesson ${curriculum.lessonNumber}!`, severity: 'success' })
         }
-
-        setSnackMessage({ text: `Position updated to Lesson ${curriculum.lessonNumber}!`, severity: 'success' })
       } catch (err) {
         console.error('[TodayPage] Failed to update position', err)
         setSnackMessage({ text: 'Failed to update position', severity: 'error' })
       }
     },
-    [familyId, selectedChildId, setSnackMessage],
+    [familyId, selectedChildId, syncScanToConfig, setSnackMessage],
   )
 
   // --- Loading state ---

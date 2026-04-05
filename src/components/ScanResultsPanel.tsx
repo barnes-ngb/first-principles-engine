@@ -52,6 +52,8 @@ interface ScanResultsPanelProps {
   childName?: string
   /** Hide action buttons (e.g. when viewing history). */
   hideActions?: boolean
+  /** Status message from auto-sync to activity config (e.g. "Updated GATB Math to lesson 34"). */
+  configSyncStatus?: string | null
 }
 
 export default function ScanResultsPanel({
@@ -64,6 +66,7 @@ export default function ScanResultsPanel({
   onUpdatePosition,
   childName,
   hideActions,
+  configSyncStatus,
 }: ScanResultsPanelProps) {
   if (isCertificateScan(results)) {
     return (
@@ -199,6 +202,15 @@ export default function ScanResultsPanel({
                 Update workbook position to Lesson {results.curriculumDetected.lessonNumber}
               </Button>
             )}
+          </Alert>
+        )}
+
+        {/* Config sync status */}
+        {configSyncStatus && (
+          <Alert severity="success" sx={{ mt: 0.5 }}>
+            <Typography variant="body2" fontWeight={500}>
+              {configSyncStatus}
+            </Typography>
           </Alert>
         )}
 
