@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import CloseIcon from '@mui/icons-material/Close'
@@ -45,7 +45,7 @@ const TIME_PRESETS = [5, 10, 15, 20, 30, 45, 60]
 
 function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editable: boolean; onUpdate: (mins: number) => void }) {
   const [open, setOpen] = useState(false)
-  const anchorRef = useRef<HTMLSpanElement>(null)
+  const [anchorEl, setAnchorEl] = useState<HTMLSpanElement | null>(null)
 
   if (!editable) {
     return (
@@ -58,7 +58,7 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
   return (
     <>
       <Typography
-        ref={anchorRef}
+        ref={setAnchorEl}
         variant="caption"
         color="text.secondary"
         onClick={() => setOpen(true)}
@@ -73,7 +73,7 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
       </Typography>
       <Popover
         open={open}
-        anchorEl={anchorRef.current}
+        anchorEl={anchorEl}
         onClose={() => setOpen(false)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         transformOrigin={{ vertical: 'top', horizontal: 'center' }}

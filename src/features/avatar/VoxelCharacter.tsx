@@ -899,7 +899,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         applyPaintedFace(headMesh, character, resolvedFeatures, skinHex)
       }
     }
-  }, [resolvedFeatures, ageGroup, equippedPieces, totalXp, currentTier, skinTextureUrl, customization, armorColors, accessories, proportions])
+  }, [resolvedFeatures, ageGroup, equippedPieces, currentTier, skinTextureUrl, customization, armorColors, accessories, proportions])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
