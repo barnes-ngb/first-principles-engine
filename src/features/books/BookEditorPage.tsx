@@ -255,16 +255,21 @@ export default function BookEditorPage() {
     if (!img?.storagePath) return
 
     setSketchEnhancing(true)
-    const result = await enhanceSketch({
-      familyId,
-      sketchStoragePath: img.storagePath,
-      style: sketchEnhanceStyle,
-    })
-    setSketchEnhancing(false)
+    try {
+      const result = await enhanceSketch({
+        familyId,
+        sketchStoragePath: img.storagePath,
+        style: sketchEnhanceStyle,
+      })
 
-    if (result) {
-      applySketchEnhancement(sketchComparePageId, sketchImageId, result.url, result.storagePath)
-      setShowSketchCompare(true)
+      if (result) {
+        applySketchEnhancement(sketchComparePageId, sketchImageId, result.url, result.storagePath)
+        setShowSketchCompare(true)
+      }
+    } catch (err) {
+      console.error('Sketch enhancement failed:', err)
+    } finally {
+      setSketchEnhancing(false)
     }
   }, [sketchImageId, sketchComparePageId, book, enhanceSketch, familyId, sketchEnhanceStyle, applySketchEnhancement])
 
@@ -335,8 +340,9 @@ export default function BookEditorPage() {
       setDrawingProcessingLabel(`${intensityLabel} in progress...`)
       try {
         // Upload sketch first, then enhance
-        const imageId = await addSketchToPage(activePage.id, drawingFile)
-        if (imageId) {
+        const sketchResult = await addSketchToPage(activePage.id, drawingFile)
+        if (sketchResult) {
+          const { imageId, storagePath } = sketchResult
           // Map intensity to style
           const style: EnhanceSketchRequest['style'] = (reimagineIntensity ?? 50) <= 25 ? 'storybook' : (reimagineIntensity ?? 50) >= 75 ? 'comic' : 'storybook'
           // Build caption from intensity
@@ -346,25 +352,21 @@ export default function BookEditorPage() {
               ? 'Reimagine this child\'s drawing as a professional illustration. Keep the subject matter but create it in a polished cartoon style.'
               : 'Enhance this child\'s drawing into a polished illustration while keeping the original composition and character design.'
 
-          const page = book?.pages.find((p) => p.id === activePage.id)
-          const img = page?.images.find((i) => i.id === imageId)
-          if (img?.storagePath) {
-            const result = await enhanceSketch({
-              familyId,
-              sketchStoragePath: img.storagePath,
-              style,
-              caption,
-            })
-            if (result) {
-              applySketchEnhancement(activePage.id, imageId, result.url, result.storagePath)
-              setSketchImageId(imageId)
-              setSketchComparePageId(activePage.id)
-              setShowSketchCompare(true)
-            }
+          const result = await enhanceSketch({
+            familyId,
+            sketchStoragePath: storagePath,
+            style,
+            caption,
+          })
+          if (result) {
+            applySketchEnhancement(activePage.id, imageId, result.url, result.storagePath)
+            setSketchImageId(imageId)
+            setSketchComparePageId(activePage.id)
+            setShowSketchCompare(true)
           }
         }
-      } catch {
-        // Sketch already added, user can enhance later
+      } catch (err) {
+        console.error('Reimagine failed:', err)
       }
       setDrawingProcessing(false)
       resetDrawingFlow()
@@ -397,7 +399,7 @@ export default function BookEditorPage() {
       setShowAiDialog(true)
       return
     }
-  }, [activePage, drawingFile, drawingPreviewUrl, addImageToPage, addSketchToPage, enhanceSketch, applySketchEnhancement, familyId, book, resetDrawingFlow])
+  }, [activePage, drawingFile, drawingPreviewUrl, addImageToPage, addSketchToPage, enhanceSketch, applySketchEnhancement, familyId, resetDrawingFlow])
 
   const handleAcceptDrawingResult = useCallback(() => {
     if (!activePage || !drawingResultFile) return
