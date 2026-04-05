@@ -64,11 +64,13 @@ export function createOpenAiProvider(apiKey: string): OpenAiProvider {
       const client = new OpenAI({ apiKey });
 
       // Use gpt-image-1 for edit — it accepts image input with a prompt
-      // Convert Buffer to a File-like Blob that the OpenAI SDK accepts
-      const imageFile = new Blob([new Uint8Array(imageBuffer)], {
+      // Convert Buffer to a proper File object that the OpenAI SDK accepts
+      const imageBlob = new Blob([new Uint8Array(imageBuffer)], {
         type: "image/png",
-      }) as unknown as File;
-      Object.defineProperty(imageFile, "name", { value: "sketch.png" });
+      });
+      const imageFile = new File([imageBlob], "sketch.png", {
+        type: "image/png",
+      });
 
       const response = await client.images.edit({
         model: "gpt-image-1",
