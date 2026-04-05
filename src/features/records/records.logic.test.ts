@@ -237,6 +237,153 @@ describe('computeHoursSummary', () => {
     expect(summary.coreHomeMinutes).toBe(30)
   })
 
+  it('with MIXED blocks (some actualMinutes, some not) only counts tracked blocks', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 30,
+            location: 'Home',
+          },
+          {
+            type: DayBlockType.Math,
+            subjectBucket: SubjectBucket.Math,
+            // no actualMinutes — this block should be skipped
+            location: 'Home',
+          },
+          {
+            type: DayBlockType.Movement,
+            subjectBucket: SubjectBucket.Other,
+            actualMinutes: 15,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    // Only the two blocks with actualMinutes should count (30 + 15 = 45)
+    // The Math block without actualMinutes is skipped
+    expect(summary.totalMinutes).toBe(45)
+    expect(summary.bySubject.find((s) => s.subjectBucket === 'Math')).toBeUndefined()
+    expect(summary.bySubject.find((s) => s.subjectBucket === 'Reading')?.totalMinutes).toBe(30)
+    expect(summary.byDate['2026-01-10']).toBe(45)
+  })
+
+  it('falls back to checklist when no blocks have actualMinutes', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            location: 'Home',
+            // no actualMinutes on any block
+          },
+        ],
+        checklist: [
+          {
+            label: 'Reading Eggs (45m)',
+            completed: true,
+            subjectBucket: SubjectBucket.Reading,
+          },
+          {
+            label: 'Math Practice (20m)',
+            completed: true,
+            subjectBucket: SubjectBucket.Math,
+          },
+          {
+            label: 'Art Project (30m)',
+            completed: false,
+            subjectBucket: SubjectBucket.Art,
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    // Uses checklist: 45 + 20 = 65 (art not completed)
+    expect(summary.totalMinutes).toBe(65)
+    expect(summary.bySubject.find((s) => s.subjectBucket === 'Reading')?.totalMinutes).toBe(45)
+    expect(summary.bySubject.find((s) => s.subjectBucket === 'Math')?.totalMinutes).toBe(20)
+    expect(summary.bySubject.find((s) => s.subjectBucket === 'Art')).toBeUndefined()
+  })
+
+  it('uses estimatedMinutes from checklist item when available', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [],
+        checklist: [
+          {
+            label: 'Reading Eggs',
+            completed: true,
+            subjectBucket: SubjectBucket.Reading,
+            estimatedMinutes: 60,
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    // Uses estimatedMinutes (60) over parsing label
+    expect(summary.totalMinutes).toBe(60)
+  })
+
+  it('all 3 sources combined produce correct aggregation', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 30,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const entries: HoursEntry[] = [
+      {
+        date: '2026-01-10',
+        minutes: 45,
+        subjectBucket: SubjectBucket.Science,
+        location: 'Home',
+      },
+    ]
+
+    const adjustments: HoursAdjustment[] = [
+      {
+        date: '2026-01-10',
+        minutes: 10,
+        reason: 'Extra time',
+        subjectBucket: SubjectBucket.Reading,
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, entries, adjustments)
+
+    // 30 (dayLog) + 45 (entry) + 10 (adjustment) = 85
+    expect(summary.totalMinutes).toBe(85)
+    expect(summary.adjustmentMinutes).toBe(10)
+    expect(summary.bySubject.find((s) => s.subjectBucket === 'Reading')?.totalMinutes).toBe(40) // 30 + 10
+    expect(summary.bySubject.find((s) => s.subjectBucket === 'Science')?.totalMinutes).toBe(45)
+    expect(summary.byDate['2026-01-10']).toBe(85)
+  })
+
   it('returns empty summary for no data', () => {
     const summary = computeHoursSummary([], [], [])
 
