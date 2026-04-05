@@ -305,22 +305,6 @@ export interface SkipSuggestion {
   evidence: string
 }
 
-export interface WeeklyPlanItem {
-  id: string
-  day: string
-  title: string
-  subjectBucket: SubjectBucket
-  estimatedMinutes: number
-  /** Source assignment candidate ID */
-  assignmentId?: string
-  /** Whether this is an app block */
-  isAppBlock?: boolean
-  skillTags: SkillTag[]
-  ladderRef?: { ladderId: string; rungId: string }
-  skipSuggestion?: SkipSuggestion
-  accepted: boolean
-}
-
 // ── Planner Chat (Conversational Planner) ─────────────────────
 
 export interface ChatMessage {
