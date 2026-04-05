@@ -473,6 +473,29 @@ export default function TodayPage() {
     [familyId, selectedChildId, syncScanToConfig, setSnackMessage],
   )
 
+  const handleSkipToNext = useCallback(
+    async (nextLesson: number) => {
+      if (!familyId || !selectedChildId || !scanResult?.results) return
+      const results = scanResult.results
+      if (results.pageType === 'certificate') return
+
+      const curriculum = results.curriculumDetected
+      if (!curriculum) return
+
+      try {
+        await syncScanToConfig(selectedChildId, {
+          ...results,
+          curriculumDetected: { ...curriculum, lessonNumber: nextLesson },
+        })
+        setSnackMessage({ text: `Skipping ahead — next lesson: ${nextLesson}`, severity: 'success' })
+      } catch (err) {
+        console.error('[TodayPage] Failed to skip to next lesson', err)
+        setSnackMessage({ text: 'Failed to update position', severity: 'error' })
+      }
+    },
+    [familyId, selectedChildId, scanResult, syncScanToConfig, setSnackMessage],
+  )
+
   // --- Loading state ---
 
   const scrollToArtifacts = useCallback(() => {
@@ -746,6 +769,7 @@ export default function TodayPage() {
           onScanSkip={handleScanSkip}
           onClearScan={handleClearScan}
           onUpdatePosition={handleScanUpdatePosition}
+          onSkipToNext={handleSkipToNext}
           onPrintMaterials={handlePrintTodayMaterials}
           printingMaterials={printingMaterials}
         />

@@ -123,6 +123,29 @@ export default function CertificateScanSection() {
     [familyId, activeChildId, syncScanToConfig],
   )
 
+  const handleSkipToNext = useCallback(
+    async (nextLesson: number) => {
+      if (!familyId || !activeChildId || !scanResult?.results) return
+      const results = scanResult.results
+      if (results.pageType === 'certificate') return
+
+      const curriculum = results.curriculumDetected
+      if (!curriculum) return
+
+      try {
+        await syncScanToConfig(activeChildId, {
+          ...results,
+          curriculumDetected: { ...curriculum, lessonNumber: nextLesson },
+        })
+        setSnack(`Skipping ahead — next lesson: ${nextLesson}`)
+      } catch (err) {
+        console.error('[CertificateScanSection] Failed to skip to next', err)
+        setSnack('Failed to update position')
+      }
+    },
+    [familyId, activeChildId, scanResult, syncScanToConfig],
+  )
+
   const childName = activeChild?.name ?? ''
 
   return (
@@ -158,6 +181,7 @@ export default function CertificateScanSection() {
             isCertificateScan(scanResult.results) ? handleApplyCertificate : undefined
           }
           onUpdatePosition={handleUpdatePosition}
+          onSkipToNext={handleSkipToNext}
           onScanAnother={handleScanAnother}
           childName={childName}
         />
