@@ -322,10 +322,24 @@ export default function PlannerChatPage() {
     })
   }, [familyId, activeChildId])
 
-  // Filter out completed programs (e.g., Reading Eggs) from the routine
+  // Filter out completed programs (e.g., Reading Eggs) from the routine and app blocks
   const filteredDailyRoutine = useMemo(
     () => filterRoutineForCompletedPrograms(dailyRoutine, snapshot?.completedPrograms ?? []),
     [dailyRoutine, snapshot?.completedPrograms],
+  )
+  const filteredAppBlocks = useMemo(
+    () => {
+      const completed = snapshot?.completedPrograms ?? []
+      if (!completed.length) return appBlocks
+      return appBlocks.filter(block => {
+        const blockLower = block.label.toLowerCase().replace(/[^a-z0-9]/g, '')
+        return !completed.some(prog => {
+          const progLower = prog.toLowerCase().replace(/[^a-z0-9]/g, '')
+          return blockLower.includes(progLower)
+        })
+      })
+    },
+    [appBlocks, snapshot?.completedPrograms],
   )
 
   // Load per-child subject time defaults
@@ -622,7 +636,7 @@ export default function PlannerChatPage() {
           status: PlannerConversationStatus.Draft,
           messages: [],
           availableHoursPerDay: hoursPerDay,
-          appBlocks,
+          appBlocks: filteredAppBlocks,
           assignments: [],
           createdAt: now,
           updatedAt: now,
@@ -631,7 +645,7 @@ export default function PlannerChatPage() {
         await setDoc(ref, conversation)
       }
     },
-    [familyId, conversationDocId, activeChildId, weekRange.start, hoursPerDay, appBlocks],
+    [familyId, conversationDocId, activeChildId, weekRange.start, hoursPerDay, filteredAppBlocks],
   )
 
   // Cached base64 images for vision API (cleared after plan generation)
@@ -871,7 +885,7 @@ Return as JSON:
     }
 
     const mergedPhotoDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedPhotoDefaults }
+    const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedPhotoDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -923,7 +937,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext])
+  }, [photoLabels, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -940,7 +954,7 @@ Return as JSON:
     }
 
     const mergedDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
+    const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -1011,7 +1025,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext])
+  }, [photoLabels, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -1119,7 +1133,7 @@ Return as JSON:
           // Recovery failed — fall back to local planner
           const assignments = photoLabelsToAssignments(photoLabels)
           const localDraft = generateDraftPlanFromInputs({
-            snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine,
+            snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine,
             subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
           })
           setCurrentDraft(localDraft)
@@ -1176,7 +1190,7 @@ Return as JSON:
       const draft = generateDraftPlanFromInputs({
         snapshot,
         hoursPerDay,
-        appBlocks,
+        appBlocks: filteredAppBlocks,
         assignments,
         adjustments: newAdjustments,
         subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
@@ -1226,7 +1240,7 @@ Return as JSON:
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Applied } : {}),
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, filteredDailyRoutine, handleGeneratePlan, subjectTimeDefaults])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, filteredAppBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, filteredDailyRoutine, handleGeneratePlan, subjectTimeDefaults])
 
   const buildWeekFocusContext = useCallback(() => {
     const contextParts: string[] = []
@@ -1290,7 +1304,7 @@ Return as JSON:
         createdAt: new Date().toISOString(),
       }
       const mergedDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
-      const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
+      const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
       let draft: DraftWeeklyPlan
       let usedAI = false
 
@@ -1351,7 +1365,7 @@ Return as JSON:
     } finally {
       setGeneratingWeek(false)
     }
-  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, appBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef, readAloudBook, readAloudChapters])
+  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef, readAloudBook, readAloudChapters])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
@@ -1717,7 +1731,7 @@ Generate a plan for Monday through Friday.`.trim()
       const draft = generateDraftPlanFromInputs({
         snapshot,
         hoursPerDay,
-        appBlocks,
+        appBlocks: filteredAppBlocks,
         assignments,
         adjustments: newAdjustments,
         subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
@@ -1748,7 +1762,7 @@ Generate a plan for Monday through Friday.`.trim()
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Applied } : {}),
     })
-  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied, subjectTimeDefaults, isEnabled, activeChildId, handleSend])
+  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, filteredAppBlocks, messages, persistConversation, applied, subjectTimeDefaults, isEnabled, activeChildId, handleSend])
 
   // Generate activity for a plan item
   const handleGenerateActivity = useCallback(async (item: DraftPlanItem) => {
@@ -1918,13 +1932,13 @@ ${dayPrompts}`
         status: PlannerConversationStatus.Draft,
         messages: [],
         availableHoursPerDay: hoursPerDay,
-        appBlocks,
+        appBlocks: filteredAppBlocks,
         assignments: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       })
     }
-  }, [conversationDocId, familyId, activeChildId, weekRange.start, hoursPerDay, appBlocks])
+  }, [conversationDocId, familyId, activeChildId, weekRange.start, hoursPerDay, filteredAppBlocks])
 
   // Redo Plan handler: clears applied plan from Today/Week AND resets conversation
   const handleRedoPlan = useCallback(async () => {
@@ -2005,7 +2019,7 @@ ${dayPrompts}`
           {/* Plan Summary Panel (pinned above chat) */}
           <PlanSummaryPanel
             hoursPerDay={hoursPerDay}
-            appBlocks={appBlocks}
+            appBlocks={filteredAppBlocks}
             prioritySkills={snapshot?.prioritySkills ?? []}
             currentDraft={currentDraft}
             masteryReviewLine={masteryReviewLine}
@@ -2184,7 +2198,7 @@ ${dayPrompts}`
         child={activeChild ?? null}
         weekKey={weekRange.start}
         hoursPerDay={hoursPerDay}
-        appBlocks={appBlocks}
+        appBlocks={filteredAppBlocks}
         snapshot={snapshot}
       />
 
