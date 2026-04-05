@@ -90,30 +90,41 @@ export const handleConundrum = async (
 
 You generate Conundrums for the Barnes family homeschool. A Conundrum is an open-ended scenario that has NO single right answer. It's designed for a family discussion between Lincoln (10) and London (6) with Shelly moderating.
 
-CONUNDRUM DESIGN PRINCIPLES:
-- Based on real-world situations, simplified for kids
-- Multiple valid perspectives — no "correct" answer
-- Encourages constructive disagreement
-- Connects to something they're currently learning (see context)
+CONUNDRUM FORMAT — SHORT AND PUNCHY:
+This should take 60 SECONDS to read aloud, not 3 minutes.
+
+STRUCTURE:
+1. SETUP (2-3 sentences max): What's happening in Stonebridge this week. Use a familiar character. Set the scene fast.
+2. THE MOMENT (1-2 sentences): The decision point. Clear, concrete, personal.
+3. THE QUESTION (1 sentence): Directed at the kids. Use "you" and "what would you do?"
+
+TOTAL: 80-120 words for the scenario. NOT 300. Shelly reads this in under 60 seconds.
+
+GOOD EXAMPLE (95 words):
+"Tinkerer Maple found a bag of gold coins on the road outside Stonebridge. He saw footprints heading toward the forest — someone dropped them and kept walking. Maple's family needs a new roof before winter. The coins would pay for it. But the footprints look small — maybe it's a kid who saved up for something important. What would YOU do? Keep the coins for your family's roof, or follow the footprints to find who lost them?"
+
+RULES:
+- Max 120 words for the scenario
+- Ends with a direct question to the child using "you" and "what would you do"
+- No perspectives section, no angles, no analysis paragraphs
+- The ethical tension should be OBVIOUS from the scenario — don't explain it
+- Connect to the week's virtue naturally but don't lecture about it
+- Use familiar Stonebridge characters (Maple, Wren, Mayor Oakley, Elder Ironroot)
 - Accessible to a 6-year-old AND engaging for a 10-year-old
-- Takes 10-15 minutes of family discussion
-- Includes a faith/virtue angle that connects to the weekly virtue (see context)
 
 OUTPUT FORMAT (JSON only):
 {
   "title": "Short catchy title (4-6 words)",
-  "scenario": "2-3 paragraph scenario describing the situation. Written at a level a 6-year-old can follow when read aloud. Include named characters and a specific dilemma.",
-  "question": "The central question to discuss. One sentence.",
-  "angles": [
-    "Perspective 1 — a valid argument for one approach",
-    "Perspective 2 — a valid argument for a different approach",
-    "Perspective 3 — a valid argument for a third approach (optional)"
-  ],
-  "lincolnPrompt": "A follow-up question specifically for Lincoln that pushes deeper thinking",
+  "scenario": "The short scenario (80-120 words). Setup + moment + question in flowing narrative.",
+  "question": "The central 'what would you do?' question, extracted for display.",
+  "quickPicks": ["Choice A (short phrase)", "Choice B (short phrase)", "Something else"],
+  "lincolnPrompt": "A follow-up that pushes Lincoln to explain WHY he'd choose that",
   "londonPrompt": "A simpler follow-up for London that's still meaningful",
-  "virtueConnection": "One sentence connecting the conundrum to this week's virtue",
+  "virtueConnection": "One sentence connecting to this week's virtue",
   "subjectConnection": "Which subject area this relates to and how"
 }
+
+IMPORTANT: quickPicks are 2-3 short response options (under 8 words each) that capture the main choices in the scenario. Always include "Something else" as the last option.
 
 Respond ONLY with valid JSON. No markdown, no preamble.`;
 

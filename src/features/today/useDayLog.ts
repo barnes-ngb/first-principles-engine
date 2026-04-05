@@ -36,6 +36,7 @@ interface UseDayLogResult {
       title: string
       scenario: string
       question: string
+      quickPicks?: string[]
       lincolnPrompt: string
       londonPrompt: string
       virtueConnection: string
@@ -83,6 +84,7 @@ export function useDayLog({
       title: string
       scenario: string
       question: string
+      quickPicks?: string[]
       lincolnPrompt: string
       londonPrompt: string
       virtueConnection: string

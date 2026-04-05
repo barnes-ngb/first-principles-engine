@@ -12,7 +12,7 @@ Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — Apr
 * Teach-Back prompt (parent view) — "Teach London" card appears after 3+ items completed or 50% must-do. Text capture, tags as Explain engine stage.
 * Teach-Back prompt (kid view) — Lincoln gets "I Taught London!" button with subject chips + audio recording. No text input — respects speech/writing challenges.
 * Extra Activity Logger (kid view) — "I Did More Mining!" lets Lincoln log tablet time (Reading Eggs, Math App, etc.) with activity + duration chips. All taps, no typing. Adds to checklist as completed item, counts toward hours and teach-back trigger.
-* Weekly Conundrum card — expandable discussion scenario from week plan
+* Weekly Conundrum card — short punchy scenario (80-120 words, 60s read-aloud), TTS auto-read, quick-pick response chips + audio record, expandable in parent view
 * Chapter Question card — Stonebridge narrative question from unified weekly focus
 * **SectionErrorBoundary** — per-section crash isolation prevents one broken section from taking down the whole page
 * **Evaluation nudge** — planner shows nudge when no skill snapshot exists
@@ -50,7 +50,7 @@ Plan My Week
 * "Repeat Last Week" shortcut for low-energy weeks
 * **Evaluation scheduling** — AI planner auto-includes Knowledge Mine and Fluency Practice sessions in the Choose section based on child's Skill Snapshot (emerging/not-yet skills). Max 1 quest + 1 fluency per day, spread across the week, not on heavy days (230m+).
 * AI feature flag defaults to ON (no manual Settings toggle needed)
-* Weekly Conundrum — AI-generated open-ended discussion scenario tied to week theme/virtue/subjects. No right answer. Separate prompts for Lincoln (deeper) and London (simpler). Saved to week plan, visible on Today.
+* Weekly Conundrum — AI-generated open-ended discussion scenario (80-120 words, under 60 seconds read-aloud). Tied to week theme/virtue/subjects. No right answer. Generates quickPicks (2-3 tappable response options). TTS auto-read in kid view. Separate prompts for Lincoln (deeper) and London (simpler). Audio + quick-pick response capture. Saved to week plan, visible on Today.
 * **Explicit daily item ordering** — AI prompt enforces: Formation → Core Reading → Core Math → Read-Aloud → Support Skills → Apps → Enrichment. Reading right after Scripture gets highest-energy slot.
 * **Daily variation / rotation** — Support skills (handwriting, sight words, booster cards, memory cards, language arts) rotate across the week (2-3 days each) instead of appearing identically every day. Monday is fullest, Friday is lightest.
 * **Day-aware time budgets** — Mon/Tue full day (3-3.5h), Wed/Thu standard (2.5-3h), Friday lighter (2-2.5h). Item count adjusts to fit.
@@ -281,7 +281,10 @@ Progress
 * Evaluations tab — AI evaluation history (guided + Knowledge Mine quest sessions, filter chips, quest detail with collapsible question breakdown, struggling words, recommendations)
 * Portfolio tab — artifact gallery with photo thumbnails + audio playback Dad Lab
 * Full lifecycle: Plan → Start → Lincoln Contributes → Nathan Completes
-* "Suggest a Lab" AI, "I Have an Idea", "Plan a Lab" manual
+* 5 lab types with frameworks: Experiment (Scientific Method: Question→Hypothesis→Test→Observe→Conclude), Build (Engineering Design: Problem→Design→Build→Test→Improve), Explore (Discovery: Wonder→Observe→Document→Research→Share), Create (Creative/Character: Inspiration→Plan→Make→Reflect→Display)
+* "Suggest a Lab" AI with framework-aware prompts (identifies type, lists phases, teaching moment, subject connection), "I Have an Idea", "Plan a Lab" manual
+* Framework display in LabReportForm — shows step chips for selected lab type
+* Scientific method step UI in KidLabView — for experiment-type labs, Lincoln gets guided 5-step flow (Question→Prediction→Test→Observe→Conclude+Teach) with step navigation, audio/photo capture per step
 * Kid view: prediction, explanation, photo + audio capture
 * Artifact gallery, compliance hours auto-logged on completion Settings
 * General family profile, AI usage dashboard
@@ -498,6 +501,9 @@ Key Design Decisions
 45. **Tiers are biomes** — each armor tier is a Minecraft-like world (Caves, Plains, Mountains, Desert Temple, The End, The Nether). Portal moments between them.
 46. **Active effort earns diamonds** — quests, teach-back, Dad Lab, and creative engagement earn diamonds. Routine activities (checklist, daily ritual) earn XP only.
 46. **Spending is placing, not losing** — diamonds become permanent things (forged armor, cosmetics, world decorations). Nothing disappears.
+47. **Conundrums are 60 seconds, not 3 minutes** — short enough for low energy, engaging enough for discussion. 80-120 words with TTS auto-read. Quick-pick response chips reduce friction.
+48. **AI chat is a teaching mirror** — reflects real data back to Shelly (completion patterns, frustration rates, conundrum engagement), not generic advice. Data-driven suggestion chips surface actionable insights.
+49. **Dad Lab types match the activity** — experiments get scientific method, builds get engineering design, exploration gets discovery framework. Each type has its own step sequence in kid view.
 
 ### Key Files Reference
 
@@ -551,7 +557,7 @@ Key Design Decisions
 
 **KidTodayView** — Original: 1,813L → Shell: 805L + 6 extracted components
 - `KidChecklist.tsx` (484L) — kid daily checklist with must-do/choose sections
-- `KidConundrumResponse.tsx` (209L) — weekly conundrum response
+- `KidConundrumResponse.tsx` — weekly conundrum response with TTS, quick-pick chips, scenario display
 - `KidTeachBack.tsx` (167L) — "I Taught London!" capture
 - `KidExtraLogger.tsx` (163L) — extra activity logger ("I Did More Mining!")
 - `KidChapterResponse.tsx` (159L) — chapter question response
@@ -586,8 +592,9 @@ Key Design Decisions
 - Consolidation pending.
 
 #### shellyChat Context Loading
-- Lincoln/London tabs: loads 6 context sources per child (skill snapshot, eval findings, today's plan, engagement history, disposition profile, sight words)
+- Lincoln/London tabs: loads 6 context sources per child (skill snapshot, eval findings, today's plan, engagement history, disposition profile, sight words) + teaching reflection data (completion patterns by day, skipped activities, conundrum engagement, chapter response counts)
 - General tab: loads family charter, children overview, week theme only
+- Data-driven suggestion chips: shows contextual suggestions ("Lincoln seemed frustrated", "Completion drops late in the week") based on real engagement and completion data from last 14 days
 - Each context source wrapped in independent try/catch — partial failures don't block response
 - All queries use `.limit()` to bound cost
 

@@ -20,6 +20,7 @@ interface Conundrum {
   title: string
   scenario: string
   question: string
+  quickPicks?: string[]
   lincolnPrompt: string
   londonPrompt: string
   virtueConnection: string

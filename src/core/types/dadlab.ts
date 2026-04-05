@@ -85,6 +85,26 @@ export interface ChildLabReport {
   notes?: string
 }
 
+/** Framework steps for each lab type */
+export const LAB_FRAMEWORKS: Record<string, { label: string; steps: string[] }> = {
+  science: {
+    label: 'Scientific Method',
+    steps: ['Question', 'Hypothesis', 'Test', 'Observe', 'Conclude'],
+  },
+  engineering: {
+    label: 'Engineering Design',
+    steps: ['Problem', 'Design', 'Build', 'Test', 'Improve'],
+  },
+  adventure: {
+    label: 'Discovery',
+    steps: ['Wonder', 'Observe', 'Document', 'Research', 'Share'],
+  },
+  heart: {
+    label: 'Creative / Character',
+    steps: ['Inspiration', 'Plan', 'Make', 'Reflect', 'Display'],
+  },
+}
+
 export interface DadLabReport {
   id?: string
   date: string

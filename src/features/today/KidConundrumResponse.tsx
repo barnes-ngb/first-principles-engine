@@ -1,7 +1,10 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import StopIcon from '@mui/icons-material/Stop'
+import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import { addDoc, updateDoc } from 'firebase/firestore'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
@@ -10,6 +13,7 @@ import SectionCard from '../../components/SectionCard'
 import { artifactsCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
+import { useTTS } from '../../core/hooks/useTTS'
 import type { Child } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
@@ -17,7 +21,9 @@ import { addXpEvent } from '../../core/xp/addXpEvent'
 interface KidConundrumResponseProps {
   conundrum: {
     title: string
+    scenario?: string
     question: string
+    quickPicks?: string[]
     lincolnPrompt: string
     londonPrompt: string
     londonDrawingPrompt?: string
@@ -33,6 +39,9 @@ export default function KidConundrumResponse({
   child,
   familyId,
 }: KidConundrumResponseProps) {
+  // TTS for reading the conundrum aloud
+  const { speak, cancel, isSpeaking, isSupported: ttsSupported } = useTTS({ rate: 0.85 })
+
   // Lincoln audio recording state
   const [isRecordingConundrum, setIsRecordingConundrum] = useState(false)
   const [conundrumAudioUrl, setConundrumAudioUrl] = useState<string | null>(null)
@@ -41,9 +50,24 @@ export default function KidConundrumResponse({
   const [conundrumSaved, setConundrumSaved] = useState(false)
   const conundrumRecorderRef = useRef<MediaRecorder | null>(null)
 
+  // Quick pick selection
+  const [selectedPick, setSelectedPick] = useState<string | null>(null)
+
   // London photo capture state
   const [showConundrumPhoto, setShowConundrumPhoto] = useState(false)
   const [conundrumPhotoSaved, setConundrumPhotoSaved] = useState(false)
+
+  // Auto-read the conundrum when it first appears (kid view)
+  const hasAutoRead = useRef(false)
+  useEffect(() => {
+    if (conundrum?.scenario && ttsSupported && !hasAutoRead.current) {
+      hasAutoRead.current = true
+      const timer = setTimeout(() => {
+        speak(conundrum.scenario!)
+      }, 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [conundrum?.scenario, ttsSupported, speak])
 
   const startConundrumRecording = useCallback(async () => {
     try {
@@ -80,6 +104,11 @@ export default function KidConundrumResponse({
         await uploadBytes(storageRef, conundrumAudioBlob)
         mediaUrl = await getDownloadURL(storageRef)
       }
+
+      const content = selectedPick
+        ? `Q: ${conundrum.question}\nChoice: ${selectedPick}`
+        : `Q: ${conundrum.question}`
+
       await addDoc(artifactsCollection(familyId), {
         childId: child.id,
         type: EvidenceType.Audio,
@@ -90,7 +119,7 @@ export default function KidConundrumResponse({
           location: 'home',
         },
         title: `Conundrum: ${conundrum.title}`,
-        content: `Q: ${conundrum.question}`,
+        content,
         ...(mediaUrl ? { mediaUrl } : {}),
         createdAt: new Date().toISOString(),
       })
@@ -114,7 +143,7 @@ export default function KidConundrumResponse({
       console.error('Conundrum response save failed:', err)
     }
     setSavingConundrum(false)
-  }, [conundrumAudioBlob, familyId, child.id, conundrum])
+  }, [conundrumAudioBlob, familyId, child.id, conundrum, selectedPick])
 
   const handleConundrumPhoto = useCallback(async (file: File) => {
     try {
@@ -156,7 +185,7 @@ export default function KidConundrumResponse({
     }
   }, [familyId, child.id, conundrum])
 
-  // Lincoln: audio response
+  // Lincoln: audio + quick picks response
   if (isLincoln) {
     if (conundrumSaved) {
       return (
@@ -171,19 +200,61 @@ export default function KidConundrumResponse({
     return (
       <SectionCard title={`\u{1F5FA}\u{FE0F} ${conundrum.title}`}>
         <Stack spacing={2} sx={{ py: 1 }}>
-          <Typography variant="body1" sx={{ fontWeight: 500 }}>
+          {/* Scenario text */}
+          {conundrum.scenario && (
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
+              {conundrum.scenario}
+            </Typography>
+          )}
+
+          {/* Listen / Stop button */}
+          {ttsSupported && conundrum.scenario && (
+            <Button
+              startIcon={isSpeaking ? <StopIcon /> : <VolumeUpIcon />}
+              onClick={() => isSpeaking ? cancel() : speak(conundrum.scenario!)}
+              variant="outlined"
+              size="small"
+              color={isSpeaking ? 'error' : 'primary'}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              {isSpeaking ? 'Stop' : 'Listen to the story'}
+            </Button>
+          )}
+
+          {/* Main question */}
+          <Typography variant="body1" sx={{ fontWeight: 600 }}>
             {conundrum.question}
           </Typography>
+
+          {/* Quick pick chips */}
+          {conundrum.quickPicks && conundrum.quickPicks.length > 0 && (
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {conundrum.quickPicks.map((pick) => (
+                <Chip
+                  key={pick}
+                  label={pick}
+                  onClick={() => setSelectedPick(selectedPick === pick ? null : pick)}
+                  color={selectedPick === pick ? 'primary' : 'default'}
+                  variant={selectedPick === pick ? 'filled' : 'outlined'}
+                  sx={{ fontSize: '0.9rem', py: 2.5 }}
+                />
+              ))}
+            </Stack>
+          )}
+
+          {/* Lincoln's deeper prompt */}
           <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
             {conundrum.lincolnPrompt}
           </Typography>
+
+          {/* Audio record button */}
           <Button
             variant="outlined"
             onClick={isRecordingConundrum ? stopConundrumRecording : startConundrumRecording}
             color={isRecordingConundrum ? 'error' : 'primary'}
             size="large"
           >
-            {isRecordingConundrum ? '\u23F9 Stop Recording' : '\u{1F3A4} What Do You Think?'}
+            {isRecordingConundrum ? '\u23F9 Stop Recording' : '\u{1F3A4} Tell me what you think'}
           </Button>
           {conundrumAudioUrl && (
             <Stack spacing={1}>
@@ -199,14 +270,25 @@ export default function KidConundrumResponse({
               </Button>
             </Stack>
           )}
+
+          {/* Allow saving just a quick pick without audio */}
+          {selectedPick && !conundrumAudioUrl && (
+            <Button
+              variant="contained"
+              color="success"
+              onClick={handleSaveConundrumResponse}
+              disabled={savingConundrum}
+              size="small"
+            >
+              {savingConundrum ? 'Saving...' : `\u{1F48E} Save: "${selectedPick}"`}
+            </Button>
+          )}
         </Stack>
       </SectionCard>
     )
   }
 
-  // London: drawing photo
-  if (!conundrum.londonDrawingPrompt) return null
-
+  // London: drawing photo + listen button
   if (conundrumPhotoSaved) {
     return (
       <SectionCard title={`\u{1F3A8} Drawing Quest`}>
@@ -218,21 +300,73 @@ export default function KidConundrumResponse({
   }
 
   return (
-    <SectionCard title={`\u{1F3A8} Drawing Quest`}>
+    <SectionCard title={`\u{1F3A8} ${conundrum.title}`}>
       <Stack spacing={2} sx={{ py: 1 }}>
-        <Typography variant="body1" sx={{ fontWeight: 500 }}>
-          {conundrum.londonDrawingPrompt}
-        </Typography>
-        {showConundrumPhoto ? (
-          <PhotoCapture onCapture={handleConundrumPhoto} />
-        ) : (
+        {/* Scenario text for London too */}
+        {conundrum.scenario && (
+          <Typography variant="body2" sx={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
+            {conundrum.scenario}
+          </Typography>
+        )}
+
+        {/* Listen button */}
+        {ttsSupported && conundrum.scenario && (
           <Button
-            variant="contained"
-            size="large"
-            onClick={() => setShowConundrumPhoto(true)}
+            startIcon={isSpeaking ? <StopIcon /> : <VolumeUpIcon />}
+            onClick={() => isSpeaking ? cancel() : speak(conundrum.scenario!)}
+            variant="outlined"
+            size="small"
+            color={isSpeaking ? 'error' : 'primary'}
+            sx={{ alignSelf: 'flex-start' }}
           >
-            {'\u{1F4F8}'} Take a Photo of Your Drawing
+            {isSpeaking ? 'Stop' : 'Listen to the story'}
           </Button>
+        )}
+
+        {/* Question */}
+        <Typography variant="body1" sx={{ fontWeight: 600 }}>
+          {conundrum.question}
+        </Typography>
+
+        {/* Quick pick chips for London too */}
+        {conundrum.quickPicks && conundrum.quickPicks.length > 0 && (
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {conundrum.quickPicks.map((pick) => (
+              <Chip
+                key={pick}
+                label={pick}
+                onClick={() => setSelectedPick(selectedPick === pick ? null : pick)}
+                color={selectedPick === pick ? 'primary' : 'default'}
+                variant={selectedPick === pick ? 'filled' : 'outlined'}
+                sx={{ fontSize: '0.9rem', py: 2.5 }}
+              />
+            ))}
+          </Stack>
+        )}
+
+        {/* London prompt */}
+        <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+          {conundrum.londonPrompt}
+        </Typography>
+
+        {/* Drawing prompt and capture */}
+        {conundrum.londonDrawingPrompt && (
+          <>
+            <Typography variant="body1" sx={{ fontWeight: 500 }}>
+              {conundrum.londonDrawingPrompt}
+            </Typography>
+            {showConundrumPhoto ? (
+              <PhotoCapture onCapture={handleConundrumPhoto} />
+            ) : (
+              <Button
+                variant="contained"
+                size="large"
+                onClick={() => setShowConundrumPhoto(true)}
+              >
+                {'\u{1F4F8}'} Take a Photo of Your Drawing
+              </Button>
+            )}
+          </>
         )}
       </Stack>
     </SectionCard>
