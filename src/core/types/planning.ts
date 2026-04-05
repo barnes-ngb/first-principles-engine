@@ -42,8 +42,10 @@ export interface WeekPlan {
   }>
   conundrum?: {
     title: string
-    scenario: string          // Narrative story chapter, not a case study
+    scenario: string          // Short punchy narrative (80-120 words)
     question: string
+    /** 2-3 tappable quick-pick response options for kids */
+    quickPicks?: string[]
     lincolnPrompt: string
     londonPrompt: string
     virtueConnection: string

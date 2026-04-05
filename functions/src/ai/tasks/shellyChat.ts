@@ -36,7 +36,12 @@ export const handleShellyChat = async (
   const monday = getWeekMonday(new Date());
   const weekId = monday.toISOString().slice(0, 10);
 
-  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult] =
+  // Date range for teaching reflection data (14 days)
+  const fourteenDaysAgo = new Date();
+  fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+  const reflectionStartDate = fourteenDaysAgo.toISOString().slice(0, 10);
+
+  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult] =
     await Promise.allSettled([
       db.collection(`families/${familyId}/children`).get(),
       childId
@@ -50,6 +55,30 @@ export const handleShellyChat = async (
             .get()
         : Promise.resolve(null),
       db.doc(`families/${familyId}/weeks/${weekId}`).get(),
+      // Completion patterns — day logs from last 14 days
+      childId
+        ? db.collection(`families/${familyId}/days`)
+            .where("childId", "==", childId)
+            .where("date", ">=", reflectionStartDate)
+            .limit(50)
+            .get()
+        : Promise.resolve(null),
+      // Conundrum artifacts — how many conundrum responses recorded
+      childId
+        ? db.collection(`families/${familyId}/artifacts`)
+            .where("childId", "==", childId)
+            .where("tags.domain", "==", "conundrum")
+            .limit(20)
+            .get()
+        : Promise.resolve(null),
+      // Chapter responses — recent read-aloud discussion responses
+      childId
+        ? db.collection(`families/${familyId}/chapterResponses`)
+            .where("childId", "==", childId)
+            .where("date", ">=", reflectionStartDate)
+            .limit(20)
+            .get()
+        : Promise.resolve(null),
     ]);
 
   // Format supplemental context
@@ -124,6 +153,81 @@ export const handleShellyChat = async (
         supplementalContext += `\n\nCONUNDRUM THIS WEEK: ${data.conundrumTitle}`;
       }
     }
+  }
+
+  // ── Teaching Reflection Data ──────────────────────────────────
+  const reflectionLines: string[] = [];
+
+  // Completion patterns by day of week
+  if (completionResult.status === "fulfilled" && completionResult.value) {
+    const snap = completionResult.value as { empty: boolean; docs: Array<{ data: () => Record<string, unknown> }> };
+    if (!snap.empty) {
+      const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const dayCompletionRates: Record<string, { total: number; completed: number }> = {};
+      const skippedActivities: Record<string, number> = {};
+
+      for (const d of snap.docs) {
+        const data = d.data() as { date?: string; checklist?: Array<{ label?: string; completed?: boolean; skipped?: boolean; engagement?: string }> };
+        if (!data.date || !data.checklist) continue;
+        const dayOfWeek = dayNames[new Date(data.date + "T12:00:00").getDay()];
+        if (!dayCompletionRates[dayOfWeek]) dayCompletionRates[dayOfWeek] = { total: 0, completed: 0 };
+
+        for (const item of data.checklist) {
+          dayCompletionRates[dayOfWeek].total++;
+          if (item.completed) dayCompletionRates[dayOfWeek].completed++;
+          if (item.skipped && item.label) {
+            skippedActivities[item.label] = (skippedActivities[item.label] ?? 0) + 1;
+          }
+        }
+      }
+
+      const completionByDay = Object.entries(dayCompletionRates)
+        .filter(([, v]) => v.total > 0)
+        .map(([day, v]) => `${day}: ${Math.round((v.completed / v.total) * 100)}%`)
+        .join(", ");
+
+      if (completionByDay) {
+        reflectionLines.push(`Completion by day: ${completionByDay}`);
+      }
+
+      const topSkipped = Object.entries(skippedActivities)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 3)
+        .map(([label, count]) => `${label} (${count}x)`)
+        .join(", ");
+      if (topSkipped) {
+        reflectionLines.push(`Most skipped: ${topSkipped}`);
+      }
+    }
+  }
+
+  // Conundrum engagement
+  if (conundrumArtifactsResult.status === "fulfilled" && conundrumArtifactsResult.value) {
+    const snap = conundrumArtifactsResult.value as { empty: boolean; size: number };
+    const count = snap.empty ? 0 : snap.size;
+    reflectionLines.push(`Conundrum responses recorded: ${count}`);
+  }
+
+  // Chapter response data
+  if (chapterResponseResult.status === "fulfilled" && chapterResponseResult.value) {
+    const snap = chapterResponseResult.value as { empty: boolean; size: number; docs: Array<{ data: () => Record<string, unknown> }> };
+    if (!snap.empty) {
+      const count = snap.size;
+      const books = new Set<string>();
+      for (const d of snap.docs) {
+        const data = d.data() as { bookTitle?: string };
+        if (data.bookTitle) books.add(data.bookTitle);
+      }
+      reflectionLines.push(`Chapter responses (last 2 weeks): ${count} responses across ${books.size} book(s)${books.size > 0 ? ` (${Array.from(books).join(", ")})` : ""}`);
+    }
+  }
+
+  if (reflectionLines.length > 0) {
+    supplementalContext += `\n\nTEACHING REFLECTION DATA (use this when Shelly asks how things are going):\n${reflectionLines.join("\n")}
+
+When Shelly asks about engagement, frustration, or how things are going, use this data.
+Don't give generic homeschool advice — give advice based on what's actually happening.
+Example: If she says "Lincoln seems bored with reading" and the data shows positive engagement but low quest completion, tell her: "His daily reading engagement looks positive — he might enjoy the workbook but find the quests too easy. Try increasing quest difficulty or switching to comprehension mode."`;
   }
 
   console.log(
