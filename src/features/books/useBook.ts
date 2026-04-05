@@ -37,8 +37,8 @@ interface UseBookResult {
   addAiImageToPage: (pageId: string, url: string, storagePath: string, prompt: string) => void
   addStickerToPage: (pageId: string, stickerUrl: string, storagePath: string, label: string, tags?: StickerTag[]) => void
   updateImagePosition: (pageId: string, imageId: string, position: PageImage['position']) => void
-  /** Add a hand-drawn sketch photo to a page. Returns the image ID for later enhancement. */
-  addSketchToPage: (pageId: string, file: File) => Promise<string | undefined>
+  /** Add a hand-drawn sketch photo to a page. Returns the image ID and storage path for later enhancement. */
+  addSketchToPage: (pageId: string, file: File) => Promise<{ imageId: string; storagePath: string } | undefined>
   /** Update a sketch PageImage after AI enhancement resolves. */
   applySketchEnhancement: (pageId: string, imageId: string, enhancedUrl: string, enhancedStoragePath: string) => void
   /** Switch which version (original vs enhanced) is the active URL for a sketch image. */
@@ -430,7 +430,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   )
 
   const addSketchToPage = useCallback(
-    async (pageId: string, file: File): Promise<string | undefined> => {
+    async (pageId: string, file: File): Promise<{ imageId: string; storagePath: string } | undefined> => {
       if (!familyId || !bookId) return undefined
 
       const imageId = generateImageId()
@@ -490,7 +490,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           void addDoc(artifactsCollection(familyId), artifact)
         }
 
-        return imageId
+        return { imageId, storagePath }
       } catch (err) {
         console.error('Sketch upload failed:', err)
         setSaveState('error')
