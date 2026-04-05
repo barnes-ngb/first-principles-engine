@@ -16,6 +16,7 @@ Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — Apr
 * Chapter Question card — Stonebridge narrative question from unified weekly focus
 * **SectionErrorBoundary** — per-section crash isolation prevents one broken section from taking down the whole page
 * **Evaluation nudge** — planner shows nudge when no skill snapshot exists
+* **Skip guidance display** — Parent checklist shows per-item AI skip/focus notes color-coded (green for mastered/skip, amber for frontier/focus, grey for info). Not shown in kid view.
 * **Minutes-logged indicator** — Today checklist shows tracked minutes per item
 * **HelpStrip guidance** — contextual help on Records, Weekly Review, and Progress pages
 * **Per-child materials theming** — Lincoln gets Minecraft-themed worksheets, London gets story/adventure-themed worksheets
@@ -37,7 +38,9 @@ Plan My Week
 * AI-powered plan generation (Sonnet) with full enriched context (snapshot, workbooks, evaluation findings, engagement data, subject defaults)
 * **Full-width plan preview** — renders outside chat area, day cards with Must-Do / Choose sections clearly labeled
 * Single set of quick adjustment chips (tap to apply immediately) + chat-based free-form adjustments
-* Skip guidance per item from evaluation data + week skip summary
+* Skip guidance per item from evaluation data + week skip summary + per-item skipGuidance color-coded on parent Today checklist (green=skip, amber=focus, grey=info; not shown in kid view)
+* Completed program exclusion — workbooks marked complete or matching completedPrograms are filtered from plan generation context
+* Recent scans context — planner receives last scan position per workbook to know what lesson to assign next
 * Plan generation intent detection — typing "generate a plan" in chat redirects to proper generation path
 * Robust JSON parsing — handles code-fenced responses, truncated JSON, fallback recovery
 * "Lock In This Plan" button → daily checklists with subjectBucket tagging + auto-generate lesson cards
@@ -263,7 +266,7 @@ Progress
 * **Learning Profile** — AI-generated disposition narrative (Curiosity, Persistence, Articulation, Self-Awareness, Ownership) from 4 weeks of day log data, evaluations, and Dad Lab reports. First tab in Progress.
   * Dispositions mapped to Wonder→Build→Explain→Reflect→Share learning loop
   * Replaces manual ladder logging as the primary growth visibility tool
-* Skill Snapshot — priority skills, supports, stop rules, evidence definitions, workbook configs
+* Skill Snapshot — priority skills, supports, stop rules, evidence definitions, workbook configs with Mark Complete (greyed card + reactivate) and visual completion indicator
 * Conceptual Blocks — conceptualBlocks[] on Skill Snapshot from pattern detection; ADDRESS_NOW vs DEFER; plain language rationale + strategies
 * "Evaluate Skills" button → evaluation chat Records
 * Hours & Compliance — additive computation (day logs + hours entries + adjustments)

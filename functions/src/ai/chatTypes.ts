@@ -11,6 +11,7 @@ export interface SnapshotData {
   prioritySkills?: Array<{ tag: string; label: string; level: string }>;
   supports?: Array<{ label: string; description: string }>;
   stopRules?: Array<{ label: string; trigger: string; action: string }>;
+  completedPrograms?: string[];
 }
 
 /** Context passed to every chat task handler. */

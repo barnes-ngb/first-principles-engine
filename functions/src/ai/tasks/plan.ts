@@ -57,6 +57,27 @@ export const handlePlan = async (
     sections.push(lines.join("\n"));
   }
 
+  // Append skip guidance instructions
+  sections.push([
+    "SKIP GUIDANCE — IMPORTANT:",
+    "You have the child's Skill Snapshot showing mastered, emerging, and not-yet skills.",
+    "For EVERY workbook-based checklist item in the plan, include a \"skipGuidance\" field:",
+    "",
+    "RULES:",
+    "1. If the workbook lesson covers skills the child has MASTERED:",
+    '   → skipGuidance: "[Child] has [skill] mastered — skim this lesson or skip to [next lesson number]."',
+    "2. If the lesson covers skills the child is still EMERGING on:",
+    '   → skipGuidance: "This is [Child]\'s frontier — spend full time here. Focus on [specific skill]."',
+    "3. If the lesson covers skills NOT YET started:",
+    '   → skipGuidance: "New material — go slow, this is first exposure to [topic]."',
+    "4. If you don't know what specific content the lesson covers:",
+    '   → skipGuidance: "Check lesson content. If it covers [list of mastered skills], skip ahead."',
+    "5. For non-workbook items (Prayer, Handwriting, etc.):",
+    "   → skipGuidance: null (these don't need skip guidance)",
+    "",
+    "INCLUDE skipGuidance ON EVERY WORKBOOK ITEM in the JSON output.",
+  ].join("\n"));
+
   // Append plan-specific output format instructions
   sections.push(buildPlanOutputInstructions());
 

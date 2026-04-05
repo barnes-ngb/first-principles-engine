@@ -474,6 +474,10 @@ export interface WorkbookConfig {
   defaultMinutes?: number
   /** Curriculum-specific metadata */
   curriculum?: CurriculumMeta
+  /** Whether this workbook has been marked as complete (preserves record unlike delete) */
+  completed?: boolean
+  /** ISO date when workbook was marked complete */
+  completedDate?: string
   createdAt?: string
   updatedAt?: string
 }
