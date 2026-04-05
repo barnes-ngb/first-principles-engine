@@ -33,6 +33,7 @@ import {
   evaluationSessionsCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
+import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type {
@@ -534,6 +535,10 @@ export default function EvaluateChatPage() {
 
       await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)))
       setSnackText('Skill snapshot updated! Priority skills, supports, stop rules, and evidence all set.')
+
+      // Update Learning Map from findings (fire-and-forget)
+      updateSkillMapFromFindings(familyId, activeChildId, findings)
+        .catch((err) => console.warn('[LearningMap] Failed to update from evaluation findings', err))
 
       // Award XP for completing an evaluation (once per evaluation session)
       if (sessionDocId) {
