@@ -108,6 +108,8 @@ export default function PhotoLabelForm({
   const handleCapture = async (file: File) => {
     const artifactId = await onPhotoCapture(file)
     if (artifactId) {
+      // Deduplicate — skip if this artifact is already in the list
+      if (labels.some((l) => l.artifactId === artifactId)) return
       onLabelsChange([
         ...labels,
         {

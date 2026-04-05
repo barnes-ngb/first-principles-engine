@@ -1,4 +1,5 @@
 import type {
+  ActivityConfig,
   AppBlock,
   AssignmentCandidate,
   DraftDayPlan,
@@ -29,6 +30,29 @@ Memory card — 10 min — Reading
 Language arts workbook — 20 min — LanguageArts
 Reading Eggs (tablet) — 45 min — Reading Eggs (app) — Reading
 Good and the Beautiful Math — 30 min — GATB — Math`
+
+/**
+ * Convert activity configs to a routine text string suitable for the local plan generator.
+ * This replaces the old free-text dailyRoutine with structured data from activityConfigs.
+ * Only includes non-completed configs, sorted by sortOrder.
+ */
+export function activityConfigsToRoutineText(configs: ActivityConfig[]): string {
+  const active = configs
+    .filter((c) => !c.completed)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+
+  if (active.length === 0) return ''
+
+  return active
+    .map((c) => {
+      let line = `${c.name} — ${c.defaultMinutes} min — ${c.subjectBucket}`
+      if (c.currentPosition && c.totalUnits) {
+        line += ` (at ${c.unitLabel || 'lesson'} ${c.currentPosition} of ${c.totalUnits})`
+      }
+      return line
+    })
+    .join('\n')
+}
 
 /** Parse a routine string and return total minutes per day. */
 export function parseRoutineTotalMinutes(routine: string): number {
@@ -1190,4 +1214,60 @@ function parseRoutineText(dailyRoutine: string): DraftPlanItem[] {
   }
 
   return items
+}
+
+/**
+ * Post-generation validator: ensure the plan includes evaluation items
+ * (Knowledge Mine + Fluency Practice). If the AI omitted them, inject defaults.
+ */
+export function ensureEvaluationItems(plan: DraftWeeklyPlan): DraftWeeklyPlan {
+  const allItems = plan.days.flatMap((d) => d.items)
+  const hasEval = allItems.some(
+    (item) =>
+      item.itemType === 'evaluation' ||
+      item.title?.toLowerCase().includes('knowledge mine') ||
+      item.title?.toLowerCase().includes('fluency'),
+  )
+
+  if (hasEval || plan.days.length === 0) return plan
+
+  console.warn('[Planner] No evaluation items in generated plan — injecting defaults')
+
+  const knowledgeMine: DraftPlanItem = {
+    id: generateItemId(),
+    title: 'Knowledge Mine — Comprehension',
+    estimatedMinutes: 15,
+    subjectBucket: SubjectBucket.Reading,
+    skillTags: [],
+    accepted: true,
+    category: 'choose',
+    mvdEssential: false,
+    itemType: 'evaluation',
+    evaluationMode: 'comprehension',
+    link: '/quest',
+  }
+
+  const fluency: DraftPlanItem = {
+    id: generateItemId(),
+    title: 'Fluency Practice',
+    estimatedMinutes: 10,
+    subjectBucket: SubjectBucket.Reading,
+    skillTags: [],
+    accepted: true,
+    category: 'choose',
+    mvdEssential: false,
+    itemType: 'evaluation',
+    evaluationMode: 'fluency',
+    link: '/quest',
+  }
+
+  const days = plan.days.map((day) => ({ ...day, items: [...day.items] }))
+
+  // Spread evaluations across the week: Knowledge Mine on Tue/Thu, Fluency on Mon/Wed
+  if (days.length >= 2) days[1].items.push({ ...knowledgeMine, id: generateItemId() })
+  if (days.length >= 4) days[3].items.push({ ...knowledgeMine, id: generateItemId() })
+  if (days.length >= 1) days[0].items.push({ ...fluency, id: generateItemId() })
+  if (days.length >= 3) days[2].items.push({ ...fluency, id: generateItemId() })
+
+  return { ...plan, days }
 }
