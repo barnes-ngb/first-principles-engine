@@ -727,19 +727,13 @@ export default function TodayPage() {
         </SectionErrorBoundary>
       )}
 
-      {/* --- Workshop Game Cards --- */}
-      {familyId && children.length > 0 && (
-        <WorkshopGameCards familyId={familyId} children={children} />
-      )}
-
-      {/* --- Creative Time Log --- */}
-      {familyId && selectedChild && (
-        <CreativeTimeLog
-          familyId={familyId}
-          childId={selectedChild.id ?? ''}
-          childName={selectedChild.name}
+      {/* --- Chapter Question (read-aloud discussion) — daily formation, shown prominently --- */}
+      <SectionErrorBoundary section="chapter question">
+        <ChapterQuestionCard
+          dayLog={dayLog}
+          persistDayLogImmediate={persistDayLogImmediate}
         />
-      )}
+      </SectionErrorBoundary>
 
       {/* --- Today's Plan checklist (PRIMARY) --- */}
       {selectedChild && (
@@ -798,14 +792,6 @@ export default function TodayPage() {
         </DialogContent>
       </Dialog>
 
-      {/* --- Chapter Question (read-aloud discussion) --- */}
-      <SectionErrorBoundary section="chapter question">
-        <ChapterQuestionCard
-          dayLog={dayLog}
-          persistDayLogImmediate={persistDayLogImmediate}
-        />
-      </SectionErrorBoundary>
-
       {/* --- Teach-Back (Lincoln only, after 50%+ must-do completion) --- */}
       {selectedChild && (
         <SectionErrorBoundary section="teach-back">
@@ -819,6 +805,20 @@ export default function TodayPage() {
             onSnackMessage={handleSnackMessage}
           />
         </SectionErrorBoundary>
+      )}
+
+      {/* --- Workshop Game Cards (fun extras, below daily plan) --- */}
+      {familyId && children.length > 0 && (
+        <WorkshopGameCards familyId={familyId} children={children} />
+      )}
+
+      {/* --- Creative Time Log --- */}
+      {familyId && selectedChild && (
+        <CreativeTimeLog
+          familyId={familyId}
+          childId={selectedChild.id ?? ''}
+          childName={selectedChild.name}
+        />
       )}
 
       {/* Quick non-core hours — collapsed by default */}
