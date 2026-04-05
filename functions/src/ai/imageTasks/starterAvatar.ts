@@ -32,7 +32,7 @@ const STARTER_AVATAR_RAW_PROMPTS: Record<"minecraft" | "platformer", string> = {
 };
 
 export const generateStarterAvatar = onCall(
-  { secrets: [openaiApiKey, claudeApiKey] },
+  { secrets: [openaiApiKey, claudeApiKey], timeoutSeconds: 120, memory: "512MiB" },
   async (request): Promise<StarterAvatarResponse> => {
     const { uid } = requireApprovedUser(request);
 
