@@ -7,6 +7,7 @@ import { CURRICULUM_MAPS } from './curriculumMap'
 import type { ChildSkillMap, DomainSummary, SkillNodeStatus } from './skillStatus'
 import { SkillStatus } from './skillStatus'
 import type { CurriculumDomain } from './curriculumMap'
+import { initializeSkillMapFromHistory } from './updateSkillMapFromFindings'
 
 interface UseSkillMapResult {
   /** The child's full skill map, or null while loading */
@@ -44,11 +45,24 @@ export function useSkillMap(childId: string): UseSkillMapResult {
         if (snap.exists()) {
           setSkillMap({ ...snap.data(), id: snap.id })
         } else {
-          setSkillMap({
-            childId,
-            skills: {},
-            updatedAt: new Date().toISOString(),
-          })
+          // No skill map yet — initialize from existing evaluation history
+          try {
+            const initialized = await initializeSkillMapFromHistory(familyId, childId)
+            if (cancelled) return
+            // Persist if we found any data
+            if (Object.keys(initialized.skills).length > 0) {
+              await setDoc(ref, JSON.parse(JSON.stringify(initialized)))
+            }
+            setSkillMap(initialized)
+          } catch (err) {
+            console.warn('[LearningMap] Initialization failed, starting empty', err)
+            if (cancelled) return
+            setSkillMap({
+              childId,
+              skills: {},
+              updatedAt: new Date().toISOString(),
+            })
+          }
         }
       } finally {
         if (!cancelled) setIsLoading(false)

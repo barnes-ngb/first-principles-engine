@@ -4,7 +4,6 @@ import Box from '@mui/material/Box'
 
 import type { AccessoryId, AvatarBackground, CharacterFeatures, CharacterProportions, OutfitCustomization, VoxelArmorPieceId } from '../../core/types'
 import { DEFAULT_CHARACTER_FEATURES } from '../../core/types'
-import { XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import { buildCharacter, applyProfileOutfit } from './voxel/buildCharacter'
 import { buildArmorPiece, VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import { animateEquip, animateUnequip, animateJump, animateNod, animateSwordFlourish, animateHipTurn, animateTorsoPuff } from './voxel/equipAnimation'
@@ -143,23 +142,24 @@ function enforceArmorOpacity(
   armorMeshes: Map<VoxelArmorPieceId, THREE.Group>,
   equipped: string[],
 ) {
-  for (const pieceId of equipped) {
-    const mesh = armorMeshes.get(pieceId as VoxelArmorPieceId)
-    if (!mesh) continue
-    mesh.visible = true
-    mesh.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.material) {
-        const mats = Array.isArray(child.material) ? child.material : [child.material]
-        for (const mat of mats) {
-          if ((mat instanceof THREE.MeshLambertMaterial || mat instanceof THREE.MeshPhongMaterial) && (mat.transparent || mat.opacity < 1)) {
-            mat.transparent = false
-            mat.opacity = 1.0
-            mat.depthWrite = true
-            mat.needsUpdate = true
+  for (const [pieceId, mesh] of armorMeshes) {
+    const isEquipped = equipped.includes(pieceId)
+    mesh.visible = isEquipped
+    if (isEquipped) {
+      mesh.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material) {
+          const mats = Array.isArray(child.material) ? child.material : [child.material]
+          for (const mat of mats) {
+            if ((mat instanceof THREE.MeshLambertMaterial || mat instanceof THREE.MeshPhongMaterial) && (mat.transparent || mat.opacity < 1)) {
+              mat.transparent = false
+              mat.opacity = 1.0
+              mat.depthWrite = true
+              mat.needsUpdate = true
+            }
           }
         }
-      }
-    })
+      })
+    }
   }
 }
 
@@ -545,46 +545,15 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       }
     }
 
-    // Set initial visibility — equipped solid, unlocked translucent, locked ghost
+    // Set initial visibility — equipped solid, not equipped hidden
     for (const [pieceId, group] of armorGroupsRef.current) {
       const isEquipped = equippedPieces.includes(pieceId)
-      const isUnlocked = totalXp >= XP_THRESHOLDS[pieceId]
 
-      group.visible = true
       if (isEquipped) {
+        group.visible = true
         group.scale.set(1, 1, 1)
-      } else if (isUnlocked) {
-        group.scale.set(1, 1, 1)
-        group.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            const mat = Array.isArray(child.material) ? child.material : [child.material]
-            for (const m of mat) {
-              if (m instanceof THREE.MeshLambertMaterial || m instanceof THREE.MeshPhongMaterial) {
-                m.transparent = true
-                m.opacity = 0.3
-                m.depthWrite = false
-              }
-            }
-          }
-        })
       } else {
-        const tierTint = getTierTint(currentTier)
-        const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
-        group.scale.set(1, 1, 1)
-        if (pieceId === 'shield') {
-          group.scale.set(0.85, 0.85, 0.85)
-        }
-        group.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            const ghostMat = new THREE.MeshLambertMaterial({
-              color: tierMat.primary,
-              transparent: true,
-              opacity: 0.08,
-              depthWrite: false,
-            })
-            child.material = ghostMat
-          }
-        })
+        group.visible = false
       }
     }
     // Apply tier-based materials to all equipped pieces (with optional dye colors)
@@ -1166,7 +1135,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       }
     }
 
-    // Unequipped pieces -> show as translucent ghost
+    // Unequipped pieces -> completely hidden
     for (const pieceId of prev) {
       if (!current.has(pieceId)) {
         // If helmet was unequipped, restore full hair
@@ -1178,24 +1147,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           // Remove glow + outlines from unequipped piece
           removeEnchantGlow(group)
           removeOutlinesFromGroup(group)
-
-          const isUnlocked = totalXp >= XP_THRESHOLDS[pieceId as VoxelArmorPieceId]
-          const tierTint = getTierTint(currentTier)
-          const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
-          group.visible = true
-          if (pieceId === 'shield' && !isUnlocked) {
-            group.scale.set(0.85, 0.85, 0.85)
-          }
-          group.traverse((child) => {
-            if (child instanceof THREE.Mesh && !child.userData.isGlow) {
-              child.material = new THREE.MeshLambertMaterial({
-                color: tierMat.primary,
-                transparent: true,
-                opacity: isUnlocked ? 0.3 : 0.08,
-                depthWrite: false,
-              })
-            }
-          })
+          group.visible = false
         }
       }
     }
@@ -1210,7 +1162,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     equipPoseRef.current?.(equippedPieces)
 
     prevEquippedRef.current = current
-  }, [equippedPieces, currentTier, totalXp, onPoseComplete, resolvedFeatures, armorColors])
+  }, [equippedPieces, currentTier, onPoseComplete, resolvedFeatures, armorColors])
 
   // ── Handle explicit pose trigger (from PoseButtons) ────────────
   useEffect(() => {
