@@ -295,9 +295,10 @@ const DEFAULT_ROUTINE_CONFIGS: Omit<
  * Ensure default routine/formation activity configs exist for a child.
  *
  * Unlike `migrateToActivityConfigs` (which only runs on an empty collection),
- * this function checks whether each default config is present by name and
- * creates any that are missing. This handles the case where a scan created
- * one workbook config but the routine defaults were never seeded.
+ * this function checks whether each default config is present and creates any
+ * that are missing. Matching uses subject+type so that scan-created configs
+ * (e.g. "The Good and the Beautiful Math") satisfy the "Good and the Beautiful
+ * Math" default, and deliberately deleted configs are not recreated.
  */
 export async function ensureDefaultActivityConfigs(
   familyId: string,
@@ -316,16 +317,48 @@ export async function ensureDefaultActivityConfigs(
     return 0
   }
 
-  // Build a set of normalized existing names for matching
-  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
-  const existingNames = new Set(
-    existingSnap.docs.map((d) => normalize(d.data().name ?? '')),
-  )
+  const existingConfigs = existingSnap.docs.map((d) => d.data())
+
+  // Normalize: lowercase, strip "the", remove non-alphanumeric
+  const normalize = (s: string) =>
+    (s || '').toLowerCase().replace(/^the\s+/i, '').replace(/[^a-z0-9]/g, '')
+
+  // Check if a default config is already covered by an existing config.
+  // Match by: (1) normalized name/curriculum, or (2) same type + subjectBucket.
+  const isCovered = (
+    dflt: (typeof DEFAULT_ROUTINE_CONFIGS)[number],
+  ): boolean => {
+    const dName = normalize(dflt.name)
+    const dCurriculum = normalize((dflt as { curriculum?: string }).curriculum ?? '')
+
+    return existingConfigs.some((existing) => {
+      // Name-based match (normalized)
+      const eName = normalize(existing.name ?? '')
+      const eCurriculum = normalize(existing.curriculum ?? '')
+      if (eName && dName && (eName === dName || eName.includes(dName) || dName.includes(eName)))
+        return true
+      if (eCurriculum && dCurriculum && (eCurriculum.includes(dCurriculum) || dCurriculum.includes(eCurriculum)))
+        return true
+      if (eName && dCurriculum && eName.includes(dCurriculum))
+        return true
+      if (eCurriculum && dName && eCurriculum.includes(dName))
+        return true
+
+      // Type + subject match: a workbook config for the same subject counts
+      if (
+        existing.type === dflt.type &&
+        existing.subjectBucket &&
+        dflt.subjectBucket &&
+        existing.subjectBucket.toLowerCase() === dflt.subjectBucket.toLowerCase()
+      )
+        return true
+
+      return false
+    })
+  }
 
   // Find defaults that don't yet exist
-  const missing = DEFAULT_ROUTINE_CONFIGS.filter(
-    (cfg) => !existingNames.has(normalize(cfg.name)),
-  )
+  const missing = DEFAULT_ROUTINE_CONFIGS.filter((cfg) => !isCovered(cfg))
 
   if (missing.length === 0) return 0
 
