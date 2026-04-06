@@ -48,11 +48,8 @@ export function useScanToActivityConfig() {
       const existing = configsSnap.docs.find((d) => {
         const config = d.data()
         return (
-          isWorkbookMatch(config.name ?? '', curriculumName) ||
-          isWorkbookMatch(config.curriculum ?? '', curriculumName) ||
-          // Fallback: same subject workbook (one primary workbook per subject)
-          (config.type === 'workbook' &&
-            config.subjectBucket?.toLowerCase() === subject.toLowerCase())
+          isWorkbookMatch(config.name ?? '', curriculumName, config.subjectBucket, subject) ||
+          isWorkbookMatch(config.curriculum ?? '', curriculumName, config.subjectBucket, subject)
         )
       })
 
@@ -70,6 +67,12 @@ export function useScanToActivityConfig() {
         if (curriculumName.length > existingName.length && curriculumName.length < 100) {
           updates.name = curriculumName
           updates.curriculum = curriculumName
+        }
+        // Use scan's estimated minutes if current is suspiciously low (5m default)
+        const existingMinutes = existing.data().defaultMinutes ?? 0
+        const estimatedMinutes = scanResult.estimatedMinutes ?? 0
+        if (existingMinutes < 10 && estimatedMinutes >= 10) {
+          updates.defaultMinutes = estimatedMinutes
         }
         await updateDoc(existing.ref, updates)
         return {
@@ -129,7 +132,12 @@ function normalizeForMatch(name: string): string {
     .replace(/[^a-z0-9]/g, '')
 }
 
-function isWorkbookMatch(configName: string, scanName: string): boolean {
+function isWorkbookMatch(
+  configName: string,
+  scanName: string,
+  configSubject?: string,
+  scanSubject?: string,
+): boolean {
   const a = normalizeForMatch(configName)
   const b = normalizeForMatch(scanName)
 
@@ -138,8 +146,8 @@ function isWorkbookMatch(configName: string, scanName: string): boolean {
   // Exact match after normalization
   if (a === b) return true
 
-  // One contains the other
-  if (a.includes(b) || b.includes(a)) return true
+  // One contains the other (min length 3 to avoid false positives)
+  if (a.length > 3 && b.length > 3 && (a.includes(b) || b.includes(a))) return true
 
   // Both are GATB — match if same subject
   const subjects = ['math', 'reading', 'languagearts', 'language', 'phonics', 'spelling']
@@ -152,6 +160,13 @@ function isWorkbookMatch(configName: string, scanName: string): boolean {
     }
   }
 
+  // Same subject + at least one is GATB (e.g. config "Good and the Beautiful Math" vs scan subject "Math")
+  if (configSubject && scanSubject) {
+    const cs = configSubject.toLowerCase()
+    const ss = scanSubject.toLowerCase()
+    if (cs === ss && (isGATB(a) || isGATB(b))) return true
+  }
+
   // Subject-based matching for generic names like "Language arts workbook"
   const genericWorkbook = (s: string) =>
     s.includes('workbook') && !isGATB(s)
@@ -159,6 +174,11 @@ function isWorkbookMatch(configName: string, scanName: string): boolean {
     for (const subj of subjects) {
       if (a.includes(subj) && b.includes(subj)) return true
     }
+  }
+
+  // Fallback: same subject workbook (one primary workbook per subject)
+  if (configSubject && scanSubject) {
+    if (configSubject.toLowerCase() === scanSubject.toLowerCase()) return true
   }
 
   return false
