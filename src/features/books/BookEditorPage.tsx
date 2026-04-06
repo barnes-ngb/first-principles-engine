@@ -32,6 +32,9 @@ import FormControlLabel from '@mui/material/FormControlLabel'
 import Switch from '@mui/material/Switch'
 
 import Alert from '@mui/material/Alert'
+import CloseIcon from '@mui/icons-material/Close'
+import Paper from '@mui/material/Paper'
+import Snackbar from '@mui/material/Snackbar'
 import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
 import AudioRecorder from '../../components/AudioRecorder'
@@ -54,6 +57,8 @@ import { useBook } from './useBook'
 import { printBook } from './printBook'
 import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
+import { useBackgroundReimagine } from './useBackgroundReimagine'
+import ReimagineResultDialog from './ReimagineResultDialog'
 
 type VoiceMode = 'record' | 'dictate'
 
@@ -139,6 +144,18 @@ export default function BookEditorPage() {
   } = useBook(familyId, bookId)
 
   const { generateImage, enhanceSketch, loading: aiLoading, error: aiError } = useAI()
+
+  const bgReimagine = useBackgroundReimagine({
+    familyId,
+    childId: activeChild?.id ?? '',
+    childName,
+    onAddToPage: (pageId, imageId, url, storagePath) => {
+      applySketchEnhancement(pageId, imageId, url, storagePath)
+    },
+    onAddSticker: (pageId, url, storagePath, label) => {
+      addStickerToPage(pageId, url, storagePath, label)
+    },
+  })
 
   const [activePageIndex, setActivePageIndex] = useState(0)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -360,22 +377,18 @@ export default function BookEditorPage() {
     }
 
     if (choice === 'reimagine') {
-      setDrawingProcessing(true)
+      // Upload sketch first (blocking — fast), then process reimagine in background
       setReimagineError(null)
-      const intensityLabel = (reimagineIntensity ?? 50) <= 25 ? 'Light touch-up' : (reimagineIntensity ?? 50) >= 75 ? 'Full reimagine' : 'Enhancement'
-      setDrawingProcessingLabel(`${intensityLabel} in progress...`)
       try {
-        // Upload sketch first, then enhance
         const sketchResult = await addSketchToPage(activePage.id, drawingFile)
         if (!sketchResult) {
           setReimagineError('Sketch upload failed — check your connection and try again.')
-          setDrawingProcessing(false)
           resetDrawingFlow()
           return
         }
         const { imageId, storagePath } = sketchResult
-        // Map intensity to style
-        const style: EnhanceSketchRequest['style'] = (reimagineIntensity ?? 50) <= 25 ? 'storybook' : (reimagineIntensity ?? 50) >= 75 ? 'comic' : 'storybook'
+        const imageUrl = URL.createObjectURL(drawingFile)
+
         // Build caption from intensity
         const caption = (reimagineIntensity ?? 50) <= 25
           ? 'Lightly clean up this child\'s drawing, keeping their art style and line work. Just smooth edges and brighten colors.'
@@ -383,39 +396,24 @@ export default function BookEditorPage() {
             ? 'Reimagine this child\'s drawing as a professional illustration. Keep the subject matter but create it in a polished cartoon style.'
             : 'Enhance this child\'s drawing into a polished illustration while keeping the original composition and character design.'
 
-        const result = await Promise.race([
-          enhanceSketch({
-            familyId,
-            sketchStoragePath: storagePath,
-            style,
-            caption,
-          }),
-          new Promise<null>((_, reject) =>
-            setTimeout(() => reject(new Error(
-              'Reimagine is taking too long — the image service may be busy. Please try again.'
-            )), 120_000),
-          ),
-        ])
-        if (result?.url) {
-          applySketchEnhancement(activePage.id, imageId, result.url, result.storagePath)
-          setSketchImageId(imageId)
-          setSketchComparePageId(activePage.id)
-          setShowSketchCompare(true)
-        } else {
-          // Enhancement failed or returned no URL — keep sketch as-is, show why
-          const aiMsg = aiError?.message || 'AI enhancement returned no image'
-          console.warn('Reimagine returned no image URL, keeping original sketch:', aiMsg)
-          setReimagineError(`Enhancement failed: ${aiMsg}. Original sketch kept.`)
-          setSketchImageId(imageId)
-          setSketchComparePageId(activePage.id)
-        }
+        // Close the dialog — kid goes back to editing
+        resetDrawingFlow()
+
+        // Start background processing (non-blocking)
+        void bgReimagine.startReimagine(
+          imageId,
+          activePage.id,
+          storagePath,
+          imageUrl,
+          reimagineIntensity ?? 50,
+          caption,
+        )
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
-        console.error('Reimagine failed:', err)
+        console.error('Reimagine sketch upload failed:', err)
         setReimagineError(`Reimagine failed: ${errMsg}`)
+        resetDrawingFlow()
       }
-      setDrawingProcessing(false)
-      resetDrawingFlow()
       return
     }
 
@@ -445,7 +443,7 @@ export default function BookEditorPage() {
       setShowAiDialog(true)
       return
     }
-  }, [activePage, drawingFile, drawingPreviewUrl, addImageToPage, addSketchToPage, enhanceSketch, applySketchEnhancement, familyId, resetDrawingFlow, aiError])
+  }, [activePage, drawingFile, drawingPreviewUrl, addImageToPage, addSketchToPage, resetDrawingFlow, bgReimagine])
 
   const handleAcceptDrawingResult = useCallback(() => {
     if (!activePage || !drawingResultFile) return
@@ -1576,6 +1574,94 @@ export default function BookEditorPage() {
         onClose={() => setShowPrintSettings(false)}
         onPrint={(s) => { void handlePrint(s) }}
         hasSightWords={(book.sightWords?.length ?? 0) > 0}
+      />
+
+      {/* ── Background reimagine: floating chip while processing ── */}
+      {bgReimagine.job?.status === 'processing' && (
+        <Chip
+          icon={<CircularProgress size={16} />}
+          label="Reimagining..."
+          size="small"
+          sx={{
+            position: 'fixed',
+            bottom: 80,
+            right: 16,
+            zIndex: 1000,
+            bgcolor: 'background.paper',
+            boxShadow: 2,
+          }}
+        />
+      )}
+
+      {/* ── Background reimagine: success notification ── */}
+      {bgReimagine.job?.status === 'done' && !bgReimagine.showChoiceDialog && (
+        <Paper
+          elevation={4}
+          onClick={bgReimagine.openChoiceDialog}
+          sx={{
+            position: 'fixed',
+            bottom: 80,
+            right: 16,
+            left: 16,
+            zIndex: 1000,
+            p: 2,
+            borderRadius: 2,
+            cursor: 'pointer',
+          }}
+        >
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <Box
+              component="img"
+              src={bgReimagine.job.resultUrl}
+              sx={{ width: 60, height: 60, borderRadius: 1, objectFit: 'cover' }}
+            />
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="subtitle2">Drawing reimagined!</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Tap to see what to do with it
+              </Typography>
+            </Box>
+            <IconButton
+              size="small"
+              onClick={(e) => { e.stopPropagation(); bgReimagine.dismissNotification() }}
+            >
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Box>
+        </Paper>
+      )}
+
+      {/* ── Background reimagine: failure snackbar ── */}
+      <Snackbar
+        open={bgReimagine.job?.status === 'failed'}
+        autoHideDuration={6000}
+        onClose={bgReimagine.dismissError}
+      >
+        <Alert severity="warning" onClose={bgReimagine.dismissError} sx={{ width: '100%' }}>
+          {bgReimagine.job?.error ?? 'Reimagine didn\'t work this time — try again or use a different drawing'}
+        </Alert>
+      </Snackbar>
+
+      {/* ── Background reimagine: auto-dismiss notification ── */}
+      <Snackbar
+        open={!!bgReimagine.autoDismissedMessage}
+        autoHideDuration={6000}
+        onClose={() => bgReimagine.setAutoDismissedMessage(null)}
+      >
+        <Alert severity="info" onClose={() => bgReimagine.setAutoDismissedMessage(null)} sx={{ width: '100%' }}>
+          {bgReimagine.autoDismissedMessage}
+        </Alert>
+      </Snackbar>
+
+      {/* ── Background reimagine: choice dialog ── */}
+      <ReimagineResultDialog
+        open={bgReimagine.showChoiceDialog}
+        job={bgReimagine.job}
+        onClose={bgReimagine.dismissNotification}
+        onAddToPage={bgReimagine.handleAddToPage}
+        onMakeSticker={bgReimagine.handleMakeSticker}
+        onSaveToGallery={() => { void bgReimagine.handleSaveToGallery() }}
+        onDiscard={() => { void bgReimagine.handleDiscard() }}
       />
 
       {/* Celebration overlay */}
