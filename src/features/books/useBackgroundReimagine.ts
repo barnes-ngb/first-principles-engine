@@ -23,6 +23,8 @@ interface UseBackgroundReimagineOptions {
   familyId: string
   childId: string
   childName: string
+  /** Book theme ID — influences reimagine style to match the book's visual identity. */
+  bookTheme?: string
   /** Called when user picks "Add to page" */
   onAddToPage: (pageId: string, imageId: string, url: string, storagePath: string) => void
   /** Called to add a sticker to the current page */
@@ -38,6 +40,7 @@ export function useBackgroundReimagine({
   familyId,
   childId,
   childName,
+  bookTheme,
   onAddToPage,
   onAddSticker,
 }: UseBackgroundReimagineOptions) {
@@ -131,6 +134,7 @@ export function useBackgroundReimagine({
           sketchStoragePath: storagePath,
           style,
           caption,
+          theme: bookTheme,
         })
 
         if (result?.url) {
@@ -153,7 +157,7 @@ export function useBackgroundReimagine({
         )
       }
     },
-    [enhanceSketch, familyId],
+    [enhanceSketch, familyId, bookTheme],
   )
 
   // ── Actions on the result ────────────────────────────────────────
