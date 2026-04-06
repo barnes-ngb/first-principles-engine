@@ -549,7 +549,7 @@ export default function TodayChecklist({
                   </Box>
                 )}
                 {/* Scan-based feedback (specific — from photographed page) */}
-                {!item.completed && (() => {
+                {!item.completed && getSparkleMode(item) === 'scan' && (() => {
                   const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
                   const fb = bucket ? scanFeedbackBySubject[bucket] : undefined
                   if (!fb) return null
