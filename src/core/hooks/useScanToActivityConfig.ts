@@ -43,18 +43,16 @@ export function useScanToActivityConfig() {
         ),
       )
 
-      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
-      const scanNorm = normalize(curriculumName)
+      const subject = mapSubjectBucket(curriculumName, detected?.provider ?? null)
 
       const existing = configsSnap.docs.find((d) => {
         const config = d.data()
-        const configName = normalize(config.name ?? '')
-        const configCurr = normalize(config.curriculum ?? '')
         return (
-          configName.includes(scanNorm) ||
-          scanNorm.includes(configName) ||
-          configCurr.includes(scanNorm) ||
-          scanNorm.includes(configCurr)
+          isWorkbookMatch(config.name ?? '', curriculumName) ||
+          isWorkbookMatch(config.curriculum ?? '', curriculumName) ||
+          // Fallback: same subject workbook (one primary workbook per subject)
+          (config.type === 'workbook' &&
+            config.subjectBucket?.toLowerCase() === subject.toLowerCase())
         )
       })
 
@@ -67,17 +65,22 @@ export function useScanToActivityConfig() {
             updates.currentPosition = lessonNumber
           }
         }
+        // If scan name is more specific (longer), upgrade the name
+        const existingName = existing.data().name ?? ''
+        if (curriculumName.length > existingName.length && curriculumName.length < 100) {
+          updates.name = curriculumName
+          updates.curriculum = curriculumName
+        }
         await updateDoc(existing.ref, updates)
         return {
           action: 'updated',
           configId: existing.id,
-          configName: existing.data().name,
+          configName: (updates.name as string) ?? existing.data().name,
           position: lessonNumber,
         }
       }
 
       // CREATE new activity config from scan
-      const subject = mapSubjectBucket(curriculumName, detected?.provider ?? null)
       const ref = doc(activityConfigsCollection(familyId))
       const isCover = (scanResult as WorksheetScanResult & { isCover?: boolean }).isCover === true
       const totalUnits = isCover
@@ -115,6 +118,50 @@ export function useScanToActivityConfig() {
   )
 
   return { syncScanToConfig }
+}
+
+function normalizeForMatch(name: string): string {
+  return (name || '')
+    .toLowerCase()
+    .replace(/^the\s+/i, '')
+    .replace(/\s+level\s+\d+/i, '')
+    .replace(/\s*\(.*?\)/g, '')
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function isWorkbookMatch(configName: string, scanName: string): boolean {
+  const a = normalizeForMatch(configName)
+  const b = normalizeForMatch(scanName)
+
+  if (!a || !b) return false
+
+  // Exact match after normalization
+  if (a === b) return true
+
+  // One contains the other
+  if (a.includes(b) || b.includes(a)) return true
+
+  // Both are GATB — match if same subject
+  const subjects = ['math', 'reading', 'languagearts', 'language', 'phonics', 'spelling']
+  const isGATB = (s: string) =>
+    s.includes('gatb') || s.includes('goodandthebeautiful') || s.includes('goodandbeautiful')
+
+  if (isGATB(a) && isGATB(b)) {
+    for (const subj of subjects) {
+      if (a.includes(subj) && b.includes(subj)) return true
+    }
+  }
+
+  // Subject-based matching for generic names like "Language arts workbook"
+  const genericWorkbook = (s: string) =>
+    s.includes('workbook') && !isGATB(s)
+  if (genericWorkbook(a) || genericWorkbook(b)) {
+    for (const subj of subjects) {
+      if (a.includes(subj) && b.includes(subj)) return true
+    }
+  }
+
+  return false
 }
 
 function mapSubjectBucket(
