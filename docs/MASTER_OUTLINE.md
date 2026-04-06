@@ -129,7 +129,7 @@ Evaluation Chat
 * **Skill Snapshot → Planner pipeline** — plan context slices include skillSnapshot with calibration guidance (skip Secure, practice Emerging, direct-instruct Not Yet, ADDRESS_NOW blocks)
 * **Pattern detection from quest sessions** — after endSession, if 3+ evaluation sessions exist, fires analyzeEvaluationPatterns (non-blocking) to detect conceptual blocks
 * **Word completion blank validation** — prompt rules require blank count === answer length; client-side `validateQuestion()` rejects mismatched questions before display
-* **TTS on math questions** — auto-reads question text on appear; tap prompt or options to replay; mute toggle in header; reading quest TTS is selective (reads prompt for word-ID/rhyming, but not word-completion stimulus)
+* **All quest text tappable for TTS** — every word in prompt, passage, stimulus, and answer options is individually tappable to hear it spoken; passage-level "Read passage aloud" button on comprehension questions; tapping a new word cancels in-progress speech; subtle hover/tap visual affordance on all tappable words; mute toggle in header; auto-reads math questions on appear
 * **Struggling words display fix** — summary shows reconstructed target words (not raw blanked stimuli)
 * 30 unit tests for quest helpers (including 6 new validateQuestion tests)
 
