@@ -133,6 +133,7 @@ interface TodayChecklistProps {
   onSkipToNext?: (nextLesson: number) => void
   onPrintMaterials: () => void
   printingMaterials: boolean
+  scanFeedbackBySubject?: Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
 }
 
 export default function TodayChecklist({
@@ -155,6 +156,7 @@ export default function TodayChecklist({
   onSkipToNext,
   onPrintMaterials,
   printingMaterials,
+  scanFeedbackBySubject = {},
 }: TodayChecklistProps) {
   const navigate = useNavigate()
   const [editingPlan, setEditingPlan] = useState(false)
@@ -546,8 +548,52 @@ export default function TodayChecklist({
                     </Typography>
                   </Box>
                 )}
-                {/* Skip guidance (parent-only, not shown in kid view) */}
-                {item.skipGuidance && !item.completed && (
+                {/* Scan-based feedback (specific — from photographed page) */}
+                {!item.completed && (() => {
+                  const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
+                  const fb = bucket ? scanFeedbackBySubject[bucket] : undefined
+                  if (!fb) return null
+                  const styles = {
+                    'skip': { bg: 'success.50', color: 'success.main', label: 'Skip \u2014 already knows this' },
+                    'quick-review': { bg: 'warning.50', color: 'warning.main', label: 'Quick review' },
+                    'do': { bg: 'info.50', color: 'info.main', label: 'New material \u2014 full time' },
+                    'modify': { bg: 'info.50', color: 'info.main', label: 'Modify approach' },
+                  }
+                  const s = styles[fb.recommendation] || styles['do']
+                  const icon = fb.recommendation === 'skip' ? '\u23ED\uFE0F'
+                    : fb.recommendation === 'quick-review' ? '\u26A1'
+                    : '\uD83C\uDFAF'
+                  return (
+                    <Box sx={{ mt: 0.5, ml: 5, p: 0.75, borderRadius: 1, bgcolor: s.bg }}>
+                      <Typography variant="caption" sx={{ color: s.color, lineHeight: 1.4 }}>
+                        {icon} {s.label}
+                        {fb.topic && <span style={{ fontWeight: 400 }}> \u2014 {fb.topic}</span>}
+                        {fb.estimatedMinutes != null && fb.recommendation !== 'do' && (
+                          <span style={{ fontWeight: 400 }}> (~{fb.estimatedMinutes}m)</span>
+                        )}
+                      </Typography>
+                    </Box>
+                  )
+                })()}
+                {/* "No scan yet" prompt for workbook items */}
+                {!item.completed && getSparkleMode(item) === 'scan' && (() => {
+                  const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
+                  const hasFeedback = bucket ? !!scanFeedbackBySubject[bucket] : false
+                  if (hasFeedback || item.skipGuidance) return null
+                  return (
+                    <Typography
+                      variant="caption"
+                      sx={{ color: 'text.secondary', mt: 0.5, ml: 5, display: 'block', fontSize: '0.7rem' }}
+                    >
+                      {'\uD83D\uDCF7'} Scan a page to see if you should skip or focus here
+                    </Typography>
+                  )
+                })()}
+                {/* Skip guidance (parent-only, not shown in kid view) — hidden when scan feedback exists */}
+                {item.skipGuidance && !item.completed && !(() => {
+                  const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
+                  return bucket ? !!scanFeedbackBySubject[bucket] : false
+                })() && (
                   <Typography
                     variant="caption"
                     sx={{
