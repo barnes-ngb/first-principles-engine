@@ -77,7 +77,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/components/` — Shared UI components (includes SectionErrorBoundary for per-section crash isolation)
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
-- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useSpeechRecognition, useTTS, useActivityConfigs, useScanToActivityConfig)
+- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCertificateProgress, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useSpeechRecognition, useTTS, useActivityConfigs, useScanToActivityConfig)
 - `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
 - `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns
 - `src/core/ai/` — AI service layer, feature flags, useAI hook, prompt templates
@@ -245,7 +245,7 @@ All under `families/{familyId}/`:
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
 - `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns)
 
-### Cloud Functions (19 exported)
+### Cloud Functions (18 exported)
 - `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate)
 - `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
@@ -290,7 +290,7 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 - **ShellyChatPage.tsx (1,653L)** — 23+ useState hooks. Image generation, thread management, follow-up suggestions, image refinement flow. Decomposition candidate after usage patterns stabilize.
 - **WorkshopPage.tsx (1,606L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
 - **chat.ts CF (1,599L)** — Grew +420 from quest expansion. buildQuestPrompt alone is 400+ lines. Consider extracting prompt builders to separate files.
-- **useQuestSession.ts (1,544L)** — Grew from 954L. Quest, comprehension, fluency all in one hook. Consider splitting by quest domain.
+- **useQuestSession.ts (1,545L)** — Grew from 954L. Quest, comprehension, fluency all in one hook. Consider splitting by quest domain.
 - **MyAvatarPage.tsx (1,386L)** — Decomposed from 1,862L. Grew +152 from forge + portal. State management + ceremony flow. Stable.
 - **VoxelCharacter.tsx (1,242L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
 - **Ladder system** — Partially deprecated. Disposition system replacing it. 5 files have TODO comments marking ladder references for removal.

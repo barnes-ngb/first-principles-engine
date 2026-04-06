@@ -1,52 +1,52 @@
-# Code Health Report — 2026-04-05
+# Code Health Report — 2026-04-06
 
 ## Metrics
-- **Total lines:** 113,417
-- **Total files:** 450
-- **Total commits:** 108
+- **Total lines:** ~119,605
+- **Total files:** 466
+- **Total commits:** 106
 - **Test files:** 56
-- **Test lines:** 12,284
-- **Firestore collections:** 31 (via `firestore.ts` collection helpers)
-- **Cloud Functions:** 19 exported (healthCheck, chat, analyzeEvaluationPatterns, weeklyReview, generateWeeklyReviewNow, generateActivity, generateImage, generateAvatarPiece, generateStarterAvatar, transformAvatarPhoto, generateArmorPiece, generateBaseCharacter, generateArmorSheet, generateArmorReference, extractFeatures, generateMinecraftSkin, generateMinecraftFace, enhanceSketch)
+- **Test lines:** 12,206
+- **Firestore collections:** 32 (via `firestore.ts` collection helpers + 2 subcollections)
+- **Cloud Functions:** 18 exported (healthCheck, chat, analyzeEvaluationPatterns, weeklyReview, generateWeeklyReviewNow, generateActivity, generateImage, generateAvatarPiece, generateStarterAvatar, transformAvatarPhoto, generateArmorPiece, generateBaseCharacter, generateArmorSheet, generateArmorReference, extractFeatures, generateMinecraftSkin, generateMinecraftFace, enhanceSketch)
 - **AI task types:** 13 (analyzePatterns, analyzeWorkbook, chat, conundrum, disposition, evaluate, generateStory, plan, quest, scan, shellyChat, weeklyFocus, workshop)
-- **Tests:** 991 passing across 55 test files
+- **Tests:** 1,025 passing across 56 test files
 
 ## Largest Files (over 500 lines)
 
 | File | Lines |
 |------|-------|
-| `src/features/planner-chat/PlannerChatPage.tsx` | 2,184 |
+| `src/features/planner-chat/PlannerChatPage.tsx` | 2,252 |
+| `src/features/books/BookEditorPage.tsx` | 1,886 |
+| `src/features/shelly-chat/ShellyChatPage.tsx` | 1,653 |
 | `src/features/workshop/WorkshopPage.tsx` | 1,606 |
-| `functions/src/ai/chat.ts` | 1,589 |
-| `src/features/shelly-chat/ShellyChatPage.tsx` | 1,528 |
-| `src/features/quest/useQuestSession.ts` | 1,458 |
-| `src/features/books/BookEditorPage.tsx` | 1,458 |
+| `functions/src/ai/chat.ts` | 1,599 |
+| `src/features/quest/useQuestSession.ts` | 1,545 |
 | `src/features/avatar/MyAvatarPage.tsx` | 1,386 |
-| `src/features/avatar/VoxelCharacter.tsx` | 1,290 |
-| `src/features/planner-chat/chatPlanner.logic.ts` | 1,174 |
-| `src/features/records/RecordsPage.tsx` | 1,124 |
-| `src/features/today/KidTodayView.tsx` | 1,082 |
-| `src/features/evaluation/SkillSnapshotPage.tsx` | 1,078 |
-| `src/features/evaluate/EvaluateChatPage.tsx` | 1,055 |
+| `src/features/planner-chat/chatPlanner.logic.ts` | 1,293 |
+| `src/features/avatar/VoxelCharacter.tsx` | 1,242 |
+| `src/features/records/RecordsPage.tsx` | 1,127 |
+| `src/features/today/KidTodayView.tsx` | 1,083 |
+| `src/features/evaluate/EvaluateChatPage.tsx` | 1,060 |
 | `src/features/records/records.logic.test.ts` | 1,053 |
 | `src/features/planner-chat/chatPlanner.logic.test.ts` | 1,051 |
 | `src/features/books/BookshelfPage.tsx` | 1,006 |
 | `src/features/settings/AvatarAdminTab.tsx` | 997 |
+| `src/features/today/TodayPage.tsx` | 982 |
+| `src/features/today/TodayChecklist.tsx` | 973 |
 | `src/features/dad-lab/DadLabPage.tsx` | 969 |
 | `src/features/books/printBook.ts` | 937 |
-| `src/features/today/TodayPage.tsx` | 899 |
+| `functions/src/ai/contextSlices.ts` | 914 |
 | `src/features/avatar/BrothersVoxelScene.tsx` | 865 |
 | `src/features/quest/ReadingQuest.tsx` | 830 |
-| `src/features/dad-lab/LabReportForm.tsx` | 776 |
+| `src/features/dad-lab/LabReportForm.tsx` | 797 |
+| `src/core/types/planning.ts` | 795 |
 | `src/features/workshop/GamePlayView.tsx` | 772 |
 | `src/features/books/BookReaderPage.tsx` | 772 |
-| `functions/src/ai/contextSlices.ts` | 754 |
-| `src/features/today/TodayChecklist.tsx` | 748 |
+| `src/features/books/useBook.ts` | 754 |
 | `src/features/progress/ArmorTab.tsx` | 745 |
-| `src/features/books/useBook.ts` | 742 |
 | `src/core/data/seed.ts` | 704 |
-| `src/core/types/planning.ts` | 684 |
 | `src/features/workshop/workshopUtils.ts` | 675 |
+| `src/features/progress/CurriculumTab.tsx` | 670 |
 | `src/features/ladders/lincolnLadders.ts` | 670 |
 | `src/features/avatar/__tests__/avatarSystem.test.ts` | 651 |
 | `src/features/records/records.logic.ts` | 640 |
@@ -85,18 +85,20 @@
 - Unused imports removed: **0** (codebase is clean — TypeScript `noUnusedLocals` enforces this)
 - Lint issues fixed: **0** (ESLint `--fix` found no auto-fixable issues)
 - Inline handlers extracted: **0** (no inline JSX arrow functions over 20 lines found)
-- Files split: **none** (no files over 2,000-line threshold requiring extraction — PlannerChatPage at 2,184 is the only candidate; see Decomposition Candidates)
+- Files split: **none** (no files over 2,000-line threshold requiring extraction — PlannerChatPage at 2,252 is the only candidate; see Decomposition Candidates)
 - Dead exports removed: **14** (4 interfaces, 1 const, 1 deprecated interface, 10 unused zod inferred types — see below)
 
 ## Issues Found (Not Auto-Fixed)
 
 ### High Priority
-- **None.** Build, lint, and all 991 tests pass cleanly.
+- **None.** Build, lint, and all 1,025 tests pass cleanly.
 
 ### Medium Priority
-- **PlannerChatPage.tsx (2,184 lines)** is the only file over 2,000 lines. Down from ~2,617 noted in CLAUDE.md — decomposition is working. The setup wizard section remains a candidate for extraction but shares state with the chat flow.
+- **PlannerChatPage.tsx (2,252 lines)** is the only file over 2,000 lines. The setup wizard section remains a candidate for extraction but shares state with the chat flow.
+- **BookEditorPage.tsx (1,886 lines)** grew from themes + drawing flows. Second largest component file.
 - **ESLint does not cover `functions/src/`** — the `functions/` directory has its own eslint config that isn't resolvable from the root project's eslint. Consider adding a lint script in `functions/package.json`.
-- **`functions/src/ai/chat.ts` (1,589 lines)** — large task dispatcher with implicit `any` parameters (visible in TSC output). Type annotations for callback parameters would improve safety.
+- **`functions/src/ai/chat.ts` (1,599 lines)** — large task dispatcher with implicit `any` parameters (visible in TSC output). Type annotations for callback parameters would improve safety.
+- **`functions/src/ai/contextSlices.ts` (914 lines)** — grew significantly; context assembly logic is expanding with each new task type.
 
 ### Low Priority
 - **Vite chunk warning:** Main bundle `index-DnjdAqZ2.js` is 3,520 KB (1,038 KB gzipped). Dynamic imports or manual chunks could reduce initial load.
@@ -124,13 +126,14 @@
 
 | File | Lines | Notes |
 |------|-------|-------|
-| `PlannerChatPage.tsx` | 2,184 | Setup wizard is the best extraction candidate. Shares chat/plan/apply state — needs careful prop design. Wizard state (`wizardStep`, `selectedChild`, etc.) is somewhat isolated. |
+| `PlannerChatPage.tsx` | 2,252 | Setup wizard is the best extraction candidate. Shares chat/plan/apply state — needs careful prop design. Wizard state (`wizardStep`, `selectedChild`, etc.) is somewhat isolated. |
+| `BookEditorPage.tsx` | 1,886 | Grew from themes + drawing flows. Sketch/voice/sticker panels could extract. |
+| `ShellyChatPage.tsx` | 1,653 | 23+ useState hooks. Image generation flow, thread management, follow-up suggestions could be separate hooks. |
 | `WorkshopPage.tsx` | 1,606 | Phase-based rendering. Handlers share `currentGame` state across 3 game types. Not urgent. |
-| `functions/src/ai/chat.ts` | 1,589 | Task dispatcher + prompt builders. Could extract prompt building per-task into the tasks/ directory. |
-| `ShellyChatPage.tsx` | 1,528 | 23+ useState hooks. Image generation flow, thread management, follow-up suggestions could be separate hooks. New feature — wait for patterns to stabilize. |
-| `useQuestSession.ts` | 1,458 | Large hook. Quest session state machine could split into phase-specific hooks. |
-| `BookEditorPage.tsx` | 1,458 | Stable. Sketch/voice/sticker panels could extract later. |
-| `MyAvatarPage.tsx` | 1,386 | Down from ~2,445 noted in CLAUDE.md. Good progress. 3D scene, equip panel could separate further. |
+| `functions/src/ai/chat.ts` | 1,599 | Task dispatcher + prompt builders. Could extract prompt building per-task into the tasks/ directory. |
+| `useQuestSession.ts` | 1,545 | Large hook. Quest session state machine could split into phase-specific hooks. |
+| `MyAvatarPage.tsx` | 1,386 | Decomposed from ~2,445. 3D scene, equip panel could separate further. |
+| `chatPlanner.logic.ts` | 1,293 | Core planner logic. Growing with each planning improvement. |
 
 ## Charter Alignment Check
 
