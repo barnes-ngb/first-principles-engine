@@ -119,6 +119,13 @@ export const enhanceSketch = onCall(
     const provider = createOpenAiProvider(openaiApiKey.value());
     const prompt = buildEnhancePrompt(style, safeCaption);
 
+    console.log("enhanceSketch: starting API call", {
+      sketchStoragePath,
+      style: style ?? "storybook",
+      sketchBufferLength: sketchBuffer.length,
+      promptLength: prompt.length,
+    });
+
     let imageResponse;
     try {
       imageResponse = await provider.editImage(
@@ -157,6 +164,12 @@ export const enhanceSketch = onCall(
     }
 
     // ── Save enhanced image to Storage ─────────────────────────
+    console.log("enhanceSketch: API call completed", {
+      hasB64Data: !!imageResponse.b64Data,
+      hasUrl: !!imageResponse.url,
+      b64DataLength: imageResponse.b64Data?.length ?? 0,
+    });
+
     if (!imageResponse.b64Data) {
       throw new HttpsError(
         "internal",
