@@ -77,13 +77,14 @@ const items = snapshot.docs.map((doc) => ({
 - `src/components/` — Shared UI components (includes SectionErrorBoundary for per-section crash isolation)
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
-- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useSpeechRecognition, useTTS)
+- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useSpeechRecognition, useTTS, useActivityConfigs, useScanToActivityConfig)
 - `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
 - `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns
 - `src/core/ai/` — AI service layer, feature flags, useAI hook, prompt templates
 - `src/core/profile/` — Profile context provider and hook (family + children)
 - `src/core/xp/` — XP ledger, armor tiers, armor unlock logic
 - `src/core/avatar/` — Daily armor session management (`getDailyArmorSession.ts`)
+- `src/core/curriculum/` — Curriculum knowledge map, skill mapping, finding integration (curriculumMap, mapFindingToNode, skillStatus, updateSkillMapFromFindings, useSkillMap)
 - `src/core/data/` — Database seed data
 - `src/features/auth/` — Auth guard route wrapper
 - `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, decomposed panels (ArmorPieceGallery, ArmorVerseCard, AvatarPhotoUpload, AvatarHeroBanner, AvatarCharacterDisplay, ArmorSuitUpPanel, AvatarCustomizer, speakVerse), VoxelCharacter (Three.js character, armor, poses, materials, camera), `voxel/` sub-module (armor meshes, pose definitions)
@@ -98,7 +99,9 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/not-found/` — 404 page
 - `src/features/planner/` — TeachHelperDialog (shared)
 - `src/features/planner-chat/` — Plan My Week (AI chat planner, decomposed: PlannerChatPage + PlannerSetupWizard, WeekFocusPanel, PlanDayCards, PlannerChatMessages)
-- `src/features/progress/` — Progress tabs (learning profile, ladders, engine, snapshot, milestones, word wall, armor)
+- `src/features/progress/` — Progress tabs (learning profile, ladders, engine, snapshot, milestones, word wall, armor, curriculum)
+- `src/features/progress/CurriculumTab.tsx` — Curriculum management tab (activity configs)
+- `src/features/progress/learning-map/` — Learning Map UI components (visual curriculum knowledge map)
 - `src/features/progress/DispositionProfile.tsx` — AI disposition narrative from day log data
 - `src/features/quest/` — Knowledge Mine (interactive reading quest)
 - `src/features/records/` — Hours, compliance, evaluations, portfolio
@@ -201,6 +204,8 @@ All under `families/{familyId}/`:
 | `scans` | Curriculum photo scan records |
 | `shellyChatThreads` | Shelly AI chat thread roots |
 | `chapterResponses` | Read-aloud chapter discussion responses per child |
+| `bookThemes` | Book theme presets and custom themes |
+| `childSkillMaps` | Per-child curriculum knowledge maps |
 
 **Subcollections:**
 - `shellyChatThreads/{threadId}/messages` — Messages within a Shelly chat thread
@@ -280,12 +285,16 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 
 ## Known Technical Debt
 
-- **PlannerChatPage.tsx (2,112L)** — Decomposed render (800→500L) but state management is still ~1,600L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
-- **WorkshopPage.tsx (1,578L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
-- **BookEditorPage.tsx (1,419L)** — Stable, handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
-- **VoxelCharacter.tsx (1,290L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
-- **MyAvatarPage.tsx (1,293L)** — Decomposed from 1,862L. Remaining code is state management + ceremony flow. Stable.
+- **PlannerChatPage.tsx (2,252L)** — Decomposed render (800→500L) but state management is still ~1,700L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **BookEditorPage.tsx (1,886L)** — Grew from themes + drawing flows. Handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
+- **ShellyChatPage.tsx (1,653L)** — 23+ useState hooks. Image generation, thread management, follow-up suggestions, image refinement flow. Decomposition candidate after usage patterns stabilize.
+- **WorkshopPage.tsx (1,606L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
+- **chat.ts CF (1,599L)** — Grew +420 from quest expansion. buildQuestPrompt alone is 400+ lines. Consider extracting prompt builders to separate files.
+- **useQuestSession.ts (1,544L)** — Grew from 954L. Quest, comprehension, fluency all in one hook. Consider splitting by quest domain.
+- **MyAvatarPage.tsx (1,386L)** — Decomposed from 1,862L. Grew +152 from forge + portal. State management + ceremony flow. Stable.
+- **VoxelCharacter.tsx (1,242L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
 - **Ladder system** — Partially deprecated. Disposition system replacing it. 5 files have TODO comments marking ladder references for removal.
 - **evaluate.ts (weekly review)** — Now uses CHARTER_PREAMBLE + addendum, but still separate from the task system. Not in task registry.
-- **ShellyChatPage.tsx (1,456L)** — New feature, 23+ useState hooks. Image generation, thread management, follow-up suggestions, image refinement flow. Decomposition candidate after usage patterns stabilize.
+- **WorkbookConfig → ActivityConfig migration** — Both systems exist. ActivityConfig is the new primary (66 refs vs 27). workbookConfigs still read by quest starting level check and certificate scan. Plan: complete migration, remove workbookConfig references.
+- **Bundle size** — Main chunk is 3.4MB (1MB gzipped). Should code-split Three.js, jsPDF, and heavy features.
 - **Hours partial-day edge** — If a day has some blocks with actualMinutes and others without, only tracked blocks count. By design but undocumented.

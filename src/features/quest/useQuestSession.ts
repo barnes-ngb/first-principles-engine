@@ -6,6 +6,7 @@ import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMap
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
+// TODO: Migrate to activityConfigs. WorkbookConfig is legacy — see migrateActivityConfigs.ts
 import { db, evaluationSessionsCollection, skillSnapshotsCollection, workbookConfigsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'

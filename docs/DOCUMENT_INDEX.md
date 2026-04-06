@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-04-02.
+> Where everything lives. Updated 2026-04-05.
 
 ---
 
@@ -8,17 +8,19 @@
 
 | Document | Status | Notes |
 |---|---|---|
-| `MASTER_OUTLINE.md` | **CURRENT** (v15) | Single source of truth: features, status, sprint history. Updated Apr 1: Shelly Chat context tabs (Lincoln/London/General), deep child context loading, follow-up suggestions |
+| `MASTER_OUTLINE.md` | **CURRENT** (v15) | Single source of truth: features, status, sprint history. Updated Apr 5: Two-currency economy, curriculum pipeline, activity configs, Learning Map, quest expansion, book themes, planning improvements |
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
-| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — lists 31 collections but 6 are legacy/removed (`sessions`, `projects`, `weeklyScores`, `labSessions`, `plannerSessions`, `sightWordLists`); missing 3 newer collections (`storyGames`, `scans`, `shellyChatThreads`). CLAUDE.md table is now authoritative at 28 collections + 2 subcollections. |
+| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative at 31 collections + 2 subcollections. |
 | `WEEKLY_CONUNDRUM_ARC.md` | **CURRENT** | Weekly conundrum story arc design — Stonebridge narrative, recurring characters, ethical reasoning scenarios |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
 | `ENGINE_V2.md` | **CURRENT** | Learning framework: family snapshot, curriculum mapping, energy modes, weekly rhythm |
 | `FIRST_PRINCIPLES_ALIGNMENT.md` | **NEW** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
-| `GAME_WORLD_ECONOMY.md` | **NEW** | Two-currency economy design (XP + Diamonds), choice-based armor forging, Stonebridge world |
+| `GAME_WORLD_ECONOMY.md` | **CURRENT** | Two-currency economy design (XP + Diamonds), choice-based armor forging, Stonebridge world |
+| `HEALTH_REPORT.md` | **CURRENT** | Weekly code health metrics — line counts, test coverage, bundle size, tech debt tracking |
+| `PROFILE_LIMITS_AUDIT.md` | **CURRENT** | Profile-based rate limits and experience audit — AI usage caps, generation limits, cost controls |
 | `SYSTEM_PROMPTS.md` | **CURRENT** (v4) | Task dispatch, model selection, context slices — 13 task types including scan + shellyChat |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
@@ -49,6 +51,8 @@
 | `FIRESTORE_AUDIT.md` | Working on data model, indexes, collections |
 | `WEEKLY_CONUNDRUM_ARC.md` | Working on conundrums, weekly theme integration |
 | `GAME_WORLD_ECONOMY.md` | Working on XP/Diamond economy, armor forging, tier progression |
+| `HEALTH_REPORT.md` | Working on code health, tech debt, bundle size optimization |
+| `PROFILE_LIMITS_AUDIT.md` | Working on rate limits, AI usage caps, cost controls |
 | `08_RUNBOOK.md` | Working on deployment, backups, operations |
 | `barnes-testing-guide-v2.md` | Working on tests (stale — needs Knowledge Mine, Workshop, Books, Armor coverage) |
 
