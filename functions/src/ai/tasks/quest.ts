@@ -29,6 +29,7 @@ export const handleQuest = async (
   let suggestedStartLevel: number | undefined;
   if (domain === "reading" || !domain) {
     try {
+      // TODO: Migrate to activityConfigs. WorkbookConfig is legacy — see migrateActivityConfigs.ts
       const wbSnap = await db
         .collection(`families/${familyId}/workbookConfigs`)
         .where("childId", "==", childId)

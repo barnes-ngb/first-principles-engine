@@ -1,4 +1,4 @@
-Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — April 1, 2026 **Status:** Updated — Shelly Chat context tabs (Lincoln/London/General), deep child context loading, follow-up suggestions, markdown rendering Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~100k lines TypeScript (src/ ~91k + functions/ ~9k), 52 test files, 600+ tests, 113 commits, 28 Firestore collections, 18 Cloud Functions, 13 chat task types, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
+Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — April 5, 2026 **Status:** Updated — Two-currency economy, curriculum pipeline, activity configs, Learning Map, quest expansion, book themes, planning improvements, SDK consolidation, 13 bug fixes Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: ~119k lines TypeScript (src/ ~109k + functions/ ~10k), 57 test files, 1000+ tests, 1,244+ commits, 31 Firestore collections, 18 Cloud Functions, 13 chat task types, 27 routes What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Books, Ask AI, Game Workshop, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
 * Plan-first layout with daily checklist
 * Energy selector (Normal/Low/Overwhelmed → MVD mode)
 * Week Focus card (theme, virtue, scripture, heart question)
@@ -31,6 +31,48 @@ Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — Apr
 * Cloud Function: `chat` with `taskType: 'scan'` — Claude analyzes photo for curriculum content
 * Scan records saved to `families/{familyId}/scans`
 
+### Activity Configs
+* Structured activity configs replacing routine text + workbook configs
+* `ActivityConfig` type with curriculum tracking, frequency, schedule ordering
+* Activity types: formation, workbook, routine, activity, app, evaluation
+* Frequency options: daily, 3x/week, 2x/week, 1x/week, as-needed
+* Migration from workbookConfigs → activityConfigs on first load
+* Curriculum tab on Progress page for activity management
+* Default activity configs generated from scan + skill snapshot
+* Completed activities auto-filter from planner context
+* Scans update currentPosition on matching activity configs
+* `activityConfigs` Firestore collection
+
+### Learning Map
+* Visual curriculum knowledge map in Progress page
+* Domain sections (Reading, Math, Speech, etc.) with skill nodes
+* Skill nodes connected to actual quest/evaluation finding data
+* Skill detail drawer with status, evidence, and recommendations
+* `childSkillMaps` Firestore collection
+* `src/core/curriculum/` module (curriculumMap, mapFindingToNode, skillStatus, updateSkillMapFromFindings, useSkillMap)
+
+### Reading Comprehension Quest
+* Quest Levels 7-10 for advanced readers
+* Level 9-10: passage-based inference questions with reading comprehension
+* Multi-syllable words, prefixes, vocabulary at higher levels
+* Quest starting level calibrated from curriculum completion data
+
+### Fluency Practice
+* Timed fluency sessions with WPM (words per minute) tracking
+* Fluency session display in Records evaluations tab
+* Scheduled as real checklist items in weekly plan (like Knowledge Mine)
+
+### Book Themes
+* 15 preset themes + custom theme creation
+* Theme-aware generation — reimagine and AI scene gen match book theme style
+* `bookThemes` Firestore collection
+* Drawing choice dialog (Sketch, Full Reimagine, Upload)
+* Holidays theme preset included
+
+### PWA
+* Progressive Web App manifest with Sunny golden retriever icon
+* Installable on mobile devices
+
 Plan My Week
 * Page title "Plan My Week" with subtitle "Set up your week, review the plan, and you're done."
 * **Auto-suggested Week Focus** — AI pre-fills theme, virtue, scripture, heart question on page load (editable)
@@ -55,7 +97,7 @@ Plan My Week
 * **Daily variation / rotation** — Support skills (handwriting, sight words, booster cards, memory cards, language arts) rotate across the week (2-3 days each) instead of appearing identically every day. Monday is fullest, Friday is lightest.
 * **Day-aware time budgets** — Mon/Tue full day (3-3.5h), Wed/Thu standard (2.5-3h), Friday lighter (2-2.5h). Item count adjusts to fit.
 * **Read-aloud as distinct block** — Family read-aloud book (e.g. Narnia) placed after core academics, before support skills, with chapter question in contentGuide field.
-* **Plan My Week decomposition (completed):** PlannerChatPage (2,112L) + PlannerSetupWizard (201L) + WeekFocusPanel (88L) + PlanDayCards (104L) + PlannerChatMessages (65L). Render reduced 800→500L; state management still unified in main page.
+* **Plan My Week decomposition (completed):** PlannerChatPage (2,252L) + PlannerSetupWizard (201L) + WeekFocusPanel (88L) + PlanDayCards (104L) + PlannerChatMessages (65L). Render reduced 800→500L; state management still unified in main page.
 
 Evaluation Chat
 * Shelly-guided reading diagnostic, AI walks through structured assessment levels
@@ -169,7 +211,7 @@ My Books (Book Builder + AI Story Generator)
 * Tier upgrade — all 6 pieces collected → full-set celebration, new tier sheet generates in parallel, before/after reveal
 * Parent controls — Settings → Avatar & XP tab: add/subtract XP, delete pieces, reset avatar, force tier upgrade (testing), activity log
 * Daily session — DailyArmorSession per child per date; resets at midnight; tracks applied pieces
-* **MyAvatarPage decomposition (completed):** MyAvatarPage (1,234L) + ArmorPieceGallery (271L) + ArmorVerseCard (169L) + AvatarPhotoUpload (250L) + AvatarHeroBanner (199L) + AvatarCharacterDisplay (288L) + ArmorSuitUpPanel (296L) + AvatarCustomizer (133L) + speakVerse (19L)
+* **MyAvatarPage decomposition (completed):** MyAvatarPage (1,386L) + ArmorPieceGallery (271L) + ArmorVerseCard (169L) + AvatarPhotoUpload (250L) + AvatarHeroBanner (199L) + AvatarCharacterDisplay (288L) + ArmorSuitUpPanel (296L) + AvatarCustomizer (133L) + speakVerse (19L)
 
 ### 3D Avatar — Armor of God System
 
@@ -308,7 +350,7 @@ Progress
 * FAB on parent Today page for quick access
 * Parent nav: "Ask AI" (last item)
 * Saves to `families/{familyId}/shellyChatThreads` (tagged with chatContext) + messages subcollection
-* Firebase Storage: `families/{familyId}/chat-uploads/` for uploaded images Cloud Functions (18 exported, 13 task types)
+* Firebase Storage: `families/{familyId}/chat-uploads/` for uploaded images Cloud Functions (18 exported, 13 chat task types)
 1. `chat` — Task dispatch (13 task types): plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat (context-aware general chat + vision analysis), chat, generate. shellyChat loads child-specific context (skill snapshot, evals, engagement, disposition, sight words, today's plan) based on chatContext. Supports multi-part content for image analysis via Claude vision.
 2. `weeklyReview` — Scheduled Sunday 7pm CT
 3. `generateWeeklyReviewNow` — Manual trigger
@@ -325,7 +367,7 @@ Progress
 - Workshop: story inputs + skill snapshot for challenge calibration + game structure constraints + adventure tree generation + card game generation + card fix suggestions
 - Pattern analysis: child profile + skill snapshot + eval findings + conceptual blocks
 - Engagement data compressed to summary format (reduces tokens ~60%)
-- Token usage logged per task type to aiUsage collection Firestore Collections (29 in firestore.ts) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, activityConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, dadLabReports, books, sightWordProgress, xpLedger, dailyArmorSessions, stickerLibrary, storyGames, evaluations, scans, shellyChatThreads
+- Token usage logged per task type to aiUsage collection Firestore Collections (31 in firestore.ts) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, activityConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, dadLabReports, books, sightWordProgress, xpLedger, dailyArmorSessions, stickerLibrary, storyGames, evaluations, scans, shellyChatThreads, bookThemes, childSkillMaps, chapterResponses
 
 * `avatarProfiles` — per-child avatar data (features, XP, tier, equipped pieces, customization, forgedPieces, unlockedTiers)
 * `xpLedger` — append-only XP/Diamond event history per child (currencyType: 'xp' | 'diamond', category, itemId fields)
@@ -439,6 +481,7 @@ Audit Mar 29-31 Architecture audit: dead code cleanup, TodayPage decomposition, 
 Shelly Chat  Mar 31  Shelly's AI Chat: persistent threads, Claude with family context, inline DALL-E image gen, image upload + Claude vision analysis, prompt refinement flow with tappable options, thread drawer (rename/archive), suggestion buttons, pre-seeded chat utility, FAB on Today, parent nav entry
 Shelly Chat  Apr 1  Shelly's AI Chat: context tabs (Lincoln/London/General), persistent threads, deep child context (skill snapshot + evals + engagement + disposition + sight words + today's plan), markdown rendering, follow-up suggestions, DALL-E with prompt refinement, image upload + Claude vision, thread drawer, pre-seeded chat utility, FAB on Today, parent nav entry
 Economy v1  Apr 4  Two-currency system (XP + Diamonds), choice-based armor forging with verse engagement, diamond earn sources (quest/teach-back/Dad Lab/workshop/conundrum/extra activity/books), forge costs per tier, XP bar + diamond count HUD, portal moments between tier biomes
+Apr 4-5  Apr 4-5  Two-currency economy (XP+Diamonds, forge, portal), curriculum pipeline (certificate scan, GATB map, coverage reframe), activity configs, Learning Map, quest expansion (comprehension, fluency, speech), book themes, planning improvements, SDK consolidation, response caching, 13 bug fixes
 
 Removed Features (Cleanup Sprint, Mar 24-25)
 * Sessions (1,720 lines) — orphaned feature with no nav links; sessionsCollection removed
@@ -514,7 +557,7 @@ Key Design Decisions
 | `src/app/AppShell.tsx` | Nav structure (parent + kid) |
 | `src/app/router.tsx` | All routes (21 pages + 6 redirects) |
 | `src/core/types/index.ts` | Barrel re-export of split type files (common, family, planning, evaluation, xp, books, compliance, dadlab, workshop, skillTags) |
-| `src/core/firebase/firestore.ts` | All 28 collection references |
+| `src/core/firebase/firestore.ts` | All 31 collection references |
 | `src/core/ai/useAI.ts` | Chat + generateImage hooks |
 | `src/core/xp/addXpEvent.ts` | XP writer with dedup guards |
 | `src/core/xp/checkAndUnlockArmor.ts` | Tier unlock + sheet generation trigger |
@@ -522,6 +565,7 @@ Key Design Decisions
 | `src/core/utils/perf.ts` | Performance measurement helpers |
 | `functions/src/ai/chat.ts` | AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) |
 | `functions/src/ai/imageGen.ts` | DALL-E 3 + gpt-image-1 routing |
+| `src/core/curriculum/` | Curriculum knowledge map, skill mapping, finding integration |
 | `functions/src/ai/tasks/` | Chat task registry (13 handlers: plan, chat, evaluate, quest, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, workshop, scan, shellyChat + analyzePatterns export) |
 | `functions/src/ai/imageTasks/` | Image task registry (11 handlers) |
 | `functions/src/ai/contextSlices.ts` | Task-specific context assembly + engagement compression |
@@ -539,14 +583,16 @@ Key Design Decisions
 
 ### Architecture Notes
 
-#### Top 5 Largest Files
+#### Top 7 Largest Files
 | File | Lines | Status |
 |------|-------|--------|
-| `PlannerChatPage.tsx` | 2,112 | Decomposed render (800→500L), state management unified. Stable. |
-| `WorkshopPage.tsx` | 1,549 | Stable — phase-based rendering, shared currentGame state |
-| `BookEditorPage.tsx` | 1,419 | Stable — clear section boundaries |
-| `VoxelCharacter.tsx` | 1,264 | Three.js render code. Leave as-is. |
-| `MyAvatarPage.tsx` | 1,234 | Decomposed from 1,862L. State + ceremony flow. Stable. |
+| `PlannerChatPage.tsx` | 2,252 | Grew +140 from plan improvements |
+| `BookEditorPage.tsx` | 1,886 | Grew +467 from themes + drawing flows |
+| `ShellyChatPage.tsx` | 1,653 | Grew +197 from error handling |
+| `WorkshopPage.tsx` | 1,606 | Stable |
+| `chat.ts (CF)` | 1,599 | Grew +420 from quest expansion |
+| `useQuestSession.ts` | 1,544 | Grew +590 from quest levels + fluency |
+| `MyAvatarPage.tsx` | 1,386 | Grew +152 from forge + portal |
 
 #### Decompositions (All Completed)
 
@@ -565,13 +611,13 @@ Key Design Decisions
 - `KidChapterResponse.tsx` (159L) — chapter question response
 - `KidCelebration.tsx` (117L) — completion celebration
 
-**PlannerChatPage** — Original: 2,363L → Shell: 2,112L + 4 extracted components (render 800→500L)
+**PlannerChatPage** — Original: 2,363L → Shell: 2,252L + 4 extracted components (render 800→500L)
 - `PlannerSetupWizard.tsx` (201L) — first-visit setup wizard
 - `PlanDayCards.tsx` (104L) — day card rendering in plan preview
 - `WeekFocusPanel.tsx` (88L) — week focus display panel
 - `PlannerChatMessages.tsx` (65L) — chat message rendering
 
-**MyAvatarPage** — Original: 1,862L → Shell: 1,234L + 8 extracted components
+**MyAvatarPage** — Original: 1,862L → Shell: 1,386L + 8 extracted components
 - `ArmorSuitUpPanel.tsx` (296L) — daily armor suit-up flow
 - `AvatarCharacterDisplay.tsx` (288L) — character display wrapper
 - `ArmorPieceGallery.tsx` (271L) — armor piece card gallery
@@ -580,6 +626,10 @@ Key Design Decisions
 - `ArmorVerseCard.tsx` (169L) — verse card with TTS
 - `AvatarCustomizer.tsx` (133L) — customization UI (dye, emblems, crests)
 - `speakVerse.ts` (19L) — verse TTS utility
+
+#### Decomposition Candidates
+- **useQuestSession.ts (1,544L)** — Grew from 954L. Quest, comprehension, fluency all in one hook. Consider splitting by quest domain.
+- **chat.ts (1,599L)** — buildQuestPrompt alone is 400+ lines. Consider extracting prompt builders to separate files.
 
 #### Ladder System Deprecation
 - Partially deprecated. Disposition system (curiosity, persistence, articulation, self-awareness, ownership) is replacing ladder-based tracking.
@@ -604,10 +654,12 @@ Key Design Decisions
 - `families/{familyId}/chat-uploads/{threadId}/{timestamp}.jpg` — user-uploaded chat images (Shelly's AI Chat)
 
 #### Known Technical Debt
-- **PlannerChatPage.tsx (2,112L)** — Decomposed render (800→500L) but state management is still ~1,600L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **PlannerChatPage.tsx (2,252L)** — Decomposed render (800→500L) but state management is still ~1,700L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
 - **evaluate.ts (weekly review)** — Now uses CHARTER_PREAMBLE + addendum, but still separate from the task system. Not in task registry.
 - **Hours partial-day edge** — If a day has some blocks with actualMinutes and others without, only tracked blocks count. By design but undocumented.
 - **Dead `sessions` collection** — Fully removed (PR #651). No orphaned references remain.
+- **WorkbookConfig → ActivityConfig migration** — Both systems exist. ActivityConfig is the new primary (66 refs vs 27). workbookConfigs still read by quest starting level check and certificate scan. Plan: complete migration, remove workbookConfig references.
+- **Bundle size** — Main chunk is 3.4MB (1MB gzipped). Should code-split Three.js, jsPDF, and heavy features.
 
 #### Avatar / Three.js Architecture
 - Three.js scene lifecycle managed in a single React component with `useEffect` cleanup
@@ -661,11 +713,11 @@ Architecture Review Notes (March 29, 2026) The following areas are flagged for a
 * XP system — xpLedger uses dedup guard pattern; totalXp computed from full ledger on every award (O(n), fix pending)
 * Avatar generation costs — DALL-E 3 sheet generation per tier per child; when to generate vs cache; cost implications at scale
 * Cloud Function sprawl — chat function handles 13 task types; generateImage handles 12 image tasks; whether these should be split into separate functions
-* Firestore collection count — 27 formal collections + `wordProgress` raw subcollection reference in quest.ts
+* Firestore collection count — 31 formal collections + `wordProgress` raw subcollection reference in quest.ts
 * Client-side image processing — cropArmorSheet, sketch cleanup, and print PDF all do heavy canvas work client-side; perf on low-end devices
 * AI context pipeline size — system prompt includes many data sources; token cost and latency implications
 * AI prompt drift — 3 different patterns for system prompt construction across task handlers; consolidation pending
 * Type safety — types split across 10 files (common, family, planning, evaluation, xp, books, compliance, dadlab, workshop, skillTags) with barrel re-export via index.ts
-* Decomposition queue — all 4 targets completed (TodayPage, KidTodayView, PlannerChatPage, MyAvatarPage). Next largest files are WorkshopPage (1,549L) and BookEditorPage (1,419L), both stable.
+* Decomposition queue — all 4 targets completed (TodayPage, KidTodayView, PlannerChatPage, MyAvatarPage). Next largest files are BookEditorPage (1,886L), ShellyChatPage (1,653L), WorkshopPage (1,606L). New candidates: useQuestSession.ts (1,544L), chat.ts CF (1,599L).
 
-Last updated: April 1, 2026
+Last updated: April 5, 2026

@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { doc, getDocs, query, setDoc, updateDoc, where, serverTimestamp } from 'firebase/firestore'
 
+// TODO: Migrate to activityConfigs. WorkbookConfig is legacy — see migrateActivityConfigs.ts
 import { workbookConfigsCollection, workbookConfigDocId, normalizeCurriculumKey } from '../firebase/firestore'
 import type { CertificateScanResult, WorkbookConfig, CurriculumMeta } from '../types'
 import { SubjectBucket } from '../types/enums'
