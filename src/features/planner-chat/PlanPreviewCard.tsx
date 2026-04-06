@@ -6,7 +6,12 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Popover from '@mui/material/Popover'
 import Stack from '@mui/material/Stack'
@@ -15,6 +20,16 @@ import Typography from '@mui/material/Typography'
 
 import type { DraftPlanItem, DraftWeeklyPlan } from '../../core/types'
 import { dayTotalMinutes } from './chatPlanner.logic'
+
+/** Block display metadata for plan preview grouping. */
+const BLOCK_HEADER: Record<string, { label: string; color: string }> = {
+  readaloud: { label: 'Paired \u2014 happen at the same time', color: 'info.main' },
+  choice: { label: "Lincoln\u2019s choice (do both, pick order)", color: 'warning.main' },
+  flex: { label: 'Flex \u2014 end of day', color: 'text.secondary' },
+}
+
+/** Ordered list of blocks for consistent rendering. */
+const BLOCK_ORDER = ['formation', 'readaloud', 'choice', 'core-reading', 'core-math', 'flex', 'independent', 'other'] as const
 
 const QUESTION_TYPE_EMOJI: Record<string, string> = {
   comprehension: '\uD83D\uDD0D',
@@ -100,6 +115,7 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
 
 export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
+  const [removeConfirm, setRemoveConfirm] = useState<{ dayIndex: number; itemIndex: number; title: string } | null>(null)
 
   const isRoutineItem = (item: DraftPlanItem) => item.category === 'must-do' || item.mvdEssential === true
 
@@ -237,7 +253,7 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                     </IconButton>
                     <IconButton
                       size="small"
-                      onClick={() => onRemoveItem(dayIndex, itemIndex)}
+                      onClick={() => setRemoveConfirm({ dayIndex, itemIndex, title: item.title })}
                       sx={{ p: 0.25 }}
                     >
                       <CloseIcon sx={{ fontSize: 14 }} />
@@ -272,76 +288,170 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
               <Typography variant="body2" color="text.secondary" sx={{ pl: 1 }}>
                 No items
               </Typography>
-            ) : (
-              <>
-                {/* ROUTINE section — muted, same every day */}
-                {routineItems.length > 0 && (
-                  <Box sx={{ pl: 1, mb: 0.5 }}>
-                    <Typography
-                      variant="caption"
-                      color="text.disabled"
-                      sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, fontSize: '0.65rem' }}
-                    >
-                      Routine
-                    </Typography>
-                    <Stack spacing={0}>
-                      {routineItems.map(item => renderItem(item, true))}
-                    </Stack>
-                  </Box>
-                )}
+            ) : (() => {
+              // Group items by block for structured display
+              const hasBlocks = day.items.some(item => item.block)
 
-                {/* TODAY'S FOCUS section — highlighted, themed */}
-                {focusItems.length > 0 && (
-                  <Box
-                    sx={{
-                      pl: 1,
-                      mt: 0.5,
-                      ml: 0.5,
-                      borderLeft: '3px solid',
-                      borderColor: 'secondary.main',
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="secondary.main"
-                      sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6 }}
-                    >
-                      Today&apos;s Focus{focusItems.length >= 3 ? ' \u00b7 Choose 2' : ''}
-                    </Typography>
-                    <Stack spacing={0.25}>
-                      {focusItems.map(item => renderItem(item, false))}
-                    </Stack>
-                  </Box>
-                )}
+              if (hasBlocks) {
+                // Block-based grouping
+                const blockGroups = new Map<string, DraftPlanItem[]>()
+                for (const item of day.items) {
+                  const key = item.block || 'other'
+                  if (!blockGroups.has(key)) blockGroups.set(key, [])
+                  blockGroups.get(key)!.push(item)
+                }
 
-                {/* Chapter question for the day */}
-                {day.chapterQuestion && (
-                  <Box
-                    sx={{
-                      mt: 1,
-                      ml: 1,
-                      p: 1.25,
-                      bgcolor: 'grey.50',
-                      borderRadius: 1.5,
-                      border: '1px solid',
-                      borderColor: 'divider',
-                    }}
-                  >
-                    <Stack direction="row" spacing={0.5} alignItems="center">
-                      <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                        {questionTypeEmoji(day.chapterQuestion.questionType)} {day.chapterQuestion.book} — {day.chapterQuestion.chapter}
+                // Render in block order
+                const orderedBlocks = BLOCK_ORDER.filter(b => blockGroups.has(b))
+
+                return (
+                  <>
+                    {orderedBlocks.map(blockName => {
+                      const blockItems = blockGroups.get(blockName)!
+                      const header = BLOCK_HEADER[blockName]
+
+                      return (
+                        <Box key={blockName} sx={{ mb: 1, pl: 1 }}>
+                          {header && (
+                            <Typography
+                              variant="caption"
+                              color={header.color}
+                              sx={{ fontWeight: 500, mb: 0.25, display: 'block', fontSize: '0.7rem' }}
+                            >
+                              {header.label}
+                            </Typography>
+                          )}
+                          <Stack spacing={0}>
+                            {blockItems.map(item => renderItem(item, isRoutineItem(item)))}
+                          </Stack>
+                        </Box>
+                      )
+                    })}
+
+                    {/* Chapter question for the day */}
+                    {day.chapterQuestion && (
+                      <Box
+                        sx={{
+                          mt: 1,
+                          ml: 1,
+                          p: 1.25,
+                          bgcolor: 'grey.50',
+                          borderRadius: 1.5,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                        }}
+                      >
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                            {questionTypeEmoji(day.chapterQuestion.questionType)} {day.chapterQuestion.book} — {day.chapterQuestion.chapter}
+                          </Typography>
+                        </Stack>
+                        <Typography variant="body2" sx={{ fontStyle: 'italic', mt: 0.5 }}>
+                          &ldquo;{day.chapterQuestion.question}&rdquo;
+                        </Typography>
+                      </Box>
+                    )}
+                  </>
+                )
+              }
+
+              // Fallback: legacy routine/focus split when no blocks present
+              return (
+                <>
+                  {/* ROUTINE section — muted, same every day */}
+                  {routineItems.length > 0 && (
+                    <Box sx={{ pl: 1, mb: 0.5 }}>
+                      <Typography
+                        variant="caption"
+                        color="text.disabled"
+                        sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, fontSize: '0.65rem' }}
+                      >
+                        Routine
                       </Typography>
-                    </Stack>
-                    <Typography variant="body2" sx={{ fontStyle: 'italic', mt: 0.5 }}>
-                      &ldquo;{day.chapterQuestion.question}&rdquo;
-                    </Typography>
-                  </Box>
-                )}
-              </>
-            )}
+                      <Stack spacing={0}>
+                        {routineItems.map(item => renderItem(item, true))}
+                      </Stack>
+                    </Box>
+                  )}
+
+                  {/* TODAY'S FOCUS section — highlighted, themed */}
+                  {focusItems.length > 0 && (
+                    <Box
+                      sx={{
+                        pl: 1,
+                        mt: 0.5,
+                        ml: 0.5,
+                        borderLeft: '3px solid',
+                        borderColor: 'secondary.main',
+                      }}
+                    >
+                      <Typography
+                        variant="caption"
+                        color="secondary.main"
+                        sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6 }}
+                      >
+                        Today&apos;s Focus{focusItems.length >= 3 ? ' \u00b7 Choose 2' : ''}
+                      </Typography>
+                      <Stack spacing={0.25}>
+                        {focusItems.map(item => renderItem(item, false))}
+                      </Stack>
+                    </Box>
+                  )}
+
+                  {/* Chapter question for the day */}
+                  {day.chapterQuestion && (
+                    <Box
+                      sx={{
+                        mt: 1,
+                        ml: 1,
+                        p: 1.25,
+                        bgcolor: 'grey.50',
+                        borderRadius: 1.5,
+                        border: '1px solid',
+                        borderColor: 'divider',
+                      }}
+                    >
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                          {questionTypeEmoji(day.chapterQuestion.questionType)} {day.chapterQuestion.book} — {day.chapterQuestion.chapter}
+                        </Typography>
+                      </Stack>
+                      <Typography variant="body2" sx={{ fontStyle: 'italic', mt: 0.5 }}>
+                        &ldquo;{day.chapterQuestion.question}&rdquo;
+                      </Typography>
+                    </Box>
+                  )}
+                </>
+              )
+            })()}
           </Box>
         )
       })}
+
+      {/* Remove item confirmation dialog */}
+      <Dialog open={!!removeConfirm} onClose={() => setRemoveConfirm(null)}>
+        <DialogTitle>Remove item?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Remove &ldquo;{removeConfirm?.title}&rdquo; from this day?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRemoveConfirm(null)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => {
+              if (removeConfirm && onRemoveItem) {
+                onRemoveItem(removeConfirm.dayIndex, removeConfirm.itemIndex)
+              }
+              setRemoveConfirm(null)
+            }}
+          >
+            Remove
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

@@ -380,14 +380,32 @@ export default function TodayChecklist({
             />
           </Stack>
 
-          {/* Checklist items */}
+          {/* Checklist items — with block headers when block data exists */}
           {checklist.map((item, index) => {
+            // Show block header when block changes
+            const prevBlock = index > 0 ? (checklist[index - 1] as ChecklistItemType).block : undefined
+            const showBlockHeader = item.block && item.block !== prevBlock
+            const blockHeaderLabel =
+              item.block === 'choice' ? "Lincoln\u2019s choice (do both, pick order)"
+              : item.block === 'readaloud' ? 'Paired \u2014 happen at the same time'
+              : item.block === 'flex' ? 'Flex \u2014 droppable'
+              : null
             const isDimmed = isMvd && item.mvdEssential !== true
             const dotColor = getItemColor(item)
 
             if (editingPlan) {
               return (
-                <Stack key={index} direction="row" spacing={0.5} alignItems="center">
+                <Box key={index}>
+                  {showBlockHeader && blockHeaderLabel && (
+                    <Typography
+                      variant="caption"
+                      color={item.block === 'choice' ? 'warning.main' : item.block === 'flex' ? 'text.secondary' : 'info.main'}
+                      sx={{ fontWeight: 500, mt: 1, mb: 0.25, display: 'block', fontSize: '0.7rem' }}
+                    >
+                      {blockHeaderLabel}
+                    </Typography>
+                  )}
+                <Stack direction="row" spacing={0.5} alignItems="center">
                   {/* Reorder buttons */}
                   <Stack>
                     <IconButton
@@ -432,11 +450,22 @@ export default function TodayChecklist({
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Stack>
+                </Box>
               )
             }
 
             return (
-              <Box key={index} sx={{
+              <Box key={index}>
+                {showBlockHeader && blockHeaderLabel && (
+                  <Typography
+                    variant="caption"
+                    color={item.block === 'choice' ? 'warning.main' : item.block === 'flex' ? 'text.secondary' : 'info.main'}
+                    sx={{ fontWeight: 500, mt: 1, mb: 0.25, display: 'block', fontSize: '0.7rem' }}
+                  >
+                    {blockHeaderLabel}
+                  </Typography>
+                )}
+              <Box sx={{
                 ...(item.itemType === 'evaluation' ? {
                   borderLeft: '3px solid',
                   borderLeftColor: 'info.main',
@@ -793,6 +822,14 @@ export default function TodayChecklist({
                     <Typography variant="body2">{item.gradeResult}</Typography>
                   </Box>
                 )}
+
+                {/* Aspirational indicator — gentle, not a harsh unchecked box */}
+                {item.aspirational && !item.completed && (
+                  <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', ml: 5, display: 'block', mt: 0.25 }}>
+                    Working toward this
+                  </Typography>
+                )}
+              </Box>
               </Box>
             )
           })}
