@@ -29,10 +29,15 @@ import PrintIcon from '@mui/icons-material/Print'
 
 import Divider from '@mui/material/Divider'
 import FormControlLabel from '@mui/material/FormControlLabel'
+import ImageList from '@mui/material/ImageList'
+import ImageListItem from '@mui/material/ImageListItem'
 import Switch from '@mui/material/Switch'
+import useMediaQuery from '@mui/material/useMediaQuery'
+import { useTheme } from '@mui/material/styles'
 
 import Alert from '@mui/material/Alert'
 import CloseIcon from '@mui/icons-material/Close'
+import CollectionsIcon from '@mui/icons-material/Collections'
 import Paper from '@mui/material/Paper'
 import Snackbar from '@mui/material/Snackbar'
 import CreativeTimer from '../../components/CreativeTimer'
@@ -121,6 +126,8 @@ export default function BookEditorPage() {
   const isLincoln = childName.toLowerCase() === 'lincoln'
 
   const { children } = useActiveChild()
+  const muiTheme = useTheme()
+  const isMobile = useMediaQuery(muiTheme.breakpoints.down('sm'))
 
   const {
     book,
@@ -149,6 +156,7 @@ export default function BookEditorPage() {
     familyId,
     childId: activeChild?.id ?? '',
     childName,
+    bookTheme: book?.theme,
     onAddToPage: (pageId, imageId, url, storagePath) => {
       applySketchEnhancement(pageId, imageId, url, storagePath)
     },
@@ -210,6 +218,10 @@ export default function BookEditorPage() {
 
   // Background replacement tracking
   const [replacingBackgroundIds, setReplacingBackgroundIds] = useState<string[]>([])
+
+  // Background source picker state
+  const [showBgSourcePicker, setShowBgSourcePicker] = useState(false)
+  const [showGalleryPicker, setShowGalleryPicker] = useState(false)
 
   // Deselect signal — increment to tell PageEditor to deselect all images
   const [deselectSignal, setDeselectSignal] = useState(0)
@@ -291,6 +303,7 @@ export default function BookEditorPage() {
           familyId,
           sketchStoragePath: img.storagePath,
           style: sketchEnhanceStyle,
+          theme: book?.theme,
         }),
         new Promise<null>((_, reject) =>
           setTimeout(() => reject(new Error(
@@ -519,14 +532,57 @@ export default function BookEditorPage() {
       .filter((img) => img.type !== 'sticker')
       .map((img) => img.id)
     setReplacingBackgroundIds(bgIds)
-    // Open the AI scene dialog pre-filled from current page text
-    const prefill = activePage.text
+    setShowBgSourcePicker(true)
+  }, [activePage])
+
+  const handleBgSourceMakeScene = useCallback(() => {
+    setShowBgSourcePicker(false)
+    const prefill = activePage?.text
       ? `Illustrate: ${activePage.text.slice(0, 100)}`
       : ''
     setAiPrompt(prefill)
     setAiResult(null)
     setShowAiDialog(true)
   }, [activePage])
+
+  const handleBgSourceUpload = useCallback(() => {
+    setShowBgSourcePicker(false)
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.capture = 'environment'
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (file && activePage) {
+        // Remove old backgrounds, then add photo as full-page background
+        if (replacingBackgroundIds.length > 0) {
+          replacingBackgroundIds.forEach((id) => removeImageFromPage(activePage.id, id))
+          setReplacingBackgroundIds([])
+        }
+        void addImageToPage(activePage.id, file, { cleanBackground: false })
+      }
+    }
+    input.click()
+  }, [activePage, replacingBackgroundIds, removeImageFromPage, addImageToPage])
+
+  const handleBgSourceGallery = useCallback(() => {
+    setShowBgSourcePicker(false)
+    setShowGalleryPicker(true)
+  }, [])
+
+  const handleSelectGalleryBackground = useCallback(
+    (url: string) => {
+      if (!activePage) return
+      // Remove old backgrounds
+      if (replacingBackgroundIds.length > 0) {
+        replacingBackgroundIds.forEach((id) => removeImageFromPage(activePage.id, id))
+        setReplacingBackgroundIds([])
+      }
+      addAiImageToPage(activePage.id, url, '', 'From gallery')
+      setShowGalleryPicker(false)
+    },
+    [activePage, replacingBackgroundIds, removeImageFromPage, addAiImageToPage],
+  )
 
   // ── AI Scene generation ─────────────────────────────────────────
   const openAiDialog = useCallback(() => {
@@ -630,6 +686,15 @@ export default function BookEditorPage() {
       setPrinting(false)
     }
   }, [book, childName, isLincoln])
+
+  // ── Book backgrounds (for gallery picker) ────────────────────────
+  const bookBackgrounds = useMemo(() => {
+    if (!book) return []
+    return book.pages
+      .flatMap((page) => page.images)
+      .filter((img) => img.type !== 'sticker' && img.url)
+      .filter((img, i, arr) => arr.findIndex((x) => x.url === img.url) === i)
+  }, [book])
 
   // ── Finish flow ───────────────────────────────────────────────────
   const coverCandidates = useMemo(() => {
@@ -1301,6 +1366,125 @@ export default function BookEditorPage() {
           </Stack>
         </Alert>
       )}
+
+      {/* Background source picker */}
+      <Dialog
+        open={showBgSourcePicker}
+        onClose={() => { setShowBgSourcePicker(false); setReplacingBackgroundIds([]) }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Change Background</DialogTitle>
+        <DialogContent>
+          <Stack direction="row" spacing={2} justifyContent="center" sx={{ py: 2 }}>
+            <Box
+              onClick={handleBgSourceMakeScene}
+              sx={{
+                width: 90,
+                py: 2,
+                textAlign: 'center',
+                borderRadius: 2,
+                border: '1px solid',
+                borderColor: 'divider',
+                cursor: 'pointer',
+                '&:hover': { bgcolor: 'action.hover', borderColor: 'primary.main' },
+              }}
+            >
+              <AutoAwesomeIcon sx={{ fontSize: 32, color: 'secondary.main', mb: 0.5 }} />
+              <Typography variant="caption" display="block" fontWeight={600}>
+                Make a scene
+              </Typography>
+            </Box>
+            <Box
+              onClick={handleBgSourceUpload}
+              sx={{
+                width: 90,
+                py: 2,
+                textAlign: 'center',
+                borderRadius: 2,
+                border: '1px solid',
+                borderColor: 'divider',
+                cursor: 'pointer',
+                '&:hover': { bgcolor: 'action.hover', borderColor: 'primary.main' },
+              }}
+            >
+              <PhotoCameraIcon sx={{ fontSize: 32, color: 'info.main', mb: 0.5 }} />
+              <Typography variant="caption" display="block" fontWeight={600}>
+                Upload photo
+              </Typography>
+            </Box>
+            <Box
+              onClick={handleBgSourceGallery}
+              sx={{
+                width: 90,
+                py: 2,
+                textAlign: 'center',
+                borderRadius: 2,
+                border: '1px solid',
+                borderColor: 'divider',
+                cursor: 'pointer',
+                '&:hover': { bgcolor: 'action.hover', borderColor: 'primary.main' },
+                ...(!bookBackgrounds.length ? { opacity: 0.4, pointerEvents: 'none' } : {}),
+              }}
+            >
+              <CollectionsIcon sx={{ fontSize: 32, color: 'success.main', mb: 0.5 }} />
+              <Typography variant="caption" display="block" fontWeight={600}>
+                From gallery
+              </Typography>
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setShowBgSourcePicker(false); setReplacingBackgroundIds([]) }}>
+            Cancel
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Gallery background picker */}
+      <Dialog
+        open={showGalleryPicker}
+        onClose={() => { setShowGalleryPicker(false); setReplacingBackgroundIds([]) }}
+        fullScreen={isMobile}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Pick a background</DialogTitle>
+        <DialogContent>
+          {bookBackgrounds.length > 0 ? (
+            <>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                From this book
+              </Typography>
+              <ImageList cols={3} gap={8}>
+                {bookBackgrounds.map((img) => (
+                  <ImageListItem
+                    key={img.id}
+                    onClick={() => handleSelectGalleryBackground(img.url)}
+                    sx={{ cursor: 'pointer', borderRadius: 1, overflow: 'hidden' }}
+                  >
+                    <img
+                      src={img.url}
+                      alt={img.prompt ?? img.label ?? 'Background'}
+                      loading="lazy"
+                      style={{ borderRadius: 8, objectFit: 'cover', height: 100, width: '100%' }}
+                    />
+                  </ImageListItem>
+                ))}
+              </ImageList>
+            </>
+          ) : (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
+              No backgrounds yet — add some scenes to your book first!
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setShowGalleryPicker(false); setReplacingBackgroundIds([]) }}>
+            Cancel
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* AI Scene generation dialog */}
       <Dialog open={showAiDialog} onClose={() => { setShowAiDialog(false); setReplacingBackgroundIds([]) }} maxWidth="sm" fullWidth>

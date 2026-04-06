@@ -90,6 +90,8 @@ export interface EnhanceSketchRequest {
   style?: 'storybook' | 'comic' | 'realistic' | 'minecraft'
   /** Optional caption/description of the sketch (e.g. "my dragon drawing"). Filtered for copyright. */
   caption?: string
+  /** Optional book theme ID — influences the reimagine style to match the book's visual identity. */
+  theme?: string
 }
 
 export interface EnhanceSketchResponse {
