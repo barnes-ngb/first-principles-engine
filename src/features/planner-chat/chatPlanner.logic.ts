@@ -552,9 +552,29 @@ export function filterRoutineForCompletedPrograms(routine: string, completedProg
 }
 
 export function dayTotalMinutes(day: DraftDayPlan): number {
-  return day.items
-    .filter((item) => item.accepted)
-    .reduce((sum, item) => sum + item.estimatedMinutes, 0)
+  let total = 0
+  const pairedCounted = new Set<string>()
+  const accepted = day.items.filter((item) => item.accepted)
+
+  for (const item of accepted) {
+    // For paired items, only count the longer one (they overlap)
+    if (item.pairedWith) {
+      if (pairedCounted.has(item.pairedWith)) continue
+      const pair = accepted.find(
+        (i) => i.id === item.pairedWith || i.pairedWith === item.id,
+      )
+      if (pair && pair !== item) {
+        total += Math.max(item.estimatedMinutes, pair.estimatedMinutes)
+        pairedCounted.add(item.pairedWith)
+        pairedCounted.add(item.id)
+        continue
+      }
+    }
+    if (pairedCounted.has(item.id)) continue
+    total += item.estimatedMinutes
+  }
+
+  return total
 }
 
 export function planTotalMinutes(plan: DraftWeeklyPlan): number {

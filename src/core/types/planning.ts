@@ -12,6 +12,7 @@ import type {
   PlannerConversationStatus,
   PlanType,
   ReviewStatus,
+  ScheduleBlock,
   SessionResult,
   StreamId,
   SubjectBucket,
@@ -258,6 +259,16 @@ export interface ChecklistItem {
   contentGuide?: string
   /** Whether this workbook item has been scanned after completion. */
   scanned?: boolean
+  /** Which schedule block this item belongs to */
+  block?: ScheduleBlock
+  /** Activity ID this runs simultaneously with */
+  pairedWith?: string
+  /** Group ID for "pick your order" items */
+  choiceGroup?: string
+  /** Can be dropped on light days */
+  droppableOnLightDay?: boolean
+  /** Building toward this — don't nag if unchecked */
+  aspirational?: boolean
 }
 
 export interface ChapterResponse {
@@ -422,6 +433,18 @@ export interface DraftPlanItem {
   evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
   /** Route to navigate to (e.g., '/quest') for in-app activities. */
   link?: string
+  /** Which schedule block this item belongs to */
+  block?: ScheduleBlock
+  /** Activity ID this runs simultaneously with */
+  pairedWith?: string
+  /** Group ID for "pick your order" items */
+  choiceGroup?: string
+  /** Can be dropped on light days */
+  droppableOnLightDay?: boolean
+  /** Building toward this — don't nag if unchecked */
+  aspirational?: boolean
+  /** Brief content guide for workbook items (what to cover today). */
+  contentGuide?: string
 }
 
 export interface PlannerConversation {
@@ -751,6 +774,18 @@ export interface ActivityConfig {
   scannable: boolean
   /** Curriculum map node IDs this feeds */
   linkedCurriculumNodes?: string[]
+
+  // Block-based schedule grouping
+  /** Which schedule block this activity belongs to */
+  block?: ScheduleBlock
+  /** Activity ID this runs simultaneously with (e.g., handwriting during read-aloud) */
+  pairedWith?: string
+  /** Group ID for "pick your order" items (e.g., Lincoln's choice block) */
+  choiceGroup?: string
+  /** Can be dropped when energy is low / light day */
+  droppableOnLightDay?: boolean
+  /** Building toward this — don't count as missed if unchecked */
+  aspirational?: boolean
 
   // Metadata
   /** Shelly's notes */
