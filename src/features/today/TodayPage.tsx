@@ -28,6 +28,8 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
+  orderBy,
   query,
   updateDoc,
   where,
@@ -46,6 +48,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   artifactsCollection,
+  scansCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
 import {
@@ -53,7 +56,8 @@ import {
   uploadArtifactFile,
 } from '../../core/firebase/upload'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, LadderCardDefinition, SkillSnapshot } from '../../core/types'
+import type { Artifact, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, LadderCardDefinition, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
+import { isWorksheetScan } from '../../core/types'
 import { getLaddersForChild } from '../ladders/laddersCatalog'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
@@ -241,6 +245,45 @@ export default function TodayPage() {
     const ref = doc(skillSnapshotsCollection(familyId), selectedChildId)
     getDoc(ref).then((snap) => {
       if (snap.exists()) setTodaySnapshot(snap.data() as SkillSnapshot)
+    }).catch(() => { /* ignore */ })
+  }, [familyId, selectedChildId])
+
+  // Load recent scan feedback for today's checklist items
+  const [scanFeedbackBySubject, setScanFeedbackBySubject] = useState<
+    Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
+  >({})
+  useEffect(() => {
+    if (!familyId || !selectedChildId) return
+    const q = query(
+      scansCollection(familyId),
+      where('childId', '==', selectedChildId),
+      orderBy('createdAt', 'desc'),
+      limit(20),
+    )
+    getDocs(q).then((snap) => {
+      const feedback: typeof scanFeedbackBySubject = {}
+      for (const d of snap.docs) {
+        const scan = { ...d.data(), id: d.id } as ScanRecord
+        if (!scan.results || !isWorksheetScan(scan.results)) continue
+        const r = scan.results as WorksheetScanResult
+        const subject = (r.subject || '').toLowerCase()
+        const key = subject.includes('math') ? 'Math'
+          : subject.includes('reading') || subject.includes('phonics') ? 'Reading'
+          : subject.includes('language') ? 'LanguageArts'
+          : subject.includes('science') ? 'Science'
+          : subject.includes('history') ? 'History'
+          : subject.includes('art') ? 'Art'
+          : subject.includes('music') ? 'Music'
+          : subject
+        if (!feedback[key]) {
+          feedback[key] = {
+            topic: r.specificTopic || '',
+            recommendation: r.recommendation,
+            estimatedMinutes: r.estimatedMinutes,
+          }
+        }
+      }
+      setScanFeedbackBySubject(feedback)
     }).catch(() => { /* ignore */ })
   }, [familyId, selectedChildId])
 
@@ -806,6 +849,7 @@ export default function TodayPage() {
           onSkipToNext={handleSkipToNext}
           onPrintMaterials={handlePrintTodayMaterials}
           printingMaterials={printingMaterials}
+          scanFeedbackBySubject={scanFeedbackBySubject}
         />
         </SectionErrorBoundary>
       )}
