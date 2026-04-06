@@ -333,6 +333,28 @@ export const ActivityFrequencyLabel: Record<ActivityFrequency, string> = {
   [ActivityFrequency.AsNeeded]: 'as needed',
 }
 
+export const ScheduleBlock = {
+  Formation: 'formation',
+  ReadAloud: 'readaloud',
+  Choice: 'choice',
+  CoreReading: 'core-reading',
+  CoreMath: 'core-math',
+  Flex: 'flex',
+  Independent: 'independent',
+} as const
+export type ScheduleBlock = (typeof ScheduleBlock)[keyof typeof ScheduleBlock]
+
+/** Human-readable label for each schedule block. */
+export const ScheduleBlockLabel: Record<ScheduleBlock, string> = {
+  [ScheduleBlock.Formation]: 'Formation',
+  [ScheduleBlock.ReadAloud]: 'Read-Aloud + Handwriting',
+  [ScheduleBlock.Choice]: "Lincoln's Choice",
+  [ScheduleBlock.CoreReading]: 'Core Reading',
+  [ScheduleBlock.CoreMath]: 'Core Math',
+  [ScheduleBlock.Flex]: 'Flex',
+  [ScheduleBlock.Independent]: 'Independent',
+}
+
 export const StickerCategory = {
   Animals: 'animals',
   Minecraft: 'minecraft',
