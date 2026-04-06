@@ -256,6 +256,8 @@ export interface ChecklistItem {
   completedAt?: string
   /** Brief content guide for workbook items (what to cover today). */
   contentGuide?: string
+  /** Whether this workbook item has been scanned after completion. */
+  scanned?: boolean
 }
 
 export interface ChapterResponse {
