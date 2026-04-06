@@ -59,16 +59,12 @@ export function createOpenAiProvider(apiKey: string): OpenAiProvider {
     },
 
     async editImage(imageBuffer, prompt, options) {
-      const { default: OpenAI } = await import("openai");
-      const { Blob } = await import("buffer");
+      const { default: OpenAI, toFile } = await import("openai");
       const client = new OpenAI({ apiKey });
 
       // Use gpt-image-1 for edit — it accepts image input with a prompt
-      // Convert Buffer to a proper File object that the OpenAI SDK accepts
-      const imageBlob = new Blob([new Uint8Array(imageBuffer)], {
-        type: "image/png",
-      });
-      const imageFile = new File([imageBlob], "sketch.png", {
+      // Use the SDK's toFile utility for reliable buffer → uploadable conversion
+      const imageFile = await toFile(imageBuffer, "sketch.png", {
         type: "image/png",
       });
 
@@ -76,7 +72,6 @@ export function createOpenAiProvider(apiKey: string): OpenAiProvider {
         model: "gpt-image-1",
         image: imageFile,
         prompt,
-        n: 1,
         size: (options?.size as "1024x1024") ?? "1024x1024",
       });
 
