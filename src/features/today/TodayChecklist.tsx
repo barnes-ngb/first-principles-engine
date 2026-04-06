@@ -601,6 +601,33 @@ export default function TodayChecklist({
                     Scan failed: {scanError}
                   </Alert>
                 )}
+                {/* Post-completion scan prompt for workbook items */}
+                {item.completed && !item.scanned && getSparkleMode(item) === 'scan' && scanItemIndex !== index && (
+                  <Box sx={{ ml: 5, mt: 0.5 }}>
+                    <Button
+                      size="small"
+                      variant="text"
+                      startIcon={scanLoading && scanItemIndex === index
+                        ? <CircularProgress size={14} />
+                        : <CameraAltIcon sx={{ fontSize: 16 }} />}
+                      disabled={scanLoading}
+                      onClick={() => {
+                        const input = document.createElement('input')
+                        input.type = 'file'
+                        input.accept = 'image/*'
+                        input.capture = 'environment'
+                        input.onchange = (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0]
+                          if (file) onScanCapture(file, index)
+                        }
+                        input.click()
+                      }}
+                      sx={{ fontSize: '0.7rem', color: 'text.secondary', textTransform: 'none' }}
+                    >
+                      Scan page to track progress
+                    </Button>
+                  </Box>
+                )}
                 {/* Engagement feedback: emoji row after completion */}
                 {item.completed && !item.engagement && (
                   <Stack direction="row" spacing={0.5} sx={{ ml: 5, mt: 0.5 }}>

@@ -78,6 +78,8 @@ import TeachBackSection from './TeachBackSection'
 import TodayChecklist from './TodayChecklist'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
+import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
+import { ensureDefaultActivityConfigs } from '../../core/firebase/migrateActivityConfigs'
 import { useScan } from '../../core/hooks/useScan'
 import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
 import QuickAddHours from '../records/QuickAddHours'
@@ -224,6 +226,14 @@ export default function TodayPage() {
   }, [dailyPlan])
 
   const { chat: aiChat } = useAI()
+
+  // Ensure default activity configs exist (routine, formation, workbooks)
+  // so the planner generates full-length plans even if the user hasn't visited Settings.
+  useEffect(() => {
+    if (familyId && selectedChildId) {
+      void ensureDefaultActivityConfigs(familyId, selectedChildId)
+    }
+  }, [familyId, selectedChildId])
 
   // Load skill snapshot for print materials
   useEffect(() => {
@@ -403,8 +413,32 @@ export default function TodayPage() {
       } catch (err) {
         console.error('[TodayPage] Failed to sync scan to config:', err)
       }
+
+      // Feed scan skills into the Learning Map (non-blocking)
+      const skills = record.results.skillsTargeted
+      if (skills.length > 0) {
+        try {
+          const findings = skills.map((s) => ({
+            skill: s.skill,
+            status: (s.alignsWithSnapshot === 'ahead' ? 'mastered' : 'emerging') as 'mastered' | 'emerging',
+            evidence: `Workbook scan: ${s.skill} (${s.level})`,
+            testedAt: new Date().toISOString(),
+          }))
+          await updateSkillMapFromFindings(familyId, selectedChildId, findings)
+        } catch (err) {
+          console.warn('[TodayPage] Failed to update skill map from scan (non-blocking):', err)
+        }
+      }
     }
-  }, [runScan, familyId, selectedChildId, syncScanToConfig, setSnackMessage])
+
+    // Mark checklist item as scanned so the post-completion prompt hides
+    if (record?.results && dayLog?.checklist) {
+      const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
+        i === index ? { ...ci, scanned: true } : ci,
+      )
+      persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+    }
+  }, [runScan, familyId, selectedChildId, syncScanToConfig, setSnackMessage, dayLog, persistDayLogImmediate])
 
   const handleScanAddToPlan = useCallback(() => {
     if (!scanResult?.results || scanItemIndex == null || !dayLog?.checklist) return

@@ -16,6 +16,7 @@ import ScanResultsPanel from '../../components/ScanResultsPanel'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useCertificateProgress } from '../../core/hooks/useCertificateProgress'
+import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { useScan } from '../../core/hooks/useScan'
 import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
 import type { CertificateScanResult, CurriculumDetected } from '../../core/types'
@@ -56,6 +57,22 @@ export default function CertificateScanSection() {
           }
         } catch (err) {
           console.error('[CertificateScanSection] Failed to sync config:', err)
+        }
+
+        // Feed scan skills into the Learning Map (non-blocking)
+        const skills = record.results.skillsTargeted
+        if (skills.length > 0) {
+          try {
+            const findings = skills.map((s) => ({
+              skill: s.skill,
+              status: (s.alignsWithSnapshot === 'ahead' ? 'mastered' : 'emerging') as 'mastered' | 'emerging',
+              evidence: `Workbook scan: ${s.skill} (${s.level})`,
+              testedAt: new Date().toISOString(),
+            }))
+            await updateSkillMapFromFindings(familyId, activeChildId, findings)
+          } catch (err) {
+            console.warn('[CertificateScanSection] Failed to update skill map (non-blocking):', err)
+          }
         }
       }
     },
