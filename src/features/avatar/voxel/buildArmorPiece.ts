@@ -179,53 +179,62 @@ function buildHelmet(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   const { U, headSize } = layout
 
   // Helmet uses HEAD-LOCAL coordinates (headGroup center = 0,0,0).
-  // Crusader-style closed helmet: fully encloses the head, visor slit IS the face.
-  const h = headSize // head size in world units
-  const pad = U * 1.6 // padding beyond head on each side
+  // Open-face helmet: covers top, sides, and back of head.
+  // Front is open — face (eyes, nose, mouth) fully visible.
+  const h = headSize
+  const pad = U * 1.6
 
-  // Main dome — slightly larger than head on all sides
-  const domeSize = h + pad
-  const dome = taggedBox(domeSize, domeSize, domeSize, W, 'primary', 'helmet_dome')
-  dome.position.set(0, U * 0.4, 0)
+  // TOP DOME — wide cap covering upper portion of head only
+  const domeW = h + pad
+  const domeH = h * 0.45
+  const domeD = h + pad
+  const dome = taggedBox(domeW, domeH, domeD, W, 'primary', 'helmet_dome')
+  // Bottom edge sits just above eye level
+  dome.position.set(0, h * 0.08 + domeH / 2, 0)
   group.add(dome)
 
-  // Bottom brim/lip — thin strip around the bottom edge
-  const brimW = h + pad + U * 0.8
-  const brimFront = taggedBox(brimW, U * 0.8, U * 1.0, W, 'accent', 'helmet_brim_front')
-  brimFront.position.set(0, -h / 2, domeSize / 2 + U * 0.1)
-  group.add(brimFront)
-  const brimBack = taggedBox(brimW, U * 0.8, U * 1.0, W, 'accent', 'helmet_brim_back')
-  brimBack.position.set(0, -h / 2, -(domeSize / 2 + U * 0.1))
+  // BACK PANEL — extends from dome down to cover back of head
+  const backH = h * 0.75
+  const back = taggedBox(domeW - U * 2, backH, U * 1.4, W, 'primary', 'helmet_back')
+  back.position.set(0, h * 0.08 - backH / 2 + U * 0.5, -(domeD / 2 - U * 0.3))
+  group.add(back)
+
+  // SIDE CHEEK GUARDS — cover sides of head, pulled back from face
+  const sideH = h * 0.55
+  const sideD = h * 0.45
+  const sideL = taggedBox(U * 1.4, sideH, sideD, W, 'accent', 'helmet_side_l')
+  sideL.position.set(-(domeW / 2 - U * 0.2), -h * 0.05, -h * 0.12)
+  group.add(sideL)
+  const sideR = taggedBox(U * 1.4, sideH, sideD, W, 'accent', 'helmet_side_r')
+  sideR.position.set(domeW / 2 - U * 0.2, -h * 0.05, -h * 0.12)
+  group.add(sideR)
+
+  // BROW BAND — accent strip at top of face opening (like a visor flipped up)
+  const browW = domeW + U * 0.4
+  const brow = taggedBox(browW, U * 1.4, U * 1.0, W, 'accent', 'helmet_brow')
+  brow.position.set(0, h * 0.08, domeD / 2 + U * 0.2)
+  group.add(brow)
+
+  // BOTTOM BRIM — back and sides only (front is open)
+  const brimY = -h / 2
+  const brimBack = taggedBox(domeW + U * 0.4, U * 0.8, U * 1.0, W, 'accent', 'helmet_brim_back')
+  brimBack.position.set(0, brimY, -(domeD / 2 + U * 0.1))
   group.add(brimBack)
-  const brimL = taggedBox(U * 1.0, U * 0.8, domeSize, W, 'accent', 'helmet_brim_l')
-  brimL.position.set(-(domeSize / 2 + U * 0.4), -h / 2, 0)
+  const brimL = taggedBox(U * 1.0, U * 0.8, domeD * 0.6, W, 'accent', 'helmet_brim_l')
+  brimL.position.set(-(domeW / 2 + U * 0.4), brimY, -h * 0.15)
   group.add(brimL)
-  const brimR = taggedBox(U * 1.0, U * 0.8, domeSize, W, 'accent', 'helmet_brim_r')
-  brimR.position.set(domeSize / 2 + U * 0.4, -h / 2, 0)
+  const brimR = taggedBox(U * 1.0, U * 0.8, domeD * 0.6, W, 'accent', 'helmet_brim_r')
+  brimR.position.set(domeW / 2 + U * 0.4, brimY, -h * 0.15)
   group.add(brimR)
 
-  // Front face plate
-  const facePlate = taggedBox(h, h * 0.6, U * 1.0, W, 'primary', 'helmet_faceplate')
-  facePlate.position.set(0, -h * 0.15, domeSize / 2 - U * 0.2)
-  group.add(facePlate)
-
-  // Visor slit — thin dark horizontal bar
-  const visor = taggedFlatBox(h - U * 0.4, U * 1.0, U * 0.6, 0x222222, 'detail', 'helmet_visor')
-  visor.position.set(0, U * 0.6, domeSize / 2 + U * 0.4)
-  group.add(visor)
-
-  // Nose guard — vertical bar from visor to chin
-  const noseGuard = taggedBox(U * 1.0, h * 0.45, U * 0.8, W, 'accent', 'helmet_noseguard')
-  noseGuard.position.set(0, -h * 0.2, domeSize / 2 + U * 0.2)
-  group.add(noseGuard)
-
-  // Top crest — accent ridge front to back
+  // TOP CREST — accent ridge front to back
+  const domeTopY = h * 0.08 + domeH
   const crest = taggedBox(U * 1.0, U * 1.4, h, W, 'accent', 'helmet_crest')
   crest.userData.isAccent = true
-  crest.position.set(0, domeSize / 2 + U * 0.8, 0)
+  crest.position.set(0, domeTopY + U * 0.5, 0)
   group.add(crest)
 
-  // Neck guard — extends below head at the back
+  // NECK GUARD — extends below head at the back
   const neckGuard = taggedBox(h, U * 2.4, U * 1.4, W, 'primary', 'helmet_neckguard')
   neckGuard.position.set(0, -h * 0.6, -h * 0.55)
   group.add(neckGuard)
@@ -402,8 +411,10 @@ function buildShield(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   const { U, armH } = layout
   const armMid = armH / 2
 
-  // Angle the shield
-  group.rotation.y = THREE.MathUtils.degToRad(15)
+  // Rotate shield face from sideways (-X) to mostly forward (+Z)
+  group.rotation.y = THREE.MathUtils.degToRad(75)
+  // Push entire shield group forward so it clears the torso front face
+  group.position.z = U * 2
 
   // Shield offset: outside the arm
   const shX = -U * 4

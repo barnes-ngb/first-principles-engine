@@ -25,10 +25,10 @@ export function buildHelmetCrest(
 
   const mat = () => new THREE.MeshLambertMaterial({ color })
 
-  // Base Y: top of helmet dome. Dome is (headPx + 1.6)U with center at 0.4U.
-  // Top = 0.4 + (headPx + 1.6) / 2
-  const domeSize = headPx + 1.6
-  const baseY = U * (0.4 + domeSize / 2)
+  // Base Y: top of open-face helmet dome.
+  // Dome height = headPx * 0.45, dome center Y = headPx * 0.08 + domeH/2
+  // Dome top = headPx * (0.08 + 0.45) = headPx * 0.53
+  const baseY = U * (headPx * 0.53)
 
   switch (type) {
     case 'fin': {
