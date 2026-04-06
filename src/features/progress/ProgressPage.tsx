@@ -8,6 +8,7 @@ import Typography from '@mui/material/Typography'
 import HelpStrip from '../../components/HelpStrip'
 import SectionCard from '../../components/SectionCard'
 import CertificateScanSection from './CertificateScanSection'
+import CurriculumTab from './CurriculumTab'
 import DispositionProfile from './DispositionProfile'
 import LearningMap from './learning-map/LearningMap'
 import SkillSnapshotPage from '../evaluation/SkillSnapshotPage'
@@ -37,6 +38,7 @@ export default function ProgressPage() {
           >
             <Tab label="Learning Profile" />
             <Tab label="Learning Map" />
+            <Tab label="Curriculum" />
             <Tab label="Skill Snapshot" />
             <Tab label="Word Wall" />
           </Tabs>
@@ -52,8 +54,9 @@ export default function ProgressPage() {
       </Container>
       {tab === 0 && <DispositionProfile />}
       {tab === 1 && <LearningMap />}
-      {tab === 2 && <SkillSnapshotPage />}
-      {tab === 3 && <WordWall />}
+      {tab === 2 && <CurriculumTab />}
+      {tab === 3 && <SkillSnapshotPage />}
+      {tab === 4 && <WordWall />}
     </>
   )
 }
