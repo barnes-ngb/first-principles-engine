@@ -16,6 +16,8 @@ export interface EnhanceSketchRequest {
   style?: "storybook" | "comic" | "realistic" | "minecraft";
   /** Optional caption/description of the sketch (e.g. "my dragon drawing"). Filtered for copyright. */
   caption?: string;
+  /** Optional book theme ID — influences the reimagine style to match the book's visual identity. */
+  theme?: string;
 }
 
 export interface EnhanceSketchResponse {
@@ -36,16 +38,65 @@ const STYLE_HINTS: Record<string, string> = {
   minecraft: "in a colorful blocky pixel art style",
 };
 
-export function buildEnhancePrompt(style?: string, caption?: string): string {
+// ── Theme style mapping ────────────────────────────────────────
+// Maps book theme IDs to style descriptions for the reimagine prompt.
+// Keeps the server self-contained (no import from client-side books.ts).
+
+const THEME_IMAGE_STYLES: Record<string, string> = {
+  minecraft:
+    "Blocky pixel-art Minecraft style with cubic shapes and bright colors.",
+  fantasy:
+    "Whimsical fairy-tale illustration with soft colors and magical elements.",
+  adventure:
+    "Bold adventure illustration with dramatic lighting and exciting landscapes.",
+  animals:
+    "Cute, friendly animal illustration with warm, soft colors.",
+  science:
+    "Clean, educational illustration with bright colors and wonder.",
+  space:
+    "Cosmic space illustration with stars, planets, and vibrant nebula colors.",
+  faith:
+    "Warm, gentle illustration with golden light and peaceful tones.",
+  dinosaurs:
+    "Playful prehistoric illustration with lush jungle and colorful dinosaurs.",
+  ocean:
+    "Underwater illustration with coral reefs, sea creatures, and ocean blue tones.",
+  superheroes:
+    "Dynamic superhero illustration with bold colors and action poses.",
+  holidays:
+    "Festive holiday illustration with warm, cheerful seasonal decorations.",
+  cooking:
+    "Warm, cheerful kitchen scene with colorful ingredients and friendly style.",
+  sports:
+    "Bright, energetic illustration with action poses and outdoor settings.",
+  family:
+    "Warm, cozy illustration with soft lighting and happy family moments.",
+  sight_words:
+    "Simple, clean illustration with bold colors and minimal detail.",
+};
+
+function getThemeImageStyle(theme?: string): string | null {
+  if (!theme) return null;
+  return THEME_IMAGE_STYLES[theme] ?? null;
+}
+
+export function buildEnhancePrompt(
+  style?: string,
+  caption?: string,
+  theme?: string,
+): string {
   const styleHint =
     STYLE_HINTS[style ?? "storybook"] ?? STYLE_HINTS["storybook"];
   const captionClause = caption
     ? `The child described this as: "${caption}". `
     : "";
+  const themeStyle = getThemeImageStyle(theme);
+  const themeClause = themeStyle ? `Visual theme: ${themeStyle} ` : "";
   return (
     `Create a polished children's book illustration ${styleHint}, ` +
     `inspired by this child's hand-drawn sketch. ` +
     `${captionClause}` +
+    `${themeClause}` +
     `Keep the same composition, characters, and scene layout from the original drawing. ` +
     `Make it colorful, detailed, and full of charm. ` +
     `Maintain the creativity and spirit of the original sketch. ` +
@@ -61,7 +112,7 @@ export const enhanceSketch = onCall(
     // ── Auth gate ──────────────────────────────────────────────
     const { uid } = requireApprovedUser(request);
 
-    const { familyId, sketchStoragePath, style, caption } =
+    const { familyId, sketchStoragePath, style, caption, theme } =
       request.data as EnhanceSketchRequest;
 
     // ── Input validation ───────────────────────────────────────
@@ -117,7 +168,7 @@ export const enhanceSketch = onCall(
 
     // ── Enhance via gpt-image-1 edit endpoint ──────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
-    const prompt = buildEnhancePrompt(style, safeCaption);
+    const prompt = buildEnhancePrompt(style, safeCaption, theme);
 
     console.log("enhanceSketch: starting API call", {
       sketchStoragePath,
