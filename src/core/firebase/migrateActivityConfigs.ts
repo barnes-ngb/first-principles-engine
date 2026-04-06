@@ -292,80 +292,39 @@ const DEFAULT_ROUTINE_CONFIGS: Omit<
 ]
 
 /**
- * Ensure default routine/formation activity configs exist for a child.
+ * Ensure default activity configs exist for a child.
  *
- * Unlike `migrateToActivityConfigs` (which only runs on an empty collection),
- * this function checks whether each default config is present and creates any
- * that are missing. Matching uses subject+type so that scan-created configs
- * (e.g. "The Good and the Beautiful Math") satisfy the "Good and the Beautiful
- * Math" default, and deliberately deleted configs are not recreated.
+ * Only creates defaults on a truly empty slate (no configs at all).
+ * If ANY configs exist — even if some defaults were deleted — we assume the
+ * user has set things up and don't recreate deleted entries.
+ *
+ * The full migration (`migrateToActivityConfigs`) handles the empty-collection
+ * case, so in practice this is a no-op safety net.
  */
 export async function ensureDefaultActivityConfigs(
   familyId: string,
   childId: string,
 ): Promise<number> {
-  // Load all existing configs for this child
+  // Check if ANY activity configs exist for this child (any type)
   const existingSnap = await getDocs(
     query(
       activityConfigsCollection(familyId),
       where('childId', 'in', [childId, 'both']),
+      limit(1),
     ),
   )
 
-  if (existingSnap.empty) {
-    // No configs at all — let the full migration handle it
-    return 0
-  }
+  // If ANY configs exist, don't create defaults — the user has set things up.
+  // Deliberately deleted configs should stay deleted.
+  if (!existingSnap.empty) return 0
 
-  const existingConfigs = existingSnap.docs.map((d) => d.data())
-
-  // Normalize: lowercase, strip "the", remove non-alphanumeric
-  const normalize = (s: string) =>
-    (s || '').toLowerCase().replace(/^the\s+/i, '').replace(/[^a-z0-9]/g, '')
-
-  // Check if a default config is already covered by an existing config.
-  // Match by: (1) normalized name/curriculum, or (2) same type + subjectBucket.
-  const isCovered = (
-    dflt: (typeof DEFAULT_ROUTINE_CONFIGS)[number],
-  ): boolean => {
-    const dName = normalize(dflt.name)
-    const dCurriculum = normalize((dflt as { curriculum?: string }).curriculum ?? '')
-
-    return existingConfigs.some((existing) => {
-      // Name-based match (normalized)
-      const eName = normalize(existing.name ?? '')
-      const eCurriculum = normalize(existing.curriculum ?? '')
-      if (eName && dName && (eName === dName || eName.includes(dName) || dName.includes(eName)))
-        return true
-      if (eCurriculum && dCurriculum && (eCurriculum.includes(dCurriculum) || dCurriculum.includes(eCurriculum)))
-        return true
-      if (eName && dCurriculum && eName.includes(dCurriculum))
-        return true
-      if (eCurriculum && dName && eCurriculum.includes(dName))
-        return true
-
-      // Type + subject match: a workbook config for the same subject counts
-      if (
-        existing.type === dflt.type &&
-        existing.subjectBucket &&
-        dflt.subjectBucket &&
-        existing.subjectBucket.toLowerCase() === dflt.subjectBucket.toLowerCase()
-      )
-        return true
-
-      return false
-    })
-  }
-
-  // Find defaults that don't yet exist
-  const missing = DEFAULT_ROUTINE_CONFIGS.filter((cfg) => !isCovered(cfg))
-
-  if (missing.length === 0) return 0
+  // No configs at all — create the full set of defaults
+  console.log('[ActivityConfigs] No configs found — creating defaults')
 
   const now = new Date().toISOString()
   const batch = writeBatch(db)
 
-  for (const config of missing) {
+  for (const config of DEFAULT_ROUTINE_CONFIGS) {
     const ref = doc(activityConfigsCollection(familyId))
     // Prayer/Handwriting are shared (both); everything else is per-child
     const sharedNames = ['prayer and scripture', 'handwriting (while read-aloud)']
@@ -382,7 +341,7 @@ export async function ensureDefaultActivityConfigs(
 
   await batch.commit()
   console.log(
-    `[ActivityConfigs] Created ${missing.length} missing default configs for child ${childId}`,
+    `[ActivityConfigs] Created ${DEFAULT_ROUTINE_CONFIGS.length} default configs for child ${childId}`,
   )
-  return missing.length
+  return DEFAULT_ROUTINE_CONFIGS.length
 }
