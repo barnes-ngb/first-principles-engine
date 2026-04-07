@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { doc, getDoc, getDocs, query, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
+import { doc, getDoc, getDocs, query, updateDoc, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -280,7 +280,21 @@ export default function KnowledgeMinePage() {
                     (m) => m.domain === domain && m.questMode === mode,
                   ) ?? READING_MODES[0],
                 )
-                void quest.startQuest(domain, mode)
+                const ok = quest.resumeSession(resumeSession)
+                if (!ok) {
+                  // Fallback: resume fields missing — start fresh instead
+                  void quest.startQuest(domain, mode)
+                }
+              }}
+              onStartFresh={() => {
+                // Mark the partial session as abandoned in Firestore
+                if (resumeSession.id) {
+                  const ref = doc(evaluationSessionsCollection(familyId), resumeSession.id)
+                  updateDoc(ref, { status: 'abandoned' }).catch((err) =>
+                    console.error('Failed to mark session as abandoned', err),
+                  )
+                }
+                setResumeSession(null)
               }}
             />
           )}
@@ -580,9 +594,11 @@ const QUEST_MODE_LABELS: Record<string, string> = {
 function ResumeCard({
   session,
   onResume,
+  onStartFresh,
 }: {
   session: EvaluationSession & Partial<InteractiveSessionData>
   onResume: () => void
+  onStartFresh: () => void
 }) {
   const elapsed = Date.now() - new Date(session.evaluatedAt).getTime()
   const hoursAgo = Math.floor(elapsed / (1000 * 60 * 60))
@@ -638,6 +654,35 @@ function ResumeCard({
           </Typography>
         </Box>
       </Stack>
+      <Typography
+        component="span"
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          e.stopPropagation()
+          onStartFresh()
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            e.stopPropagation()
+            onStartFresh()
+          }
+        }}
+        sx={{
+          display: 'block',
+          fontFamily: MC.font,
+          fontSize: '0.3rem',
+          color: MC.stone,
+          mt: 1,
+          textAlign: 'center',
+          textDecoration: 'underline',
+          cursor: 'pointer',
+          '&:hover': { color: MC.gold },
+        }}
+      >
+        Start fresh instead
+      </Typography>
     </Box>
   )
 }

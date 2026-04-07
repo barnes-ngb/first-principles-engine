@@ -79,7 +79,7 @@ export interface EvaluationSession {
   id?: string
   childId: string
   domain: EvaluationDomain
-  status: 'in-progress' | 'complete'
+  status: 'in-progress' | 'complete' | 'resumed' | 'abandoned'
   messages: ChatMessage[]
   findings: EvaluationFinding[]
   recommendations: EvaluationRecommendation[]
