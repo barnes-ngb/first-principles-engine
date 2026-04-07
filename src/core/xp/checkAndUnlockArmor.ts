@@ -80,7 +80,7 @@ export function ensureNewProfileStructure(raw: Record<string, unknown>): AvatarP
     childId: raw.childId as string,
     themeStyle,
     pieces,
-    currentTier: themeStyle === 'minecraft' ? 'stone' : 'basic',
+    currentTier: themeStyle === 'minecraft' ? 'wood' : 'basic',
     ...(raw.starterImageUrl ? { baseCharacterUrl: raw.starterImageUrl as string } : {}),
     ...(raw.photoTransformUrl ? { photoTransformUrl: raw.photoTransformUrl as string } : {}),
     totalXp: (raw.totalXp as number) ?? 0,

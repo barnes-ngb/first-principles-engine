@@ -60,7 +60,7 @@ export type ArmorPiece =
 /** Simplified armor piece ID used by the 3D voxel system */
 export type VoxelArmorPieceId = 'belt' | 'breastplate' | 'shoes' | 'shield' | 'helmet' | 'sword'
 
-export type ArmorTier = 'stone' | 'diamond' | 'netherite'       // Lincoln
+export type ArmorTier = 'wood' | 'stone' | 'iron' | 'gold' | 'diamond' | 'netherite'  // Lincoln (voxel tiers)
 export type PlatformerTier = 'basic' | 'powerup' | 'champion'  // London
 
 /** Character features extracted from a photo by AI vision */
@@ -241,6 +241,7 @@ export const XP_EVENTS = {
   DAD_LAB_COMPLETE: 20,         // finished a Dad Lab
   ARMOR_DAILY_COMPLETE: 5,      // all earned pieces applied today
   MANUAL_AWARD: 0,              // parent-awarded XP (amount varies)
+  MANUAL_DEDUCT: 0,             // parent-deducted XP (amount varies, stored as negative)
 } as const
 
 export interface ArmorPieceProgress {
@@ -472,6 +473,8 @@ export interface AvatarProfile {
   lastFullArmorDate?: string
 
   totalXp: number   // cached from xpLedger for quick reads
+  /** Cached diamond balance — maintained by addXpEvent (earn) and spendDiamonds (spend). */
+  diamondBalance?: number
   updatedAt: string
 }
 

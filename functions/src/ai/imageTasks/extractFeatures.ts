@@ -183,7 +183,7 @@ export const extractFeatures = onCall(
         totalXp: 0,
         pieces: [],
         themeStyle: "minecraft",
-        currentTier: "stone",
+        currentTier: "wood",
         equippedPieces: [],
         unlockedPieces: [],
         updatedAt: new Date().toISOString(),
