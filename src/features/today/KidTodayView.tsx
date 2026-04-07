@@ -10,7 +10,7 @@ import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import TextField from '@mui/material/TextField'
-import { addDoc, doc, getDocs, query, updateDoc, where, orderBy } from 'firebase/firestore'
+import { addDoc, doc, getDocs, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { useNavigate } from 'react-router-dom'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
@@ -21,19 +21,26 @@ import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
-import { artifactsCollection, evaluationSessionsCollection } from '../../core/firebase/firestore'
+import {
+  artifactsCollection,
+  dailyArmorSessionDocId,
+  dailyArmorSessionsCollection,
+  evaluationSessionsCollection,
+  stripUndefined,
+} from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
-import type { Artifact, ChecklistItem, Child, DayLog } from '../../core/types'
+import type { Artifact, ChecklistItem, Child, DailyArmorSession, DayLog } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
 import { useAvatarProfile } from '../avatar/useAvatarProfile'
-import { getArmorGateStatus } from '../avatar/armorGate'
+import { getArmorGateStatusFromSession } from '../avatar/armorGate'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../avatar/voxel/buildArmorPiece'
 import { calculateTier } from '../avatar/voxel/tierMaterials'
 import ArmorGateScreen from '../avatar/ArmorGateScreen'
 import MinecraftXpBar from '../avatar/MinecraftXpBar'
+import { getAppliedVoxelPieces } from '../avatar/armorPieceState'
 import XpDiamondBar from '../../components/XpDiamondBar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
 import { useDraftBook, useCompletedBook } from '../books/useBook'
@@ -397,15 +404,51 @@ export default function KidTodayView({
   const todayXp = useMemo(() => calculateXp(dayLog), [dayLog])
   const xpLedger = useXpLedger(familyId, child.id)
   const avatarProfile = useAvatarProfile(familyId, child.id)
+  const [dailyArmorSession, setDailyArmorSession] = useState<DailyArmorSession | null>(null)
 
   const { totalDiamonds, domains, maxLevel, streakDays, quests: todayQuests } = useTodayQuests(familyId, child.id, today)
 
   const greeting = useMemo(() => getGreeting(child.name, isLincoln), [child.name, isLincoln])
   const celebrationMessage = useMemo(() => getCelebration(today, isLincoln), [today, isLincoln])
 
-  // ── Armor Gate: block Today until all unlocked pieces are equipped ──
-  const armorGateStatus = avatarProfile ? getArmorGateStatus(avatarProfile) : null
+  useEffect(() => {
+    if (!familyId || !child.id || !today) return
+    const docId = dailyArmorSessionDocId(child.id, today)
+    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+    const unsub = onSnapshot(sessionRef, async (snap) => {
+      if (snap.exists()) {
+        const raw = snap.data()
+        setDailyArmorSession({
+          ...raw,
+          appliedPieces: Array.isArray(raw.appliedPieces) ? raw.appliedPieces : [],
+          manuallyUnequipped: Array.isArray(raw.manuallyUnequipped) ? raw.manuallyUnequipped : [],
+        })
+        return
+      }
+
+      const newSession: DailyArmorSession = {
+        familyId,
+        childId: child.id,
+        date: today,
+        appliedPieces: [],
+      }
+      await setDoc(sessionRef, stripUndefined(newSession as unknown as Record<string, unknown>) as unknown as DailyArmorSession)
+      setDailyArmorSession(newSession)
+    })
+    return unsub
+  }, [familyId, child.id, today])
+
+  // ── Armor Gate: use today's daily session (not stale profile state) ──
+  const armorGateStatus = avatarProfile
+    ? getArmorGateStatusFromSession(avatarProfile, dailyArmorSession)
+    : null
   const armorReady = armorGateStatus?.complete ?? false
+  const showArmorGateBlocker = Boolean(armorGateStatus?.hasForgedPieces && !armorReady)
+  const showArmorPrompt = Boolean(armorGateStatus && !armorGateStatus.hasForgedPieces)
+  const equippedTodayVoxel = useMemo(
+    () => getAppliedVoxelPieces(dailyArmorSession?.appliedPieces ?? []),
+    [dailyArmorSession?.appliedPieces],
+  )
 
   // Award XP when all must-do items are completed (once per day per child)
   const prevMustDoDoneRef = useRef(false)
@@ -555,12 +598,13 @@ export default function KidTodayView({
     isLincoln && !dayLog.teachBackDone && (totalCompleted >= 3 || hasEngagementFeedback)
 
   // ── Armor Gate early return (after all hooks) ──
-  if (avatarProfile && !armorReady && armorGateStatus) {
+  if (avatarProfile && showArmorGateBlocker && armorGateStatus) {
     return (
       <ArmorGateScreen
         gateStatus={armorGateStatus}
         avatarProfile={avatarProfile}
         childName={child.name}
+        equippedToday={equippedTodayVoxel}
       />
     )
   }
@@ -597,7 +641,7 @@ export default function KidTodayView({
             <AvatarThumbnail
               features={avatarProfile.characterFeatures}
               ageGroup={avatarProfile.ageGroup}
-              equippedPieces={avatarProfile.equippedPieces ?? []}
+              equippedPieces={equippedTodayVoxel}
               totalXp={avatarProfile.totalXp}
               faceGrid={avatarProfile.faceGrid}
               size={64}
@@ -630,6 +674,18 @@ export default function KidTodayView({
               }}
             >
               {getMotivation(avatarProfile)}
+            </Typography>
+          )}
+          {showArmorPrompt && (
+            <Typography
+              sx={{
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
+                fontSize: isLincoln ? '0.4rem' : '12px',
+                color: 'text.secondary',
+                mt: 0.25,
+              }}
+            >
+              No armor forged yet—want to visit Avatar and craft your first piece?
             </Typography>
           )}
           {todayXp > 0 && (

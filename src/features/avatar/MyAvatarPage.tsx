@@ -66,6 +66,7 @@ import AvatarHeroBanner from './AvatarHeroBanner'
 import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
+import { getArmorGateStatusFromSession } from './armorGate'
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -802,8 +803,8 @@ export default function MyAvatarPage() {
   const appliedPieces = Array.isArray(session?.appliedPieces) ? session.appliedPieces : []
   const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
   const unlockedVoxel = profile ? getVisiblePieces(profile) : []
-  const equippableVoxel = profile ? getEquippablePieces(profile) : []
-  const allEarnedApplied = equippableVoxel.length > 0 && equippableVoxel.every((v) => appliedVoxel.includes(v))
+  const armorGateStatus = profile ? getArmorGateStatusFromSession(profile, session) : null
+  const allEarnedApplied = armorGateStatus?.hasForgedPieces ? armorGateStatus.complete : false
   const nextUnlock = profile ? getNextUnlock(profile) : null
   const allSixUnlocked = unlockedVoxel.length === 6
 

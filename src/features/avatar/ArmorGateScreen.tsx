@@ -4,7 +4,7 @@ import Typography from '@mui/material/Typography'
 import { useNavigate } from 'react-router-dom'
 
 import Page from '../../components/Page'
-import type { AvatarProfile } from '../../core/types'
+import type { AvatarProfile, VoxelArmorPieceId } from '../../core/types'
 import type { ArmorGateStatus } from './armorGate'
 import { VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import AvatarThumbnail from './AvatarThumbnail'
@@ -13,9 +13,15 @@ interface ArmorGateScreenProps {
   gateStatus: ArmorGateStatus
   avatarProfile: AvatarProfile | null
   childName: string
+  equippedToday?: VoxelArmorPieceId[]
 }
 
-export default function ArmorGateScreen({ gateStatus, avatarProfile, childName }: ArmorGateScreenProps) {
+export default function ArmorGateScreen({
+  gateStatus,
+  avatarProfile,
+  childName,
+  equippedToday = [],
+}: ArmorGateScreenProps) {
   const navigate = useNavigate()
   const isLincoln = childName.toLowerCase() === 'lincoln'
 
@@ -37,7 +43,7 @@ export default function ArmorGateScreen({ gateStatus, avatarProfile, childName }
           <AvatarThumbnail
             features={avatarProfile.characterFeatures}
             ageGroup={avatarProfile.ageGroup}
-            equippedPieces={avatarProfile.equippedPieces ?? []}
+            equippedPieces={equippedToday}
             totalXp={avatarProfile.totalXp}
             size={120}
             animated
