@@ -1,26 +1,5 @@
 import type { AvatarProfile, VoxelArmorPieceId } from '../../core/types'
-
-/** Get the tier the child is currently forging in (lowest unlocked tier with unforged pieces). */
-function getActiveForgeTier(profile: AvatarProfile): string {
-  const tiers = profile.unlockedTiers ?? ['wood']
-  const forged = profile.forgedPieces ?? {}
-  const allPieceIds: VoxelArmorPieceId[] = ['belt', 'shoes', 'breastplate', 'shield', 'helmet', 'sword']
-
-  for (const tier of tiers) {
-    const tierForged = forged[tier] ?? {}
-    const allForgedInTier = allPieceIds.every(id => tierForged[id])
-    if (!allForgedInTier) return tier
-  }
-
-  return tiers[tiers.length - 1] ?? 'wood'
-}
-
-/** Pieces that can be equipped (forged in active tier). */
-function getEquippablePieces(profile: AvatarProfile): VoxelArmorPieceId[] {
-  const activeTier = getActiveForgeTier(profile)
-  const forged = profile.forgedPieces?.[activeTier] ?? {}
-  return Object.keys(forged) as VoxelArmorPieceId[]
-}
+import { getEquippablePieces } from './armorPieceState'
 
 export interface ArmorGateStatus {
   /** True when every forged piece is equipped */
