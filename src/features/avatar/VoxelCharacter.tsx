@@ -142,15 +142,21 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number) {
-  const backwardPush = Math.max(0, rotX) * HERO_ANIMATION_TUNING.torsoAvoidanceGain
-  const minOutward = HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + backwardPush
-  const outwardZ = clamp(rotZ, minOutward, HERO_ANIMATION_TUNING.armSwingClampZ)
-  const forwardX = clamp(
-    rotX,
-    HERO_ANIMATION_TUNING.armSwingClampX.min,
-    HERO_ANIMATION_TUNING.armSwingClampX.max,
+  const sideConfig = HERO_ANIMATION_TUNING.guardrails.armBySide[side]
+  const softTorso = HERO_ANIMATION_TUNING.guardrails.torsoSoftCollision
+  const forwardX = clamp(rotX, sideConfig.rotXMin, sideConfig.rotXMax)
+  const torsoT = clamp(
+    (forwardX - softTorso.rotXStart) / (softTorso.rotXEnd - softTorso.rotXStart),
+    0,
+    1,
   )
-  void side
+  const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance)
+  const minOutward = Math.max(
+    sideConfig.rotZMin,
+    HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoPush,
+    HERO_ANIMATION_TUNING.guardrails.elbowInwardCollapseLimit,
+  )
+  const outwardZ = clamp(rotZ, minOutward, sideConfig.rotZMax)
   return { rotX: forwardX, rotZ: outwardZ }
 }
 
@@ -772,6 +778,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     const poseAnimator = poseAnimatorRef.current
     let baseFootL = 0
     let baseFootR = 0
+    let baseFootY = 0
     let baseFootCaptured = false
 
     sceneActiveRef.current = true
@@ -828,6 +835,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         if (!baseFootCaptured && legLObj && legRObj) {
           baseFootL = legLObj.position.x
           baseFootR = legRObj.position.x
+          baseFootY = legLObj.position.y
           baseFootCaptured = true
         }
 
@@ -850,7 +858,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             const constrained = constrainArmPose(
               'L',
               currentEqPose.armLRotX + Math.sin(time * 0.8 + HERO_ANIMATION_TUNING.armPhaseOffset) * HERO_ANIMATION_TUNING.armSwingX,
-              currentEqPose.armLRotZ + Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.armSwingZ,
+              currentEqPose.armLRotZ
+                + HERO_ANIMATION_TUNING.silhouetteBias.leftRotZ
+                + Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.armSwingZ,
             )
             armLObj.rotation.z = constrained.rotZ
             armLObj.rotation.x = constrained.rotX
@@ -859,7 +869,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             const constrained = constrainArmPose(
               'R',
               currentEqPose.armRRotX - Math.sin(time * 0.8 + HERO_ANIMATION_TUNING.armPhaseOffset) * HERO_ANIMATION_TUNING.armSwingX,
-              currentEqPose.armRRotZ - Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.armSwingZ,
+              currentEqPose.armRRotZ
+                + HERO_ANIMATION_TUNING.silhouetteBias.rightRotZ
+                - Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.armSwingZ,
             )
             armRObj.rotation.z = constrained.rotZ
             armRObj.rotation.x = constrained.rotX
@@ -874,6 +886,8 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             leftX = center - HERO_ANIMATION_TUNING.footSeparation * 0.5
             rightX = center + HERO_ANIMATION_TUNING.footSeparation * 0.5
           }
+          leftX = Math.min(leftX, -HERO_ANIMATION_TUNING.footCenterLineGap)
+          rightX = Math.max(rightX, HERO_ANIMATION_TUNING.footCenterLineGap)
           for (const [name, x] of [
             ['legL', leftX],
             ['bootL', leftX],
@@ -883,7 +897,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             ['bootBandR', rightX],
           ] as const) {
             const part = characterRef.current.getObjectByName(name)
-            if (part) part.position.x = x
+            if (part) {
+              part.position.x = x
+              part.position.y = baseFootY + HERO_ANIMATION_TUNING.footPlantY
+            }
           }
 
           // Head micro-movement — very slow, subtle look-around (6s period)
