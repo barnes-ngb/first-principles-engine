@@ -1,5 +1,6 @@
 import type { QuestState } from './questTypes'
 import {
+  FLOOR_WRONG_LIMIT,
   FRUSTRATION_LIMIT,
   LEVEL_DOWN_STREAK,
   LEVEL_UP_STREAK,
@@ -17,6 +18,7 @@ export function computeNextState(prev: QuestState, correct: boolean): QuestState
   let consecutiveCorrect = prev.consecutiveCorrect
   let consecutiveWrong = prev.consecutiveWrong
   let levelDownsInARow = prev.levelDownsInARow
+  let wrongAtFloor = prev.wrongAtFloor
   let questionsThisLevel = prev.questionsThisLevel + 1
   const totalCorrect = prev.totalCorrect + (correct ? 1 : 0)
   const totalQuestions = prev.totalQuestions + 1
@@ -25,6 +27,7 @@ export function computeNextState(prev: QuestState, correct: boolean): QuestState
     consecutiveCorrect = prev.consecutiveCorrect + 1
     consecutiveWrong = 0
     levelDownsInARow = 0
+    wrongAtFloor = 0
     if (consecutiveCorrect >= LEVEL_UP_STREAK && currentLevel < 10) {
       currentLevel = prev.currentLevel + 1
       consecutiveCorrect = 0
@@ -39,6 +42,10 @@ export function computeNextState(prev: QuestState, correct: boolean): QuestState
       questionsThisLevel = 0
       levelDownsInARow = prev.levelDownsInARow + 1
     }
+    // Track wrong answers at Level 1 (floor) for frustration escape
+    if (currentLevel === 1) {
+      wrongAtFloor = prev.wrongAtFloor + 1
+    }
   }
 
   return {
@@ -47,6 +54,7 @@ export function computeNextState(prev: QuestState, correct: boolean): QuestState
     consecutiveCorrect,
     consecutiveWrong,
     levelDownsInARow,
+    wrongAtFloor,
     totalQuestions,
     totalCorrect,
     questionsThisLevel,
@@ -63,7 +71,8 @@ export function shouldEndSession(state: QuestState): { end: boolean; timedOut: b
   const end =
     state.totalQuestions >= MAX_QUESTIONS ||
     timedOut ||
-    (pastMinimum && state.levelDownsInARow >= FRUSTRATION_LIMIT)
+    (pastMinimum && state.levelDownsInARow >= FRUSTRATION_LIMIT) ||
+    (pastMinimum && state.wrongAtFloor >= FLOOR_WRONG_LIMIT)
   return { end, timedOut }
 }
 
