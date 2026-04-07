@@ -276,26 +276,33 @@ export class PoseAnimator {
   private applyKeyframes(obj: THREE.Object3D, kf: PoseKeyframes, t: number) {
     const armSide = obj.name === 'armL' ? 'L' : obj.name === 'armR' ? 'R' : null
     const isArm = armSide !== null
+    const sideConfig = armSide ? HERO_ANIMATION_TUNING.guardrails.armBySide[armSide] : null
     if (kf.rotX) {
       let val = this.interpolate(kf.rotX, kf.times, t)
-      if (isArm) {
-        val = Math.max(
-          HERO_ANIMATION_TUNING.armSwingClampX.min,
-          Math.min(HERO_ANIMATION_TUNING.armSwingClampX.max, val),
-        )
+      if (sideConfig) {
+        val = Math.max(sideConfig.rotXMin, Math.min(sideConfig.rotXMax, val))
       }
       obj.rotation.x = val
     }
     if (kf.rotY) obj.rotation.y = this.interpolate(kf.rotY, kf.times, t)
     if (kf.rotZ) {
       let val = this.interpolate(kf.rotZ, kf.times, t)
-      if (isArm) {
+      if (sideConfig && isArm) {
         const armX = obj.rotation.x
-        const torsoAvoidance = Math.max(0, armX) * HERO_ANIMATION_TUNING.torsoAvoidanceGain
-        const minOutward = HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoAvoidance
+        const softTorso = HERO_ANIMATION_TUNING.guardrails.torsoSoftCollision
+        const torsoT = Math.max(
+          0,
+          Math.min(1, (armX - softTorso.rotXStart) / (softTorso.rotXEnd - softTorso.rotXStart)),
+        )
+        const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance)
+        const minOutward = Math.max(
+          sideConfig.rotZMin,
+          HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoPush,
+          HERO_ANIMATION_TUNING.guardrails.elbowInwardCollapseLimit,
+        )
         val = Math.max(
           minOutward,
-          Math.min(HERO_ANIMATION_TUNING.armSwingClampZ + 1.2, val),
+          Math.min(sideConfig.rotZMax, val),
         )
       }
       obj.rotation.z = val
