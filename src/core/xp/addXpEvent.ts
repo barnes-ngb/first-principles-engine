@@ -17,7 +17,7 @@ function defaultAvatarProfile(childId: string): AvatarProfile {
     childId,
     themeStyle: 'minecraft',
     pieces: [],
-    currentTier: 'stone',
+    currentTier: 'wood',
     equippedPieces: [],
     unlockedPieces: [],
     totalXp: 0,
@@ -91,8 +91,19 @@ export async function addXpEvent(
     ...(options?.itemId ? { itemId: options.itemId } : {}),
   })
 
-  // Diamond entries are event-only — no cumulative doc or armor check needed
+  // Diamond entries are event-only — no cumulative doc or armor check needed.
+  // Update cached diamondBalance on the avatar profile for transactional spend safety.
   if (currencyType === 'diamond') {
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    const profileSnap = await getDoc(profileRef)
+    if (profileSnap.exists()) {
+      const profile = profileSnap.data() as AvatarProfile
+      await setDoc(profileRef, {
+        ...profile,
+        diamondBalance: (profile.diamondBalance ?? 0) + amount,
+        updatedAt: new Date().toISOString(),
+      })
+    }
     return amount
   }
 

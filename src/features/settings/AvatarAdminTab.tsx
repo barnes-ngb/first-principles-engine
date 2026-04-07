@@ -31,7 +31,6 @@ import {
   dailyArmorSessionsCollection,
   dailyArmorSessionDocId,
   xpLedgerCollection,
-  xpLedgerDocId,
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
@@ -39,13 +38,13 @@ import { normalizeAvatarProfile } from '../../features/avatar/normalizeProfile'
 import { ARMOR_PIECES } from '../../core/types'
 import type {
   ArmorPiece,
-  ArmorPieceProgress,
   ArmorTier,
   AvatarProfile,
   DailyArmorSession,
   PlatformerTier,
   XpLedger,
 } from '../../core/types'
+import { addXpEvent } from '../../core/xp/addXpEvent'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -63,7 +62,10 @@ function isPieceEarned(profile: AvatarProfile, pieceId: ArmorPiece): boolean {
 }
 
 const NEXT_TIER: Record<string, ArmorTier | PlatformerTier | null> = {
-  stone: 'diamond',
+  wood: 'stone',
+  stone: 'iron',
+  iron: 'gold',
+  gold: 'diamond',
   diamond: 'netherite',
   netherite: null,
   basic: 'powerup',
@@ -143,57 +145,15 @@ export default function AvatarAdminTab() {
   const handleAdjustXp = useCallback(
     async (delta: number) => {
       if (!profile || !familyId || !activeChildId) return
-      const newXp = Math.max(0, profile.totalXp + delta)
 
-      // Recompute unlocked pieces — add newly eligible stone pieces
-      const updatedPieces: ArmorPieceProgress[] = [...(profile.pieces ?? [])]
-      for (const pieceDef of ARMOR_PIECES) {
-        const existing = updatedPieces.find((p) => p.pieceId === pieceDef.id)
-        const alreadyEarned = existing && (
-          profile.themeStyle === 'minecraft'
-            ? (existing.unlockedTiers ?? []).length > 0
-            : (existing.unlockedTiersPlatformer ?? []).length > 0
-        )
-        if (!alreadyEarned && newXp >= pieceDef.xpToUnlockStone) {
-          if (existing) {
-            if (profile.themeStyle === 'minecraft') {
-              existing.unlockedTiers = [...(existing.unlockedTiers ?? []), 'stone']
-            } else {
-              existing.unlockedTiersPlatformer = [...(existing.unlockedTiersPlatformer ?? []), 'basic']
-            }
-          } else {
-            updatedPieces.push({
-              pieceId: pieceDef.id,
-              unlockedTiers: profile.themeStyle === 'minecraft' ? ['stone'] : [],
-              ...(profile.themeStyle === 'platformer' ? { unlockedTiersPlatformer: ['basic'] as PlatformerTier[] } : {}),
-              generatedImageUrls: {},
-            })
-          }
-        }
-      }
-
-      const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
       try {
-        await setDoc(profileRef, stripUndefined({
-          ...profile,
-          totalXp: newXp,
-          pieces: updatedPieces,
-          updatedAt: new Date().toISOString(),
-        }))
+        const eventType = delta > 0 ? 'MANUAL_AWARD' : 'MANUAL_DEDUCT'
+        const dedupKey = `admin_${Date.now()}`
+        const meta = { awardedBy: 'admin', note: delta > 0 ? 'Admin added XP' : 'Admin removed XP' }
 
-        const adminDedupKey = `admin_${Date.now()}`
-        const eventRef = doc(xpLedgerCollection(familyId), xpLedgerDocId(activeChildId, adminDedupKey))
-        await setDoc(eventRef, {
-          childId: activeChildId,
-          totalXp: delta,
-          sources: { routines: delta, quests: 0, books: 0 },
-          type: 'parent_adjustment',
-          amount: delta,
-          dedupKey: adminDedupKey,
-          meta: { note: delta > 0 ? 'Parent added XP' : 'Parent removed XP' },
-          awardedAt: new Date().toISOString(),
-          lastUpdatedAt: new Date().toISOString(),
-        } satisfies XpLedger)
+        await addXpEvent(familyId, activeChildId, eventType, delta, dedupKey, meta)
+
+        // addXpEvent handles ledger, profile totalXp, tier detection, and calls checkAndUnlockArmor
 
         setFeedback({ severity: 'success', message: `XP ${delta > 0 ? 'added' : 'removed'}: ${Math.abs(delta)}` })
       } catch (err) {
@@ -344,7 +304,7 @@ export default function AvatarAdminTab() {
         childId: profile.childId,
         themeStyle: profile.themeStyle,
         pieces: [],
-        currentTier: profile.themeStyle === 'minecraft' ? 'stone' : 'basic',
+        currentTier: profile.themeStyle === 'minecraft' ? 'wood' : 'basic',
         ...(profile.baseCharacterUrl ? { baseCharacterUrl: profile.baseCharacterUrl } : {}),
         ...(profile.photoTransformUrl ? { photoTransformUrl: profile.photoTransformUrl } : {}),
         armorSheetUrls: {},
