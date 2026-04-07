@@ -65,6 +65,7 @@ import TierUpgradeCelebration from './TierUpgradeCelebration'
 import TierUpCeremony from '../../components/avatar/TierUpCeremony'
 import { calculateTier, TIERS } from './voxel/tierMaterials'
 import AvatarCharacterDisplay from './AvatarCharacterDisplay'
+import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
 import { getArmorGateStatusFromSession } from './armorGate'
@@ -206,6 +207,9 @@ export default function MyAvatarPage() {
   const [childCustomizerExpanded, setChildCustomizerExpanded] = useState(false)
   const [weekData, setWeekData] = useState<HeroHubWeekData | null>(null)
   const [localProportions, setLocalProportions] = useState<CharacterProportions>(DEFAULT_PROPORTIONS)
+  const heroDebugEnabled = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('heroDebug') === '1'
+  const [heroAnimationTuning, setHeroAnimationTuning] = useState<HeroAnimationTuningOverride>({})
   const siblingChild = children.find((c) => c.id !== childId)
   const siblingId = brothersMode ? siblingChild?.id : undefined
   const siblingProfile = useAvatarProfile(familyId, siblingId)
@@ -1264,6 +1268,9 @@ export default function MyAvatarPage() {
           proportions={localProportions}
           onEditCharacter={handleTunerToggle}
           tunerOpen={tunerOpen}
+          heroDebugEnabled={heroDebugEnabled}
+          heroAnimationTuning={heroAnimationTuning}
+          onHeroAnimationTuningChange={setHeroAnimationTuning}
           onTierUp={async (_oldTier, newTier) => {
             setCeremonyActive(false)
             if (!familyId || !childId) return

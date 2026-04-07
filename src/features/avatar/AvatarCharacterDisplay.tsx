@@ -5,12 +5,14 @@ import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import EditIcon from '@mui/icons-material/Edit'
 
 import type { AvatarProfile, AvatarBackground, CharacterProportions, Child } from '../../core/types'
+import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
 import { LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
 import type { CharacterFeatures } from '../../core/types'
 import type { VoxelCharacterHandle } from './VoxelCharacter'
 import VoxelCharacter from './VoxelCharacter'
 import BrothersVoxelScene from './BrothersVoxelScene'
 import PoseButtons from './PoseButtons'
+import HeroAnimationDebugPanel from './HeroAnimationDebugPanel'
 
 interface AvatarCharacterDisplayProps {
   profile: AvatarProfile
@@ -42,6 +44,9 @@ interface AvatarCharacterDisplayProps {
   proportions?: Partial<CharacterProportions>
   onEditCharacter: () => void
   tunerOpen: boolean
+  heroDebugEnabled?: boolean
+  heroAnimationTuning: HeroAnimationTuningOverride
+  onHeroAnimationTuningChange: (next: HeroAnimationTuningOverride) => void
 }
 
 export default function AvatarCharacterDisplay({
@@ -72,6 +77,9 @@ export default function AvatarCharacterDisplay({
   proportions,
   onEditCharacter,
   tunerOpen,
+  heroDebugEnabled = false,
+  heroAnimationTuning,
+  onHeroAnimationTuningChange,
 }: AvatarCharacterDisplayProps) {
   return (
     <>
@@ -154,6 +162,13 @@ export default function AvatarCharacterDisplay({
           {bgMode === 'room' ? 'Room' : 'Night'}
         </Box>
       </Box>
+
+      {heroDebugEnabled && (
+        <HeroAnimationDebugPanel
+          values={heroAnimationTuning}
+          onChange={onHeroAnimationTuningChange}
+        />
+      )}
 
       {/* ── 3D Character Display ─────────────────────────────── */}
       {brothersMode && childrenList.length > 1 ? (
@@ -250,6 +265,7 @@ export default function AvatarCharacterDisplay({
             onTierUpStart={onTierUpStart}
             onTierUp={onTierUp}
             proportions={proportions}
+            animationTuningOverrides={heroAnimationTuning}
           />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
             <Box sx={{ flex: 1 }}>
