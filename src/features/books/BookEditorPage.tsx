@@ -705,10 +705,19 @@ export default function BookEditorPage() {
   }, [book])
 
   const handleOpenFinishDialog = useCallback(() => {
-    setSelectedCoverUrl(coverCandidates[0] ?? null)
+    setSelectedCoverUrl(book?.coverImageUrl ?? coverCandidates[0] ?? null)
     setSelectedTheme(book?.theme)
     setShowFinishDialog(true)
-  }, [coverCandidates, book?.theme])
+  }, [coverCandidates, book?.coverImageUrl, book?.theme])
+
+  const handleSaveCover = useCallback(() => {
+    if (!book) return
+    updateBookMeta({
+      ...(selectedCoverUrl ? { coverImageUrl: selectedCoverUrl } : { coverImageUrl: undefined }),
+      ...(selectedTheme ? { theme: selectedTheme } : { theme: undefined }),
+    })
+    setShowFinishDialog(false)
+  }, [book, selectedCoverUrl, selectedTheme, updateBookMeta])
 
   const handleFinishBook = useCallback(() => {
     if (!book) return
@@ -833,6 +842,13 @@ export default function BookEditorPage() {
           icon={printing ? <CircularProgress size={14} /> : <PrintIcon />}
           onClick={() => setShowPrintSettings(true)}
           disabled={printing}
+          variant="outlined"
+          size="small"
+        />
+        <Chip
+          label="Cover"
+          icon={<CollectionsIcon />}
+          onClick={handleOpenFinishDialog}
           variant="outlined"
           size="small"
         />
@@ -1674,7 +1690,7 @@ export default function BookEditorPage() {
 
       {/* Finish dialog */}
       <Dialog open={showFinishDialog} onClose={() => setShowFinishDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Your book is ready!</DialogTitle>
+        <DialogTitle>{book.status === 'complete' ? 'Edit Cover' : 'Cover & Finish'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
             {coverCandidates.length > 0 && (
@@ -1746,9 +1762,15 @@ export default function BookEditorPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowFinishDialog(false)}>Keep working</Button>
-          <Button variant="contained" color="success" onClick={handleFinishBook}>
-            Finish!
-          </Button>
+          {book.status === 'complete' ? (
+            <Button variant="contained" onClick={handleSaveCover}>
+              Save cover
+            </Button>
+          ) : (
+            <Button variant="contained" color="success" onClick={handleFinishBook}>
+              Finish!
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
@@ -1883,4 +1905,3 @@ export default function BookEditorPage() {
     </Page>
   )
 }
-
