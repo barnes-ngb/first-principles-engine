@@ -4,6 +4,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
 import { requireEmailAuth, checkRateLimit } from "./authGuard.js";
 import { STONEBRIDGE_BIBLE } from "./stonebridgeBible.js";
+import { ensureWorkbookActivityConfigsForChild } from "./workbookActivityConfigBackfill.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -1586,6 +1587,20 @@ export const chat = onCall(
             completedPrograms?: string[];
           })
         : undefined;
+      // Guaranteed server-side workbook backfill (Phase 2B hardening).
+      // Runs before any task can depend on workbook-type activityConfigs.
+      const backfillStats = await ensureWorkbookActivityConfigsForChild(
+        db,
+        familyId,
+        childId,
+      );
+      if (backfillStats.created > 0 || backfillStats.updated > 0) {
+        console.log("[activityConfigs.backfill] Applied workbook backfill", {
+          familyId,
+          childId,
+          ...backfillStats,
+        });
+      }
     }
 
     // ── Dispatch to handler ────────────────────────────────────
