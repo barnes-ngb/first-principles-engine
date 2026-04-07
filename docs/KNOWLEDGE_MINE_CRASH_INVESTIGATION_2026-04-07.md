@@ -1,5 +1,7 @@
 # Knowledge Mine Crash Investigation — 2026-04-07
 
+> **Status: RESOLVED** — All fixes landed 2026-04-07.
+
 > Lincoln test session on production tablet. Three symptoms observed after 3 correct comprehension answers triggered a level-up from 6 → 7.
 
 ---
@@ -262,3 +264,33 @@ F1 + F4 together fix all three symptoms with ~20 lines of code.
 5. **Is the `quest.screen` dependency on the resume useEffect actually effective?** After a crash, if the hook's state is destroyed and recreated, `quest.screen` starts at `'intro'` — which is its default. React's `useEffect` runs on mount regardless of dependency values, so this should work on a clean remount. The issue is specifically when the component **doesn't unmount** (preserved by router) or when the precision crash prevents mounting entirely.
 
 6. **Could the tab be running low on memory?** A 3.4MB bundle with Three.js loaded globally on a tablet could hit memory pressure. The unhandled rejection might be caused by the browser killing the Cloud Function fetch due to memory pressure, not a CF failure.
+
+---
+
+## 9. Resolution (2026-04-07)
+
+Four fixes landed to break the cascade. Each is independently revertable.
+
+| Fix | What Changed | Symptoms Resolved |
+|-----|-------------|-------------------|
+| **F1: submitAnswer/handleSkip try/catch** (`useQuestSession.ts`) | Wrapped the AI call block in both `submitAnswer` and `handleSkip` in try/catch. On error with answered questions → `endSession()` fires, showing QuestSummary with earned diamonds. On error with zero questions → `resetToIntro()` + friendly "mine is being tricky" message. Error logged with full context. | S1 (quest crash/ejection) — prevents the cascade trigger |
+| **F2+F3: AvatarThumbnail WebGL safety** (`AvatarThumbnail.tsx`) | (a) Wrapped `WebGLRenderer` creation in try/catch with CSS fallback (purple circle + child initial). (b) Added `gl.isContextLost()` check after renderer creation. (c) Added `renderer.forceContextLoss()` to `disposeScene` — was missing, causing WebGL context leaks. | S2 (precision crash) — prevents the WebGL context exhaustion |
+| **F4: /quest errorElement** (`router.tsx` + `QuestErrorBoundary.tsx`) | Added Minecraft-themed error boundary to the `/quest` route: "The mine collapsed!" with Back to mine / Back to Today buttons. Logs error for debugging. | S2 fallback (if a render error still escapes) |
+| **F5: Resume useEffect — no change needed** | Verified: the dependency array `[activeChildId, familyId, quest.screen]` is correct. The real blocker was the precision crash (F2) preventing component mount. With F2 fixed, the resume query fires normally on soft nav back to `/quest`. | S3 (resume card not appearing) — resolved by F2 |
+
+### AvatarThumbnail Remount Audit
+
+**Finding:** AvatarThumbnail is rendered inside `AppShell` which wraps `<Outlet>`. AppShell persists across navigations — AvatarThumbnail does **not** remount on page nav. The `useEffect` only re-runs when props change (e.g., `totalXp` after an XP gain, or `equippedPieces` after armor equip).
+
+The WebGL context leak was caused by missing `forceContextLoss()` in the cleanup function. `renderer.dispose()` alone releases Three.js internal state but does NOT release the WebGL context back to the browser's pool. On a tablet that also uses WebGL elsewhere (or after multiple prop-change re-renders), this could exhaust the browser's context limit (typically 8-16 on mobile).
+
+**Fix applied:** Added `renderer.forceContextLoss()` to `disposeScene()`. This ensures every cleanup properly releases the context.
+
+### Routes Missing errorElement (audit)
+
+The entire route tree has zero `errorElement` definitions besides the new `/quest` one. Kid-facing routes that should have themed error boundaries:
+- `/workshop` — Story Game Workshop
+- `/books` (and sub-routes) — My Books
+- `/avatar` — My Armor
+
+These are candidates for a separate cleanup pass using `QuestErrorBoundary` as the pattern.

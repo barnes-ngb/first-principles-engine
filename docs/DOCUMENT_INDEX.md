@@ -24,7 +24,7 @@
 | `SYSTEM_PROMPTS.md` | **CURRENT** (v4) | Task dispatch, model selection, context slices — 13 task types including scan + shellyChat |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
 | `KNOWLEDGE_MINE_AUDIT_2026-04.md` | **NEW** | Knowledge Mine audit (Part 1/4): quest type inventory, level system analysis, Level 7 mystery resolution, difficulty progression, Lincoln constraint compliance |
-| `KNOWLEDGE_MINE_CRASH_INVESTIGATION_2026-04-07.md` | **NEW** | Crash investigation: session ejection + precision TypeError + resume card failure after Level 6→7 promotion in comprehension quest. Root cause chain identified, 7 fixes proposed. |
+| `KNOWLEDGE_MINE_CRASH_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Crash investigation: session ejection + precision TypeError + resume card failure after Level 6→7 promotion in comprehension quest. Root cause chain identified, 4 fixes landed (try/catch, WebGL safety, forceContextLoss, errorElement). |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `archive/01–07_*.md` | ARCHIVED | Phase 1–5 specs, original testing plan, Saturday lab runbook — all superseded by current docs |
 | `08_RUNBOOK.md` | **CURRENT** (Reference) | Operational runbook: deploy, backups, key rotation, troubleshooting |
