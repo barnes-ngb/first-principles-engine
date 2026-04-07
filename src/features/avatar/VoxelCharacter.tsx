@@ -129,11 +129,11 @@ const POSE_DEFAULT: EquipmentPose = { armLRotZ: 0, armRRotZ: 0, armLRotX: 0, arm
 function calculateEquipmentPose(equipped: string[]): EquipmentPose {
   const pose = { ...POSE_DEFAULT }
   if (equipped.includes('sword')) {
-    pose.armRRotZ = 0.55   // ~32° outward — enough to clear breastplate
+    pose.armRRotZ = 0.64   // Wider default for clearer mobile silhouette
     pose.armRRotX = -0.15  // Slight forward tilt
   }
   if (equipped.includes('shield')) {
-    pose.armLRotZ = 0.5    // ~29° outward
+    pose.armLRotZ = 0.6    // Wider default for clearer mobile silhouette
     pose.armLRotX = 0.35   // More forward — shield presents to front
   }
   return pose

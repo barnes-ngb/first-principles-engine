@@ -56,29 +56,29 @@ export interface HeroAnimationTuning {
 
 export const HERO_ANIMATION_TUNING_DEFAULTS: HeroAnimationTuning = {
   // Feet / stance
-  stanceWidth: 0.28,
-  footSeparation: 0.24,
-  footSway: 0.003,
-  footLift: 0.003,
-  footCenterLineGap: 0.1,
+  stanceWidth: 0.31,
+  footSeparation: 0.27,
+  footSway: 0.0015,
+  footLift: 0.0015,
+  footCenterLineGap: 0.115,
   footPlantY: 0,
-  emoteFootSeparationMultiplier: 1.18,
+  emoteFootSeparationMultiplier: 1.28,
 
   // Idle body language (stable, heroic read)
-  torsoTwist: 0.026,
-  shoulderSwing: 0.9,
-  headTurnAmount: 0.05,
+  torsoTwist: 0.018,
+  shoulderSwing: 0.72,
+  headTurnAmount: 0.035,
 
   // Idle arm motion
-  armSwingZ: 0.014,
-  armSwingX: 0.016,
+  armSwingZ: 0.011,
+  armSwingX: 0.012,
   armPhaseOffset: Math.PI * 0.62,
-  elbowOutBias: 0.33,
+  elbowOutBias: 0.37,
   armSwingClampZ: 1.55,
   armSwingClampX: { min: -1.0, max: 0.42 },
   silhouetteBias: {
-    leftRotZ: 0.12,
-    rightRotZ: 0.18,
+    leftRotZ: 0.16,
+    rightRotZ: 0.22,
   },
   postPoseArmClearanceBoost: 0.12,
   postPoseClearanceDurationSec: 0.65,
@@ -86,10 +86,10 @@ export const HERO_ANIMATION_TUNING_DEFAULTS: HeroAnimationTuning = {
   // Procedural guardrails (applied after pose + idle calculations)
   guardrails: {
     armBySide: {
-      L: { rotZMin: 0.32, rotZMax: 1.7, rotXMin: -1.0, rotXMax: 0.34 },
-      R: { rotZMin: 0.36, rotZMax: 1.78, rotXMin: -0.9, rotXMax: 0.38 },
+      L: { rotZMin: 0.38, rotZMax: 1.7, rotXMin: -1.0, rotXMax: 0.34 },
+      R: { rotZMin: 0.42, rotZMax: 1.78, rotXMin: -0.9, rotXMax: 0.38 },
     },
-    elbowInwardCollapseLimit: 0.28,
+    elbowInwardCollapseLimit: 0.34,
     torsoSoftCollision: {
       rotXStart: -0.1,
       rotXEnd: 0.42,
@@ -99,12 +99,12 @@ export const HERO_ANIMATION_TUNING_DEFAULTS: HeroAnimationTuning = {
   },
 
   // Collision avoidance
-  torsoClearance: 0.22,
+  torsoClearance: 0.25,
   torsoAvoidanceGain: 0.52,
 
   // General character motion
-  bodyBobAmplitude: 0.008,
-  bodyLateralShift: 0.015,
+  bodyBobAmplitude: 0.005,
+  bodyLateralShift: 0.01,
 
   // Emote/expression shaping
   emoteIntensity: 1,
