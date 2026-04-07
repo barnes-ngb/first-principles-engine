@@ -68,6 +68,12 @@ import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
 import { getArmorGateStatusFromSession } from './armorGate'
 
+type NextRecommendedAction =
+  | { type: 'forge'; label: string }
+  | { type: 'suit_up'; label: string }
+  | { type: 'start_day'; label: string }
+  | { type: 'earn_xp'; label: string }
+
 // ── Helpers ───────────────────────────────────────────────────────
 
 /** Normalize raw Firestore DailyArmorSession data — guards against non-array fields */
@@ -182,6 +188,7 @@ export default function MyAvatarPage() {
   const [bgMode, setBgMode] = useState<AvatarBackground>('night')
   // Character tuner state
   const [tunerOpen, setTunerOpen] = useState(false)
+  const [childCustomizerExpanded, setChildCustomizerExpanded] = useState(false)
   const [localProportions, setLocalProportions] = useState<CharacterProportions>(DEFAULT_PROPORTIONS)
   const siblingChild = children.find((c) => c.id !== childId)
   const siblingId = brothersMode ? siblingChild?.id : undefined
@@ -821,6 +828,21 @@ export default function MyAvatarPage() {
 
   // Calculate XP progress within the current tier range
   const currentTierName = profile ? calculateTier(profile.totalXp) : 'WOOD'
+  const nextRecommendedAction: NextRecommendedAction = (() => {
+    if (allEarnedApplied && unlockedVoxel.length > 0) {
+      return { type: 'start_day', label: 'Start your day' }
+    }
+    if (unlockedVoxel.length > 0 && appliedVoxel.length < unlockedVoxel.length) {
+      return { type: 'suit_up', label: 'Suit up' }
+    }
+    if (!allSixUnlocked && nextUnlock) {
+      if (nextUnlock.xpNeeded <= 0) {
+        return { type: 'forge', label: `Forge ${nextUnlock.piece.shortName}` }
+      }
+      return { type: 'earn_xp', label: `Earn ${nextUnlock.xpNeeded} XP for ${nextUnlock.piece.shortName}` }
+    }
+    return { type: 'start_day', label: 'Start your day' }
+  })()
 
   // ── Screenshot capture ──────────────────────────────────────────
   const playShutterSound = useCallback(() => {
@@ -1103,7 +1125,12 @@ export default function MyAvatarPage() {
           isLincoln={isLincoln}
           isChildProfile={isChildProfile}
           accentColor={accentColor}
+          nextRecommendedAction={nextRecommendedAction}
           onSuitUpAll={suitUpAll}
+          onForgeNext={() => {
+            if (!nextUnlock) return
+            setSelectedPiece(nextUnlock.piece)
+          }}
           onStartDay={() => navigate('/today')}
         />
 
@@ -1143,38 +1170,95 @@ export default function MyAvatarPage() {
         )}
 
         {/* ── Customizer (outfit, dye, accessories, emblem, crest, skin, photo) ── */}
-        <AvatarCustomizer
-          profile={profile}
-          familyId={familyId}
-          childId={childId}
-          childName={activeChild?.name}
-          isLincoln={isLincoln}
-          ageGroup={ageGroup}
-          appliedPieces={appliedPieces}
-          unlockedVoxel={unlockedVoxel}
-          appliedVoxel={appliedVoxel}
-          currentTierName={currentTierName}
-          accentColor={accentColor}
-          textColor={textColor}
-          onOutfitColorChange={handleOutfitColorChange}
-          onArmorDyeChange={handleArmorDyeChange}
-          onArmorDyeReset={handleArmorDyeReset}
-          onEmblemChange={handleEmblemChange}
-          onCrestChange={handleCrestChange}
-          onAccessoryToggle={handleAccessoryToggle}
-          tunerOpen={tunerOpen}
-          tunerProportions={localProportions}
-          tunerOutfitColors={{
-            shirtColor: profile.customization?.shirtColor ?? (isLincoln ? '#CC5500' : '#E8A838'),
-            pantsColor: profile.customization?.pantsColor ?? (isLincoln ? '#2A3A52' : '#C4B998'),
-            shoeColor: profile.customization?.shoeColor ?? '#3D2B1F',
-            capeColor: profile.customization?.capeColor ?? (isLincoln ? '#8B0000' : '#2255AA'),
-          }}
-          onTunerProportionsChange={handleTunerProportionsChange}
-          onTunerCapeColorChange={handleTunerCapeColorChange}
-          onTunerDone={handleTunerDone}
-          onTunerReset={handleTunerReset}
-        />
+        {isChildProfile ? (
+          <Box sx={{ px: 2, mt: 1 }}>
+            <Box
+              component="button"
+              onClick={() => setChildCustomizerExpanded((prev) => !prev)}
+              sx={{
+                width: '100%',
+                py: 1.25,
+                borderRadius: isLincoln ? '6px' : '14px',
+                border: `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
+                background: isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                color: isLincoln ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.75)',
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '12px' : '15px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              {childCustomizerExpanded ? 'Hide customize options' : 'Customize warrior'}
+            </Box>
+            {childCustomizerExpanded && (
+              <AvatarCustomizer
+                profile={profile}
+                familyId={familyId}
+                childId={childId}
+                childName={activeChild?.name}
+                isLincoln={isLincoln}
+                ageGroup={ageGroup}
+                appliedPieces={appliedPieces}
+                unlockedVoxel={unlockedVoxel}
+                appliedVoxel={appliedVoxel}
+                currentTierName={currentTierName}
+                accentColor={accentColor}
+                textColor={textColor}
+                onOutfitColorChange={handleOutfitColorChange}
+                onArmorDyeChange={handleArmorDyeChange}
+                onArmorDyeReset={handleArmorDyeReset}
+                onEmblemChange={handleEmblemChange}
+                onCrestChange={handleCrestChange}
+                onAccessoryToggle={handleAccessoryToggle}
+                tunerOpen={tunerOpen}
+                tunerProportions={localProportions}
+                tunerOutfitColors={{
+                  shirtColor: profile.customization?.shirtColor ?? (isLincoln ? '#CC5500' : '#E8A838'),
+                  pantsColor: profile.customization?.pantsColor ?? (isLincoln ? '#2A3A52' : '#C4B998'),
+                  shoeColor: profile.customization?.shoeColor ?? '#3D2B1F',
+                  capeColor: profile.customization?.capeColor ?? (isLincoln ? '#8B0000' : '#2255AA'),
+                }}
+                onTunerProportionsChange={handleTunerProportionsChange}
+                onTunerCapeColorChange={handleTunerCapeColorChange}
+                onTunerDone={handleTunerDone}
+                onTunerReset={handleTunerReset}
+              />
+            )}
+          </Box>
+        ) : (
+          <AvatarCustomizer
+            profile={profile}
+            familyId={familyId}
+            childId={childId}
+            childName={activeChild?.name}
+            isLincoln={isLincoln}
+            ageGroup={ageGroup}
+            appliedPieces={appliedPieces}
+            unlockedVoxel={unlockedVoxel}
+            appliedVoxel={appliedVoxel}
+            currentTierName={currentTierName}
+            accentColor={accentColor}
+            textColor={textColor}
+            onOutfitColorChange={handleOutfitColorChange}
+            onArmorDyeChange={handleArmorDyeChange}
+            onArmorDyeReset={handleArmorDyeReset}
+            onEmblemChange={handleEmblemChange}
+            onCrestChange={handleCrestChange}
+            onAccessoryToggle={handleAccessoryToggle}
+            tunerOpen={tunerOpen}
+            tunerProportions={localProportions}
+            tunerOutfitColors={{
+              shirtColor: profile.customization?.shirtColor ?? (isLincoln ? '#CC5500' : '#E8A838'),
+              pantsColor: profile.customization?.pantsColor ?? (isLincoln ? '#2A3A52' : '#C4B998'),
+              shoeColor: profile.customization?.shoeColor ?? '#3D2B1F',
+              capeColor: profile.customization?.capeColor ?? (isLincoln ? '#8B0000' : '#2255AA'),
+            }}
+            onTunerProportionsChange={handleTunerProportionsChange}
+            onTunerCapeColorChange={handleTunerCapeColorChange}
+            onTunerDone={handleTunerDone}
+            onTunerReset={handleTunerReset}
+          />
+        )}
       </Page>
 
       {/* Unequip dialog removed — tap toggles directly */}
