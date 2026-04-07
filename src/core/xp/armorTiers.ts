@@ -1,18 +1,16 @@
 /**
- * Minecraft armor progression system for Lincoln.
+ * Armor tier progression — derived from the voxel tier system (single source of truth).
  *
- * XP earned from daily routines maps to armor tiers. As Lincoln accumulates
- * lifetime XP, his avatar upgrades from Steve (no armor) all the way to
- * Netherite. Each tier also unlocks a Minecraft-themed title.
- *
- * The color values match actual Minecraft armor colors so that — in theory —
- * a skin builder could replicate the look in-game.
+ * Thresholds match `src/features/avatar/voxel/tierMaterials.ts` TIERS exactly.
+ * Legacy tier names (Leather, Chain) are removed; we now use the 6-tier
+ * voxel system: Wood, Stone, Iron, Gold, Diamond, Netherite.
  */
 
+import { TIERS } from '../../features/avatar/voxel/tierMaterials'
+
 export const ArmorTier = {
-  None: 'none',
-  Leather: 'leather',
-  Chain: 'chain',
+  Wood: 'wood',
+  Stone: 'stone',
   Iron: 'iron',
   Gold: 'gold',
   Diamond: 'diamond',
@@ -27,79 +25,69 @@ export interface ArmorTierInfo {
   title: string
   /** Minimum cumulative XP to reach this tier */
   minXp: number
-  /** Primary color of the armor (helmet/chestplate/leggings/boots) */
+  /** Primary color of the armor */
   color: string
   /** Secondary/accent color */
   accent: string
-  /** Number of armor pieces shown (0-4: boots, leggings, chestplate, helmet) */
+  /** Number of armor pieces shown (0-4) */
   pieces: number
 }
 
 /**
- * Armor tiers in ascending order. XP thresholds are designed so Lincoln
- * sees progress every few weeks of consistent work (~8-15 XP/day).
+ * Armor tiers in ascending order, derived from the voxel TIERS definition.
  */
 export const ARMOR_TIERS: ArmorTierInfo[] = [
   {
-    tier: ArmorTier.None,
-    label: 'No Armor',
+    tier: ArmorTier.Wood,
+    label: TIERS.WOOD.label + ' Armor',
     title: 'New Player',
-    minXp: 0,
-    color: '#4A7A3A',      // Steve's shirt green
-    accent: '#3B2A1A',     // Steve's hair brown
+    minXp: TIERS.WOOD.minXp,         // 0
+    color: '#8B7332',                 // Warm golden-brown (wood)
+    accent: '#6B5522',
     pieces: 0,
   },
   {
-    tier: ArmorTier.Leather,
-    label: 'Leather Armor',
+    tier: ArmorTier.Stone,
+    label: TIERS.STONE.label + ' Armor',
     title: 'Survivor',
-    minXp: 50,
-    color: '#A06540',      // Leather brown
-    accent: '#8B5630',
-    pieces: 1,             // boots only
-  },
-  {
-    tier: ArmorTier.Chain,
-    label: 'Chainmail Armor',
-    title: 'Explorer',
-    minXp: 150,
-    color: '#8C8C8C',      // Chain gray
-    accent: '#6B6B6B',
-    pieces: 2,             // boots + leggings
+    minXp: TIERS.STONE.minXp,        // 200
+    color: '#808080',                 // Stone gray
+    accent: '#666666',
+    pieces: 1,
   },
   {
     tier: ArmorTier.Iron,
-    label: 'Iron Armor',
+    label: TIERS.IRON.label + ' Armor',
     title: 'Warrior',
-    minXp: 350,
-    color: '#C8C8C8',      // Iron silver
+    minXp: TIERS.IRON.minXp,         // 500
+    color: '#C8C8C8',                 // Iron silver
     accent: '#A0A0A0',
-    pieces: 3,             // boots + leggings + chestplate
+    pieces: 2,
   },
   {
     tier: ArmorTier.Gold,
-    label: 'Gold Armor',
+    label: TIERS.GOLD.label + ' Armor',
     title: 'Champion',
-    minXp: 600,
-    color: '#FCDB5B',      // Gold yellow
+    minXp: TIERS.GOLD.minXp,         // 1000
+    color: '#FCDB5B',                 // Gold yellow
     accent: '#DBA520',
-    pieces: 4,             // full set
+    pieces: 3,
   },
   {
     tier: ArmorTier.Diamond,
-    label: 'Diamond Armor',
+    label: TIERS.DIAMOND.label + ' Armor',
     title: 'Diamond Scholar',
-    minXp: 1000,
-    color: '#5DECF5',      // Diamond cyan
+    minXp: TIERS.DIAMOND.minXp,      // 2000
+    color: '#5DECF5',                 // Diamond cyan
     accent: '#2CB9C4',
     pieces: 4,
   },
   {
     tier: ArmorTier.Netherite,
-    label: 'Netherite Armor',
+    label: TIERS.NETHERITE.label + ' Armor',
     title: 'Netherite Legend',
-    minXp: 1800,
-    color: '#44393B',      // Netherite dark
+    minXp: TIERS.NETHERITE.minXp,    // 5000
+    color: '#44393B',                 // Netherite dark
     accent: '#6B575A',
     pieces: 4,
   },
@@ -147,13 +135,10 @@ export function getNextTierProgress(xp: number): {
 
 /**
  * Skin-export hint: maps armor pieces to Minecraft skin regions.
- *
- * A Minecraft skin is a 64×64 PNG. These are the pixel regions for each
- * armor slot, useful if we ever want to generate an actual downloadable skin.
  */
 export const SKIN_REGIONS = {
-  helmet:     { x: 0,  y: 0,  w: 32, h: 16 }, // head overlay
-  chestplate: { x: 16, y: 20, w: 24, h: 12 }, // body
-  leggings:   { x: 0,  y: 20, w: 16, h: 12 }, // legs
-  boots:      { x: 0,  y: 52, w: 16, h: 12 }, // feet
+  helmet:     { x: 0,  y: 0,  w: 32, h: 16 },
+  chestplate: { x: 16, y: 20, w: 24, h: 12 },
+  leggings:   { x: 0,  y: 20, w: 16, h: 12 },
+  boots:      { x: 0,  y: 52, w: 16, h: 12 },
 } as const

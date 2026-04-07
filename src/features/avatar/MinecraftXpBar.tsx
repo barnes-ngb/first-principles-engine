@@ -183,7 +183,7 @@ export default function MinecraftXpBar({
 
 /** Simple index lookup for display level number */
 function ARMOR_TIERS_INDEX(tier: string): number {
-  const order = ['none', 'leather', 'chain', 'iron', 'gold', 'diamond', 'netherite']
+  const order = ['wood', 'stone', 'iron', 'gold', 'diamond', 'netherite']
   const idx = order.indexOf(tier)
   return idx >= 0 ? idx : 0
 }

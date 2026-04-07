@@ -8,6 +8,9 @@ const mockDoc = vi.fn((...args: unknown[]) => { void args; return 'mock-doc' })
 const mockGetDoc = vi.fn()
 const mockSetDoc = vi.fn()
 
+// Transaction mock that executes the callback with mock transaction methods
+const mockRunTransaction = vi.fn()
+
 vi.mock('firebase/firestore', () => ({
   getDocs: (...args: unknown[]) => mockGetDocs(...args),
   query: (...args: unknown[]) => mockQuery(...args),
@@ -15,9 +18,11 @@ vi.mock('firebase/firestore', () => ({
   doc: (...args: unknown[]) => mockDoc(...args),
   getDoc: (...args: unknown[]) => mockGetDoc(...args),
   setDoc: (...args: unknown[]) => mockSetDoc(...args),
+  runTransaction: (...args: unknown[]) => mockRunTransaction(...args),
 }))
 
 vi.mock('../firebase/firestore', () => ({
+  db: 'mock-db',
   xpLedgerCollection: () => 'mock-collection',
   xpLedgerDocId: (childId: string, dedupKey: string) => `${childId}_${dedupKey}`,
   avatarProfilesCollection: () => 'mock-avatar-collection',
@@ -105,21 +110,66 @@ describe('spendDiamonds', () => {
   })
 
   it('returns false when balance is insufficient', async () => {
-    // Balance = 5, trying to spend 10
-    mockGetDocs.mockResolvedValue(mockSnapshotDocs([{ amount: 5 }]))
+    // Transaction runs the callback; profile has diamondBalance=5, trying to spend 10
+    mockRunTransaction.mockImplementation(async (_db: unknown, cb: (tx: unknown) => Promise<void>) => {
+      const mockTx = {
+        get: vi.fn()
+          .mockResolvedValueOnce({ exists: () => true, data: () => ({ diamondBalance: 5 }) })
+          .mockResolvedValueOnce({ exists: () => false }),
+        update: vi.fn(),
+        set: vi.fn(),
+      }
+      await cb(mockTx)
+    })
     expect(await spendDiamonds('fam-1', 'child-1', 10, 'dedup-1', 'forge')).toBe(false)
   })
 
   it('returns true and writes event when balance is sufficient', async () => {
-    // Balance = 20
-    mockGetDocs.mockResolvedValue(mockSnapshotDocs([{ amount: 20 }]))
-    // addXpEvent dedup check — doc doesn't exist yet
-    mockGetDoc.mockResolvedValue({ exists: () => false })
-    mockSetDoc.mockResolvedValue(undefined)
+    // Transaction succeeds — profile has diamondBalance=20, spending 8
+    mockRunTransaction.mockImplementation(async (_db: unknown, cb: (tx: unknown) => Promise<void>) => {
+      const mockTx = {
+        get: vi.fn()
+          .mockResolvedValueOnce({ exists: () => true, data: () => ({ diamondBalance: 20 }) })
+          .mockResolvedValueOnce({ exists: () => false }), // dedup doc doesn't exist
+        update: vi.fn(),
+        set: vi.fn(),
+      }
+      await cb(mockTx)
+    })
 
     const result = await spendDiamonds('fam-1', 'child-1', 8, 'forge-belt-wood', 'forge', 'belt')
     expect(result).toBe(true)
-    // Verify setDoc was called (the event doc write)
-    expect(mockSetDoc).toHaveBeenCalled()
+    expect(mockRunTransaction).toHaveBeenCalled()
+  })
+
+  it('returns false when profile not found', async () => {
+    mockRunTransaction.mockImplementation(async (_db: unknown, cb: (tx: unknown) => Promise<void>) => {
+      const mockTx = {
+        get: vi.fn().mockResolvedValueOnce({ exists: () => false }),
+        update: vi.fn(),
+        set: vi.fn(),
+      }
+      await cb(mockTx)
+    })
+    expect(await spendDiamonds('fam-1', 'child-1', 5, 'dedup-1', 'forge')).toBe(false)
+  })
+
+  it('falls back to computed balance when diamondBalance is not cached', async () => {
+    // Profile exists but has no diamondBalance field — falls back to getDiamondBalance()
+    mockRunTransaction.mockImplementation(async (_db: unknown, cb: (tx: unknown) => Promise<void>) => {
+      const mockTx = {
+        get: vi.fn()
+          .mockResolvedValueOnce({ exists: () => true, data: () => ({}) }) // no diamondBalance
+          .mockResolvedValueOnce({ exists: () => false }),
+        update: vi.fn(),
+        set: vi.fn(),
+      }
+      await cb(mockTx)
+    })
+    // getDiamondBalance returns 15
+    mockGetDocs.mockResolvedValue(mockSnapshotDocs([{ amount: 15 }]))
+
+    const result = await spendDiamonds('fam-1', 'child-1', 8, 'dedup-1', 'forge')
+    expect(result).toBe(true)
   })
 })

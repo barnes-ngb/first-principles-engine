@@ -262,7 +262,7 @@ export default function MyAvatarPage() {
           childId,
           themeStyle: isLincoln ? 'minecraft' : 'platformer',
           pieces: [],
-          currentTier: isLincoln ? 'stone' : 'basic',
+          currentTier: isLincoln ? 'wood' : 'basic',
           characterFeatures: isLincoln ? LINCOLN_FEATURES : LONDON_FEATURES,
           ageGroup,
           equippedPieces: [],

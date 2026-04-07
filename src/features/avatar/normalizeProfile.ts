@@ -12,6 +12,7 @@ import type {
   ShieldEmblem,
 } from '../../core/types'
 import { ACCESSORY_XP_THRESHOLDS, AvatarBackground as AvatarBackgroundValues, ShieldEmblem as ShieldEmblemValues, HelmetCrest as HelmetCrestValues } from '../../core/types'
+import { calculateTier } from './voxel/tierMaterials'
 
 /**
  * Auto-migrate: treat all previously equipped pieces as forged in 'wood' tier.
@@ -44,13 +45,18 @@ export function normalizeAvatarProfile(raw: unknown): AvatarProfile {
 
   const r = raw as Record<string, unknown>
 
+  const totalXp = typeof r.totalXp === 'number' ? r.totalXp : 0
+
+  // Auto-correct currentTier from totalXp (single source of truth = totalXp)
+  const computedTier = calculateTier(totalXp).toLowerCase()
+
   return {
     childId: (r.childId as string) || '',
     themeStyle: (r.themeStyle as 'minecraft' | 'platformer') || 'minecraft',
     ageGroup: (r.ageGroup as 'older' | 'younger') || 'older',
     characterFeatures: normalizeFeatures(r.characterFeatures),
-    totalXp: typeof r.totalXp === 'number' ? r.totalXp : 0,
-    currentTier: (r.currentTier as ArmorTier) || 'stone',
+    totalXp,
+    currentTier: computedTier as ArmorTier,
     equippedPieces: Array.isArray(r.equippedPieces) ? r.equippedPieces : [],
     pieces: Array.isArray(r.pieces) ? r.pieces.map(normalizePiece) : [],
     unlockedPieces: Array.isArray(r.unlockedPieces) ? r.unlockedPieces : [],
@@ -70,6 +76,7 @@ export function normalizeAvatarProfile(raw: unknown): AvatarProfile {
     lastEquipAnimation: (r.lastEquipAnimation as string) || undefined,
     lastFullArmorDate: (r.lastFullArmorDate as string) || undefined,
     armorStreak: typeof r.armorStreak === 'number' ? r.armorStreak : 0,
+    diamondBalance: typeof r.diamondBalance === 'number' ? r.diamondBalance : undefined,
     updatedAt: (r.updatedAt as string) || new Date().toISOString(),
     // Preserve legacy fields if present
     ...migrateEquippedToForged(
@@ -205,7 +212,7 @@ function createDefaultProfile(): AvatarProfile {
       eyeColor: '#4A6B7A',
     },
     totalXp: 0,
-    currentTier: 'stone',
+    currentTier: 'wood',
     equippedPieces: [],
     pieces: [],
     unlockedPieces: [],

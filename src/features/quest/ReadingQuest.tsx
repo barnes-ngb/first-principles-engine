@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
 import IconButton from '@mui/material/IconButton'
 import LinearProgress from '@mui/material/LinearProgress'
@@ -10,6 +11,7 @@ import VolumeOffIcon from '@mui/icons-material/VolumeOff'
 import { useSpeechRecognition } from '../../core/hooks/useSpeechRecognition'
 import { useTTS } from '../../core/hooks/useTTS'
 import { sanitizeStimulus } from './questHelpers'
+import TappableText from './TappableText'
 import type { AnswerInputMethod, QuestQuestion, QuestState } from './questTypes'
 import { MAX_QUESTIONS } from './questTypes'
 
@@ -464,23 +466,29 @@ export default function QuestQuestionScreen({
     }
   }, [question.id, isMathQuest, muted]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Determine TTS behavior based on domain and question type
-  const shouldReadQuestion = isMathQuest
-    || /which word is/i.test(question.prompt)
-    || /rhymes with/i.test(question.prompt)
-    || /complete the sentence/i.test(question.prompt)
-    || /belongs in this sentence/i.test(question.prompt)
-  // Options should be readable for math (always) and reading question types where
-  // hearing the sound/word helps but reading it isn't the skill being tested
-  const shouldReadOptions = isMathQuest
-    || /complete the word/i.test(question.prompt)
-    || /finish the word/i.test(question.prompt)
-    || /fill in/i.test(question.prompt)
-    || /rhymes with/i.test(question.prompt)
-    || /same sound/i.test(question.prompt)
-    || /starts with the/i.test(question.prompt)
-    || /begins with/i.test(question.prompt)
-    || /does NOT rhyme/i.test(question.prompt)
+  // Speak a word via TTS (cancels any in-progress speech first)
+  const speakWord = useCallback(
+    (word: string) => {
+      if (!muted) tts.speak(blendForTTS(word))
+    },
+    [muted, tts],
+  )
+
+  // Detect passage-based comprehension questions (passage separated by double newline)
+  const passageParts = useMemo(() => {
+    const prompt = question.prompt
+    // Comprehension questions have format: "Read this...\n\nPassage text\n\nQuestion?"
+    const parts = prompt.split(/\n\n+/)
+    if (parts.length >= 3) {
+      // First part is instruction, middle part(s) are passage, last is question
+      return {
+        instruction: parts[0],
+        passage: parts.slice(1, -1).join('\n\n'),
+        question: parts[parts.length - 1],
+      }
+    }
+    return null
+  }, [question.prompt])
 
   // Show skip button after 8 seconds on current question
   useEffect(() => {
@@ -607,35 +615,99 @@ export default function QuestQuestionScreen({
         </Box>
       )}
 
-      {/* Prompt — tappable for TTS on math and some reading question types */}
-      <Box
-        onClick={shouldReadQuestion && !muted ? () => tts.speak(question.prompt) : undefined}
-        sx={{
-          cursor: shouldReadQuestion && !muted ? 'pointer' : 'default',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 1,
-          mb: 2,
-        }}
-      >
-        <Typography
-          sx={{
-            fontFamily: MC.font,
-            fontSize: '0.7rem',
-            color: MC.white,
-            textAlign: 'center',
-            lineHeight: 1.8,
-          }}
-        >
-          🧱 {question.prompt}
-        </Typography>
-        {shouldReadQuestion && !muted && (
-          <VolumeUpIcon sx={{ fontSize: '1rem', color: MC.stone, opacity: 0.5, flexShrink: 0 }} />
-        )}
-      </Box>
+      {/* Prompt — every word is tappable for TTS */}
+      {passageParts ? (
+        /* Comprehension question: instruction + passage + question, with read-aloud button */
+        <Box sx={{ mb: 2 }}>
+          {/* Instruction line */}
+          <Box sx={{ textAlign: 'center', mb: 1 }}>
+            <Typography
+              component="span"
+              sx={{ fontFamily: MC.font, fontSize: '0.6rem', color: MC.stone, lineHeight: 1.8 }}
+            >
+              {'🧱 '}
+            </Typography>
+            <TappableText
+              text={passageParts.instruction}
+              onTapWord={speakWord}
+              fontFamily={MC.font}
+              fontSize="0.6rem"
+              color={MC.stone}
+            />
+          </Box>
 
-      {/* Stimulus word — large, centered, Minecraft-style */}
+          {/* Read passage aloud button */}
+          {!muted && (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<VolumeUpIcon />}
+              onClick={() => tts.speak(passageParts.passage)}
+              sx={{
+                mb: 1.5,
+                color: MC.diamond,
+                borderColor: MC.diamond,
+                fontFamily: MC.font,
+                fontSize: '0.45rem',
+                textTransform: 'none',
+                '&:hover': { borderColor: MC.gold, color: MC.gold },
+              }}
+            >
+              Read passage aloud
+            </Button>
+          )}
+
+          {/* Passage text — tappable words */}
+          <Box
+            sx={{
+              bgcolor: MC.darkStone,
+              border: `1px solid ${MC.stone}`,
+              borderRadius: 2,
+              p: 2,
+              mb: 2,
+            }}
+          >
+            <TappableText
+              text={passageParts.passage}
+              onTapWord={speakWord}
+              fontFamily="Georgia, serif"
+              fontSize="0.85rem"
+              color={MC.white}
+              lineHeight={2}
+            />
+          </Box>
+
+          {/* Question text — tappable words */}
+          <Box sx={{ textAlign: 'center' }}>
+            <TappableText
+              text={passageParts.question}
+              onTapWord={speakWord}
+              fontFamily={MC.font}
+              fontSize="0.7rem"
+              color={MC.white}
+            />
+          </Box>
+        </Box>
+      ) : (
+        /* Non-passage question: single prompt line, all words tappable */
+        <Box sx={{ textAlign: 'center', mb: 2 }}>
+          <Typography
+            component="span"
+            sx={{ fontFamily: MC.font, fontSize: '0.7rem', color: MC.white, lineHeight: 1.8 }}
+          >
+            {'🧱 '}
+          </Typography>
+          <TappableText
+            text={question.prompt}
+            onTapWord={speakWord}
+            fontFamily={MC.font}
+            fontSize="0.7rem"
+            color={MC.white}
+          />
+        </Box>
+      )}
+
+      {/* Stimulus word — large, centered, Minecraft-style, tappable for TTS */}
       {displayStimulus && (
         <Box
           sx={{
@@ -647,17 +719,14 @@ export default function QuestQuestionScreen({
             mb: 3,
           }}
         >
-          <Typography
-            sx={{
-              fontFamily: MC.font,
-              fontSize: '1.4rem',
-              color: MC.diamond,
-              letterSpacing: 6,
-              textTransform: 'lowercase',
-            }}
-          >
-            {displayStimulus}
-          </Typography>
+          <TappableText
+            text={displayStimulus}
+            onTapWord={speakWord}
+            fontFamily={MC.font}
+            fontSize="1.4rem"
+            color={MC.diamond}
+            sx={{ letterSpacing: 6, textTransform: 'lowercase' }}
+          />
         </Box>
       )}
 
@@ -719,31 +788,23 @@ export default function QuestQuestionScreen({
                 },
               }}
             >
-              <Stack direction="row" spacing={1} alignItems="center" justifyContent="center">
-                <Typography
-                  sx={{
-                    fontFamily: MC.font,
-                    fontSize: '0.7rem',
-                    color: revealCorrect ? MC.green : MC.white,
-                    textAlign: 'center',
-                  }}
-                >
-                  {revealCorrect ? `✅ ${option}` : option}
-                </Typography>
-                {shouldReadOptions && !muted && !revealingAnswer && (
-                  <IconButton
-                    size="small"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      tts.speak(blendForTTS(option))
-                    }}
-                    sx={{ ml: 0.5, p: 0.5, color: MC.stone, opacity: 0.5, flexShrink: 0 }}
-                    aria-label={`Hear ${option}`}
+              <Box sx={{ textAlign: 'center' }}>
+                {revealCorrect && (
+                  <Typography
+                    component="span"
+                    sx={{ fontFamily: MC.font, fontSize: '0.7rem', color: MC.green }}
                   >
-                    <VolumeUpIcon sx={{ fontSize: '0.9rem' }} />
-                  </IconButton>
+                    {'✅ '}
+                  </Typography>
                 )}
-              </Stack>
+                <TappableText
+                  text={option}
+                  onTapWord={speakWord}
+                  fontFamily={MC.font}
+                  fontSize="0.7rem"
+                  color={revealCorrect ? MC.green : MC.white}
+                />
+              </Box>
             </Box>
           )
         })}

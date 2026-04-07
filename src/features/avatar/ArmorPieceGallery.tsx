@@ -157,7 +157,7 @@ export default function ArmorPieceGallery({
               <ArmorIcon
                 pieceId={armorPieceId}
                 size={46}
-                tier={(profile.currentTier ?? 'stone') as ArmorTierColor}
+                tier={(profile.currentTier ?? 'wood') as ArmorTierColor}
                 locked={false}
               />
 
