@@ -2,6 +2,7 @@ import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
 import { CHARTER_PREAMBLE } from "../contextSlices.js";
+import { STONEBRIDGE_BIBLE } from "../stonebridgeBible.js";
 
 /**
  * Task: conundrum
@@ -88,6 +89,13 @@ export const handleConundrum = async (
 
   const systemPrompt = `${CHARTER_PREAMBLE}
 
+STONEBRIDGE WORLD CONTEXT:
+${STONEBRIDGE_BIBLE}
+
+Generate a weekly conundrum set in Stonebridge that uses these characters and places.
+Reference at least one named character and one named place from the Stonebridge Story Bible.
+The conundrum should feel like an ongoing chapter in the village's restoration story.
+
 You generate Conundrums for the Barnes family homeschool. A Conundrum is an open-ended scenario that has NO single right answer. It's designed for a family discussion between Lincoln (10) and London (6) with Shelly moderating.
 
 CONUNDRUM FORMAT — SHORT AND PUNCHY:
@@ -109,7 +117,7 @@ RULES:
 - No perspectives section, no angles, no analysis paragraphs
 - The ethical tension should be OBVIOUS from the scenario — don't explain it
 - Connect to the week's virtue naturally but don't lecture about it
-- Use familiar Stonebridge characters (Maple, Wren, Mayor Oakley, Elder Ironroot)
+- Use familiar Stonebridge characters and places from the Stonebridge Story Bible
 - Accessible to a 6-year-old AND engaging for a 10-year-old
 
 OUTPUT FORMAT (JSON only):
