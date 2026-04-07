@@ -45,6 +45,8 @@ import type {
   XpLedger,
 } from '../../core/types'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -81,6 +83,10 @@ export default function AvatarAdminTab() {
   const [todaySession, setTodaySession] = useState<DailyArmorSession | null>(null)
   const [recentEvents, setRecentEvents] = useState<XpLedger[]>([])
   const [xpAmount, setXpAmount] = useState(10)
+  const [diamondAmount, setDiamondAmount] = useState(10)
+  const [diamondReason, setDiamondReason] = useState('')
+  const [diamondAwarding, setDiamondAwarding] = useState(false)
+  const [confirmDeduct, setConfirmDeduct] = useState(false)
   const [feedback, setFeedback] = useState<{ severity: 'success' | 'error'; message: string } | null>(null)
   const [upgrading, setUpgrading] = useState(false)
   const [regenBaseChar, setRegenBaseChar] = useState(false)
@@ -162,6 +168,68 @@ export default function AvatarAdminTab() {
       }
     },
     [profile, familyId, activeChildId],
+  )
+
+  // ── Award / Deduct Diamonds ────────────────────────────────────
+  const handleAwardDiamonds = useCallback(
+    async (amount: number) => {
+      if (!profile || !familyId || !activeChildId || amount <= 0 || amount > 200) return
+      setDiamondAwarding(true)
+      try {
+        const result = await addDiamondEvent({
+          familyId,
+          childId: activeChildId,
+          amount,
+          type: DIAMOND_EVENTS.MANUAL_AWARD,
+          reason: diamondReason || `Parent awarded ${amount} diamonds`,
+          dedupKey: `manual-diamond-${Date.now()}`,
+          awardedBy: 'parent',
+        })
+        if (result.success) {
+          setDiamondReason('')
+          setFeedback({ severity: 'success', message: `+${amount} ◆ awarded` })
+        } else {
+          setFeedback({ severity: 'error', message: result.error || 'Failed to award diamonds' })
+        }
+      } catch (err) {
+        console.error('Diamond award failed:', err)
+        setFeedback({ severity: 'error', message: 'Failed to award diamonds.' })
+      } finally {
+        setDiamondAwarding(false)
+      }
+    },
+    [profile, familyId, activeChildId, diamondReason],
+  )
+
+  const handleDeductDiamonds = useCallback(
+    async (amount: number) => {
+      if (!profile || !familyId || !activeChildId || amount <= 0) return
+      setDiamondAwarding(true)
+      setConfirmDeduct(false)
+      try {
+        const result = await addDiamondEvent({
+          familyId,
+          childId: activeChildId,
+          amount: -amount,
+          type: DIAMOND_EVENTS.MANUAL_DEDUCT,
+          reason: diamondReason || `Parent deducted ${amount} diamonds`,
+          dedupKey: `manual-diamond-deduct-${Date.now()}`,
+          awardedBy: 'parent',
+        })
+        if (result.success) {
+          setDiamondReason('')
+          setFeedback({ severity: 'success', message: `−${amount} ◆ deducted` })
+        } else {
+          setFeedback({ severity: 'error', message: result.error || 'Insufficient diamonds' })
+        }
+      } catch (err) {
+        console.error('Diamond deduct failed:', err)
+        setFeedback({ severity: 'error', message: 'Failed to deduct diamonds.' })
+      } finally {
+        setDiamondAwarding(false)
+      }
+    },
+    [profile, familyId, activeChildId, diamondReason],
   )
 
   // ── Force tier upgrade (testing) ──────────────────────────────
@@ -609,6 +677,9 @@ export default function AvatarAdminTab() {
               Total XP: <strong>{profile.totalXp}</strong>
             </Typography>
             <Typography variant="body2">
+              Diamonds: <strong style={{ color: '#0288d1' }}>◆ {profile.diamondBalance ?? 0}</strong>
+            </Typography>
+            <Typography variant="body2">
               Current Tier: <strong style={{ textTransform: 'capitalize' }}>{profile.currentTier}</strong>
             </Typography>
             <Typography variant="body2">
@@ -751,6 +822,69 @@ export default function AvatarAdminTab() {
 
       <Divider />
 
+      {/* ── Diamond Adjustment ──────────────────────────────────── */}
+      <Box>
+        <Typography variant="subtitle1" fontWeight={700} gutterBottom sx={{ color: 'info.main' }}>
+          ◆ Diamond Adjustment
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          Balance: <strong style={{ color: '#0288d1' }}>◆ {profile?.diamondBalance ?? 0}</strong>
+        </Typography>
+        <Stack direction="row" spacing={1} sx={{ mb: 1.5 }} flexWrap="wrap" useFlexGap>
+          {[5, 10, 25, 50].map((amt) => (
+            <Button
+              key={amt}
+              variant="outlined"
+              color="info"
+              size="small"
+              disabled={diamondAwarding}
+              onClick={() => void handleAwardDiamonds(amt)}
+            >
+              +{amt} ◆
+            </Button>
+          ))}
+        </Stack>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+          <TextField
+            type="number"
+            size="small"
+            value={diamondAmount}
+            onChange={(e) => setDiamondAmount(Math.max(1, parseInt(e.target.value) || 1))}
+            inputProps={{ min: 1, max: 200 }}
+            sx={{ width: 120 }}
+            InputProps={{
+              startAdornment: <InputAdornment position="start">◆</InputAdornment>,
+            }}
+          />
+          <Button
+            variant="contained"
+            color="info"
+            onClick={() => void handleAwardDiamonds(diamondAmount)}
+            disabled={diamondAwarding}
+          >
+            + Award
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={() => setConfirmDeduct(true)}
+            disabled={diamondAwarding || !profile || (profile.diamondBalance ?? 0) === 0}
+          >
+            − Deduct
+          </Button>
+        </Stack>
+        <TextField
+          size="small"
+          fullWidth
+          value={diamondReason}
+          onChange={(e) => setDiamondReason(e.target.value)}
+          placeholder="Reason (e.g., 'Helped with dishes')"
+          sx={{ mb: 1 }}
+        />
+      </Box>
+
+      <Divider />
+
       {/* ── Force Tier Upgrade (testing) ─────────────────────────── */}
       {canUpgradeTier && (
         <Box>
@@ -862,6 +996,21 @@ export default function AvatarAdminTab() {
           {feedback.message}
         </Alert>
       )}
+
+      {/* ── Deduct diamonds confirmation ────────────────────────── */}
+      <Dialog open={confirmDeduct} onClose={() => setConfirmDeduct(false)}>
+        <DialogTitle>Deduct Diamonds?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Remove {diamondAmount} diamonds from {selectedChild?.name ?? 'this child'}?
+            Current balance: ◆ {profile?.diamondBalance ?? 0}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDeduct(false)}>Cancel</Button>
+          <Button color="warning" onClick={() => void handleDeductDiamonds(diamondAmount)}>Deduct</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* ── Regen base character confirmation ───────────────────── */}
       <Dialog open={regenBaseCharConfirmOpen} onClose={() => setRegenBaseCharConfirmOpen(false)}>

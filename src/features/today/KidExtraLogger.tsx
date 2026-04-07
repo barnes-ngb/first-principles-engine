@@ -8,6 +8,8 @@ import SectionCard from '../../components/SectionCard'
 import type { ChecklistItem, DayLog } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 
 interface KidExtraLoggerProps {
   dayLog: DayLog
@@ -67,11 +69,14 @@ export default function KidExtraLogger({
         ).catch((err) => console.error('[XP] Extra activity award failed:', err))
 
         // Award 2 diamonds for extra activity
-        void addXpEvent(
-          familyId, childId, 'MANUAL_AWARD', 2, `${dedupBase}-diamond`,
-          { reason: extraActivity.label },
-          { currencyType: 'diamond', category: 'earn' },
-        ).catch((err) => console.error('[Diamond] Extra activity award failed:', err))
+        void addDiamondEvent({
+          familyId,
+          childId,
+          amount: 2,
+          type: DIAMOND_EVENTS.EXTRA_ACTIVITY,
+          reason: extraActivity.label,
+          dedupKey: `${dedupBase}-diamond`,
+        }).catch((err) => console.error('[Diamond] Extra activity award failed:', err))
       }
 
       setShowExtraLog(false)

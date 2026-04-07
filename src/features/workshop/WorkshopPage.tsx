@@ -24,6 +24,8 @@ import type {
 } from '../../core/types'
 import { GamePhase, GameType, PlaytestStatus, WorkshopStatus } from '../../core/types/workshop'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 import type { CardRevision } from '../../core/types/workshop'
 import type { WizardState } from './useWorkshopWizard'
 import { useAI, TaskType } from '../../core/ai/useAI'
@@ -718,9 +720,14 @@ export default function WorkshopPage() {
         void addXpEvent(familyId, activeChildId, 'MANUAL_AWARD', 5, `${dedupBase}-xp`, {
           reason: `Workshop: ${currentGame.generatedGame.title}`,
         }).catch((err) => console.warn('[XP] Workshop award failed:', err))
-        void addXpEvent(familyId, activeChildId, 'MANUAL_AWARD', 3, `${dedupBase}-diamond`, {
+        void addDiamondEvent({
+          familyId,
+          childId: activeChildId,
+          amount: 3,
+          type: DIAMOND_EVENTS.WORKSHOP_GAME,
           reason: `Workshop: ${currentGame.generatedGame.title}`,
-        }, { currencyType: 'diamond', category: 'earn' }).catch((err) => console.warn('[Diamond] Workshop award failed:', err))
+          dedupKey: `${dedupBase}-diamond`,
+        }).catch((err) => console.warn('[Diamond] Workshop award failed:', err))
       } catch (err) {
         console.warn('Failed to log workshop results:', err)
       }
@@ -777,9 +784,14 @@ export default function WorkshopPage() {
         void addXpEvent(familyId, activeChildId, 'MANUAL_AWARD', 5, `${dedupBase}-xp`, {
           reason: `Adventure: ${currentGame.storyInputs.theme}`,
         }).catch((err) => console.warn('[XP] Adventure award failed:', err))
-        void addXpEvent(familyId, activeChildId, 'MANUAL_AWARD', 3, `${dedupBase}-diamond`, {
+        void addDiamondEvent({
+          familyId,
+          childId: activeChildId,
+          amount: 3,
+          type: DIAMOND_EVENTS.WORKSHOP_GAME,
           reason: `Adventure: ${currentGame.storyInputs.theme}`,
-        }, { currencyType: 'diamond', category: 'earn' }).catch((err) => console.warn('[Diamond] Adventure award failed:', err))
+          dedupKey: `${dedupBase}-diamond`,
+        }).catch((err) => console.warn('[Diamond] Adventure award failed:', err))
       } catch (err) {
         console.warn('Failed to log adventure results:', err)
       }
@@ -848,9 +860,14 @@ export default function WorkshopPage() {
         void addXpEvent(familyId, activeChildId, 'MANUAL_AWARD', 5, `${dedupBase}-xp`, {
           reason: `Card Game: ${currentGame.storyInputs.theme}`,
         }).catch((err) => console.warn('[XP] Card game award failed:', err))
-        void addXpEvent(familyId, activeChildId, 'MANUAL_AWARD', 3, `${dedupBase}-diamond`, {
+        void addDiamondEvent({
+          familyId,
+          childId: activeChildId,
+          amount: 3,
+          type: DIAMOND_EVENTS.WORKSHOP_GAME,
           reason: `Card Game: ${currentGame.storyInputs.theme}`,
-        }, { currencyType: 'diamond', category: 'earn' }).catch((err) => console.warn('[Diamond] Card game award failed:', err))
+          dedupKey: `${dedupBase}-diamond`,
+        }).catch((err) => console.warn('[Diamond] Card game award failed:', err))
       } catch (err) {
         console.warn('Failed to log card game results:', err)
       }
