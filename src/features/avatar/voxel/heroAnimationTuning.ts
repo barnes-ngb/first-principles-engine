@@ -53,23 +53,23 @@ export interface HeroAnimationTuning {
 
 export const HERO_ANIMATION_TUNING_DEFAULTS: HeroAnimationTuning = {
   // Feet / stance
-  stanceWidth: 0.2,
-  footSeparation: 0.18,
-  footSway: 0.008,
+  stanceWidth: 0.22,
+  footSeparation: 0.2,
+  footSway: 0.006,
   footLift: 0.003,
   footCenterLineGap: 0.07,
   footPlantY: 0,
 
   // Idle body language (stable, heroic read)
-  torsoTwist: 0.04,
+  torsoTwist: 0.03,
   shoulderSwing: 1,
   headTurnAmount: 0.055,
 
   // Idle arm motion
-  armSwingZ: 0.02,
-  armSwingX: 0.02,
-  armPhaseOffset: Math.PI / 3,
-  elbowOutBias: 0.22,
+  armSwingZ: 0.016,
+  armSwingX: 0.016,
+  armPhaseOffset: Math.PI * 0.62,
+  elbowOutBias: 0.24,
   armSwingClampZ: 1.55,
   armSwingClampX: { min: -1.0, max: 0.42 },
   silhouetteBias: {
@@ -93,8 +93,8 @@ export const HERO_ANIMATION_TUNING_DEFAULTS: HeroAnimationTuning = {
   },
 
   // Collision avoidance
-  torsoClearance: 0.14,
-  torsoAvoidanceGain: 0.48,
+  torsoClearance: 0.16,
+  torsoAvoidanceGain: 0.52,
 
   // General character motion
   bodyBobAmplitude: 0.01,
@@ -112,6 +112,8 @@ export type HeroAnimationTuningOverride = Partial<
     | 'footSeparation'
     | 'footSway'
     | 'footLift'
+    | 'armSwingX'
+    | 'armSwingZ'
     | 'torsoTwist'
     | 'shoulderSwing'
     | 'elbowOutBias'
@@ -135,6 +137,8 @@ export const HERO_ANIMATION_CONTROL_DEFS: HeroAnimationControlDef[] = [
   { key: 'footSeparation', label: 'Foot spacing min', min: 0.14, max: 0.28, step: 0.005, help: 'Hard minimum distance between feet.' },
   { key: 'footLift', label: 'Foot lift', min: 0, max: 0.02, step: 0.001, help: 'Vertical idle bounce at each foot.' },
   { key: 'footSway', label: 'Foot sway', min: 0, max: 0.03, step: 0.001, help: 'Horizontal in/out sway per idle cycle.' },
+  { key: 'armSwingX', label: 'Arm swing X', min: 0.004, max: 0.04, step: 0.001, help: 'Forward/back idle arm arc size.' },
+  { key: 'armSwingZ', label: 'Arm swing Z', min: 0.004, max: 0.04, step: 0.001, help: 'Outward arm sweep size (silhouette).' },
   { key: 'torsoTwist', label: 'Torso twist', min: 0, max: 0.08, step: 0.002, help: 'Yaw sweep through idle loop.' },
   { key: 'shoulderSwing', label: 'Shoulder swing', min: 0, max: 1.8, step: 0.05, help: 'Multiplier for shoulder + arm idle arcs.' },
   { key: 'elbowOutBias', label: 'Elbow-out bias', min: 0.15, max: 0.4, step: 0.01, help: 'Forces outward arm silhouette.' },
@@ -142,6 +146,14 @@ export const HERO_ANIMATION_CONTROL_DEFS: HeroAnimationControlDef[] = [
   { key: 'headTurnAmount', label: 'Head turn amount', min: 0.02, max: 0.12, step: 0.002, help: 'Idle side-to-side head look.' },
   { key: 'emoteIntensity', label: 'Emote intensity', min: 0.7, max: 1.35, step: 0.01, help: 'Scales facial expression strength.' },
 ]
+
+export const HERO_ANIMATION_PRIMARY_CONSTANTS = {
+  stanceWidth: 'stanceWidth',
+  footSeparation: 'footSeparation',
+  armSwing: ['armSwingX', 'armSwingZ'],
+  elbowAngle: 'elbowOutBias',
+  torsoClearance: 'torsoClearance',
+} as const
 
 export function resolveHeroAnimationTuning(overrides?: HeroAnimationTuningOverride): HeroAnimationTuning {
   return {
