@@ -1080,84 +1080,104 @@ export function useQuestSession() {
 
       conversationRef.current.push(userMessage)
 
-      const response = await chat({
-        familyId,
-        childId: activeChildId,
-        taskType: TaskType.Quest,
-        messages: [...conversationRef.current],
-        domain: activeDomainRef.current,
-      })
+      try {
+        const response = await chat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.Quest,
+          messages: [...conversationRef.current],
+          domain: activeDomainRef.current,
+        })
 
-      if (!response) {
-        // AI failed — end session gracefully
-        await endSession(updatedQuestions, newState, false)
-        return
-      }
+        if (!response) {
+          // AI failed — end session gracefully
+          await endSession(updatedQuestions, newState, false)
+          return
+        }
 
-      conversationRef.current.push({ role: 'assistant', content: response.message })
+        conversationRef.current.push({ role: 'assistant', content: response.message })
 
-      const finding = extractQuestFinding(response.message)
-      if (finding) {
-        setFindings((prev) => [...prev, finding])
-      }
+        const finding = extractQuestFinding(response.message)
+        if (finding) {
+          setFindings((prev) => [...prev, finding])
+        }
 
-      let question = parseQuestBlock(response.message)
-      if (question) {
-        question = validateQuestion(question)
-      }
+        let question = parseQuestBlock(response.message)
+        if (question) {
+          question = validateQuestion(question)
+        }
 
-      // Retry if validation failed — request a new question from AI
-      if (!question) {
-        for (let retry = 0; retry < VALIDATION_RETRIES; retry++) {
-          console.warn(`[submitAnswer] Question validation failed, retry ${retry + 1}/${VALIDATION_RETRIES}`)
-          const retryMessage: AIChatMessage = {
-            role: 'user',
-            content: JSON.stringify({
-              action: 'answer',
-              instruction: 'The previous question had a formatting error. Please generate a NEW, DIFFERENT question. Ensure correctAnswer exactly matches one option and blank counts match answer length.',
-              currentLevel: needsBonusRound ? bonusLevel : newState.currentLevel,
-              consecutiveCorrect: newState.consecutiveCorrect,
-              consecutiveWrong: newState.consecutiveWrong,
-              totalQuestions: newState.totalQuestions,
-              totalCorrect: newState.totalCorrect,
-              questionsThisLevel: newState.questionsThisLevel,
-              levelDownsInARow: newState.levelDownsInARow,
-            }),
-          }
-          conversationRef.current.push(retryMessage)
-
-          const retryResponse = await chat({
-            familyId,
-            childId: activeChildId,
-            taskType: TaskType.Quest,
-            messages: [...conversationRef.current],
-            domain: activeDomainRef.current,
-          })
-
-          if (retryResponse) {
-            conversationRef.current.push({ role: 'assistant', content: retryResponse.message })
-            const retryFinding = extractQuestFinding(retryResponse.message)
-            if (retryFinding) {
-              setFindings((prev) => [...prev, retryFinding])
+        // Retry if validation failed — request a new question from AI
+        if (!question) {
+          for (let retry = 0; retry < VALIDATION_RETRIES; retry++) {
+            console.warn(`[submitAnswer] Question validation failed, retry ${retry + 1}/${VALIDATION_RETRIES}`)
+            const retryMessage: AIChatMessage = {
+              role: 'user',
+              content: JSON.stringify({
+                action: 'answer',
+                instruction: 'The previous question had a formatting error. Please generate a NEW, DIFFERENT question. Ensure correctAnswer exactly matches one option and blank counts match answer length.',
+                currentLevel: needsBonusRound ? bonusLevel : newState.currentLevel,
+                consecutiveCorrect: newState.consecutiveCorrect,
+                consecutiveWrong: newState.consecutiveWrong,
+                totalQuestions: newState.totalQuestions,
+                totalCorrect: newState.totalCorrect,
+                questionsThisLevel: newState.questionsThisLevel,
+                levelDownsInARow: newState.levelDownsInARow,
+              }),
             }
-            question = parseQuestBlock(retryResponse.message)
-            if (question) {
-              question = validateQuestion(question)
+            conversationRef.current.push(retryMessage)
+
+            const retryResponse = await chat({
+              familyId,
+              childId: activeChildId,
+              taskType: TaskType.Quest,
+              messages: [...conversationRef.current],
+              domain: activeDomainRef.current,
+            })
+
+            if (retryResponse) {
+              conversationRef.current.push({ role: 'assistant', content: retryResponse.message })
+              const retryFinding = extractQuestFinding(retryResponse.message)
+              if (retryFinding) {
+                setFindings((prev) => [...prev, retryFinding])
+              }
+              question = parseQuestBlock(retryResponse.message)
+              if (question) {
+                question = validateQuestion(question)
+              }
+              if (question) break
             }
-            if (question) break
           }
         }
-      }
 
-      // All retries failed — use a client-side fallback question
-      if (!question) {
-        console.warn('[submitAnswer] All validation retries failed, using fallback question')
-        question = generateFallbackQuestion(newState.currentLevel, activeDomainRef.current)
-      }
+        // All retries failed — use a client-side fallback question
+        if (!question) {
+          console.warn('[submitAnswer] All validation retries failed, using fallback question')
+          question = generateFallbackQuestion(newState.currentLevel, activeDomainRef.current)
+        }
 
-      setCurrentQuestion(question)
-      questionStartRef.current = Date.now()
-      setScreen(QuestScreen.Question)
+        setCurrentQuestion(question)
+        questionStartRef.current = Date.now()
+        setScreen(QuestScreen.Question)
+      } catch (err) {
+        console.error('[submitAnswer] AI call threw — ending session gracefully', {
+          error: err,
+          currentLevel: newState.currentLevel,
+          questMode: activeQuestModeRef.current,
+          childId: activeChildId,
+          totalQuestions: newState.totalQuestions,
+        })
+
+        // If no questions answered yet, return to intro with a friendly message
+        if (updatedQuestions.filter((q) => !q.skipped).length === 0) {
+          setStartQuestError('Hmm, the mine is being tricky. Try again in a minute.')
+          setScreen(QuestScreen.Intro)
+          return
+        }
+
+        // Otherwise show summary with whatever diamonds were earned
+        await endSession(updatedQuestions, newState, false)
+      }
     },
     [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
   )
@@ -1227,84 +1247,102 @@ export function useQuestSession() {
 
       conversationRef.current.push(userMessage)
 
-      const response = await chat({
-        familyId,
-        childId: activeChildId,
-        taskType: TaskType.Quest,
-        messages: [...conversationRef.current],
-        domain: activeDomainRef.current,
-      })
+      try {
+        const response = await chat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.Quest,
+          messages: [...conversationRef.current],
+          domain: activeDomainRef.current,
+        })
 
-      if (!response) {
-        // AI failed — end session gracefully
-        await endSession(updatedQuestions, questState, false)
-        return
-      }
+        if (!response) {
+          // AI failed — end session gracefully
+          await endSession(updatedQuestions, questState, false)
+          return
+        }
 
-      conversationRef.current.push({ role: 'assistant', content: response.message })
+        conversationRef.current.push({ role: 'assistant', content: response.message })
 
-      const finding = extractQuestFinding(response.message)
-      if (finding) {
-        setFindings((prev) => [...prev, finding])
-      }
+        const finding = extractQuestFinding(response.message)
+        if (finding) {
+          setFindings((prev) => [...prev, finding])
+        }
 
-      let question = parseQuestBlock(response.message)
-      if (question) {
-        question = validateQuestion(question)
-      }
+        let question = parseQuestBlock(response.message)
+        if (question) {
+          question = validateQuestion(question)
+        }
 
-      // Retry if validation failed — request a new question from AI
-      if (!question) {
-        for (let retry = 0; retry < VALIDATION_RETRIES; retry++) {
-          console.warn(`[handleSkip] Question validation failed, retry ${retry + 1}/${VALIDATION_RETRIES}`)
-          const retryMessage: AIChatMessage = {
-            role: 'user',
-            content: JSON.stringify({
-              action: 'answer',
-              instruction: 'The previous question had a formatting error. Please generate a NEW, DIFFERENT question. Ensure correctAnswer exactly matches one option and blank counts match answer length.',
-              currentLevel: questState.currentLevel,
-              consecutiveCorrect: questState.consecutiveCorrect,
-              consecutiveWrong: questState.consecutiveWrong,
-              totalQuestions: questState.totalQuestions,
-              totalCorrect: questState.totalCorrect,
-              questionsThisLevel: questState.questionsThisLevel,
-              levelDownsInARow: questState.levelDownsInARow,
-            }),
-          }
-          conversationRef.current.push(retryMessage)
-
-          const retryResponse = await chat({
-            familyId,
-            childId: activeChildId,
-            taskType: TaskType.Quest,
-            messages: [...conversationRef.current],
-            domain: activeDomainRef.current,
-          })
-
-          if (retryResponse) {
-            conversationRef.current.push({ role: 'assistant', content: retryResponse.message })
-            const retryFinding = extractQuestFinding(retryResponse.message)
-            if (retryFinding) {
-              setFindings((prev) => [...prev, retryFinding])
+        // Retry if validation failed — request a new question from AI
+        if (!question) {
+          for (let retry = 0; retry < VALIDATION_RETRIES; retry++) {
+            console.warn(`[handleSkip] Question validation failed, retry ${retry + 1}/${VALIDATION_RETRIES}`)
+            const retryMessage: AIChatMessage = {
+              role: 'user',
+              content: JSON.stringify({
+                action: 'answer',
+                instruction: 'The previous question had a formatting error. Please generate a NEW, DIFFERENT question. Ensure correctAnswer exactly matches one option and blank counts match answer length.',
+                currentLevel: questState.currentLevel,
+                consecutiveCorrect: questState.consecutiveCorrect,
+                consecutiveWrong: questState.consecutiveWrong,
+                totalQuestions: questState.totalQuestions,
+                totalCorrect: questState.totalCorrect,
+                questionsThisLevel: questState.questionsThisLevel,
+                levelDownsInARow: questState.levelDownsInARow,
+              }),
             }
-            question = parseQuestBlock(retryResponse.message)
-            if (question) {
-              question = validateQuestion(question)
+            conversationRef.current.push(retryMessage)
+
+            const retryResponse = await chat({
+              familyId,
+              childId: activeChildId,
+              taskType: TaskType.Quest,
+              messages: [...conversationRef.current],
+              domain: activeDomainRef.current,
+            })
+
+            if (retryResponse) {
+              conversationRef.current.push({ role: 'assistant', content: retryResponse.message })
+              const retryFinding = extractQuestFinding(retryResponse.message)
+              if (retryFinding) {
+                setFindings((prev) => [...prev, retryFinding])
+              }
+              question = parseQuestBlock(retryResponse.message)
+              if (question) {
+                question = validateQuestion(question)
+              }
+              if (question) break
             }
-            if (question) break
           }
         }
-      }
 
-      // All retries failed — use a client-side fallback question
-      if (!question) {
-        console.warn('[handleSkip] All validation retries failed, using fallback question')
-        question = generateFallbackQuestion(questState.currentLevel, activeDomainRef.current)
-      }
+        // All retries failed — use a client-side fallback question
+        if (!question) {
+          console.warn('[handleSkip] All validation retries failed, using fallback question')
+          question = generateFallbackQuestion(questState.currentLevel, activeDomainRef.current)
+        }
 
-      setCurrentQuestion(question)
-      questionStartRef.current = Date.now()
-      setScreen(QuestScreen.Question)
+        setCurrentQuestion(question)
+        questionStartRef.current = Date.now()
+        setScreen(QuestScreen.Question)
+      } catch (err) {
+        console.error('[handleSkip] AI call threw — ending session gracefully', {
+          error: err,
+          currentLevel: questState.currentLevel,
+          questMode: activeQuestModeRef.current,
+          childId: activeChildId,
+          totalQuestions: questState.totalQuestions,
+        })
+
+        if (updatedQuestions.filter((q) => !q.skipped).length === 0) {
+          setStartQuestError('Hmm, the mine is being tricky. Try again in a minute.')
+          setScreen(QuestScreen.Intro)
+          return
+        }
+
+        await endSession(updatedQuestions, questState, false)
+      }
     },
     [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
   )

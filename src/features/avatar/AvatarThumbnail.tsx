@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 
 import type { CharacterFeatures } from '../../core/types'
@@ -21,6 +21,8 @@ interface AvatarThumbnailProps {
   style?: React.CSSProperties
   /** Cached 64-color hex array for AI-generated pixel face */
   faceGrid?: string[]
+  /** Child's name — used for CSS fallback initial when WebGL fails */
+  childName?: string
 }
 
 // Track active renderers to warn about performance
@@ -38,9 +40,11 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
   className,
   style,
   faceGrid,
+  childName,
 }: AvatarThumbnailProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
+  const [webglFailed, setWebglFailed] = useState(false)
 
   // Only animate for sizes > 48
   const shouldAnimate = animated && size > 48
@@ -54,7 +58,7 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
   }, [])
 
   useEffect(() => {
-    if (!canvasRef.current) return
+    if (!canvasRef.current || webglFailed) return
 
     // Cleanup previous scene
     cleanupRef.current?.()
@@ -63,15 +67,33 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
     const canvas = canvasRef.current
     const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
 
-    const scene = new THREE.Scene()
-    const renderer = new THREE.WebGLRenderer({
-      canvas,
-      alpha: true,
-      antialias: size > 64,
-    })
+    let renderer: THREE.WebGLRenderer
+    try {
+      renderer = new THREE.WebGLRenderer({
+        canvas,
+        alpha: true,
+        antialias: size > 64,
+      })
+    } catch (err) {
+      console.warn('AvatarThumbnail WebGL init failed, falling back to CSS avatar', err)
+      setWebglFailed(true)
+      return
+    }
+
+    // Verify the context is usable (catches lost/exhausted contexts)
+    const gl = renderer.getContext()
+    if (!gl || gl.isContextLost()) {
+      console.warn('AvatarThumbnail WebGL context lost or null, falling back to CSS avatar')
+      renderer.dispose()
+      renderer.forceContextLoss()
+      setWebglFailed(true)
+      return
+    }
+
     renderer.setSize(size, size)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
+    const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100)
 
     // Simplified lighting
@@ -221,7 +243,33 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
       cleanupRef.current?.()
       cleanupRef.current = null
     }
-  }, [features, ageGroup, equippedPieces, totalXp, size, showArmor, shouldAnimate, faceGrid])
+  }, [features, ageGroup, equippedPieces, totalXp, size, showArmor, shouldAnimate, faceGrid, webglFailed])
+
+  // CSS fallback when WebGL is unavailable
+  if (webglFailed) {
+    const initial = (childName ?? '?')[0].toUpperCase()
+    return (
+      <div
+        className={className}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size >= 64 ? 8 : 4,
+          background: 'linear-gradient(135deg, #7B5EA7 0%, #9B59B6 100%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#fff',
+          fontFamily: '"Press Start 2P", monospace',
+          fontSize: Math.max(size * 0.4, 12),
+          fontWeight: 'bold',
+          ...style,
+        }}
+      >
+        {initial}
+      </div>
+    )
+  }
 
   return (
     <canvas
@@ -251,6 +299,7 @@ function disposeScene(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     }
   })
   renderer.dispose()
+  renderer.forceContextLoss()
 }
 
 export default AvatarThumbnail

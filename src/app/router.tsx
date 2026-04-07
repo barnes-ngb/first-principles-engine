@@ -12,6 +12,7 @@ import SettingsPage from '../features/settings/SettingsPage'
 import TodayPage from '../features/today/TodayPage'
 import DadLabPage from '../features/dad-lab/DadLabPage'
 import KnowledgeMinePage from '../features/quest/KnowledgeMinePage'
+import QuestErrorBoundary from '../features/quest/QuestErrorBoundary'
 import WeeklyReviewPage from '../features/weekly-review/WeeklyReviewPage'
 import BookshelfPage from '../features/books/BookshelfPage'
 import BookEditorPage from '../features/books/BookEditorPage'
@@ -54,7 +55,7 @@ const routes = [
       { path: '/books/sight-words', element: <SightWordDashboard /> },
       { path: '/books/:bookId', element: <BookEditorPage /> },
       { path: '/books/:bookId/read', element: <BookReaderPage /> },
-      { path: '/quest', element: <KnowledgeMinePage /> },
+      { path: '/quest', element: <KnowledgeMinePage />, errorElement: <QuestErrorBoundary /> },
       { path: '/avatar', element: <MyAvatarPage /> },
       { path: '/workshop', element: <WorkshopPage /> },
       { path: '/ladders', element: <LaddersPage /> },
