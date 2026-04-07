@@ -1,4 +1,7 @@
 import type { DiamondCategory, DiamondEventType } from '../types/xp'
+import { doc, getDoc } from 'firebase/firestore'
+
+import { avatarProfilesCollection } from '../firebase/firestore'
 import { addXpEvent } from './addXpEvent'
 
 export interface AddDiamondEventArgs {
@@ -39,7 +42,10 @@ export async function addDiamondEvent(args: AddDiamondEventArgs): Promise<{
   } = args
 
   if (amount === 0) {
-    return { success: true, newBalance: 0 }
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    const profileSnap = await getDoc(profileRef)
+    const balance = profileSnap.exists() ? (profileSnap.data().diamondBalance ?? 0) : 0
+    return { success: true, newBalance: balance }
   }
 
   try {
@@ -57,7 +63,14 @@ export async function addDiamondEvent(args: AddDiamondEventArgs): Promise<{
       { currencyType: 'diamond', category, ...(itemId ? { itemId } : {}) },
     )
 
-    return { success: awarded !== 0 || amount === 0, newBalance: awarded }
+    const success = awarded !== 0
+    if (!success) return { success: false, newBalance: 0 }
+
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    const profileSnap = await getDoc(profileRef)
+    const newBalance = profileSnap.exists() ? (profileSnap.data().diamondBalance ?? 0) : 0
+
+    return { success: true, newBalance }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('addDiamondEvent failed:', message)
