@@ -141,23 +141,35 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
-function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number) {
-  const sideConfig = HERO_ANIMATION_TUNING.guardrails.armBySide[side]
+
+function getForwardTorsoPush(rotX: number): number {
   const softTorso = HERO_ANIMATION_TUNING.guardrails.torsoSoftCollision
-  const forwardX = clamp(rotX, sideConfig.rotXMin, sideConfig.rotXMax)
+  const forwardMagnitude = Math.max(0, -rotX)
   const torsoT = clamp(
-    (forwardX - softTorso.rotXStart) / (softTorso.rotXEnd - softTorso.rotXStart),
+    (forwardMagnitude - softTorso.forwardRotXStart) / (softTorso.forwardRotXEnd - softTorso.forwardRotXStart),
     0,
     1,
   )
-  const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance)
+  return torsoT * (softTorso.forearmClearance + softTorso.handClearance) * HERO_ANIMATION_TUNING.torsoAvoidanceGain
+}
+
+function getFootHalfWidth(footPart: THREE.Object3D | null | undefined): number {
+  if (!(footPart instanceof THREE.Mesh) || !(footPart.geometry instanceof THREE.BoxGeometry)) return 0
+  return footPart.geometry.parameters.width * 0.5
+}
+
+function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number) {
+  const sideConfig = HERO_ANIMATION_TUNING.guardrails.armBySide[side]
+  const forwardX = clamp(rotX, sideConfig.rotXMin, sideConfig.rotXMax)
+  const torsoPush = getForwardTorsoPush(forwardX)
   const minOutward = Math.max(
     sideConfig.rotZMin,
     HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoPush,
     HERO_ANIMATION_TUNING.guardrails.elbowInwardCollapseLimit,
   )
-  const outwardZ = clamp(rotZ, minOutward, sideConfig.rotZMax)
-  return { rotX: forwardX, rotZ: outwardZ }
+  const clampedX = clamp(forwardX, HERO_ANIMATION_TUNING.armSwingClampX.min, HERO_ANIMATION_TUNING.armSwingClampX.max)
+  const outwardZ = clamp(rotZ, minOutward, Math.min(sideConfig.rotZMax, HERO_ANIMATION_TUNING.armSwingClampZ))
+  return { rotX: clampedX, rotZ: outwardZ }
 }
 
 // ── Enforce solid opacity on equipped armor ──────────────────────────
@@ -877,14 +889,18 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             armRObj.rotation.x = constrained.rotX
           }
 
-          // Foot planting: preserve authored base stance and only apply tiny opposite offsets.
-          const footSpread = Math.sin(time * 0.9 + Math.PI * 0.25) * HERO_ANIMATION_TUNING.footSway
+          // Foot planting: preserve authored stance and guard visual separation to prevent crossing on mobile silhouettes.
+          const footSpread = Math.sin(time * 0.9 + HERO_ANIMATION_TUNING.footPhaseOffset) * HERO_ANIMATION_TUNING.footSway
           let leftX = baseFootL - footSpread
           let rightX = baseFootR + footSpread
-          if (rightX - leftX < HERO_ANIMATION_TUNING.footSeparation) {
+          const bootLObj = characterRef.current.getObjectByName('bootL')
+          const bootRObj = characterRef.current.getObjectByName('bootR')
+          const visualMinSeparation = getFootHalfWidth(bootLObj) + getFootHalfWidth(bootRObj) + HERO_ANIMATION_TUNING.footVisualClearance
+          const minSeparation = Math.max(HERO_ANIMATION_TUNING.footSeparation, visualMinSeparation)
+          if (rightX - leftX < minSeparation) {
             const center = (leftX + rightX) * 0.5
-            leftX = center - HERO_ANIMATION_TUNING.footSeparation * 0.5
-            rightX = center + HERO_ANIMATION_TUNING.footSeparation * 0.5
+            leftX = center - minSeparation * 0.5
+            rightX = center + minSeparation * 0.5
           }
           leftX = Math.min(leftX, -HERO_ANIMATION_TUNING.footCenterLineGap)
           rightX = Math.max(rightX, HERO_ANIMATION_TUNING.footCenterLineGap)

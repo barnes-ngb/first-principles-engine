@@ -235,6 +235,21 @@ export const POSE_EXPRESSIONS: Record<string, FacialExpression> = {
 
 // ── Pose Animator ───────────────────────────────────────────────────
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value))
+}
+
+function getForwardTorsoPush(rotX: number): number {
+  const softTorso = HERO_ANIMATION_TUNING.guardrails.torsoSoftCollision
+  const forwardMagnitude = Math.max(0, -rotX)
+  const torsoT = clamp(
+    (forwardMagnitude - softTorso.forwardRotXStart) / (softTorso.forwardRotXEnd - softTorso.forwardRotXStart),
+    0,
+    1,
+  )
+  return torsoT * (softTorso.forearmClearance + softTorso.handClearance) * HERO_ANIMATION_TUNING.torsoAvoidanceGain
+}
+
 export class PoseAnimator {
   private currentPose: Pose | null = null
   private startTime = 0
@@ -281,6 +296,7 @@ export class PoseAnimator {
       let val = this.interpolate(kf.rotX, kf.times, t)
       if (sideConfig) {
         val = Math.max(sideConfig.rotXMin, Math.min(sideConfig.rotXMax, val))
+        val = Math.max(HERO_ANIMATION_TUNING.armSwingClampX.min, Math.min(HERO_ANIMATION_TUNING.armSwingClampX.max, val))
       }
       obj.rotation.x = val
     }
@@ -289,12 +305,7 @@ export class PoseAnimator {
       let val = this.interpolate(kf.rotZ, kf.times, t)
       if (sideConfig && isArm) {
         const armX = obj.rotation.x
-        const softTorso = HERO_ANIMATION_TUNING.guardrails.torsoSoftCollision
-        const torsoT = Math.max(
-          0,
-          Math.min(1, (armX - softTorso.rotXStart) / (softTorso.rotXEnd - softTorso.rotXStart)),
-        )
-        const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance)
+        const torsoPush = getForwardTorsoPush(armX)
         const minOutward = Math.max(
           sideConfig.rotZMin,
           HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoPush,
@@ -302,7 +313,7 @@ export class PoseAnimator {
         )
         val = Math.max(
           minOutward,
-          Math.min(sideConfig.rotZMax, val),
+          Math.min(Math.min(sideConfig.rotZMax, HERO_ANIMATION_TUNING.armSwingClampZ), val),
         )
       }
       obj.rotation.z = val
