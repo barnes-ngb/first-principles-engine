@@ -442,7 +442,7 @@ export function useQuestSession() {
           }
 
           // Compatibility fallback while workbookConfigs still exist.
-          // TODO(phase-2b): Remove fallback after AI and quest reads fully migrate to activityConfigs.
+          // TODO(phase-2b-workbookconfigs-fallback): Remove once all active families have reading workbook activityConfigs with curriculumMeta.
           if (activitySnap.empty) {
             const wbQuery = query(
               workbookConfigsCollection(familyId),

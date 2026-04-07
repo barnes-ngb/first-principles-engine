@@ -18,7 +18,7 @@ import { getGatbProgress } from "./data/gatbCurriculum.js";
 export const ContextSlice = {
   Charter: "charter",
   ChildProfile: "childProfile",
-  WorkbookPaces: "workbookPaces", // TODO: Migrate to activityConfigs. WorkbookConfig is legacy — see migrateActivityConfigs.ts
+  WorkbookPaces: "workbookPaces", // Activity-config-backed curriculum coverage slice (legacy workbookConfigs fallback remains temporarily).
   WeekFocus: "weekFocus",
   HoursProgress: "hoursProgress",
   Engagement: "engagement",
