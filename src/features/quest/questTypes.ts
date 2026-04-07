@@ -41,7 +41,12 @@ export const MAX_SECONDS = 480 // 8 minutes
 export const LEVEL_UP_STREAK = 3 // 3 correct → harder
 export const LEVEL_DOWN_STREAK = 2 // 2 wrong → easier
 export const FRUSTRATION_LIMIT = 2 // 2 level-downs in a row → end
-export const FLOOR_WRONG_LIMIT = 4 // 4 wrong at Level 1 → end (frustration escape)
+// 4 wrong at Level 1 → end (frustration escape).
+// At floor, level-downs can't fire (already at 1), so FRUSTRATION_LIMIT (2 level-downs)
+// never triggers. 4 wrong at floor ≈ 2 would-be level-down events (every 2 wrong = 1
+// level-down attempt), matching the FRUSTRATION_LIMIT = 2 design intent.
+// Bonus round still fires because levelDownsInARow stays 0 at floor.
+export const FLOOR_WRONG_LIMIT = 4
 export const VALIDATION_RETRIES = 2 // retry AI calls when question validation fails
 
 // ── Quest adaptive state ──────────────────────────────────────

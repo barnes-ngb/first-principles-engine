@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc, getDocs, query, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -9,9 +9,9 @@ import Typography from '@mui/material/Typography'
 
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { evaluationSessionsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { SkillSnapshot } from '../../core/types'
+import type { EvaluationSession, SkillSnapshot } from '../../core/types'
 import { EvaluationDomain, SkillLevel } from '../../core/types/enums'
 import MinecraftAvatar from '../avatar/MinecraftAvatar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
@@ -19,7 +19,7 @@ import QuestQuestionScreen, { QuestFeedback, QuestLoading } from './ReadingQuest
 import QuestSummary from './QuestSummary'
 import FluencyPractice from './FluencyPractice'
 import { extractTargetWord } from './questHelpers'
-import type { QuestDomainConfig } from './questTypes'
+import type { InteractiveSessionData, QuestDomainConfig } from './questTypes'
 import { QuestScreen } from './questTypes'
 import { useQuestSession } from './useQuestSession'
 
@@ -135,6 +135,35 @@ export default function KnowledgeMinePage() {
     return () => { cancelled = true }
   }, [activeChildId, familyId])
 
+  // Load in-progress quest sessions (within 24h) for resume card
+  const [resumeSession, setResumeSession] = useState<(EvaluationSession & Partial<InteractiveSessionData>) | null>(null)
+  useEffect(() => {
+    if (!activeChildId || !familyId) return
+    let cancelled = false
+    async function loadResume() {
+      try {
+        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        const q = query(
+          evaluationSessionsCollection(familyId),
+          where('childId', '==', activeChildId),
+          where('status', '==', 'in-progress'),
+          orderBy('evaluatedAt', 'desc'),
+          firestoreLimit(1),
+        )
+        const snap = await getDocs(q)
+        if (cancelled) return
+        const sessions = snap.docs
+          .map((d) => ({ ...d.data(), id: d.id }) as EvaluationSession & Partial<InteractiveSessionData>)
+          .filter((s) => s.sessionType === 'interactive' && s.evaluatedAt >= cutoff)
+        setResumeSession(sessions[0] ?? null)
+      } catch {
+        // Non-blocking — resume card is optional
+      }
+    }
+    void loadResume()
+    return () => { cancelled = true }
+  }, [activeChildId, familyId, quest.screen]) // re-query when returning to intro
+
   const phonicsSecure = isPhonicsSecure(snapshot)
 
   // Build reading modes with recommendation badges
@@ -237,6 +266,23 @@ export default function KnowledgeMinePage() {
                 </Typography>
               </Box>
             </Stack>
+          )}
+
+          {/* ── Resume card ──────────────────────────────────── */}
+          {resumeSession && (
+            <ResumeCard
+              session={resumeSession}
+              onResume={() => {
+                const domain = resumeSession.domain as EvaluationDomain
+                const mode = resumeSession.questMode
+                setActiveDomain(
+                  [...READING_MODES, ...MATH_MODES].find(
+                    (m) => m.domain === domain && m.questMode === mode,
+                  ) ?? READING_MODES[0],
+                )
+                void quest.startQuest(domain, mode)
+              }}
+            />
           )}
 
           {/* ── READING section ─────────────────────────────── */}
@@ -519,6 +565,79 @@ function QuestCard({ config, onSelect }: { config: QuestDomainConfig; onSelect: 
           </Typography>
         )}
       </Box>
+    </Box>
+  )
+}
+
+/** Quest mode labels for resume card display */
+const QUEST_MODE_LABELS: Record<string, string> = {
+  phonics: 'Phonics Quest',
+  comprehension: 'Comprehension Quest',
+  fluency: 'Fluency Practice',
+  math: 'Math Quest',
+}
+
+function ResumeCard({
+  session,
+  onResume,
+}: {
+  session: EvaluationSession & Partial<InteractiveSessionData>
+  onResume: () => void
+}) {
+  const elapsed = Date.now() - new Date(session.evaluatedAt).getTime()
+  const hoursAgo = Math.floor(elapsed / (1000 * 60 * 60))
+  const minsAgo = Math.floor(elapsed / (1000 * 60))
+  const timeLabel = hoursAgo >= 1 ? `${hoursAgo}h ago` : `${minsAgo}m ago`
+  const modeLabel = QUEST_MODE_LABELS[session.questMode ?? ''] ?? 'Quest'
+
+  return (
+    <Box
+      role="button"
+      tabIndex={0}
+      onClick={onResume}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onResume()
+        }
+      }}
+      sx={{
+        bgcolor: MC.darkStone,
+        border: `2px solid ${MC.diamond}`,
+        borderRadius: 2,
+        p: 2,
+        mb: 2,
+        cursor: 'pointer',
+        transition: 'border-color 0.15s',
+        '&:hover': { borderColor: MC.gold },
+        '&:focus-visible': { borderColor: MC.gold, outline: 'none' },
+      }}
+    >
+      <Stack direction="row" alignItems="center" spacing={1.5}>
+        <Typography sx={{ fontSize: '1.5rem' }}>🔄</Typography>
+        <Box sx={{ flex: 1, textAlign: 'left' }}>
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.45rem',
+              color: MC.diamond,
+              lineHeight: 1.8,
+            }}
+          >
+            Pick up where you left off?
+          </Typography>
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.35rem',
+              color: MC.stone,
+              mt: 0.3,
+            }}
+          >
+            {modeLabel} · {session.totalCorrect ?? 0}/{session.totalQuestions ?? 0} correct · Level {session.finalLevel ?? '?'} · {timeLabel}
+          </Typography>
+        </Box>
+      </Stack>
     </Box>
   )
 }
