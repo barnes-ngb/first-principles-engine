@@ -36,10 +36,10 @@ export default function ArmorPieceGallery({
 }: ArmorPieceGalleryProps) {
   const cardScrollRef = useRef<HTMLDivElement>(null)
 
-  // Reset card scroll to start (Belt first) on load
+  // Reset card scroll to start (Belt first) on initial load only
   useEffect(() => {
     if (cardScrollRef.current) cardScrollRef.current.scrollLeft = 0
-  }, [profile])
+  }, [])
 
   const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
 

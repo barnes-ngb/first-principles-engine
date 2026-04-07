@@ -14,7 +14,7 @@ interface ArmorSuitUpPanelProps {
   allSixUnlocked: boolean
   nextUnlock: { piece: ArmorPieceMeta; xpNeeded: number } | null
   currentTierName: string
-  tierProgress: number
+  nextUnlockProgress: number
   isLincoln: boolean
   isChildProfile: boolean
   accentColor: string
@@ -31,7 +31,7 @@ export default function ArmorSuitUpPanel({
   allSixUnlocked,
   nextUnlock,
   currentTierName,
-  tierProgress,
+  nextUnlockProgress,
   isLincoln,
   isChildProfile,
   accentColor,
@@ -257,6 +257,19 @@ export default function ArmorSuitUpPanel({
               >
                 Next: {nextUnlock.piece.name} — {nextUnlock.xpNeeded} XP away
               </Typography>
+              <Typography
+                sx={{
+                  mb: 0.5,
+                  color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.6)',
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                  fontSize: isLincoln ? '10px' : '12px',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                Progress to next piece
+              </Typography>
               <Box
                 sx={{
                   height: 6,
@@ -268,7 +281,7 @@ export default function ArmorSuitUpPanel({
                 <Box
                   sx={{
                     height: '100%',
-                    width: `${tierProgress}%`,
+                    width: `${nextUnlockProgress}%`,
                     borderRadius: 'inherit',
                     bgcolor: getTierTextColor(currentTierName),
                     transition: 'width 0.5s ease-out',
