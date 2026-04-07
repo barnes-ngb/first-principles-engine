@@ -254,6 +254,13 @@ function drawTrimMarks(pdf: jsPDF, pageW: number, pageH: number): void {
 /** Points to mm conversion factor */
 const PT_TO_MM = 0.3528
 
+export function shouldRenderPlainSightWordText(
+  sightWordSet: Set<string>,
+  sightWordStyle: PrintSettings['sightWordStyle'],
+): boolean {
+  return sightWordSet.size === 0 || sightWordStyle === 'plain'
+}
+
 /**
  * Render text with optional sight word highlighting using direct jsPDF calls.
  * Returns the Y position after the last line.
@@ -278,8 +285,8 @@ function renderText(
   pdf.setFontSize(fontSizePt)
   pdf.setTextColor(...textColor)
 
-  // Simple path: no sight word highlighting
-  if (sightWordSet.size === 0 || sightWordStyle === 'plain') {
+  // Simple path: no sight word highlighting (`plain` is the print "Off" state)
+  if (shouldRenderPlainSightWordText(sightWordSet, sightWordStyle)) {
     const lines: string[] = pdf.splitTextToSize(text, maxWidth)
     for (const line of lines) {
       if (maxY && y > maxY) break

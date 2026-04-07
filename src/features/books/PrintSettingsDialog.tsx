@@ -226,7 +226,7 @@ export default function PrintSettingsDialog({
           {hasSightWords && (
             <div>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Sight words
+                Sight word highlighting
               </Typography>
               <ToggleButtonGroup
                 value={settings.sightWordStyle}
@@ -244,9 +244,12 @@ export default function PrintSettingsDialog({
                   Bold only
                 </ToggleButton>
                 <ToggleButton value="plain" sx={{ textTransform: 'none' }}>
-                  Plain
+                  Off
                 </ToggleButton>
               </ToggleButtonGroup>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                Off prints normal text with no highlight or bold.
+              </Typography>
             </div>
           )}
         </Stack>

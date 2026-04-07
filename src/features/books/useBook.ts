@@ -118,6 +118,13 @@ export async function createBookArtifact(familyId: string, book: Book): Promise<
   await addDoc(artifactsCollection(familyId), artifact)
 }
 
+export function shouldTriggerBookCompletionRewards(
+  previousStatus: Book['status'],
+  nextStatus: Book['status'] | undefined,
+): boolean {
+  return nextStatus === 'complete' && previousStatus !== 'complete'
+}
+
 export function useBook(familyId: string, bookId: string | undefined): UseBookResult {
   const [book, setBook] = useState<Book | null>(null)
   const [loading, setLoading] = useState(!!familyId && !!bookId)
@@ -259,7 +266,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
       applyUpdate((prev) => {
         const next = { ...prev, ...changes }
         // If status changes to 'complete', create portfolio artifact + award XP
-        if (changes.status === 'complete' && prev.status !== 'complete') {
+        if (shouldTriggerBookCompletionRewards(prev.status, changes.status)) {
           void createBookArtifact(familyId, next)
           // 25 XP for finishing a book (lifetime dedup per book)
           void addXpEvent(
