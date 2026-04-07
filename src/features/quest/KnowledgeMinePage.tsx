@@ -584,10 +584,12 @@ function ResumeCard({
   session: EvaluationSession & Partial<InteractiveSessionData>
   onResume: () => void
 }) {
-  const elapsed = Date.now() - new Date(session.evaluatedAt).getTime()
-  const hoursAgo = Math.floor(elapsed / (1000 * 60 * 60))
-  const minsAgo = Math.floor(elapsed / (1000 * 60))
-  const timeLabel = hoursAgo >= 1 ? `${hoursAgo}h ago` : `${minsAgo}m ago`
+  const [timeLabel] = useState(() => {
+    const elapsed = Date.now() - new Date(session.evaluatedAt).getTime()
+    const hoursAgo = Math.floor(elapsed / (1000 * 60 * 60))
+    const minsAgo = Math.floor(elapsed / (1000 * 60))
+    return hoursAgo >= 1 ? `${hoursAgo}h ago` : `${minsAgo}m ago`
+  })
   const modeLabel = QUEST_MODE_LABELS[session.questMode ?? ''] ?? 'Quest'
 
   return (
