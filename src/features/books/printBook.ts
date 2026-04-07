@@ -261,6 +261,12 @@ export function shouldRenderPlainSightWordText(
   return sightWordSet.size === 0 || sightWordStyle === 'plain'
 }
 
+export function getSightWordChipColors(isLincoln: boolean): { bg: string; text: string } {
+  return isLincoln
+    ? { bg: '#1a3a4a', text: '#ffffff' }
+    : { bg: '#fce4ec', text: '#333333' }
+}
+
 /**
  * Render text with optional sight word highlighting using direct jsPDF calls.
  * Returns the Y position after the last line.
@@ -497,13 +503,16 @@ function drawSightWordsPage(
   area: ContentArea,
 ): void {
   if (sightWords.length === 0) return
-  const textColor = hexToRgb(colors.text)
+  const pageTextColor = hexToRgb(colors.text)
+  const chipColors = getSightWordChipColors(isLincoln)
+  const chipBgColor = hexToRgb(chipColors.bg)
+  const chipTextColor = hexToRgb(chipColors.text)
   const centerX = area.x + area.w / 2
 
   // Title
   pdf.setFont('times', 'bold')
   pdf.setFontSize(20)
-  pdf.setTextColor(...textColor)
+  pdf.setTextColor(...pageTextColor)
   const title = isLincoln ? 'Words to Mine' : 'Words to Watch For'
   pdf.text(title, centerX, area.y + 20, { align: 'center' })
 
@@ -527,11 +536,10 @@ function drawSightWordsPage(
       curY += chipH + chipGap
     }
     // Draw chip background
-    const bgColor = isLincoln ? hexToRgb('#1a3a4a') : hexToRgb('#fce4ec')
-    pdf.setFillColor(...bgColor)
+    pdf.setFillColor(...chipBgColor)
     pdf.roundedRect(curX, curY, chipW, chipH, 2, 2, 'F')
     // Draw word text centered in chip
-    pdf.setTextColor(...textColor)
+    pdf.setTextColor(...chipTextColor)
     pdf.text(word, curX + chipPadX, curY + chipH * 0.7)
     curX += chipW + chipGap
   }
@@ -539,7 +547,7 @@ function drawSightWordsPage(
   // Footer hint
   pdf.setFont('times', 'italic')
   pdf.setFontSize(10)
-  pdf.setTextColor(128, 128, 128)
+  pdf.setTextColor(...pageTextColor)
   pdf.text('Look for these words as you read!', centerX, curY + chipH + 15, { align: 'center' })
 }
 
