@@ -259,11 +259,12 @@ export class PoseAnimator {
 
     const elapsed = now - this.startTime
     const t = Math.min(elapsed / this.currentPose.duration, 1)
+    const emoteIntensity = this.currentPose.id === 'idle' ? 1 : HERO_ANIMATION_TUNING.emoteIntensity
 
-    this.applyKeyframes(armL, this.currentPose.armL, t)
-    this.applyKeyframes(armR, this.currentPose.armR, t)
-    this.applyKeyframes(head, this.currentPose.head, t)
-    this.applyBodyKeyframes(body, this.currentPose.body, t)
+    this.applyKeyframes(armL, this.currentPose.armL, t, emoteIntensity)
+    this.applyKeyframes(armR, this.currentPose.armR, t, emoteIntensity)
+    this.applyKeyframes(head, this.currentPose.head, t, emoteIntensity)
+    this.applyBodyKeyframes(body, this.currentPose.body, t, emoteIntensity)
 
     if (t >= 1) {
       this.isPlaying = false
@@ -273,20 +274,20 @@ export class PoseAnimator {
     return true // Animation is active — caller should skip idle sway
   }
 
-  private applyKeyframes(obj: THREE.Object3D, kf: PoseKeyframes, t: number) {
+  private applyKeyframes(obj: THREE.Object3D, kf: PoseKeyframes, t: number, intensity = 1) {
     const armSide = obj.name === 'armL' ? 'L' : obj.name === 'armR' ? 'R' : null
     const isArm = armSide !== null
     const sideConfig = armSide ? HERO_ANIMATION_TUNING.guardrails.armBySide[armSide] : null
     if (kf.rotX) {
-      let val = this.interpolate(kf.rotX, kf.times, t)
+      let val = this.interpolate(kf.rotX, kf.times, t) * intensity
       if (sideConfig) {
         val = Math.max(sideConfig.rotXMin, Math.min(sideConfig.rotXMax, val))
       }
       obj.rotation.x = val
     }
-    if (kf.rotY) obj.rotation.y = this.interpolate(kf.rotY, kf.times, t)
+    if (kf.rotY) obj.rotation.y = this.interpolate(kf.rotY, kf.times, t) * intensity
     if (kf.rotZ) {
-      let val = this.interpolate(kf.rotZ, kf.times, t)
+      let val = this.interpolate(kf.rotZ, kf.times, t) * intensity
       if (sideConfig && isArm) {
         const armX = obj.rotation.x
         const softTorso = HERO_ANIMATION_TUNING.guardrails.torsoSoftCollision
@@ -297,7 +298,7 @@ export class PoseAnimator {
         const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance)
         const minOutward = Math.max(
           sideConfig.rotZMin,
-          HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoPush,
+          HERO_ANIMATION_TUNING.handToTorsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoPush,
           HERO_ANIMATION_TUNING.guardrails.elbowInwardCollapseLimit,
         )
         val = Math.max(
@@ -309,11 +310,11 @@ export class PoseAnimator {
     }
   }
 
-  private applyBodyKeyframes(obj: THREE.Object3D, kf: PoseKeyframes, t: number) {
+  private applyBodyKeyframes(obj: THREE.Object3D, kf: PoseKeyframes, t: number, intensity = 1) {
     if (kf.posY) {
       const baseY = (obj.userData.basePoseY as number | undefined) ?? obj.position.y
       obj.userData.basePoseY = baseY
-      obj.position.y = baseY + this.interpolate(kf.posY, kf.times, t)
+      obj.position.y = baseY + this.interpolate(kf.posY, kf.times, t) * intensity
     }
   }
 

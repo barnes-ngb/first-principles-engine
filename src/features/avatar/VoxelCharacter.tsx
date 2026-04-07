@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react'
+import { useEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from 'react'
 import * as THREE from 'three'
 import Box from '@mui/material/Box'
 
@@ -122,6 +122,42 @@ interface EquipmentPose {
   armRRotX: number
 }
 
+const HERO_DEBUG_STORAGE_KEY = 'heroHubAnimationDebug'
+const HERO_TUNING_STORAGE_KEY = 'heroHubAnimationTuning'
+const HERO_DEBUG_CONTROLS = [
+  { label: 'Stance Width', path: 'stanceWidth', min: 0.1, max: 0.28, step: 0.005 },
+  { label: 'Foot Spacing Min', path: 'footSeparation', min: 0.1, max: 0.24, step: 0.005 },
+  { label: 'Foot Sway', path: 'footSway', min: 0, max: 0.03, step: 0.001 },
+  { label: 'Foot Lift', path: 'footLift', min: 0, max: 0.015, step: 0.001 },
+  { label: 'Torso Twist', path: 'torsoTwist', min: 0, max: 0.06, step: 0.002 },
+  { label: 'Shoulder Swing', path: 'shoulderSwing.z', min: 0, max: 0.04, step: 0.001 },
+  { label: 'Elbow-Out Bias', path: 'elbowOutBias', min: 0.1, max: 0.35, step: 0.005 },
+  { label: 'Hand Clearance', path: 'handToTorsoClearance', min: 0.06, max: 0.22, step: 0.005 },
+  { label: 'Head Turn', path: 'headTurnAmount', min: 0, max: 0.1, step: 0.005 },
+  { label: 'Emote Intensity', path: 'emoteIntensity', min: 0.7, max: 1.2, step: 0.01 },
+] as const
+
+function getTuningValue(path: string): number {
+  const [rootKey, nestedKey] = path.split('.')
+  const root = HERO_ANIMATION_TUNING[rootKey as keyof typeof HERO_ANIMATION_TUNING]
+  if (nestedKey && root && typeof root === 'object') {
+    return (root as Record<string, number>)[nestedKey]
+  }
+  return root as number
+}
+
+function setTuningValue(path: string, value: number) {
+  const [rootKey, nestedKey] = path.split('.')
+  if (nestedKey) {
+    const root = HERO_ANIMATION_TUNING[rootKey as keyof typeof HERO_ANIMATION_TUNING]
+    if (root && typeof root === 'object') {
+      (root as Record<string, number>)[nestedKey] = value
+    }
+    return
+  }
+  ;(HERO_ANIMATION_TUNING as unknown as Record<string, number>)[rootKey] = value
+}
+
 const POSE_DEFAULT: EquipmentPose = { armLRotZ: 0, armRRotZ: 0, armLRotX: 0, armRRotX: 0 }
 
 function calculateEquipmentPose(equipped: string[]): EquipmentPose {
@@ -153,7 +189,7 @@ function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number) {
   const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance)
   const minOutward = Math.max(
     sideConfig.rotZMin,
-    HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoPush,
+    HERO_ANIMATION_TUNING.handToTorsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoPush,
     HERO_ANIMATION_TUNING.guardrails.elbowInwardCollapseLimit,
   )
   const outwardZ = clamp(rotZ, minOutward, sideConfig.rotZMax)
@@ -400,6 +436,23 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   const onTierUpRef = useRef(onTierUp)
   const ceremonyActiveRef = useRef(false)
   const sceneActiveRef = useRef(false)
+  const [debugValues, setDebugValues] = useState<Record<string, number>>(() => {
+    const values: Record<string, number> = {}
+    for (const control of HERO_DEBUG_CONTROLS) {
+      values[control.path] = getTuningValue(control.path)
+    }
+    return values
+  })
+  const [heroDebugEnabled] = useState(() => {
+    if (typeof window === 'undefined') return false
+    const queryEnabled = new URLSearchParams(window.location.search).get('heroDebug') === '1'
+    const stored = window.localStorage.getItem(HERO_DEBUG_STORAGE_KEY) === '1'
+    const enabled = queryEnabled || stored
+    if (queryEnabled && !stored) {
+      window.localStorage.setItem(HERO_DEBUG_STORAGE_KEY, '1')
+    }
+    return enabled
+  })
 
   // Expose capture method to parent via ref
   useImperativeHandle(ref, () => ({
@@ -425,6 +478,28 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     () => proportions ? JSON.stringify(proportions) : '',
     [proportions],
   )
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const raw = window.localStorage.getItem(HERO_TUNING_STORAGE_KEY)
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw) as Record<string, number>
+      const next: Record<string, number> = {}
+      for (const control of HERO_DEBUG_CONTROLS) {
+        const value = parsed[control.path]
+        if (typeof value === 'number') {
+          setTuningValue(control.path, value)
+          next[control.path] = value
+        } else {
+          next[control.path] = getTuningValue(control.path)
+        }
+      }
+      setDebugValues(next)
+    } catch {
+      // Ignore malformed debug tuning cache.
+    }
+  }, [])
 
   // Keep refs in sync so animation loop always has current values
   backgroundRef.current = background
@@ -804,6 +879,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         if (!ceremonyActiveRef.current) {
           characterRef.current.position.y = baseY + Math.sin(time * 2.1) * HERO_ANIMATION_TUNING.bodyBobAmplitude
           characterRef.current.position.x = Math.sin(time * 0.8) * HERO_ANIMATION_TUNING.bodyLateralShift
+          characterRef.current.rotation.y = Math.sin(time * 0.45) * HERO_ANIMATION_TUNING.torsoTwist
 
           // Animate ground shadow scale with character bob
           const shadowMesh = scene.getObjectByName('groundShadow')
@@ -857,10 +933,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           if (armLObj) {
             const constrained = constrainArmPose(
               'L',
-              currentEqPose.armLRotX + Math.sin(time * 0.8 + HERO_ANIMATION_TUNING.armPhaseOffset) * HERO_ANIMATION_TUNING.armSwingX,
+              currentEqPose.armLRotX + Math.sin(time * 0.8 + HERO_ANIMATION_TUNING.shoulderSwing.phaseOffset) * HERO_ANIMATION_TUNING.shoulderSwing.x,
               currentEqPose.armLRotZ
                 + HERO_ANIMATION_TUNING.silhouetteBias.leftRotZ
-                + Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.armSwingZ,
+                + Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.shoulderSwing.z,
             )
             armLObj.rotation.z = constrained.rotZ
             armLObj.rotation.x = constrained.rotX
@@ -868,10 +944,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           if (armRObj) {
             const constrained = constrainArmPose(
               'R',
-              currentEqPose.armRRotX - Math.sin(time * 0.8 + HERO_ANIMATION_TUNING.armPhaseOffset) * HERO_ANIMATION_TUNING.armSwingX,
+              currentEqPose.armRRotX - Math.sin(time * 0.8 + HERO_ANIMATION_TUNING.shoulderSwing.phaseOffset) * HERO_ANIMATION_TUNING.shoulderSwing.x,
               currentEqPose.armRRotZ
                 + HERO_ANIMATION_TUNING.silhouetteBias.rightRotZ
-                - Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.armSwingZ,
+                - Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.shoulderSwing.z,
             )
             armRObj.rotation.z = constrained.rotZ
             armRObj.rotation.x = constrained.rotX
@@ -879,8 +955,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
 
           // Foot planting: preserve authored base stance and only apply tiny opposite offsets.
           const footSpread = Math.sin(time * 0.9 + Math.PI * 0.25) * HERO_ANIMATION_TUNING.footSway
-          let leftX = baseFootL - footSpread
-          let rightX = baseFootR + footSpread
+          const baseCenter = (baseFootL + baseFootR) * 0.5
+          const desiredHalfGap = Math.max(HERO_ANIMATION_TUNING.stanceWidth * 0.5, HERO_ANIMATION_TUNING.footSeparation * 0.5)
+          let leftX = baseCenter - desiredHalfGap - footSpread
+          let rightX = baseCenter + desiredHalfGap + footSpread
           if (rightX - leftX < HERO_ANIMATION_TUNING.footSeparation) {
             const center = (leftX + rightX) * 0.5
             leftX = center - HERO_ANIMATION_TUNING.footSeparation * 0.5
@@ -888,24 +966,24 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           }
           leftX = Math.min(leftX, -HERO_ANIMATION_TUNING.footCenterLineGap)
           rightX = Math.max(rightX, HERO_ANIMATION_TUNING.footCenterLineGap)
-          for (const [name, x] of [
-            ['legL', leftX],
-            ['bootL', leftX],
-            ['bootBandL', leftX],
-            ['legR', rightX],
-            ['bootR', rightX],
-            ['bootBandR', rightX],
+          for (const [name, x, liftOffset] of [
+            ['legL', leftX, Math.max(0, footSpread)],
+            ['bootL', leftX, Math.max(0, footSpread)],
+            ['bootBandL', leftX, Math.max(0, footSpread)],
+            ['legR', rightX, Math.max(0, -footSpread)],
+            ['bootR', rightX, Math.max(0, -footSpread)],
+            ['bootBandR', rightX, Math.max(0, -footSpread)],
           ] as const) {
             const part = characterRef.current.getObjectByName(name)
             if (part) {
               part.position.x = x
-              part.position.y = baseFootY + HERO_ANIMATION_TUNING.footPlantY
+              part.position.y = baseFootY + HERO_ANIMATION_TUNING.footPlantY + liftOffset * HERO_ANIMATION_TUNING.footLift
             }
           }
 
           // Head micro-movement — very slow, subtle look-around (6s period)
           if (headObj) {
-            headObj.rotation.y = Math.sin(time * (Math.PI * 2 / 6)) * 0.05
+            headObj.rotation.y = Math.sin(time * (Math.PI * 2 / 6)) * HERO_ANIMATION_TUNING.headTurnAmount
           }
         }
       }
@@ -1284,6 +1362,17 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     }
   }, [animateUnequipPiece, onUnequipAnimDone])
 
+  const handleDebugControlChange = useCallback((path: string, value: number) => {
+    setTuningValue(path, value)
+    setDebugValues((prev) => {
+      const next = { ...prev, [path]: value }
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(HERO_TUNING_STORAGE_KEY, JSON.stringify(next))
+      }
+      return next
+    })
+  }, [])
+
   return (
     <Box
       ref={containerRef}
@@ -1313,7 +1402,46 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         // Subtle vignette — darkens corners for depth
         boxShadow: 'inset 0 0 80px rgba(0,0,0,0.4)',
       }}
-    />
+    >
+      {heroDebugEnabled && (
+        <Box
+          sx={{
+            position: 'absolute',
+            right: 8,
+            top: 8,
+            width: 220,
+            maxHeight: '70%',
+            overflowY: 'auto',
+            p: 1,
+            borderRadius: '8px',
+            bgcolor: 'rgba(15, 22, 32, 0.82)',
+            color: '#e8f3ff',
+            fontSize: '11px',
+            zIndex: 2,
+            border: '1px solid rgba(126, 211, 255, 0.35)',
+          }}
+        >
+          <Box sx={{ fontWeight: 700, mb: 0.5 }}>Hero Anim Debug</Box>
+          {HERO_DEBUG_CONTROLS.map((control) => (
+            <Box key={control.path} sx={{ mb: 0.75 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
+                <span>{control.label}</span>
+                <span>{debugValues[control.path]?.toFixed(3)}</span>
+              </Box>
+              <input
+                type="range"
+                min={control.min}
+                max={control.max}
+                step={control.step}
+                value={debugValues[control.path] ?? getTuningValue(control.path)}
+                onChange={(event) => handleDebugControlChange(control.path, Number(event.target.value))}
+                style={{ width: '100%' }}
+              />
+            </Box>
+          ))}
+        </Box>
+      )}
+    </Box>
   )
 })
 
