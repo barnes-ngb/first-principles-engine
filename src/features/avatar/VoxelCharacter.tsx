@@ -155,7 +155,9 @@ function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number) {
     0,
     1,
   )
-  const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance)
+  const torsoPush = torsoT
+    * (softTorso.forearmClearance + softTorso.handClearance)
+    * HERO_ANIMATION_TUNING.torsoAvoidanceGain
   const minOutward = Math.max(
     sideConfig.rotZMin,
     HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoPush,
@@ -809,11 +811,12 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       if (characterRef.current) {
         const dt = clock.getDelta()
         const time = clock.getElapsedTime()
+        const weightShift = shapedArc(time * 0.92 + 0.35)
+        const heroCycle = time * 0.78
 
         // Gentle breathing bob (freeze during ceremony so character stays still)
         if (!ceremonyActiveRef.current) {
           const breath = Math.sin(time * 1.45) * 0.7 + Math.sin(time * 2.9 + 0.7) * 0.3
-          const weightShift = shapedArc(time * 0.92 + 0.35)
           characterRef.current.position.y = baseY + breath * HERO_ANIMATION_TUNING.bodyBobAmplitude
           characterRef.current.position.x = weightShift * HERO_ANIMATION_TUNING.bodyLateralShift
 
@@ -872,8 +875,6 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           currentEqPose.armLRotX += (targetEqPose.armLRotX - currentEqPose.armLRotX) * lerpSpeed
           currentEqPose.armRRotX += (targetEqPose.armRRotX - currentEqPose.armRRotX) * lerpSpeed
 
-          const weightShift = shapedArc(time * 0.92 + 0.35)
-          const heroCycle = time * 0.78
           const torsoLead = shapedArc(heroCycle - 0.24)
 
           if (torsoObj) {
@@ -884,8 +885,8 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
 
           // Arm idle arcs — shaped wave keeps motion handcrafted and readable.
           const armSwayTime = heroCycle
-          const leftArc = shapedArc(armSwayTime + 0.8)
-          const rightArc = shapedArc(armSwayTime - 0.35)
+          const leftArc = shapedArc(armSwayTime + HERO_ANIMATION_TUNING.armPhaseOffset)
+          const rightArc = shapedArc(armSwayTime - HERO_ANIMATION_TUNING.armPhaseOffset * 0.7)
           if (armLObj) {
             const constrained = constrainArmPose(
               'L',
@@ -917,15 +918,45 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             armRObj.position.y = baseArmRY + Math.max(0, weightShift) * 0.018
           }
 
-          // Foot planting: preserve authored base stance and only apply tiny opposite offsets.
-          const footSpread = shapedArc(time * 0.92 + Math.PI * 0.25) * HERO_ANIMATION_TUNING.footSway
-          let leftX = baseFootL - footSpread + Math.min(0, weightShift) * 0.01
-          let rightX = baseFootR + footSpread + Math.max(0, weightShift) * 0.01
-          if (rightX - leftX < HERO_ANIMATION_TUNING.footSeparation) {
-            const center = (leftX + rightX) * 0.5
-            leftX = center - HERO_ANIMATION_TUNING.footSeparation * 0.5
-            rightX = center + HERO_ANIMATION_TUNING.footSeparation * 0.5
+          // Head and shoulders offsets — subtle asymmetry keeps idle alive.
+          if (headObj) {
+            headObj.rotation.y = shapedArc(heroCycle * 0.8 + 0.25) * 0.055
+            headObj.rotation.x = Math.sin(heroCycle * 1.7 + 1.1) * 0.02
+            headObj.rotation.z = weightShift * 0.015
+            headObj.position.x = baseHeadX + weightShift * 0.014
+            headObj.position.y = baseHeadY + Math.sin(heroCycle * 1.7 + 0.4) * 0.006
           }
+        }
+
+        // Post-pose arm guardrails: keeps emotes readable and avoids torso clipping.
+        if (!ceremonyActiveRef.current) {
+          if (armLObj) {
+            const constrained = constrainArmPose('L', armLObj.rotation.x, armLObj.rotation.z)
+            armLObj.rotation.x = constrained.rotX
+            armLObj.rotation.z = constrained.rotZ
+          }
+          if (armRObj) {
+            const constrained = constrainArmPose('R', armRObj.rotation.x, armRObj.rotation.z)
+            armRObj.rotation.x = constrained.rotX
+            armRObj.rotation.z = constrained.rotZ
+          }
+        }
+
+        // Foot planting: always preserve separation so emotes don't lock in a crossed stance.
+        if (!ceremonyActiveRef.current && baseFootCaptured) {
+          const baseCenter = (baseFootL + baseFootR) * 0.5
+          const baseSeparation = Math.max(0.001, baseFootR - baseFootL)
+          const minSeparation = Math.max(HERO_ANIMATION_TUNING.footSeparation, baseSeparation * 0.82)
+          const maxSeparation = Math.max(minSeparation + 0.04, baseSeparation + HERO_ANIMATION_TUNING.stanceWidth * 0.2)
+          const footSwayScale = poseActive ? 0.25 : 1
+          const footSpread = shapedArc(time * 0.92 + Math.PI * 0.25) * HERO_ANIMATION_TUNING.footSway * footSwayScale
+          let leftX = baseFootL - footSpread + Math.min(0, weightShift) * 0.008
+          let rightX = baseFootR + footSpread + Math.max(0, weightShift) * 0.008
+          const center = (leftX + rightX) * 0.5
+          const centered = baseCenter + (center - baseCenter) * 0.35
+          const currentSeparation = clamp(rightX - leftX, minSeparation, maxSeparation)
+          leftX = centered - currentSeparation * 0.5
+          rightX = centered + currentSeparation * 0.5
           leftX = Math.min(leftX, -HERO_ANIMATION_TUNING.footCenterLineGap)
           rightX = Math.max(rightX, HERO_ANIMATION_TUNING.footCenterLineGap)
           for (const [name, x] of [
@@ -944,15 +975,6 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
                 : Math.max(0, weightShift) * 0.004
               part.position.y = baseFootY + HERO_ANIMATION_TUNING.footPlantY + yOffset
             }
-          }
-
-          // Head and shoulders offsets — subtle asymmetry keeps idle alive.
-          if (headObj) {
-            headObj.rotation.y = shapedArc(heroCycle * 0.8 + 0.25) * 0.055
-            headObj.rotation.x = Math.sin(heroCycle * 1.7 + 1.1) * 0.02
-            headObj.rotation.z = weightShift * 0.015
-            headObj.position.x = baseHeadX + weightShift * 0.014
-            headObj.position.y = baseHeadY + Math.sin(heroCycle * 1.7 + 0.4) * 0.006
           }
         }
       }

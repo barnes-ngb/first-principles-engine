@@ -1,21 +1,21 @@
 export const HERO_ANIMATION_TUNING = {
   // Feet / stance
-  stanceWidth: 0.2,
-  footSeparation: 0.18,
-  footSway: 0.008,
+  stanceWidth: 0.24,
+  footSeparation: 0.24,
+  footSway: 0.006,
   footCenterLineGap: 0.07,
   footPlantY: 0,
 
   // Idle arm motion
-  armSwingZ: 0.02,
-  armSwingX: 0.02,
-  armPhaseOffset: Math.PI / 3,
-  elbowOutBias: 0.22,
+  armSwingZ: 0.016,
+  armSwingX: 0.015,
+  armPhaseOffset: Math.PI * 0.42,
+  elbowOutBias: 0.27,
   armSwingClampZ: 1.55,
   armSwingClampX: { min: -1.0, max: 0.42 },
   silhouetteBias: {
-    leftRotZ: 0.07,
-    rightRotZ: 0.1,
+    leftRotZ: 0.08,
+    rightRotZ: 0.11,
   },
 
   // Procedural guardrails (applied after pose + idle calculations)
@@ -26,18 +26,18 @@ export const HERO_ANIMATION_TUNING = {
     },
     elbowInwardCollapseLimit: 0.28,
     torsoSoftCollision: {
-      rotXStart: -0.1,
-      rotXEnd: 0.42,
-      forearmClearance: 0.16,
-      handClearance: 0.08,
+      rotXStart: -0.16,
+      rotXEnd: 0.36,
+      forearmClearance: 0.2,
+      handClearance: 0.1,
     },
   },
 
   // Collision avoidance
-  torsoClearance: 0.14,
-  torsoAvoidanceGain: 0.48,
+  torsoClearance: 0.19,
+  torsoAvoidanceGain: 0.62,
 
   // General character motion
   bodyBobAmplitude: 0.01,
-  bodyLateralShift: 0.024,
+  bodyLateralShift: 0.018,
 } as const
