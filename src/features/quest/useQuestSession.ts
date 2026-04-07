@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { collection, doc, getDoc, getDocs, limit as firestoreLimit, orderBy, query, setDoc, where } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, limit as firestoreLimit, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
@@ -338,6 +338,7 @@ export function useQuestSession() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const questionStartRef = useRef<number>(0)
   const bonusRoundUsedRef = useRef(false)
+  const sessionIdRef = useRef<string | null>(null)
 
   // ── Load previous sessions + streak ───────────────────────────
 
@@ -471,6 +472,7 @@ export function useQuestSession() {
       setCurrentPassageText('')
       conversationRef.current = []
       bonusRoundUsedRef.current = false
+      sessionIdRef.current = null
 
       // Fluency mode has a different flow
       if (questMode === 'fluency') {
@@ -715,9 +717,8 @@ export function useQuestSession() {
         sessionRecommendations = generateFallbackRecommendations([], finalState.currentLevel, domain)
       }
 
-      // Save to Firestore
-      const timestamp = Date.now()
-      const docId = `interactive_${activeChildId}_${timestamp}`
+      // Save to Firestore — reuse existing sessionId if resuming, else generate new
+      const docId = sessionIdRef.current ?? `interactive_${activeChildId}_${Date.now()}`
 
       const skippedCount = questions.filter((q) => q.skipped).length
       const flaggedErrorCount = questions.filter((q) => q.flaggedAsError).length
@@ -1489,13 +1490,96 @@ export function useQuestSession() {
     [activeChildId, familyId, questState, fluencyPassages, fluencyDiamonds],
   )
 
+  // ── Resume session from partial save ──────────────────────────
+
+  const resumeSession = useCallback(
+    (partialDoc: EvaluationSession & Partial<InteractiveSessionData> & { id?: string }) => {
+      if (!familyId) return
+
+      // Validate required resume fields
+      const saved = partialDoc.savedQuestState
+      if (!saved || !partialDoc.savedCurrentQuestion) {
+        console.warn('[resumeSession] Partial session missing savedQuestState or savedCurrentQuestion — cannot resume')
+        return false
+      }
+
+      // Restore session identity so endSession updates this doc, not creates a new one
+      const docId = partialDoc.id
+      if (!docId) {
+        console.warn('[resumeSession] Partial session missing doc id — cannot resume')
+        return false
+      }
+      sessionIdRef.current = docId
+
+      // Restore adaptive state
+      setQuestState(saved)
+      setAnsweredQuestions(partialDoc.questions ?? [])
+      setFindings(partialDoc.findings ?? [])
+
+      // Check if the saved currentQuestion was already answered (edge case: save race)
+      const alreadyAnswered = (partialDoc.questions ?? []).some(
+        (q) => q.id === partialDoc.savedCurrentQuestion!.id,
+      )
+
+      // Restore the exact question or flag that we need a new one
+      if (alreadyAnswered) {
+        // Question was answered before save completed — we'll need a fresh one.
+        // Set currentQuestion to null; the normal submitAnswer→fetchNextQuestion flow
+        // doesn't apply here, so we trigger a new AI call after setting screen.
+        setCurrentQuestion(null)
+      } else {
+        setCurrentQuestion(partialDoc.savedCurrentQuestion)
+      }
+
+      // Restore refs
+      bonusRoundUsedRef.current = partialDoc.bonusRoundUsed ?? false
+      activeDomainRef.current = partialDoc.domain as EvaluationDomain
+      activeQuestModeRef.current = partialDoc.questMode
+      conversationRef.current = []
+
+      // Reset other state
+      setLastAnswer(null)
+      setSessionSaved(false)
+      setSummarizing(false)
+      setStartQuestError(null)
+      setFluencyPassages([])
+      setFluencyDiamonds(0)
+      setCurrentPassageText('')
+
+      // Start the elapsed-time timer from where we left off
+      if (timerRef.current) clearInterval(timerRef.current)
+      timerRef.current = setInterval(() => {
+        setQuestState((prev) =>
+          prev ? { ...prev, elapsedSeconds: prev.elapsedSeconds + 1 } : prev,
+        )
+      }, 1000)
+
+      // Show the question screen (or loading if we need a new question)
+      if (alreadyAnswered) {
+        setScreen(QuestScreen.Loading)
+        // TODO: fetch new question — for now this is an extreme edge case
+      } else {
+        setScreen(QuestScreen.Question)
+      }
+
+      // Mark the Firestore doc as 'resumed' so it doesn't show up in the resume card again
+      const ref = doc(evaluationSessionsCollection(familyId), docId)
+      updateDoc(ref, { status: 'resumed' }).catch((err) =>
+        console.error('[resumeSession] Failed to mark session as resumed', err),
+      )
+
+      return true
+    },
+    [familyId],
+  )
+
   // ── Reset to intro ────────────────────────────────────────────
 
   const resetToIntro = useCallback(() => {
     // Auto-save partial session if quest is in progress with answered questions
     if (questState && questState.totalQuestions > 0 && activeChildId && familyId) {
-      const timestamp = Date.now()
-      const docId = `interactive_${activeChildId}_${timestamp}`
+      // Reuse existing sessionId if resuming, otherwise generate new one
+      const docId = sessionIdRef.current ?? `interactive_${activeChildId}_${Date.now()}`
       const domain = activeDomainRef.current
       const skippedCount = answeredQuestions.filter((q) => q.skipped).length
       const flaggedErrorCount = answeredQuestions.filter((q) => q.flaggedAsError).length
@@ -1519,6 +1603,10 @@ export function useQuestSession() {
         streakDays: streak.currentStreak,
         skippedCount: skippedCount || undefined,
         flaggedErrorCount: flaggedErrorCount || undefined,
+        // Resume support: save full state needed to restore session
+        savedQuestState: questState,
+        savedCurrentQuestion: currentQuestion ?? undefined,
+        bonusRoundUsed: bonusRoundUsedRef.current,
       }
 
       // Fire-and-forget save — don't block the UI reset
@@ -1547,7 +1635,8 @@ export function useQuestSession() {
     conversationRef.current = []
     bonusRoundUsedRef.current = false
     activeQuestModeRef.current = undefined
-  }, [questState, activeChildId, familyId, answeredQuestions, findings, streak.currentStreak])
+    sessionIdRef.current = null
+  }, [questState, currentQuestion, activeChildId, familyId, answeredQuestions, findings, streak.currentStreak])
 
   return {
     screen,
@@ -1563,6 +1652,7 @@ export function useQuestSession() {
     aiError,
     startQuestError,
     startQuest,
+    resumeSession,
     submitAnswer,
     handleSkip,
     resetToIntro,

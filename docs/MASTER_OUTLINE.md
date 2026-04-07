@@ -56,6 +56,7 @@ Barnes Family Homeschool — Master Project Outline v15 **Version:** v15 — Apr
 * Level 9-10: passage-based inference questions with reading comprehension
 * Multi-syllable words, prefixes, vocabulary at higher levels
 * Quest starting level calibrated from curriculum completion data
+* Partial session auto-save + true resume — quest progress persists if child taps Back to mine; Continue restores exact state and current question; resumable for 24 hours
 
 ### Fluency Practice
 * Timed fluency sessions with WPM (words per minute) tracking
