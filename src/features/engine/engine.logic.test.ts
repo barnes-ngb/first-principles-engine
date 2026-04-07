@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import type { MilestoneProgress } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import {
   computeLoopStatus,
   countMilestonesAchievedInRange,
   countUniqueRungsInRange,
   getWeekRange,
+  type MilestoneProgressEntry,
   suggestNextStage,
 } from './engine.logic'
 
@@ -139,7 +139,7 @@ describe('countMilestonesAchievedInRange', () => {
   const range = { start: '2026-02-02', end: '2026-02-08' }
 
   it('counts milestone achievements within the week range', () => {
-    const milestones: MilestoneProgress[] = [
+    const milestones: MilestoneProgressEntry[] = [
       {
         childId: 'child-a',
         ladderId: 'ladder-1',
