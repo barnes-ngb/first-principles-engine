@@ -1,17 +1,17 @@
 # Knowledge Mine Audit — April 2026
 
-> Read-only audit, Part 1 of 4. No code changes.
+> Read-only audit, 4 parts. No code changes.
 > Auditor: Claude Code. Date: 2026-04-07.
 
 ---
 
 ## Summary
 
-1. **The "6 level" claim is stale.** The intro screen says "Levels 1-6" for both Phonics and Comprehension quests, but the actual system supports Levels 1-10 with a hard cap of 10 in `questAdaptive.ts:28`. A child can reach Level 7+ in normal play — this is not a bug, but the UI description is wrong.
-2. **Phonics and Comprehension use different level scales.** Phonics has 10 well-defined levels (letter sounds through vocabulary-in-context). Comprehension has only 6 defined difficulty tiers in its prompt (Levels 1-6) but shares the same 1-10 adaptive engine, meaning Levels 7-10 are undefined for comprehension — the AI is freestyling above Level 6.
-3. **Math is capped at 6 levels by design** in the prompt but also shares the 1-10 engine. Same undefined-above-6 problem.
-4. **Lincoln's constraints are well-respected** for Levels 1-8 (no required typing, MC primary, TTS available, voice optional). Levels 9-10 introduce reading passages that may be too text-heavy for comfortable tablet interaction, though TTS is available.
-5. **The comprehension quest correctly skips phonics** — its "DO NOT TEST" list explicitly blocks letter sounds, CVC, blends, and digraphs. However, its 6-level difficulty definition is too coarse for the 10-level engine it runs on.
+1. **"Back to mine" can destroy a session with one tap.** No confirmation dialog — tapping the button mid-quest instantly clears all progress with no Firestore save. This is the highest-risk UX issue for Lincoln. (Part C, Finding C1)
+2. **Level 7+ is undefined territory for Comprehension and Math.** The adaptive engine supports Levels 1-10, but Comprehension and Math prompts only define Levels 1-6. Above Level 6 the AI freestyles with no content guidance. Phonics is fine (all 10 levels defined). (Part A)
+3. **Level 1 frustration trap.** A child stuck at Level 1 who keeps getting wrong answers will never trigger the frustration exit — `levelDownsInARow` can't increment at the floor. The session only ends at 10 questions or 8 minutes. (Part B, Finding B1)
+4. **Coverage gaps are safely handled.** Speech Quest is properly disabled with "Coming soon!" messaging and non-clickable UI. London (no evaluation history) can use Knowledge Mine without crashes — the system gracefully defaults to Level 2 with generic questions. (Part F)
+5. **The "6 level" claim is stale.** The intro screen says "Levels 1-6" but the engine supports 1-10. Not a bug, but the UI description is wrong and misleading. (Part A)
 
 ---
 
@@ -487,3 +487,146 @@ Because skips don't count toward `totalQuestions`, a child could theoretically s
 During the bonus round, `totalQuestions` has already reached 10 (the trigger for `shouldEnd`), but a new question is shown. The header renders `{questState.totalQuestions + 1}/{MAX_QUESTIONS}` which evaluates to `11/10`. This is a minor cosmetic issue — the "BONUS ROUND!" banner at `ReadingQuest.tsx:589-616` draws attention away from the counter, but `11/10` could confuse a child who notices it.
 
 **Recommendation**: Hide the progress counter during the bonus round, or cap the display at `10/10`.
+
+---
+
+## Part F: Coverage Gaps
+
+### F1: Math Quest — Status: Enabled and Safe
+
+Math Quest was promoted from "coming soon" to enabled status. Per `MASTER_OUTLINE.md:127`: "Math Quest enabled (was 'coming soon')."
+
+**Implementation**:
+- `KnowledgeMinePage.tsx:66-75`: `MATH_MODES` array has `enabled: true`.
+- Full AI prompt exists at `functions/src/ai/chat.ts:1163-1316` with 6 defined levels.
+- TTS auto-reads math questions (`ReadingQuest.tsx:462-467`).
+- Uses the same adaptive engine, quest session hook, and quest UI as reading quests.
+- No separate routes — domain selection is UI-only within `/quest`.
+
+**Finding F1 (Pass):** Math Quest is production-ready. No broken nav links, no half-built UI. Fully functional and navigable.
+
+### F2: Speech Quest — Status: Safely Disabled
+
+**Implementation** (`KnowledgeMinePage.tsx:77-85`):
+```
+domain: EvaluationDomain.Speech,
+label: 'Speech Quest',
+icon: '🗣️',
+enabled: false,
+description: 'Coming soon!',
+```
+
+**Safety verification**:
+
+| Check | Result |
+|---|---|
+| Clickable? | **No.** `QuestCard` only renders `onClick`/`role="button"`/`tabIndex` when `enabled={true}`. |
+| Visual state | Opacity 0.4, cursor `default` (not pointer). Clearly disabled. |
+| "Coming soon" messaging | **Yes.** Description reads "Coming soon!" |
+| Broken nav links to speech quest? | **None.** No `/speech-quest` route. No hardcoded links anywhere in the codebase. |
+| Half-built components? | **None.** No `SpeechQuestPage.tsx` or speech-specific quest components. |
+| Backend prompt? | **None.** No speech quest task handler exists. |
+| Evaluate page tab? | Speech tab exists in `EvaluateChatPage.tsx` but is also disabled with "coming soon" messaging. |
+| Keyboard accessible? | **No** (correctly — `tabIndex` not set when disabled). |
+
+**Finding F2 (Pass):** Speech Quest is safely stubbed. Lincoln cannot accidentally enter it. No broken navigation paths. Clear "Coming soon!" messaging.
+
+### F3: London in Knowledge Mine — No Learner Profile
+
+London (6, kindergarten) has no evaluation sessions, no skill snapshots, no word progress data, and no workbook configs. What happens if she opens Knowledge Mine?
+
+**Step-by-step walkthrough**:
+
+1. **Page load**: `KnowledgeMinePage` renders normally. `useActiveChild()` returns London's child document (which exists in the `children` collection). No age gating, no profile requirement. Greeting: "Hey London! Ready to mine some knowledge?"
+
+2. **Quest selection**: All three reading modes (Phonics, Comprehension, Fluency) and Math Quest display as enabled. Speech Quest displays as disabled. Avatar shows Wooden tier, 0 XP (defaults).
+
+3. **Start quest (e.g., Phonics)**:
+   - `startQuest()` checks `activeChildId && activeChild` — both exist, proceeds.
+   - Attempts to load `workbookConfigs` for starting level — none exist, defaults to **Level 2** (`useQuestSession.ts:391`).
+   - Calls AI service with London's context.
+
+4. **Cloud function context loading** (`contextSlices.ts` + `quest.ts`):
+   - All 6 context slices use `Promise.allSettled()` — failures don't block:
+     - `childProfile`: Loads from `children` collection — **succeeds**.
+     - `sightWords`: Queries `sightWordProgress` — **empty, returns empty string**.
+     - `recentEval`: Queries last evaluation — **none exist, returns empty string**.
+     - `wordMastery`: Queries `children/{childId}/wordProgress` — **empty, returns empty string**.
+     - `skillSnapshot`: Loads skill snapshot doc — **none exists, returns empty string**.
+     - `workbookPaces`: Loads curriculum workbooks — **empty, returns empty string**.
+
+5. **AI prompt**: Generated with London's name, Level 2, and all optional context sections empty. The AI generates generic Level 2 phonics questions (CVC blending) with no personalization.
+
+6. **Session completion**: Questions, score, and level are saved to `evaluationSessions`. XP and diamonds are awarded normally. A skill snapshot is auto-created from session findings.
+
+**Finding F3 (Pass with notes):** Knowledge Mine works correctly for London with no crashes or broken UI.
+
+| Behavior | Assessment |
+|---|---|
+| Page renders | Pass — no missing data crashes |
+| Quest starts | Pass — defaults to Level 2 |
+| AI generates questions | Pass — generic but age-appropriate CVC content |
+| Session saves | Pass — creates new evaluation session and skill snapshot |
+| XP/diamonds awarded | Pass — standard awards apply |
+| Streak tracking | Pass — shows "Never played" for first session |
+
+**Caveats**:
+- Questions are completely generic (no personalization from prior evaluations or skill data). This is fine for a first session.
+- Every session starts at Level 2 until workbook configs or curriculum data is added for London. There's no automatic progression of starting level between sessions based on prior quest performance.
+- The system does NOT check whether the child's grade or age is appropriate for the quest content. Level 2 phonics (CVC blending) is developmentally appropriate for London (kindergarten, knows most letter sounds), but this is coincidental — the default, not an intentional age adaptation.
+
+---
+
+## Prioritized Fix List
+
+### P0 — Breaks Lincoln's Flow or Violates Core Design Principle
+
+| # | Title | Part | Description | Effort |
+|---|---|---|---|---|
+| P0-1 | "Back to mine" needs confirmation | C | Tapping the button mid-quest instantly destroys session with no save and no confirmation dialog. One accidental tap = lost progress. | S |
+| P0-2 | Level 1 frustration trap | B | A child stuck at Level 1 never triggers frustration exit. `levelDownsInARow` can't increment at floor. Only 10-question cap or 8-min timeout ends the session. Add a "total wrong at Level 1" escape. | S |
+
+### P1 — Quality Issue, Should Fix Soon
+
+| # | Title | Part | Description | Effort |
+|---|---|---|---|---|
+| P1-1 | Comprehension/Math level cap at 6 | A | Adaptive engine allows Level 7-10 but prompts only define 1-6. Add per-quest-mode level caps in `computeNextState` so children can't enter undefined territory. | S |
+| P1-2 | Stale "Levels 1-6" UI text | A | `KnowledgeMinePage.tsx:46,54` claims Levels 1-6 for all quests. Phonics actually supports 1-10. Either update text or remove level range from UI. | S |
+| P1-3 | Comprehension prompt under-specified | A | Only 3 difficulty bands (2 levels each) with vague guidance. Phonics has 6 specific bands with concrete question types. Comprehension quality is unpredictable. | M |
+| P1-4 | Phonics L9-10 domain mismatch | A | Levels 9-10 test passage comprehension, not phonics. A child who excels at decoding gets comprehension questions inside "Phonics Quest." Should redirect to Comprehension Quest instead. | M |
+| P1-5 | Duplicate starting-level logic | A | Curriculum-to-starting-level computed in both client (`useQuestSession.ts:390-443`) and server (`quest.ts:29-87`). Could drift if only one is updated. | M |
+| P1-6 | Math has no starting-level boost | A | Math always starts at Level 2 regardless of curriculum data. Reading adapts starting level from workbook completion. Math should do the same. | S |
+
+### P2 — Nice to Have
+
+| # | Title | Part | Description | Effort |
+|---|---|---|---|---|
+| P2-1 | Bonus round shows "11/10" counter | B, C | Header renders `11/10` during bonus question. Cosmetic — hide counter or cap display at `10/10`. | S |
+| P2-2 | Fluency passage difficulty hardcoded | A | Fluency passages always generate at "2nd-3rd grade reading level" regardless of child's actual level. Not adaptive. | S |
+| P2-3 | No client-side phoneme display guard | C | Phoneme display renders at any level if the AI sends it. Add `questState.currentLevel <= 3` guard. | S |
+| P2-4 | Infinite skip edge case | C | Skips don't count toward question total — theoretically unlimited. 8-min timeout is the only backstop. Consider counting skips toward a separate cap. | S |
+| P2-5 | No bonus round unit test | B | Bonus round logic lives in `useQuestSession.ts` (integration level). No isolated unit test. | S |
+| P2-6 | `wordProgress` subcollection undocumented | A | `children/{childId}/wordProgress` is not in CLAUDE.md's Firestore collections table (mentioned in a note only). | S |
+
+---
+
+## Open Questions for Shelly/Nathan
+
+1. **Should Phonics L9-10 exist?** They test comprehension, not phonics. A child who reaches L9 has demonstrated strong decoding — should the system redirect them to Comprehension Quest with a message like "You've mastered phonics! Try Comprehension Quest next"? Or is it fine to keep the domain bleed?
+
+2. **Per-quest level caps or expand prompts?** Two ways to fix the Level 7+ gap: (a) cap Comprehension and Math at Level 6 in the adaptive engine, or (b) define Levels 7-10 content in their prompts. Option (a) is simpler but limits growth. Option (b) is more work but better long-term.
+
+3. **Should London's starting level adapt over time?** Currently every quest session starts at Level 2 for a child with no curriculum data. After London completes several quests, should her starting level increase based on prior quest performance (not just workbook configs)?
+
+4. **Level 1 escape — what feels right?** Options: (a) count level-floor hits as frustration events, (b) add a "4 wrong at Level 1 → end session" rule, (c) show a parent-facing prompt ("London seems stuck — want to end the session?"). Which approach fits the "no shame" philosophy best?
+
+5. **Math starting level from curriculum**: Reading uses workbook completion to boost starting level (up to Level 8). Should math do the same from math curriculum data? Or is Level 2 the right default since Lincoln is "~3rd grade math" and the levels are well-calibrated for that range?
+
+6. **Fluency difficulty**: Should fluency passages adapt to the child's reading level from their most recent skill snapshot, or is the fixed "2nd-3rd grade" target appropriate for both Lincoln (~1st grade reading) and future children?
+
+7. **Bonus round counter display**: Hide the counter entirely during bonus round, cap at "10/10", or show "BONUS" instead of the number? Minor but worth a quick decision.
+
+---
+
+*Audit complete. 4 parts, 6 sections (A-C, F), 15 findings, 14 fixes, 7 open questions.*
+*No code was changed. No files were modified except this document.*
