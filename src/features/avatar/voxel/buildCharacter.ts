@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { CharacterFeatures, CharacterProportions, OutfitCustomization } from '../../../core/types'
 import { buildHair } from './buildHair'
+import { HERO_ANIMATION_TUNING } from './heroAnimationTuning'
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -375,7 +376,11 @@ export function buildCharacter(
 
   // --- LEGS (pants upper + boot lower) ---
   const legCenter = legH / 2
-  const legXOffset = legW / 2 + 0.01 * s
+  const halfStanceGap = Math.max(
+    HERO_ANIMATION_TUNING.stanceWidth * s * 0.5,
+    HERO_ANIMATION_TUNING.footSeparation * s * 0.5,
+  )
+  const legXOffset = legW / 2 + halfStanceGap
 
   // Full leg in pants color
   const legL = texturedBox(legW, legH, legD, pantsColor, 'legL')

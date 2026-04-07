@@ -24,6 +24,7 @@ import { buildHelmetCrest } from './voxel/buildHelmetCrest'
 import { buildRoom } from './voxel/buildRoom'
 import { addOutlinesToGroup, removeOutlinesFromGroup } from './voxel/blockOutline'
 import { buildAccessory, getAccessoryAttachPoint, animateAccessories, getHiddenAccessories } from './voxel/buildAccessory'
+import { HERO_ANIMATION_TUNING } from './voxel/heroAnimationTuning'
 import {
   getCurrentSeason,
   getSeasonalStarColor,
@@ -126,7 +127,7 @@ const POSE_DEFAULT: EquipmentPose = { armLRotZ: 0, armRRotZ: 0, armLRotX: 0, arm
 function calculateEquipmentPose(equipped: string[]): EquipmentPose {
   const pose = { ...POSE_DEFAULT }
   if (equipped.includes('sword')) {
-    pose.armRRotZ = -0.55  // ~32° outward — enough to clear breastplate
+    pose.armRRotZ = 0.55   // ~32° outward — enough to clear breastplate
     pose.armRRotX = -0.15  // Slight forward tilt
   }
   if (equipped.includes('shield')) {
@@ -134,6 +135,22 @@ function calculateEquipmentPose(equipped: string[]): EquipmentPose {
     pose.armLRotX = 0.35   // More forward — shield presents to front
   }
   return pose
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value))
+}
+
+function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number) {
+  const minOutward = HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias
+  const outwardZ = clamp(rotZ, minOutward, HERO_ANIMATION_TUNING.armSwingClampZ)
+  const forwardX = clamp(
+    rotX,
+    HERO_ANIMATION_TUNING.armSwingClampX.min,
+    HERO_ANIMATION_TUNING.armSwingClampX.max,
+  )
+  void side
+  return { rotX: forwardX, rotZ: outwardZ }
 }
 
 // ── Enforce solid opacity on equipped armor ──────────────────────────
@@ -774,12 +791,12 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
 
         // Gentle breathing bob (freeze during ceremony so character stays still)
         if (!ceremonyActiveRef.current) {
-          characterRef.current.position.y = baseY + Math.sin(time * 2.1) * 0.02
+          characterRef.current.position.y = baseY + Math.sin(time * 2.1) * HERO_ANIMATION_TUNING.bodyBobAmplitude
 
           // Animate ground shadow scale with character bob
           const shadowMesh = scene.getObjectByName('groundShadow')
           if (shadowMesh) {
-            const bobScale = 1 + Math.sin(time * 2.1) * 0.02
+            const bobScale = 1 + Math.sin(time * 2.1) * HERO_ANIMATION_TUNING.bodyBobAmplitude
             shadowMesh.scale.set(bobScale, 1, bobScale)
           }
         }
@@ -814,15 +831,47 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           currentEqPose.armLRotX += (targetEqPose.armLRotX - currentEqPose.armLRotX) * lerpSpeed
           currentEqPose.armRRotX += (targetEqPose.armRRotX - currentEqPose.armRRotX) * lerpSpeed
 
-          // Arm idle sway — opposition motion, 4s period
+          // Arm idle sway — subtle and constrained to keep elbows outside torso silhouette
           const armSwayTime = time * (Math.PI * 2 / 4) // 4-second period
           if (armLObj) {
-            armLObj.rotation.z = currentEqPose.armLRotZ + Math.sin(armSwayTime) * 0.03
-            armLObj.rotation.x = currentEqPose.armLRotX + Math.sin(time * 0.8) * 0.03
+            const constrained = constrainArmPose(
+              'L',
+              currentEqPose.armLRotX + Math.sin(time * 0.8 + HERO_ANIMATION_TUNING.armPhaseOffset) * HERO_ANIMATION_TUNING.armSwingX,
+              currentEqPose.armLRotZ + Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.armSwingZ,
+            )
+            armLObj.rotation.z = constrained.rotZ
+            armLObj.rotation.x = constrained.rotX
           }
           if (armRObj) {
-            armRObj.rotation.z = currentEqPose.armRRotZ - Math.sin(armSwayTime) * 0.03
-            armRObj.rotation.x = currentEqPose.armRRotX - Math.sin(time * 0.8) * 0.03
+            const constrained = constrainArmPose(
+              'R',
+              currentEqPose.armRRotX - Math.sin(time * 0.8 + HERO_ANIMATION_TUNING.armPhaseOffset) * HERO_ANIMATION_TUNING.armSwingX,
+              currentEqPose.armRRotZ - Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.armSwingZ,
+            )
+            armRObj.rotation.z = constrained.rotZ
+            armRObj.rotation.x = constrained.rotX
+          }
+
+          // Foot planting + stance micro-shift to avoid visual overlap from camera angles
+          const footSpread = Math.sin(time * 0.9) * HERO_ANIMATION_TUNING.footSway
+          const leftX = -HERO_ANIMATION_TUNING.stanceWidth / 2 - footSpread
+          const rightX = HERO_ANIMATION_TUNING.stanceWidth / 2 + footSpread
+          const enforcedGap = Math.max(
+            HERO_ANIMATION_TUNING.footSeparation,
+            rightX - leftX,
+          )
+          const clampedLeft = -enforcedGap / 2
+          const clampedRight = enforcedGap / 2
+          for (const [name, x] of [
+            ['legL', clampedLeft],
+            ['bootL', clampedLeft],
+            ['bootBandL', clampedLeft],
+            ['legR', clampedRight],
+            ['bootR', clampedRight],
+            ['bootBandR', clampedRight],
+          ] as const) {
+            const part = characterRef.current.getObjectByName(name)
+            if (part) part.position.x = x
           }
 
           // Head micro-movement — very slow, subtle look-around (6s period)
