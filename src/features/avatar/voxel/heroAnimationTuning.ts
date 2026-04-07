@@ -6,6 +6,7 @@ export interface HeroAnimationTuning {
   footLift: number
   footCenterLineGap: number
   footPlantY: number
+  emoteFootSeparationMultiplier: number
 
   // Idle body language
   torsoTwist: number
@@ -23,6 +24,8 @@ export interface HeroAnimationTuning {
     leftRotZ: number
     rightRotZ: number
   }
+  postPoseArmClearanceBoost: number
+  postPoseClearanceDurationSec: number
 
   // Procedural guardrails (applied after pose + idle calculations)
   guardrails: {
@@ -53,35 +56,38 @@ export interface HeroAnimationTuning {
 
 export const HERO_ANIMATION_TUNING_DEFAULTS: HeroAnimationTuning = {
   // Feet / stance
-  stanceWidth: 0.22,
-  footSeparation: 0.2,
-  footSway: 0.006,
+  stanceWidth: 0.28,
+  footSeparation: 0.24,
+  footSway: 0.003,
   footLift: 0.003,
-  footCenterLineGap: 0.07,
+  footCenterLineGap: 0.1,
   footPlantY: 0,
+  emoteFootSeparationMultiplier: 1.18,
 
   // Idle body language (stable, heroic read)
-  torsoTwist: 0.03,
-  shoulderSwing: 1,
-  headTurnAmount: 0.055,
+  torsoTwist: 0.026,
+  shoulderSwing: 0.9,
+  headTurnAmount: 0.05,
 
   // Idle arm motion
-  armSwingZ: 0.016,
+  armSwingZ: 0.014,
   armSwingX: 0.016,
   armPhaseOffset: Math.PI * 0.62,
-  elbowOutBias: 0.24,
+  elbowOutBias: 0.33,
   armSwingClampZ: 1.55,
   armSwingClampX: { min: -1.0, max: 0.42 },
   silhouetteBias: {
-    leftRotZ: 0.07,
-    rightRotZ: 0.1,
+    leftRotZ: 0.12,
+    rightRotZ: 0.18,
   },
+  postPoseArmClearanceBoost: 0.12,
+  postPoseClearanceDurationSec: 0.65,
 
   // Procedural guardrails (applied after pose + idle calculations)
   guardrails: {
     armBySide: {
-      L: { rotZMin: 0.2, rotZMax: 1.6, rotXMin: -1.0, rotXMax: 0.34 },
-      R: { rotZMin: 0.24, rotZMax: 1.7, rotXMin: -0.9, rotXMax: 0.38 },
+      L: { rotZMin: 0.32, rotZMax: 1.7, rotXMin: -1.0, rotXMax: 0.34 },
+      R: { rotZMin: 0.36, rotZMax: 1.78, rotXMin: -0.9, rotXMax: 0.38 },
     },
     elbowInwardCollapseLimit: 0.28,
     torsoSoftCollision: {
@@ -93,12 +99,12 @@ export const HERO_ANIMATION_TUNING_DEFAULTS: HeroAnimationTuning = {
   },
 
   // Collision avoidance
-  torsoClearance: 0.16,
+  torsoClearance: 0.22,
   torsoAvoidanceGain: 0.52,
 
   // General character motion
-  bodyBobAmplitude: 0.01,
-  bodyLateralShift: 0.024,
+  bodyBobAmplitude: 0.008,
+  bodyLateralShift: 0.015,
 
   // Emote/expression shaping
   emoteIntensity: 1,
