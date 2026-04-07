@@ -141,6 +141,7 @@ export default function MyAvatarPage() {
 
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
+  const [portalPrompt, setPortalPrompt] = useState<{ from: string; to: string } | null>(null)
   const [portalTransition, setPortalTransition] = useState<{ from: string; to: string } | null>(null)
   const [ceremonyActive, setCeremonyActive] = useState(false)
   const [ceremonyTier, setCeremonyTier] = useState<string | null>(null)
@@ -567,8 +568,8 @@ export default function MyAvatarPage() {
         if (forgedCount >= 6) {
           const nextTier = getNextTierKey(activeTier)
           if (nextTier && (profile.unlockedTiers ?? []).includes(nextTier) && profile.lastPortalTier !== activeTier) {
-            // Delay portal to let forge animation play
-            setTimeout(() => setPortalTransition({ from: activeTier, to: nextTier }), 1500)
+            // Delay prompt to let forge animation play, then let child confirm before transition
+            setTimeout(() => setPortalPrompt({ from: activeTier, to: nextTier }), 1500)
           }
         }
         return true
@@ -983,16 +984,64 @@ export default function MyAvatarPage() {
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3, maxWidth: '100vw', overflowX: 'hidden', boxSizing: 'border-box' }}>
       {/* ── Portal Transition Overlay ────────────────────────── */}
+      {portalPrompt && (
+        <Dialog
+          open
+          onClose={() => undefined}
+          maxWidth="xs"
+          fullWidth
+          PaperProps={{
+            sx: {
+              borderRadius: 3,
+              border: '2px solid rgba(155,89,182,0.5)',
+              bgcolor: isLincoln ? 'rgba(13,17,23,0.96)' : '#1a0033',
+              color: '#fff',
+              textAlign: 'center',
+              px: 1,
+            },
+          }}
+        >
+          <DialogContent sx={{ py: 3 }}>
+            <Box sx={{ fontFamily: '"Press Start 2P", monospace', fontSize: '12px', color: '#BB86FC', mb: 1.5 }}>
+              A portal opens to the next biome.
+            </Box>
+            <Box sx={{ fontFamily: '"Press Start 2P", monospace', fontSize: '10px', color: 'rgba(255,255,255,0.7)', mb: 3 }}>
+              Tap to continue your adventure.
+            </Box>
+            <Box
+              component="button"
+              onClick={() => {
+                if (familyId && childId) {
+                  const profileRef = doc(avatarProfilesCollection(familyId), childId)
+                  void safeUpdateProfile(profileRef, { lastPortalTier: portalPrompt.from })
+                }
+                setPortalTransition(portalPrompt)
+                setPortalPrompt(null)
+              }}
+              sx={{
+                border: 0,
+                px: 2.5,
+                py: 1.2,
+                borderRadius: 2,
+                cursor: 'pointer',
+                fontFamily: '"Press Start 2P", monospace',
+                fontSize: '10px',
+                color: '#fff',
+                bgcolor: '#7B1FA2',
+                boxShadow: '0 0 16px rgba(123,31,162,0.45)',
+                '&:hover': { bgcolor: '#9C27B0' },
+              }}
+            >
+              Enter portal
+            </Box>
+          </DialogContent>
+        </Dialog>
+      )}
       {portalTransition && (
         <PortalTransition
           fromTier={portalTransition.from}
           toTier={portalTransition.to}
           onComplete={() => {
-            // Save guard so portal doesn't re-fire on reload
-            if (familyId && childId && portalTransition) {
-              const profileRef = doc(avatarProfilesCollection(familyId), childId)
-              void safeUpdateProfile(profileRef, { lastPortalTier: portalTransition.from })
-            }
             setPortalTransition(null)
           }}
         />
