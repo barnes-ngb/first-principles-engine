@@ -50,7 +50,7 @@ import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import { getActiveForgeTier, getAppliedVoxelPieces, getArmorPieceState, getEquippablePieces, getVisiblePieces } from './armorPieceState'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import ArmorVerseCard from './ArmorVerseCard'
-import { speakVerse } from './speakVerse'
+import { speakStatus, speakVerse } from './speakVerse'
 import { forgeArmorPiece } from '../../core/xp/forgeArmorPiece'
 import { getForgeCost } from '../../core/xp/forgeCosts'
 import XpDiamondBar from '../../components/XpDiamondBar'
@@ -739,10 +739,12 @@ export default function MyAvatarPage() {
     const toEquip = equipOrder.filter((vid) => forgedIds.includes(vid) && !currentVoxel.includes(vid))
     if (toEquip.length === 0) return
 
+    const pieceCount = toEquip.length
+    const pieceLabel = pieceCount === 1 ? 'piece' : 'pieces'
+    speakStatus(`Suiting up ${pieceCount} ${pieceLabel}. Great choice!`)
+
     toEquip.forEach((voxelId, i) => {
       setTimeout(() => {
-        const meta = VOXEL_ARMOR_PIECES.find((p) => p.id === voxelId)
-        if (meta) speakVerse(meta.name, meta.verseText)
         void handleApplyPiece(voxelId as VoxelArmorPieceId)
       }, i * 200) // Stagger 200ms apart for a cascading effect
     })
@@ -807,17 +809,18 @@ export default function MyAvatarPage() {
   const allEarnedApplied = armorGateStatus?.hasForgedPieces ? armorGateStatus.complete : false
   const nextUnlock = profile ? getNextUnlock(profile) : null
   const allSixUnlocked = unlockedVoxel.length === 6
+  const nextUnlockProgress = (() => {
+    if (!profile || !nextUnlock) return 0
+    const nextIdx = VOXEL_ARMOR_PIECES.findIndex((piece) => piece.id === nextUnlock.piece.id)
+    const prevThreshold = nextIdx > 0 ? XP_THRESHOLDS[VOXEL_ARMOR_PIECES[nextIdx - 1].id] : 0
+    const nextThreshold = XP_THRESHOLDS[nextUnlock.piece.id]
+    const unlockRange = Math.max(nextThreshold - prevThreshold, 1)
+    const unlockProgress = profile.totalXp - prevThreshold
+    return Math.min(Math.max((unlockProgress / unlockRange) * 100, 0), 100)
+  })()
 
   // Calculate XP progress within the current tier range
   const currentTierName = profile ? calculateTier(profile.totalXp) : 'WOOD'
-  const tierEntries = Object.entries(TIERS)
-  const currentTierIdx = tierEntries.findIndex(([k]) => k === currentTierName)
-  const tierMinXp = TIERS[currentTierName]?.minXp ?? 0
-  const nextTierEntry = currentTierIdx < tierEntries.length - 1 ? tierEntries[currentTierIdx + 1] : null
-  const tierMaxXp = nextTierEntry ? nextTierEntry[1].minXp : tierMinXp + 1000
-  const tierRange = tierMaxXp - tierMinXp
-  const xpInTier = profile ? profile.totalXp - tierMinXp : 0
-  const tierProgress = tierRange > 0 ? Math.min((xpInTier / tierRange) * 100, 100) : 100
 
   // ── Screenshot capture ──────────────────────────────────────────
   const playShutterSound = useCallback(() => {
@@ -1096,7 +1099,7 @@ export default function MyAvatarPage() {
           allSixUnlocked={allSixUnlocked}
           nextUnlock={nextUnlock}
           currentTierName={currentTierName}
-          tierProgress={tierProgress}
+          nextUnlockProgress={nextUnlockProgress}
           isLincoln={isLincoln}
           isChildProfile={isChildProfile}
           accentColor={accentColor}
