@@ -762,6 +762,8 @@ export interface ActivityConfig {
   currentPosition?: number
   /** Unit label: "lesson", "chapter", "unit" */
   unitLabel?: string
+  /** Certificate-derived curriculum metadata (migration bridge from WorkbookConfig.curriculum). */
+  curriculumMeta?: CurriculumMeta
 
   // Completion tracking
   /** Whether this program is finished */

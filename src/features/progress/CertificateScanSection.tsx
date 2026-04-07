@@ -260,7 +260,7 @@ export default function CertificateScanSection() {
               )}
               {!preview.existingConfig && (
                 <Alert severity="info" sx={{ mt: 1 }}>
-                  No existing workbook config found for this curriculum. A new one will be created.
+                  No existing activity config found for this curriculum. A new one will be created.
                 </Alert>
               )}
             </Stack>

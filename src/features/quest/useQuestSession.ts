@@ -8,8 +8,7 @@ import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
-// TODO: Migrate to activityConfigs. WorkbookConfig is legacy — see migrateActivityConfigs.ts
-import { db, evaluationSessionsCollection, skillSnapshotsCollection, workbookConfigsCollection } from '../../core/firebase/firestore'
+import { activityConfigsCollection, db, evaluationSessionsCollection, skillSnapshotsCollection, workbookConfigsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'
 import type { EvaluationDomain } from '../../core/types/enums'
@@ -394,19 +393,20 @@ export function useQuestSession() {
       let startLevel = 2
       if (domain === 'reading') {
         try {
-          const wbQuery = query(
-            workbookConfigsCollection(familyId),
-            where('childId', '==', activeChildId),
+          const activityQuery = query(
+            activityConfigsCollection(familyId),
+            where('childId', 'in', [activeChildId, 'both']),
+            where('type', '==', 'workbook'),
           )
-          const wbSnap = await getDocs(wbQuery)
-          for (const wbDoc of wbSnap.docs) {
-            const config = wbDoc.data()
+          const activitySnap = await getDocs(activityQuery)
+          for (const configDoc of activitySnap.docs) {
+            const config = configDoc.data()
             if (config.subjectBucket !== 'Reading' && config.subjectBucket !== 'LanguageArts') continue
-            if (!config.curriculum) continue
-            if (config.curriculum.completed) {
+            const curriculumMeta = config.curriculumMeta
+            if (config.completed || curriculumMeta?.completed) {
               startLevel = Math.max(startLevel, 5)
             }
-            const masteredLower = (config.curriculum.masteredSkills ?? []).map((s) =>
+            const masteredLower = (curriculumMeta?.masteredSkills ?? []).map((s) =>
               s.toLowerCase(),
             )
             const hasVowelTeams = masteredLower.some(
@@ -439,6 +439,57 @@ export function useQuestSession() {
             if (hasVowelTeams) startLevel = Math.max(startLevel, 6)
             if (hasDiphthongs || hasLeEndings) startLevel = Math.max(startLevel, 7)
             if (hasRControlled && hasMultiSyllable) startLevel = Math.max(startLevel, 8)
+          }
+
+          // Compatibility fallback while workbookConfigs still exist.
+          // TODO(phase-2b): Remove fallback after AI and quest reads fully migrate to activityConfigs.
+          if (activitySnap.empty) {
+            const wbQuery = query(
+              workbookConfigsCollection(familyId),
+              where('childId', '==', activeChildId),
+            )
+            const wbSnap = await getDocs(wbQuery)
+            for (const wbDoc of wbSnap.docs) {
+              const config = wbDoc.data()
+              if (config.subjectBucket !== 'Reading' && config.subjectBucket !== 'LanguageArts') continue
+              if (!config.curriculum) continue
+              if (config.curriculum.completed) {
+                startLevel = Math.max(startLevel, 5)
+              }
+              const masteredLower = (config.curriculum.masteredSkills ?? []).map((s) =>
+                s.toLowerCase(),
+              )
+              const hasVowelTeams = masteredLower.some(
+                (s) =>
+                  s.includes('vowel-team') ||
+                  s.includes('vowel-digraph') ||
+                  s.includes('vowel_team') ||
+                  s === 'vowel-teams-ea-ai-oa-ee-oo',
+              )
+              const hasDiphthongs = masteredLower.some(
+                (s) =>
+                  s.includes('diphthong') ||
+                  s.includes('ear') ||
+                  s.includes('ue') ||
+                  s === 'diphthongs-ear-ue',
+              )
+              const hasLeEndings = masteredLower.some(
+                (s) =>
+                  s.includes('final-stable') ||
+                  s.includes('le-ending') ||
+                  s.includes('le_ending') ||
+                  s === 'le-endings',
+              )
+              const hasRControlled = masteredLower.some(
+                (s) => s.includes('r-controlled') || s.includes('r_controlled'),
+              )
+              const hasMultiSyllable = masteredLower.some(
+                (s) => s.includes('multisyllab') || s.includes('multi-syllab'),
+              )
+              if (hasVowelTeams) startLevel = Math.max(startLevel, 6)
+              if (hasDiphthongs || hasLeEndings) startLevel = Math.max(startLevel, 7)
+              if (hasRControlled && hasMultiSyllable) startLevel = Math.max(startLevel, 8)
+            }
           }
         } catch (err) {
           console.warn('[startQuest] Failed to load curriculum data for starting level', err)

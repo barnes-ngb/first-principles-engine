@@ -1,15 +1,14 @@
 import { useCallback, useState } from 'react'
 import { doc, getDocs, query, setDoc, updateDoc, where, serverTimestamp } from 'firebase/firestore'
 
-// TODO: Migrate to activityConfigs. WorkbookConfig is legacy — see migrateActivityConfigs.ts
-import { workbookConfigsCollection, workbookConfigDocId, normalizeCurriculumKey } from '../firebase/firestore'
-import type { CertificateScanResult, WorkbookConfig, CurriculumMeta } from '../types'
+import { activityConfigsCollection, normalizeCurriculumKey } from '../firebase/firestore'
+import type { ActivityConfig, CertificateScanResult, CurriculumMeta } from '../types'
 import { SubjectBucket } from '../types/enums'
 import type { SubjectBucket as SubjectBucketType } from '../types/enums'
 
 export interface CertificatePreview {
   workbookName: string
-  existingConfig: WorkbookConfig | null
+  existingConfig: ActivityConfig | null
   updates: {
     currentPosition: number | null
     lastMilestone: string
@@ -53,12 +52,16 @@ export function useCertificateProgress(): UseCertificateProgressResult {
       result: CertificateScanResult,
     ): Promise<CertificatePreview> => {
       const workbookName = result.curriculumName
-      const colRef = workbookConfigsCollection(familyId)
+      const colRef = activityConfigsCollection(familyId)
 
       // Match by normalized curriculum key to avoid duplicates
       const normalizedKey = normalizeCurriculumKey(workbookName)
-      const allSnap = await getDocs(query(colRef, where('childId', '==', childId)))
-      const matchingDoc = allSnap.docs.find(d => normalizeCurriculumKey(d.data().name) === normalizedKey)
+      const allSnap = await getDocs(
+        query(colRef, where('childId', 'in', [childId, 'both']), where('type', '==', 'workbook')),
+      )
+      const matchingDoc = allSnap.docs.find((d) =>
+        normalizeCurriculumKey(d.data().name ?? d.data().curriculum ?? '') === normalizedKey,
+      )
       const existingConfig = matchingDoc?.data() ?? null
 
       // Parse lesson range end number as new position if available
@@ -102,12 +105,16 @@ export function useCertificateProgress(): UseCertificateProgressResult {
 
       try {
         const workbookName = result.curriculumName
-        const colRef = workbookConfigsCollection(familyId)
+        const colRef = activityConfigsCollection(familyId)
 
         // Match by normalized curriculum key to find existing config
         const normalizedKey = normalizeCurriculumKey(workbookName)
-        const allSnap = await getDocs(query(colRef, where('childId', '==', childId)))
-        const matchingDoc = allSnap.docs.find(d => normalizeCurriculumKey(d.data().name) === normalizedKey)
+        const allSnap = await getDocs(
+          query(colRef, where('childId', 'in', [childId, 'both']), where('type', '==', 'workbook')),
+        )
+        const matchingDoc = allSnap.docs.find((d) =>
+          normalizeCurriculumKey(d.data().name ?? d.data().curriculum ?? '') === normalizedKey,
+        )
 
         // Parse lesson range end number as new position
         let newPosition: number | null = null
@@ -125,9 +132,9 @@ export function useCertificateProgress(): UseCertificateProgressResult {
         const milestoneDate = result.date || new Date().toISOString().slice(0, 10)
 
         if (matchingDoc) {
-          // Update existing workbook config (regardless of exact name)
+          // Update existing activity config (regardless of exact name)
           const existing = matchingDoc.data()
-          const existingMastered = existing.curriculum?.masteredSkills ?? []
+          const existingMastered = existing.curriculumMeta?.masteredSkills ?? []
           const mergedSkills = [...new Set([...existingMastered, ...newMasteredSkills])]
 
           const milestoneText = (result.milestone ?? '').toLowerCase()
@@ -138,7 +145,7 @@ export function useCertificateProgress(): UseCertificateProgressResult {
             milestoneText.includes('gold')
 
           const curriculumUpdate: CurriculumMeta = {
-            ...existing.curriculum,
+            ...existing.curriculumMeta,
             provider: result.curriculum,
             level: result.level,
             lastMilestone: result.milestone,
@@ -148,19 +155,18 @@ export function useCertificateProgress(): UseCertificateProgressResult {
           }
 
           const updates: Record<string, unknown> = {
-            curriculum: curriculumUpdate,
+            curriculumMeta: curriculumUpdate,
             updatedAt: serverTimestamp(),
           }
 
-          if (newPosition !== null && newPosition > existing.currentPosition) {
+          if (newPosition !== null && newPosition > (existing.currentPosition ?? 0)) {
             updates.currentPosition = newPosition
           }
 
           await updateDoc(matchingDoc.ref, updates)
         } else {
-          // Create new workbook config from certificate data
-          const docId = workbookConfigDocId(childId, workbookName)
-          const docRef = doc(colRef, docId)
+          // Create new activity config from certificate data
+          const docRef = doc(colRef)
           const subjectBucket = inferSubjectBucket(result.curriculum, result.curriculumName)
 
           const milestoneText = (result.milestone ?? '').toLowerCase()
@@ -170,16 +176,20 @@ export function useCertificateProgress(): UseCertificateProgressResult {
             milestoneText.includes('finished') ||
             milestoneText.includes('gold')
 
-          const newConfig: WorkbookConfig = {
+          const newConfig: ActivityConfig = {
+            id: docRef.id,
             childId,
             name: workbookName,
+            type: 'workbook',
             subjectBucket,
+            defaultMinutes: 30,
+            frequency: 'daily',
+            sortOrder: 11,
+            curriculum: workbookName,
             totalUnits: 0, // Unknown from certificate alone
             currentPosition: newPosition ?? 0,
             unitLabel: 'lesson',
-            targetFinishDate: '',
-            schoolDaysPerWeek: 4,
-            curriculum: {
+            curriculumMeta: {
               provider: result.curriculum,
               level: result.level,
               lastMilestone: result.milestone,
@@ -187,13 +197,13 @@ export function useCertificateProgress(): UseCertificateProgressResult {
               masteredSkills: newMasteredSkills,
               ...(isComplete && { completed: true }),
             },
+            completed: false,
+            scannable: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
           }
 
-          await setDoc(docRef, {
-            ...newConfig,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          } as unknown as WorkbookConfig)
+          await setDoc(docRef, newConfig)
         }
 
         setApplied(true)
