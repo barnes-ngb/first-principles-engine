@@ -81,6 +81,7 @@ function NavContent({
               totalXp={avatarProfile.totalXp}
               faceGrid={avatarProfile.faceGrid}
               size={32}
+              childName={activeChild.name}
             />
           )}
           <Chip
@@ -200,6 +201,7 @@ export function AppShell({ children }: AppShellProps) {
                 equippedPieces={avatarProfile.equippedPieces ?? []}
                 totalXp={avatarProfile.totalXp}
                 size={32}
+                childName={activeChild.name}
               />
             )}
             <Chip
