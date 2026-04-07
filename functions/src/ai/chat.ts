@@ -155,59 +155,32 @@ export async function loadWorkbookPaces(
     .where("type", "==", "workbook")
     .get();
 
-  if (!activitySnap.empty) {
-    const paces: WorkbookPace[] = [];
-    for (const activityDoc of activitySnap.docs) {
-      const data = activityDoc.data() as {
-        name?: string;
-        curriculum?: string;
-        unitLabel?: string;
-        currentPosition?: number;
-        totalUnits?: number;
-        subjectBucket?: string;
-        curriculumMeta?: CurriculumMeta;
-        completed?: boolean;
-      };
+  const paces: WorkbookPace[] = [];
+  for (const activityDoc of activitySnap.docs) {
+    const data = activityDoc.data() as {
+      name?: string;
+      curriculum?: string;
+      unitLabel?: string;
+      currentPosition?: number;
+      totalUnits?: number;
+      subjectBucket?: string;
+      curriculumMeta?: CurriculumMeta;
+      completed?: boolean;
+    };
 
-      if (data.completed || data.curriculumMeta?.completed) continue;
+    if (data.completed || data.curriculumMeta?.completed) continue;
 
-      paces.push({
-        name: data.name || data.curriculum || "Workbook",
-        unitLabel: data.unitLabel || "lesson",
-        currentPosition: data.currentPosition ?? 0,
-        totalUnits: data.totalUnits ?? 0,
-        subjectBucket: data.subjectBucket,
-        curriculum: data.curriculumMeta,
-      });
-    }
-    return paces;
+    paces.push({
+      name: data.name || data.curriculum || "Workbook",
+      unitLabel: data.unitLabel || "lesson",
+      currentPosition: data.currentPosition ?? 0,
+      totalUnits: data.totalUnits ?? 0,
+      subjectBucket: data.subjectBucket,
+      curriculum: data.curriculumMeta,
+    });
   }
 
-  // TODO(phase-2b-workbookconfigs-fallback): Remove this fallback after activityConfigs exists for every active family.
-  const legacySnap = await db
-    .collection(`families/${familyId}/workbookConfigs`)
-    .where("childId", "==", childId)
-    .get();
-
-  return legacySnap.docs
-    .map((doc) => doc.data() as {
-      name: string;
-      unitLabel: string;
-      currentPosition: number;
-      totalUnits: number;
-      subjectBucket?: string;
-      curriculum?: CurriculumMeta;
-      completed?: boolean;
-    })
-    .filter((data) => !data.completed)
-    .map((data) => ({
-      name: data.name,
-      unitLabel: data.unitLabel || "lesson",
-      currentPosition: data.currentPosition,
-      totalUnits: data.totalUnits,
-      subjectBucket: data.subjectBucket,
-      curriculum: data.curriculum,
-    }));
+  return paces;
 }
 
 /** Load current week's plan (theme, virtue, scripture). */

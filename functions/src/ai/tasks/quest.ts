@@ -43,29 +43,6 @@ export const handleQuest = async (
         };
       });
 
-      // TODO(phase-2b-workbookconfigs-fallback): Remove this legacy fallback once all families have workbook activityConfigs.
-      if (curriculumDocs.length === 0) {
-        const wbSnap = await db
-          .collection(`families/${familyId}/workbookConfigs`)
-          .where("childId", "==", childId)
-          .get();
-        curriculumDocs.push(
-          ...wbSnap.docs.map((d) => {
-            const legacy = d.data() as {
-              subjectBucket?: string;
-              curriculum?: {
-                completed?: boolean;
-                masteredSkills?: string[];
-              };
-            };
-            return {
-              subjectBucket: legacy.subjectBucket,
-              curriculumMeta: legacy.curriculum,
-            };
-          }),
-        );
-      }
-
       for (const config of curriculumDocs) {
         const curriculum = config.curriculumMeta;
         if (config.subjectBucket !== "Reading" && config.subjectBucket !== "LanguageArts") continue;
