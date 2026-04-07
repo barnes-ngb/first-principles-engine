@@ -244,6 +244,31 @@ export const XP_EVENTS = {
   MANUAL_DEDUCT: 0,             // parent-deducted XP (amount varies, stored as negative)
 } as const
 
+// ── Diamond Event Types ──────────────────────────────────────────
+
+export const DIAMOND_EVENTS = {
+  // Auto-earning
+  QUEST_COMPLETE: 'diamond_quest_complete',
+  BOOK_COMPLETE: 'diamond_book_complete',
+  BOOK_READ: 'diamond_book_read',
+  DAD_LAB_COMPLETE: 'diamond_dad_lab_complete',
+  TEACH_BACK: 'diamond_teach_back',
+  EXTRA_ACTIVITY: 'diamond_extra_activity',
+  CONUNDRUM_RESPONSE: 'diamond_conundrum_response',
+  CONUNDRUM_DRAWING: 'diamond_conundrum_drawing',
+  WORKSHOP_GAME: 'diamond_workshop_game',
+  FLUENCY_BONUS: 'diamond_fluency_bonus',
+
+  // Manual (parent)
+  MANUAL_AWARD: 'diamond_manual_award',
+  MANUAL_DEDUCT: 'diamond_manual_deduct',
+
+  // Spending
+  FORGE_PIECE: 'diamond_forge_piece',
+} as const
+
+export type DiamondEventType = (typeof DIAMOND_EVENTS)[keyof typeof DIAMOND_EVENTS]
+
 export interface ArmorPieceProgress {
   pieceId: ArmorPiece
   /** Lincoln/Minecraft tiers unlocked */

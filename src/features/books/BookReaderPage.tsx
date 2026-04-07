@@ -23,6 +23,8 @@ import { artifactsCollection, hoursCollection } from '../../core/firebase/firest
 import type { Book, BookPage } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 import { useBook } from './useBook'
 import { printBook } from './printBook'
 import PrintSettingsDialog from './PrintSettingsDialog'
@@ -251,15 +253,14 @@ export default function BookReaderPage() {
       ).catch((err) => console.error('[XP] Award failed:', err))
 
       // Award 3 diamonds for reading a book
-      void addXpEvent(
+      void addDiamondEvent({
         familyId,
-        book.childId,
-        'BOOK_READ',
-        3,
-        `book_${book.id ?? 'unknown'}_${date}-diamond`,
-        undefined,
-        { currencyType: 'diamond', category: 'earn' },
-      ).catch((err) => console.error('[Diamond] Award failed:', err))
+        childId: book.childId,
+        amount: 3,
+        type: DIAMOND_EVENTS.BOOK_READ,
+        reason: `Read: ${book.title ?? 'book'}`,
+        dedupKey: `book_${book.id ?? 'unknown'}_${date}-diamond`,
+      }).catch((err) => console.error('[Diamond] Award failed:', err))
     }
     // Only run cleanup on unmount
     // eslint-disable-next-line react-hooks/exhaustive-deps

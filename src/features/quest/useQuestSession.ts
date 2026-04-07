@@ -4,6 +4,8 @@ import { collection, doc, getDoc, getDocs, limit as firestoreLimit, orderBy, que
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 // TODO: Migrate to activityConfigs. WorkbookConfig is legacy — see migrateActivityConfigs.ts
@@ -784,18 +786,14 @@ export function useQuestSession() {
 
       // 3) Award diamonds: 1 per correct answer
       if (finalState.totalCorrect > 0) {
-        addXpEvent(
+        addDiamondEvent({
           familyId,
-          activeChildId,
-          'QUEST_DIAMOND',
-          finalState.totalCorrect,
-          `quest-complete_${docId}-diamond`,
-          {
-            domain,
-            questionsCorrect: String(finalState.totalCorrect),
-          },
-          { currencyType: 'diamond', category: 'earn' },
-        ).catch((err) => console.warn('Failed to award quest diamonds', err))
+          childId: activeChildId,
+          amount: finalState.totalCorrect,
+          type: DIAMOND_EVENTS.QUEST_COMPLETE,
+          reason: `Quest: ${domain} (${finalState.totalCorrect} correct)`,
+          dedupKey: `quest-complete_${docId}-diamond`,
+        }).catch((err) => console.warn('Failed to award quest diamonds', err))
       }
 
       // Auto-apply findings to skill snapshot
@@ -1439,15 +1437,14 @@ export function useQuestSession() {
           { domain: 'reading', source: 'fluency' },
         ).catch((err) => console.warn('Failed to award fluency XP', err))
 
-        addXpEvent(
+        addDiamondEvent({
           familyId,
-          activeChildId,
-          'QUEST_DIAMOND',
-          diamonds,
-          `fluency_${docId}-diamond`,
-          { domain: 'reading', source: 'fluency' },
-          { currencyType: 'diamond', category: 'earn' },
-        ).catch((err) => console.warn('Failed to award fluency diamonds', err))
+          childId: activeChildId,
+          amount: diamonds,
+          type: DIAMOND_EVENTS.FLUENCY_BONUS,
+          reason: `Fluency bonus: ${diamonds} diamonds`,
+          dedupKey: `fluency_${docId}-diamond`,
+        }).catch((err) => console.warn('Failed to award fluency diamonds', err))
       }
 
       // Auto-complete matching fluency evaluation item on today's checklist
