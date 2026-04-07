@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { doc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { useFamilyId } from '../auth/useAuth'
-import { activityConfigsCollection } from '../firebase/firestore'
+import { activityConfigsCollection, normalizeCurriculumKey } from '../firebase/firestore'
 import type { ActivityConfig, WorksheetScanResult } from '../types'
 import { ActivityType, SubjectBucket } from '../types/enums'
 import type { SubjectBucket as SubjectBucketType } from '../types/enums'
@@ -124,12 +124,12 @@ export function useScanToActivityConfig() {
 }
 
 function normalizeForMatch(name: string): string {
-  return (name || '')
-    .toLowerCase()
-    .replace(/^the\s+/i, '')
-    .replace(/\s+level\s+\d+/i, '')
-    .replace(/\s*\(.*?\)/g, '')
-    .replace(/[^a-z0-9]/g, '')
+  return normalizeCurriculumKey(
+    (name || '')
+      .replace(/^the\s+/i, '')
+      .replace(/\s+level\s+\d+/i, '')
+      .replace(/\s*\(.*?\)/g, ''),
+  ).replace(/-/g, '')
 }
 
 function isWorkbookMatch(

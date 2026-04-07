@@ -33,7 +33,6 @@ import {
   plannerConversationsCollection,
   skillSnapshotsCollection,
   weeksCollection,
-  workbookConfigsCollection,
   db,
 } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
@@ -259,9 +258,6 @@ export default function PlannerChatPage() {
     clearScan,
   } = useScan()
 
-  // Workbook configs for active child (for photo label matching)
-  const [workbookConfigs, setWorkbookConfigs] = useState<WorkbookConfig[]>([])
-
   // Setup wizard state
   const [setupComplete, setSetupComplete] = useState(false)
   const [weekEnergy, setWeekEnergy] = useState<'full' | 'lighter' | 'mvd'>('full')
@@ -279,6 +275,29 @@ export default function PlannerChatPage() {
   const dailyRoutine = useMemo(
     () => activityConfigsToRoutineText(activityConfigs),
     [activityConfigs],
+  )
+  const workbookConfigs = useMemo<WorkbookConfig[]>(
+    () =>
+      activityConfigs
+        .filter((cfg) => cfg.type === 'workbook' && !cfg.completed)
+        .map((cfg) => ({
+          id: cfg.id,
+          childId: cfg.childId === 'both' ? activeChildId ?? '' : cfg.childId,
+          name: cfg.name,
+          subjectBucket: cfg.subjectBucket,
+          totalUnits: cfg.totalUnits ?? 0,
+          currentPosition: cfg.currentPosition ?? 0,
+          unitLabel: cfg.unitLabel ?? 'lesson',
+          targetFinishDate: '',
+          schoolDaysPerWeek: 5,
+          defaultMinutes: cfg.defaultMinutes,
+          curriculum: cfg.curriculumMeta,
+          completed: cfg.completed,
+          completedDate: cfg.completedDate,
+          createdAt: cfg.createdAt,
+          updatedAt: cfg.updatedAt,
+        })),
+    [activityConfigs, activeChildId],
   )
 
   // Adjust hoursPerDay based on energy selection and routine total
@@ -502,20 +521,6 @@ export default function PlannerChatPage() {
     if (hasSkip) parts.push(`Skip candidates: ${short(masterySummary.gotIt)}`)
     return parts.join(' · ')
   }, [masterySummary])
-
-  // Load workbook configs for active child
-  useEffect(() => {
-    if (!activeChildId) {
-      setWorkbookConfigs([])
-      return
-    }
-    const col = workbookConfigsCollection(familyId)
-    const q = query(col, where('childId', '==', activeChildId))
-    void getDocs(q).then((snap) => {
-      const configs = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
-      setWorkbookConfigs(configs)
-    })
-  }, [familyId, activeChildId])
 
   // Load week plan (theme/virtue/scripture/heartQuestion)
   const weekPlanRef = useMemo(

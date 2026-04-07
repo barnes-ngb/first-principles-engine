@@ -29,29 +29,54 @@ export const handleQuest = async (
   let suggestedStartLevel: number | undefined;
   if (domain === "reading" || !domain) {
     try {
-      // TODO: Migrate to activityConfigs. WorkbookConfig is legacy — see migrateActivityConfigs.ts
-      const wbSnap = await db
-        .collection(`families/${familyId}/workbookConfigs`)
-        .where("childId", "==", childId)
+      const activitySnap = await db
+        .collection(`families/${familyId}/activityConfigs`)
+        .where("childId", "in", [childId, "both"])
+        .where("type", "==", "workbook")
         .get();
 
-      for (const wbDoc of wbSnap.docs) {
-        const config = wbDoc.data() as {
-          subjectBucket?: string;
-          curriculum?: {
-            completed?: boolean;
-            masteredSkills?: string[];
-          };
+      const curriculumDocs = activitySnap.docs.map((d) => d.data() as {
+        subjectBucket?: string;
+        curriculumMeta?: {
+          completed?: boolean;
+          masteredSkills?: string[];
         };
+      });
+
+      // TODO(phase-2b-workbookconfigs-fallback): Remove this legacy fallback once all families have workbook activityConfigs.
+      if (curriculumDocs.length === 0) {
+        const wbSnap = await db
+          .collection(`families/${familyId}/workbookConfigs`)
+          .where("childId", "==", childId)
+          .get();
+        curriculumDocs.push(
+          ...wbSnap.docs.map((d) => {
+            const legacy = d.data() as {
+              subjectBucket?: string;
+              curriculum?: {
+                completed?: boolean;
+                masteredSkills?: string[];
+              };
+            };
+            return {
+              subjectBucket: legacy.subjectBucket,
+              curriculumMeta: legacy.curriculum,
+            };
+          }),
+        );
+      }
+
+      for (const config of curriculumDocs) {
+        const curriculum = config.curriculumMeta;
         if (config.subjectBucket !== "Reading" && config.subjectBucket !== "LanguageArts") continue;
-        if (!config.curriculum) continue;
+        if (!curriculum) continue;
 
         // Completed reading curriculum → start past basic phonics
-        if (config.curriculum.completed) {
+        if (curriculum.completed) {
           suggestedStartLevel = Math.max(suggestedStartLevel ?? 0, 5);
         }
         // Check specific mastered skills for finer-grained level (flexible matching)
-        const masteredLower = (config.curriculum.masteredSkills ?? []).map((s) => s.toLowerCase());
+        const masteredLower = (curriculum.masteredSkills ?? []).map((s) => s.toLowerCase());
         const hasVowelTeams = masteredLower.some(
           (s) => s.includes("vowel-team") || s.includes("vowel-digraph") || s.includes("vowel_team") || s === "vowel-teams-ea-ai-oa-ee-oo",
         );
