@@ -13,7 +13,7 @@ import { applyTierToArmor, calculateTier, getTierTint, TIER_MATERIALS } from './
 import { addEnchantGlow, removeEnchantGlow, animateEnchantGlow, tierHasGlow } from './voxel/enchantmentGlow'
 import { buildBaseCape, animateCape, resolveCapeColor } from './voxel/buildCape'
 import { triggerTierUpCeremony } from './voxel/tierUpCeremony'
-import { PoseAnimator, POSES, POSE_EXPRESSIONS, applyExpression, getEquipmentIdlePose } from './voxel/poseSystem'
+import { PoseAnimator, POSES, applyExpression, getEquipmentIdlePose, getScaledExpression } from './voxel/poseSystem'
 import type { Pose } from './voxel/poseSystem'
 import { applyPaintedFace, applyFaceWithAIFallback } from './voxel/pixelFace'
 import { buildHelmHair } from './voxel/buildHair'
@@ -24,7 +24,7 @@ import { buildHelmetCrest } from './voxel/buildHelmetCrest'
 import { buildRoom } from './voxel/buildRoom'
 import { addOutlinesToGroup, removeOutlinesFromGroup } from './voxel/blockOutline'
 import { buildAccessory, getAccessoryAttachPoint, animateAccessories, getHiddenAccessories } from './voxel/buildAccessory'
-import { HERO_ANIMATION_TUNING } from './voxel/heroAnimationTuning'
+import { HERO_ANIMATION_TUNING, resolveHeroAnimationTuning, type HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
 import {
   getCurrentSeason,
   getSeasonalStarColor,
@@ -74,6 +74,8 @@ interface VoxelCharacterProps {
   accessories?: AccessoryId[]
   /** Custom character body proportions (from Character Tuner) */
   proportions?: Partial<CharacterProportions>
+  /** Optional runtime animation tuning overrides (debug only) */
+  animationTuningOverrides?: HeroAnimationTuningOverride
 }
 
 // ── Helmet hair management ────────────────────────────────────────────
@@ -146,9 +148,9 @@ function shapedArc(phase: number): number {
   return Math.sign(s) * Math.pow(Math.abs(s), 1.35)
 }
 
-function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number) {
-  const sideConfig = HERO_ANIMATION_TUNING.guardrails.armBySide[side]
-  const softTorso = HERO_ANIMATION_TUNING.guardrails.torsoSoftCollision
+function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number, tuning = HERO_ANIMATION_TUNING) {
+  const sideConfig = tuning.guardrails.armBySide[side]
+  const softTorso = tuning.guardrails.torsoSoftCollision
   const forwardX = clamp(rotX, sideConfig.rotXMin, sideConfig.rotXMax)
   const torsoT = clamp(
     (forwardX - softTorso.rotXStart) / (softTorso.rotXEnd - softTorso.rotXStart),
@@ -158,8 +160,8 @@ function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number) {
   const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance)
   const minOutward = Math.max(
     sideConfig.rotZMin,
-    HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoPush,
-    HERO_ANIMATION_TUNING.guardrails.elbowInwardCollapseLimit,
+    tuning.torsoClearance + tuning.elbowOutBias + torsoPush,
+    tuning.guardrails.elbowInwardCollapseLimit,
   )
   const outwardZ = clamp(rotZ, minOutward, sideConfig.rotZMax)
   return { rotX: forwardX, rotZ: outwardZ }
@@ -377,6 +379,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   background = 'night',
   accessories = [],
   proportions,
+  animationTuningOverrides,
 }: VoxelCharacterProps, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -397,7 +400,13 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   const particlesRef = useRef<FallingParticle[]>([])
   const backgroundRef = useRef(background)
   const equippedRef = useRef<string[]>([])
-  const poseAnimatorRef = useRef<PoseAnimator>(new PoseAnimator())
+  const runtimeTuning = useMemo(
+    () => resolveHeroAnimationTuning(animationTuningOverrides),
+    [animationTuningOverrides],
+  )
+  const tuningRef = useRef(runtimeTuning)
+  tuningRef.current = runtimeTuning
+  const poseAnimatorRef = useRef<PoseAnimator>(new PoseAnimator(() => tuningRef.current))
   const swipePoseIndexRef = useRef(0)
   const onSwipePoseRef = useRef(onSwipePose)
   const onPoseCompleteRef = useRef(onPoseComplete)
@@ -754,7 +763,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       poseAnimatorRef.current.play(pose, () => {
         // Smooth return to equipment idle pose
         if (characterRef.current) {
-          applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {})
+          applyExpression(characterRef.current, getScaledExpression('idle', tuningRef.current))
         }
         const idlePose = getEquipmentIdlePose(equippedRef.current)
         poseAnimatorRef.current.play(idlePose, () => {
@@ -763,8 +772,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       })
       // Apply facial expression for this pose
       if (characterRef.current) {
-        const expr = POSE_EXPRESSIONS[pose.id]
-        if (expr) applyExpression(characterRef.current, expr)
+        applyExpression(characterRef.current, getScaledExpression(pose.id, tuningRef.current))
       }
       onSwipePoseRef.current?.(pose.id)
     }
@@ -814,13 +822,14 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         if (!ceremonyActiveRef.current) {
           const breath = Math.sin(time * 1.45) * 0.7 + Math.sin(time * 2.9 + 0.7) * 0.3
           const weightShift = shapedArc(time * 0.92 + 0.35)
-          characterRef.current.position.y = baseY + breath * HERO_ANIMATION_TUNING.bodyBobAmplitude
-          characterRef.current.position.x = weightShift * HERO_ANIMATION_TUNING.bodyLateralShift
+          const tuning = tuningRef.current
+          characterRef.current.position.y = baseY + breath * tuning.bodyBobAmplitude
+          characterRef.current.position.x = weightShift * tuning.bodyLateralShift
 
           // Animate ground shadow scale with character bob
           const shadowMesh = scene.getObjectByName('groundShadow')
           if (shadowMesh) {
-            const bobScale = 1 + breath * HERO_ANIMATION_TUNING.bodyBobAmplitude
+            const bobScale = 1 + breath * tuningRef.current.bodyBobAmplitude
             shadowMesh.scale.set(bobScale, 1, bobScale)
           }
         }
@@ -865,6 +874,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         )
 
         if (!poseActive && !ceremonyActiveRef.current) {
+          const tuning = tuningRef.current
           // Lerp toward equipment-based idle pose + idle sway
           const lerpSpeed = Math.min(3.0 * dt, 1)
           currentEqPose.armLRotZ += (targetEqPose.armLRotZ - currentEqPose.armLRotZ) * lerpSpeed
@@ -877,7 +887,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           const torsoLead = shapedArc(heroCycle - 0.24)
 
           if (torsoObj) {
-            torsoObj.rotation.y = torsoLead * 0.04
+            torsoObj.rotation.y = torsoLead * tuning.torsoTwist
             torsoObj.rotation.x = 0.01 + Math.sin(heroCycle * 2 + 0.4) * 0.012
             torsoObj.rotation.z = weightShift * 0.018
           }
@@ -890,44 +900,48 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             const constrained = constrainArmPose(
               'L',
               currentEqPose.armLRotX
-                + leftArc * HERO_ANIMATION_TUNING.armSwingX
-                + Math.max(0, torsoLead) * 0.014,
+                + leftArc * tuning.armSwingX * tuning.shoulderSwing
+                + Math.max(0, torsoLead) * 0.014 * tuning.shoulderSwing,
               currentEqPose.armLRotZ
-                + HERO_ANIMATION_TUNING.silhouetteBias.leftRotZ
-                + leftArc * HERO_ANIMATION_TUNING.armSwingZ
-                + Math.max(0, -weightShift) * 0.015,
+                + tuning.silhouetteBias.leftRotZ
+                + leftArc * tuning.armSwingZ * tuning.shoulderSwing
+                + Math.max(0, -weightShift) * 0.015 * tuning.shoulderSwing,
+              tuning,
             )
             armLObj.rotation.z = constrained.rotZ
             armLObj.rotation.x = constrained.rotX
-            armLObj.position.y = baseArmLY + Math.max(0, -weightShift) * 0.018
+            armLObj.position.y = baseArmLY + Math.max(0, -weightShift) * 0.018 * tuning.shoulderSwing
           }
           if (armRObj) {
             const constrained = constrainArmPose(
               'R',
               currentEqPose.armRRotX
-                - rightArc * HERO_ANIMATION_TUNING.armSwingX
-                + Math.max(0, -torsoLead) * 0.014,
+                - rightArc * tuning.armSwingX * tuning.shoulderSwing
+                + Math.max(0, -torsoLead) * 0.014 * tuning.shoulderSwing,
               currentEqPose.armRRotZ
-                + HERO_ANIMATION_TUNING.silhouetteBias.rightRotZ
-                - rightArc * HERO_ANIMATION_TUNING.armSwingZ
-                + Math.max(0, weightShift) * 0.015,
+                + tuning.silhouetteBias.rightRotZ
+                - rightArc * tuning.armSwingZ * tuning.shoulderSwing
+                + Math.max(0, weightShift) * 0.015 * tuning.shoulderSwing,
+              tuning,
             )
             armRObj.rotation.z = constrained.rotZ
             armRObj.rotation.x = constrained.rotX
-            armRObj.position.y = baseArmRY + Math.max(0, weightShift) * 0.018
+            armRObj.position.y = baseArmRY + Math.max(0, weightShift) * 0.018 * tuning.shoulderSwing
           }
 
           // Foot planting: preserve authored base stance and only apply tiny opposite offsets.
-          const footSpread = shapedArc(time * 0.92 + Math.PI * 0.25) * HERO_ANIMATION_TUNING.footSway
-          let leftX = baseFootL - footSpread + Math.min(0, weightShift) * 0.01
-          let rightX = baseFootR + footSpread + Math.max(0, weightShift) * 0.01
-          if (rightX - leftX < HERO_ANIMATION_TUNING.footSeparation) {
+          const footSpread = shapedArc(time * 0.92 + Math.PI * 0.25) * tuning.footSway
+          const footCenter = (baseFootL + baseFootR) * 0.5
+          const stanceHalf = Math.max(tuning.stanceWidth * 0.5, tuning.footSeparation * 0.5)
+          let leftX = footCenter - stanceHalf - footSpread + Math.min(0, weightShift) * 0.01
+          let rightX = footCenter + stanceHalf + footSpread + Math.max(0, weightShift) * 0.01
+          if (rightX - leftX < tuning.footSeparation) {
             const center = (leftX + rightX) * 0.5
-            leftX = center - HERO_ANIMATION_TUNING.footSeparation * 0.5
-            rightX = center + HERO_ANIMATION_TUNING.footSeparation * 0.5
+            leftX = center - tuning.footSeparation * 0.5
+            rightX = center + tuning.footSeparation * 0.5
           }
-          leftX = Math.min(leftX, -HERO_ANIMATION_TUNING.footCenterLineGap)
-          rightX = Math.max(rightX, HERO_ANIMATION_TUNING.footCenterLineGap)
+          leftX = Math.min(leftX, -tuning.footCenterLineGap)
+          rightX = Math.max(rightX, tuning.footCenterLineGap)
           for (const [name, x] of [
             ['legL', leftX],
             ['bootL', leftX],
@@ -939,16 +953,16 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             const part = characterRef.current.getObjectByName(name)
             if (part) {
               part.position.x = x
-              const yOffset = name.includes('L')
-                ? Math.max(0, -weightShift) * 0.004
-                : Math.max(0, weightShift) * 0.004
-              part.position.y = baseFootY + HERO_ANIMATION_TUNING.footPlantY + yOffset
+              const swayLift = name.includes('L')
+                ? Math.max(0, -weightShift) * tuning.footLift
+                : Math.max(0, weightShift) * tuning.footLift
+              part.position.y = baseFootY + tuning.footPlantY + swayLift
             }
           }
 
           // Head and shoulders offsets — subtle asymmetry keeps idle alive.
           if (headObj) {
-            headObj.rotation.y = shapedArc(heroCycle * 0.8 + 0.25) * 0.055
+            headObj.rotation.y = shapedArc(heroCycle * 0.8 + 0.25) * tuning.headTurnAmount
             headObj.rotation.x = Math.sin(heroCycle * 1.7 + 1.1) * 0.02
             headObj.rotation.z = weightShift * 0.015
             headObj.position.x = baseHeadX + weightShift * 0.014
@@ -1245,10 +1259,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           const autoPose = POSES.find((p) => p.requiresPiece === pieceId)
           if (autoPose) {
             setTimeout(() => {
-              const expr = POSE_EXPRESSIONS[autoPose.id]
-              if (expr && characterRef.current) applyExpression(characterRef.current, expr)
+              if (characterRef.current) applyExpression(characterRef.current, getScaledExpression(autoPose.id, tuningRef.current))
               poseAnimatorRef.current.play(autoPose, () => {
-                if (characterRef.current) applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {})
+                if (characterRef.current) applyExpression(characterRef.current, getScaledExpression('idle', tuningRef.current))
                 const idlePose = getEquipmentIdlePose(equippedRef.current)
                 poseAnimatorRef.current.play(idlePose, () => {
                   onPoseComplete?.()
@@ -1297,13 +1310,12 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
 
     // Apply facial expression
     if (characterRef.current) {
-      const expr = POSE_EXPRESSIONS[pose.id]
-      if (expr) applyExpression(characterRef.current, expr)
+      applyExpression(characterRef.current, getScaledExpression(pose.id, tuningRef.current))
     }
 
     poseAnimatorRef.current.play(pose, () => {
       if (characterRef.current) {
-        applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {})
+        applyExpression(characterRef.current, getScaledExpression('idle', tuningRef.current))
       }
       // Smooth return to equipment idle
       const idlePose = getEquipmentIdlePose(equippedRef.current)
