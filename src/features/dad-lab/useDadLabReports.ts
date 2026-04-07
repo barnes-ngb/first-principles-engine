@@ -18,6 +18,8 @@ import { useChildren } from '../../core/hooks/useChildren'
 import type { DadLabReport } from '../../core/types'
 import type { DadLabStatus } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 
 export function useDadLabReports() {
   const familyId = useFamilyId()
@@ -105,9 +107,14 @@ export function useDadLabReports() {
           }).catch((err) => console.error('[XP] Award failed:', err))
 
           // Award 10 diamonds for Dad Lab completion
-          void addXpEvent(familyId, child.id, 'DAD_LAB_COMPLETE', 10, `dadlab-${reportId}-diamond`, {
+          void addDiamondEvent({
+            familyId,
+            childId: child.id,
+            amount: 10,
+            type: DIAMOND_EVENTS.DAD_LAB_COMPLETE,
             reason: `Dad Lab: ${report.title || 'experiment'}`,
-          }, { currencyType: 'diamond', category: 'earn' }).catch((err) => console.error('[Diamond] Award failed:', err))
+            dedupKey: `dadlab-${reportId}-diamond`,
+          }).catch((err) => console.error('[Diamond] Award failed:', err))
         }
       }
 
@@ -134,9 +141,14 @@ export function useDadLabReports() {
             }).catch((err) => console.error('[XP] Award failed:', err))
 
             // Award 10 diamonds for Dad Lab completion
-            void addXpEvent(familyId, child.id, 'DAD_LAB_COMPLETE', 10, `dadlab-${reportId}-diamond`, {
+            void addDiamondEvent({
+              familyId,
+              childId: child.id,
+              amount: 10,
+              type: DIAMOND_EVENTS.DAD_LAB_COMPLETE,
               reason: `Dad Lab: ${report.title || 'experiment'}`,
-            }, { currencyType: 'diamond', category: 'earn' }).catch((err) => console.error('[Diamond] Award failed:', err))
+              dedupKey: `dadlab-${reportId}-diamond`,
+            }).catch((err) => console.error('[Diamond] Award failed:', err))
           }
         }
       }

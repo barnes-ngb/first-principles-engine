@@ -19,6 +19,8 @@ import type { Artifact, Book, BookPage, PageImage, StickerTag } from '../../core
 import type { SaveState } from '../../components/SaveIndicator'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 import { createEmptyPage, generateImageId } from './bookTypes'
 import { cleanSketchBackground } from './cleanSketch'
 
@@ -269,15 +271,14 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
             { title: next.title },
           )
           // 5 diamonds for finishing a book
-          void addXpEvent(
+          void addDiamondEvent({
             familyId,
-            prev.childId,
-            'BOOK_COMPLETE',
-            5,
-            `book_complete_${bookId}-diamond`,
-            { title: next.title },
-            { currencyType: 'diamond', category: 'earn' },
-          )
+            childId: prev.childId,
+            amount: 5,
+            type: DIAMOND_EVENTS.BOOK_COMPLETE,
+            reason: `Book complete: ${next.title}`,
+            dedupKey: `book_complete_${bookId}-diamond`,
+          })
         }
         return next
       })

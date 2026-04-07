@@ -14,6 +14,8 @@ import { storage } from '../../core/firebase/storage'
 import type { Child, DayLog } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 
 interface KidTeachBackProps {
   child: Child
@@ -102,15 +104,14 @@ export default function KidTeachBack({
       ).catch((err) => console.error('[XP] Teach-back award failed:', err))
 
       // Award 5 diamonds for teach-back
-      void addXpEvent(
+      void addDiamondEvent({
         familyId,
-        child.id,
-        'MANUAL_AWARD',
-        5,
-        `teachback_${today}-diamond`,
-        { reason: `Teach-back: ${teachSubject}` },
-        { currencyType: 'diamond', category: 'earn' },
-      ).catch((err) => console.error('[Diamond] Teach-back award failed:', err))
+        childId: child.id,
+        amount: 5,
+        type: DIAMOND_EVENTS.TEACH_BACK,
+        reason: `Teach-back: ${teachSubject}`,
+        dedupKey: `teachback_${today}-diamond`,
+      }).catch((err) => console.error('[Diamond] Teach-back award failed:', err))
 
       persistDayLogImmediate({ ...dayLog, teachBackDone: true })
       setShowTeachBack(false)

@@ -17,6 +17,8 @@ import { useTTS } from '../../core/hooks/useTTS'
 import type { Child } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 
 interface KidConundrumResponseProps {
   conundrum: {
@@ -132,11 +134,14 @@ export default function KidConundrumResponse({
       ).catch((err) => console.error('[XP] Conundrum award failed:', err))
 
       // Award 5 diamonds for conundrum response
-      void addXpEvent(
-        familyId, child.id, 'MANUAL_AWARD', 5, `conundrum_${conundrumDate}-diamond`,
-        { reason: `Conundrum: ${conundrum.title}` },
-        { currencyType: 'diamond', category: 'earn' },
-      ).catch((err) => console.error('[Diamond] Conundrum award failed:', err))
+      void addDiamondEvent({
+        familyId,
+        childId: child.id,
+        amount: 5,
+        type: DIAMOND_EVENTS.CONUNDRUM_RESPONSE,
+        reason: `Conundrum: ${conundrum.title}`,
+        dedupKey: `conundrum_${conundrumDate}-diamond`,
+      }).catch((err) => console.error('[Diamond] Conundrum award failed:', err))
 
       setConundrumSaved(true)
     } catch (err) {
@@ -172,11 +177,14 @@ export default function KidConundrumResponse({
       ).catch((err) => console.error('[XP] Conundrum drawing award failed:', err))
 
       // Award 5 diamonds for conundrum drawing
-      void addXpEvent(
-        familyId, child.id, 'MANUAL_AWARD', 5, `conundrum_${conundrumDate}-diamond`,
-        { reason: `Conundrum drawing: ${conundrum.title}` },
-        { currencyType: 'diamond', category: 'earn' },
-      ).catch((err) => console.error('[Diamond] Conundrum drawing award failed:', err))
+      void addDiamondEvent({
+        familyId,
+        childId: child.id,
+        amount: 5,
+        type: DIAMOND_EVENTS.CONUNDRUM_DRAWING,
+        reason: `Conundrum drawing: ${conundrum.title}`,
+        dedupKey: `conundrum_${conundrumDate}-drawing-diamond`,
+      }).catch((err) => console.error('[Diamond] Conundrum drawing award failed:', err))
 
       setConundrumPhotoSaved(true)
       setShowConundrumPhoto(false)

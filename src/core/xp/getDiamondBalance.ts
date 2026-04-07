@@ -2,7 +2,8 @@ import { doc, getDocs, query, runTransaction, where } from 'firebase/firestore'
 
 import { avatarProfilesCollection, xpLedgerCollection, xpLedgerDocId } from '../firebase/firestore'
 import { db } from '../firebase/firestore'
-import type { AvatarProfile, DiamondCategory } from '../types'
+import type { AvatarProfile, DiamondCategory, DiamondEventType } from '../types'
+import { DIAMOND_EVENTS } from '../types'
 
 /**
  * Compute diamond balance for a child by summing all diamond ledger entries.
@@ -52,8 +53,11 @@ export async function spendDiamonds(
   dedupKey: string,
   category: DiamondCategory,
   itemId?: string,
+  eventType?: DiamondEventType,
 ): Promise<boolean> {
   if (amount <= 0) return false
+
+  const diamondType = eventType ?? DIAMOND_EVENTS.FORGE_PIECE
 
   const profileRef = doc(avatarProfilesCollection(familyId), childId)
   const ledgerDocRef = doc(xpLedgerCollection(familyId), xpLedgerDocId(childId, dedupKey))
@@ -92,9 +96,9 @@ export async function spendDiamonds(
         totalXp: -amount,
         sources: { routines: 0, quests: 0, books: 0 },
         dedupKey,
-        type: 'MANUAL_AWARD',
+        type: 'MANUAL_DEDUCT',
         amount: -amount,
-        meta: { action: 'spend', category, ...(itemId ? { itemId } : {}) },
+        meta: { action: 'spend', category, diamondType, ...(itemId ? { itemId } : {}) },
         awardedAt: new Date().toISOString(),
         lastUpdatedAt: new Date().toISOString(),
         currencyType: 'diamond',
