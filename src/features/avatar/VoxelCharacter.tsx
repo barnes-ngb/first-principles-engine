@@ -142,7 +142,10 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number) {
-  const backwardPush = Math.max(0, rotX) * HERO_ANIMATION_TUNING.torsoAvoidanceGain
+  const backwardPush = Math.min(
+    HERO_ANIMATION_TUNING.torsoAvoidanceMax,
+    Math.max(0, rotX) * HERO_ANIMATION_TUNING.torsoAvoidanceGain,
+  )
   const minOutward = HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + backwardPush
   const outwardZ = clamp(rotZ, minOutward, HERO_ANIMATION_TUNING.armSwingClampZ)
   const forwardX = clamp(
@@ -772,6 +775,8 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     const poseAnimator = poseAnimatorRef.current
     let baseFootL = 0
     let baseFootR = 0
+    let baseFootY = 0
+    let legWidth = 0
     let baseFootCaptured = false
 
     sceneActiveRef.current = true
@@ -828,6 +833,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         if (!baseFootCaptured && legLObj && legRObj) {
           baseFootL = legLObj.position.x
           baseFootR = legRObj.position.x
+          baseFootY = legLObj.position.y
+          const legGeo = legLObj instanceof THREE.Mesh ? legLObj.geometry : null
+          const legGeoWidth = legGeo instanceof THREE.BoxGeometry ? legGeo.parameters.width as number : 0
+          legWidth = Math.max(legGeoWidth, 0.68 * (ageGroup === 'younger' ? 0.85 : 1))
           baseFootCaptured = true
         }
 
@@ -866,13 +875,21 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           }
 
           // Foot planting: preserve authored base stance and only apply tiny opposite offsets.
-          const footSpread = Math.sin(time * 0.9 + Math.PI * 0.25) * HERO_ANIMATION_TUNING.footSway
+          const footSpread = Math.sin(time * 0.9 + HERO_ANIMATION_TUNING.footPhaseOffset) * HERO_ANIMATION_TUNING.footSway
           let leftX = baseFootL - footSpread
           let rightX = baseFootR + footSpread
-          if (rightX - leftX < HERO_ANIMATION_TUNING.footSeparation) {
-            const center = (leftX + rightX) * 0.5
-            leftX = center - HERO_ANIMATION_TUNING.footSeparation * 0.5
-            rightX = center + HERO_ANIMATION_TUNING.footSeparation * 0.5
+          const minStance = HERO_ANIMATION_TUNING.stanceWidthMin + legWidth
+          const maxStance = HERO_ANIMATION_TUNING.stanceWidthMax + legWidth
+          const desiredMinSeparation = legWidth + HERO_ANIMATION_TUNING.footSeparation
+          let centerDistance = rightX - leftX
+          centerDistance = Math.max(desiredMinSeparation, Math.max(minStance, Math.min(maxStance, centerDistance)))
+          const center = (leftX + rightX) * 0.5
+          leftX = center - centerDistance * 0.5
+          rightX = center + centerDistance * 0.5
+          if (Math.abs(leftX) < HERO_ANIMATION_TUNING.stanceWidthMin * 0.35) {
+            const widen = HERO_ANIMATION_TUNING.stanceWidthMin * 0.35
+            leftX = -widen
+            rightX = widen
           }
           for (const [name, x] of [
             ['legL', leftX],
@@ -883,7 +900,12 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             ['bootBandR', rightX],
           ] as const) {
             const part = characterRef.current.getObjectByName(name)
-            if (part) part.position.x = x
+            if (part) {
+              part.position.x = x
+              part.position.y = name.startsWith('leg')
+                ? HERO_ANIMATION_TUNING.footPlantY + baseFootY
+                : part.position.y
+            }
           }
 
           // Head micro-movement — very slow, subtle look-around (6s period)
