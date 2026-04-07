@@ -1171,7 +1171,7 @@ export function useQuestSession() {
         // If no questions answered yet, return to intro with a friendly message
         if (updatedQuestions.filter((q) => !q.skipped).length === 0) {
           setStartQuestError('Hmm, the mine is being tricky. Try again in a minute.')
-          resetToIntro()
+          setScreen(QuestScreen.Intro)
           return
         }
 
@@ -1179,7 +1179,7 @@ export function useQuestSession() {
         await endSession(updatedQuestions, newState, false)
       }
     },
-    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession, resetToIntro],
+    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
   )
 
   // ── Skip question ───────────────────────────────────────────
@@ -1337,14 +1337,14 @@ export function useQuestSession() {
 
         if (updatedQuestions.filter((q) => !q.skipped).length === 0) {
           setStartQuestError('Hmm, the mine is being tricky. Try again in a minute.')
-          resetToIntro()
+          setScreen(QuestScreen.Intro)
           return
         }
 
         await endSession(updatedQuestions, questState, false)
       }
     },
-    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession, resetToIntro],
+    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
   )
 
   // ── Fluency: record attempt and advance ───────────────────────
