@@ -47,6 +47,7 @@ import { ACCESSORY_SLOTS } from '../../core/types'
 
 import type { VoxelCharacterHandle } from './VoxelCharacter'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
+import { getActiveForgeTier, getAppliedVoxelPieces, getArmorPieceState, getEquippablePieces, getVisiblePieces } from './armorPieceState'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import ArmorVerseCard from './ArmorVerseCard'
 import { speakVerse } from './speakVerse'
@@ -77,51 +78,11 @@ function normalizeDailyArmorSession(raw: DailyArmorSession): DailyArmorSession {
   }
 }
 
-/** Pieces visible in gallery (XP meets threshold — for display, not equip) */
-function getVisiblePieces(profile: AvatarProfile): VoxelArmorPieceId[] {
-  const xp = profile.totalXp
-  return VOXEL_ARMOR_PIECES
-    .filter((p) => xp >= XP_THRESHOLDS[p.id])
-    .map((p) => p.id)
-}
-
-/** @deprecated Use getVisiblePieces or getEquippablePieces instead */
-function getUnlockedVoxelPieces(profile: AvatarProfile): VoxelArmorPieceId[] {
-  return getVisiblePieces(profile)
-}
-
-/** Get the tier the child is currently forging in (lowest unlocked tier with unforged pieces). */
-function getActiveForgeTier(profile: AvatarProfile): string {
-  const tiers = profile.unlockedTiers ?? ['wood']
-  const forged = profile.forgedPieces ?? {}
-  const allPieceIds: VoxelArmorPieceId[] = ['belt', 'shoes', 'breastplate', 'shield', 'helmet', 'sword']
-
-  for (const tier of tiers) {
-    const tierForged = forged[tier] ?? {}
-    const allForgedInTier = allPieceIds.every(id => tierForged[id])
-    if (!allForgedInTier) return tier
-  }
-
-  return tiers[tiers.length - 1] ?? 'wood'
-}
-
-/** Pieces that can be equipped (forged in active tier) */
-function getEquippablePieces(profile: AvatarProfile): VoxelArmorPieceId[] {
-  const activeTier = getActiveForgeTier(profile)
-  const forged = profile.forgedPieces?.[activeTier] ?? {}
-  return Object.keys(forged) as VoxelArmorPieceId[]
-}
-
 function getNextUnlock(profile: AvatarProfile): { piece: ArmorPieceMeta; xpNeeded: number } | null {
   const visible = new Set(getVisiblePieces(profile))
   const next = VOXEL_ARMOR_PIECES.find((p) => !visible.has(p.id))
   if (!next) return null
   return { piece: next, xpNeeded: Math.max(XP_THRESHOLDS[next.id] - profile.totalXp, 0) }
-}
-
-/** Map ArmorPiece IDs from daily session to VoxelArmorPieceId */
-function sessionToVoxelPieces(appliedPieces: ArmorPiece[]): string[] {
-  return (appliedPieces ?? []).map((p) => ARMOR_PIECE_TO_VOXEL[p])
 }
 
 /** Check if yesterday's date string is exactly one day before today */
@@ -305,10 +266,10 @@ export default function MyAvatarPage() {
             setLocalProportions(DEFAULT_PROPORTIONS)
           }
 
-          const unlockedCount = getUnlockedVoxelPieces(data).length
+          const unlockedCount = getVisiblePieces(data).length
           if (unlockedCount > prevPiecesCountRef.current && prevPiecesCountRef.current > 0) {
             // A new piece was unlocked
-            const unlocked = getUnlockedVoxelPieces(data)
+            const unlocked = getVisiblePieces(data)
             const newPieceVoxel = unlocked[unlocked.length - 1]
             // Map back to ArmorPiece for celebration component compatibility
             const armorPieceId = ARMOR_PIECES.find(
@@ -662,7 +623,7 @@ export default function MyAvatarPage() {
 
       // Also update equippedPieces on avatar profile
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
-      const equippedVoxel = [...sessionToVoxelPieces(updatedApplied)]
+      const equippedVoxel = [...getAppliedVoxelPieces(updatedApplied)]
       await safeUpdateProfile(profileRef, {
         equippedPieces: equippedVoxel,
         lastEquipAnimation: voxelPieceId,
@@ -707,7 +668,7 @@ export default function MyAvatarPage() {
 
     // Also update equippedPieces on avatar profile
     const profileRef = doc(avatarProfilesCollection(familyId), childId)
-    const remainingVoxel = sessionToVoxelPieces(
+    const remainingVoxel = getAppliedVoxelPieces(
       (session.appliedPieces ?? []).filter((p) => p !== armorPieceId),
     )
     await safeUpdateProfile(profileRef, {
@@ -740,20 +701,23 @@ export default function MyAvatarPage() {
       )?.id
 
       const isApplied = armorPieceId && (session.appliedPieces ?? []).includes(armorPieceId)
-      const activeTier = getActiveForgeTier(profile)
-      const isForged = Boolean(profile.forgedPieces?.[activeTier]?.[piece.id])
+      const pieceState = getArmorPieceState({
+        profile,
+        pieceId: piece.id,
+        activeForgeTier: getActiveForgeTier(profile),
+        appliedTodayVoxel: getAppliedVoxelPieces(session.appliedPieces ?? []),
+      })
 
       if (isApplied) {
         // Equipped → unequip (toggle off)
         setUnequipPiece(piece.id)
         void handleUnequipDirect(piece.id)
-      } else if (isForged) {
+      } else if (pieceState === 'forged_not_equipped_today') {
         // Forged → equip immediately + read verse aloud
         speakVerse(piece.name, piece.verseText)
         void handleApplyPiece(piece.id)
       } else {
-        // Not forged (whether XP-unlocked or locked) → show verse card
-        // The verse card will show forge button if unlocked, info-only if locked
+        // Locked/forgeable/equipped state details are shown in verse card
         setSelectedPiece((prev) => {
           if (prev?.id === piece.id) return null
           speakVerse(piece.name, piece.verseText)
@@ -768,7 +732,7 @@ export default function MyAvatarPage() {
   const suitUpAll = useCallback(() => {
     if (!profile || !session || !familyId || !childId) return
     const forgedIds = getEquippablePieces(profile)
-    const currentVoxel = sessionToVoxelPieces(session.appliedPieces ?? [])
+    const currentVoxel = getAppliedVoxelPieces(session.appliedPieces ?? [])
     // Canonical equip order: belt → breastplate → shoes → shield → helmet → sword
     const equipOrder: VoxelArmorPieceId[] = ['belt', 'breastplate', 'shoes', 'shield', 'helmet', 'sword']
     const toEquip = equipOrder.filter((vid) => forgedIds.includes(vid) && !currentVoxel.includes(vid))
@@ -836,7 +800,7 @@ export default function MyAvatarPage() {
 
   // ── Computed values ────────────────────────────────────────────
   const appliedPieces = Array.isArray(session?.appliedPieces) ? session.appliedPieces : []
-  const appliedVoxel = sessionToVoxelPieces(appliedPieces)
+  const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
   const unlockedVoxel = profile ? getVisiblePieces(profile) : []
   const equippableVoxel = profile ? getEquippablePieces(profile) : []
   const allEarnedApplied = equippableVoxel.length > 0 && equippableVoxel.every((v) => appliedVoxel.includes(v))
@@ -1158,9 +1122,12 @@ export default function MyAvatarPage() {
         {selectedPiece && (
           <ArmorVerseCard
             piece={selectedPiece}
-            isUnlocked={true}
-            isEquipped={appliedVoxel.includes(selectedPiece.id)}
-            isForged={Boolean(profile.forgedPieces?.[getActiveForgeTier(profile)]?.[selectedPiece.id])}
+            pieceState={getArmorPieceState({
+              profile,
+              pieceId: selectedPiece.id,
+              activeForgeTier: getActiveForgeTier(profile),
+              appliedTodayVoxel: appliedVoxel,
+            })}
             forgeCost={getForgeCost(getActiveForgeTier(profile), selectedPiece.id)}
             isLincoln={isLincoln}
             accentColor={accentColor}

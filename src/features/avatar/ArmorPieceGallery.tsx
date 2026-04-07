@@ -7,6 +7,7 @@ import { VOXEL_TO_ARMOR_PIECE } from '../../core/types'
 import { getForgeCost } from '../../core/xp/forgeCosts'
 import { ArmorIcon } from './icons/ArmorIcons'
 import type { ArmorTierColor } from './icons/ArmorIcons'
+import { getAppliedVoxelPieces, getArmorPieceState } from './armorPieceState'
 import { VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 
@@ -40,6 +41,8 @@ export default function ArmorPieceGallery({
     if (cardScrollRef.current) cardScrollRef.current.scrollLeft = 0
   }, [profile])
 
+  const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
+
   return (
     <Box
       ref={cardScrollRef}
@@ -57,12 +60,32 @@ export default function ArmorPieceGallery({
     >
       {VOXEL_ARMOR_PIECES.map((piece) => {
         const armorPieceId = VOXEL_TO_ARMOR_PIECE[piece.id]
-        const isApplied = armorPieceId ? appliedPieces.includes(armorPieceId) : false
+        const pieceState = getArmorPieceState({
+          profile,
+          pieceId: piece.id,
+          activeForgeTier,
+          appliedTodayVoxel: appliedVoxel,
+        })
+        const isApplied = pieceState === 'equipped_today'
+        const isLocked = pieceState === 'locked_by_xp'
         const isSelected = selectedPiece?.id === piece.id
-
-        // Forge state: all 6 pieces are available in the active forge tier
-        const isForged = Boolean(profile.forgedPieces?.[activeForgeTier]?.[piece.id])
         const forgeCost = getForgeCost(activeForgeTier, piece.id)
+
+        const statusLabel = pieceState === 'locked_by_xp'
+          ? 'Locked'
+          : pieceState === 'forgeable'
+            ? `◆ ${forgeCost} Forge`
+            : pieceState === 'forged_not_equipped_today'
+              ? 'Equip'
+              : 'Equipped'
+
+        const statusColor = pieceState === 'locked_by_xp'
+          ? (isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.5)')
+          : pieceState === 'forgeable'
+            ? '#00BCD4'
+            : pieceState === 'forged_not_equipped_today'
+              ? '#FFA726'
+              : '#4caf50'
 
         return (
           <Box
@@ -88,7 +111,7 @@ export default function ArmorPieceGallery({
                     ? 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)'
                     : 'linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.005) 100%)'),
               cursor: 'pointer',
-              opacity: 1,
+              opacity: isLocked ? 0.7 : 1,
               transition: 'all 0.25s ease',
               textAlign: 'center',
               display: 'flex',
@@ -102,14 +125,15 @@ export default function ArmorPieceGallery({
                 : isSelected
                   ? `0 0 12px ${accentColor}33`
                   : `0 2px 8px ${isLincoln ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.06)'}`,
-              // Pulsing border when verse card is showing for this piece
-              ...(isSelected ? {
-                animation: 'cardPulse 1.5s ease-in-out infinite',
-                '@keyframes cardPulse': {
-                  '0%, 100%': { borderColor: `${accentColor}88` },
-                  '50%': { borderColor: accentColor },
-                },
-              } : {}),
+              ...(isSelected
+                ? {
+                    animation: 'cardPulse 1.5s ease-in-out infinite',
+                    '@keyframes cardPulse': {
+                      '0%, 100%': { borderColor: `${accentColor}88` },
+                      '50%': { borderColor: accentColor },
+                    },
+                  }
+                : {}),
               '&:hover': {
                 transform: 'translateY(-2px) scale(1.03)',
                 boxShadow: isApplied
@@ -119,7 +143,6 @@ export default function ArmorPieceGallery({
               '&:active': { transform: 'scale(0.97)' },
             }}
           >
-            {/* Status indicator — top strip */}
             <Box
               sx={{
                 position: 'absolute',
@@ -135,7 +158,6 @@ export default function ArmorPieceGallery({
               }}
             />
 
-            {/* Icon container with glow for equipped */}
             <Box
               sx={{
                 width: 64,
@@ -158,10 +180,9 @@ export default function ArmorPieceGallery({
                 pieceId={armorPieceId}
                 size={46}
                 tier={(profile.currentTier ?? 'wood') as ArmorTierColor}
-                locked={false}
+                locked={isLocked}
               />
 
-              {/* Equipped check overlay */}
               {isApplied && (
                 <Box sx={{
                   position: 'absolute', bottom: -3, right: -3,
@@ -179,7 +200,6 @@ export default function ArmorPieceGallery({
 
             </Box>
 
-            {/* Piece name */}
             <Typography
               sx={{
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
@@ -192,40 +212,16 @@ export default function ArmorPieceGallery({
               {piece.shortName}
             </Typography>
 
-            {/* Status / Forge cost */}
-            {isApplied ? (
-              <Typography
-                sx={{
-                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '12px' : '13px',
-                  color: '#4caf50',
-                  fontWeight: 600,
-                }}
-              >
-                Equipped
-              </Typography>
-            ) : isForged ? (
-              <Typography
-                sx={{
-                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '12px' : '13px',
-                  color: '#FFA726',
-                }}
-              >
-                Tap to equip
-              </Typography>
-            ) : (
-              <Typography
-                sx={{
-                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                  fontSize: isLincoln ? '12px' : '13px',
-                  color: '#00BCD4',
-                  fontWeight: 600,
-                }}
-              >
-                {'\u25C6'} {forgeCost} Forge
-              </Typography>
-            )}
+            <Typography
+              sx={{
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                fontSize: isLincoln ? '12px' : '13px',
+                color: statusColor,
+                fontWeight: 600,
+              }}
+            >
+              {statusLabel}
+            </Typography>
           </Box>
         )
       })}
