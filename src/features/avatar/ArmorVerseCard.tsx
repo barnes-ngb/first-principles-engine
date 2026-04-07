@@ -8,15 +8,14 @@ import MicIcon from '@mui/icons-material/Mic'
 import StopIcon from '@mui/icons-material/Stop'
 
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
+import type { ArmorPieceState } from './armorPieceState'
 import { speakVerse } from './speakVerse'
 
 // ── Types ──────────────────────────────────────────────────────────
 
 interface ArmorVerseCardProps {
   piece: ArmorPieceMeta
-  isUnlocked: boolean
-  isEquipped: boolean
-  isForged: boolean
+  pieceState: ArmorPieceState
   forgeCost: number
   isLincoln: boolean
   accentColor: string
@@ -38,8 +37,7 @@ const VERSE_RESPONSE_CHIPS = [
 
 export default function ArmorVerseCard({
   piece,
-  isUnlocked,
-  isForged,
+  pieceState,
   forgeCost,
   isLincoln,
   accentColor,
@@ -91,7 +89,7 @@ export default function ArmorVerseCard({
       const response = chipResponse ?? (audioBlob ? '(audio response)' : undefined)
       const success = await onForge(response, audioUrl ?? undefined)
       if (!success) {
-        setForgeError('Not enough diamonds — keep mining!')
+        setForgeError('Cannot forge yet. Earn more XP or diamonds first!')
       }
     } catch (err) {
       console.error('[Forge] Error:', err)
@@ -206,8 +204,8 @@ export default function ArmorVerseCard({
         </Typography>
       </Box>
 
-      {/* Forge flow — for unlocked but unforged pieces */}
-      {isUnlocked && !isForged && (
+      {/* Forge flow — only when piece is forgeable */}
+      {pieceState === 'forgeable' && (
         <Box sx={{ mt: 2 }}>
           {/* Verse response prompt */}
           <Typography sx={{
@@ -301,8 +299,8 @@ export default function ArmorVerseCard({
         </Box>
       )}
 
-      {/* Equip button — only for forged pieces */}
-      {isUnlocked && isForged && (
+      {/* Equip button — only for forged pieces not yet equipped today */}
+      {pieceState === 'forged_not_equipped_today' && (
         <Button
           variant="contained"
           fullWidth
@@ -327,6 +325,35 @@ export default function ArmorVerseCard({
         >
           Put it on!
         </Button>
+      )}
+
+      {pieceState === 'locked_by_xp' && (
+        <Typography
+          sx={{
+            mt: 2,
+            color: isLincoln ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.55)',
+            fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+            fontSize: isLincoln ? '10px' : '14px',
+            textAlign: 'center',
+          }}
+        >
+          Locked — earn more XP to forge this piece.
+        </Typography>
+      )}
+
+      {pieceState === 'equipped_today' && (
+        <Typography
+          sx={{
+            mt: 2,
+            color: '#4caf50',
+            fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+            fontSize: isLincoln ? '10px' : '14px',
+            textAlign: 'center',
+            fontWeight: 700,
+          }}
+        >
+          Equipped today ✓
+        </Typography>
       )}
     </Box>
   )

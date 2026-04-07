@@ -1,16 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
-import { getDocs, query, where } from 'firebase/firestore'
 
 import { useXpLedger } from '../core/xp/useXpLedger'
-import { xpLedgerCollection } from '../core/firebase/firestore'
+import { useDiamondBalance } from '../core/xp/useDiamondBalance'
 import { TIERS } from '../features/avatar/voxel/tierMaterials'
 
 interface XpDiamondBarProps {
   familyId: string
   childId: string
   compact?: boolean
+  diamondBalanceOverride?: number | null
 }
 
 /** Compute next tier label and XP needed */
@@ -35,53 +34,19 @@ function getNextTier(totalXp: number): { label: string; xpNeeded: number; progre
  * Compact XP progress bar + diamond balance HUD.
  * Minecraft-style aesthetic: green XP bar, cyan diamond icon.
  */
-export default function XpDiamondBar({ familyId, childId, compact }: XpDiamondBarProps) {
+export default function XpDiamondBar({
+  familyId,
+  childId,
+  compact,
+  diamondBalanceOverride = null,
+}: XpDiamondBarProps) {
   const { totalXp, loading: xpLoading } = useXpLedger(familyId, childId)
-  const [diamondBalance, setDiamondBalance] = useState(0)
-  const prevDiamondsRef = useRef(0)
-  const [diamondBump, setDiamondBump] = useState(false)
-
-  // Fetch diamond balance
-  useEffect(() => {
-    if (!familyId || !childId) return
-    let cancelled = false
-
-    const fetchBalance = async () => {
-      try {
-        const collRef = xpLedgerCollection(familyId)
-        const q = query(
-          collRef,
-          where('childId', '==', childId),
-          where('currencyType', '==', 'diamond'),
-        )
-        const snap = await getDocs(q)
-        let balance = 0
-        snap.forEach((doc) => {
-          const data = doc.data()
-          balance += data.amount ?? 0
-        })
-        if (!cancelled) {
-          if (balance > prevDiamondsRef.current && prevDiamondsRef.current > 0) {
-            setDiamondBump(true)
-            setTimeout(() => setDiamondBump(false), 600)
-          }
-          prevDiamondsRef.current = balance
-          setDiamondBalance(balance)
-        }
-      } catch (err) {
-        console.warn('Failed to fetch diamond balance:', err)
-      }
-    }
-
-    void fetchBalance()
-    // Poll every 10s for live-ish updates
-    const interval = setInterval(() => void fetchBalance(), 10000)
-    return () => { cancelled = true; clearInterval(interval) }
-  }, [familyId, childId])
+  const { balance: diamondBalance, loading: diamondsLoading } = useDiamondBalance(familyId, childId)
+  const displayedDiamondBalance = diamondBalanceOverride ?? diamondBalance
 
   const nextTier = getNextTier(totalXp)
 
-  if (xpLoading) return null
+  if (xpLoading || diamondsLoading) return null
 
   return (
     <Box
@@ -151,8 +116,6 @@ export default function XpDiamondBar({ familyId, childId, compact }: XpDiamondBa
           display: 'flex',
           alignItems: 'center',
           gap: 0.5,
-          transition: 'transform 0.3s ease',
-          transform: diamondBump ? 'scale(1.2)' : 'scale(1)',
         }}
       >
         <Typography
@@ -166,23 +129,22 @@ export default function XpDiamondBar({ familyId, childId, compact }: XpDiamondBa
           {'\u25C6'}
         </Typography>
         <Typography
+          key={displayedDiamondBalance}
           sx={{
             fontFamily: '"Press Start 2P", monospace',
             fontSize: compact ? '10px' : '12px',
-            color: '#00BCD4',
             lineHeight: 1,
             fontWeight: 700,
-            ...(diamondBump ? {
-              animation: 'diamondPulse 0.6s ease',
-              '@keyframes diamondPulse': {
-                '0%': { color: '#00BCD4' },
-                '50%': { color: '#4DD0E1' },
-                '100%': { color: '#00BCD4' },
-              },
-            } : {}),
+            color: '#00BCD4',
+            animation: 'diamondPulse 0.45s ease',
+            '@keyframes diamondPulse': {
+              '0%': { color: '#00BCD4', transform: 'scale(1)' },
+              '50%': { color: '#4DD0E1', transform: 'scale(1.15)' },
+              '100%': { color: '#00BCD4', transform: 'scale(1)' },
+            },
           }}
         >
-          {diamondBalance}
+          {displayedDiamondBalance}
         </Typography>
       </Box>
     </Box>

@@ -9,6 +9,7 @@ function makeState(overrides: Partial<QuestState> = {}): QuestState {
     consecutiveCorrect: 0,
     consecutiveWrong: 0,
     levelDownsInARow: 0,
+    wrongAtFloor: 0,
     totalQuestions: 0,
     totalCorrect: 0,
     questionsThisLevel: 0,
@@ -86,6 +87,44 @@ describe('computeNextState', () => {
     })
   })
 
+  describe('wrongAtFloor (Level 1 frustration escape)', () => {
+    it('increments wrongAtFloor when wrong at Level 1', () => {
+      const state = makeState({ currentLevel: 1, wrongAtFloor: 0 })
+      const next = computeNextState(state, false)
+      expect(next.wrongAtFloor).toBe(1)
+    })
+
+    it('does not increment wrongAtFloor when wrong above Level 1', () => {
+      const state = makeState({ currentLevel: 2, wrongAtFloor: 0 })
+      const next = computeNextState(state, false)
+      expect(next.wrongAtFloor).toBe(0)
+    })
+
+    it('increments wrongAtFloor on level-down to Level 1', () => {
+      // Level 2 with 1 consecutive wrong → next wrong triggers level-down to 1
+      const state = makeState({ currentLevel: 2, consecutiveWrong: 1, wrongAtFloor: 0 })
+      const next = computeNextState(state, false)
+      expect(next.currentLevel).toBe(1)
+      // Now at floor, the wrong answer counts
+      expect(next.wrongAtFloor).toBe(1)
+    })
+
+    it('resets wrongAtFloor on correct answer', () => {
+      const state = makeState({ currentLevel: 1, wrongAtFloor: 3 })
+      const next = computeNextState(state, true)
+      expect(next.wrongAtFloor).toBe(0)
+    })
+
+    it('accumulates wrongAtFloor across multiple wrong answers at Level 1', () => {
+      let state = makeState({ currentLevel: 1, wrongAtFloor: 0 })
+      state = computeNextState(state, false)
+      state = computeNextState(state, false)
+      state = computeNextState(state, false)
+      state = computeNextState(state, false)
+      expect(state.wrongAtFloor).toBe(4)
+    })
+  })
+
   describe('totals', () => {
     it('increments totalQuestions on every answer', () => {
       const state = makeState()
@@ -136,6 +175,16 @@ describe('shouldEndSession', () => {
 
   it('does not end when no conditions met', () => {
     const state = makeState({ totalQuestions: 5, elapsedSeconds: 200, levelDownsInARow: 1 })
+    expect(shouldEndSession(state)).toEqual({ end: false, timedOut: false })
+  })
+
+  it('ends when wrongAtFloor >= 4 after MIN_QUESTIONS reached', () => {
+    const state = makeState({ currentLevel: 1, wrongAtFloor: 4, totalQuestions: 5 })
+    expect(shouldEndSession(state)).toEqual({ end: true, timedOut: false })
+  })
+
+  it('does not end on floor frustration before MIN_QUESTIONS', () => {
+    const state = makeState({ currentLevel: 1, wrongAtFloor: 4, totalQuestions: 3 })
     expect(shouldEndSession(state)).toEqual({ end: false, timedOut: false })
   })
 })

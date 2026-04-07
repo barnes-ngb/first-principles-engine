@@ -47,9 +47,10 @@ import { ACCESSORY_SLOTS } from '../../core/types'
 
 import type { VoxelCharacterHandle } from './VoxelCharacter'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
+import { getActiveForgeTier, getAppliedVoxelPieces, getArmorPieceState, getEquippablePieces, getVisiblePieces } from './armorPieceState'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import ArmorVerseCard from './ArmorVerseCard'
-import { speakVerse } from './speakVerse'
+import { speakStatus, speakVerse } from './speakVerse'
 import { forgeArmorPiece } from '../../core/xp/forgeArmorPiece'
 import { getForgeCost } from '../../core/xp/forgeCosts'
 import XpDiamondBar from '../../components/XpDiamondBar'
@@ -65,6 +66,13 @@ import AvatarHeroBanner from './AvatarHeroBanner'
 import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
+import { getArmorGateStatusFromSession } from './armorGate'
+
+type NextRecommendedAction =
+  | { type: 'forge'; label: string }
+  | { type: 'suit_up'; label: string }
+  | { type: 'start_day'; label: string }
+  | { type: 'earn_xp'; label: string }
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -77,51 +85,11 @@ function normalizeDailyArmorSession(raw: DailyArmorSession): DailyArmorSession {
   }
 }
 
-/** Pieces visible in gallery (XP meets threshold — for display, not equip) */
-function getVisiblePieces(profile: AvatarProfile): VoxelArmorPieceId[] {
-  const xp = profile.totalXp
-  return VOXEL_ARMOR_PIECES
-    .filter((p) => xp >= XP_THRESHOLDS[p.id])
-    .map((p) => p.id)
-}
-
-/** @deprecated Use getVisiblePieces or getEquippablePieces instead */
-function getUnlockedVoxelPieces(profile: AvatarProfile): VoxelArmorPieceId[] {
-  return getVisiblePieces(profile)
-}
-
-/** Get the tier the child is currently forging in (lowest unlocked tier with unforged pieces). */
-function getActiveForgeTier(profile: AvatarProfile): string {
-  const tiers = profile.unlockedTiers ?? ['wood']
-  const forged = profile.forgedPieces ?? {}
-  const allPieceIds: VoxelArmorPieceId[] = ['belt', 'shoes', 'breastplate', 'shield', 'helmet', 'sword']
-
-  for (const tier of tiers) {
-    const tierForged = forged[tier] ?? {}
-    const allForgedInTier = allPieceIds.every(id => tierForged[id])
-    if (!allForgedInTier) return tier
-  }
-
-  return tiers[tiers.length - 1] ?? 'wood'
-}
-
-/** Pieces that can be equipped (forged in active tier) */
-function getEquippablePieces(profile: AvatarProfile): VoxelArmorPieceId[] {
-  const activeTier = getActiveForgeTier(profile)
-  const forged = profile.forgedPieces?.[activeTier] ?? {}
-  return Object.keys(forged) as VoxelArmorPieceId[]
-}
-
 function getNextUnlock(profile: AvatarProfile): { piece: ArmorPieceMeta; xpNeeded: number } | null {
   const visible = new Set(getVisiblePieces(profile))
   const next = VOXEL_ARMOR_PIECES.find((p) => !visible.has(p.id))
   if (!next) return null
   return { piece: next, xpNeeded: Math.max(XP_THRESHOLDS[next.id] - profile.totalXp, 0) }
-}
-
-/** Map ArmorPiece IDs from daily session to VoxelArmorPieceId */
-function sessionToVoxelPieces(appliedPieces: ArmorPiece[]): string[] {
-  return (appliedPieces ?? []).map((p) => ARMOR_PIECE_TO_VOXEL[p])
 }
 
 /** Check if yesterday's date string is exactly one day before today */
@@ -169,10 +137,12 @@ export default function MyAvatarPage() {
   const [session, setSession] = useState<DailyArmorSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedPiece, setSelectedPiece] = useState<ArmorPieceMeta | null>(null)
+  const [optimisticDiamondBalance, setOptimisticDiamondBalance] = useState<number | null>(null)
   const [, setUnequipPiece] = useState<VoxelArmorPieceId | null>(null)
 
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
+  const [portalPrompt, setPortalPrompt] = useState<{ from: string; to: string } | null>(null)
   const [portalTransition, setPortalTransition] = useState<{ from: string; to: string } | null>(null)
   const [ceremonyActive, setCeremonyActive] = useState(false)
   const [ceremonyTier, setCeremonyTier] = useState<string | null>(null)
@@ -220,6 +190,7 @@ export default function MyAvatarPage() {
   const [bgMode, setBgMode] = useState<AvatarBackground>('night')
   // Character tuner state
   const [tunerOpen, setTunerOpen] = useState(false)
+  const [childCustomizerExpanded, setChildCustomizerExpanded] = useState(false)
   const [localProportions, setLocalProportions] = useState<CharacterProportions>(DEFAULT_PROPORTIONS)
   const siblingChild = children.find((c) => c.id !== childId)
   const siblingId = brothersMode ? siblingChild?.id : undefined
@@ -305,10 +276,10 @@ export default function MyAvatarPage() {
             setLocalProportions(DEFAULT_PROPORTIONS)
           }
 
-          const unlockedCount = getUnlockedVoxelPieces(data).length
+          const unlockedCount = getVisiblePieces(data).length
           if (unlockedCount > prevPiecesCountRef.current && prevPiecesCountRef.current > 0) {
             // A new piece was unlocked
-            const unlocked = getUnlockedVoxelPieces(data)
+            const unlocked = getVisiblePieces(data)
             const newPieceVoxel = unlocked[unlocked.length - 1]
             // Map back to ArmorPiece for celebration component compatibility
             const armorPieceId = ARMOR_PIECES.find(
@@ -348,6 +319,14 @@ export default function MyAvatarPage() {
     }
     prevXpRef.current = totalXp
   }, [totalXp])
+
+  // Clear optimistic diamond override once live profile catches up.
+  useEffect(() => {
+    if (optimisticDiamondBalance === null) return
+    if (profile?.diamondBalance === optimisticDiamondBalance) {
+      setOptimisticDiamondBalance(null)
+    }
+  }, [optimisticDiamondBalance, profile?.diamondBalance])
 
   // ── Real-time session listener ─────────────────────────────────
   useEffect(() => {
@@ -583,10 +562,30 @@ export default function MyAvatarPage() {
   const handleForgePiece = useCallback(
     async (voxelPieceId: VoxelArmorPieceId, verseResponse?: string, verseResponseAudio?: string): Promise<boolean> => {
       if (!profile || !familyId || !childId) return false
+      if (profile.totalXp < XP_THRESHOLDS[voxelPieceId]) {
+        console.warn(`[Forge] XP locked: ${voxelPieceId}`)
+        return false
+      }
+
       const activeTier = getActiveForgeTier(profile)
+      const appliedTodayVoxel = getAppliedVoxelPieces(session?.appliedPieces ?? [])
+      const pieceState = getArmorPieceState({
+        profile,
+        pieceId: voxelPieceId,
+        activeForgeTier: activeTier,
+        appliedTodayVoxel: appliedTodayVoxel,
+      })
+      if (pieceState !== 'forgeable') {
+        console.warn(`[Forge] Piece not forgeable: ${voxelPieceId} (${pieceState})`)
+        return false
+      }
+
       const result = await forgeArmorPiece(familyId, childId, activeTier, voxelPieceId, verseResponse, verseResponseAudio)
       if (result.success) {
         setSelectedPiece(null)
+        if (typeof result.newBalance === 'number') {
+          setOptimisticDiamondBalance(result.newBalance)
+        }
 
         // Check if this completed the tier (all 6 forged) and next tier is unlocked
         // We need to simulate the updated forgedPieces since profile hasn't refreshed yet
@@ -598,8 +597,8 @@ export default function MyAvatarPage() {
         if (forgedCount >= 6) {
           const nextTier = getNextTierKey(activeTier)
           if (nextTier && (profile.unlockedTiers ?? []).includes(nextTier) && profile.lastPortalTier !== activeTier) {
-            // Delay portal to let forge animation play
-            setTimeout(() => setPortalTransition({ from: activeTier, to: nextTier }), 1500)
+            // Delay prompt to let forge animation play, then let child confirm before transition
+            setTimeout(() => setPortalPrompt({ from: activeTier, to: nextTier }), 1500)
           }
         }
         return true
@@ -608,7 +607,7 @@ export default function MyAvatarPage() {
         return false
       }
     },
-    [profile, familyId, childId],
+    [profile, familyId, childId, session?.appliedPieces],
   )
 
   // ── Apply a piece (equip) ───────────────────────────────────────
@@ -662,7 +661,7 @@ export default function MyAvatarPage() {
 
       // Also update equippedPieces on avatar profile
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
-      const equippedVoxel = [...sessionToVoxelPieces(updatedApplied)]
+      const equippedVoxel = [...getAppliedVoxelPieces(updatedApplied)]
       await safeUpdateProfile(profileRef, {
         equippedPieces: equippedVoxel,
         lastEquipAnimation: voxelPieceId,
@@ -707,7 +706,7 @@ export default function MyAvatarPage() {
 
     // Also update equippedPieces on avatar profile
     const profileRef = doc(avatarProfilesCollection(familyId), childId)
-    const remainingVoxel = sessionToVoxelPieces(
+    const remainingVoxel = getAppliedVoxelPieces(
       (session.appliedPieces ?? []).filter((p) => p !== armorPieceId),
     )
     await safeUpdateProfile(profileRef, {
@@ -740,20 +739,23 @@ export default function MyAvatarPage() {
       )?.id
 
       const isApplied = armorPieceId && (session.appliedPieces ?? []).includes(armorPieceId)
-      const activeTier = getActiveForgeTier(profile)
-      const isForged = Boolean(profile.forgedPieces?.[activeTier]?.[piece.id])
+      const pieceState = getArmorPieceState({
+        profile,
+        pieceId: piece.id,
+        activeForgeTier: getActiveForgeTier(profile),
+        appliedTodayVoxel: getAppliedVoxelPieces(session.appliedPieces ?? []),
+      })
 
       if (isApplied) {
         // Equipped → unequip (toggle off)
         setUnequipPiece(piece.id)
         void handleUnequipDirect(piece.id)
-      } else if (isForged) {
+      } else if (pieceState === 'forged_not_equipped_today') {
         // Forged → equip immediately + read verse aloud
         speakVerse(piece.name, piece.verseText)
         void handleApplyPiece(piece.id)
       } else {
-        // Not forged (whether XP-unlocked or locked) → show verse card
-        // The verse card will show forge button if unlocked, info-only if locked
+        // Locked/forgeable/equipped state details are shown in verse card
         setSelectedPiece((prev) => {
           if (prev?.id === piece.id) return null
           speakVerse(piece.name, piece.verseText)
@@ -768,16 +770,18 @@ export default function MyAvatarPage() {
   const suitUpAll = useCallback(() => {
     if (!profile || !session || !familyId || !childId) return
     const forgedIds = getEquippablePieces(profile)
-    const currentVoxel = sessionToVoxelPieces(session.appliedPieces ?? [])
+    const currentVoxel = getAppliedVoxelPieces(session.appliedPieces ?? [])
     // Canonical equip order: belt → breastplate → shoes → shield → helmet → sword
     const equipOrder: VoxelArmorPieceId[] = ['belt', 'breastplate', 'shoes', 'shield', 'helmet', 'sword']
     const toEquip = equipOrder.filter((vid) => forgedIds.includes(vid) && !currentVoxel.includes(vid))
     if (toEquip.length === 0) return
 
+    const pieceCount = toEquip.length
+    const pieceLabel = pieceCount === 1 ? 'piece' : 'pieces'
+    speakStatus(`Suiting up ${pieceCount} ${pieceLabel}. Great choice!`)
+
     toEquip.forEach((voxelId, i) => {
       setTimeout(() => {
-        const meta = VOXEL_ARMOR_PIECES.find((p) => p.id === voxelId)
-        if (meta) speakVerse(meta.name, meta.verseText)
         void handleApplyPiece(voxelId as VoxelArmorPieceId)
       }, i * 200) // Stagger 200ms apart for a cascading effect
     })
@@ -836,23 +840,39 @@ export default function MyAvatarPage() {
 
   // ── Computed values ────────────────────────────────────────────
   const appliedPieces = Array.isArray(session?.appliedPieces) ? session.appliedPieces : []
-  const appliedVoxel = sessionToVoxelPieces(appliedPieces)
+  const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
   const unlockedVoxel = profile ? getVisiblePieces(profile) : []
-  const equippableVoxel = profile ? getEquippablePieces(profile) : []
-  const allEarnedApplied = equippableVoxel.length > 0 && equippableVoxel.every((v) => appliedVoxel.includes(v))
+  const armorGateStatus = profile ? getArmorGateStatusFromSession(profile, session) : null
+  const allEarnedApplied = armorGateStatus?.hasForgedPieces ? armorGateStatus.complete : false
   const nextUnlock = profile ? getNextUnlock(profile) : null
   const allSixUnlocked = unlockedVoxel.length === 6
+  const nextUnlockProgress = (() => {
+    if (!profile || !nextUnlock) return 0
+    const nextIdx = VOXEL_ARMOR_PIECES.findIndex((piece) => piece.id === nextUnlock.piece.id)
+    const prevThreshold = nextIdx > 0 ? XP_THRESHOLDS[VOXEL_ARMOR_PIECES[nextIdx - 1].id] : 0
+    const nextThreshold = XP_THRESHOLDS[nextUnlock.piece.id]
+    const unlockRange = Math.max(nextThreshold - prevThreshold, 1)
+    const unlockProgress = profile.totalXp - prevThreshold
+    return Math.min(Math.max((unlockProgress / unlockRange) * 100, 0), 100)
+  })()
 
   // Calculate XP progress within the current tier range
   const currentTierName = profile ? calculateTier(profile.totalXp) : 'WOOD'
-  const tierEntries = Object.entries(TIERS)
-  const currentTierIdx = tierEntries.findIndex(([k]) => k === currentTierName)
-  const tierMinXp = TIERS[currentTierName]?.minXp ?? 0
-  const nextTierEntry = currentTierIdx < tierEntries.length - 1 ? tierEntries[currentTierIdx + 1] : null
-  const tierMaxXp = nextTierEntry ? nextTierEntry[1].minXp : tierMinXp + 1000
-  const tierRange = tierMaxXp - tierMinXp
-  const xpInTier = profile ? profile.totalXp - tierMinXp : 0
-  const tierProgress = tierRange > 0 ? Math.min((xpInTier / tierRange) * 100, 100) : 100
+  const nextRecommendedAction: NextRecommendedAction = (() => {
+    if (allEarnedApplied && unlockedVoxel.length > 0) {
+      return { type: 'start_day', label: 'Start your day' }
+    }
+    if (unlockedVoxel.length > 0 && appliedVoxel.length < unlockedVoxel.length) {
+      return { type: 'suit_up', label: 'Suit up' }
+    }
+    if (!allSixUnlocked && nextUnlock) {
+      if (nextUnlock.xpNeeded <= 0) {
+        return { type: 'forge', label: `Forge ${nextUnlock.piece.shortName}` }
+      }
+      return { type: 'earn_xp', label: `Earn ${nextUnlock.xpNeeded} XP for ${nextUnlock.piece.shortName}` }
+    }
+    return { type: 'start_day', label: 'Start your day' }
+  })()
 
   // ── Screenshot capture ──────────────────────────────────────────
   const playShutterSound = useCallback(() => {
@@ -993,16 +1013,64 @@ export default function MyAvatarPage() {
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3, maxWidth: '100vw', overflowX: 'hidden', boxSizing: 'border-box' }}>
       {/* ── Portal Transition Overlay ────────────────────────── */}
+      {portalPrompt && (
+        <Dialog
+          open
+          onClose={() => undefined}
+          maxWidth="xs"
+          fullWidth
+          PaperProps={{
+            sx: {
+              borderRadius: 3,
+              border: '2px solid rgba(155,89,182,0.5)',
+              bgcolor: isLincoln ? 'rgba(13,17,23,0.96)' : '#1a0033',
+              color: '#fff',
+              textAlign: 'center',
+              px: 1,
+            },
+          }}
+        >
+          <DialogContent sx={{ py: 3 }}>
+            <Box sx={{ fontFamily: '"Press Start 2P", monospace', fontSize: '12px', color: '#BB86FC', mb: 1.5 }}>
+              A portal opens to the next biome.
+            </Box>
+            <Box sx={{ fontFamily: '"Press Start 2P", monospace', fontSize: '10px', color: 'rgba(255,255,255,0.7)', mb: 3 }}>
+              Tap to continue your adventure.
+            </Box>
+            <Box
+              component="button"
+              onClick={() => {
+                if (familyId && childId) {
+                  const profileRef = doc(avatarProfilesCollection(familyId), childId)
+                  void safeUpdateProfile(profileRef, { lastPortalTier: portalPrompt.from })
+                }
+                setPortalTransition(portalPrompt)
+                setPortalPrompt(null)
+              }}
+              sx={{
+                border: 0,
+                px: 2.5,
+                py: 1.2,
+                borderRadius: 2,
+                cursor: 'pointer',
+                fontFamily: '"Press Start 2P", monospace',
+                fontSize: '10px',
+                color: '#fff',
+                bgcolor: '#7B1FA2',
+                boxShadow: '0 0 16px rgba(123,31,162,0.45)',
+                '&:hover': { bgcolor: '#9C27B0' },
+              }}
+            >
+              Enter portal
+            </Box>
+          </DialogContent>
+        </Dialog>
+      )}
       {portalTransition && (
         <PortalTransition
           fromTier={portalTransition.from}
           toTier={portalTransition.to}
           onComplete={() => {
-            // Save guard so portal doesn't re-fire on reload
-            if (familyId && childId && portalTransition) {
-              const profileRef = doc(avatarProfilesCollection(familyId), childId)
-              void safeUpdateProfile(profileRef, { lastPortalTier: portalTransition.from })
-            }
             setPortalTransition(null)
           }}
         />
@@ -1117,7 +1185,11 @@ export default function MyAvatarPage() {
         {/* ── XP + Diamond HUD ────────────────────────────────── */}
         {familyId && childId && (
           <Box sx={{ mx: 2, mb: 1 }}>
-            <XpDiamondBar familyId={familyId} childId={childId} />
+            <XpDiamondBar
+              familyId={familyId}
+              childId={childId}
+              diamondBalanceOverride={optimisticDiamondBalance}
+            />
           </Box>
         )}
 
@@ -1131,11 +1203,16 @@ export default function MyAvatarPage() {
           allSixUnlocked={allSixUnlocked}
           nextUnlock={nextUnlock}
           currentTierName={currentTierName}
-          tierProgress={tierProgress}
+          nextUnlockProgress={nextUnlockProgress}
           isLincoln={isLincoln}
           isChildProfile={isChildProfile}
           accentColor={accentColor}
+          nextRecommendedAction={nextRecommendedAction}
           onSuitUpAll={suitUpAll}
+          onForgeNext={() => {
+            if (!nextUnlock) return
+            setSelectedPiece(nextUnlock.piece)
+          }}
           onStartDay={() => navigate('/today')}
         />
 
@@ -1158,9 +1235,12 @@ export default function MyAvatarPage() {
         {selectedPiece && (
           <ArmorVerseCard
             piece={selectedPiece}
-            isUnlocked={true}
-            isEquipped={appliedVoxel.includes(selectedPiece.id)}
-            isForged={Boolean(profile.forgedPieces?.[getActiveForgeTier(profile)]?.[selectedPiece.id])}
+            pieceState={getArmorPieceState({
+              profile,
+              pieceId: selectedPiece.id,
+              activeForgeTier: getActiveForgeTier(profile),
+              appliedTodayVoxel: appliedVoxel,
+            })}
             forgeCost={getForgeCost(getActiveForgeTier(profile), selectedPiece.id)}
             isLincoln={isLincoln}
             accentColor={accentColor}
@@ -1172,38 +1252,95 @@ export default function MyAvatarPage() {
         )}
 
         {/* ── Customizer (outfit, dye, accessories, emblem, crest, skin, photo) ── */}
-        <AvatarCustomizer
-          profile={profile}
-          familyId={familyId}
-          childId={childId}
-          childName={activeChild?.name}
-          isLincoln={isLincoln}
-          ageGroup={ageGroup}
-          appliedPieces={appliedPieces}
-          unlockedVoxel={unlockedVoxel}
-          appliedVoxel={appliedVoxel}
-          currentTierName={currentTierName}
-          accentColor={accentColor}
-          textColor={textColor}
-          onOutfitColorChange={handleOutfitColorChange}
-          onArmorDyeChange={handleArmorDyeChange}
-          onArmorDyeReset={handleArmorDyeReset}
-          onEmblemChange={handleEmblemChange}
-          onCrestChange={handleCrestChange}
-          onAccessoryToggle={handleAccessoryToggle}
-          tunerOpen={tunerOpen}
-          tunerProportions={localProportions}
-          tunerOutfitColors={{
-            shirtColor: profile.customization?.shirtColor ?? (isLincoln ? '#CC5500' : '#E8A838'),
-            pantsColor: profile.customization?.pantsColor ?? (isLincoln ? '#2A3A52' : '#C4B998'),
-            shoeColor: profile.customization?.shoeColor ?? '#3D2B1F',
-            capeColor: profile.customization?.capeColor ?? (isLincoln ? '#8B0000' : '#2255AA'),
-          }}
-          onTunerProportionsChange={handleTunerProportionsChange}
-          onTunerCapeColorChange={handleTunerCapeColorChange}
-          onTunerDone={handleTunerDone}
-          onTunerReset={handleTunerReset}
-        />
+        {isChildProfile ? (
+          <Box sx={{ px: 2, mt: 1 }}>
+            <Box
+              component="button"
+              onClick={() => setChildCustomizerExpanded((prev) => !prev)}
+              sx={{
+                width: '100%',
+                py: 1.25,
+                borderRadius: isLincoln ? '6px' : '14px',
+                border: `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
+                background: isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                color: isLincoln ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.75)',
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '12px' : '15px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              {childCustomizerExpanded ? 'Hide customize options' : 'Customize warrior'}
+            </Box>
+            {childCustomizerExpanded && (
+              <AvatarCustomizer
+                profile={profile}
+                familyId={familyId}
+                childId={childId}
+                childName={activeChild?.name}
+                isLincoln={isLincoln}
+                ageGroup={ageGroup}
+                appliedPieces={appliedPieces}
+                unlockedVoxel={unlockedVoxel}
+                appliedVoxel={appliedVoxel}
+                currentTierName={currentTierName}
+                accentColor={accentColor}
+                textColor={textColor}
+                onOutfitColorChange={handleOutfitColorChange}
+                onArmorDyeChange={handleArmorDyeChange}
+                onArmorDyeReset={handleArmorDyeReset}
+                onEmblemChange={handleEmblemChange}
+                onCrestChange={handleCrestChange}
+                onAccessoryToggle={handleAccessoryToggle}
+                tunerOpen={tunerOpen}
+                tunerProportions={localProportions}
+                tunerOutfitColors={{
+                  shirtColor: profile.customization?.shirtColor ?? (isLincoln ? '#CC5500' : '#E8A838'),
+                  pantsColor: profile.customization?.pantsColor ?? (isLincoln ? '#2A3A52' : '#C4B998'),
+                  shoeColor: profile.customization?.shoeColor ?? '#3D2B1F',
+                  capeColor: profile.customization?.capeColor ?? (isLincoln ? '#8B0000' : '#2255AA'),
+                }}
+                onTunerProportionsChange={handleTunerProportionsChange}
+                onTunerCapeColorChange={handleTunerCapeColorChange}
+                onTunerDone={handleTunerDone}
+                onTunerReset={handleTunerReset}
+              />
+            )}
+          </Box>
+        ) : (
+          <AvatarCustomizer
+            profile={profile}
+            familyId={familyId}
+            childId={childId}
+            childName={activeChild?.name}
+            isLincoln={isLincoln}
+            ageGroup={ageGroup}
+            appliedPieces={appliedPieces}
+            unlockedVoxel={unlockedVoxel}
+            appliedVoxel={appliedVoxel}
+            currentTierName={currentTierName}
+            accentColor={accentColor}
+            textColor={textColor}
+            onOutfitColorChange={handleOutfitColorChange}
+            onArmorDyeChange={handleArmorDyeChange}
+            onArmorDyeReset={handleArmorDyeReset}
+            onEmblemChange={handleEmblemChange}
+            onCrestChange={handleCrestChange}
+            onAccessoryToggle={handleAccessoryToggle}
+            tunerOpen={tunerOpen}
+            tunerProportions={localProportions}
+            tunerOutfitColors={{
+              shirtColor: profile.customization?.shirtColor ?? (isLincoln ? '#CC5500' : '#E8A838'),
+              pantsColor: profile.customization?.pantsColor ?? (isLincoln ? '#2A3A52' : '#C4B998'),
+              shoeColor: profile.customization?.shoeColor ?? '#3D2B1F',
+              capeColor: profile.customization?.capeColor ?? (isLincoln ? '#8B0000' : '#2255AA'),
+            }}
+            onTunerProportionsChange={handleTunerProportionsChange}
+            onTunerCapeColorChange={handleTunerCapeColorChange}
+            onTunerDone={handleTunerDone}
+            onTunerReset={handleTunerReset}
+          />
+        )}
       </Page>
 
       {/* Unequip dialog removed — tap toggles directly */}

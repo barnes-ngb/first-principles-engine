@@ -1,9 +1,15 @@
-/** TTS helper for reading armor verses aloud */
-export function speakVerse(pieceName: string, verseText: string) {
-  if (!('speechSynthesis' in window)) return
-  window.speechSynthesis.cancel()
+type SpeakMode = 'interrupt' | 'queue'
 
-  const text = `${pieceName}. ${verseText}`
+interface SpeakOptions {
+  mode?: SpeakMode
+}
+
+function speakText(text: string, { mode = 'interrupt' }: SpeakOptions = {}) {
+  if (!('speechSynthesis' in window)) return
+  if (mode === 'interrupt') {
+    window.speechSynthesis.cancel()
+  }
+
   const utterance = new SpeechSynthesisUtterance(text)
   utterance.rate = 0.85
   utterance.pitch = 1.0
@@ -16,4 +22,14 @@ export function speakVerse(pieceName: string, verseText: string) {
   if (preferred) utterance.voice = preferred
 
   window.speechSynthesis.speak(utterance)
+}
+
+/** TTS helper for reading armor verses aloud */
+export function speakVerse(pieceName: string, verseText: string, options?: SpeakOptions) {
+  speakText(`${pieceName}. ${verseText}`, options)
+}
+
+/** TTS helper for short status messages */
+export function speakStatus(message: string, options?: SpeakOptions) {
+  speakText(message, options)
 }

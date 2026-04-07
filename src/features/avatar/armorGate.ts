@@ -1,55 +1,57 @@
-import type { AvatarProfile, VoxelArmorPieceId } from '../../core/types'
-
-/** Get the tier the child is currently forging in (lowest unlocked tier with unforged pieces). */
-function getActiveForgeTier(profile: AvatarProfile): string {
-  const tiers = profile.unlockedTiers ?? ['wood']
-  const forged = profile.forgedPieces ?? {}
-  const allPieceIds: VoxelArmorPieceId[] = ['belt', 'shoes', 'breastplate', 'shield', 'helmet', 'sword']
-
-  for (const tier of tiers) {
-    const tierForged = forged[tier] ?? {}
-    const allForgedInTier = allPieceIds.every(id => tierForged[id])
-    if (!allForgedInTier) return tier
-  }
-
-  return tiers[tiers.length - 1] ?? 'wood'
-}
-
-/** Pieces that can be equipped (forged in active tier). */
-function getEquippablePieces(profile: AvatarProfile): VoxelArmorPieceId[] {
-  const activeTier = getActiveForgeTier(profile)
-  const forged = profile.forgedPieces?.[activeTier] ?? {}
-  return Object.keys(forged) as VoxelArmorPieceId[]
-}
+import type { ArmorPiece, AvatarProfile, DailyArmorSession, VoxelArmorPieceId } from '../../core/types'
+import { getAppliedVoxelPieces, getEquippablePieces } from './armorPieceState'
 
 export interface ArmorGateStatus {
-  /** True when every forged piece is equipped */
+  /** True when every forged piece is equipped for the current day */
   complete: boolean
-  /** Number of currently equipped pieces */
+  /** Number of currently equipped forged pieces (for today) */
   equipped: number
-  /** Total forged pieces that must be equipped */
+  /** Total forged pieces that should be equipped today */
   total: number
-  /** Voxel IDs of pieces not yet equipped */
+  /** Voxel IDs of pieces not yet equipped today */
   missing: VoxelArmorPieceId[]
+  /** Whether the child has any forged pieces at all */
+  hasForgedPieces: boolean
 }
 
-/** Check whether a child has equipped all forged armor pieces. */
-export function isArmorComplete(profile: AvatarProfile): boolean {
-  const equippable = getEquippablePieces(profile)
-  const equipped = profile.equippedPieces ?? []
-  return equippable.length > 0 && equippable.every((id) => equipped.includes(id))
+function getAppliedTodayVoxel(profile: AvatarProfile, appliedPieces: ArmorPiece[] | undefined): VoxelArmorPieceId[] {
+  if (Array.isArray(appliedPieces)) {
+    return getAppliedVoxelPieces(appliedPieces)
+  }
+  return Array.isArray(profile.equippedPieces) ? profile.equippedPieces as VoxelArmorPieceId[] : []
 }
 
-/** Get detailed armor gate status for the UI. */
-export function getArmorGateStatus(profile: AvatarProfile): ArmorGateStatus {
+/**
+ * Shared gate computation based on forged pieces + today's daily armor session.
+ * Profile equippedPieces can still be used for rendering, but not for readiness.
+ */
+export function getArmorGateStatus(
+  profile: AvatarProfile,
+  appliedPiecesToday?: ArmorPiece[],
+): ArmorGateStatus {
   const equippable = getEquippablePieces(profile)
-  const equipped = profile.equippedPieces ?? []
-  const missing = equippable.filter((id) => !equipped.includes(id))
+  const appliedTodayVoxel = getAppliedTodayVoxel(profile, appliedPiecesToday)
+  const missing = equippable.filter((id) => !appliedTodayVoxel.includes(id))
+  const hasForgedPieces = equippable.length > 0
 
   return {
-    complete: equippable.length > 0 && missing.length === 0,
-    equipped: equippable.filter((id) => equipped.includes(id)).length,
+    complete: hasForgedPieces && missing.length === 0,
+    equipped: equippable.filter((id) => appliedTodayVoxel.includes(id)).length,
     total: equippable.length,
     missing,
+    hasForgedPieces,
   }
+}
+
+/** Backward-compatible boolean check used by existing callers. */
+export function isArmorComplete(profile: AvatarProfile, appliedPiecesToday?: ArmorPiece[]): boolean {
+  return getArmorGateStatus(profile, appliedPiecesToday).complete
+}
+
+/** Convenience helper when a DailyArmorSession object is available. */
+export function getArmorGateStatusFromSession(
+  profile: AvatarProfile,
+  session: Pick<DailyArmorSession, 'appliedPieces'> | null | undefined,
+): ArmorGateStatus {
+  return getArmorGateStatus(profile, session?.appliedPieces)
 }

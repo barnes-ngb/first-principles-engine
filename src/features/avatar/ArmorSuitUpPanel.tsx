@@ -14,11 +14,16 @@ interface ArmorSuitUpPanelProps {
   allSixUnlocked: boolean
   nextUnlock: { piece: ArmorPieceMeta; xpNeeded: number } | null
   currentTierName: string
-  tierProgress: number
+  nextUnlockProgress: number
   isLincoln: boolean
   isChildProfile: boolean
   accentColor: string
+  nextRecommendedAction: {
+    type: 'forge' | 'suit_up' | 'start_day' | 'earn_xp'
+    label: string
+  }
   onSuitUpAll: () => void
+  onForgeNext: () => void
   onStartDay: () => void
 }
 
@@ -31,11 +36,13 @@ export default function ArmorSuitUpPanel({
   allSixUnlocked,
   nextUnlock,
   currentTierName,
-  tierProgress,
+  nextUnlockProgress,
   isLincoln,
   isChildProfile,
   accentColor,
+  nextRecommendedAction,
   onSuitUpAll,
+  onForgeNext,
   onStartDay,
 }: ArmorSuitUpPanelProps) {
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
@@ -78,7 +85,86 @@ export default function ArmorSuitUpPanel({
       )}
 
       {/* ── Armor status text ────────────────────────────────── */}
-      {allEarnedApplied && unlockedVoxel.length > 0 ? (
+      {isChildProfile ? (
+        <Box
+          sx={{
+            mx: 2,
+            mb: 1,
+            p: 1.5,
+            borderRadius: isLincoln ? '8px' : '16px',
+            border: `1.5px solid ${isLincoln ? 'rgba(126,252,32,0.2)' : 'rgba(232,160,191,0.3)'}`,
+            background: isLincoln
+              ? 'linear-gradient(135deg, rgba(126,252,32,0.08) 0%, rgba(255,255,255,0.02) 100%)'
+              : 'linear-gradient(135deg, rgba(232,160,191,0.1) 0%, rgba(255,255,255,0.8) 100%)',
+          }}
+        >
+          <Typography
+            sx={{
+              textAlign: 'center',
+              fontFamily: titleFont,
+              fontSize: isLincoln ? '11px' : '14px',
+              fontWeight: 600,
+              color: isLincoln ? 'rgba(255,255,255,0.72)' : 'rgba(0,0,0,0.62)',
+              mb: 1,
+            }}
+          >
+            Next action
+          </Typography>
+
+          <Box
+            component="button"
+            onClick={() => {
+              if (nextRecommendedAction.type === 'suit_up') {
+                onSuitUpAll()
+                return
+              }
+              if (nextRecommendedAction.type === 'start_day') {
+                onStartDay()
+                return
+              }
+              if (nextRecommendedAction.type === 'forge') {
+                onForgeNext()
+                return
+              }
+            }}
+            disabled={nextRecommendedAction.type === 'earn_xp'}
+            sx={{
+              width: '100%',
+              py: 1.5,
+              borderRadius: isLincoln ? '6px' : '22px',
+              border: `2px solid ${accentColor}`,
+              background: isLincoln
+                ? 'linear-gradient(135deg, rgba(126,252,32,0.16) 0%, rgba(126,252,32,0.08) 100%)'
+                : 'linear-gradient(135deg, rgba(232,160,191,0.18) 0%, rgba(232,160,191,0.1) 100%)',
+              color: accentColor,
+              fontFamily: titleFont,
+              fontSize: isLincoln ? '12px' : '18px',
+              fontWeight: 700,
+              cursor: nextRecommendedAction.type === 'earn_xp' ? 'default' : 'pointer',
+              minHeight: '52px',
+              opacity: nextRecommendedAction.type === 'earn_xp' ? 0.85 : 1,
+            }}
+          >
+            {nextRecommendedAction.type === 'suit_up' && '⚔️ '}
+            {nextRecommendedAction.type === 'start_day' && '🌅 '}
+            {nextRecommendedAction.type === 'forge' && '🔨 '}
+            {nextRecommendedAction.label}
+          </Box>
+
+          <Typography
+            sx={{
+              mt: 1,
+              textAlign: 'center',
+              fontFamily: titleFont,
+              fontSize: isLincoln ? '10px' : '13px',
+              color: isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.55)',
+              fontWeight: 500,
+            }}
+          >
+            {appliedVoxel.length}/{Math.max(unlockedVoxel.length, 0)} equipped today
+          </Typography>
+        </Box>
+      ) : allEarnedApplied && unlockedVoxel.length > 0 ? (
         <Box sx={{ textAlign: 'center', py: 2, mb: 0.5 }}>
           <Typography
             key={`count-${appliedVoxel.length}`}
@@ -125,39 +211,6 @@ export default function ArmorSuitUpPanel({
               >
                 🔥 {profile.armorStreak}-day streak
               </Typography>
-            </Box>
-          )}
-          {/* Start Your Day button */}
-          {isChildProfile && (
-            <Box
-              component="button"
-              onClick={onStartDay}
-              sx={{
-                display: 'block',
-                mx: 'auto',
-                mt: 1.5,
-                px: '28px',
-                py: '12px',
-                borderRadius: isLincoln ? '4px' : '24px',
-                border: 'none',
-                background: isLincoln
-                  ? 'linear-gradient(135deg, #7EFC20, #5BC010)'
-                  : 'linear-gradient(135deg, #4caf50, #388e3c)',
-                color: isLincoln ? '#000' : '#fff',
-                fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                fontSize: isLincoln ? '12px' : '16px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                minHeight: '48px',
-                boxShadow: `0 4px 14px ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(76,175,80,0.3)'}`,
-                animation: 'pulse 2s ease-in-out infinite',
-                '@keyframes pulse': {
-                  '0%, 100%': { transform: 'scale(1)', boxShadow: `0 4px 14px ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(76,175,80,0.3)'}` },
-                  '50%': { transform: 'scale(1.03)', boxShadow: `0 6px 20px ${isLincoln ? 'rgba(126,252,32,0.4)' : 'rgba(76,175,80,0.4)'}` },
-                },
-              }}
-            >
-              Start Your Day →
             </Box>
           )}
         </Box>
@@ -257,6 +310,19 @@ export default function ArmorSuitUpPanel({
               >
                 Next: {nextUnlock.piece.name} — {nextUnlock.xpNeeded} XP away
               </Typography>
+              <Typography
+                sx={{
+                  mb: 0.5,
+                  color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.6)',
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                  fontSize: isLincoln ? '10px' : '12px',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                Progress to next piece
+              </Typography>
               <Box
                 sx={{
                   height: 6,
@@ -268,7 +334,7 @@ export default function ArmorSuitUpPanel({
                 <Box
                   sx={{
                     height: '100%',
-                    width: `${tierProgress}%`,
+                    width: `${nextUnlockProgress}%`,
                     borderRadius: 'inherit',
                     bgcolor: getTierTextColor(currentTierName),
                     transition: 'width 0.5s ease-out',

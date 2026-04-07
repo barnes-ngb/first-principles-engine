@@ -450,6 +450,7 @@ export function useQuestSession() {
         consecutiveCorrect: 0,
         consecutiveWrong: 0,
         levelDownsInARow: 0,
+        wrongAtFloor: 0,
         totalQuestions: 0,
         totalCorrect: 0,
         questionsThisLevel: 0,
@@ -1491,6 +1492,42 @@ export function useQuestSession() {
   // ── Reset to intro ────────────────────────────────────────────
 
   const resetToIntro = useCallback(() => {
+    // Auto-save partial session if quest is in progress with answered questions
+    if (questState && questState.totalQuestions > 0 && activeChildId && familyId) {
+      const timestamp = Date.now()
+      const docId = `interactive_${activeChildId}_${timestamp}`
+      const domain = activeDomainRef.current
+      const skippedCount = answeredQuestions.filter((q) => q.skipped).length
+      const flaggedErrorCount = answeredQuestions.filter((q) => q.flaggedAsError).length
+
+      const partialSession: EvaluationSession & InteractiveSessionData = {
+        childId: activeChildId,
+        domain,
+        status: 'in-progress',
+        messages: [],
+        findings,
+        recommendations: [],
+        summary: `Partial session: ${questState.totalCorrect}/${questState.totalQuestions} correct at level ${questState.currentLevel} (exited early)`,
+        evaluatedAt: new Date().toISOString(),
+        sessionType: 'interactive',
+        questMode: activeQuestModeRef.current,
+        questions: answeredQuestions,
+        finalLevel: questState.currentLevel,
+        totalCorrect: questState.totalCorrect,
+        totalQuestions: questState.totalQuestions,
+        diamondsMined: questState.totalCorrect,
+        streakDays: streak.currentStreak,
+        skippedCount: skippedCount || undefined,
+        flaggedErrorCount: flaggedErrorCount || undefined,
+      }
+
+      // Fire-and-forget save — don't block the UI reset
+      const ref = doc(evaluationSessionsCollection(familyId), docId)
+      setDoc(ref, JSON.parse(JSON.stringify(partialSession))).catch((err) =>
+        console.error('Failed to auto-save partial quest session', err),
+      )
+    }
+
     if (timerRef.current) {
       clearInterval(timerRef.current)
       timerRef.current = null
@@ -1510,7 +1547,7 @@ export function useQuestSession() {
     conversationRef.current = []
     bonusRoundUsedRef.current = false
     activeQuestModeRef.current = undefined
-  }, [])
+  }, [questState, activeChildId, familyId, answeredQuestions, findings, streak.currentStreak])
 
   return {
     screen,

@@ -6,10 +6,11 @@ import { normalizeAvatarProfile } from '../../features/avatar/normalizeProfile'
 import { safeUpdateProfile } from '../../features/avatar/safeProfileWrite'
 import { spendDiamonds } from './getDiamondBalance'
 import { getForgeCost } from './forgeCosts'
+import { XP_THRESHOLDS } from '../../features/avatar/voxel/buildArmorPiece'
 
 export interface ForgeResult {
   success: boolean
-  error?: 'tier_locked' | 'already_forged' | 'insufficient_diamonds' | 'invalid_input'
+  error?: 'tier_locked' | 'already_forged' | 'insufficient_diamonds' | 'invalid_input' | 'xp_locked'
   newBalance?: number
 }
 
@@ -46,6 +47,11 @@ export async function forgeArmorPiece(
   const forgedPieces = profile.forgedPieces ?? {}
   if (forgedPieces[tier]?.[piece]) {
     return { success: false, error: 'already_forged' }
+  }
+
+  // Enforce XP lock server-side (single source of truth for unlock eligibility)
+  if (profile.totalXp < XP_THRESHOLDS[piece]) {
+    return { success: false, error: 'xp_locked' }
   }
 
   // Check diamond cost
@@ -88,7 +94,12 @@ export async function forgeArmorPiece(
     unlockedPieces,
   } as Partial<AvatarProfile> & Record<string, unknown>)
 
-  return { success: true }
+  const refreshedProfile = await getDoc(profileRef)
+  const newBalance = refreshedProfile.exists()
+    ? normalizeAvatarProfile(refreshedProfile.data()).diamondBalance ?? 0
+    : 0
+
+  return { success: true, newBalance }
 }
 
 /** Check if a specific piece is forged at a given tier. */
