@@ -148,22 +148,30 @@ function shapedArc(phase: number): number {
   return Math.sign(s) * Math.pow(Math.abs(s), 1.35)
 }
 
-function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number, tuning = HERO_ANIMATION_TUNING) {
+function constrainArmPose(
+  side: 'L' | 'R',
+  rotX: number,
+  rotZ: number,
+  torsoLead: number,
+  tuning = HERO_ANIMATION_TUNING,
+) {
   const sideConfig = tuning.guardrails.armBySide[side]
   const softTorso = tuning.guardrails.torsoSoftCollision
-  const forwardX = clamp(rotX, sideConfig.rotXMin, sideConfig.rotXMax)
+  const forwardX = clamp(rotX, tuning.armSwingClampX.min, tuning.armSwingClampX.max)
+  const torsoSide = side === 'L' ? -1 : 1
+  const torsoDrive = Math.max(0, torsoLead * torsoSide) * tuning.torsoAvoidanceGain
   const torsoT = clamp(
     (forwardX - softTorso.rotXStart) / (softTorso.rotXEnd - softTorso.rotXStart),
     0,
     1,
   )
-  const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance)
+  const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance) + torsoDrive
   const minOutward = Math.max(
     sideConfig.rotZMin,
     tuning.torsoClearance + tuning.elbowOutBias + torsoPush,
     tuning.guardrails.elbowInwardCollapseLimit,
   )
-  const outwardZ = clamp(rotZ, minOutward, sideConfig.rotZMax)
+  const outwardZ = clamp(rotZ, minOutward, Math.min(sideConfig.rotZMax, tuning.armSwingClampZ))
   return { rotX: forwardX, rotZ: outwardZ }
 }
 
@@ -894,18 +902,21 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
 
           // Arm idle arcs — shaped wave keeps motion handcrafted and readable.
           const armSwayTime = heroCycle
-          const leftArc = shapedArc(armSwayTime + 0.8)
-          const rightArc = shapedArc(armSwayTime - 0.35)
+          const leftArc = shapedArc(armSwayTime + tuning.armPhaseOffset * 0.5)
+          const rightArc = shapedArc(armSwayTime - tuning.armPhaseOffset * 0.5)
           if (armLObj) {
+            const armLRotX = currentEqPose.armLRotX
+              + leftArc * tuning.armSwingX * tuning.shoulderSwing
+              + Math.max(0, torsoLead) * 0.014 * tuning.shoulderSwing
+            const armLRotZ = currentEqPose.armLRotZ
+              + tuning.silhouetteBias.leftRotZ
+              + leftArc * tuning.armSwingZ * tuning.shoulderSwing
+              + Math.max(0, -weightShift) * 0.015 * tuning.shoulderSwing
             const constrained = constrainArmPose(
               'L',
-              currentEqPose.armLRotX
-                + leftArc * tuning.armSwingX * tuning.shoulderSwing
-                + Math.max(0, torsoLead) * 0.014 * tuning.shoulderSwing,
-              currentEqPose.armLRotZ
-                + tuning.silhouetteBias.leftRotZ
-                + leftArc * tuning.armSwingZ * tuning.shoulderSwing
-                + Math.max(0, -weightShift) * 0.015 * tuning.shoulderSwing,
+              armLRotX,
+              armLRotZ,
+              torsoLead,
               tuning,
             )
             armLObj.rotation.z = constrained.rotZ
@@ -913,15 +924,18 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             armLObj.position.y = baseArmLY + Math.max(0, -weightShift) * 0.018 * tuning.shoulderSwing
           }
           if (armRObj) {
+            const armRRotX = currentEqPose.armRRotX
+              - rightArc * tuning.armSwingX * tuning.shoulderSwing
+              + Math.max(0, -torsoLead) * 0.014 * tuning.shoulderSwing
+            const armRRotZ = currentEqPose.armRRotZ
+              + tuning.silhouetteBias.rightRotZ
+              - rightArc * tuning.armSwingZ * tuning.shoulderSwing
+              + Math.max(0, weightShift) * 0.015 * tuning.shoulderSwing
             const constrained = constrainArmPose(
               'R',
-              currentEqPose.armRRotX
-                - rightArc * tuning.armSwingX * tuning.shoulderSwing
-                + Math.max(0, -torsoLead) * 0.014 * tuning.shoulderSwing,
-              currentEqPose.armRRotZ
-                + tuning.silhouetteBias.rightRotZ
-                - rightArc * tuning.armSwingZ * tuning.shoulderSwing
-                + Math.max(0, weightShift) * 0.015 * tuning.shoulderSwing,
+              armRRotX,
+              armRRotZ,
+              torsoLead,
               tuning,
             )
             armRObj.rotation.z = constrained.rotZ
@@ -929,19 +943,24 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             armRObj.position.y = baseArmRY + Math.max(0, weightShift) * 0.018 * tuning.shoulderSwing
           }
 
-          // Foot planting: preserve authored base stance and only apply tiny opposite offsets.
-          const footSpread = shapedArc(time * 0.92 + Math.PI * 0.25) * tuning.footSway
+          // Foot planting: hold each foot near its planted lane and keep a readable gap.
           const footCenter = (baseFootL + baseFootR) * 0.5
-          const stanceHalf = Math.max(tuning.stanceWidth * 0.5, tuning.footSeparation * 0.5)
-          let leftX = footCenter - stanceHalf - footSpread + Math.min(0, weightShift) * 0.01
-          let rightX = footCenter + stanceHalf + footSpread + Math.max(0, weightShift) * 0.01
+          const stanceHalf = Math.max(tuning.stanceWidth * 0.5, tuning.footSeparation * 0.5 + 0.01)
+          const inwardRoom = Math.max(0, stanceHalf - tuning.footSeparation * 0.5)
+          const maxSafeSway = Math.min(tuning.footSway, inwardRoom * 0.85)
+          const leftStep = shapedArc(time * 0.92 + Math.PI * 0.1)
+          const rightStep = shapedArc(time * 0.92 + Math.PI * 1.1)
+          const footSpread = (leftStep - rightStep) * 0.5 * maxSafeSway
+          let leftX = footCenter - stanceHalf - footSpread + Math.min(0, weightShift) * 0.008
+          let rightX = footCenter + stanceHalf + footSpread + Math.max(0, weightShift) * 0.008
           if (rightX - leftX < tuning.footSeparation) {
             const center = (leftX + rightX) * 0.5
             leftX = center - tuning.footSeparation * 0.5
             rightX = center + tuning.footSeparation * 0.5
           }
-          leftX = Math.min(leftX, -tuning.footCenterLineGap)
-          rightX = Math.max(rightX, tuning.footCenterLineGap)
+          const centerGap = Math.max(tuning.footCenterLineGap, tuning.footSeparation * 0.42)
+          leftX = Math.min(leftX, -centerGap)
+          rightX = Math.max(rightX, centerGap)
           for (const [name, x] of [
             ['legL', leftX],
             ['bootL', leftX],
@@ -953,9 +972,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             const part = characterRef.current.getObjectByName(name)
             if (part) {
               part.position.x = x
-              const swayLift = name.includes('L')
-                ? Math.max(0, -weightShift) * tuning.footLift
-                : Math.max(0, weightShift) * tuning.footLift
+              const planted = name.includes('L')
+                ? 1 - Math.max(0, leftStep)
+                : 1 - Math.max(0, rightStep)
+              const swayLift = (1 - planted) * tuning.footLift
               part.position.y = baseFootY + tuning.footPlantY + swayLift
             }
           }
