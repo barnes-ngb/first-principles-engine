@@ -127,6 +127,13 @@ export interface InteractiveSessionData {
   flaggedErrorCount?: number
   /** Distinguishes phonics quests from comprehension quests */
   questMode?: QuestMode
+  // ── Resume support fields (saved on partial sessions) ──────
+  /** Full adaptive state — needed to restore quest on resume */
+  savedQuestState?: QuestState
+  /** The exact question the child was looking at when they exited */
+  savedCurrentQuestion?: QuestQuestion
+  /** Whether bonus round was already used this session */
+  bonusRoundUsed?: boolean
 }
 
 // ── Fluency practice types ───────────────────────────────────

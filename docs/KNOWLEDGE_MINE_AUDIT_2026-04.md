@@ -583,7 +583,7 @@ London (6, kindergarten) has no evaluation sessions, no skill snapshots, no word
 
 | # | Title | Part | Description | Effort |
 |---|---|---|---|---|
-| P0-1 | "Back to mine" needs confirmation | C | Tapping the button mid-quest instantly destroys session with no save and no confirmation dialog. One accidental tap = lost progress. | S |
+| P0-1 | "Back to mine" needs confirmation | C | Tapping the button mid-quest instantly destroys session with no save and no confirmation dialog. One accidental tap = lost progress. **Fixed:** Resume now restores full state (level, diamonds, current question) — no more fresh-start regression on Continue. | S |
 | P0-2 | Level 1 frustration trap | B | A child stuck at Level 1 never triggers frustration exit. `levelDownsInARow` can't increment at floor. Only 10-question cap or 8-min timeout ends the session. Add a "total wrong at Level 1" escape. | S |
 
 ### P1 — Quality Issue, Should Fix Soon

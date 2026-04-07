@@ -219,7 +219,7 @@ export default function EvaluateChatPage() {
           setMessages(inProgress.messages || [])
           setFindings(inProgress.findings || [])
           setRecommendations(inProgress.recommendations || [])
-          setSessionStatus(inProgress.status)
+          setSessionStatus('in-progress')
           setCompleteSummary(inProgress.summary || null)
           setNextEvalDate(inProgress.nextEvalDate)
         } else {

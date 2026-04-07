@@ -49,7 +49,7 @@ All collections live under `families/{familyId}/`. No subcollections go deeper t
 | 28 | `aiUsage` | auto | 50+/yr | Range by `createdAt` |
 | 29 | `avatarProfiles` | `{childId}` | 2–5 | Single doc listener |
 | 30 | `dailyArmorSessions` | `{childId}-{date}` | ~360/yr | Single doc listener |
-| 31 | `evaluationSessions` | auto | 20–50 | Filtered by `childId` + `domain`/`status`, ordered by `evaluatedAt` |
+| 31 | `evaluationSessions` | auto | 20–50 | Filtered by `childId` + `domain`/`status`, ordered by `evaluatedAt`. Status values: `in-progress`, `complete`, `resumed`, `abandoned`. Interactive sessions may include `savedQuestState`, `savedCurrentQuestion`, `bonusRoundUsed` for resume support. |
 
 > **Note:** 31 collections found (28 in `firestore.ts` + `sightWordLists`, `sightWordProgress`, and `aiUsage` are in `firestore.ts` but the CLAUDE.md table lists only 18 named collections). The CLAUDE.md collection table is outdated.
 
