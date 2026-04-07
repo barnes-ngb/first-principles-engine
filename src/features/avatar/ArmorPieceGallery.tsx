@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
@@ -35,11 +35,6 @@ export default function ArmorPieceGallery({
   onPieceTap,
 }: ArmorPieceGalleryProps) {
   const cardScrollRef = useRef<HTMLDivElement>(null)
-
-  // Reset card scroll to start (Belt first) on initial load only
-  useEffect(() => {
-    if (cardScrollRef.current) cardScrollRef.current.scrollLeft = 0
-  }, [])
 
   const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
 

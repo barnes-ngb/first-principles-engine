@@ -14,8 +14,11 @@ export interface ArmorGateStatus {
   hasForgedPieces: boolean
 }
 
-function getAppliedTodayVoxel(appliedPieces: ArmorPiece[] | undefined): VoxelArmorPieceId[] {
-  return getAppliedVoxelPieces(Array.isArray(appliedPieces) ? appliedPieces : [])
+function getAppliedTodayVoxel(profile: AvatarProfile, appliedPieces: ArmorPiece[] | undefined): VoxelArmorPieceId[] {
+  if (Array.isArray(appliedPieces)) {
+    return getAppliedVoxelPieces(appliedPieces)
+  }
+  return Array.isArray(profile.equippedPieces) ? profile.equippedPieces as VoxelArmorPieceId[] : []
 }
 
 /**
@@ -27,15 +30,16 @@ export function getArmorGateStatus(
   appliedPiecesToday?: ArmorPiece[],
 ): ArmorGateStatus {
   const equippable = getEquippablePieces(profile)
-  const appliedTodayVoxel = getAppliedTodayVoxel(appliedPiecesToday)
+  const appliedTodayVoxel = getAppliedTodayVoxel(profile, appliedPiecesToday)
   const missing = equippable.filter((id) => !appliedTodayVoxel.includes(id))
+  const hasForgedPieces = equippable.length > 0
 
   return {
-    complete: equippable.length === 0 || missing.length === 0,
+    complete: hasForgedPieces && missing.length === 0,
     equipped: equippable.filter((id) => appliedTodayVoxel.includes(id)).length,
     total: equippable.length,
     missing,
-    hasForgedPieces: equippable.length > 0,
+    hasForgedPieces,
   }
 }
 

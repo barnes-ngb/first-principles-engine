@@ -137,6 +137,7 @@ export default function MyAvatarPage() {
   const [session, setSession] = useState<DailyArmorSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedPiece, setSelectedPiece] = useState<ArmorPieceMeta | null>(null)
+  const [optimisticDiamondBalance, setOptimisticDiamondBalance] = useState<number | null>(null)
   const [, setUnequipPiece] = useState<VoxelArmorPieceId | null>(null)
 
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
@@ -318,6 +319,14 @@ export default function MyAvatarPage() {
     }
     prevXpRef.current = totalXp
   }, [totalXp])
+
+  // Clear optimistic diamond override once live profile catches up.
+  useEffect(() => {
+    if (optimisticDiamondBalance === null) return
+    if (profile?.diamondBalance === optimisticDiamondBalance) {
+      setOptimisticDiamondBalance(null)
+    }
+  }, [optimisticDiamondBalance, profile?.diamondBalance])
 
   // ── Real-time session listener ─────────────────────────────────
   useEffect(() => {
@@ -553,10 +562,30 @@ export default function MyAvatarPage() {
   const handleForgePiece = useCallback(
     async (voxelPieceId: VoxelArmorPieceId, verseResponse?: string, verseResponseAudio?: string): Promise<boolean> => {
       if (!profile || !familyId || !childId) return false
+      if (profile.totalXp < XP_THRESHOLDS[voxelPieceId]) {
+        console.warn(`[Forge] XP locked: ${voxelPieceId}`)
+        return false
+      }
+
       const activeTier = getActiveForgeTier(profile)
+      const appliedTodayVoxel = getAppliedVoxelPieces(session?.appliedPieces ?? [])
+      const pieceState = getArmorPieceState({
+        profile,
+        pieceId: voxelPieceId,
+        activeForgeTier: activeTier,
+        appliedTodayVoxel: appliedTodayVoxel,
+      })
+      if (pieceState !== 'forgeable') {
+        console.warn(`[Forge] Piece not forgeable: ${voxelPieceId} (${pieceState})`)
+        return false
+      }
+
       const result = await forgeArmorPiece(familyId, childId, activeTier, voxelPieceId, verseResponse, verseResponseAudio)
       if (result.success) {
         setSelectedPiece(null)
+        if (typeof result.newBalance === 'number') {
+          setOptimisticDiamondBalance(result.newBalance)
+        }
 
         // Check if this completed the tier (all 6 forged) and next tier is unlocked
         // We need to simulate the updated forgedPieces since profile hasn't refreshed yet
@@ -578,7 +607,7 @@ export default function MyAvatarPage() {
         return false
       }
     },
-    [profile, familyId, childId],
+    [profile, familyId, childId, session?.appliedPieces],
   )
 
   // ── Apply a piece (equip) ───────────────────────────────────────
@@ -1156,7 +1185,11 @@ export default function MyAvatarPage() {
         {/* ── XP + Diamond HUD ────────────────────────────────── */}
         {familyId && childId && (
           <Box sx={{ mx: 2, mb: 1 }}>
-            <XpDiamondBar familyId={familyId} childId={childId} />
+            <XpDiamondBar
+              familyId={familyId}
+              childId={childId}
+              diamondBalanceOverride={optimisticDiamondBalance}
+            />
           </Box>
         )}
 
