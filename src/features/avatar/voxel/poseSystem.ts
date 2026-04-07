@@ -1,5 +1,5 @@
 import type * as THREE from 'three'
-import { HERO_ANIMATION_TUNING } from './heroAnimationTuning'
+import { HERO_ANIMATION_TUNING, type HeroAnimationTuning } from './heroAnimationTuning'
 
 // ── Pose Keyframes ──────────────────────────────────────────────────
 
@@ -233,13 +233,31 @@ export const POSE_EXPRESSIONS: Record<string, FacialExpression> = {
   dab:         { eyeScale: 1.3, mouthWidth: 1.4, mouthHeight: 1.3, eyebrowAngle: 0.15 },
 }
 
+
+export function getScaledExpression(poseId: string, tuning: HeroAnimationTuning): FacialExpression {
+  const base = POSE_EXPRESSIONS[poseId] ?? POSE_EXPRESSIONS.idle ?? {}
+  const intensity = tuning.emoteIntensity
+  const neutral = { eyeScale: 1, mouthWidth: 1, mouthHeight: 1, eyebrowAngle: 0 }
+  return {
+    eyeScale: neutral.eyeScale + ((base.eyeScale ?? neutral.eyeScale) - neutral.eyeScale) * intensity,
+    mouthWidth: neutral.mouthWidth + ((base.mouthWidth ?? neutral.mouthWidth) - neutral.mouthWidth) * intensity,
+    mouthHeight: neutral.mouthHeight + ((base.mouthHeight ?? neutral.mouthHeight) - neutral.mouthHeight) * intensity,
+    eyebrowAngle: neutral.eyebrowAngle + ((base.eyebrowAngle ?? neutral.eyebrowAngle) - neutral.eyebrowAngle) * intensity,
+  }
+}
+
 // ── Pose Animator ───────────────────────────────────────────────────
 
 export class PoseAnimator {
   private currentPose: Pose | null = null
+  private readonly getTuning: () => HeroAnimationTuning
   private startTime = 0
   private isPlaying = false
   private onComplete?: () => void
+
+  constructor(getTuning?: () => HeroAnimationTuning) {
+    this.getTuning = getTuning ?? (() => HERO_ANIMATION_TUNING)
+  }
 
   play(pose: Pose, onComplete?: () => void) {
     this.currentPose = pose
@@ -276,23 +294,34 @@ export class PoseAnimator {
   private applyKeyframes(obj: THREE.Object3D, kf: PoseKeyframes, t: number) {
     const armSide = obj.name === 'armL' ? 'L' : obj.name === 'armR' ? 'R' : null
     const isArm = armSide !== null
+    const tuning = this.getTuning()
+    const sideConfig = armSide ? tuning.guardrails.armBySide[armSide] : null
     if (kf.rotX) {
       let val = this.interpolate(kf.rotX, kf.times, t)
-      if (isArm) {
-        val = Math.max(
-          HERO_ANIMATION_TUNING.armSwingClampX.min,
-          Math.min(HERO_ANIMATION_TUNING.armSwingClampX.max, val),
-        )
+      if (sideConfig) {
+        val = Math.max(sideConfig.rotXMin, Math.min(sideConfig.rotXMax, val))
       }
       obj.rotation.x = val
     }
     if (kf.rotY) obj.rotation.y = this.interpolate(kf.rotY, kf.times, t)
     if (kf.rotZ) {
       let val = this.interpolate(kf.rotZ, kf.times, t)
-      if (isArm) {
+      if (sideConfig && isArm) {
+        const armX = obj.rotation.x
+        const softTorso = tuning.guardrails.torsoSoftCollision
+        const torsoT = Math.max(
+          0,
+          Math.min(1, (armX - softTorso.rotXStart) / (softTorso.rotXEnd - softTorso.rotXStart)),
+        )
+        const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance)
+        const minOutward = Math.max(
+          sideConfig.rotZMin,
+          tuning.torsoClearance + tuning.elbowOutBias + torsoPush,
+          tuning.guardrails.elbowInwardCollapseLimit,
+        )
         val = Math.max(
-          HERO_ANIMATION_TUNING.torsoClearance,
-          Math.min(HERO_ANIMATION_TUNING.armSwingClampZ + 1.2, val),
+          minOutward,
+          Math.min(sideConfig.rotZMax, val),
         )
       }
       obj.rotation.z = val

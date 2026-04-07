@@ -424,6 +424,9 @@ I did **not** fully re-audit scoreboard/projects in source, so keep this as a sp
    - remove `WorkbookConfig` type
    - remove `workbookConfigsCollection`
    - remove legacy pace helpers
+5. Phase 2C guardrail:
+   - keep workbook fallback reads until the guaranteed server-side backfill path has been deployed and verified for active families/children.
+   - see `docs/WORKBOOK_ACTIVITYCONFIG_BACKFILL.md` for exact rollout/validation gates.
 
 ### Phase 3 — Remove newer ladder UI path
 
