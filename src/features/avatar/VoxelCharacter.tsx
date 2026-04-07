@@ -24,7 +24,8 @@ import { buildHelmetCrest } from './voxel/buildHelmetCrest'
 import { buildRoom } from './voxel/buildRoom'
 import { addOutlinesToGroup, removeOutlinesFromGroup } from './voxel/blockOutline'
 import { buildAccessory, getAccessoryAttachPoint, animateAccessories, getHiddenAccessories } from './voxel/buildAccessory'
-import { HERO_ANIMATION_TUNING } from './voxel/heroAnimationTuning'
+import { resolveHeroAnimationConfig } from './voxel/heroAnimationConfig'
+import type { HeroAnimationConfig } from './voxel/heroAnimationConfig'
 import {
   getCurrentSeason,
   getSeasonalStarColor,
@@ -74,6 +75,8 @@ interface VoxelCharacterProps {
   accessories?: AccessoryId[]
   /** Custom character body proportions (from Character Tuner) */
   proportions?: Partial<CharacterProportions>
+  /** Optional runtime hero animation tuning for debug/workflow iteration */
+  animationTuning?: Partial<HeroAnimationConfig>
 }
 
 // ── Helmet hair management ────────────────────────────────────────────
@@ -141,14 +144,14 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
-function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number) {
-  const backwardPush = Math.max(0, rotX) * HERO_ANIMATION_TUNING.torsoAvoidanceGain
-  const minOutward = HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + backwardPush
-  const outwardZ = clamp(rotZ, minOutward, HERO_ANIMATION_TUNING.armSwingClampZ)
+function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number, tuning: HeroAnimationConfig) {
+  const backwardPush = Math.max(0, rotX) * tuning.torsoAvoidanceGain
+  const minOutward = tuning.handToTorsoClearance + tuning.elbowOutBias + backwardPush
+  const outwardZ = clamp(rotZ, minOutward, tuning.armSwingClampZ)
   const forwardX = clamp(
     rotX,
-    HERO_ANIMATION_TUNING.armSwingClampX.min,
-    HERO_ANIMATION_TUNING.armSwingClampX.max,
+    tuning.armSwingClampX.min,
+    tuning.armSwingClampX.max,
   )
   void side
   return { rotX: forwardX, rotZ: outwardZ }
@@ -366,6 +369,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   background = 'night',
   accessories = [],
   proportions,
+  animationTuning,
 }: VoxelCharacterProps, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -394,6 +398,8 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   const onTierUpRef = useRef(onTierUp)
   const ceremonyActiveRef = useRef(false)
   const sceneActiveRef = useRef(false)
+
+  const tuning = useMemo(() => resolveHeroAnimationConfig(animationTuning), [animationTuning])
 
   // Expose capture method to parent via ref
   useImperativeHandle(ref, () => ({
@@ -743,7 +749,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       poseAnimatorRef.current.play(pose, () => {
         // Smooth return to equipment idle pose
         if (characterRef.current) {
-          applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {})
+          applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {}, tuning.emoteIntensity)
         }
         const idlePose = getEquipmentIdlePose(equippedRef.current)
         poseAnimatorRef.current.play(idlePose, () => {
@@ -753,7 +759,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       // Apply facial expression for this pose
       if (characterRef.current) {
         const expr = POSE_EXPRESSIONS[pose.id]
-        if (expr) applyExpression(characterRef.current, expr)
+        if (expr) applyExpression(characterRef.current, expr, tuning.emoteIntensity)
       }
       onSwipePoseRef.current?.(pose.id)
     }
@@ -770,9 +776,11 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     equipPoseRef.current(equippedPieces)
 
     const poseAnimator = poseAnimatorRef.current
+    poseAnimator.setTuning(tuning)
     let baseFootL = 0
     let baseFootR = 0
     let baseFootCaptured = false
+    const basePartY = new Map<string, number>()
 
     sceneActiveRef.current = true
 
@@ -795,13 +803,14 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
 
         // Gentle breathing bob (freeze during ceremony so character stays still)
         if (!ceremonyActiveRef.current) {
-          characterRef.current.position.y = baseY + Math.sin(time * 2.1) * HERO_ANIMATION_TUNING.bodyBobAmplitude
-          characterRef.current.position.x = Math.sin(time * 0.8) * HERO_ANIMATION_TUNING.bodyLateralShift
+          characterRef.current.position.y = baseY + tuning.footPlantY + Math.sin(time * 2.1) * tuning.bodyBobAmplitude
+          characterRef.current.position.x = Math.sin(time * 0.8) * tuning.bodyLateralShift
+          characterRef.current.rotation.y = Math.sin(time * 0.6) * tuning.torsoTwist
 
           // Animate ground shadow scale with character bob
           const shadowMesh = scene.getObjectByName('groundShadow')
           if (shadowMesh) {
-            const bobScale = 1 + Math.sin(time * 2.1) * HERO_ANIMATION_TUNING.bodyBobAmplitude
+            const bobScale = 1 + Math.sin(time * 2.1) * tuning.bodyBobAmplitude
             shadowMesh.scale.set(bobScale, 1, bobScale)
           }
         }
@@ -829,6 +838,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           baseFootL = legLObj.position.x
           baseFootR = legRObj.position.x
           baseFootCaptured = true
+          for (const name of ['legL', 'bootL', 'bootBandL', 'legR', 'bootR', 'bootBandR'] as const) {
+            const part = characterRef.current.getObjectByName(name)
+            if (part) basePartY.set(name, part.position.y)
+          }
         }
 
         // Check if pose animator is actively playing (skip during ceremony)
@@ -849,8 +862,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           if (armLObj) {
             const constrained = constrainArmPose(
               'L',
-              currentEqPose.armLRotX + Math.sin(time * 0.8 + HERO_ANIMATION_TUNING.armPhaseOffset) * HERO_ANIMATION_TUNING.armSwingX,
-              currentEqPose.armLRotZ + Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.armSwingZ,
+              currentEqPose.armLRotX + Math.sin(time * 0.8 + tuning.armPhaseOffset) * tuning.shoulderSwingForward,
+              currentEqPose.armLRotZ + Math.sin(armSwayTime) * tuning.shoulderSwing,
+              tuning,
             )
             armLObj.rotation.z = constrained.rotZ
             armLObj.rotation.x = constrained.rotX
@@ -858,37 +872,42 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           if (armRObj) {
             const constrained = constrainArmPose(
               'R',
-              currentEqPose.armRRotX - Math.sin(time * 0.8 + HERO_ANIMATION_TUNING.armPhaseOffset) * HERO_ANIMATION_TUNING.armSwingX,
-              currentEqPose.armRRotZ - Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.armSwingZ,
+              currentEqPose.armRRotX - Math.sin(time * 0.8 + tuning.armPhaseOffset) * tuning.shoulderSwingForward,
+              currentEqPose.armRRotZ - Math.sin(armSwayTime) * tuning.shoulderSwing,
+              tuning,
             )
             armRObj.rotation.z = constrained.rotZ
             armRObj.rotation.x = constrained.rotX
           }
 
           // Foot planting: preserve authored base stance and only apply tiny opposite offsets.
-          const footSpread = Math.sin(time * 0.9 + Math.PI * 0.25) * HERO_ANIMATION_TUNING.footSway
+          const footSpread = Math.sin(time * 0.9 + Math.PI * 0.25) * tuning.footSway
           let leftX = baseFootL - footSpread
           let rightX = baseFootR + footSpread
-          if (rightX - leftX < HERO_ANIMATION_TUNING.footSeparation) {
+          const footLift = Math.abs(Math.sin(time * 1.1)) * tuning.footLift
+          if (rightX - leftX < tuning.footSeparationMin) {
             const center = (leftX + rightX) * 0.5
-            leftX = center - HERO_ANIMATION_TUNING.footSeparation * 0.5
-            rightX = center + HERO_ANIMATION_TUNING.footSeparation * 0.5
+            leftX = center - tuning.footSeparationMin * 0.5
+            rightX = center + tuning.footSeparationMin * 0.5
           }
-          for (const [name, x] of [
-            ['legL', leftX],
-            ['bootL', leftX],
-            ['bootBandL', leftX],
-            ['legR', rightX],
-            ['bootR', rightX],
-            ['bootBandR', rightX],
+          for (const [name, x, y] of [
+            ['legL', leftX, footLift],
+            ['bootL', leftX, footLift],
+            ['bootBandL', leftX, footLift],
+            ['legR', rightX, 0],
+            ['bootR', rightX, 0],
+            ['bootBandR', rightX, 0],
           ] as const) {
             const part = characterRef.current.getObjectByName(name)
-            if (part) part.position.x = x
+            if (part) {
+              part.position.x = x
+              part.position.y = (basePartY.get(name) ?? part.position.y) + y
+            }
           }
 
           // Head micro-movement — very slow, subtle look-around (6s period)
           if (headObj) {
-            headObj.rotation.y = Math.sin(time * (Math.PI * 2 / 6)) * 0.05
+            headObj.rotation.y = Math.sin(time * (Math.PI * 2 / 6)) * tuning.headTurnAmount
           }
         }
       }
@@ -960,7 +979,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         applyPaintedFace(headMesh, character, resolvedFeatures, skinHex)
       }
     }
-  }, [resolvedFeatures, ageGroup, equippedPieces, currentTier, skinTextureUrl, customization, armorColors, accessories, proportions])
+  }, [resolvedFeatures, ageGroup, equippedPieces, currentTier, skinTextureUrl, customization, armorColors, accessories, proportions, tuning])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
@@ -1182,9 +1201,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           if (autoPose) {
             setTimeout(() => {
               const expr = POSE_EXPRESSIONS[autoPose.id]
-              if (expr && characterRef.current) applyExpression(characterRef.current, expr)
+              if (expr && characterRef.current) applyExpression(characterRef.current, expr, tuning.emoteIntensity)
               poseAnimatorRef.current.play(autoPose, () => {
-                if (characterRef.current) applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {})
+                if (characterRef.current) applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {}, tuning.emoteIntensity)
                 const idlePose = getEquipmentIdlePose(equippedRef.current)
                 poseAnimatorRef.current.play(idlePose, () => {
                   onPoseComplete?.()
@@ -1223,7 +1242,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     equipPoseRef.current?.(equippedPieces)
 
     prevEquippedRef.current = current
-  }, [equippedPieces, currentTier, onPoseComplete, resolvedFeatures, armorColors])
+  }, [equippedPieces, currentTier, onPoseComplete, resolvedFeatures, armorColors, tuning])
 
   // ── Handle explicit pose trigger (from PoseButtons) ────────────
   useEffect(() => {
@@ -1234,12 +1253,12 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     // Apply facial expression
     if (characterRef.current) {
       const expr = POSE_EXPRESSIONS[pose.id]
-      if (expr) applyExpression(characterRef.current, expr)
+      if (expr) applyExpression(characterRef.current, expr, tuning.emoteIntensity)
     }
 
     poseAnimatorRef.current.play(pose, () => {
       if (characterRef.current) {
-        applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {})
+        applyExpression(characterRef.current, POSE_EXPRESSIONS.idle ?? {}, tuning.emoteIntensity)
       }
       // Smooth return to equipment idle
       const idlePose = getEquipmentIdlePose(equippedRef.current)
@@ -1247,7 +1266,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         onPoseComplete?.()
       })
     })
-  }, [activePoseId, onPoseComplete])
+  }, [activePoseId, onPoseComplete, tuning])
 
   // ── Handle equip animation trigger ──────────────────────────────
   useEffect(() => {

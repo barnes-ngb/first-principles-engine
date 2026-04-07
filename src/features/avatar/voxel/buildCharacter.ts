@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import type { CharacterFeatures, CharacterProportions, OutfitCustomization } from '../../../core/types'
 import { buildHair } from './buildHair'
-import { HERO_ANIMATION_TUNING } from './heroAnimationTuning'
+import { HERO_ANIMATION_DEFAULTS } from './heroAnimationConfig'
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -377,8 +377,8 @@ export function buildCharacter(
   // --- LEGS (pants upper + boot lower) ---
   const legCenter = legH / 2
   const halfStanceGap = Math.max(
-    HERO_ANIMATION_TUNING.stanceWidth * s * 0.5,
-    HERO_ANIMATION_TUNING.footSeparation * s * 0.5,
+    HERO_ANIMATION_DEFAULTS.stanceWidth * s * 0.5,
+    HERO_ANIMATION_DEFAULTS.footSeparationMin * s * 0.5,
   )
   const legXOffset = legW / 2 + halfStanceGap
 

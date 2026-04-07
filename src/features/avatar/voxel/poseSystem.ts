@@ -1,5 +1,6 @@
 import type * as THREE from 'three'
-import { HERO_ANIMATION_TUNING } from './heroAnimationTuning'
+import { HERO_ANIMATION_DEFAULTS } from './heroAnimationConfig'
+import type { HeroAnimationConfig } from './heroAnimationConfig'
 
 // ── Pose Keyframes ──────────────────────────────────────────────────
 
@@ -240,6 +241,11 @@ export class PoseAnimator {
   private startTime = 0
   private isPlaying = false
   private onComplete?: () => void
+  private tuning: HeroAnimationConfig = HERO_ANIMATION_DEFAULTS
+
+  setTuning(tuning: HeroAnimationConfig) {
+    this.tuning = tuning
+  }
 
   play(pose: Pose, onComplete?: () => void) {
     this.currentPose = pose
@@ -280,8 +286,8 @@ export class PoseAnimator {
       let val = this.interpolate(kf.rotX, kf.times, t)
       if (isArm) {
         val = Math.max(
-          HERO_ANIMATION_TUNING.armSwingClampX.min,
-          Math.min(HERO_ANIMATION_TUNING.armSwingClampX.max, val),
+          this.tuning.armSwingClampX.min,
+          Math.min(this.tuning.armSwingClampX.max, val),
         )
       }
       obj.rotation.x = val
@@ -291,11 +297,11 @@ export class PoseAnimator {
       let val = this.interpolate(kf.rotZ, kf.times, t)
       if (isArm) {
         const armX = obj.rotation.x
-        const torsoAvoidance = Math.max(0, armX) * HERO_ANIMATION_TUNING.torsoAvoidanceGain
-        const minOutward = HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoAvoidance
+        const torsoAvoidance = Math.max(0, armX) * this.tuning.torsoAvoidanceGain
+        const minOutward = this.tuning.handToTorsoClearance + this.tuning.elbowOutBias + torsoAvoidance
         val = Math.max(
           minOutward,
-          Math.min(HERO_ANIMATION_TUNING.armSwingClampZ + 1.2, val),
+          Math.min(this.tuning.armSwingClampZ + 1.2, val),
         )
       }
       obj.rotation.z = val
@@ -340,32 +346,38 @@ export class PoseAnimator {
 export function applyExpression(
   character: THREE.Group,
   expression: FacialExpression,
+  intensity = 1,
   skinColor?: number,
 ) {
+  const eyeScale = expression.eyeScale === undefined ? 1 : 1 + (expression.eyeScale - 1) * intensity
+  const mouthWidth = expression.mouthWidth === undefined ? 1 : 1 + (expression.mouthWidth - 1) * intensity
+  const mouthHeight = expression.mouthHeight === undefined ? 1 : 1 + (expression.mouthHeight - 1) * intensity
+  const eyebrowAngle = (expression.eyebrowAngle ?? 0) * intensity
+
   // Scale eye whites and pupils
   const eyeNames = ['eyeWhiteL', 'eyeWhiteR', 'pupilL', 'pupilR']
   for (const name of eyeNames) {
     const mesh = character.getObjectByName(name)
     if (mesh) {
-      mesh.scale.y = expression.eyeScale ?? 1
+      mesh.scale.y = eyeScale
     }
   }
 
   // Scale mouth
   const mouth = character.getObjectByName('mouth')
   if (mouth) {
-    mouth.scale.x = expression.mouthWidth ?? 1
-    mouth.scale.y = expression.mouthHeight ?? 1
+    mouth.scale.x = mouthWidth
+    mouth.scale.y = mouthHeight
   }
 
   // Rotate eyebrows
   const browL = character.getObjectByName('eyebrowL')
   const browR = character.getObjectByName('eyebrowR')
-  if (browL) browL.rotation.z = expression.eyebrowAngle ?? 0
-  if (browR) browR.rotation.z = -(expression.eyebrowAngle ?? 0)
+  if (browL) browL.rotation.z = eyebrowAngle
+  if (browR) browR.rotation.z = -eyebrowAngle
 
   // For closed eyes (prayer), hide whites to simulate eyelids
-  if ((expression.eyeScale ?? 1) < 0.2) {
+  if (eyeScale < 0.2) {
     for (const name of ['eyeWhiteL', 'eyeWhiteR']) {
       const mesh = character.getObjectByName(name)
       if (mesh) mesh.visible = false

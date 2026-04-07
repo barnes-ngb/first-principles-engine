@@ -1,6 +1,10 @@
+import { useMemo, useState } from 'react'
 import type { RefObject } from 'react'
 import Box from '@mui/material/Box'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
+import Slider from '@mui/material/Slider'
+import Typography from '@mui/material/Typography'
+import Button from '@mui/material/Button'
 
 import EditIcon from '@mui/icons-material/Edit'
 
@@ -11,6 +15,11 @@ import type { VoxelCharacterHandle } from './VoxelCharacter'
 import VoxelCharacter from './VoxelCharacter'
 import BrothersVoxelScene from './BrothersVoxelScene'
 import PoseButtons from './PoseButtons'
+import {
+  HERO_ANIMATION_DEFAULTS,
+  HERO_ANIMATION_DEBUG_CONTROLS,
+  resolveHeroAnimationConfig,
+} from './voxel/heroAnimationConfig'
 
 interface AvatarCharacterDisplayProps {
   profile: AvatarProfile
@@ -73,6 +82,16 @@ export default function AvatarCharacterDisplay({
   onEditCharacter,
   tunerOpen,
 }: AvatarCharacterDisplayProps) {
+  const debugEnabled = useMemo(() => {
+    if (typeof window === 'undefined') return false
+    return new URLSearchParams(window.location.search).get('heroAnimDebug') === '1'
+  }, [])
+  const [debugValues, setDebugValues] = useState(HERO_ANIMATION_DEFAULTS)
+  const mergedDebugTuning = useMemo(
+    () => (debugEnabled ? resolveHeroAnimationConfig(debugValues) : undefined),
+    [debugEnabled, debugValues],
+  )
+
   return (
     <>
       {/* ── Brothers Toggle ────── */}
@@ -250,6 +269,7 @@ export default function AvatarCharacterDisplay({
             onTierUpStart={onTierUpStart}
             onTierUp={onTierUp}
             proportions={proportions}
+            animationTuning={mergedDebugTuning}
           />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
             <Box sx={{ flex: 1 }}>
@@ -327,6 +347,46 @@ export default function AvatarCharacterDisplay({
               <PhotoCameraIcon sx={{ fontSize: 20 }} />
             </Box>
           </Box>
+          {debugEnabled && (
+            <Box
+              sx={{
+                mt: 1,
+                mx: 1,
+                mb: 1,
+                p: 1.5,
+                borderRadius: isLincoln ? '8px' : '16px',
+                border: `1px dashed ${isLincoln ? 'rgba(126,252,32,0.35)' : 'rgba(232,160,191,0.4)'}`,
+                background: isLincoln ? 'rgba(126,252,32,0.05)' : 'rgba(232,160,191,0.08)',
+              }}
+            >
+              <Typography sx={{ fontSize: 12, fontWeight: 700, mb: 0.5 }}>Hero Animation Debug (temporary)</Typography>
+              {HERO_ANIMATION_DEBUG_CONTROLS.map((control) => (
+                <Box key={control.key} sx={{ mb: 1 }}>
+                  <Typography sx={{ fontSize: 11, opacity: 0.8 }}>
+                    {control.label}: {debugValues[control.key].toFixed(3)}
+                  </Typography>
+                  <Slider
+                    size="small"
+                    min={control.min}
+                    max={control.max}
+                    step={control.step}
+                    value={debugValues[control.key]}
+                    onChange={(_, value) => {
+                      const nextValue = Array.isArray(value) ? value[0] : value
+                      setDebugValues((prev) => ({ ...prev, [control.key]: nextValue }))
+                    }}
+                  />
+                </Box>
+              ))}
+              <Button
+                size="small"
+                onClick={() => setDebugValues(HERO_ANIMATION_DEFAULTS)}
+                sx={{ textTransform: 'none', fontSize: 11 }}
+              >
+                Reset defaults
+              </Button>
+            </Box>
+          )}
         </Box>
       )}
     </>
