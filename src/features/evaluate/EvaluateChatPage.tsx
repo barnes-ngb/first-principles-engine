@@ -44,8 +44,10 @@ import type {
   EvaluationSession,
   SkillSnapshot,
 } from '../../core/types'
+import { DIAMOND_EVENTS } from '../../core/types'
 import FoundationsSection from './FoundationsSection'
 import { ChatMessageRole, EvaluationDomain, MasteryGate, SkillLevel } from '../../core/types/enums'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -549,11 +551,20 @@ export default function EvaluateChatPage() {
           25,
           `eval_${sessionDocId}`,
         ).catch((err) => console.error('[XP] Award failed:', err))
+
+        void addDiamondEvent({
+          familyId,
+          childId: activeChildId,
+          amount: 5,
+          type: DIAMOND_EVENTS.EVALUATION_COMPLETE,
+          reason: `Evaluation completed (${domain})`,
+          dedupKey: `eval_${sessionDocId}-diamond`,
+        }).catch((err) => console.error('[Diamond] Evaluation award failed:', err))
       }
     } catch (err) {
       console.error('Failed to apply findings to skill snapshot', err)
     }
-  }, [activeChildId, familyId, findings, recommendations, completeData, sessionDocId, conceptualBlocks])
+  }, [activeChildId, familyId, findings, recommendations, completeData, sessionDocId, conceptualBlocks, domain])
 
   // ── Clear & Restart ───────────────────────────────────────
 
