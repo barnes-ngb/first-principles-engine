@@ -242,3 +242,248 @@ The comprehension prompt defines difficulty in 2-level bands rather than per-lev
 8. **Math has no starting-level boost from curriculum data.** Unlike reading, math always starts at Level 2 regardless of curriculum completion. Is this intentional or an oversight?
 
 9. **Word progress tracking**: Only fires for the interactive quest modes (phonics/comprehension), not for fluency or math. Tracked at `families/{familyId}/children/{childId}/wordProgress` — a subcollection not listed in CLAUDE.md's Firestore Collections table (it is mentioned in a note but not in the main table).
+
+---
+
+## Part B: Adaptive Logic Audit
+
+### MASTER_OUTLINE Rule Verification
+
+| Rule | Expected | Actual | Status | Location |
+|---|---|---|---|---|
+| 3 correct → level up | 3 consecutive correct answers raise level by 1 | `consecutiveCorrect >= LEVEL_UP_STREAK (3)` triggers `currentLevel + 1` | **PASS** | `questAdaptive.ts:28-31` |
+| 2 wrong → level down | 2 consecutive wrong answers lower level by 1 | `consecutiveWrong >= LEVEL_DOWN_STREAK (2)` triggers `currentLevel - 1` | **PASS** | `questAdaptive.ts:36-41` |
+| 10 question cap | Session ends after 10 questions | `totalQuestions >= MAX_QUESTIONS (10)` triggers end | **PASS** | `questAdaptive.ts:64`, `questTypes.ts:38` |
+| 8 minute cap | Session ends after 480 seconds | `elapsedSeconds >= MAX_SECONDS (480)` triggers end | **PASS** | `questAdaptive.ts:60-61`, `questTypes.ts:40` |
+| Frustration limit | 2 consecutive level-downs end session | `levelDownsInARow >= FRUSTRATION_LIMIT (2)` triggers end (only after `MIN_QUESTIONS` reached) | **PASS** | `questAdaptive.ts:66` |
+| End-on-a-win bonus round | If session would end on a wrong answer, give one bonus question at easier level | Bonus round fires when `shouldEnd && !timedOut && !correct && !bonusRoundUsedRef.current && levelDownsInARow < FRUSTRATION_LIMIT`. Bonus level = `currentLevel - 2` (floor 1). Used only once per session (`bonusRoundUsedRef`). | **PASS** | `useQuestSession.ts:1037-1054, 1062` |
+| Level floor = 1 | Can't go below Level 1 | `currentLevel > 1` guard on level-down | **PASS** | `questAdaptive.ts:36` |
+| Level ceiling = 10 | Can't go above Level 10 | `currentLevel < 10` guard on level-up | **PASS** | `questAdaptive.ts:28` |
+| Minimum questions = 5 | Frustration limit doesn't trigger before 5 questions | `pastMinimum = totalQuestions >= MIN_QUESTIONS (5)` required for frustration end | **PASS** | `questAdaptive.ts:63, 66` |
+
+### Test Coverage
+
+The adaptive logic has thorough unit tests in `questAdaptive.test.ts`:
+- Level up after 3 correct (lines 25-38)
+- No level up past 10 (lines 47-52)
+- Level down after 2 wrong (lines 56-66)
+- No level down past 1 (lines 68-72)
+- `levelDownsInARow` increment on level-down (lines 74-78)
+- `levelDownsInARow` reset on any correct answer (lines 41-44)
+- Session end at 10 questions (line 112-114)
+- Session end at 480 seconds (lines 116-118)
+- Frustration end after MIN_QUESTIONS (lines 120-125)
+- No frustration end before MIN_QUESTIONS (lines 127-129)
+- Timeout still ends before MIN_QUESTIONS (lines 131-133)
+
+**Missing test**: No unit test for the bonus round logic itself (it lives in `useQuestSession.ts`, not in the pure `questAdaptive.ts` functions). The bonus round is integration-level logic, harder to unit test but should be tested.
+
+### Edge Cases — Frustration Loop Analysis
+
+**Scenario: Lincoln stuck at Level 1**
+
+If Lincoln starts at Level 2 and gets 2 wrong → drops to Level 1. Gets 2 more wrong at Level 1 → can't drop below 1, but `levelDownsInARow` is NOT incremented because the level-down guard (`currentLevel > 1`) prevents the level change AND the `levelDownsInARow` increment (both are inside the same `if` block at `questAdaptive.ts:36-41`).
+
+**This is a potential frustration trap.** Here's the sequence:
+
+1. Start Level 2. Wrong, wrong → Level 1. `levelDownsInARow = 1`.
+2. Level 1. Wrong → `consecutiveWrong = 1`. No level change (floor).
+3. Level 1. Wrong → `consecutiveWrong = 2`. Guard fails (`currentLevel > 1` is false). `consecutiveWrong` stays at 2 (never reset because the level-down block doesn't execute). `levelDownsInARow` stays at 1.
+4. Level 1. Wrong → `consecutiveWrong = 3`. Same — guard keeps failing.
+5. **The child is stuck**: `levelDownsInARow` is frozen at 1 (never reaches FRUSTRATION_LIMIT of 2), so the frustration exit never fires. The only exits are 10-question cap or 8-minute timeout.
+
+**Wait — let me re-read the code more carefully.**
+
+At `questAdaptive.ts:34-41`:
+```ts
+consecutiveWrong = prev.consecutiveWrong + 1
+consecutiveCorrect = 0
+if (consecutiveWrong >= LEVEL_DOWN_STREAK && currentLevel > 1) {
+  currentLevel = prev.currentLevel - 1
+  consecutiveWrong = 0
+  questionsThisLevel = 0
+  levelDownsInARow = prev.levelDownsInARow + 1
+}
+```
+
+When at Level 1: `consecutiveWrong` keeps incrementing (1, 2, 3, 4...) because the reset inside the `if` block never fires. But `levelDownsInARow` never increments past 1. So:
+
+**Finding B1 (Medium): Level 1 frustration trap.** A child who drops to Level 1 and continues getting wrong answers will never trigger the frustration exit (`levelDownsInARow >= 2`). They must answer all 10 questions or wait 8 minutes. This is the worst case for Lincoln: stuck at Level 1 with questions he can't answer, no adaptive escape.
+
+**Mitigation already present**: The skip button appears after 8 seconds or 2 consecutive wrong answers (`ReadingQuest.tsx:500`). Skips don't count toward the question total (`useQuestSession.ts:1195-1196`), so Lincoln can skip bad questions indefinitely. However, skipping also doesn't advance the session toward the 10-question exit — a skip-heavy session could theoretically run until the 8-minute timeout. In practice, the parent would intervene, but the system doesn't have an automatic escape.
+
+**Recommendation**: Consider adding a "total wrong at Level 1" counter (e.g., 4 wrong answers at Level 1 → end session), or counting level-floor hits toward `levelDownsInARow`.
+
+---
+
+**Scenario: Rapid oscillation between levels**
+
+1. Level 3. Correct, correct, correct → Level 4. `levelDownsInARow = 0`.
+2. Level 4. Wrong, wrong → Level 3. `levelDownsInARow = 1`.
+3. Level 3. Correct, correct, correct → Level 4. `levelDownsInARow = 0` (reset by correct answer at step 3.1).
+4. Level 4. Wrong, wrong → Level 3. `levelDownsInARow = 1`.
+5. Repeat.
+
+**Finding B2 (Low): Oscillation doesn't trigger frustration exit.** Because any correct answer resets `levelDownsInARow` to 0 (`questAdaptive.ts:27`), a child who oscillates between two levels (e.g., getting 3 right then 2 wrong repeatedly) will never trigger the frustration limit. They'll hit the 10-question cap naturally, which is appropriate — this pattern shows the child is near their frontier, and the 10-question cap keeps the session short.
+
+**Verdict**: Not a real problem. The 10-question cap handles this correctly.
+
+---
+
+**Scenario: Bonus round edge cases**
+
+The bonus round fires when:
+- Session should end (10 questions OR frustration limit)
+- Last answer was wrong
+- Not timed out
+- Bonus not already used
+- `levelDownsInARow < FRUSTRATION_LIMIT`
+
+The bonus level is `Math.max(1, currentLevel - 2)`.
+
+**Finding B3 (Low): Bonus round can exceed MAX_QUESTIONS.** If the session hits 10 questions on a wrong answer, the bonus round adds an 11th question. This is by design (the bonus question extends the session to end on a positive note). The counter display shows `11/10` momentarily (`ReadingQuest.tsx:545`: `questState.totalQuestions + 1}/{MAX_QUESTIONS}`). Cosmetic issue only — the underlying behavior is intentional and correct.
+
+**Finding B4 (Info): Bonus round skipped during frustration.** The bonus round correctly does NOT fire when `levelDownsInARow >= FRUSTRATION_LIMIT` (`useQuestSession.ts:1043`). This means a child who exits due to frustration won't be forced to do one more question — good design for Lincoln.
+
+### Adaptive State Purity
+
+`computeNextState` is a pure function with no side effects — verified by inspection. All state transitions are deterministic. The function does not access refs, hooks, or external state. It only reads its two inputs (`prev: QuestState`, `correct: boolean`) and returns a new state object.
+
+The skip path correctly does NOT call `computeNextState` (`useQuestSession.ts:1195`), so skips don't affect level, streaks, or frustration counters.
+
+---
+
+## Part C: Quest UX Audit
+
+### C1: "Back to Mine" Button — Accidental Tap Risk
+
+**Location**: `KnowledgeMinePage.tsx:337-350` (active quest) and `KnowledgeMinePage.tsx:160-172` (fluency).
+
+**Current implementation**:
+```tsx
+<Button
+  onClick={quest.resetToIntro}
+  sx={{
+    fontFamily: MC.font,
+    fontSize: '0.4rem',
+    color: MC.stone,
+    textTransform: 'none',
+    mb: 1,
+    '&:hover': { color: MC.white },
+  }}
+>
+  ← Back to mine
+</Button>
+```
+
+**Finding C1 (High): No confirmation dialog.** Tapping "← Back to mine" immediately calls `resetToIntro()`, which clears ALL session state — `questState`, `answeredQuestions`, `findings`, `currentQuestion`, etc. (`useQuestSession.ts:1496-1516`). There is no confirm dialog. If Lincoln accidentally taps it mid-question, the entire session is lost with no recovery. The session has NOT been saved to Firestore at this point (saving happens only in `endSession()`).
+
+**Position**: The button is rendered ABOVE the question card, in the top-left corner. On a phone, this is close to where a child might tap while scrolling or adjusting grip. The button has no minimum tap target height (uses default MUI Button sizing with `fontSize: '0.4rem'`, which is very small). The small size reduces accidental tap risk somewhat, but the lack of confirmation is the real danger.
+
+**Visibility**: The button is hidden on the Summary screen (`quest.screen !== QuestScreen.Summary` guard at line 337), which is correct — once the session is complete, "Back to mine" shouldn't appear.
+
+**Recommendation**:
+1. Add a confirmation dialog: "End quest? Your progress won't be saved." with Cancel/End buttons.
+2. Alternatively, auto-save partial sessions before navigating away, so progress isn't completely lost.
+3. Consider moving the button to a less prominent position (e.g., overflow menu / three-dot icon).
+
+### C2: Phoneme Display — `/s/ /t/` Style Notation
+
+**Finding C2 (Pass): Phoneme display is correctly scoped to Levels 1-3 only.**
+
+- The AI prompt explicitly limits phoneme display: "Levels 1-3 ONLY: You may include phonemeDisplay with SIMPLE notation: /s/ /t/ /o/ /p/" (`chat.ts:1058`).
+- The prompt explicitly bans IPA symbols: "NEVER use macrons (ā, ē, ī, ō, ū), schwas (ə), or IPA symbols" (`chat.ts:1059`).
+- Kid-friendly substitutions are mandated: `/ay/` for long-a, `/ee/` for long-e, `/igh/` for long-i, `/oh/` for long-o, `/yoo/` for long-u (`chat.ts:1060`).
+- Level 4+: "Set phonemeDisplay to null. Do NOT show phoneme breakdowns at higher levels" (`chat.ts:1061`).
+- The client renders `phonemeDisplay` only if the field is present (`ReadingQuest.tsx:734`: `{question.phonemeDisplay && ...}`), so even if the AI erroneously includes it at Level 5+, the field would render. However, the AI is explicitly told not to, and the field is optional (`questTypes.ts:78`).
+
+**Concern**: No client-side level check. If the AI sends `phonemeDisplay` at Level 5, the client will display it. A defensive guard like `{question.phonemeDisplay && questState.currentLevel <= 3 && ...}` would be safer, but this is low risk since the prompt is clear.
+
+### C3: Word Stimulus Rendering
+
+**Finding C3 (Pass): Target word renders large and clear above answer options.**
+
+The stimulus word display at `ReadingQuest.tsx:711-731`:
+```tsx
+{displayStimulus && (
+  <Box sx={{
+    bgcolor: MC.darkStone,
+    border: `2px solid ${MC.diamond}`,
+    borderRadius: 2,
+    p: 2.5,
+    textAlign: 'center',
+    mb: 3,
+  }}>
+    <TappableText
+      text={displayStimulus}
+      onTapWord={speakWord}
+      fontFamily={MC.font}
+      fontSize="1.4rem"
+      color={MC.diamond}
+      sx={{ letterSpacing: 6, textTransform: 'lowercase' }}
+    />
+  </Box>
+)}
+```
+
+- Font size: `1.4rem` — significantly larger than the prompt (`0.7rem`) and options (`0.7rem`).
+- Color: `MC.diamond` (#5BFCEE) — bright cyan on dark background, high contrast.
+- Border: `2px solid ${MC.diamond}` — clearly delineated box.
+- Position: Above the answer options, below the prompt text. Correct visual hierarchy.
+- Tappable for TTS: Each word in the stimulus is individually tappable to hear pronunciation.
+- Defensive fallback: If the AI omits the stimulus but the prompt asks "What word is this?", the code falls back to using `correctAnswer` as the display word (`ReadingQuest.tsx:521`). This prevents Lincoln from guessing blind.
+
+### C4: Skip Button Behavior
+
+**Finding C4 (Pass with notes): Skip is well-designed but has an infinite-skip edge case.**
+
+**When Skip appears** (`ReadingQuest.tsx:500`):
+- After 8 seconds on the current question (`timerElapsed`), OR
+- After 2+ consecutive wrong answers (`consecutiveWrong >= 2`)
+
+**What Skip does** (`ReadingQuest.tsx:506-514`, `useQuestSession.ts:1167-1196`):
+
+1. **UI**: Highlights the correct answer for 2 seconds (correct option turns green, others fade), then moves on.
+2. **Recording**: The question is recorded as `skipped: true`, `correct: false`, `childAnswer: ''`.
+3. **Error flagging**: If the question had a formatting error (detected by `shouldFlagAsError()`), it's also marked `flaggedAsError: true`.
+4. **Adaptive state**: Skip does NOT call `computeNextState()`. It does NOT increment `totalQuestions`, `consecutiveWrong`, `consecutiveCorrect`, or `levelDownsInARow`. The adaptive engine is completely unaffected by skips.
+5. **Next question**: A replacement question is requested at the same level with an instruction to test a different skill/word.
+
+**Behavior is consistent across quest types**: The same `handleSkip` function is used for phonics, comprehension, and math quests. Fluency mode doesn't have skippable questions (it's self-paced reading).
+
+**Edge case — infinite skips** (`useQuestSession.ts:1195-1196`):
+> "DO NOT call computeNextState — skip doesn't affect adaptive state"
+> "DO NOT increment totalQuestions — question counter stays the same"
+
+Because skips don't count toward `totalQuestions`, a child could theoretically skip indefinitely without ever reaching the 10-question cap. The only exits would be:
+- The 8-minute timeout (which continues ticking during skips)
+- The parent tapping "Back to mine"
+- The child answering (not skipping) enough questions to trigger a normal end condition
+
+**In practice**: This is unlikely to be a problem. Skipping generates a new question at the same level, so a child who skips repeatedly will keep getting new questions they can attempt. The 8-minute timeout provides a hard backstop. And a child who is motivated enough to keep skipping is demonstrating engagement (or demonstrating that the questions are too hard, which the parent would notice).
+
+**UI detail**: The skip button is styled as a muted stone-colored block below the answer options (`ReadingQuest.tsx:829-872`). It has `minHeight: 56` — same as answer options. It says "Skip ⛏️". It's visually distinct from answer options (stone border vs. no border on options), reducing accidental skip taps.
+
+### C5: Score Framing — "Questions Explored" vs. "X Correct out of Y"
+
+**Finding C5 (Pass): The child-facing UI consistently uses "questions explored" and "diamonds mined" framing. No "X correct out of Y" language appears.**
+
+| Location | What's Shown | Framing |
+|---|---|---|
+| In-quest header (`ReadingQuest.tsx:544-546`) | `{totalQuestions + 1}/{MAX_QUESTIONS}` | Progress counter ("question 3 of 10"), NOT a score |
+| In-quest diamond counter (`ReadingQuest.tsx:585`) | `💎 {questState.totalCorrect}` | Raw diamond count, no denominator |
+| Feedback — correct (`ReadingQuest.tsx:165`) | `{totalCorrect} diamond(s) mined so far` | Diamonds framing |
+| Feedback — wrong (`ReadingQuest.tsx:129`) | `Almost!` + correct answer + encouragement | No score shown on wrong answer |
+| Summary diamonds (`QuestSummary.tsx:136`) | `{totalCorrect} diamond(s) mined!` | Diamonds framing |
+| Summary detail (`QuestSummary.tsx:145`) | `{totalQuestions} questions explored · Level {finalLevel}` | "Questions explored" — not "correct" |
+| Summary XP (`QuestSummary.tsx:229`) | `+{questXp} XP!` | XP framing |
+
+**One parent-facing exception**: The internal session summary text (`useQuestSession.ts:658`) uses `${finalState.totalCorrect}/${finalState.totalQuestions} correct` — but this is stored in Firestore for the parent's review, not shown to the child during the quest.
+
+**The diamond count implicitly reveals the score** (noted in Part A as PARTIAL), but it's framed as an achievement ("diamonds mined") rather than a deficit ("X wrong"). A child who gets 3 out of 10 sees "3 diamonds mined!" and "10 questions explored" — positive framing on both counts.
+
+### C6: Additional UX Finding — Header Counter Shows "11/10" During Bonus Round
+
+During the bonus round, `totalQuestions` has already reached 10 (the trigger for `shouldEnd`), but a new question is shown. The header renders `{questState.totalQuestions + 1}/{MAX_QUESTIONS}` which evaluates to `11/10`. This is a minor cosmetic issue — the "BONUS ROUND!" banner at `ReadingQuest.tsx:589-616` draws attention away from the counter, but `11/10` could confuse a child who notices it.
+
+**Recommendation**: Hide the progress counter during the bonus round, or cap the display at `10/10`.
