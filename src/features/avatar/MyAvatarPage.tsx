@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { addDoc, arrayRemove, deleteField, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore'
+import { addDoc, arrayRemove, deleteField, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
 import Box from '@mui/material/Box'
 import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
@@ -16,7 +16,9 @@ import {
   avatarProfilesCollection,
   dailyArmorSessionsCollection,
   dailyArmorSessionDocId,
+  daysCollection,
   stripUndefined,
+  weeksCollection,
 } from '../../core/firebase/firestore'
 import { uploadArtifactFile, generateFilename } from '../../core/firebase/upload'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -62,17 +64,28 @@ import UnlockCelebration from './UnlockCelebration'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
 import TierUpCeremony from '../../components/avatar/TierUpCeremony'
 import { calculateTier, TIERS } from './voxel/tierMaterials'
-import AvatarHeroBanner from './AvatarHeroBanner'
 import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
 import { getArmorGateStatusFromSession } from './armorGate'
+import { getWeekRange } from '../../core/utils/time'
+import { dayLogDocId } from '../today/daylog.model'
+import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
+import StonebridgePreviewCard from './StonebridgePreviewCard'
 
 type NextRecommendedAction =
   | { type: 'forge'; label: string }
   | { type: 'suit_up'; label: string }
   | { type: 'start_day'; label: string }
   | { type: 'earn_xp'; label: string }
+
+type HeroHubWeekData = {
+  weekNumber?: number
+  conundrum?: { title: string; answered: boolean }
+  chapterQuestion?: { answered: boolean }
+  chapterTitle?: string
+  chapterIntro?: string
+}
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -191,6 +204,7 @@ export default function MyAvatarPage() {
   // Character tuner state
   const [tunerOpen, setTunerOpen] = useState(false)
   const [childCustomizerExpanded, setChildCustomizerExpanded] = useState(false)
+  const [weekData, setWeekData] = useState<HeroHubWeekData | null>(null)
   const [localProportions, setLocalProportions] = useState<CharacterProportions>(DEFAULT_PROPORTIONS)
   const siblingChild = children.find((c) => c.id !== childId)
   const siblingId = brothersMode ? siblingChild?.id : undefined
@@ -402,6 +416,45 @@ export default function MyAvatarPage() {
       }
     }
   }, [profile, session, familyId, childId, today])
+
+  useEffect(() => {
+    if (!familyId || !childId) return
+    let cancelled = false
+
+    const loadHeroHubWeekData = async () => {
+      const weekRange = getWeekRange(new Date())
+      const dayLogRef = doc(daysCollection(familyId), dayLogDocId(today, childId))
+      const [dayLogSnap, weekSnap] = await Promise.all([
+        getDoc(dayLogRef),
+        getDocs(query(weeksCollection(familyId), where('startDate', '==', weekRange.start))),
+      ])
+      if (cancelled) return
+
+      const dayLog = dayLogSnap.exists() ? dayLogSnap.data() : null
+      const weekPlan = weekSnap.docs[0]?.data()
+      const weekStart = new Date(`${weekRange.start}T00:00:00Z`)
+      const currentWeek = Math.max(1, Math.floor((Date.now() - weekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1)
+
+      setWeekData({
+        weekNumber: currentWeek,
+        conundrum: weekPlan?.conundrum
+          ? { title: weekPlan.conundrum.title, answered: !!weekPlan.conundrum.discussed }
+          : undefined,
+        chapterQuestion: dayLog?.chapterQuestion
+          ? { answered: !!dayLog.chapterQuestion.responded }
+          : undefined,
+        chapterTitle: dayLog?.chapterQuestion
+          ? `${dayLog.chapterQuestion.book} ${dayLog.chapterQuestion.chapter}`
+          : undefined,
+        chapterIntro: dayLog?.chapterQuestion?.question,
+      })
+    }
+
+    void loadHeroHubWeekData()
+    return () => {
+      cancelled = true
+    }
+  }, [familyId, childId, today])
 
   // ── Outfit color change ──────────────────────────────────────────
   const handleOutfitColorChange = useCallback(
@@ -874,6 +927,45 @@ export default function MyAvatarPage() {
     return { type: 'start_day', label: 'Start your day' }
   })()
 
+  const mission: HeroMission = (() => {
+    if (!allEarnedApplied) {
+      return {
+        icon: '⚡',
+        title: "Today's Mission",
+        text: 'Suit up your armor and head to the village square.',
+        cta: 'Suit Up & Begin',
+        action: () => {
+          document.getElementById('hero-hub-customize')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        },
+      }
+    }
+    if (weekData?.conundrum && !weekData.conundrum.answered) {
+      return {
+        icon: '🤔',
+        title: "Today's Mission",
+        text: `${weekData.conundrum.title} — the village needs your wisdom.`,
+        cta: 'Join the Discussion',
+        action: () => navigate('/today#conundrum'),
+      }
+    }
+    if (weekData?.chapterQuestion && !weekData.chapterQuestion.answered) {
+      return {
+        icon: '📖',
+        title: "Today's Mission",
+        text: 'A new chapter awaits in Stonebridge.',
+        cta: 'Read & Discuss',
+        action: () => navigate('/today#chapter'),
+      }
+    }
+    return {
+      icon: '⚔️',
+      title: 'Hero Ready',
+      text: 'Your armor is on. The village is counting on you.',
+      cta: 'Start Your Day',
+      action: () => navigate('/today'),
+    }
+  })()
+
   // ── Screenshot capture ──────────────────────────────────────────
   const playShutterSound = useCallback(() => {
     try {
@@ -1076,7 +1168,7 @@ export default function MyAvatarPage() {
         />
       )}
       <Page>
-        {/* ── Child Switcher + XP/Tier Header ────── */}
+        {/* ── Hero Hub Header ────── */}
         <Box sx={{ textAlign: 'center', pt: 1.5, pb: 0.5 }}>
           {/* Child switcher — only for parent profiles with multiple children */}
           {!isChildProfile && children.length > 1 && (
@@ -1123,16 +1215,25 @@ export default function MyAvatarPage() {
             </Box>
           )}
 
-          {/* ── Tier + XP Hero Banner ────── */}
-          <AvatarHeroBanner
-            profile={profile}
-            displayXp={displayXp}
-            isLincoln={isLincoln}
-            isChildProfile={isChildProfile}
-            childName={activeChild?.name}
-            childCount={children.length}
-            accentColor={accentColor}
-          />
+          <Box
+            sx={{
+              mx: 1,
+              px: 2,
+              py: 1.5,
+              borderRadius: isLincoln ? '8px' : '16px',
+              border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.14)' : 'rgba(232,160,191,0.2)'}`,
+              background: isLincoln ? 'rgba(14,20,28,0.9)' : 'rgba(255,245,251,0.9)',
+            }}
+          >
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
+              <Box sx={{ fontFamily: titleFont, fontSize: isLincoln ? '14px' : '18px', fontWeight: 700 }}>
+                Hero Hub
+              </Box>
+              <Box sx={{ fontFamily: titleFont, fontSize: isLincoln ? '10px' : '14px', opacity: 0.72 }}>
+                {activeChild?.name ?? 'Hero'}
+              </Box>
+            </Box>
+          </Box>
         </Box>
 
         {/* ── 3D Character Display ─────────────────────────────── */}
@@ -1182,6 +1283,45 @@ export default function MyAvatarPage() {
           }}
         />
 
+        <HeroMissionCard mission={mission} isLincoln={isLincoln} />
+        <StonebridgePreviewCard
+          isLincoln={isLincoln}
+          weekData={{
+            weekNumber: weekData?.weekNumber,
+            chapterTitle: weekData?.chapterTitle,
+            chapterIntro: weekData?.chapterIntro,
+            conundrumTitle: weekData?.conundrum?.title,
+          }}
+        />
+        <Box
+          sx={{
+            mx: 1,
+            mt: 1,
+            mb: 1,
+            px: 1.5,
+            py: 1,
+            borderRadius: isLincoln ? '6px' : '12px',
+            border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.16)' : 'rgba(232,160,191,0.2)'}`,
+            background: isLincoln ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.6)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 1,
+            overflowX: 'auto',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <Box sx={{ fontFamily: titleFont, fontSize: isLincoln ? '10px' : '14px' }}>
+            ◆ {optimisticDiamondBalance ?? profile.diamondBalance ?? 0}
+          </Box>
+          <Box sx={{ fontFamily: titleFont, fontSize: isLincoln ? '10px' : '14px' }}>
+            XP {displayXp}
+          </Box>
+          <Box sx={{ fontFamily: titleFont, fontSize: isLincoln ? '10px' : '14px' }}>
+            {currentTierName} tier
+          </Box>
+        </Box>
+
         {/* ── XP + Diamond HUD ────────────────────────────────── */}
         {familyId && childId && (
           <Box sx={{ mx: 2, mb: 1 }}>
@@ -1192,6 +1332,9 @@ export default function MyAvatarPage() {
             />
           </Box>
         )}
+        <Box id="hero-hub-customize" sx={{ mx: 2, my: 1.5, textAlign: 'center', opacity: 0.7, fontFamily: titleFont, fontSize: isLincoln ? '10px' : '14px' }}>
+          ── Customize ──
+        </Box>
 
         {/* ── Morning reset + Armor status + Suit Up ────────────── */}
         <ArmorSuitUpPanel

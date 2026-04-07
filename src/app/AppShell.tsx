@@ -32,7 +32,7 @@ const navItems = [
 const kidNavItems = [
   { label: 'Today', to: '/today' },
   { label: 'Knowledge Mine', to: '/quest' },
-  { label: 'My Armor', to: '/avatar' },
+  { label: 'Hero Hub', to: '/avatar' },
   { label: 'My Books', to: '/books' },
   { label: 'My Stuff', to: '/records/portfolio' },
   { label: 'Game Workshop', to: '/workshop' },
