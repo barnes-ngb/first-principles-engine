@@ -9,6 +9,7 @@ interface XpDiamondBarProps {
   familyId: string
   childId: string
   compact?: boolean
+  diamondBalanceOverride?: number | null
 }
 
 /** Compute next tier label and XP needed */
@@ -33,9 +34,15 @@ function getNextTier(totalXp: number): { label: string; xpNeeded: number; progre
  * Compact XP progress bar + diamond balance HUD.
  * Minecraft-style aesthetic: green XP bar, cyan diamond icon.
  */
-export default function XpDiamondBar({ familyId, childId, compact }: XpDiamondBarProps) {
+export default function XpDiamondBar({
+  familyId,
+  childId,
+  compact,
+  diamondBalanceOverride = null,
+}: XpDiamondBarProps) {
   const { totalXp, loading: xpLoading } = useXpLedger(familyId, childId)
   const { balance: diamondBalance, loading: diamondsLoading } = useDiamondBalance(familyId, childId)
+  const displayedDiamondBalance = diamondBalanceOverride ?? diamondBalance
 
   const nextTier = getNextTier(totalXp)
 
@@ -122,7 +129,7 @@ export default function XpDiamondBar({ familyId, childId, compact }: XpDiamondBa
           {'\u25C6'}
         </Typography>
         <Typography
-          key={diamondBalance}
+          key={displayedDiamondBalance}
           sx={{
             fontFamily: '"Press Start 2P", monospace',
             fontSize: compact ? '10px' : '12px',
@@ -137,7 +144,7 @@ export default function XpDiamondBar({ familyId, childId, compact }: XpDiamondBa
             },
           }}
         >
-          {diamondBalance}
+          {displayedDiamondBalance}
         </Typography>
       </Box>
     </Box>
