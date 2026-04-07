@@ -142,7 +142,8 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number) {
-  const minOutward = HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias
+  const backwardPush = Math.max(0, rotX) * HERO_ANIMATION_TUNING.torsoAvoidanceGain
+  const minOutward = HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + backwardPush
   const outwardZ = clamp(rotZ, minOutward, HERO_ANIMATION_TUNING.armSwingClampZ)
   const forwardX = clamp(
     rotX,
@@ -769,6 +770,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     equipPoseRef.current(equippedPieces)
 
     const poseAnimator = poseAnimatorRef.current
+    let baseFootL = 0
+    let baseFootR = 0
+    let baseFootCaptured = false
 
     sceneActiveRef.current = true
 
@@ -792,6 +796,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         // Gentle breathing bob (freeze during ceremony so character stays still)
         if (!ceremonyActiveRef.current) {
           characterRef.current.position.y = baseY + Math.sin(time * 2.1) * HERO_ANIMATION_TUNING.bodyBobAmplitude
+          characterRef.current.position.x = Math.sin(time * 0.8) * HERO_ANIMATION_TUNING.bodyLateralShift
 
           // Animate ground shadow scale with character bob
           const shadowMesh = scene.getObjectByName('groundShadow')
@@ -817,6 +822,14 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         const armLObj = characterRef.current.getObjectByName('armL')
         const armRObj = characterRef.current.getObjectByName('armR')
         const headObj = characterRef.current.getObjectByName('headGroup')
+        const legLObj = characterRef.current.getObjectByName('legL')
+        const legRObj = characterRef.current.getObjectByName('legR')
+
+        if (!baseFootCaptured && legLObj && legRObj) {
+          baseFootL = legLObj.position.x
+          baseFootR = legRObj.position.x
+          baseFootCaptured = true
+        }
 
         // Check if pose animator is actively playing (skip during ceremony)
         const poseActive = !ceremonyActiveRef.current && armLObj && armRObj && headObj && poseAnimator.update(
@@ -852,23 +865,22 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             armRObj.rotation.x = constrained.rotX
           }
 
-          // Foot planting + stance micro-shift to avoid visual overlap from camera angles
-          const footSpread = Math.sin(time * 0.9) * HERO_ANIMATION_TUNING.footSway
-          const leftX = -HERO_ANIMATION_TUNING.stanceWidth / 2 - footSpread
-          const rightX = HERO_ANIMATION_TUNING.stanceWidth / 2 + footSpread
-          const enforcedGap = Math.max(
-            HERO_ANIMATION_TUNING.footSeparation,
-            rightX - leftX,
-          )
-          const clampedLeft = -enforcedGap / 2
-          const clampedRight = enforcedGap / 2
+          // Foot planting: preserve authored base stance and only apply tiny opposite offsets.
+          const footSpread = Math.sin(time * 0.9 + Math.PI * 0.25) * HERO_ANIMATION_TUNING.footSway
+          let leftX = baseFootL - footSpread
+          let rightX = baseFootR + footSpread
+          if (rightX - leftX < HERO_ANIMATION_TUNING.footSeparation) {
+            const center = (leftX + rightX) * 0.5
+            leftX = center - HERO_ANIMATION_TUNING.footSeparation * 0.5
+            rightX = center + HERO_ANIMATION_TUNING.footSeparation * 0.5
+          }
           for (const [name, x] of [
-            ['legL', clampedLeft],
-            ['bootL', clampedLeft],
-            ['bootBandL', clampedLeft],
-            ['legR', clampedRight],
-            ['bootR', clampedRight],
-            ['bootBandR', clampedRight],
+            ['legL', leftX],
+            ['bootL', leftX],
+            ['bootBandL', leftX],
+            ['legR', rightX],
+            ['bootR', rightX],
+            ['bootBandR', rightX],
           ] as const) {
             const part = characterRef.current.getObjectByName(name)
             if (part) part.position.x = x
