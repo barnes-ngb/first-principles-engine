@@ -153,6 +153,7 @@ function constrainArmPose(
   rotX: number,
   rotZ: number,
   torsoLead: number,
+  clearanceBoost = 0,
   tuning = HERO_ANIMATION_TUNING,
 ) {
   const sideConfig = tuning.guardrails.armBySide[side]
@@ -168,7 +169,7 @@ function constrainArmPose(
   const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance) + torsoDrive
   const minOutward = Math.max(
     sideConfig.rotZMin,
-    tuning.torsoClearance + tuning.elbowOutBias + torsoPush,
+    tuning.torsoClearance + tuning.elbowOutBias + torsoPush + clearanceBoost,
     tuning.guardrails.elbowInwardCollapseLimit,
   )
   const outwardZ = clamp(rotZ, minOutward, Math.min(sideConfig.rotZMax, tuning.armSwingClampZ))
@@ -806,6 +807,8 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     let baseHeadX = 0
     let baseHeadY = 0
     let baseShouldersCaptured = false
+    let wasPoseActiveLastFrame = false
+    let lastPoseEndTime = -Infinity
 
     sceneActiveRef.current = true
 
@@ -881,8 +884,20 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           armLObj, armRObj, headObj, characterRef.current, performance.now(),
         )
 
+        if (wasPoseActiveLastFrame && !poseActive) {
+          lastPoseEndTime = time
+        }
+        wasPoseActiveLastFrame = Boolean(poseActive)
+
         if (!poseActive && !ceremonyActiveRef.current) {
           const tuning = tuningRef.current
+          const timeSincePoseEnd = Math.max(0, time - lastPoseEndTime)
+          const poseRecoveryT = clamp(
+            1 - timeSincePoseEnd / tuning.postPoseClearanceDurationSec,
+            0,
+            1,
+          )
+          const postPoseArmClearanceBoost = tuning.postPoseArmClearanceBoost * poseRecoveryT
           // Lerp toward equipment-based idle pose + idle sway
           const lerpSpeed = Math.min(3.0 * dt, 1)
           currentEqPose.armLRotZ += (targetEqPose.armLRotZ - currentEqPose.armLRotZ) * lerpSpeed
@@ -917,6 +932,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
               armLRotX,
               armLRotZ,
               torsoLead,
+              postPoseArmClearanceBoost,
               tuning,
             )
             armLObj.rotation.z = constrained.rotZ
@@ -936,6 +952,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
               armRRotX,
               armRRotZ,
               torsoLead,
+              postPoseArmClearanceBoost,
               tuning,
             )
             armRObj.rotation.z = constrained.rotZ
@@ -943,22 +960,36 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             armRObj.position.y = baseArmRY + Math.max(0, weightShift) * 0.018 * tuning.shoulderSwing
           }
 
-          // Foot planting: hold each foot near its planted lane and keep a readable gap.
+          // Head and shoulders offsets — subtle asymmetry keeps idle alive.
+          if (headObj) {
+            headObj.rotation.y = shapedArc(heroCycle * 0.8 + 0.25) * tuning.headTurnAmount
+            headObj.rotation.x = Math.sin(heroCycle * 1.7 + 1.1) * 0.02
+            headObj.rotation.z = weightShift * 0.015
+            headObj.position.x = baseHeadX + weightShift * 0.014
+            headObj.position.y = baseHeadY + Math.sin(heroCycle * 1.7 + 0.4) * 0.006
+          }
+        }
+
+        if (!ceremonyActiveRef.current) {
+          const tuning = tuningRef.current
+          const isEmote = poseActive && poseAnimator.currentPoseId !== 'idle'
           const footCenter = (baseFootL + baseFootR) * 0.5
-          const stanceHalf = Math.max(tuning.stanceWidth * 0.5, tuning.footSeparation * 0.5 + 0.01)
-          const inwardRoom = Math.max(0, stanceHalf - tuning.footSeparation * 0.5)
-          const maxSafeSway = Math.min(tuning.footSway, inwardRoom * 0.85)
+          const minSeparation = tuning.footSeparation * (isEmote ? tuning.emoteFootSeparationMultiplier : 1)
+          const stanceHalf = Math.max(tuning.stanceWidth * 0.5, minSeparation * 0.5 + 0.01)
+          const inwardRoom = Math.max(0, stanceHalf - minSeparation * 0.5)
+          const swayScale = isEmote ? 0.2 : 1
+          const maxSafeSway = Math.min(tuning.footSway * swayScale, inwardRoom * 0.85)
           const leftStep = shapedArc(time * 0.92 + Math.PI * 0.1)
           const rightStep = shapedArc(time * 0.92 + Math.PI * 1.1)
           const footSpread = (leftStep - rightStep) * 0.5 * maxSafeSway
-          let leftX = footCenter - stanceHalf - footSpread + Math.min(0, weightShift) * 0.008
-          let rightX = footCenter + stanceHalf + footSpread + Math.max(0, weightShift) * 0.008
-          if (rightX - leftX < tuning.footSeparation) {
+          let leftX = footCenter - stanceHalf - footSpread + Math.min(0, shapedArc(time * 0.92 + 0.35)) * 0.008
+          let rightX = footCenter + stanceHalf + footSpread + Math.max(0, shapedArc(time * 0.92 + 0.35)) * 0.008
+          if (rightX - leftX < minSeparation) {
             const center = (leftX + rightX) * 0.5
-            leftX = center - tuning.footSeparation * 0.5
-            rightX = center + tuning.footSeparation * 0.5
+            leftX = center - minSeparation * 0.5
+            rightX = center + minSeparation * 0.5
           }
-          const centerGap = Math.max(tuning.footCenterLineGap, tuning.footSeparation * 0.42)
+          const centerGap = Math.max(tuning.footCenterLineGap, minSeparation * 0.42)
           leftX = Math.min(leftX, -centerGap)
           rightX = Math.max(rightX, centerGap)
           for (const [name, x] of [
@@ -975,18 +1006,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
               const planted = name.includes('L')
                 ? 1 - Math.max(0, leftStep)
                 : 1 - Math.max(0, rightStep)
-              const swayLift = (1 - planted) * tuning.footLift
+              const swayLift = (1 - planted) * tuning.footLift * (isEmote ? 0.25 : 1)
               part.position.y = baseFootY + tuning.footPlantY + swayLift
             }
-          }
-
-          // Head and shoulders offsets — subtle asymmetry keeps idle alive.
-          if (headObj) {
-            headObj.rotation.y = shapedArc(heroCycle * 0.8 + 0.25) * tuning.headTurnAmount
-            headObj.rotation.x = Math.sin(heroCycle * 1.7 + 1.1) * 0.02
-            headObj.rotation.z = weightShift * 0.015
-            headObj.position.x = baseHeadX + weightShift * 0.014
-            headObj.position.y = baseHeadY + Math.sin(heroCycle * 1.7 + 0.4) * 0.006
           }
         }
       }
