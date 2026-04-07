@@ -1,4 +1,4 @@
-import type { Artifact, MilestoneProgress } from '../../core/types'
+import type { Artifact } from '../../core/types'
 import { EngineStage } from '../../core/types/enums'
 import { formatDateYmd } from '../../core/utils/format'
 import type { WeekRange } from '../../core/utils/time'
@@ -9,6 +9,15 @@ export { getWeekRange } from '../../core/utils/time'
 export type StageCounts = Partial<Record<EngineStage, number>>
 
 export type LoopStatus = 'complete' | 'minimum' | 'incomplete'
+export interface MilestoneProgressEntry {
+  id?: string
+  childId: string
+  ladderId?: string
+  rungId?: string
+  label?: string
+  status?: 'locked' | 'active' | 'achieved'
+  achievedAt?: string
+}
 
 const orderedStages = [
   EngineStage.Wonder,
@@ -66,7 +75,7 @@ export const countUniqueRungsInRange = (
 }
 
 export const countMilestonesAchievedInRange = (
-  milestoneProgress: MilestoneProgress[],
+  milestoneProgress: MilestoneProgressEntry[],
   childId: string,
   range: WeekRange,
 ) =>

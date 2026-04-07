@@ -1,4 +1,5 @@
 import type * as THREE from 'three'
+import { HERO_ANIMATION_TUNING } from './heroAnimationTuning'
 
 // ── Pose Keyframes ──────────────────────────────────────────────────
 
@@ -273,16 +274,27 @@ export class PoseAnimator {
   }
 
   private applyKeyframes(obj: THREE.Object3D, kf: PoseKeyframes, t: number) {
-    const isArm = obj.name === 'armL' || obj.name === 'armR'
+    const armSide = obj.name === 'armL' ? 'L' : obj.name === 'armR' ? 'R' : null
+    const isArm = armSide !== null
     if (kf.rotX) {
       let val = this.interpolate(kf.rotX, kf.times, t)
-      if (isArm) val = Math.max(-1.3, Math.min(1.3, val))
+      if (isArm) {
+        val = Math.max(
+          HERO_ANIMATION_TUNING.armSwingClampX.min,
+          Math.min(HERO_ANIMATION_TUNING.armSwingClampX.max, val),
+        )
+      }
       obj.rotation.x = val
     }
     if (kf.rotY) obj.rotation.y = this.interpolate(kf.rotY, kf.times, t)
     if (kf.rotZ) {
       let val = this.interpolate(kf.rotZ, kf.times, t)
-      if (isArm) val = Math.max(-2.8, Math.min(2.8, val))
+      if (isArm) {
+        val = Math.max(
+          HERO_ANIMATION_TUNING.torsoClearance,
+          Math.min(HERO_ANIMATION_TUNING.armSwingClampZ + 1.2, val),
+        )
+      }
       obj.rotation.z = val
     }
   }

@@ -14,8 +14,8 @@ export interface TouchControlState {
   _cleanup?: () => void
 }
 
-const AUTO_ROTATE_DELAY = 4000
-const AUTO_ROTATE_SPEED = 0.003
+const AUTO_ROTATE_DELAY = 6500
+const AUTO_ROTATE_SPEED = 0.0016
 const DRAG_SENSITIVITY = 0.006
 const LERP_FACTOR = 0.08
 const FRICTION = 0.95

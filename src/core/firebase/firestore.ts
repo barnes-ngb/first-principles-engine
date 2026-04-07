@@ -24,10 +24,8 @@ import type {
   EvaluationSession,
   HoursAdjustment,
   HoursEntry,
-  Ladder,
   LadderProgress,
   LessonCard,
-  MilestoneProgress,
   PlannerConversation,
   ScanRecord,
   SightWordProgress,
@@ -124,17 +122,6 @@ export const evaluationsCollection = (
   familyId: string,
 ): CollectionReference<Evaluation> =>
   collection(db, `families/${familyId}/evaluations`) as CollectionReference<Evaluation>
-
-export const laddersCollection = (familyId: string): CollectionReference<Ladder> =>
-  collection(db, `families/${familyId}/ladders`) as CollectionReference<Ladder>
-
-export const milestoneProgressCollection = (
-  familyId: string,
-): CollectionReference<MilestoneProgress> =>
-  collection(
-    db,
-    `families/${familyId}/milestoneProgress`,
-  ) as CollectionReference<MilestoneProgress>
 
 export const hoursAdjustmentsCollection = (
   familyId: string,

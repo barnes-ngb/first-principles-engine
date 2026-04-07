@@ -3,6 +3,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
 import { requireEmailAuth, checkRateLimit } from "./authGuard.js";
+import { STONEBRIDGE_BIBLE } from "./stonebridgeBible.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -460,10 +461,16 @@ PLAN CONTENT RULES:
 - Every item must have a "category" field with value "must-do" or "choose":
   - "must-do": Core non-negotiable items (3-4 per day). Always includes: Formation/Prayer, primary reading/phonics workbook, primary math workbook. These happen every day in order.
   - "choose": Enrichment activities the child picks from AFTER completing must-do items (3-4 options per day, child picks 2). Examples: Reading Eggs, Minecraft reading, read-aloud time, art, sight word games, science exploration.
-  - On MVD (Minimum Viable Day) weeks, ONLY must-do items are required. Choose items are bonus.
-  - Items with category "must-do" should always have "mvdEssential": true.
+- On MVD (Minimum Viable Day) weeks, ONLY must-do items are required. Choose items are bonus.
+- Items with category "must-do" should always have "mvdEssential": true.
 - If the user specified a read-aloud book with chapters, include a "chapterQuestion" object on each day that has a reading assignment. Distribute chapters across the school days (Mon-Fri). Vary the questionType across days — never use the same type two days in a row.
 - "chapterQuestion" is optional — only include it when the user has specified a read-aloud book.
+- Chapter questions should align with the Stonebridge Story Bible context below when possible:
+  - Use at least one named Stonebridge character or place as an analogy or reflection anchor.
+  - Keep continuity with ongoing village restoration themes.
+
+STONEBRIDGE WORLD CONTEXT:
+${STONEBRIDGE_BIBLE}
 
 {
   "days": [
