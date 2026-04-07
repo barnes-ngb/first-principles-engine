@@ -94,7 +94,12 @@ export async function forgeArmorPiece(
     unlockedPieces,
   } as Partial<AvatarProfile> & Record<string, unknown>)
 
-  return { success: true }
+  const refreshedProfile = await getDoc(profileRef)
+  const newBalance = refreshedProfile.exists()
+    ? normalizeAvatarProfile(refreshedProfile.data()).diamondBalance ?? 0
+    : 0
+
+  return { success: true, newBalance }
 }
 
 /** Check if a specific piece is forged at a given tier. */

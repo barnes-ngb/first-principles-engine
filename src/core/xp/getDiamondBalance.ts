@@ -6,12 +6,11 @@ import type { AvatarProfile, DiamondCategory, DiamondEventType } from '../types'
 import { DIAMOND_EVENTS } from '../types'
 
 /**
- * Compute diamond balance for a child by summing all diamond ledger entries.
+ * Compute diamond balance from the ledger by summing all diamond events.
  * Positive amounts = earned, negative amounts = spent.
  *
- * TODO: O(n) computation — sums entire diamond ledger on every call.
- * For a single family this is fine. At scale, cache balance on avatar
- * profile (same pattern as totalXp cached on xpLedger cumulative doc).
+ * Note: this is a fallback path. The canonical live value for UI and spend
+ * checks is avatarProfile.diamondBalance, which is updated on each event.
  */
 export async function getDiamondBalance(
   familyId: string,
@@ -39,10 +38,9 @@ export async function getDiamondBalance(
 /**
  * Spend diamonds using a Firestore transaction for atomicity.
  *
- * Uses the cached `diamondBalance` on the avatar profile to prevent
- * race conditions (two concurrent spends can't both succeed if balance
- * only covers one). Falls back to computing from ledger if the cached
- * balance is missing (first-time migration).
+ * Uses cached avatarProfile.diamondBalance inside the transaction to prevent
+ * race conditions (two concurrent spends can't both succeed if balance only
+ * covers one). Falls back to ledger sum only when cache is missing.
  *
  * Returns true if successful, false if insufficient balance or error.
  */
