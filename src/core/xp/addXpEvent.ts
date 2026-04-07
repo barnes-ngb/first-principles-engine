@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc, getDoc, increment, setDoc, updateDoc } from 'firebase/firestore'
 
 import {
   avatarProfilesCollection,
@@ -44,8 +44,8 @@ export interface AddXpEventOptions {
  *
  * Dedup and event tracking are handled via per-event docs in xpLedger
  * (doc ID: {childId}_{dedupKey}). The cumulative doc (doc ID: {childId})
- * is also updated atomically for XP entries. Diamond entries are stored
- * as individual events only (balance computed from sum).
+ * is also updated atomically for XP entries. Diamond entries update both
+ * the per-event ledger and cached avatarProfile.diamondBalance.
  *
  * @param dedupKey - Unique key for this event (e.g., `checklist_2026-03-20`,
  *   `book_${bookId}_2026-03-20`, `eval_${sessionId}`)
@@ -91,16 +91,14 @@ export async function addXpEvent(
     ...(options?.itemId ? { itemId: options.itemId } : {}),
   })
 
-  // Diamond entries are event-only — no cumulative doc or armor check needed.
-  // Update cached diamondBalance on the avatar profile for transactional spend safety.
+  // Diamond entries do not use the cumulative XP doc. They update the cached
+  // avatarProfile.diamondBalance so HUD snapshots and transactional spends stay in sync.
   if (currencyType === 'diamond') {
     const profileRef = doc(avatarProfilesCollection(familyId), childId)
     const profileSnap = await getDoc(profileRef)
     if (profileSnap.exists()) {
-      const profile = profileSnap.data() as AvatarProfile
-      await setDoc(profileRef, {
-        ...profile,
-        diamondBalance: (profile.diamondBalance ?? 0) + amount,
+      await updateDoc(profileRef, {
+        diamondBalance: increment(amount),
         updatedAt: new Date().toISOString(),
       })
     }
