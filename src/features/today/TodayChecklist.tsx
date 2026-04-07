@@ -101,6 +101,18 @@ function getSparkleMode(item: ChecklistItemType): SparkleMode {
   return 'generate'
 }
 
+function isScannableWorkbook(item: ChecklistItemType): boolean {
+  const title = ((item as ChecklistItemType & { title?: string }).title || item.label || '').toLowerCase()
+  return (
+    title.includes('good and the beautiful') ||
+    title.includes('gatb') ||
+    title.includes('language arts level') ||
+    item.itemType === 'workbook' ||
+    item.block === 'core-reading' ||
+    item.block === 'core-math'
+  )
+}
+
 function formatTime12h(date: Date): string {
   const h = date.getHours()
   const m = date.getMinutes()
@@ -549,7 +561,7 @@ export default function TodayChecklist({
                   </Box>
                 )}
                 {/* Scan-based feedback (specific — from photographed page) */}
-                {!item.completed && getSparkleMode(item) === 'scan' && (() => {
+                {!item.completed && getSparkleMode(item) === 'scan' && isScannableWorkbook(item) && (() => {
                   const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
                   const fb = bucket ? scanFeedbackBySubject[bucket] : undefined
                   if (!fb) return null
@@ -576,7 +588,7 @@ export default function TodayChecklist({
                   )
                 })()}
                 {/* "No scan yet" prompt for workbook items */}
-                {!item.completed && getSparkleMode(item) === 'scan' && (() => {
+                {!item.completed && getSparkleMode(item) === 'scan' && isScannableWorkbook(item) && (() => {
                   const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
                   const hasFeedback = bucket ? !!scanFeedbackBySubject[bucket] : false
                   if (hasFeedback || item.skipGuidance) return null

@@ -483,6 +483,7 @@ Shelly Chat  Mar 31  Shelly's AI Chat: persistent threads, Claude with family co
 Shelly Chat  Apr 1  Shelly's AI Chat: context tabs (Lincoln/London/General), persistent threads, deep child context (skill snapshot + evals + engagement + disposition + sight words + today's plan), markdown rendering, follow-up suggestions, DALL-E with prompt refinement, image upload + Claude vision, thread drawer, pre-seeded chat utility, FAB on Today, parent nav entry
 Economy v1  Apr 4  Two-currency system (XP + Diamonds), choice-based armor forging with verse engagement, diamond earn sources (quest/teach-back/Dad Lab/workshop/conundrum/extra activity/books), forge costs per tier, XP bar + diamond count HUD, portal moments between tier biomes
 Apr 4-5  Apr 4-5  Two-currency economy (XP+Diamonds, forge, portal), curriculum pipeline (certificate scan, GATB map, coverage reframe), activity configs, Learning Map, quest expansion (comprehension, fluency, speech), book themes, planning improvements, SDK consolidation, response caching, 13 bug fixes
+Crash Fix  Apr 7  Knowledge Mine crash cascade fix: submitAnswer/handleSkip try/catch (graceful AI failure → summary or intro), AvatarThumbnail WebGL safety (try/catch + CSS fallback + forceContextLoss context leak fix), /quest errorElement (themed "mine collapsed" error screen), resume useEffect verified
 
 Removed Features (Cleanup Sprint, Mar 24-25)
 * Sessions (1,720 lines) — orphaned feature with no nav links; sessionsCollection removed
@@ -661,6 +662,7 @@ Key Design Decisions
 - **Dead `sessions` collection** — Fully removed (PR #651). No orphaned references remain.
 - **WorkbookConfig → ActivityConfig migration** — Both systems exist. ActivityConfig is the new primary (66 refs vs 27). workbookConfigs still read by quest starting level check and certificate scan. Plan: complete migration, remove workbookConfig references.
 - **Bundle size** — Main chunk is 3.4MB (1MB gzipped). Should code-split Three.js, jsPDF, and heavy features.
+- **Missing errorElements on kid routes** — `/workshop`, `/books/*`, `/avatar` have no errorElement. `/quest` now has one (Apr 7). Use `QuestErrorBoundary.tsx` as pattern for the others.
 
 #### Avatar / Three.js Architecture
 - Three.js scene lifecycle managed in a single React component with `useEffect` cleanup
