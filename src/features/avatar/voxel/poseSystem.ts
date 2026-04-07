@@ -290,8 +290,11 @@ export class PoseAnimator {
     if (kf.rotZ) {
       let val = this.interpolate(kf.rotZ, kf.times, t)
       if (isArm) {
+        const armX = obj.rotation.x
+        const torsoAvoidance = Math.max(0, armX) * HERO_ANIMATION_TUNING.torsoAvoidanceGain
+        const minOutward = HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + torsoAvoidance
         val = Math.max(
-          HERO_ANIMATION_TUNING.torsoClearance,
+          minOutward,
           Math.min(HERO_ANIMATION_TUNING.armSwingClampZ + 1.2, val),
         )
       }
