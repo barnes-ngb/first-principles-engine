@@ -252,6 +252,7 @@ export const DIAMOND_EVENTS = {
   BOOK_COMPLETE: 'diamond_book_complete',
   BOOK_READ: 'diamond_book_read',
   DAD_LAB_COMPLETE: 'diamond_dad_lab_complete',
+  EVALUATION_COMPLETE: 'diamond_evaluation_complete',
   TEACH_BACK: 'diamond_teach_back',
   EXTRA_ACTIVITY: 'diamond_extra_activity',
   CONUNDRUM_RESPONSE: 'diamond_conundrum_response',
@@ -524,4 +525,3 @@ export const PIECE_POSITIONS: Record<
   shield_of_faith:               { topPct: 28, leftPct: 2,  widthPct: 34, heightPct: 38 },
   sword_of_the_spirit:           { topPct: 28, leftPct: 64, widthPct: 34, heightPct: 42 },
 }
-
