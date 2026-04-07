@@ -141,6 +141,23 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
+function smooth01(t: number): number {
+  const x = clamp(t, 0, 1)
+  return x * x * (3 - 2 * x)
+}
+
+/**
+ * Hand-authored idle curve (0-1 cycle) with a small settle.
+ * This avoids endless symmetric sine-wave wobble and gives readable beats.
+ */
+function authoredIdleArc(phase: number): number {
+  const p = phase - Math.floor(phase)
+  if (p < 0.22) return smooth01(p / 0.22) // rise with intent
+  if (p < 0.54) return 1 // brief heroic hold
+  if (p < 0.82) return 1 - smooth01((p - 0.54) / 0.28) * 1.35 // return past center
+  return -0.35 + smooth01((p - 0.82) / 0.18) * 0.35 // settle at neutral
+}
+
 function constrainArmPose(side: 'L' | 'R', rotX: number, rotZ: number) {
   const backwardPush = Math.max(0, rotX) * HERO_ANIMATION_TUNING.torsoAvoidanceGain
   const minOutward = HERO_ANIMATION_TUNING.torsoClearance + HERO_ANIMATION_TUNING.elbowOutBias + backwardPush
@@ -795,13 +812,19 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
 
         // Gentle breathing bob (freeze during ceremony so character stays still)
         if (!ceremonyActiveRef.current) {
-          characterRef.current.position.y = baseY + Math.sin(time * 2.1) * HERO_ANIMATION_TUNING.bodyBobAmplitude
-          characterRef.current.position.x = Math.sin(time * 0.8) * HERO_ANIMATION_TUNING.bodyLateralShift
+          const weightCycle = authoredIdleArc(time / 3.9)
+          const chestCycle = authoredIdleArc(time / 5.8 + 0.17)
+          const breathing = Math.sin(time * 2.1)
+
+          characterRef.current.position.y = baseY + breathing * HERO_ANIMATION_TUNING.bodyBobAmplitude
+          characterRef.current.position.x = weightCycle * HERO_ANIMATION_TUNING.bodyLateralShift
+          characterRef.current.rotation.y = chestCycle * HERO_ANIMATION_TUNING.chestYaw
+          characterRef.current.rotation.z = -weightCycle * HERO_ANIMATION_TUNING.chestRoll
 
           // Animate ground shadow scale with character bob
           const shadowMesh = scene.getObjectByName('groundShadow')
           if (shadowMesh) {
-            const bobScale = 1 + Math.sin(time * 2.1) * HERO_ANIMATION_TUNING.bodyBobAmplitude
+            const bobScale = 1 + breathing * HERO_ANIMATION_TUNING.bodyBobAmplitude
             shadowMesh.scale.set(bobScale, 1, bobScale)
           }
         }
@@ -844,13 +867,16 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           currentEqPose.armLRotX += (targetEqPose.armLRotX - currentEqPose.armLRotX) * lerpSpeed
           currentEqPose.armRRotX += (targetEqPose.armRRotX - currentEqPose.armRRotX) * lerpSpeed
 
-          // Arm idle sway — subtle and constrained to keep elbows outside torso silhouette
-          const armSwayTime = time * (Math.PI * 2 / 4) // 4-second period
+          // Hand-authored idle arm arcs with slight asymmetry and readable hold windows.
+          const leftArc = authoredIdleArc(time / 4.6 + 0.08)
+          const rightArc = authoredIdleArc(time / 4.6 + 0.57)
+          const shoulderBias = authoredIdleArc(time / 7.4 + 0.22) * HERO_ANIMATION_TUNING.shoulderDip
+
           if (armLObj) {
             const constrained = constrainArmPose(
               'L',
-              currentEqPose.armLRotX + Math.sin(time * 0.8 + HERO_ANIMATION_TUNING.armPhaseOffset) * HERO_ANIMATION_TUNING.armSwingX,
-              currentEqPose.armLRotZ + Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.armSwingZ,
+              currentEqPose.armLRotX + leftArc * HERO_ANIMATION_TUNING.armSwingX - shoulderBias * 0.35,
+              currentEqPose.armLRotZ + leftArc * HERO_ANIMATION_TUNING.armSwingZ - shoulderBias * 0.22,
             )
             armLObj.rotation.z = constrained.rotZ
             armLObj.rotation.x = constrained.rotX
@@ -858,17 +884,17 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           if (armRObj) {
             const constrained = constrainArmPose(
               'R',
-              currentEqPose.armRRotX - Math.sin(time * 0.8 + HERO_ANIMATION_TUNING.armPhaseOffset) * HERO_ANIMATION_TUNING.armSwingX,
-              currentEqPose.armRRotZ - Math.sin(armSwayTime) * HERO_ANIMATION_TUNING.armSwingZ,
+              currentEqPose.armRRotX + rightArc * HERO_ANIMATION_TUNING.armSwingX + shoulderBias * 0.25,
+              currentEqPose.armRRotZ + rightArc * HERO_ANIMATION_TUNING.armSwingZ + shoulderBias * 0.18,
             )
             armRObj.rotation.z = constrained.rotZ
             armRObj.rotation.x = constrained.rotX
           }
 
-          // Foot planting: preserve authored base stance and only apply tiny opposite offsets.
-          const footSpread = Math.sin(time * 0.9 + Math.PI * 0.25) * HERO_ANIMATION_TUNING.footSway
-          let leftX = baseFootL - footSpread
-          let rightX = baseFootR + footSpread
+          // Foot planting: weighted stance shift with minimum gap preserved for silhouette readability.
+          const weightShift = authoredIdleArc(time / 3.9) * HERO_ANIMATION_TUNING.footSway
+          let leftX = baseFootL - weightShift * 0.8
+          let rightX = baseFootR + weightShift * 1.2
           if (rightX - leftX < HERO_ANIMATION_TUNING.footSeparation) {
             const center = (leftX + rightX) * 0.5
             leftX = center - HERO_ANIMATION_TUNING.footSeparation * 0.5
@@ -888,7 +914,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
 
           // Head micro-movement — very slow, subtle look-around (6s period)
           if (headObj) {
-            headObj.rotation.y = Math.sin(time * (Math.PI * 2 / 6)) * 0.05
+            const lookCycle = authoredIdleArc(time / 6.2 + 0.31)
+            headObj.rotation.y = lookCycle * HERO_ANIMATION_TUNING.headYaw
+            headObj.rotation.x = -HERO_ANIMATION_TUNING.headPitch + authoredIdleArc(time / 8.5 + 0.63) * HERO_ANIMATION_TUNING.headPitch
+            headObj.rotation.z = -authoredIdleArc(time / 7 + 0.08) * 0.012
           }
         }
       }

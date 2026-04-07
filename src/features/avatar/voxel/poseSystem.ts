@@ -39,9 +39,9 @@ export const POSES: Pose[] = [
     name: 'Standing',
     icon: '\u{1F9CD}',
     duration: 0,
-    armL: { rotZ: [0.05], rotX: [0] },      // Very slight outward at rest
-    armR: { rotZ: [0.05], rotX: [0] },
-    head: { rotX: [0], rotY: [0] },
+    armL: { rotZ: [0.22], rotX: [-0.06] },   // Intentional asymmetry at rest
+    armR: { rotZ: [0.3], rotX: [-0.1] },
+    head: { rotX: [-0.02], rotY: [0.03] },
     body: { posY: [0] },
   },
 
@@ -400,14 +400,14 @@ export function getEquipmentIdlePose(equipped: string[]): Pose {
     icon: '',
     duration: 500,
     armL: {
-      rotZ: [hasShield ? 0.25 : 0.05],    // Shield arm slightly out
-      rotX: [hasShield ? -0.3 : 0],       // And slightly forward
+      rotZ: [hasShield ? 0.35 : 0.22],    // Left side anchored and readable
+      rotX: [hasShield ? -0.38 : -0.06],  // Slightly forward to avoid torso clipping
     },
     armR: {
-      rotZ: [hasSword ? 0.35 : 0.05],     // Sword arm slightly out
-      rotX: [hasSword ? -0.1 : 0],        // Barely forward
+      rotZ: [hasSword ? 0.58 : 0.3],      // Sword side opens silhouette
+      rotX: [hasSword ? -0.18 : -0.1],    // Maintain clear hand read
     },
-    head: { rotX: [0], rotY: [0] },
+    head: { rotX: [-0.02], rotY: [0.03] },
     body: { posY: [0] },
   }
 }
