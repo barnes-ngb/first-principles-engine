@@ -235,8 +235,10 @@ export interface ChecklistItem {
   bookId?: string
   /** Engagement feedback: how the activity went */
   engagement?: 'engaged' | 'okay' | 'struggled' | 'refused'
-  /** Linked evidence artifact document ID (from per-item capture). */
+  /** Linked evidence document ID (from unified capture — may point to scans or artifacts). */
   evidenceArtifactId?: string
+  /** Which Firestore collection the evidence doc lives in. Absent on legacy items means 'artifacts'. */
+  evidenceCollection?: 'scans' | 'artifacts'
   /** Manual or AI-generated review result for the captured work. */
   gradeResult?: string
   /** Mastery level observed by parent after completion */

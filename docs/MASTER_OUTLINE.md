@@ -116,6 +116,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 | Legends Visual Overhaul | Apr 2026 | Lighting/material pass, particles, gradient sky, pedestal scene polish |
 | Hero Hub Phase 1 | Apr 2026 | My Armor → Hero Hub, mission card, Stonebridge preview card |
 | Crash Cascade Stabilization | Apr 7, 2026 | Quest graceful error paths, `/quest` error boundary, AvatarThumbnail WebGL safety |
+| Unified Capture Pipeline | Apr 8, 2026 | Merged 3 Today capture entry points into 1 AI-routed handler. Worksheets/textbooks/tests → scans + curriculum update; everything else → artifacts. Fixes "Last updated" staleness on Progress. |
 
 ## Removed Features / Concepts
 - Ghost armor visual state (moved to binary on/off only).
