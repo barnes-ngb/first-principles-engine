@@ -129,12 +129,12 @@ const POSE_DEFAULT: EquipmentPose = { armLRotZ: 0, armRRotZ: 0, armLRotX: 0, arm
 function calculateEquipmentPose(equipped: string[]): EquipmentPose {
   const pose = { ...POSE_DEFAULT }
   if (equipped.includes('sword')) {
-    pose.armRRotZ = 0.64   // Wider default for clearer mobile silhouette
-    pose.armRRotX = -0.15  // Slight forward tilt
+    pose.armRRotZ = 0.58   // Keep blade readable while reducing over-flare
+    pose.armRRotX = -0.12  // Slight forward tilt without collapsing torso silhouette
   }
   if (equipped.includes('shield')) {
-    pose.armLRotZ = 0.6    // Wider default for clearer mobile silhouette
-    pose.armLRotX = -0.35  // More forward — shield presents to front
+    pose.armLRotZ = 0.68   // Readable outward offset for mobile front view
+    pose.armLRotX = -0.24  // Forward enough to present shield, but cleaner shoulder line
   }
   return pose
 }
@@ -274,8 +274,8 @@ function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): T
   topEdge.position.set(0, 0.35 * s + 0.1 * s, 0.8 * s)
   platform.add(topEdge)
 
-  // Shift the whole platform down so character feet still at Y=0
-  platform.position.y = -0.35 * s
+  // Shift platform so the top surface aligns with character foot plane (Y=0)
+  platform.position.y = -0.45 * s
 
   return platform
 }
