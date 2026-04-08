@@ -412,7 +412,8 @@ function buildShield(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   const armMid = armH / 2
 
   // Rotate shield face from sideways (-X) to mostly forward (+Z)
-  group.rotation.y = THREE.MathUtils.degToRad(75)
+  // NOTE: negative yaw is required on the left arm so the emblem faces camera/front.
+  group.rotation.y = THREE.MathUtils.degToRad(-75)
   // Push entire shield group forward so it clears the torso front face
   group.position.z = U * 2
 
