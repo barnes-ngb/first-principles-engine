@@ -53,6 +53,8 @@ All collections live under `families/{familyId}/`. No subcollections go deeper t
 
 > **Note:** 31 collections found (28 in `firestore.ts` + `sightWordLists`, `sightWordProgress`, and `aiUsage` are in `firestore.ts` but the CLAUDE.md table lists only 18 named collections). The CLAUDE.md collection table is outdated.
 
+> **Update (Apr 8, 2026):** The `scans` collection (not listed above — added post-audit) stores AI-analyzed curriculum evidence (workbook pages, worksheets, tests). The `artifacts` collection stores non-curriculum evidence (creative builds, drawings, etc.). As of the unified capture pipeline, checklist items have an `evidenceCollection` field (`'scans' | 'artifacts'`) alongside `evidenceArtifactId` to indicate which collection the evidence doc lives in. Legacy items without `evidenceCollection` are in `artifacts`.
+
 ---
 
 ## Composite Index Inventory

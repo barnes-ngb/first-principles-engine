@@ -321,3 +321,44 @@ WorkbookCard reads:
 ## Conclusion
 
 The diagnosis is confirmed: **the per-item capture flow writes to `artifacts` and the curriculum view reads from `activityConfigs` + `scans`. These are disjoint collections with no bridge between them.** The "Scan the page" nudge on the Today page was designed to be that bridge, but the camera icon's shared visibility gate prevents it from being used after a capture.
+
+---
+
+## Resolution — 2026-04-08
+
+### What was unified
+
+The three Today-page capture entry points were replaced by a single **"Capture work"** button on every completed checklist item. One button, one handler (`handleUnifiedCapture`), AI-routed output.
+
+**Removed entry points:**
+1. Camera icon on completed items (`TodayChecklist.tsx:786-804`) — wrote to artifacts only, no curriculum analysis
+2. Pre-completion ScanButton icon for workbook items (`TodayChecklist.tsx:528-537`) — ran full scan pipeline
+3. Post-completion "Scan the page to track progress" button (`TodayChecklist.tsx:806-833`) — ran full scan pipeline
+
+**Replaced by:** A single `<Button>Capture work</Button>` that appears on `item.completed && !item.evidenceArtifactId`.
+
+### AI routing rule
+
+Every capture runs through the AI scan pipeline (`taskType: 'scan'`). The result's `pageType` determines routing:
+
+- `'worksheet' | 'textbook' | 'test'` → **scans collection** + `syncScanToConfig` (updates curriculum "Last updated") + `updateSkillMapFromFindings` (feeds Learning Map)
+- `'activity' | 'other' | 'certificate'` OR scan failure → **artifacts collection** (portfolio evidence)
+
+One photo produces ONE record. Never both. Never neither.
+
+### evidenceCollection field
+
+Added `evidenceCollection?: 'scans' | 'artifacts'` to the `ChecklistItem` type alongside the existing `evidenceArtifactId`. This tells readers which Firestore collection to fetch from. Legacy items without the field are assumed to be `'artifacts'`.
+
+### Deleted/changed handlers
+
+- `handleItemPhotoCapture` (TodayPage.tsx) — **deleted**, replaced by `handleUnifiedCapture`
+- `handleScanCapture` (TodayPage.tsx) — **replaced** by `handlePreCompletionScan` (retained for the "scan to check if should skip" pre-completion flow) and `handleUnifiedCapture` (for post-completion evidence capture)
+- `scanPatterns` regex (TodayChecklist.tsx) — **retained** for pre-completion scan-based feedback display; no longer used for capture gating
+
+### Not changed (out of scope)
+
+- Kid-facing capture views (KidChecklist, KidTodayView) — still use the old `onCaptureOpen` → artifacts-only flow
+- Cloud Functions (disposition.ts, evaluate.ts) — only count `evidenceArtifactId` presence, work unchanged
+- Progress page scan button (CurriculumTab.tsx) — unchanged, still uses `useScan` directly
+- PlannerChatPage scan handler — unchanged, separate from Today capture flow
