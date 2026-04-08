@@ -1562,17 +1562,22 @@ export const chat = onCall(
         : undefined;
       // Guaranteed server-side workbook backfill (Phase 2B hardening).
       // Runs before any task can depend on workbook-type activityConfigs.
-      const backfillStats = await ensureWorkbookActivityConfigsForChild(
-        db,
-        familyId,
-        childId,
-      );
-      if (backfillStats.created > 0 || backfillStats.updated > 0) {
-        console.log("[activityConfigs.backfill] Applied workbook backfill", {
+      // Wrapped in try/catch so backfill failures don't crash chat tasks.
+      try {
+        const backfillStats = await ensureWorkbookActivityConfigsForChild(
+          db,
           familyId,
           childId,
-          ...backfillStats,
-        });
+        );
+        if (backfillStats.created > 0 || backfillStats.updated > 0) {
+          console.log("[activityConfigs.backfill] Applied workbook backfill", {
+            familyId,
+            childId,
+            ...backfillStats,
+          });
+        }
+      } catch (err) {
+        console.warn("[activityConfigs.backfill] Non-critical backfill failed:", err);
       }
     }
 
