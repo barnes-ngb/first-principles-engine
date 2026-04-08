@@ -394,17 +394,12 @@ export default function TodayPage() {
 
       try {
         // 1. Try the scan pipeline (AI vision analysis)
-        let record: ScanRecord | null = null
-        try {
-          record = await runScan(file, familyId, selectedChildId)
-        } catch (err) {
-          console.error('[UnifiedCapture] Scan failed, falling back to artifact:', {
-            childId: selectedChildId,
-            itemLabel: item.label,
-            fileName: file.name,
-            error: err,
-          })
-          // Fall through to artifacts path
+        // useScan.scan() catches errors internally and returns null (never throws),
+        // so the old try/catch wrapper was dead code. Instead, check for null and
+        // clear stale scanError state so the red Alert doesn't flash during fallback.
+        const record = await runScan(file, familyId, selectedChildId)
+        if (!record) {
+          clearScan()
         }
 
         // 2. Route based on scan result
@@ -500,7 +495,7 @@ export default function TodayPage() {
         setScanItemIndex(null)
       }
     },
-    [runScan, familyId, selectedChildId, activeChild, today, dayLog, persistDayLogImmediate, syncScanToConfig, setSnackMessage],
+    [runScan, clearScan, familyId, selectedChildId, activeChild, today, dayLog, persistDayLogImmediate, syncScanToConfig, setSnackMessage],
   )
 
   // --- Pre-completion scan handler (for "should I skip?" advice) ---
