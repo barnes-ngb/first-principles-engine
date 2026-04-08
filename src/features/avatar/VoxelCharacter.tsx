@@ -217,6 +217,10 @@ function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): T
   const s = scale
   const platform = new THREE.Group()
   platform.name = 'platform'
+  const topStepY = 0.35 * s
+  const topBlockH = 0.21 * s
+  const topSurfaceY = topStepY + topBlockH / 2
+  const bootClearance = 0.01 * s
 
   const mainColor = tierBaseColor ?? 0x555555
   const darkColor = lerpPlatformColor(mainColor, 0x000000, 0.2)
@@ -274,8 +278,9 @@ function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): T
   topEdge.position.set(0, 0.35 * s + 0.1 * s, 0.8 * s)
   platform.add(topEdge)
 
-  // Shift the whole platform down so character feet still at Y=0
-  platform.position.y = -0.35 * s
+  // Shift platform so top surface sits just under foot contact.
+  // This keeps boots grounded while preventing idle/emote clipping from tiny downward bob.
+  platform.position.y = -(topSurfaceY + bootClearance)
 
   return platform
 }
