@@ -411,75 +411,89 @@ function buildShield(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   const { U, armH } = layout
   const armMid = armH / 2
 
-  // Rotate shield face from sideways (-X) to mostly forward (+Z)
-  // NOTE: positive yaw on the left arm presents the shield face toward camera/front.
-  group.rotation.y = THREE.MathUtils.degToRad(75)
-  // Push entire shield group forward so it clears the torso front face
-  group.position.z = U * 2
+  // IMPORTANT:
+  // Keep attachment translation (outward from arm + forward from torso) in parent-local space,
+  // and apply facing yaw only to a child "visual" group.
+  // Rotating the same node that also carries the attachment offset couples axes
+  // (x/z mix) and can pull the shield inward across the chest when arm pose changes.
+  const visual = new THREE.Group()
+  visual.name = 'shield_visual'
+  visual.rotation.y = THREE.MathUtils.degToRad(75) // Face shield mostly toward +Z/front
+  group.add(visual)
 
-  // Shield offset: outside the arm
-  const shX = -U * 4
-  const shZ = U * 1.5
+  // Attachment offset from arm pivot: outward (-X), down along forearm (-Y), forward (+Z)
+  // Applied on parent so it is NOT re-oriented by shield-facing yaw.
+  const anchorX = -U * 4.2
+  const anchorY = -(armMid + U * 1)
+  const anchorZ = U * 2.8
+  visual.position.set(anchorX, anchorY, anchorZ)
+
+  // Shield-local center
+  const shX = 0
+  const shZ = 0
 
   const shieldH = armH * 0.9
   const shieldW = U * 8
 
   // Main shield body
   const body = taggedBox(U * 1.6, shieldH, shieldW, W, 'primary', 'shield_body')
-  body.position.set(shX, -(armMid + U * 1), shZ)
-  group.add(body)
+  body.position.set(shX, 0, shZ)
+  visual.add(body)
 
   // Bevel layers
   const bevel1 = taggedFlatBox(U * 0.3, shieldH - U * 1.2, shieldW - U * 1, W, 'primary', 'shield_bevel1')
-  bevel1.position.set(shX - U * 0.95, -(armMid + U * 1), shZ)
-  group.add(bevel1)
+  bevel1.position.set(shX - U * 0.95, 0, shZ)
+  visual.add(bevel1)
   const bevel2 = taggedFlatBox(U * 0.2, shieldH - U * 2.4, shieldW - U * 2.2, W, 'primary', 'shield_bevel2')
-  bevel2.position.set(shX - U * 1.05, -(armMid + U * 1), shZ)
-  group.add(bevel2)
+  bevel2.position.set(shX - U * 1.05, 0, shZ)
+  visual.add(bevel2)
 
   // Front face panel
   const face = taggedFlatBox(U * 0.3, shieldH - U * 0.8, shieldW - U * 0.8, W, 'accent', 'shield_face')
-  face.position.set(shX - U * 0.9, -(armMid + U * 1), shZ)
-  group.add(face)
+  face.position.set(shX - U * 0.9, 0, shZ)
+  visual.add(face)
 
   // Emblem placeholder
-  group.userData.emblemX = shX - U * 1.1
-  group.userData.emblemY = -(armMid + U * 1)
-  group.userData.emblemZ = shZ
+  const emblemAnchor = new THREE.Vector3(shX - U * 1.1, 0, shZ)
+    .applyEuler(visual.rotation)
+    .add(visual.position)
+  group.userData.emblemX = emblemAnchor.x
+  group.userData.emblemY = emblemAnchor.y
+  group.userData.emblemZ = emblemAnchor.z
 
   // Cross emblem
   const crossV = taggedFlatBox(U * 0.2, shieldH * 0.55, U * 1.0, W, 'detail', 'shield_cross_v')
-  crossV.position.set(shX - U * 1.05, -(armMid + U * 1), shZ)
-  group.add(crossV)
+  crossV.position.set(shX - U * 1.05, 0, shZ)
+  visual.add(crossV)
   const crossH = taggedFlatBox(U * 0.2, U * 1.0, U * 4.0, W, 'detail', 'shield_cross_h')
-  crossH.position.set(shX - U * 1.05, -armMid, shZ)
-  group.add(crossH)
+  crossH.position.set(shX - U * 1.05, U * 1, shZ)
+  visual.add(crossH)
 
   // Border frame
   const rimTop = taggedBox(U * 1.8, U * 0.6, shieldW + U * 0.4, W, 'accent', 'shield_rim_top')
-  rimTop.position.set(shX, -(armMid + U * 1 - shieldH / 2 + U * 0.3), shZ)
-  group.add(rimTop)
+  rimTop.position.set(shX, -(shieldH / 2 - U * 0.3), shZ)
+  visual.add(rimTop)
   const rimBot = taggedBox(U * 1.8, U * 0.6, shieldW + U * 0.4, W, 'accent', 'shield_rim_bot')
-  rimBot.position.set(shX, -(armMid + U * 1 + shieldH / 2 - U * 0.3), shZ)
-  group.add(rimBot)
+  rimBot.position.set(shX, shieldH / 2 - U * 0.3, shZ)
+  visual.add(rimBot)
   const rimL = taggedBox(U * 1.8, shieldH, U * 0.6, W, 'accent', 'shield_rim_l')
-  rimL.position.set(shX, -(armMid + U * 1), shZ + shieldW / 2 + U * 0.1)
-  group.add(rimL)
+  rimL.position.set(shX, 0, shZ + shieldW / 2 + U * 0.1)
+  visual.add(rimL)
   const rimR = taggedBox(U * 1.8, shieldH, U * 0.6, W, 'accent', 'shield_rim_r')
-  rimR.position.set(shX, -(armMid + U * 1), shZ - shieldW / 2 - U * 0.1)
-  group.add(rimR)
+  rimR.position.set(shX, 0, shZ - shieldW / 2 - U * 0.1)
+  visual.add(rimR)
 
   // Center boss
   const boss = taggedFlatBox(U * 0.5, U * 2.4, U * 2.4, W, 'accent', 'shield_boss')
   boss.userData.isAccent = true
-  boss.position.set(shX - U * 1.2, -(armMid + U * 1), shZ)
-  group.add(boss)
+  boss.position.set(shX - U * 1.2, 0, shZ)
+  visual.add(boss)
 
   // Vertical grain lines
   for (let i = -2; i <= 2; i++) {
     const grain = taggedFlatBox(U * 0.15, shieldH - U * 1.6, U * 0.15, W, 'detail', `shield_grain_${i}`)
-    grain.position.set(shX - U * 1.0, -(armMid + U * 1), shZ + i * U * 1.5)
-    group.add(grain)
+    grain.position.set(shX - U * 1.0, 0, shZ + i * U * 1.5)
+    visual.add(grain)
   }
 
   return group
