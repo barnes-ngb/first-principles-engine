@@ -134,7 +134,7 @@ function calculateEquipmentPose(equipped: string[]): EquipmentPose {
   }
   if (equipped.includes('shield')) {
     pose.armLRotZ = 0.6    // Wider default for clearer mobile silhouette
-    pose.armLRotX = 0.35   // More forward — shield presents to front
+    pose.armLRotX = -0.35  // More forward — shield presents to front
   }
   return pose
 }
