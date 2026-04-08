@@ -133,8 +133,8 @@ function calculateEquipmentPose(equipped: string[]): EquipmentPose {
     pose.armRRotX = -0.15  // Slight forward tilt
   }
   if (equipped.includes('shield')) {
-    pose.armLRotZ = 0.6    // Wider default for clearer mobile silhouette
-    pose.armLRotX = 0.35   // More forward — shield presents to front
+    pose.armLRotZ = 0.68   // Slightly wider to keep silhouette clean on mobile
+    pose.armLRotX = -0.2   // Less forward pitch keeps shield readable and intentional
   }
   return pose
 }
@@ -217,6 +217,10 @@ function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): T
   const s = scale
   const platform = new THREE.Group()
   platform.name = 'platform'
+  const topStepY = 0.35 * s
+  const topBlockH = 0.21 * s
+  const topSurfaceY = topStepY + topBlockH / 2
+  const bootClearance = 0.02 * s
 
   const mainColor = tierBaseColor ?? 0x555555
   const darkColor = lerpPlatformColor(mainColor, 0x000000, 0.2)
@@ -274,8 +278,9 @@ function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): T
   topEdge.position.set(0, 0.35 * s + 0.1 * s, 0.8 * s)
   platform.add(topEdge)
 
-  // Shift the whole platform down so character feet still at Y=0
-  platform.position.y = -0.35 * s
+  // Shift platform so top surface sits just under foot contact.
+  // This keeps boots grounded while preventing idle/emote clipping from tiny downward bob.
+  platform.position.y = -(topSurfaceY + bootClearance)
 
   return platform
 }
@@ -800,7 +805,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     const poseAnimator = poseAnimatorRef.current
     let baseFootL = 0
     let baseFootR = 0
-    let baseFootY = 0
+    const baseFootYByPart = new Map<string, number>()
     let baseFootCaptured = false
     let baseArmLY = 0
     let baseArmRY = 0
@@ -868,7 +873,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         if (!baseFootCaptured && legLObj && legRObj) {
           baseFootL = legLObj.position.x
           baseFootR = legRObj.position.x
-          baseFootY = legLObj.position.y
+          for (const name of ['legL', 'bootL', 'bootBandL', 'legR', 'bootR', 'bootBandR'] as const) {
+            const part = characterRef.current.getObjectByName(name)
+            if (part) baseFootYByPart.set(name, part.position.y)
+          }
           baseFootCaptured = true
         }
         if (!baseShouldersCaptured && armLObj && armRObj && headObj) {
@@ -1007,7 +1015,8 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
                 ? 1 - Math.max(0, leftStep)
                 : 1 - Math.max(0, rightStep)
               const swayLift = (1 - planted) * tuning.footLift * (isEmote ? 0.25 : 1)
-              part.position.y = baseFootY + tuning.footPlantY + swayLift
+              const basePartY = baseFootYByPart.get(name) ?? baseFootYByPart.get(name.includes('L') ? 'legL' : 'legR') ?? 0
+              part.position.y = basePartY + tuning.footPlantY + swayLift
             }
           }
         }
