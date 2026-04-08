@@ -22,7 +22,6 @@ import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
-import ScanButton from '../../components/ScanButton'
 import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
 import type {
@@ -132,10 +131,10 @@ interface TodayChecklistProps {
   activeRoutineItems: RoutineItemKey[] | undefined
   persistDayLogImmediate: (updated: DayLog) => void
   onTeachHelperOpen: (item: ChecklistItemType) => void
-  onCaptureOpen: (index: number) => void
-  onScanCapture: (file: File, index: number) => void
-  scanLoading: boolean
-  scanItemIndex: number | null
+  onUnifiedCapture: (file: File, index: number) => void
+  onPreCompletionScan: (file: File, index: number) => void
+  captureLoading: boolean
+  captureItemIndex: number | null
   scanResult: ScanRecord | null
   scanError: string | null
   onScanAddToPlan: () => void
@@ -155,10 +154,10 @@ export default function TodayChecklist({
   activeRoutineItems,
   persistDayLogImmediate,
   onTeachHelperOpen,
-  onCaptureOpen,
-  onScanCapture,
-  scanLoading,
-  scanItemIndex,
+  onUnifiedCapture,
+  onPreCompletionScan,
+  captureLoading,
+  captureItemIndex,
   scanResult,
   scanError,
   onScanAddToPlan,
@@ -524,18 +523,7 @@ export default function TodayChecklist({
                   )}
                   {!item.completed && (() => {
                     const mode = getSparkleMode(item)
-                    if (mode === 'none') return null
-                    if (mode === 'scan') return (
-                      <Tooltip title="Scan workbook page">
-                        <span>
-                          <ScanButton
-                            variant="icon"
-                            loading={scanLoading && scanItemIndex === index}
-                            onCapture={(file) => onScanCapture(file, index)}
-                          />
-                        </span>
-                      </Tooltip>
-                    )
+                    if (mode === 'none' || mode === 'scan') return null
                     return (
                       <Tooltip title={item.lessonCardId ? 'View lesson plan' : 'Generate themed activity'}>
                         <IconButton
@@ -632,10 +620,10 @@ export default function TodayChecklist({
                     <Button
                       size="small"
                       variant="text"
-                      startIcon={scanLoading && scanItemIndex === index
+                      startIcon={captureLoading && captureItemIndex === index
                         ? <CircularProgress size={14} />
                         : <CameraAltIcon sx={{ fontSize: 16 }} />}
-                      disabled={scanLoading && scanItemIndex === index}
+                      disabled={captureLoading && captureItemIndex === index}
                       onClick={() => {
                         const input = document.createElement('input')
                         input.type = 'file'
@@ -643,7 +631,7 @@ export default function TodayChecklist({
                         input.capture = 'environment'
                         input.onchange = (e) => {
                           const file = (e.target as HTMLInputElement).files?.[0]
-                          if (file) onScanCapture(file, index)
+                          if (file) onPreCompletionScan(file, index)
                         }
                         input.click()
                       }}
@@ -670,8 +658,8 @@ export default function TodayChecklist({
                     ⛏️ Start Mining
                   </Button>
                 )}
-                {/* Scan results panel */}
-                {scanItemIndex === index && scanResult?.results && (
+                {/* Scan results panel (from pre-completion scans) */}
+                {captureItemIndex === index && scanResult?.results && (
                   <ScanResultsPanel
                     results={scanResult.results}
                     imageUrl={scanResult.imageUrl}
@@ -683,37 +671,10 @@ export default function TodayChecklist({
                     childName={selectedChild.name}
                   />
                 )}
-                {scanItemIndex === index && scanError && (
+                {captureItemIndex === index && scanError && (
                   <Alert severity="error" sx={{ mt: 1 }} onClose={() => { onClearScan() }}>
                     Scan failed: {scanError}
                   </Alert>
-                )}
-                {/* Post-completion scan prompt for workbook items */}
-                {item.completed && !item.scanned && getSparkleMode(item) === 'scan' && scanItemIndex !== index && (
-                  <Box sx={{ ml: 5, mt: 0.5 }}>
-                    <Button
-                      size="small"
-                      variant="text"
-                      startIcon={scanLoading && scanItemIndex === index
-                        ? <CircularProgress size={14} />
-                        : <CameraAltIcon sx={{ fontSize: 16 }} />}
-                      disabled={scanLoading}
-                      onClick={() => {
-                        const input = document.createElement('input')
-                        input.type = 'file'
-                        input.accept = 'image/*'
-                        input.capture = 'environment'
-                        input.onchange = (e) => {
-                          const file = (e.target as HTMLInputElement).files?.[0]
-                          if (file) onScanCapture(file, index)
-                        }
-                        input.click()
-                      }}
-                      sx={{ fontSize: '0.7rem', color: 'text.secondary', textTransform: 'none' }}
-                    >
-                      Scan page to track progress
-                    </Button>
-                  </Box>
                 )}
                 {/* Engagement feedback: emoji row after completion */}
                 {item.completed && !item.engagement && (
@@ -783,53 +744,35 @@ export default function TodayChecklist({
                   </Stack>
                 )}
 
-                {/* Per-item capture — appears after checking off */}
-                {item.completed && (
-                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 5, mt: 0.5 }}>
-                    {/* Capture button */}
-                    {!item.evidenceArtifactId && (
-                      <IconButton
-                        size="small"
-                        onClick={() => onCaptureOpen(index)}
-                        title="Capture work"
-                      >
-                        <CameraAltIcon fontSize="small" />
-                      </IconButton>
-                    )}
-                    {/* Show if evidence already captured */}
-                    {item.evidenceArtifactId && (
-                      <Chip size="small" label="Captured" variant="outlined" color="success" sx={{ height: 22 }} />
-                    )}
-                  </Stack>
-                )}
-
-                {/* Scan nudge for workbook items after completion */}
-                {item.completed && item.itemType === 'workbook' && !item.evidenceArtifactId && (
+                {/* Unified capture — one button for all completed items */}
+                {item.completed && !item.evidenceArtifactId && (
                   <Box sx={{ ml: 5, mt: 0.5 }}>
                     <Button
                       size="small"
                       variant="text"
-                      startIcon={scanLoading && scanItemIndex === index
+                      startIcon={captureLoading && captureItemIndex === index
                         ? <CircularProgress size={14} />
                         : <CameraAltIcon sx={{ fontSize: 16 }} />}
-                      disabled={scanLoading && scanItemIndex === index}
+                      disabled={captureLoading && captureItemIndex === index}
                       onClick={() => {
-                        // Trigger the camera input for scan
                         const input = document.createElement('input')
                         input.type = 'file'
                         input.accept = 'image/*'
                         input.capture = 'environment'
                         input.onchange = (e) => {
                           const file = (e.target as HTMLInputElement).files?.[0]
-                          if (file) onScanCapture(file, index)
+                          if (file) onUnifiedCapture(file, index)
                         }
                         input.click()
                       }}
-                      sx={{ fontSize: '0.7rem', color: 'text.secondary', textTransform: 'none' }}
+                      sx={{ fontSize: '0.75rem', color: 'text.secondary', textTransform: 'none' }}
                     >
-                      Scan the page to track progress
+                      Capture work
                     </Button>
                   </Box>
+                )}
+                {item.completed && item.evidenceArtifactId && (
+                  <Chip size="small" label="Captured" variant="outlined" color="success" sx={{ ml: 5, mt: 0.5, height: 22 }} />
                 )}
 
                 {/* Scan & Review: manual quick-check after capture */}

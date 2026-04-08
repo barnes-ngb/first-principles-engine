@@ -12,14 +12,10 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
-import Dialog from '@mui/material/Dialog'
 import Fab from '@mui/material/Fab'
-import DialogContent from '@mui/material/DialogContent'
-import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
-import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
@@ -39,7 +35,6 @@ import ChildSelector from '../../components/ChildSelector'
 import ContextBar from '../../components/ContextBar'
 import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
-import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
@@ -172,9 +167,6 @@ export default function TodayPage() {
   const { scan: runScan, recordAction: recordScanAction, scanResult, scanning: scanLoading, error: scanError, clearScan } = useScan()
   const { syncScanToConfig } = useScanToActivityConfig()
   const [scanItemIndex, setScanItemIndex] = useState<number | null>(null)
-  // Per-item capture state
-  const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
-  const [captureNote, setCaptureNote] = useState('')
 
   const selectableChildren = children
   const selectedChild = activeChild
@@ -390,61 +382,132 @@ export default function TodayPage() {
     }
   }, [dayLog, selectedChildId, activeChild, todaySnapshot, weekFocus, aiChat, familyId, setSnackMessage])
 
-  // --- Per-item capture handler (component-level for dialog access) ---
+  // --- Unified capture handler ---
+  // One handler for all per-item captures. Runs AI scan, routes to scans or artifacts
+  // based on pageType. Replaces the old handleItemPhotoCapture + handleScanCapture split.
 
-  const handleItemPhotoCapture = useCallback(
-    async (file: File) => {
-      if (captureItemIndex === null || !dayLog?.checklist) return
-      const item = dayLog.checklist[captureItemIndex]
+  const handleUnifiedCapture = useCallback(
+    async (file: File, index: number) => {
+      if (!dayLog?.checklist) return
+      const item = dayLog.checklist[index]
+      setScanItemIndex(index)
+
       try {
-        const artifact = {
-          childId: selectedChildId,
-          title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${activeChild?.name ?? 'Student'}'s work`,
-          type: EvidenceType.Photo,
-          dayLogId: today,
-          createdAt: new Date().toISOString(),
-          tags: {
-            engineStage: EngineStage.Build,
-            domain: '',
-            subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
-            location: 'Home',
-            planItem: item.label,
-            ...(captureNote ? { note: captureNote } : {}),
-          },
+        // 1. Try the scan pipeline (AI vision analysis)
+        let record: ScanRecord | null = null
+        try {
+          record = await runScan(file, familyId, selectedChildId)
+        } catch (err) {
+          console.error('[UnifiedCapture] Scan failed, falling back to artifact:', {
+            childId: selectedChildId,
+            itemLabel: item.label,
+            fileName: file.name,
+            error: err,
+          })
+          // Fall through to artifacts path
         }
-        const docRef = await addDoc(artifactsCollection(familyId), artifact)
-        const ext = file.name.split('.').pop() ?? 'jpg'
-        const filename = generateFilename(ext)
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
 
-        // Link artifact to checklist item
-        const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-          i === captureItemIndex ? { ...ci, evidenceArtifactId: docRef.id } : ci
-        )
-        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-        setTodayArtifacts((prev) => [
-          { ...artifact, id: docRef.id, uri: downloadUrl } as Artifact,
-          ...prev,
-        ])
-        setCaptureItemIndex(null)
-        setCaptureNote('')
-        setSnackMessage({ text: 'Work captured!', severity: 'success' })
+        // 2. Route based on scan result
+        const isCurriculumScan =
+          record?.results &&
+          record.results.pageType !== 'certificate' &&
+          ['worksheet', 'textbook', 'test'].includes(record.results.pageType)
+
+        if (isCurriculumScan && record?.results && record.id) {
+          // ── SCANS path: curriculum evidence ──
+          // Sync to activity configs (updates "Last updated" on Progress)
+          try {
+            const result = await syncScanToConfig(selectedChildId, record.results as WorksheetScanResult)
+            if (result.action === 'created') {
+              setSnackMessage({ text: `New workbook added: ${result.configName}`, severity: 'success' })
+            } else if (result.action === 'updated' && result.position) {
+              setSnackMessage({ text: `Updated ${result.configName} to lesson ${result.position}`, severity: 'success' })
+            } else {
+              setSnackMessage({ text: 'Work captured!', severity: 'success' })
+            }
+          } catch (err) {
+            console.error('[UnifiedCapture] Failed to sync scan to config:', err)
+            setSnackMessage({ text: 'Work captured!', severity: 'success' })
+          }
+
+          // Feed scan skills into the Learning Map (non-blocking)
+          const skills = (record.results as WorksheetScanResult).skillsTargeted
+          if (skills.length > 0) {
+            try {
+              const findings = skills.map((s) => ({
+                skill: s.skill,
+                status: (s.alignsWithSnapshot === 'ahead' ? 'mastered' : 'emerging') as 'mastered' | 'emerging',
+                evidence: `Workbook scan: ${s.skill} (${s.level})`,
+                testedAt: new Date().toISOString(),
+              }))
+              await updateSkillMapFromFindings(familyId, selectedChildId, findings)
+            } catch (err) {
+              console.warn('[UnifiedCapture] Failed to update skill map (non-blocking):', err)
+            }
+          }
+
+          // Link scan doc to checklist item
+          const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
+            i === index
+              ? { ...ci, evidenceArtifactId: record!.id!, evidenceCollection: 'scans' as const, scanned: true }
+              : ci,
+          )
+          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+        } else {
+          // ── ARTIFACTS path: non-curriculum or scan failed ──
+          const artifact = {
+            childId: selectedChildId,
+            title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${activeChild?.name ?? 'Student'}'s work`,
+            type: EvidenceType.Photo,
+            dayLogId: today,
+            createdAt: new Date().toISOString(),
+            tags: {
+              engineStage: EngineStage.Build,
+              domain: '',
+              subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
+              location: 'Home',
+              planItem: item.label,
+            },
+          }
+          const docRef = await addDoc(artifactsCollection(familyId), artifact)
+          const ext = file.name.split('.').pop() ?? 'jpg'
+          const filename = generateFilename(ext)
+          const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+          await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+
+          // Link artifact to checklist item
+          const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
+            i === index
+              ? { ...ci, evidenceArtifactId: docRef.id, evidenceCollection: 'artifacts' as const }
+              : ci,
+          )
+          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+          setTodayArtifacts((prev) => [
+            { ...artifact, id: docRef.id, uri: downloadUrl } as Artifact,
+            ...prev,
+          ])
+          setSnackMessage({ text: 'Work captured!', severity: 'success' })
+        }
       } catch (err) {
-        console.error('Item photo capture failed:', err)
-        setSnackMessage({ text: 'Photo upload failed. Try again.', severity: 'error' })
+        console.error('[UnifiedCapture] Capture failed:', {
+          childId: selectedChildId,
+          itemLabel: item.label,
+          fileName: file.name,
+          error: err,
+        })
+        setSnackMessage({ text: 'Photo capture failed. Try again.', severity: 'error' })
+      } finally {
+        setScanItemIndex(null)
       }
     },
-    [captureItemIndex, captureNote, dayLog, selectedChildId, activeChild, today, familyId, persistDayLogImmediate, setSnackMessage],
+    [runScan, familyId, selectedChildId, activeChild, today, dayLog, persistDayLogImmediate, syncScanToConfig, setSnackMessage],
   )
 
-  // --- Scan handlers ---
-
-  const handleScanCapture = useCallback(async (file: File, index: number) => {
+  // --- Pre-completion scan handler (for "should I skip?" advice) ---
+  const handlePreCompletionScan = useCallback(async (file: File, index: number) => {
     setScanItemIndex(index)
     const record = await runScan(file, familyId, selectedChildId)
 
-    // Auto-sync worksheet scans to activity configs
     if (record?.results && record.results.pageType !== 'certificate') {
       try {
         const result = await syncScanToConfig(selectedChildId, record.results)
@@ -457,7 +520,6 @@ export default function TodayPage() {
         console.error('[TodayPage] Failed to sync scan to config:', err)
       }
 
-      // Feed scan skills into the Learning Map (non-blocking)
       const skills = record.results.skillsTargeted
       if (skills.length > 0) {
         try {
@@ -474,7 +536,6 @@ export default function TodayPage() {
       }
     }
 
-    // Mark checklist item as scanned so the post-completion prompt hides
     if (record?.results && dayLog?.checklist) {
       const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
         i === index ? { ...ci, scanned: true } : ci,
@@ -833,13 +894,10 @@ export default function TodayPage() {
             setTeachHelperItem(item)
             setTeachHelperOpen(true)
           }}
-          onCaptureOpen={(index) => {
-            setCaptureItemIndex(index)
-            setCaptureNote('')
-          }}
-          onScanCapture={handleScanCapture}
-          scanLoading={scanLoading}
-          scanItemIndex={scanItemIndex}
+          onUnifiedCapture={handleUnifiedCapture}
+          onPreCompletionScan={handlePreCompletionScan}
+          captureLoading={scanLoading}
+          captureItemIndex={scanItemIndex}
           scanResult={scanResult}
           scanError={scanError}
           onScanAddToPlan={handleScanAddToPlan}
@@ -853,27 +911,6 @@ export default function TodayPage() {
         />
         </SectionErrorBoundary>
       )}
-
-      {/* --- Per-item capture dialog --- */}
-      <Dialog open={captureItemIndex !== null} onClose={() => setCaptureItemIndex(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          Capture: {captureItemIndex !== null ? dayLog.checklist?.[captureItemIndex]?.label?.replace(/\s*\(\d+m\)/, '') : ''}
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <PhotoCapture onCapture={(file: File) => { void handleItemPhotoCapture(file) }} />
-            <TextField
-              label="Quick note (optional)"
-              placeholder="What went well, what to work on..."
-              value={captureNote}
-              onChange={(e) => setCaptureNote(e.target.value)}
-              size="small"
-              multiline
-              rows={2}
-            />
-          </Stack>
-        </DialogContent>
-      </Dialog>
 
       {/* --- Teach-Back (Lincoln only, after 50%+ must-do completion) --- */}
       {selectedChild && (
