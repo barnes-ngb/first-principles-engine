@@ -542,7 +542,7 @@ export default function QuestQuestionScreen({
             color: MC.stone,
           }}
         >
-          {questState.totalQuestions + 1}/{MAX_QUESTIONS}
+          {question.isBonusRound ? 'BONUS' : `${questState.totalQuestions + 1}/${MAX_QUESTIONS}`}
         </Typography>
       </Stack>
 
