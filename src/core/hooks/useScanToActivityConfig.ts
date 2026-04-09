@@ -1,11 +1,12 @@
 import { useCallback } from 'react'
-import { doc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore'
+import { doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { useFamilyId } from '../auth/useAuth'
-import { activityConfigsCollection, normalizeCurriculumKey } from '../firebase/firestore'
-import type { ActivityConfig, WorksheetScanResult } from '../types'
+import { activityConfigsCollection, normalizeCurriculumKey, skillSnapshotsCollection } from '../firebase/firestore'
+import type { ActivityConfig, SkillSnapshot, WorksheetScanResult } from '../types'
 import { ActivityType, SubjectBucket } from '../types/enums'
 import type { SubjectBucket as SubjectBucketType } from '../types/enums'
+import { deriveMathWorkingLevelFromScan, canOverwriteWorkingLevel } from '../../features/quest/workingLevels'
 
 export interface ScanConfigResult {
   action: 'created' | 'updated' | 'none'
@@ -75,6 +76,12 @@ export function useScanToActivityConfig() {
           updates.defaultMinutes = estimatedMinutes
         }
         await updateDoc(existing.ref, updates)
+
+        // Update math working level from curriculum scan (fire-and-forget)
+        if (subject === SubjectBucket.Math) {
+          void updateMathWorkingLevel(familyId, childId, lessonNumber, curriculumName)
+        }
+
         return {
           action: 'updated',
           configId: existing.id,
@@ -110,6 +117,12 @@ export function useScanToActivityConfig() {
       }
 
       await setDoc(ref, newConfig)
+
+      // Update math working level from curriculum scan (fire-and-forget)
+      if (subject === SubjectBucket.Math) {
+        void updateMathWorkingLevel(familyId, childId, lessonNumber, curriculumName)
+      }
+
       return {
         action: 'created',
         configId: ref.id,
@@ -121,6 +134,35 @@ export function useScanToActivityConfig() {
   )
 
   return { syncScanToConfig }
+}
+
+async function updateMathWorkingLevel(
+  familyId: string,
+  childId: string,
+  lessonNumber: number | null,
+  curriculumName: string,
+): Promise<void> {
+  try {
+    const mathLevel = deriveMathWorkingLevelFromScan(lessonNumber, curriculumName)
+    if (!mathLevel) return
+
+    const snapshotRef = doc(skillSnapshotsCollection(familyId), childId)
+    const snapshotSnap = await getDoc(snapshotRef)
+    const existing: Partial<SkillSnapshot> = snapshotSnap.exists()
+      ? snapshotSnap.data()
+      : {}
+
+    const currentMath = existing.workingLevels?.math
+    if (!canOverwriteWorkingLevel(currentMath)) return
+
+    const mergedWorkingLevels = { ...(existing.workingLevels ?? {}), math: mathLevel }
+    await updateDoc(snapshotRef, {
+      workingLevels: mergedWorkingLevels,
+      updatedAt: new Date().toISOString(),
+    })
+  } catch (err) {
+    console.warn('[ScanToConfig] Failed to update math working level', err)
+  }
 }
 
 function normalizeForMatch(name: string): string {
