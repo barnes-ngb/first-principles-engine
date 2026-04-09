@@ -9,7 +9,6 @@ import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
-import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import { doc, updateDoc } from 'firebase/firestore'
 
@@ -228,30 +227,39 @@ export default function ScanAnalysisPanel({
           )}
 
           {/* Timestamp */}
-          {scan.createdAt && (
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-              Scanned: {new Date(scan.createdAt).toLocaleString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-              })}
-            </Typography>
-          )}
+          {scan.createdAt && (() => {
+            // createdAt may be an ISO string or a Firestore Timestamp object
+            const raw = scan.createdAt
+            const date =
+              typeof raw === 'string'
+                ? new Date(raw)
+                : typeof (raw as unknown as { toDate: () => Date }).toDate === 'function'
+                  ? (raw as unknown as { toDate: () => Date }).toDate()
+                  : null
+            if (!date || isNaN(date.getTime())) return null
+            return (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                Scanned: {date.toLocaleString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </Typography>
+            )
+          })()}
 
           {/* Override section */}
           <Box sx={{ mt: 1.5 }}>
             {localOverride && (
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+              <Stack spacing={0} sx={{ mb: 0.5 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
                   Overridden by Shelly
                 </Typography>
                 {localOverride.note && (
-                  <Tooltip title={localOverride.note}>
-                    <Typography variant="caption" color="text.secondary" sx={{ cursor: 'help', textDecoration: 'underline dotted' }}>
-                      (note)
-                    </Typography>
-                  </Tooltip>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', pl: 0.5 }}>
+                    &ldquo;{localOverride.note}&rdquo;
+                  </Typography>
                 )}
               </Stack>
             )}

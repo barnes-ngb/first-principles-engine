@@ -376,3 +376,15 @@ The single "Capture work" button was split into two side-by-side buttons: **Came
 **Fix C (This Week's Scans):** New section at the top of CurriculumTab showing a 7-day rolling list of all scans for the active child, using the same `ScanAnalysisPanel` component.
 
 **Parent override system:** Added `parentOverride` field to `ScanRecord` type — optional, stores `{ recommendation, overriddenBy, overriddenAt, note? }`. The `effectiveRecommendation(scan)` helper returns `parentOverride.recommendation ?? results.recommendation`. All recommendation readers updated to use the helper. Override UI in `ScanAnalysisPanel`: menu with 4 options, optional note, save/revert. Original AI recommendation is never mutated — preserved for audit trail.
+
+### Follow-up bug fixes — 2026-04-09
+
+Three bugs found during end-to-end testing of scan analysis visibility:
+
+**Fix D (This Week's Scans filter too narrow):** `CurriculumTab.tsx` loaded scans from Firestore via `onSnapshot` but did not convert `createdAt` from Firestore `Timestamp` objects to ISO strings. Since `createdAt` is saved with `serverTimestamp()`, the runtime value was a Timestamp object despite the `string` type annotation. The ISO string comparison `(s.createdAt ?? '') >= cutoff` silently failed, filtering out ALL scans. Fixed by converting Timestamp→ISO string in the onSnapshot handler. Also broadened the filter to exclude only `'certificate'` and `'other'` pageTypes (previously the comment said "worksheet only" but the code excluded only certificates; now `'other'` is also excluded since it signals non-curriculum content).
+
+**Fix E (Scanned: Invalid Date):** `ScanAnalysisPanel.tsx` passed `scan.createdAt` directly to `new Date()`, which produced "Invalid Date" when the value was a Firestore Timestamp object rather than a string. Fixed with a defensive conversion: checks for Timestamp `.toDate()` method, falls back to string parsing, and hides the line entirely if the date is unparseable. The primary fix in Fix D (converting in onSnapshot) prevents this path for CurriculumTab, but the defensive guard protects against other callers passing raw Firestore data.
+
+**Fix F (Override note tooltip → inline):** The override note was surfaced via a Material-UI `Tooltip` on "(note)" text — works on hover but not on mobile tap. Replaced with inline display: the note text renders directly below "Overridden by Shelly" in italics with curly quotes, always visible. Empty notes show no second line.
+
+**syncScanToConfig propagation verified:** Parent overrides do NOT need to re-fire `syncScanToConfig` because the recommendation lives on the `ScanRecord`, not the `ActivityConfig`. The `WorkbookCard` renders `ScanAnalysisPanel` for matched scans, which reads `parentOverride` from the scan document via real-time onSnapshot. When an override is saved, the Firestore update triggers onSnapshot, re-renders `recentScans`, and the panel shows the overridden recommendation. No additional sync needed.

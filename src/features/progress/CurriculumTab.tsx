@@ -79,7 +79,18 @@ export default function CurriculumTab() {
     const unsub = onSnapshot(
       q,
       (snap) => {
-        setRecentScans(snap.docs.map((d) => ({ ...(d.data() as ScanRecord), id: d.id })))
+        setRecentScans(
+          snap.docs.map((d) => {
+            const data = d.data() as ScanRecord
+            // Firestore serverTimestamp() returns a Timestamp object, not a string.
+            // Convert to ISO string so downstream date comparisons and formatting work.
+            const raw = data.createdAt
+            if (raw && typeof raw !== 'string' && typeof (raw as unknown as { toDate: () => Date }).toDate === 'function') {
+              data.createdAt = (raw as unknown as { toDate: () => Date }).toDate().toISOString()
+            }
+            return { ...data, id: d.id }
+          }),
+        )
       },
       (err) => console.error('[CurriculumTab] Failed to load scans', err),
     )
@@ -116,13 +127,17 @@ export default function CurriculumTab() {
     [recentScans],
   )
 
-  // This week's scans (last 7 days, worksheet only)
+  // This week's scans (last 7 days, all curriculum-relevant page types)
   const weeklyScans = useMemo(() => {
     const sevenDaysAgo = new Date()
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
     const cutoff = sevenDaysAgo.toISOString()
     return recentScans.filter(
-      (s) => s.results && s.results.pageType !== 'certificate' && (s.createdAt ?? '') >= cutoff,
+      (s) =>
+        s.results &&
+        s.results.pageType !== 'certificate' &&
+        s.results.pageType !== 'other' &&
+        (s.createdAt ?? '') >= cutoff,
     )
   }, [recentScans])
 
