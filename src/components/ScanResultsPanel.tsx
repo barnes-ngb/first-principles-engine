@@ -6,7 +6,7 @@ import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
-import type { ScanResult, CertificateScanResult, CurriculumDetected } from '../core/types'
+import type { ScanResult, CertificateScanResult, CurriculumDetected, Recommendation } from '../core/types'
 import { isCertificateScan } from '../core/types/planning'
 import GatbLessonInfo from './GatbLessonInfo'
 
@@ -56,6 +56,8 @@ interface ScanResultsPanelProps {
   hideActions?: boolean
   /** Status message from auto-sync to activity config (e.g. "Updated GATB Math to lesson 34"). */
   configSyncStatus?: string | null
+  /** If a parent override exists, use this recommendation instead of results.recommendation. */
+  overrideRecommendation?: Recommendation
 }
 
 export default function ScanResultsPanel({
@@ -70,6 +72,7 @@ export default function ScanResultsPanel({
   childName,
   hideActions,
   configSyncStatus,
+  overrideRecommendation,
 }: ScanResultsPanelProps) {
   if (isCertificateScan(results)) {
     return (
@@ -93,6 +96,8 @@ export default function ScanResultsPanel({
       </Alert>
     )
   }
+
+  const rec = overrideRecommendation ?? results.recommendation
 
   return (
     <Box
@@ -151,8 +156,8 @@ export default function ScanResultsPanel({
           />
           <Chip
             size="small"
-            label={`${RECOMMENDATION_LABEL[results.recommendation] ?? results.recommendation}`}
-            color={results.recommendation === 'do' ? 'success' : results.recommendation === 'skip' ? 'error' : 'warning'}
+            label={`${RECOMMENDATION_LABEL[rec] ?? rec}`}
+            color={rec === 'do' ? 'success' : rec === 'skip' ? 'error' : 'warning'}
             variant="filled"
           />
           <Chip
@@ -183,7 +188,7 @@ export default function ScanResultsPanel({
         </Typography>
 
         {/* Actionable recommendation guidance */}
-        {results.recommendation === 'skip' && (
+        {rec === 'skip' && (
           <Alert severity="success" icon={false} sx={{ py: 0.5 }}>
             <Typography variant="body2">
               {childName || 'Your child'} has this mastered. Skip ahead to the next new content.
@@ -202,7 +207,7 @@ export default function ScanResultsPanel({
           </Alert>
         )}
 
-        {results.recommendation === 'do' && (
+        {rec === 'do' && (
           <Alert severity="warning" icon={false} sx={{ py: 0.5 }}>
             <Typography variant="body2">
               New material — spend full time here. Estimated: ~{results.estimatedMinutes}m
@@ -210,7 +215,7 @@ export default function ScanResultsPanel({
           </Alert>
         )}
 
-        {results.recommendation === 'quick-review' && (
+        {rec === 'quick-review' && (
           <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
             <Typography variant="body2">
               {childName || 'Your child'} knows most of this. Quick 5-minute review, then move on.
