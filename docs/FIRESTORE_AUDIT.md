@@ -55,6 +55,17 @@ All collections live under `families/{familyId}/`. No subcollections go deeper t
 
 > **Update (Apr 8, 2026):** The `scans` collection (not listed above — added post-audit) stores AI-analyzed curriculum evidence (workbook pages, worksheets, tests). The `artifacts` collection stores non-curriculum evidence (creative builds, drawings, etc.). As of the unified capture pipeline, checklist items have an `evidenceCollection` field (`'scans' | 'artifacts'`) alongside `evidenceArtifactId` to indicate which collection the evidence doc lives in. Legacy items without `evidenceCollection` are in `artifacts`.
 
+> **Update (Apr 9, 2026):** Scan documents now support an optional `parentOverride` field:
+> ```typescript
+> parentOverride?: {
+>   recommendation: 'do' | 'skip' | 'quick-review' | 'modify'
+>   overriddenBy: string
+>   overriddenAt: string  // ISO timestamp
+>   note?: string
+> }
+> ```
+> When present, the parent's recommendation takes precedence over the AI's original in `results.recommendation`. The canonical way to read the current recommendation is `effectiveRecommendation(scan)` from `src/core/types/planning.ts`, which returns `parentOverride.recommendation ?? results.recommendation`. The AI's original is never mutated.
+
 ---
 
 ## Composite Index Inventory

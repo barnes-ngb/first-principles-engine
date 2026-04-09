@@ -25,6 +25,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   updateDoc,
@@ -52,7 +53,7 @@ import {
 } from '../../core/firebase/upload'
 import { useProfile } from '../../core/profile/useProfile'
 import type { Artifact, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, LadderCardDefinition, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
-import { isWorksheetScan } from '../../core/types'
+import { effectiveRecommendation, isWorksheetScan } from '../../core/types'
 import { getLaddersForChild } from '../ladders/laddersCatalog'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
@@ -258,6 +259,7 @@ export default function TodayPage() {
         const scan = { ...d.data(), id: d.id } as ScanRecord
         if (!scan.results || !isWorksheetScan(scan.results)) continue
         const r = scan.results as WorksheetScanResult
+        const rec = effectiveRecommendation(scan) ?? r.recommendation
         const subject = (r.subject || '').toLowerCase()
         const key = subject.includes('math') ? 'Math'
           : subject.includes('reading') || subject.includes('phonics') ? 'Reading'
@@ -270,13 +272,33 @@ export default function TodayPage() {
         if (!feedback[key]) {
           feedback[key] = {
             topic: r.specificTopic || '',
-            recommendation: r.recommendation,
+            recommendation: rec,
             estimatedMinutes: r.estimatedMinutes,
           }
         }
       }
       setScanFeedbackBySubject(feedback)
     }).catch(() => { /* ignore */ })
+  }, [familyId, selectedChildId])
+
+  // Real-time recent scans for inline analysis panels
+  const [todayRecentScans, setTodayRecentScans] = useState<ScanRecord[]>([])
+  useEffect(() => {
+    if (!familyId || !selectedChildId) return
+    const q = query(
+      scansCollection(familyId),
+      where('childId', '==', selectedChildId),
+      orderBy('createdAt', 'desc'),
+      limit(20),
+    )
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setTodayRecentScans(snap.docs.map((d) => ({ ...(d.data() as ScanRecord), id: d.id })))
+      },
+      (err) => console.error('[TodayPage] Failed to load scans', err),
+    )
+    return unsub
   }, [familyId, selectedChildId])
 
   /** Map energy level to plan type: normal → Normal Day, low/overwhelmed → MVD. */
@@ -482,6 +504,8 @@ export default function TodayPage() {
             ...prev,
           ])
           setSnackMessage({ text: 'Work captured!', severity: 'success' })
+          // No scan analysis to show for artifacts — clear the index
+          setScanItemIndex(null)
         }
       } catch (err) {
         console.error('[UnifiedCapture] Capture failed:', {
@@ -491,7 +515,6 @@ export default function TodayPage() {
           error: err,
         })
         setSnackMessage({ text: 'Photo capture failed. Try again.', severity: 'error' })
-      } finally {
         setScanItemIndex(null)
       }
     },
@@ -903,6 +926,7 @@ export default function TodayPage() {
           onPrintMaterials={handlePrintTodayMaterials}
           printingMaterials={printingMaterials}
           scanFeedbackBySubject={scanFeedbackBySubject}
+          recentScans={todayRecentScans}
         />
         </SectionErrorBoundary>
       )}
