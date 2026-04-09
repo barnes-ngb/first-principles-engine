@@ -23,6 +23,7 @@ import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
+import ScanAnalysisPanel from '../../components/ScanAnalysisPanel'
 import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
 import type {
@@ -146,6 +147,8 @@ interface TodayChecklistProps {
   onPrintMaterials: () => void
   printingMaterials: boolean
   scanFeedbackBySubject?: Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
+  /** Recent scan records for looking up scan analysis on captured items. */
+  recentScans?: ScanRecord[]
 }
 
 export default function TodayChecklist({
@@ -169,6 +172,7 @@ export default function TodayChecklist({
   onPrintMaterials,
   printingMaterials,
   scanFeedbackBySubject = {},
+  recentScans = [],
 }: TodayChecklistProps) {
   const navigate = useNavigate()
   const [editingPlan, setEditingPlan] = useState(false)
@@ -177,6 +181,7 @@ export default function TodayChecklist({
   const [newItemMinutes, setNewItemMinutes] = useState(15)
   const [newItemSubject, setNewItemSubject] = useState<SubjectBucket>(SubjectBucket.Other)
   const [gradeNote, setGradeNote] = useState<{ index: number; text: string } | null>(null)
+  const [expandedCaptureIndex, setExpandedCaptureIndex] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000)
@@ -793,9 +798,29 @@ export default function TodayChecklist({
                     </Button>
                   </Stack>
                 )}
-                {item.completed && item.evidenceArtifactId && (
-                  <Chip size="small" label="Captured" variant="outlined" color="success" sx={{ ml: 5, mt: 0.5, height: 22 }} />
-                )}
+                {item.completed && item.evidenceArtifactId && (() => {
+                  const scanDoc = item.evidenceCollection === 'scans'
+                    ? recentScans.find((s) => s.id === item.evidenceArtifactId)
+                    : undefined
+                  const isExpandable = !!scanDoc?.results
+                  return (
+                    <>
+                      <Chip
+                        size="small"
+                        label={isExpandable ? (expandedCaptureIndex === index ? 'Captured ✓ ▴' : 'Captured ✓ ▾') : 'Captured ✓'}
+                        variant="outlined"
+                        color="success"
+                        onClick={isExpandable ? () => setExpandedCaptureIndex(expandedCaptureIndex === index ? null : index) : undefined}
+                        sx={{ ml: 5, mt: 0.5, height: 22, cursor: isExpandable ? 'pointer' : 'default' }}
+                      />
+                      {isExpandable && expandedCaptureIndex === index && scanDoc && (
+                        <Box sx={{ ml: 5, mt: 0.5 }}>
+                          <ScanAnalysisPanel scan={scanDoc} defaultExpanded />
+                        </Box>
+                      )}
+                    </>
+                  )
+                })()}
 
                 {/* Scan & Review: manual quick-check after capture */}
                 {item.evidenceArtifactId && !item.gradeResult && gradeNote?.index !== index && (

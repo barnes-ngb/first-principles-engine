@@ -366,3 +366,13 @@ The single "Capture work" button was split into two side-by-side buttons: **Came
 - Cloud Functions (disposition.ts, evaluate.ts) — only count `evidenceArtifactId` presence, work unchanged
 - Progress page scan button (CurriculumTab.tsx) — unchanged, still uses `useScan` directly
 - PlannerChatPage scan handler — unchanged, separate from Today capture flow
+
+### Scan analysis persistence + parent override — 2026-04-09
+
+**Fix A (Today flash popup):** The scan analysis panel was flashing and disappearing because `handleUnifiedCapture` cleared `scanItemIndex` in a `finally` block, unmounting `ScanResultsPanel` before the user could see it. Fixed by only clearing on error or artifacts path. Additionally, the "Captured ✓" chip on completed items is now tappable when evidence is from the scans collection — expanding an inline `ScanAnalysisPanel` showing photo, AI reasoning, skills, difficulty, curriculum, and override controls.
+
+**Fix B (Progress Recent scans):** Recent scans in the `WorkbookCard` on CurriculumTab are now expandable cards using the shared `ScanAnalysisPanel` component instead of static text bullets.
+
+**Fix C (This Week's Scans):** New section at the top of CurriculumTab showing a 7-day rolling list of all scans for the active child, using the same `ScanAnalysisPanel` component.
+
+**Parent override system:** Added `parentOverride` field to `ScanRecord` type — optional, stores `{ recommendation, overriddenBy, overriddenAt, note? }`. The `effectiveRecommendation(scan)` helper returns `parentOverride.recommendation ?? results.recommendation`. All recommendation readers updated to use the helper. Override UI in `ScanAnalysisPanel`: menu with 4 options, optional note, save/revert. Original AI recommendation is never mutated — preserved for audit trail.

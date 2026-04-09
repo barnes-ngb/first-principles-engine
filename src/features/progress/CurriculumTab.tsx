@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import AddIcon from '@mui/icons-material/Add'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -9,7 +9,6 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
-import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Container from '@mui/material/Container'
 import Dialog from '@mui/material/Dialog'
@@ -30,6 +29,7 @@ import Typography from '@mui/material/Typography'
 import { limit, onSnapshot, orderBy, query, where } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
+import ScanAnalysisPanel from '../../components/ScanAnalysisPanel'
 import ScanButton from '../../components/ScanButton'
 import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
@@ -115,6 +115,16 @@ export default function CurriculumTab() {
     },
     [recentScans],
   )
+
+  // This week's scans (last 7 days, worksheet only)
+  const weeklyScans = useMemo(() => {
+    const sevenDaysAgo = new Date()
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+    const cutoff = sevenDaysAgo.toISOString()
+    return recentScans.filter(
+      (s) => s.results && s.results.pageType !== 'certificate' && (s.createdAt ?? '') >= cutoff,
+    )
+  }, [recentScans])
 
   // Menu state
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null)
@@ -320,6 +330,23 @@ export default function CurriculumTab() {
         <Typography variant="h5" fontWeight={600}>
           {childName}&apos;s Curriculum
         </Typography>
+
+        {/* This Week's Scans */}
+        <SectionCard
+          title={`This week\u2019s scans${weeklyScans.length > 0 ? ` (${weeklyScans.length})` : ''}`}
+        >
+          {weeklyScans.length === 0 ? (
+            <Typography color="text.secondary" variant="body2">
+              No scans this week yet — capture work on the Today page to see AI analysis here.
+            </Typography>
+          ) : (
+            <Stack spacing={0.5}>
+              {weeklyScans.map((scanRec) => (
+                <ScanAnalysisPanel key={scanRec.id} scan={scanRec} />
+              ))}
+            </Stack>
+          )}
+        </SectionCard>
 
         {/* Active Workbooks */}
         <SectionCard title="Active Workbooks">
@@ -635,25 +662,10 @@ function WorkbookCard({ config, recentScans, onOpenMenu, onScanCapture, scanning
           <Typography variant="caption" color="text.secondary">
             Recent scans:
           </Typography>
-          {recentScans.slice(0, 3).map((scanRec, i) => {
+          {recentScans.slice(0, 3).map((scanRec) => {
             if (!scanRec.results || scanRec.results.pageType === 'certificate') return null
-            const r = scanRec.results
             return (
-              <Typography key={scanRec.id ?? i} variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem' }}>
-                &bull; {r.specificTopic || r.subject}
-                <Chip
-                  label={r.recommendation}
-                  size="small"
-                  color={
-                    r.recommendation === 'skip'
-                      ? 'success'
-                      : r.recommendation === 'do'
-                        ? 'error'
-                        : 'warning'
-                  }
-                  sx={{ ml: 1, height: 20, fontSize: '0.7rem' }}
-                />
-              </Typography>
+              <ScanAnalysisPanel key={scanRec.id} scan={scanRec} />
             )
           })}
         </Box>

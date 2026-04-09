@@ -638,7 +638,7 @@ export interface WorksheetScanResult {
   specificTopic: string
   skillsTargeted: ScanSkillResult[]
   estimatedDifficulty: 'easy' | 'appropriate' | 'challenging' | 'too-hard'
-  recommendation: 'do' | 'skip' | 'quick-review' | 'modify'
+  recommendation: Recommendation
   recommendationReason: string
   estimatedMinutes: number
   teacherNotes: string
@@ -676,6 +676,17 @@ export function isWorksheetScan(result: ScanResult): result is WorksheetScanResu
   return result.pageType !== 'certificate'
 }
 
+/** The four possible scan recommendations. */
+export type Recommendation = 'do' | 'skip' | 'quick-review' | 'modify'
+
+/** Parent override on an AI scan recommendation. Stored alongside the original. */
+export interface ParentOverride {
+  recommendation: Recommendation
+  overriddenBy: string
+  overriddenAt: string
+  note?: string
+}
+
 export interface ScanRecord {
   id?: string
   childId: string
@@ -685,6 +696,19 @@ export interface ScanRecord {
   action: 'added' | 'skipped' | 'pending'
   error?: string
   createdAt?: string
+  /** Parent override — if present, takes precedence over AI recommendation. */
+  parentOverride?: ParentOverride
+}
+
+/**
+ * Returns the effective recommendation for a scan, preferring parentOverride
+ * over the AI's original recommendation. Returns undefined if the scan has
+ * no worksheet results.
+ */
+export function effectiveRecommendation(scan: ScanRecord): Recommendation | undefined {
+  if (scan.parentOverride) return scan.parentOverride.recommendation
+  if (scan.results && isWorksheetScan(scan.results)) return scan.results.recommendation
+  return undefined
 }
 
 // ── Skip Advisor Result ───────────────────────────────────────
