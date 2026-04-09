@@ -57,6 +57,31 @@ export interface ConceptualBlock {
   evaluationSessionId: string
 }
 
+// ── Working Levels (per-domain quest progression) ──────────────
+
+export const WorkingLevelSource = {
+  Quest: 'quest',
+  Evaluation: 'evaluation',
+  Curriculum: 'curriculum',
+  Manual: 'manual',
+} as const
+export type WorkingLevelSource = (typeof WorkingLevelSource)[keyof typeof WorkingLevelSource]
+
+export interface WorkingLevel {
+  level: number // 1-based, matches quest level scale
+  updatedAt: string // ISO timestamp
+  source: WorkingLevelSource // what kind of evidence set this
+  evidence?: string // short human-readable note
+}
+
+export interface WorkingLevels {
+  phonics?: WorkingLevel
+  comprehension?: WorkingLevel
+  math?: WorkingLevel
+  // Note: fluency has no levels, not tracked here
+  // Note: speech not yet built
+}
+
 export interface SkillSnapshot {
   id?: string
   childId: string
@@ -69,6 +94,8 @@ export interface SkillSnapshot {
   blocksUpdatedAt?: string
   /** Completed curriculum programs (e.g., ['reading-eggs']) */
   completedPrograms?: string[]
+  /** Per-domain working levels for Knowledge Mine progression */
+  workingLevels?: WorkingLevels
   createdAt?: string
   updatedAt?: string
 }
