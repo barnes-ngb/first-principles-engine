@@ -49,6 +49,17 @@ export const FRUSTRATION_LIMIT = 2 // 2 level-downs in a row → end
 export const FLOOR_WRONG_LIMIT = 4
 export const VALIDATION_RETRIES = 2 // retry AI calls when question validation fails
 
+// Per-quest-mode level ceilings.
+// Phonics: L9-10 test comprehension, not phonics — cap at 8.
+// Comprehension & Math: prompts only define L1-6 — cap at 6.
+// Fluency has no levels (N/A).
+export const QUEST_MODE_LEVEL_CAP: Record<string, number> = {
+  phonics: 8,
+  comprehension: 6,
+  math: 6,
+} as const
+export const DEFAULT_LEVEL_CAP = 10
+
 // ── Quest adaptive state ──────────────────────────────────────
 
 export interface QuestState {

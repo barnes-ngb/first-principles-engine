@@ -1,5 +1,6 @@
 import type { QuestState } from './questTypes'
 import {
+  DEFAULT_LEVEL_CAP,
   FLOOR_WRONG_LIMIT,
   FRUSTRATION_LIMIT,
   LEVEL_DOWN_STREAK,
@@ -12,8 +13,15 @@ import {
 /**
  * Compute the next adaptive state after an answer.
  * Pure function — no side effects.
+ *
+ * @param levelCap - Per-quest-mode ceiling (e.g. 8 for phonics, 6 for comprehension/math).
+ *                   Defaults to DEFAULT_LEVEL_CAP (10) if not provided.
  */
-export function computeNextState(prev: QuestState, correct: boolean): QuestState {
+export function computeNextState(
+  prev: QuestState,
+  correct: boolean,
+  levelCap: number = DEFAULT_LEVEL_CAP,
+): QuestState {
   let currentLevel = prev.currentLevel
   let consecutiveCorrect = prev.consecutiveCorrect
   let consecutiveWrong = prev.consecutiveWrong
@@ -28,7 +36,7 @@ export function computeNextState(prev: QuestState, correct: boolean): QuestState
     consecutiveWrong = 0
     levelDownsInARow = 0
     wrongAtFloor = 0
-    if (consecutiveCorrect >= LEVEL_UP_STREAK && currentLevel < 10) {
+    if (consecutiveCorrect >= LEVEL_UP_STREAK && currentLevel < levelCap) {
       currentLevel = prev.currentLevel + 1
       consecutiveCorrect = 0
       questionsThisLevel = 0

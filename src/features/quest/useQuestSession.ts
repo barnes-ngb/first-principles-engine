@@ -27,7 +27,10 @@ import type {
   SessionQuestion,
 } from './questTypes'
 import {
+  DEFAULT_LEVEL_CAP,
   FRUSTRATION_LIMIT,
+  LEVEL_UP_STREAK,
+  QUEST_MODE_LEVEL_CAP,
   QuestScreen,
   VALIDATION_RETRIES,
 } from './questTypes'
@@ -320,6 +323,7 @@ export function useQuestSession() {
   const [sessionSaved, setSessionSaved] = useState(false)
   const [summarizing, setSummarizing] = useState(false)
   const [startQuestError, setStartQuestError] = useState<string | null>(null)
+  const [hitLevelCap, setHitLevelCap] = useState(false)
   const [previousSessions, setPreviousSessions] = useState<Array<{ evaluatedAt: string }>>([])
   const activeDomainRef = useRef<EvaluationDomain>('reading')
   const activeQuestModeRef = useRef<QuestMode | undefined>(undefined)
@@ -446,6 +450,12 @@ export function useQuestSession() {
         }
       }
 
+      // Cap starting level to quest-mode ceiling
+      const modeLevelCap = questMode
+        ? (QUEST_MODE_LEVEL_CAP[questMode] ?? DEFAULT_LEVEL_CAP)
+        : DEFAULT_LEVEL_CAP
+      startLevel = Math.min(startLevel, modeLevelCap)
+
       const now = new Date().toISOString()
       const initialState: QuestState = {
         currentLevel: startLevel,
@@ -462,6 +472,7 @@ export function useQuestSession() {
 
       activeDomainRef.current = domain
       setStartQuestError(null)
+      setHitLevelCap(false)
       setQuestState(initialState)
       setAnsweredQuestions([])
       setFindings([])
@@ -1024,9 +1035,17 @@ export function useQuestSession() {
       })
       setScreen(QuestScreen.Feedback)
 
-      // Compute new adaptive state
-      const newState = computeNextState(questState, correct)
+      // Compute new adaptive state (respecting per-mode level cap)
+      const modeCap = activeQuestModeRef.current
+        ? (QUEST_MODE_LEVEL_CAP[activeQuestModeRef.current] ?? DEFAULT_LEVEL_CAP)
+        : DEFAULT_LEVEL_CAP
+      const newState = computeNextState(questState, correct, modeCap)
       setQuestState(newState)
+
+      // Detect if the child hit the level cap (at cap with enough correct to have promoted)
+      if (correct && newState.currentLevel >= modeCap && newState.consecutiveCorrect >= LEVEL_UP_STREAK) {
+        setHitLevelCap(true)
+      }
 
       // Feedback pause
       const feedbackDuration = correct ? 1200 : 2000
@@ -1668,6 +1687,7 @@ export function useQuestSession() {
     setSessionSaved(false)
     setSummarizing(false)
     setStartQuestError(null)
+    setHitLevelCap(false)
     setFluencyPassages([])
     setFluencyDiamonds(0)
     setCurrentPassageText('')
@@ -1690,6 +1710,8 @@ export function useQuestSession() {
     aiLoading,
     aiError,
     startQuestError,
+    hitLevelCap,
+    questMode: activeQuestModeRef.current,
     startQuest,
     resumeSession,
     submitAnswer,
