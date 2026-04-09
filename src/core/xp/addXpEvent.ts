@@ -9,7 +9,6 @@ import {
 import type { AvatarProfile, XP_EVENTS } from '../types'
 import type { CurrencyType, DiamondCategory } from '../types'
 import { checkAndUnlockArmor } from './checkAndUnlockArmor'
-import { calculateTier } from '../../features/avatar/voxel/tierMaterials'
 
 /** Build a sensible default AvatarProfile for a child that has none yet. */
 function defaultAvatarProfile(childId: string): AvatarProfile {
@@ -133,21 +132,11 @@ export async function addXpEvent(
     ? (profileSnap.data() as AvatarProfile)
     : defaultAvatarProfile(childId)
 
-  const oldTier = calculateTier(profile.totalXp ?? 0)
-  const newTier = calculateTier(newTotal)
-  console.log(`[XP] New total: ${newTotal}, tier: ${newTier}`)
-
-  const tierUpdate: Record<string, unknown> = {}
-  if (newTier !== oldTier) {
-    console.log(`[XP] TIER UPGRADE: ${oldTier} → ${newTier}`)
-    tierUpdate.currentTier = newTier.toLowerCase()
-    tierUpdate.pendingTierUpgrade = newTier
-  }
+  console.log(`[XP] New total: ${newTotal}`)
 
   await setDoc(profileRef, stripUndefined({
     ...profile,
     totalXp: newTotal,
-    ...tierUpdate,
     updatedAt: new Date().toISOString(),
   }) as unknown as AvatarProfile)
 

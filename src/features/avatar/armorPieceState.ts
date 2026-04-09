@@ -1,6 +1,7 @@
 import { ARMOR_PIECE_TO_VOXEL } from '../../core/types'
 import type { ArmorPiece, AvatarProfile, VoxelArmorPieceId } from '../../core/types'
 import { XP_THRESHOLDS } from './voxel/buildArmorPiece'
+import { ALL_ARMOR_VOXEL_PIECES, getActiveForgeTierFromProgress } from './armorTierProgress'
 
 export type ArmorPieceState =
   | 'locked_by_xp'
@@ -8,20 +9,9 @@ export type ArmorPieceState =
   | 'forged_not_equipped_today'
   | 'equipped_today'
 
-const ALL_PIECE_IDS: VoxelArmorPieceId[] = ['belt', 'shoes', 'breastplate', 'shield', 'helmet', 'sword']
-
 /** Get the tier the child is currently forging in (lowest unlocked tier with unforged pieces). */
 export function getActiveForgeTier(profile: AvatarProfile): string {
-  const tiers = profile.unlockedTiers ?? ['wood']
-  const forged = profile.forgedPieces ?? {}
-
-  for (const tier of tiers) {
-    const tierForged = forged[tier] ?? {}
-    const allForgedInTier = ALL_PIECE_IDS.every((id) => tierForged[id])
-    if (!allForgedInTier) return tier
-  }
-
-  return tiers[tiers.length - 1] ?? 'wood'
+  return getActiveForgeTierFromProgress(profile)
 }
 
 function isLegacyForgedEquivalent(profile: AvatarProfile, tier: string, pieceId: VoxelArmorPieceId): boolean {
@@ -37,7 +27,7 @@ export function getForgedPiecesForTier(profile: AvatarProfile, tier: string): Vo
   if (forgedFromTier.length > 0) return forgedFromTier
 
   if (!profile.forgedPieces && tier === 'wood') {
-    return ALL_PIECE_IDS.filter((pieceId) => isLegacyForgedEquivalent(profile, tier, pieceId))
+    return ALL_ARMOR_VOXEL_PIECES.filter((pieceId) => isLegacyForgedEquivalent(profile, tier, pieceId))
   }
 
   return []
@@ -45,11 +35,11 @@ export function getForgedPiecesForTier(profile: AvatarProfile, tier: string): Vo
 
 export function getVisiblePieces(profile: AvatarProfile): VoxelArmorPieceId[] {
   const xp = profile.totalXp
-  return ALL_PIECE_IDS.filter((pieceId) => xp >= XP_THRESHOLDS[pieceId])
+  return ALL_ARMOR_VOXEL_PIECES.filter((pieceId) => xp >= XP_THRESHOLDS[pieceId])
 }
 
 export function getEquippablePieces(profile: AvatarProfile): VoxelArmorPieceId[] {
-  const activeTier = getActiveForgeTier(profile)
+  const activeTier = getActiveForgeTierFromProgress(profile)
   return getForgedPiecesForTier(profile, activeTier)
 }
 

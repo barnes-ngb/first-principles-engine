@@ -18,13 +18,6 @@ vi.mock('../firebase/firestore', () => ({
   stripUndefined: (obj: Record<string, unknown>) => obj,
 }))
 
-vi.mock('../../features/avatar/voxel/tierMaterials', () => ({
-  calculateTier: (xp: number) => {
-    if (xp >= 200) return 'STONE'
-    return 'WOOD'
-  },
-}))
-
 const mockCheckAndUnlockArmor = vi.fn().mockResolvedValue({
   newlyUnlockedPieces: [],
   newlyUnlockedVoxelPieces: [],
