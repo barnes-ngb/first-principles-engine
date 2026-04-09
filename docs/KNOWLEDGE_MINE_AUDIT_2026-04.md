@@ -239,7 +239,7 @@ The comprehension prompt defines difficulty in 2-level bands rather than per-lev
 
 7. **Duplicate starting-level logic**: The curriculum-to-starting-level computation exists in both `useQuestSession.ts:390-443` (client) and `quest.ts:29-87` (server). The server result (`suggestedStartLevel`) is sent to the AI prompt, but the client result is what sets the actual `QuestState.currentLevel`. These could drift if one is updated without the other.
 
-8. **Math has no starting-level boost from curriculum data.** Unlike reading, math always starts at Level 2 regardless of curriculum completion. Is this intentional or an oversight?
+8. ~~**Math has no starting-level boost from curriculum data.** Unlike reading, math always starts at Level 2 regardless of curriculum completion. Is this intentional or an oversight?~~ **RESOLVED:** `workingLevels` data model now tracks per-domain starting levels. Math curriculum scans write `workingLevels.math` with `source: 'curriculum'`. Quest sessions, evaluations, and scans all feed into the same progression model.
 
 9. **Word progress tracking**: Only fires for the interactive quest modes (phonics/comprehension), not for fluency or math. Tracked at `families/{familyId}/children/{childId}/wordProgress` — a subcollection not listed in CLAUDE.md's Firestore Collections table (it is mentioned in a note but not in the main table).
 
@@ -595,7 +595,7 @@ London (6, kindergarten) has no evaluation sessions, no skill snapshots, no word
 | P1-3 | Comprehension prompt under-specified | A | Only 3 difficulty bands (2 levels each) with vague guidance. Phonics has 6 specific bands with concrete question types. Comprehension quality is unpredictable. | M |
 | P1-4 | Phonics L9-10 domain mismatch | A | Levels 9-10 test passage comprehension, not phonics. A child who excels at decoding gets comprehension questions inside "Phonics Quest." Should redirect to Comprehension Quest instead. | M |
 | P1-5 | Duplicate starting-level logic | A | Curriculum-to-starting-level computed in both client (`useQuestSession.ts:390-443`) and server (`quest.ts:29-87`). Could drift if only one is updated. | M |
-| P1-6 | Math has no starting-level boost | A | Math always starts at Level 2 regardless of curriculum data. Reading adapts starting level from workbook completion. Math should do the same. | S |
+| P1-6 | ~~Math has no starting-level boost~~ | A | ~~Math always starts at Level 2 regardless of curriculum data. Reading adapts starting level from workbook completion. Math should do the same.~~ **FIXED:** Math curriculum scans now write `workingLevels.math` via `deriveMathWorkingLevelFromScan`. Quest sessions read from `workingLevels` fallback chain. | S |
 
 ### P2 — Nice to Have
 
@@ -616,11 +616,11 @@ London (6, kindergarten) has no evaluation sessions, no skill snapshots, no word
 
 2. **Per-quest level caps or expand prompts?** Two ways to fix the Level 7+ gap: (a) cap Comprehension and Math at Level 6 in the adaptive engine, or (b) define Levels 7-10 content in their prompts. Option (a) is simpler but limits growth. Option (b) is more work but better long-term.
 
-3. **Should London's starting level adapt over time?** Currently every quest session starts at Level 2 for a child with no curriculum data. After London completes several quests, should her starting level increase based on prior quest performance (not just workbook configs)?
+3. ~~**Should London's starting level adapt over time?** Currently every quest session starts at Level 2 for a child with no curriculum data. After London completes several quests, should her starting level increase based on prior quest performance (not just workbook configs)?~~ **RESOLVED:** `workingLevels` now updates from quest session performance. After each session, `computeWorkingLevelFromSession` writes the new level. Next session reads it via `computeStartLevel` fallback chain.
 
 4. **Level 1 escape — what feels right?** Options: (a) count level-floor hits as frustration events, (b) add a "4 wrong at Level 1 → end session" rule, (c) show a parent-facing prompt ("London seems stuck — want to end the session?"). Which approach fits the "no shame" philosophy best?
 
-5. **Math starting level from curriculum**: Reading uses workbook completion to boost starting level (up to Level 8). Should math do the same from math curriculum data? Or is Level 2 the right default since Lincoln is "~3rd grade math" and the levels are well-calibrated for that range?
+5. ~~**Math starting level from curriculum**: Reading uses workbook completion to boost starting level (up to Level 8). Should math do the same from math curriculum data? Or is Level 2 the right default since Lincoln is "~3rd grade math" and the levels are well-calibrated for that range?~~ **RESOLVED:** Math curriculum scans now write `workingLevels.math` via GATB lesson-to-level mapping. Quest also updates from session performance.
 
 6. **Fluency difficulty**: Should fluency passages adapt to the child's reading level from their most recent skill snapshot, or is the fixed "2nd-3rd grade" target appropriate for both Lincoln (~1st grade reading) and future children?
 
@@ -630,3 +630,22 @@ London (6, kindergarten) has no evaluation sessions, no skill snapshots, no word
 
 *Audit complete. 4 parts, 6 sections (A-C, F), 15 findings, 14 fixes, 7 open questions.*
 *No code was changed. No files were modified except this document.*
+
+---
+
+## Post-Audit Fix: workingLevels Data Model (2026-04-09)
+
+**Problem:** Every Knowledge Mine session started at Level 2 (or curriculum-derived for reading). Quest performance had no effect on future sessions — Lincoln could ace 10 phonics sessions and still start at Level 2 next time.
+
+**Fix:** Added `workingLevels` field to `skillSnapshots/{childId}` — a per-domain (phonics/comprehension/math) authoritative "where is this child now" record.
+
+**Read path:** `computeStartLevel()` uses fallback chain: workingLevels[mode] → curriculum hint → Level 2 default. Always capped at mode ceiling.
+
+**Write paths:**
+1. **Quest session end** — `computeWorkingLevelFromSession()` derives new level from session performance (stable ceiling vs crash detection)
+2. **Guided evaluation apply** — `deriveWorkingLevelFromEvaluation()` maps mastered findings to levels
+3. **Math curriculum scan** — `deriveMathWorkingLevelFromScan()` maps GATB lesson numbers to levels
+
+**Manual override protection:** `source: 'manual'` is protected from automated overwrites for 48 hours.
+
+**Resolved:** P1-6, Open Questions 3/5/8.

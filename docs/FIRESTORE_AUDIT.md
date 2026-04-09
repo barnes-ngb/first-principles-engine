@@ -240,6 +240,18 @@ These queries filter/sort on multiple fields and likely need composite indexes. 
 
 **Observation:** Both are keyed by `{childId}` (one doc per child). They represent per-child metadata. `avatarProfiles` has XP/level data; `skillSnapshots` has evaluation data.
 
+**New field (2026-04):** `workingLevels?: WorkingLevels` — per-domain working levels for Knowledge Mine progression.
+
+```
+workingLevels: {
+  phonics?: { level: number, updatedAt: string, source: 'quest'|'evaluation'|'curriculum'|'manual', evidence?: string }
+  comprehension?: { ... same shape }
+  math?: { ... same shape }
+}
+```
+
+Written by: quest session end (`source: 'quest'`), guided evaluation apply (`source: 'evaluation'`), curriculum scan (`source: 'curriculum'`), future parent UI (`source: 'manual'`). Manual overrides are protected from automated overwrites for 48 hours. Optional field — absence means "no data, use default Level 2."
+
 **Option:** Merge into a single `childProfiles` collection or embed both as subcollections of `children`.
 
 | Metric | Current | After Merge |
