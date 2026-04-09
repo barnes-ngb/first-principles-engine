@@ -20,7 +20,6 @@ import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import {
-  addDoc,
   doc,
   getDoc,
   getDocs,
@@ -28,7 +27,6 @@ import {
   onSnapshot,
   orderBy,
   query,
-  updateDoc,
   where,
 } from 'firebase/firestore'
 
@@ -47,10 +45,6 @@ import {
   scansCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
-import {
-  generateFilename,
-  uploadArtifactFile,
-} from '../../core/firebase/upload'
 import { useProfile } from '../../core/profile/useProfile'
 import type { Artifact, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, LadderCardDefinition, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
 import { effectiveRecommendation, isWorksheetScan } from '../../core/types'
@@ -59,8 +53,6 @@ import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
   EnergyLevel,
   EnergyLevelLabel,
-  EngineStage,
-  EvidenceType,
   PlanType,
   PlanTypeLabel,
   SubjectBucket,
@@ -80,8 +72,7 @@ import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { ensureDefaultActivityConfigs } from '../../core/firebase/migrateActivityConfigs'
-import { useScan } from '../../core/hooks/useScan'
-import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
+import { useUnifiedCapture } from './useUnifiedCapture'
 import QuickAddHours from '../records/QuickAddHours'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import WeekFocusCard from './WeekFocusCard'
@@ -165,9 +156,6 @@ export default function TodayPage() {
   const [teachHelperOpen, setTeachHelperOpen] = useState(false)
   const [printingMaterials, setPrintingMaterials] = useState(false)
   const [todaySnapshot, setTodaySnapshot] = useState<SkillSnapshot | null>(null)
-  const { scan: runScan, recordAction: recordScanAction, scanResult, scanning: scanLoading, error: scanError, clearScan } = useScan()
-  const { syncScanToConfig } = useScanToActivityConfig()
-  const [scanItemIndex, setScanItemIndex] = useState<number | null>(null)
 
   const selectableChildren = children
   const selectedChild = activeChild
@@ -221,6 +209,29 @@ export default function TodayPage() {
       setPlanType(dailyPlan.planType)
     }
   }, [dailyPlan])
+
+  // --- Unified capture hook (shared with kid views) ---
+  const {
+    handleUnifiedCapture,
+    scanItemIndex,
+    setScanItemIndex,
+    scanResult,
+    scanLoading,
+    scanError,
+    clearScan,
+    recordScanAction,
+    syncScanToConfig,
+    runScan,
+  } = useUnifiedCapture({
+    familyId,
+    childId: selectedChildId,
+    childName: activeChild?.name ?? 'Student',
+    today,
+    dayLog,
+    persistDayLogImmediate,
+    onMessage: setSnackMessage,
+    onArtifactCreated: (artifact) => setTodayArtifacts((prev) => [artifact, ...prev]),
+  })
 
   const { chat: aiChat } = useAI()
 
@@ -403,123 +414,6 @@ export default function TodayPage() {
       setPrintingMaterials(false)
     }
   }, [dayLog, selectedChildId, activeChild, todaySnapshot, weekFocus, aiChat, familyId, setSnackMessage])
-
-  // --- Unified capture handler ---
-  // One handler for all per-item captures. Runs AI scan, routes to scans or artifacts
-  // based on pageType. Replaces the old handleItemPhotoCapture + handleScanCapture split.
-
-  const handleUnifiedCapture = useCallback(
-    async (file: File, index: number) => {
-      if (!dayLog?.checklist) return
-      const item = dayLog.checklist[index]
-      setScanItemIndex(index)
-
-      try {
-        // 1. Try the scan pipeline (AI vision analysis)
-        // useScan.scan() catches errors internally and returns null (never throws),
-        // so the old try/catch wrapper was dead code. Instead, check for null and
-        // clear stale scanError state so the red Alert doesn't flash during fallback.
-        const record = await runScan(file, familyId, selectedChildId)
-        if (!record) {
-          clearScan()
-        }
-
-        // 2. Route based on scan result
-        const isCurriculumScan =
-          record?.results &&
-          record.results.pageType !== 'certificate' &&
-          ['worksheet', 'textbook', 'test'].includes(record.results.pageType)
-
-        if (isCurriculumScan && record?.results && record.id) {
-          // ── SCANS path: curriculum evidence ──
-          // Sync to activity configs (updates "Last updated" on Progress)
-          try {
-            const result = await syncScanToConfig(selectedChildId, record.results as WorksheetScanResult)
-            if (result.action === 'created') {
-              setSnackMessage({ text: `New workbook added: ${result.configName}`, severity: 'success' })
-            } else if (result.action === 'updated' && result.position) {
-              setSnackMessage({ text: `Updated ${result.configName} to lesson ${result.position}`, severity: 'success' })
-            } else {
-              setSnackMessage({ text: 'Work captured!', severity: 'success' })
-            }
-          } catch (err) {
-            console.error('[UnifiedCapture] Failed to sync scan to config:', err)
-            setSnackMessage({ text: 'Work captured!', severity: 'success' })
-          }
-
-          // Feed scan skills into the Learning Map (non-blocking)
-          const skills = (record.results as WorksheetScanResult).skillsTargeted
-          if (skills.length > 0) {
-            try {
-              const findings = skills.map((s) => ({
-                skill: s.skill,
-                status: (s.alignsWithSnapshot === 'ahead' ? 'mastered' : 'emerging') as 'mastered' | 'emerging',
-                evidence: `Workbook scan: ${s.skill} (${s.level})`,
-                testedAt: new Date().toISOString(),
-              }))
-              await updateSkillMapFromFindings(familyId, selectedChildId, findings)
-            } catch (err) {
-              console.warn('[UnifiedCapture] Failed to update skill map (non-blocking):', err)
-            }
-          }
-
-          // Link scan doc to checklist item
-          const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-            i === index
-              ? { ...ci, evidenceArtifactId: record!.id!, evidenceCollection: 'scans' as const, scanned: true }
-              : ci,
-          )
-          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-        } else {
-          // ── ARTIFACTS path: non-curriculum or scan failed ──
-          const artifact = {
-            childId: selectedChildId,
-            title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${activeChild?.name ?? 'Student'}'s work`,
-            type: EvidenceType.Photo,
-            dayLogId: today,
-            createdAt: new Date().toISOString(),
-            tags: {
-              engineStage: EngineStage.Build,
-              domain: '',
-              subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
-              location: 'Home',
-              planItem: item.label,
-            },
-          }
-          const docRef = await addDoc(artifactsCollection(familyId), artifact)
-          const ext = file.name.split('.').pop() ?? 'jpg'
-          const filename = generateFilename(ext)
-          const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-          await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
-
-          // Link artifact to checklist item
-          const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-            i === index
-              ? { ...ci, evidenceArtifactId: docRef.id, evidenceCollection: 'artifacts' as const }
-              : ci,
-          )
-          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-          setTodayArtifacts((prev) => [
-            { ...artifact, id: docRef.id, uri: downloadUrl } as Artifact,
-            ...prev,
-          ])
-          setSnackMessage({ text: 'Work captured!', severity: 'success' })
-          // No scan analysis to show for artifacts — clear the index
-          setScanItemIndex(null)
-        }
-      } catch (err) {
-        console.error('[UnifiedCapture] Capture failed:', {
-          childId: selectedChildId,
-          itemLabel: item.label,
-          fileName: file.name,
-          error: err,
-        })
-        setSnackMessage({ text: 'Photo capture failed. Try again.', severity: 'error' })
-        setScanItemIndex(null)
-      }
-    },
-    [runScan, clearScan, familyId, selectedChildId, activeChild, today, dayLog, persistDayLogImmediate, syncScanToConfig, setSnackMessage],
-  )
 
   // --- Pre-completion scan handler (for "should I skip?" advice) ---
   const handlePreCompletionScan = useCallback(async (file: File, index: number) => {

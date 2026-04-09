@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
@@ -10,7 +11,7 @@ import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import TextField from '@mui/material/TextField'
-import { addDoc, doc, getDocs, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
+import { doc, getDocs, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore'
 
 import { useNavigate } from 'react-router-dom'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
@@ -28,9 +29,7 @@ import {
   evaluationSessionsCollection,
   stripUndefined,
 } from '../../core/firebase/firestore'
-import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import type { Artifact, ChecklistItem, Child, DailyArmorSession, DayLog } from '../../core/types'
-import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
@@ -54,6 +53,7 @@ import KidCelebration from './KidCelebration'
 import KidChapterResponse from './KidChapterResponse'
 import KidConundrumResponse from './KidConundrumResponse'
 import KidTeachBack from './KidTeachBack'
+import { useUnifiedCapture } from './useUnifiedCapture'
 import { calculateXp } from './xp'
 import type { EvaluationSession } from '../../core/types'
 import type { InteractiveSessionData } from '../quest/questTypes'
@@ -367,6 +367,22 @@ export default function KidTodayView({
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
   const [captureReflection, setCaptureReflection] = useState('')
+  const [captureMessage, setCaptureMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
+
+  // Unified capture hook — same pipeline as parent view (AI scan → curriculum/artifact routing)
+  const {
+    handleUnifiedCapture,
+    scanLoading: captureLoading,
+  } = useUnifiedCapture({
+    familyId,
+    childId: child.id,
+    childName: child.name,
+    today,
+    dayLog,
+    persistDayLogImmediate,
+    onMessage: setCaptureMessage,
+    onArtifactCreated: (artifact) => setArtifacts((prev) => [artifact, ...prev]),
+  })
 
   // XP toast state
   const [xpToast, setXpToast] = useState<{ amount: number; reason: string } | null>(null)
@@ -548,44 +564,15 @@ export default function KidTodayView({
     setCaptureReflection('')
   }, [])
 
+  /** Wrapper around unified capture that closes the dialog on completion. */
   const handleKidPhotoCapture = useCallback(
     async (file: File) => {
-      if (captureItemIndex === null || !dayLog.checklist) return
-      const item = dayLog.checklist[captureItemIndex]
-      try {
-        const artifact: Omit<Artifact, 'id'> = {
-          childId: child.id,
-          title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${child.name}'s work`,
-          type: EvidenceType.Photo,
-          dayLogId: today,
-          createdAt: new Date().toISOString(),
-          tags: {
-            engineStage: EngineStage.Build,
-            domain: '',
-            subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
-            location: 'Home',
-          },
-          ...(captureReflection ? { notes: captureReflection } : {}),
-        }
-        const docRef = await addDoc(artifactsCollection(familyId), artifact)
-        const ext = file.name.split('.').pop() ?? 'jpg'
-        const filename = generateFilename(ext)
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
-
-        // Link artifact to checklist item
-        const updatedChecklist = dayLog.checklist.map((ci, i) =>
-          i === captureItemIndex ? { ...ci, evidenceArtifactId: docRef.id } : ci
-        )
-        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-        setArtifacts((prev) => [{ ...artifact, id: docRef.id, uri: downloadUrl } as Artifact, ...prev])
-        setCaptureItemIndex(null)
-        setCaptureReflection('')
-      } catch (err) {
-        console.error('Kid capture failed:', err)
-      }
+      if (captureItemIndex === null) return
+      await handleUnifiedCapture(file, captureItemIndex)
+      setCaptureItemIndex(null)
+      setCaptureReflection('')
     },
-    [captureItemIndex, captureReflection, dayLog, child, today, familyId, persistDayLogImmediate],
+    [captureItemIndex, handleUnifiedCapture],
   )
 
   // --- Teach-back helpers (Lincoln audio capture) ---
@@ -1100,25 +1087,50 @@ export default function KidTodayView({
       </SectionCard>
 
       {/* --- Per-item capture dialog for kids --- */}
-      <Dialog open={captureItemIndex !== null} onClose={() => setCaptureItemIndex(null)} maxWidth="sm" fullWidth>
+      <Dialog open={captureItemIndex !== null} onClose={() => !captureLoading && setCaptureItemIndex(null)} maxWidth="sm" fullWidth>
         <DialogTitle>
           {captureItemIndex !== null ? dayLog.checklist?.[captureItemIndex]?.label?.replace(/\s*\(\d+m\)/, '') : ''}
         </DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <PhotoCapture onCapture={(file: File) => { void handleKidPhotoCapture(file) }} />
-            <TextField
-              label="How did it go? (optional)"
-              placeholder={isLincoln ? 'I got the hard one!' : 'It was fun!'}
-              value={captureReflection}
-              onChange={(e) => setCaptureReflection(e.target.value)}
-              size="small"
-              multiline
-              rows={2}
-            />
-          </Stack>
+          {captureLoading ? (
+            <Stack spacing={2} alignItems="center" sx={{ py: 4 }}>
+              <CircularProgress size={48} />
+              <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                {isLincoln ? 'Analyzing your work...' : 'Saving your work...'}
+              </Typography>
+            </Stack>
+          ) : (
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <PhotoCapture onCapture={(file: File) => { void handleKidPhotoCapture(file) }} />
+              <TextField
+                label="How did it go? (optional)"
+                placeholder={isLincoln ? 'I got the hard one!' : 'It was fun!'}
+                value={captureReflection}
+                onChange={(e) => setCaptureReflection(e.target.value)}
+                size="small"
+                multiline
+                rows={2}
+              />
+            </Stack>
+          )}
         </DialogContent>
       </Dialog>
+      {/* Kid-friendly capture feedback (no scan analysis details) */}
+      <Snackbar
+        open={captureMessage !== null}
+        autoHideDuration={2500}
+        onClose={() => setCaptureMessage(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setCaptureMessage(null)}
+          severity={captureMessage?.severity ?? 'success'}
+          variant="filled"
+          sx={{ width: '100%', fontWeight: 'bold' }}
+        >
+          {captureMessage?.text}
+        </Alert>
+      </Snackbar>
       <Snackbar
         open={xpToast !== null}
         autoHideDuration={2000}
