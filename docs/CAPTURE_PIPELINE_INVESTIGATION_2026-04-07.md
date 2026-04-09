@@ -362,10 +362,24 @@ The single "Capture work" button was split into two side-by-side buttons: **Came
 
 ### Not changed (out of scope)
 
-- Kid-facing capture views (KidChecklist, KidTodayView) — still use the old `onCaptureOpen` → artifacts-only flow
+- ~~Kid-facing capture views (KidChecklist, KidTodayView) — still use the old `onCaptureOpen` → artifacts-only flow~~ **Resolved 2026-04-09** — see below
 - Cloud Functions (disposition.ts, evaluate.ts) — only count `evidenceArtifactId` presence, work unchanged
 - Progress page scan button (CurriculumTab.tsx) — unchanged, still uses `useScan` directly
 - PlannerChatPage scan handler — unchanged, separate from Today capture flow
+- Dad Lab capture (KidLabView, LabReportForm) — still uses old artifacts-only flow (intentionally scoped out; lab evidence is science artifacts, not curriculum scans)
+- Quick capture sections (QuickCaptureSection, KidCaptureForm) — standalone photo/note evidence; not checklist-item captures, so they remain artifacts-only
+
+### Kid views unified — 2026-04-09
+
+Kid views (KidChecklist, KidTodayView) now use the same unified capture pipeline as the parent view. `handleUnifiedCapture` was extracted into a shared `useUnifiedCapture` hook (`src/features/today/useUnifiedCapture.ts`) consumed by both `TodayPage` and `KidTodayView`.
+
+**What changed:**
+- `KidTodayView.handleKidPhotoCapture` — replaced old artifacts-only flow with `useUnifiedCapture` hook. Photos now route through AI scan pipeline identically to parent captures.
+- Kid capture dialog shows a loading spinner during scan analysis, then auto-closes on completion.
+- Kid-friendly feedback: simple snackbar toast ("Work captured!" / "New workbook added: ...") — no `ScanAnalysisPanel`, no override UI, no AI reasoning details. That's Shelly's domain.
+- Checklist `evidenceCollection` field is now set correctly from kid captures (`'scans'` for curriculum, `'artifacts'` for non-curriculum).
+
+**Verification:** When Lincoln captures a workbook page from the kid view, Shelly sees it in Progress → Curriculum → This Week's Scans and in the workbook card's recent scans — identically to a parent-initiated capture.
 
 ### Scan analysis persistence + parent override — 2026-04-09
 
