@@ -163,6 +163,17 @@ export default function ArmorSuitUpPanel({
           >
             {appliedVoxel.length}/{Math.max(unlockedVoxel.length, 0)} equipped today
           </Typography>
+          <Typography
+            sx={{
+              mt: 0.6,
+              textAlign: 'center',
+              fontFamily: titleFont,
+              fontSize: isLincoln ? '9px' : '12px',
+              color: isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)',
+            }}
+          >
+            Forge all 6 pieces to unlock the next armor material.
+          </Typography>
         </Box>
       ) : allEarnedApplied && unlockedVoxel.length > 0 ? (
         <Box sx={{ textAlign: 'center', py: 2, mb: 0.5 }}>

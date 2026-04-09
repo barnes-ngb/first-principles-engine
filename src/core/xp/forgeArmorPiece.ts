@@ -7,6 +7,7 @@ import { safeUpdateProfile } from '../../features/avatar/safeProfileWrite'
 import { spendDiamonds } from './getDiamondBalance'
 import { getForgeCost } from './forgeCosts'
 import { XP_THRESHOLDS } from '../../features/avatar/voxel/buildArmorPiece'
+import { ALL_ARMOR_VOXEL_PIECES, deriveUnlockedTiersFromForged, getActiveForgeTierFromProgress } from '../../features/avatar/armorTierProgress'
 
 export interface ForgeResult {
   success: boolean
@@ -38,8 +39,8 @@ export async function forgeArmorPiece(
     : normalizeAvatarProfile({ childId })
 
   // Check tier is unlocked
-  const unlockedTiers = profile.unlockedTiers ?? ['wood']
-  if (!unlockedTiers.includes(tier)) {
+  const unlockedTiers = deriveUnlockedTiersFromForged(profile)
+  if (!unlockedTiers.includes(tier as typeof unlockedTiers[number])) {
     return { success: false, error: 'tier_locked' }
   }
 
@@ -77,6 +78,9 @@ export async function forgeArmorPiece(
   const updatedForged = { ...forgedPieces }
   if (!updatedForged[tier]) updatedForged[tier] = {}
   updatedForged[tier] = { ...updatedForged[tier], [piece]: entry }
+  const progressionProfile = { ...profile, forgedPieces: updatedForged } as AvatarProfile
+  const updatedUnlockedTiers = deriveUnlockedTiersFromForged(progressionProfile)
+  const nextActiveTier = getActiveForgeTierFromProgress(progressionProfile)
 
   // Also update equippedPieces and unlockedPieces for compatibility
   const equippedPieces = [...(profile.equippedPieces ?? [])]
@@ -92,6 +96,8 @@ export async function forgeArmorPiece(
     forgedPieces: updatedForged,
     equippedPieces,
     unlockedPieces,
+    unlockedTiers: updatedUnlockedTiers,
+    currentTier: nextActiveTier,
   } as Partial<AvatarProfile> & Record<string, unknown>)
 
   const refreshedProfile = await getDoc(profileRef)
@@ -126,5 +132,5 @@ export function isTierComplete(
   profile: AvatarProfile,
   tier: string,
 ): boolean {
-  return getForgedPiecesForTier(profile, tier).length >= 6
+  return getForgedPiecesForTier(profile, tier).length >= ALL_ARMOR_VOXEL_PIECES.length
 }

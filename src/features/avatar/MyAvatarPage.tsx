@@ -33,7 +33,6 @@ import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums
 import type {
   AccessoryId,
   ArmorPiece,
-  ArmorTier,
   Artifact,
   AvatarBackground,
   AvatarProfile,
@@ -41,7 +40,6 @@ import type {
   DailyArmorSession,
   HelmetCrest,
   OutfitCustomization,
-  PlatformerTier,
   ShieldEmblem,
   VoxelArmorPieceId,
 } from '../../core/types'
@@ -63,7 +61,7 @@ import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
 import TierUpCeremony from '../../components/avatar/TierUpCeremony'
-import { calculateTier, TIERS } from './voxel/tierMaterials'
+import { getDisplayArmorTier } from './armorTierProgress'
 import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
@@ -217,7 +215,6 @@ export default function MyAvatarPage() {
   // Track previous state for celebrations
   const prevPiecesCountRef = useRef(0)
   const prevTierRef = useRef<string | null>(null)
-  const prevXpRef = useRef(0)
 
   // Pre-load TTS voices (Chrome loads async)
   useEffect(() => {
@@ -307,10 +304,11 @@ export default function MyAvatarPage() {
           }
           prevPiecesCountRef.current = unlockedCount
 
-          if (prevTierRef.current && data.currentTier !== prevTierRef.current) {
-            setTierCelebration({ from: prevTierRef.current, to: data.currentTier })
+          const dataDisplayTier = getDisplayArmorTier(data)
+          if (prevTierRef.current && dataDisplayTier !== prevTierRef.current) {
+            setTierCelebration({ from: prevTierRef.current, to: dataDisplayTier })
           }
-          prevTierRef.current = data.currentTier
+          prevTierRef.current = dataDisplayTier
         }
         setLoading(false)
       },
@@ -318,25 +316,6 @@ export default function MyAvatarPage() {
     )
     return unsub
   }, [familyId, childId])
-
-  // ── Detect tier-up from XP changes ──────────────────────────────
-  const totalXp = profile?.totalXp
-  useEffect(() => {
-    if (totalXp === undefined) return
-    // Skip detection on first load after child switch (sentinel = -1)
-    if (prevXpRef.current >= 0) {
-      const oldTier = calculateTier(prevXpRef.current)
-      const newTier = calculateTier(totalXp)
-      if (newTier !== oldTier && totalXp > prevXpRef.current) {
-        const tierDef = TIERS[newTier]
-        if (tierDef) {
-          setCeremonyTier(tierDef.label)
-          setCeremonyActive(true)
-        }
-      }
-    }
-    prevXpRef.current = totalXp
-  }, [totalXp])
 
   // Clear optimistic diamond override once live profile catches up.
   useEffect(() => {
@@ -381,8 +360,6 @@ export default function MyAvatarPage() {
     resetRanRef.current = false
     resetChildRef.current = childId
     setMorningReset(false)
-    // Use -1 sentinel to skip tier-up detection on first profile load after switch
-    prevXpRef.current = -1
     prevPiecesCountRef.current = 0
     prevTierRef.current = null
   }
@@ -644,7 +621,7 @@ export default function MyAvatarPage() {
           setOptimisticDiamondBalance(result.newBalance)
         }
 
-        // Check if this completed the tier (all 6 forged) and next tier is unlocked
+        // Check if this completed the tier (all 6 forged)
         // We need to simulate the updated forgedPieces since profile hasn't refreshed yet
         const updatedForged = { ...(profile.forgedPieces ?? {}) }
         if (!updatedForged[activeTier]) updatedForged[activeTier] = {}
@@ -653,7 +630,7 @@ export default function MyAvatarPage() {
 
         if (forgedCount >= 6) {
           const nextTier = getNextTierKey(activeTier)
-          if (nextTier && (profile.unlockedTiers ?? []).includes(nextTier) && profile.lastPortalTier !== activeTier) {
+          if (nextTier && profile.lastPortalTier !== activeTier) {
             // Delay prompt to let forge animation play, then let child confirm before transition
             setTimeout(() => setPortalPrompt({ from: activeTier, to: nextTier }), 1500)
           }
@@ -780,10 +757,8 @@ export default function MyAvatarPage() {
     if (!familyId || !childId || !profile) return
 
     const profileRef = doc(avatarProfilesCollection(familyId), childId)
-    const newTier = calculateTier(profile.totalXp).toLowerCase() as ArmorTier | PlatformerTier
     await safeUpdateProfile(profileRef, {
       equippedPieces: [],
-      currentTier: newTier,
     })
   }, [familyId, childId, profile])
 
@@ -913,8 +888,8 @@ export default function MyAvatarPage() {
     return Math.min(Math.max((unlockProgress / unlockRange) * 100, 0), 100)
   })()
 
-  // Calculate XP progress within the current tier range
-  const currentTierName = profile ? calculateTier(profile.totalXp) : 'WOOD'
+  // Armor material progression is forge-based (not raw XP based).
+  const currentTierName = profile ? getDisplayArmorTier(profile).toUpperCase() : 'WOOD'
   const nextRecommendedAction: NextRecommendedAction = (() => {
     if (allEarnedApplied && unlockedVoxel.length > 0) {
       return { type: 'start_day', label: 'Start your day' }
@@ -1016,7 +991,7 @@ export default function MyAvatarPage() {
       ctx.fillStyle = '#ffffff'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      const tierLabel = profile ? calculateTier(profile.totalXp) : ''
+      const tierLabel = profile ? getDisplayArmorTier(profile).toUpperCase() : ''
       const xp = profile?.totalXp ?? 0
       const name = activeChild?.name ?? ''
       const text = `${name}  •  ${tierLabel} Tier  •  ${xp} XP`
