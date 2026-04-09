@@ -48,6 +48,7 @@ import { DIAMOND_EVENTS } from '../../core/types'
 import FoundationsSection from './FoundationsSection'
 import { ChatMessageRole, EvaluationDomain, MasteryGate, SkillLevel } from '../../core/types/enums'
 import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { deriveWorkingLevelFromEvaluation, canOverwriteWorkingLevel } from '../quest/workingLevels'
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -520,6 +521,25 @@ export default function EvaluateChatPage() {
         (s) => !newPrioritySkills.some((n) => n.tag === s.tag),
       )
 
+      // Derive working levels from evaluation findings
+      let mergedWorkingLevels = existing.workingLevels ?? {}
+      if (domain === 'reading') {
+        // Phonics working level
+        const phonicsLevel = deriveWorkingLevelFromEvaluation(findings, 'phonics')
+        if (phonicsLevel && canOverwriteWorkingLevel(mergedWorkingLevels.phonics)) {
+          mergedWorkingLevels = { ...mergedWorkingLevels, phonics: phonicsLevel }
+        }
+        // Comprehension working level
+        const compLevel = deriveWorkingLevelFromEvaluation(findings, 'comprehension')
+        if (compLevel && canOverwriteWorkingLevel(mergedWorkingLevels.comprehension)) {
+          mergedWorkingLevels = { ...mergedWorkingLevels, comprehension: compLevel }
+        }
+      }
+      // Math evaluations: derive math working level if domain is math
+      if (domain === 'math') {
+        // TODO: Add math skill→level mapping when math evaluations produce findings
+      }
+
       const now = new Date().toISOString()
       const updated: Omit<SkillSnapshot, 'id'> = {
         childId: activeChildId,
@@ -527,6 +547,7 @@ export default function EvaluateChatPage() {
         supports: newSupports.length > 0 ? newSupports : existing.supports || [],
         stopRules: newStopRules.length > 0 ? newStopRules : existing.stopRules || [],
         evidenceDefinitions: newEvidenceDefs.length > 0 ? newEvidenceDefs : existing.evidenceDefinitions || [],
+        workingLevels: mergedWorkingLevels,
         updatedAt: now,
         // Overwrite conceptual blocks with most recent evaluation's findings
         ...(conceptualBlocks.length > 0 ? {

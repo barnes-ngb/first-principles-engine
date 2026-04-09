@@ -34,6 +34,8 @@ import {
   QuestScreen,
   VALIDATION_RETRIES,
 } from './questTypes'
+import { computeStartLevel, computeWorkingLevelFromSession, canOverwriteWorkingLevel } from './workingLevels'
+import type { CurriculumLevelHint } from './workingLevels'
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -393,10 +395,25 @@ export function useQuestSession() {
 
       activeQuestModeRef.current = questMode
 
-      // Determine starting level from curriculum completion data
-      let startLevel = 2
+      // Determine starting level via workingLevels fallback chain
+      let curriculumHint: CurriculumLevelHint | null = null
+      let snapshot: Partial<SkillSnapshot> | null = null
+
+      try {
+        // Load skill snapshot for workingLevels
+        const snapshotRef = doc(skillSnapshotsCollection(familyId), activeChildId)
+        const snapshotSnap = await getDoc(snapshotRef)
+        if (snapshotSnap.exists()) {
+          snapshot = snapshotSnap.data()
+        }
+      } catch (err) {
+        console.warn('[startQuest] Failed to load skill snapshot for starting level', err)
+      }
+
+      // Build curriculum hint from activity configs (reading domain only)
       if (domain === 'reading') {
         try {
+          let currLevel = 2
           const activityQuery = query(
             activityConfigsCollection(familyId),
             where('childId', 'in', [activeChildId, 'both']),
@@ -408,7 +425,7 @@ export function useQuestSession() {
             if (config.subjectBucket !== 'Reading' && config.subjectBucket !== 'LanguageArts') continue
             const curriculumMeta = config.curriculumMeta
             if (config.completed || curriculumMeta?.completed) {
-              startLevel = Math.max(startLevel, 5)
+              currLevel = Math.max(currLevel, 5)
             }
             const masteredLower = (curriculumMeta?.masteredSkills ?? []).map((s) =>
               s.toLowerCase(),
@@ -440,21 +457,19 @@ export function useQuestSession() {
             const hasMultiSyllable = masteredLower.some(
               (s) => s.includes('multisyllab') || s.includes('multi-syllab'),
             )
-            if (hasVowelTeams) startLevel = Math.max(startLevel, 6)
-            if (hasDiphthongs || hasLeEndings) startLevel = Math.max(startLevel, 7)
-            if (hasRControlled && hasMultiSyllable) startLevel = Math.max(startLevel, 8)
+            if (hasVowelTeams) currLevel = Math.max(currLevel, 6)
+            if (hasDiphthongs || hasLeEndings) currLevel = Math.max(currLevel, 7)
+            if (hasRControlled && hasMultiSyllable) currLevel = Math.max(currLevel, 8)
           }
-
+          if (currLevel > 2) {
+            curriculumHint = { level: currLevel }
+          }
         } catch (err) {
           console.warn('[startQuest] Failed to load curriculum data for starting level', err)
         }
       }
 
-      // Cap starting level to quest-mode ceiling
-      const modeLevelCap = questMode
-        ? (QUEST_MODE_LEVEL_CAP[questMode] ?? DEFAULT_LEVEL_CAP)
-        : DEFAULT_LEVEL_CAP
-      startLevel = Math.min(startLevel, modeLevelCap)
+      const startLevel = computeStartLevel(snapshot, questMode, curriculumHint)
 
       const now = new Date().toISOString()
       const initialState: QuestState = {
@@ -810,61 +825,77 @@ export function useQuestSession() {
         }).catch((err) => console.warn('Failed to award quest diamonds', err))
       }
 
-      // Auto-apply findings to skill snapshot
-      if (findings.length > 0) {
-        try {
-          const snapshotRef = doc(skillSnapshotsCollection(familyId), activeChildId)
-          const snapshotSnap = await getDoc(snapshotRef)
-          const existing: Partial<SkillSnapshot> = snapshotSnap.exists()
-            ? snapshotSnap.data()
-            : {}
+      // Auto-apply findings to skill snapshot + update working level
+      try {
+        const snapshotRef = doc(skillSnapshotsCollection(familyId), activeChildId)
+        const snapshotSnap = await getDoc(snapshotRef)
+        const existing: Partial<SkillSnapshot> = snapshotSnap.exists()
+          ? snapshotSnap.data()
+          : {}
 
-          // Build priority skills from findings
-          const newPrioritySkills: PrioritySkill[] = findings
-            .filter((f) => f.status === 'emerging' || f.status === 'not-yet')
-            .map((f) => ({
-              tag: f.skill,
-              label: formatSkillLabel(f.skill),
-              level: SkillLevel.Emerging,
-              masteryGate: MasteryGate.NotYet,
-              notes: `${f.evidence} (Quest ${new Date().toLocaleDateString()})`,
-            }))
+        // Build priority skills from findings (if any)
+        const newPrioritySkills: PrioritySkill[] = findings
+          .filter((f) => f.status === 'emerging' || f.status === 'not-yet')
+          .map((f) => ({
+            tag: f.skill,
+            label: formatSkillLabel(f.skill),
+            level: SkillLevel.Emerging,
+            masteryGate: MasteryGate.NotYet,
+            notes: `${f.evidence} (Quest ${new Date().toLocaleDateString()})`,
+          }))
 
-          // Update mastered skills
-          for (const f of findings) {
-            if (f.status === 'mastered') {
-              const idx = newPrioritySkills.findIndex((s) => s.tag === f.skill)
-              if (idx < 0) {
-                newPrioritySkills.push({
-                  tag: f.skill,
-                  label: formatSkillLabel(f.skill),
-                  level: SkillLevel.Secure,
-                  masteryGate: MasteryGate.IndependentConsistent,
-                  notes: `${f.evidence} (Quest ${new Date().toLocaleDateString()})`,
-                })
-              }
+        // Update mastered skills
+        for (const f of findings) {
+          if (f.status === 'mastered') {
+            const idx = newPrioritySkills.findIndex((s) => s.tag === f.skill)
+            if (idx < 0) {
+              newPrioritySkills.push({
+                tag: f.skill,
+                label: formatSkillLabel(f.skill),
+                level: SkillLevel.Secure,
+                masteryGate: MasteryGate.IndependentConsistent,
+                notes: `${f.evidence} (Quest ${new Date().toLocaleDateString()})`,
+              })
             }
           }
-
-          // Merge: keep existing skills not covered by quest findings
-          const existingSkills = (existing.prioritySkills || []).filter(
-            (s) => !newPrioritySkills.some((n) => n.tag === s.tag),
-          )
-
-          const updated = {
-            childId: activeChildId,
-            prioritySkills: [...existingSkills, ...newPrioritySkills],
-            supports: existing.supports || [],
-            stopRules: existing.stopRules || [],
-            evidenceDefinitions: existing.evidenceDefinitions || [],
-            updatedAt: new Date().toISOString(),
-          }
-
-          await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)))
-        } catch (err) {
-          // Don't block session save if snapshot update fails
-          console.warn('Failed to auto-apply quest findings to skill snapshot', err)
         }
+
+        // Merge: keep existing skills not covered by quest findings
+        const existingSkills = (existing.prioritySkills || []).filter(
+          (s) => !newPrioritySkills.some((n) => n.tag === s.tag),
+        )
+
+        // Compute new working level from this session
+        const newWorkingLevel = computeWorkingLevelFromSession(
+          questions, finalState.currentLevel, questMode,
+        )
+
+        // Merge working levels, respecting manual override protection
+        let mergedWorkingLevels = existing.workingLevels ?? {}
+        if (newWorkingLevel && questMode && questMode !== 'fluency') {
+          const modeKey = questMode as 'phonics' | 'comprehension' | 'math'
+          const currentLevel = mergedWorkingLevels[modeKey]
+          if (canOverwriteWorkingLevel(currentLevel)) {
+            mergedWorkingLevels = { ...mergedWorkingLevels, [modeKey]: newWorkingLevel }
+          }
+        }
+
+        const updated = {
+          childId: activeChildId,
+          prioritySkills: findings.length > 0
+            ? [...existingSkills, ...newPrioritySkills]
+            : existing.prioritySkills || [],
+          supports: existing.supports || [],
+          stopRules: existing.stopRules || [],
+          evidenceDefinitions: existing.evidenceDefinitions || [],
+          workingLevels: mergedWorkingLevels,
+          updatedAt: new Date().toISOString(),
+        }
+
+        await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)))
+      } catch (err) {
+        // Don't block session save if snapshot update fails
+        console.warn('Failed to auto-apply quest findings/working level to skill snapshot', err)
       }
 
       // Update Learning Map from findings (fire-and-forget)
