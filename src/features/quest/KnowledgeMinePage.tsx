@@ -43,7 +43,7 @@ const READING_MODES: QuestDomainConfig[] = [
     label: 'Phonics Quest',
     icon: '⛏️',
     enabled: true,
-    description: 'Letters & sounds · Levels 1-6',
+    description: 'Letters & sounds · Levels 1-8',
   },
   {
     domain: EvaluationDomain.Reading,
@@ -455,6 +455,8 @@ export default function KnowledgeMinePage() {
               .map((q) => extractTargetWord(q))
               .filter((w): w is string => w !== null),
           )]}
+          hitLevelCap={quest.hitLevelCap}
+          questMode={quest.questMode}
           onDone={quest.resetToIntro}
           onTryAgain={() => {
             quest.resetToIntro()
