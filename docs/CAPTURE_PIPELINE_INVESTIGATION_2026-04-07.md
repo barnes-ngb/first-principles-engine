@@ -356,6 +356,10 @@ Added `evidenceCollection?: 'scans' | 'artifacts'` to the `ChecklistItem` type a
 - `handleScanCapture` (TodayPage.tsx) — **replaced** by `handlePreCompletionScan` (retained for the "scan to check if should skip" pre-completion flow) and `handleUnifiedCapture` (for post-completion evidence capture)
 - `scanPatterns` regex (TodayChecklist.tsx) — **retained** for pre-completion scan-based feedback display; no longer used for capture gating
 
+### Photo library upload added (2026-04-08)
+
+The single "Capture work" button was split into two side-by-side buttons: **Camera** (opens device camera via `capture="environment"`) and **Upload** (opens photo library/file picker, no `capture` attribute). Both route to the same `handleUnifiedCapture` handler — no pipeline changes needed.
+
 ### Not changed (out of scope)
 
 - Kid-facing capture views (KidChecklist, KidTodayView) — still use the old `onCaptureOpen` → artifacts-only flow
