@@ -1,5 +1,6 @@
 import type { ArmorPiece, AvatarProfile, DailyArmorSession, VoxelArmorPieceId } from '../../core/types'
 import { getAppliedVoxelPieces, getEquippablePieces } from './armorPieceState'
+import { ALL_ARMOR_VOXEL_PIECES } from './armorTierProgress'
 
 export interface ArmorGateStatus {
   /** True when every forged piece is equipped for the current day */
@@ -12,6 +13,25 @@ export interface ArmorGateStatus {
   missing: VoxelArmorPieceId[]
   /** Whether the child has any forged pieces at all */
   hasForgedPieces: boolean
+}
+
+
+function getForgedVoxelPieces(profile: AvatarProfile): VoxelArmorPieceId[] {
+  const forgedByTier = profile.forgedPieces
+  if (forgedByTier) {
+    const forged = new Set<VoxelArmorPieceId>()
+
+    for (const tierPieces of Object.values(forgedByTier)) {
+      for (const pieceId of ALL_ARMOR_VOXEL_PIECES) {
+        if (tierPieces?.[pieceId]) forged.add(pieceId)
+      }
+    }
+
+    return [...forged]
+  }
+
+  // Legacy fallback where forgedPieces may be absent and unlock/equip state implies forged wood pieces.
+  return getEquippablePieces(profile)
 }
 
 function getAppliedTodayVoxel(profile: AvatarProfile, appliedPieces: ArmorPiece[] | undefined): VoxelArmorPieceId[] {
@@ -29,7 +49,7 @@ export function getArmorGateStatus(
   profile: AvatarProfile,
   appliedPiecesToday?: ArmorPiece[],
 ): ArmorGateStatus {
-  const equippable = getEquippablePieces(profile)
+  const equippable = getForgedVoxelPieces(profile)
   const appliedTodayVoxel = getAppliedTodayVoxel(profile, appliedPiecesToday)
   const missing = equippable.filter((id) => !appliedTodayVoxel.includes(id))
   const hasForgedPieces = equippable.length > 0
