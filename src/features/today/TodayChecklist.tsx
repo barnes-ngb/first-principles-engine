@@ -5,6 +5,7 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
+import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary'
 import CheckIcon from '@mui/icons-material/Check'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
@@ -744,9 +745,9 @@ export default function TodayChecklist({
                   </Stack>
                 )}
 
-                {/* Unified capture — one button for all completed items */}
+                {/* Unified capture — camera + photo library for all completed items */}
                 {item.completed && !item.evidenceArtifactId && (
-                  <Box sx={{ ml: 5, mt: 0.5 }}>
+                  <Stack direction="row" spacing={1} sx={{ ml: 5, mt: 0.5 }}>
                     <Button
                       size="small"
                       variant="text"
@@ -767,9 +768,30 @@ export default function TodayChecklist({
                       }}
                       sx={{ fontSize: '0.75rem', color: 'text.secondary', textTransform: 'none' }}
                     >
-                      Capture work
+                      Camera
                     </Button>
-                  </Box>
+                    <Button
+                      size="small"
+                      variant="text"
+                      startIcon={captureLoading && captureItemIndex === index
+                        ? <CircularProgress size={14} />
+                        : <PhotoLibraryIcon sx={{ fontSize: 16 }} />}
+                      disabled={captureLoading && captureItemIndex === index}
+                      onClick={() => {
+                        const input = document.createElement('input')
+                        input.type = 'file'
+                        input.accept = 'image/*'
+                        input.onchange = (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0]
+                          if (file) onUnifiedCapture(file, index)
+                        }
+                        input.click()
+                      }}
+                      sx={{ fontSize: '0.75rem', color: 'text.secondary', textTransform: 'none' }}
+                    >
+                      Upload
+                    </Button>
+                  </Stack>
                 )}
                 {item.completed && item.evidenceArtifactId && (
                   <Chip size="small" label="Captured" variant="outlined" color="success" sx={{ ml: 5, mt: 0.5, height: 22 }} />
