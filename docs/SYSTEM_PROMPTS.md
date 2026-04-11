@@ -1,5 +1,7 @@
 # First Principles Engine — System Prompts Reference (v4)
 
+> **STALE** — does not reflect `chapterQuestions` task handler added Apr 10, 2026. Needs update.
+
 > Generated from source: `functions/src/ai/` — chat.ts, chatTypes.ts, contextSlices.ts, tasks/\*, evaluate.ts, generate.ts, imageGen.ts
 >
 > Last updated: 2026-04-01

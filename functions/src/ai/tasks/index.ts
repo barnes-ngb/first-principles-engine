@@ -11,6 +11,7 @@ import { handleConundrum } from "./conundrum.js";
 import { handleWeeklyFocus } from "./weeklyFocus.js";
 import { handleScan } from "./scan.js";
 import { handleShellyChat } from "./shellyChat.js";
+import { handleChapterQuestions } from "./chapterQuestions.js";
 
 export { analyzeEvaluationPatterns } from "./analyzePatterns.js";
 
@@ -28,4 +29,5 @@ export const CHAT_TASKS: Record<string, ChatTaskHandler> = {
   weeklyFocus: handleWeeklyFocus,
   scan: handleScan,
   shellyChat: handleShellyChat,
+  chapterQuestions: handleChapterQuestions,
 };
