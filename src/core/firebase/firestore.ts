@@ -13,7 +13,9 @@ import type {
   Artifact,
   AvatarProfile,
   Book,
+  BookProgress,
   BookThemeConfig,
+  ChapterBook,
   ChapterResponse,
   Child,
   DadLabReport,
@@ -443,3 +445,21 @@ export const chapterResponsesCollection = (
   familyId: string,
 ): CollectionReference<ChapterResponse> =>
   collection(db, `families/${familyId}/chapterResponses`) as CollectionReference<ChapterResponse>
+
+// ── Chapter Books (Global Curriculum Library) ───────────────────
+
+/** Global chapter book library. Path: curriculum/chapterBooks/{bookId} */
+export const chapterBooksCollection = (): CollectionReference<ChapterBook> =>
+  collection(db, 'curriculum', 'chapterBooks') as unknown as CollectionReference<ChapterBook>
+
+// ── Book Progress (Per-Family Read-Aloud Tracking) ──────────────
+
+/** Book progress per child. Doc ID: {childId}_{bookId} */
+export const bookProgressCollection = (
+  familyId: string,
+): CollectionReference<BookProgress> =>
+  collection(db, `families/${familyId}/bookProgress`) as CollectionReference<BookProgress>
+
+/** Book progress doc ID: {childId}_{bookId} */
+export const bookProgressDocId = (childId: string, bookId: string): string =>
+  `${childId}_${bookId}`

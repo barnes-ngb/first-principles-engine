@@ -380,3 +380,12 @@ export const DadLabStatus = {
   Complete: 'complete',
 } as const
 export type DadLabStatus = (typeof DadLabStatus)[keyof typeof DadLabStatus]
+
+export const QuestionType = {
+  Comprehension: 'comprehension',
+  Application: 'application',
+  Connection: 'connection',
+  Opinion: 'opinion',
+  Prediction: 'prediction',
+} as const
+export type QuestionType = (typeof QuestionType)[keyof typeof QuestionType]

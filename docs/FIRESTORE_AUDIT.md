@@ -1,3 +1,5 @@
+> **STALE** — does not reflect `curriculum/chapterBooks` (global) and `bookProgress` (family-scoped) collections added Apr 10, 2026.
+
 # Firestore Audit — 2026-03-21
 
 ## Summary

@@ -11,6 +11,7 @@ import type {
   PaceStatus,
   PlannerConversationStatus,
   PlanType,
+  QuestionType,
   ReviewStatus,
   ScheduleBlock,
   SessionResult,
@@ -20,6 +21,50 @@ import type {
   TrackType,
 } from './enums'
 import type { SkillTag } from './common'
+
+export interface ChapterBookChapter {
+  number: number
+  title?: string
+  summary?: string
+}
+
+export interface ChapterBook {
+  id: string
+  title: string
+  author: string
+  totalChapters: number
+  chapters?: ChapterBookChapter[]
+  coverImageUrl?: string
+  ageRange?: string
+  createdAt: string
+}
+
+export interface ChapterQuestionPoolItem {
+  chapter: number
+  chapterTitle?: string
+  questionType: QuestionType
+  question: string
+  answered: boolean
+  answeredDate?: string
+  audioUrl?: string
+  responseNote?: string
+  artifactId?: string
+}
+
+export interface BookProgress {
+  id?: string
+  bookId: string
+  childId: string
+  bookTitle: string
+  author: string
+  totalChapters: number
+  questionPool: ChapterQuestionPoolItem[]
+  lastChapterAnswered?: number
+  startedAt: string
+  completedAt?: string
+  createdAt: string
+  updatedAt: string
+}
 
 export interface WeekPlan {
   id?: string
@@ -32,6 +77,7 @@ export interface WeekPlan {
   heartQuestion: string
   formationPrompt?: string
   focusGeneratedAt?: string
+  readAloudBookId?: string
   tracks: TrackType[]
   flywheelPlan: string
   buildLab: {

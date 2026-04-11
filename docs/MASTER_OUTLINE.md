@@ -12,9 +12,9 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 - TypeScript lines: **120,662** total (`src/` 108,370 + `functions/src/` 12,292)
 - Commits: **1,429**
 - Tests: **59 test files**, **1,004 test cases**
-- Firestore collections: **31**
+- Firestore collections: **33** (31 family-scoped + 2 global)
 - Cloud Functions: **18**
-- Chat task types: **13**
+- Chat task types: **14**
 - Routes: **27**
 
 ## Navigation
@@ -121,6 +121,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 | Kid Unified Capture | Apr 9, 2026 | Extended unified capture pipeline to kid views. KidTodayView now uses shared `useUnifiedCapture` hook — Lincoln's captures route through AI scan, update curriculum, and appear in Shelly's Progress view identically to parent captures. Kid-friendly feedback (snackbar, no analysis panel). |
 | Working Levels Data Model | Apr 9, 2026 | Per-domain working level tracking for Knowledge Mine progression (phonics/comprehension/math). Starting levels persist across sessions via `workingLevels` field on skill snapshot. Updated by quest completion, guided evaluation, and curriculum scans. Manual overrides protected for 48 hours. Fixes "starts at Level 2 every session" regression. (Part 1 — plumbing only; parent UI in Part 2.) |
 | Bugfix Apr 10 | Apr 10, 2026 | Planner lock-in off-by-one: Friday plans were written to Thursday's date key because WEEK_DAYS (Monday=0) was added to a Sunday-based weekRange.start. Extracted `dateKeyForDayPlan` pure helper + unit tests. |
+| Chapter Pool P1 | Apr 10, 2026 | Chapter book question pool foundation: ChapterBook + BookProgress types, Narnia seed data (17 chapters with summaries), chapterQuestions Cloud Function task handler, Firestore collection helpers. |
 
 ## Removed Features / Concepts
 - Ghost armor visual state (moved to binary on/off only).
@@ -172,7 +173,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 | `src/features/avatar/StonebridgePreviewCard.tsx` | Stonebridge narrative preview surface |
 | `src/features/avatar/BrothersVoxelScene.tsx` | Side-by-side brothers scene |
 | `src/features/avatar/AccessoriesPanel.tsx` | Accessories system UI + slot conflicts |
-| `functions/src/ai/tasks/index.ts` | Chat task registry (13 task types) |
+| `functions/src/ai/tasks/index.ts` | Chat task registry (14 task types) |
 
 ---
 
