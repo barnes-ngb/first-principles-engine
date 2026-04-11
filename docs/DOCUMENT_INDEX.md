@@ -23,6 +23,9 @@
 | `PROFILE_LIMITS_AUDIT.md` | **CURRENT** | Profile-based rate limits and experience audit — AI usage caps, generation limits, cost controls |
 | `SYSTEM_PROMPTS.md` | **CURRENT** (v4) | Task dispatch, model selection, context slices — 13 task types including scan + shellyChat |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
+| `LINCOLN_ACCELERATION.md` | **CURRENT** | Lincoln reading acceleration plan: UFLI Foundations integration, Phonics Forge design, sprint roadmap (April–July 2026) |
+| `UFLI_INTEGRATION.md` | **CURRENT** | UFLI Foundations technical integration: data model, lesson types, progress tracking, encoding check flow |
+| `CLAUDE_CODE_PROMPTS.md` | **CURRENT** | Claude Code implementation prompts for Lincoln Acceleration sprints |
 | `KNOWLEDGE_MINE_AUDIT_2026-04.md` | **NEW** | Knowledge Mine audit (Part 1/4): quest type inventory, level system analysis, Level 7 mystery resolution, difficulty progression, Lincoln constraint compliance |
 | `KNOWLEDGE_MINE_CRASH_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Crash investigation: session ejection + precision TypeError + resume card failure after Level 6→7 promotion in comprehension quest. Root cause chain identified, 4 fixes landed (try/catch, WebGL safety, forceContextLoss, errorElement). |
 | `CAPTURE_PIPELINE_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Today page capture pipeline: 3 fragmented entry points (camera icon, pre-completion scan, post-completion scan) competing for same visibility gate. Unified into single AI-routed handler. Worksheets→scans, everything else→artifacts. |
@@ -56,6 +59,8 @@
 | `GAME_WORLD_ECONOMY.md` | Working on XP/Diamond economy, armor forging, tier progression |
 | `HEALTH_REPORT.md` | Working on code health, tech debt, bundle size optimization |
 | `PROFILE_LIMITS_AUDIT.md` | Working on rate limits, AI usage caps, cost controls |
+| `LINCOLN_ACCELERATION.md` | Working on Lincoln's reading acceleration, UFLI integration, Phonics Forge |
+| `UFLI_INTEGRATION.md` | Working on UFLI data model, progress tracking, encoding checks |
 | `08_RUNBOOK.md` | Working on deployment, backups, operations |
 | `barnes-testing-guide-v2.md` | Working on tests (stale — needs Knowledge Mine, Workshop, Books, Armor coverage) |
 

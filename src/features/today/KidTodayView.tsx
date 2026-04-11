@@ -45,6 +45,7 @@ import { useXpLedger } from '../../core/xp/useXpLedger'
 import { useDraftBook, useCompletedBook } from '../books/useBook'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import ExplorerMap from './ExplorerMap'
+import PhonicsForgeCard from './kid/PhonicsForgeCard'
 import KidExtraLogger from './KidExtraLogger'
 import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
@@ -795,6 +796,13 @@ export default function KidTodayView({
           childId={child.id}
           today={today}
         />
+      )}
+
+      {/* ── Phonics Forge (Lincoln only) ── */}
+      {isLincoln && (
+        <SectionErrorBoundary section="phonics forge">
+          <PhonicsForgeCard familyId={familyId} childId={child.id} />
+        </SectionErrorBoundary>
       )}
 
       {/* ── CHECKLIST (Must-Do + Choose) ── */}
