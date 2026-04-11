@@ -20,6 +20,7 @@ interface ArmorVerseCardProps {
   isLincoln: boolean
   accentColor: string
   textColor: string
+  lockReason?: string
   onEquip: () => void
   onForge: (verseResponse?: string, verseResponseAudio?: string) => Promise<boolean>
   onClose: () => void
@@ -42,6 +43,7 @@ export default function ArmorVerseCard({
   isLincoln,
   accentColor,
   textColor,
+  lockReason,
   onEquip,
   onForge,
   onClose,
@@ -327,7 +329,7 @@ export default function ArmorVerseCard({
         </Button>
       )}
 
-      {pieceState === 'locked_by_xp' && (
+      {(pieceState === 'locked_by_xp' || pieceState === 'locked_by_tier') && (
         <Typography
           sx={{
             mt: 2,
@@ -337,7 +339,9 @@ export default function ArmorVerseCard({
             textAlign: 'center',
           }}
         >
-          Locked — earn more XP to forge this piece.
+          {pieceState === 'locked_by_tier'
+            ? `Locked — ${lockReason || 'complete the prior tier to unlock.'}`
+            : 'Locked — earn more XP to forge this piece.'}
         </Typography>
       )}
 

@@ -57,6 +57,7 @@ export function normalizeAvatarProfile(raw: unknown): AvatarProfile {
   const forgedPieces = rawForged ?? migratedForged
   const normalizedForTier = {
     forgedPieces,
+    totalXp,
     unlockedPieces: Array.isArray(r.unlockedPieces) ? r.unlockedPieces : [],
   } as AvatarProfile
   const unlockedByForge = deriveUnlockedTiersFromForged(normalizedForTier)

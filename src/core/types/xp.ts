@@ -266,6 +266,9 @@ export const DIAMOND_EVENTS = {
 
   // Spending
   FORGE_PIECE: 'diamond_forge_piece',
+
+  // Milestone
+  FULL_TIER_COMPLETE: 'diamond_full_tier_complete',
 } as const
 
 export type DiamondEventType = (typeof DIAMOND_EVENTS)[keyof typeof DIAMOND_EVENTS]

@@ -47,7 +47,7 @@ import { ACCESSORY_SLOTS } from '../../core/types'
 
 import type { VoxelCharacterHandle } from './VoxelCharacter'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
-import { getActiveForgeTier, getAppliedVoxelPieces, getArmorPieceState, getEquippablePieces, getVisiblePieces } from './armorPieceState'
+import { getActiveForgeTier, getAppliedVoxelPieces, getArmorPieceState, getEquippablePieces, getPieceLockReason, getVisiblePieces } from './armorPieceState'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import ArmorVerseCard from './ArmorVerseCard'
 import { speakStatus, speakVerse } from './speakVerse'
@@ -621,14 +621,11 @@ export default function MyAvatarPage() {
           setOptimisticDiamondBalance(result.newBalance)
         }
 
-        // Check if this completed the tier (all 6 forged)
-        // We need to simulate the updated forgedPieces since profile hasn't refreshed yet
-        const updatedForged = { ...(profile.forgedPieces ?? {}) }
-        if (!updatedForged[activeTier]) updatedForged[activeTier] = {}
-        updatedForged[activeTier] = { ...updatedForged[activeTier], [voxelPieceId]: { forgedAt: new Date().toISOString() } }
-        const forgedCount = Object.keys(updatedForged[activeTier] ?? {}).length
-
-        if (forgedCount >= 6) {
+        // Use server-side tier completion result (includes milestone bonus)
+        if (result.tierCompleted) {
+          if (result.tierBonus) {
+            console.info(`[Forge] Tier ${activeTier} complete! +${result.tierBonus} diamond bonus`)
+          }
           const nextTier = getNextTierKey(activeTier)
           if (nextTier && profile.lastPortalTier !== activeTier) {
             // Delay prompt to let forge animation play, then let child confirm before transition
@@ -1370,6 +1367,7 @@ export default function MyAvatarPage() {
             isLincoln={isLincoln}
             accentColor={accentColor}
             textColor={textColor}
+            lockReason={getPieceLockReason(profile, getActiveForgeTier(profile))}
             onEquip={() => void handleApplyPiece(selectedPiece.id)}
             onForge={(verseResponse, verseResponseAudio) => handleForgePiece(selectedPiece.id, verseResponse, verseResponseAudio)}
             onClose={() => setSelectedPiece(null)}
