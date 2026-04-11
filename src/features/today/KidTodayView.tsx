@@ -45,7 +45,10 @@ import { useXpLedger } from '../../core/xp/useXpLedger'
 import { useDraftBook, useCompletedBook } from '../books/useBook'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import ExplorerMap from './ExplorerMap'
-import PhonicsForgeCard from './kid/PhonicsForgeCard'
+// HIDDEN 2026-04-11: Sprint 1 UFLI card disabled pending Phase 0
+// validation. See LINCOLN_ACCELERATION.md. Do not re-enable without
+// running the seed and verifying Firestore has ufliLessons collection.
+// import PhonicsForgeCard from './kid/PhonicsForgeCard'
 import KidExtraLogger from './KidExtraLogger'
 import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
@@ -798,12 +801,14 @@ export default function KidTodayView({
         />
       )}
 
-      {/* ── Phonics Forge (Lincoln only) ── */}
-      {isLincoln && (
+      {/* HIDDEN 2026-04-11: Sprint 1 UFLI card disabled pending Phase 0
+          validation. See LINCOLN_ACCELERATION.md. Do not re-enable without
+          running the seed and verifying Firestore has ufliLessons collection. */}
+      {/* {isLincoln && (
         <SectionErrorBoundary section="phonics forge">
           <PhonicsForgeCard familyId={familyId} childId={child.id} />
         </SectionErrorBoundary>
-      )}
+      )} */}
 
       {/* ── CHECKLIST (Must-Do + Choose) ── */}
       <SectionErrorBoundary section="checklist">
