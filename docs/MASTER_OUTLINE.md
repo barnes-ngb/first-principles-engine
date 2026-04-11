@@ -120,6 +120,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 | Scan Analysis + Parent Override | Apr 9, 2026 | Post-capture scan analysis visible inline on Today (expandable panel on "Captured ✓"). Progress Recent scans now tap-to-expand. New "This Week's Scans" section on Progress — 7-day rolling list. Parent override on AI recommendations — Shelly can correct classifications, originals preserved for audit. Shared ScanAnalysisPanel component. |
 | Kid Unified Capture | Apr 9, 2026 | Extended unified capture pipeline to kid views. KidTodayView now uses shared `useUnifiedCapture` hook — Lincoln's captures route through AI scan, update curriculum, and appear in Shelly's Progress view identically to parent captures. Kid-friendly feedback (snackbar, no analysis panel). |
 | Working Levels Data Model | Apr 9, 2026 | Per-domain working level tracking for Knowledge Mine progression (phonics/comprehension/math). Starting levels persist across sessions via `workingLevels` field on skill snapshot. Updated by quest completion, guided evaluation, and curriculum scans. Manual overrides protected for 48 hours. Fixes "starts at Level 2 every session" regression. (Part 1 — plumbing only; parent UI in Part 2.) |
+| Bugfix Apr 10 | Apr 10, 2026 | Planner lock-in off-by-one: Friday plans were written to Thursday's date key because WEEK_DAYS (Monday=0) was added to a Sunday-based weekRange.start. Extracted `dateKeyForDayPlan` pure helper + unit tests. |
 
 ## Removed Features / Concepts
 - Ghost armor visual state (moved to binary on/off only).
