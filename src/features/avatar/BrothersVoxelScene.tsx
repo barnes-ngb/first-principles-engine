@@ -248,7 +248,7 @@ function buildCharacterWithArmor(
   const armL = character.getObjectByName('armL')
   const armR = character.getObjectByName('armR')
   const headGroup = character.getObjectByName('headGroup')
-  const currentTier = calculateTier(child.totalXp)
+  const currentTier = (child.profile.currentTier ?? calculateTier(child.totalXp)).toUpperCase()
 
   for (const pieceMeta of VOXEL_ARMOR_PIECES) {
     const pieceGroup = buildArmorPiece(pieceMeta.id, child.ageGroup)
@@ -493,7 +493,7 @@ export default function BrothersVoxelScene({
       characters.push(characterGroup)
 
       // Stone pedestal per character (with tier color + seasonal tint)
-      const tierTint = getTierTint(calculateTier(child.totalXp))
+      const tierTint = getTierTint((child.profile.currentTier ?? calculateTier(child.totalXp)).toUpperCase())
       const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
       const platformColor = tintPlatformColor(tierMat.primary, season)
       const platform = buildPedestal(platformColor)
@@ -772,12 +772,12 @@ export default function BrothersVoxelScene({
   // Build label data for overlay
   const labelData: { name: string; tier: string; xp: number; side: 'left' | 'right' | 'center' }[] = []
   if (lincoln && london) {
-    labelData.push({ name: lincoln.name, tier: calculateTier(lincoln.totalXp), xp: lincoln.totalXp, side: 'left' })
-    labelData.push({ name: london.name, tier: calculateTier(london.totalXp), xp: london.totalXp, side: 'right' })
+    labelData.push({ name: lincoln.name, tier: (lincoln.profile.currentTier ?? calculateTier(lincoln.totalXp)).toUpperCase(), xp: lincoln.totalXp, side: 'left' })
+    labelData.push({ name: london.name, tier: (london.profile.currentTier ?? calculateTier(london.totalXp)).toUpperCase(), xp: london.totalXp, side: 'right' })
   } else if (lincoln) {
-    labelData.push({ name: lincoln.name, tier: calculateTier(lincoln.totalXp), xp: lincoln.totalXp, side: 'center' })
+    labelData.push({ name: lincoln.name, tier: (lincoln.profile.currentTier ?? calculateTier(lincoln.totalXp)).toUpperCase(), xp: lincoln.totalXp, side: 'center' })
   } else if (london) {
-    labelData.push({ name: london.name, tier: calculateTier(london.totalXp), xp: london.totalXp, side: 'center' })
+    labelData.push({ name: london.name, tier: (london.profile.currentTier ?? calculateTier(london.totalXp)).toUpperCase(), xp: london.totalXp, side: 'center' })
   }
 
   return (

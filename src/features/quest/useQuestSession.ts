@@ -746,6 +746,7 @@ export function useQuestSession() {
 
       // Save to Firestore — reuse existing sessionId if resuming, else generate new
       const docId = sessionIdRef.current ?? `interactive_${activeChildId}_${Date.now()}`
+      sessionIdRef.current = docId
 
       const skippedCount = questions.filter((q) => q.skipped).length
       const flaggedErrorCount = questions.filter((q) => q.flaggedAsError).length
@@ -1666,7 +1667,8 @@ export function useQuestSession() {
 
   const resetToIntro = useCallback(() => {
     // Auto-save partial session if quest is in progress with answered questions
-    if (questState && questState.totalQuestions > 0 && activeChildId && familyId) {
+    // Skip if session was already saved as complete (prevents ghost in-progress docs)
+    if (questState && questState.totalQuestions > 0 && !sessionSaved && activeChildId && familyId) {
       // Reuse existing sessionId if resuming, otherwise generate new one
       const docId = sessionIdRef.current ?? `interactive_${activeChildId}_${Date.now()}`
       const domain = activeDomainRef.current
@@ -1726,7 +1728,7 @@ export function useQuestSession() {
     bonusRoundUsedRef.current = false
     activeQuestModeRef.current = undefined
     sessionIdRef.current = null
-  }, [questState, currentQuestion, activeChildId, familyId, answeredQuestions, findings, streak.currentStreak])
+  }, [questState, currentQuestion, activeChildId, familyId, answeredQuestions, findings, streak.currentStreak, sessionSaved])
 
   return {
     screen,

@@ -2,21 +2,27 @@ import { doc, getDoc } from 'firebase/firestore'
 
 import { avatarProfilesCollection } from '../firebase/firestore'
 import type { AvatarProfile, ForgedPieceEntry, VoxelArmorPieceId } from '../types'
+import { DIAMOND_EVENTS } from '../types/xp'
 import { normalizeAvatarProfile } from '../../features/avatar/normalizeProfile'
 import { safeUpdateProfile } from '../../features/avatar/safeProfileWrite'
 import { spendDiamonds } from './getDiamondBalance'
-import { getForgeCost } from './forgeCosts'
+import { getForgeCost, TIER_COMPLETION_BONUSES } from './forgeCosts'
+import { addDiamondEvent } from './addDiamondEvent'
 import { XP_THRESHOLDS } from '../../features/avatar/voxel/buildArmorPiece'
+import { ALL_ARMOR_VOXEL_PIECES, deriveUnlockedTiersFromForged, getActiveForgeTierFromProgress } from '../../features/avatar/armorTierProgress'
 
 export interface ForgeResult {
   success: boolean
   error?: 'tier_locked' | 'already_forged' | 'insufficient_diamonds' | 'invalid_input' | 'xp_locked'
   newBalance?: number
+  tierCompleted?: boolean
+  tierBonus?: number
 }
 
 /**
  * Forge an armor piece for a child. Checks tier unlock, piece status, and diamond balance.
  * Creates a negative diamond ledger entry and updates avatarProfile.forgedPieces.
+ * Awards a tier completion bonus if this piece completes the tier.
  */
 export async function forgeArmorPiece(
   familyId: string,
@@ -38,8 +44,8 @@ export async function forgeArmorPiece(
     : normalizeAvatarProfile({ childId })
 
   // Check tier is unlocked
-  const unlockedTiers = profile.unlockedTiers ?? ['wood']
-  if (!unlockedTiers.includes(tier)) {
+  const unlockedTiers = deriveUnlockedTiersFromForged(profile)
+  if (!unlockedTiers.includes(tier as typeof unlockedTiers[number])) {
     return { success: false, error: 'tier_locked' }
   }
 
@@ -77,6 +83,9 @@ export async function forgeArmorPiece(
   const updatedForged = { ...forgedPieces }
   if (!updatedForged[tier]) updatedForged[tier] = {}
   updatedForged[tier] = { ...updatedForged[tier], [piece]: entry }
+  const progressionProfile = { ...profile, forgedPieces: updatedForged } as AvatarProfile
+  const updatedUnlockedTiers = deriveUnlockedTiersFromForged(progressionProfile)
+  const nextActiveTier = getActiveForgeTierFromProgress(progressionProfile)
 
   // Also update equippedPieces and unlockedPieces for compatibility
   const equippedPieces = [...(profile.equippedPieces ?? [])]
@@ -92,14 +101,38 @@ export async function forgeArmorPiece(
     forgedPieces: updatedForged,
     equippedPieces,
     unlockedPieces,
+    unlockedTiers: updatedUnlockedTiers,
+    currentTier: nextActiveTier,
   } as Partial<AvatarProfile> & Record<string, unknown>)
+
+  // Check if this piece completed the tier — award milestone bonus
+  let tierCompleted = false
+  let tierBonus = 0
+  const forgedCount = Object.keys(updatedForged[tier] ?? {}).length
+  if (forgedCount >= ALL_ARMOR_VOXEL_PIECES.length) {
+    tierCompleted = true
+    tierBonus = TIER_COMPLETION_BONUSES[tier] ?? 0
+
+    if (tierBonus > 0) {
+      await addDiamondEvent({
+        familyId,
+        childId,
+        amount: tierBonus,
+        type: DIAMOND_EVENTS.FULL_TIER_COMPLETE,
+        reason: `Completed ${tier.charAt(0).toUpperCase() + tier.slice(1)} tier — full set forged!`,
+        dedupKey: `tier-complete-${tier}-${childId}`,
+        awardedBy: 'system',
+        category: 'earn',
+      })
+    }
+  }
 
   const refreshedProfile = await getDoc(profileRef)
   const newBalance = refreshedProfile.exists()
     ? normalizeAvatarProfile(refreshedProfile.data()).diamondBalance ?? 0
     : 0
 
-  return { success: true, newBalance }
+  return { success: true, newBalance, tierCompleted, tierBonus }
 }
 
 /** Check if a specific piece is forged at a given tier. */
@@ -126,5 +159,5 @@ export function isTierComplete(
   profile: AvatarProfile,
   tier: string,
 ): boolean {
-  return getForgedPiecesForTier(profile, tier).length >= 6
+  return getForgedPiecesForTier(profile, tier).length >= ALL_ARMOR_VOXEL_PIECES.length
 }

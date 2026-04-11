@@ -12,8 +12,8 @@ import type {
 } from '../types'
 import { ARMOR_PIECE_TO_VOXEL } from '../types'
 import { XP_THRESHOLDS } from '../../features/avatar/voxel/buildArmorPiece'
-import { TIERS } from '../../features/avatar/voxel/tierMaterials'
 import { normalizeAvatarProfile } from '../../features/avatar/normalizeProfile'
+import { deriveUnlockedTiersFromForged, getActiveForgeTierFromProgress } from '../../features/avatar/armorTierProgress'
 import { safeSetProfile } from '../../features/avatar/safeProfileWrite'
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -95,7 +95,7 @@ export interface ArmorUnlockResult {
   newlyUnlockedPieces: ArmorPiece[]
   /** Voxel piece IDs newly unlocked */
   newlyUnlockedVoxelPieces: VoxelArmorPieceId[]
-  /** Tiers newly unlocked by XP threshold */
+  /** Tiers newly unlocked by forge completion */
   newlyUnlockedTiers?: string[]
   /** Set if a full-set tier upgrade happened */
   tierUpgrade?: {
@@ -163,16 +163,8 @@ export async function checkAndUnlockArmor(
     }
   }
 
-  // ── Compute unlocked tiers from XP thresholds ──────────────────
+  // ── Compute unlocked tiers from forge progression ──────────────
   const prevUnlockedTiers = profile.unlockedTiers ?? ['wood']
-  const unlockedTiers: string[] = []
-  for (const [tierKey, tierDef] of Object.entries(TIERS)) {
-    if (xp >= tierDef.minXp) {
-      unlockedTiers.push(tierKey.toLowerCase())
-    }
-  }
-  // Ensure wood is always unlocked
-  if (!unlockedTiers.includes('wood')) unlockedTiers.unshift('wood')
 
   // ── Compute unlocked voxel pieces from XP thresholds ──────────
   // Legacy: still track unlockedPieces for backward compat
@@ -200,6 +192,9 @@ export async function checkAndUnlockArmor(
     }
     forgedPieces = { wood: woodForged }
   }
+  const progressionProfile = { ...profile, forgedPieces, totalXp: xp } as AvatarProfile
+  const unlockedTiers = deriveUnlockedTiersFromForged(progressionProfile)
+  const activeTier = getActiveForgeTierFromProgress(progressionProfile)
 
   const newlyUnlockedVoxel = newlyUnlocked.map((id) => ARMOR_PIECE_TO_VOXEL[id])
   const newlyUnlockedTiers = unlockedTiers.filter((t) => !prevUnlockedTiers.includes(t))
@@ -211,6 +206,7 @@ export async function checkAndUnlockArmor(
     totalXp: xp,
     unlockedPieces: unlockedVoxelPieces,
     unlockedTiers,
+    currentTier: activeTier,
     forgedPieces,
     equippedPieces,
   } as unknown as Record<string, unknown>)

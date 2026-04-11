@@ -74,6 +74,7 @@ import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
   buildPlannerPrompt,
+  dateKeyForDayPlan,
   ensureEvaluationItems,
   fillMissingDaysFromRoutine,
   generateDraftPlanFromInputs,
@@ -1610,14 +1611,9 @@ Generate a plan for Monday through Friday.`.trim()
       for (const dayPlan of currentDraft.days) {
         const dayItems = dayPlan.items.filter((item) => item.accepted)
         if (dayItems.length === 0) continue
+        if (!WEEK_DAYS.includes(dayPlan.day as typeof WEEK_DAYS[number])) continue
 
-        const dayIndex = WEEK_DAYS.indexOf(dayPlan.day as typeof WEEK_DAYS[number])
-        if (dayIndex < 0) continue
-
-        const startDate = new Date(weekRange.start + 'T00:00:00')
-        const targetDate = new Date(startDate)
-        targetDate.setDate(startDate.getDate() + dayIndex)
-        const dateKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`
+        const dateKey = dateKeyForDayPlan(weekRange.start, dayPlan.day as typeof WEEK_DAYS[number])
 
         const docId = dayLogDocId(dateKey, activeChildId)
         const dayLogRef = doc(daysCollection(familyId), docId)
@@ -1946,13 +1942,9 @@ ${dayPrompts}`
     try {
       // Remove planner-generated blocks and checklist from each day's DayLog
       for (const dayPlan of currentDraft.days) {
-        const dayIndex = WEEK_DAYS.indexOf(dayPlan.day as typeof WEEK_DAYS[number])
-        if (dayIndex < 0) continue
+        if (!WEEK_DAYS.includes(dayPlan.day as typeof WEEK_DAYS[number])) continue
 
-        const startDate = new Date(weekRange.start + 'T00:00:00')
-        const targetDate = new Date(startDate)
-        targetDate.setDate(startDate.getDate() + dayIndex)
-        const dateKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`
+        const dateKey = dateKeyForDayPlan(weekRange.start, dayPlan.day as typeof WEEK_DAYS[number])
 
         const docId = dayLogDocId(dateKey, activeChildId)
         const dayLogRef = doc(daysCollection(familyId), docId)

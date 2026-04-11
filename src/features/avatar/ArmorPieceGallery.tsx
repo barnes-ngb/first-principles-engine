@@ -7,7 +7,7 @@ import { VOXEL_TO_ARMOR_PIECE } from '../../core/types'
 import { getForgeCost } from '../../core/xp/forgeCosts'
 import { ArmorIcon } from './icons/ArmorIcons'
 import type { ArmorTierColor } from './icons/ArmorIcons'
-import { getAppliedVoxelPieces, getArmorPieceState } from './armorPieceState'
+import { getAppliedVoxelPieces, getArmorPieceState, getPieceLockReason } from './armorPieceState'
 import { VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 
@@ -37,6 +37,7 @@ export default function ArmorPieceGallery({
   const cardScrollRef = useRef<HTMLDivElement>(null)
 
   const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
+  const tierLockReason = getPieceLockReason(profile, activeForgeTier)
 
   return (
     <Box
@@ -62,19 +63,21 @@ export default function ArmorPieceGallery({
           appliedTodayVoxel: appliedVoxel,
         })
         const isApplied = pieceState === 'equipped_today'
-        const isLocked = pieceState === 'locked_by_xp'
+        const isLocked = pieceState === 'locked_by_xp' || pieceState === 'locked_by_tier'
         const isSelected = selectedPiece?.id === piece.id
         const forgeCost = getForgeCost(activeForgeTier, piece.id)
 
-        const statusLabel = pieceState === 'locked_by_xp'
-          ? 'Locked'
-          : pieceState === 'forgeable'
-            ? `◆ ${forgeCost} Forge`
-            : pieceState === 'forged_not_equipped_today'
-              ? 'Equip'
-              : 'Equipped'
+        const statusLabel = pieceState === 'locked_by_tier'
+          ? tierLockReason || 'Locked'
+          : pieceState === 'locked_by_xp'
+            ? 'Locked'
+            : pieceState === 'forgeable'
+              ? `\u25C6 ${forgeCost} Forge`
+              : pieceState === 'forged_not_equipped_today'
+                ? 'Equip'
+                : 'Equipped'
 
-        const statusColor = pieceState === 'locked_by_xp'
+        const statusColor = isLocked
           ? (isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.5)')
           : pieceState === 'forgeable'
             ? '#00BCD4'
@@ -106,7 +109,7 @@ export default function ArmorPieceGallery({
                     ? 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)'
                     : 'linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.005) 100%)'),
               cursor: 'pointer',
-              opacity: isLocked ? 0.7 : 1,
+              opacity: isLocked ? 0.55 : 1,
               transition: 'all 0.25s ease',
               textAlign: 'center',
               display: 'flex',
@@ -210,9 +213,13 @@ export default function ArmorPieceGallery({
             <Typography
               sx={{
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                fontSize: isLincoln ? '12px' : '13px',
+                fontSize: pieceState === 'locked_by_tier'
+                  ? (isLincoln ? '8px' : '10px')
+                  : (isLincoln ? '12px' : '13px'),
                 color: statusColor,
                 fontWeight: 600,
+                lineHeight: 1.3,
+                maxWidth: '120px',
               }}
             >
               {statusLabel}

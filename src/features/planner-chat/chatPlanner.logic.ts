@@ -11,6 +11,7 @@ import type {
 import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, SubjectBucket } from '../../core/types/enums'
 import { autoSuggestTags } from '../../core/types/skillTags'
+import { formatDateYmd } from '../../core/utils/format'
 
 /** Default app blocks that run "on rails" */
 export const defaultAppBlocks: AppBlock[] = [
@@ -69,6 +70,28 @@ export function parseRoutineTotalMinutes(routine: string): number {
 
 export const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as const
 export type WeekDay = (typeof WEEK_DAYS)[number]
+
+/**
+ * Given a week start date (Sunday-based, matching getWeekRange default)
+ * and a WEEK_DAYS day name (Monday=0), return the date key (YYYY-MM-DD)
+ * for that day.
+ *
+ * WEEK_DAYS is Monday-indexed but weekRange.start is Sunday, so Monday
+ * is +1 from weekStart, Friday is +5.
+ */
+export function dateKeyForDayPlan(
+  weekStart: string,
+  day: (typeof WEEK_DAYS)[number],
+): string {
+  const dayIndex = WEEK_DAYS.indexOf(day)
+  if (dayIndex < 0) {
+    throw new Error(`Invalid day "${day}" — must be one of ${WEEK_DAYS.join(', ')}`)
+  }
+  const start = new Date(weekStart + 'T00:00:00')
+  const target = new Date(start)
+  target.setDate(start.getDate() + dayIndex + 1)
+  return formatDateYmd(target)
+}
 
 let _nextId = 1
 export function generateItemId(): string {

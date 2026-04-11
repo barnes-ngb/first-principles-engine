@@ -12,7 +12,7 @@ import type {
   ShieldEmblem,
 } from '../../core/types'
 import { ACCESSORY_XP_THRESHOLDS, AvatarBackground as AvatarBackgroundValues, ShieldEmblem as ShieldEmblemValues, HelmetCrest as HelmetCrestValues } from '../../core/types'
-import { calculateTier } from './voxel/tierMaterials'
+import { deriveUnlockedTiersFromForged, getActiveForgeTierFromProgress } from './armorTierProgress'
 
 /**
  * Auto-migrate: treat all previously equipped pieces as forged in 'wood' tier.
@@ -47,8 +47,23 @@ export function normalizeAvatarProfile(raw: unknown): AvatarProfile {
 
   const totalXp = typeof r.totalXp === 'number' ? r.totalXp : 0
 
-  // Auto-correct currentTier from totalXp (single source of truth = totalXp)
-  const computedTier = calculateTier(totalXp).toLowerCase()
+  const rawForged = (r.forgedPieces && typeof r.forgedPieces === 'object' && !Array.isArray(r.forgedPieces))
+    ? r.forgedPieces as Record<string, Record<string, { forgedAt: string }>>
+    : undefined
+  const migratedForged = migrateEquippedToForged(
+    Array.isArray(r.equippedPieces) ? r.equippedPieces as string[] : [],
+    rawForged,
+  ).forgedPieces
+  const forgedPieces = rawForged ?? migratedForged
+  const normalizedForTier = {
+    forgedPieces,
+    totalXp,
+    unlockedPieces: Array.isArray(r.unlockedPieces) ? r.unlockedPieces : [],
+  } as AvatarProfile
+  const unlockedByForge = deriveUnlockedTiersFromForged(normalizedForTier)
+  const currentTier = typeof r.currentTier === 'string'
+    ? r.currentTier
+    : getActiveForgeTierFromProgress(normalizedForTier)
 
   return {
     childId: (r.childId as string) || '',
@@ -56,14 +71,12 @@ export function normalizeAvatarProfile(raw: unknown): AvatarProfile {
     ageGroup: (r.ageGroup as 'older' | 'younger') || 'older',
     characterFeatures: normalizeFeatures(r.characterFeatures),
     totalXp,
-    currentTier: computedTier as ArmorTier,
+    currentTier: currentTier as ArmorTier,
     equippedPieces: Array.isArray(r.equippedPieces) ? r.equippedPieces : [],
     pieces: Array.isArray(r.pieces) ? r.pieces.map(normalizePiece) : [],
     unlockedPieces: Array.isArray(r.unlockedPieces) ? r.unlockedPieces : [],
-    unlockedTiers: Array.isArray(r.unlockedTiers) ? r.unlockedTiers : ['wood'],
-    forgedPieces: (r.forgedPieces && typeof r.forgedPieces === 'object' && !Array.isArray(r.forgedPieces))
-      ? r.forgedPieces as Record<string, Record<string, { forgedAt: string }>>
-      : undefined,
+    unlockedTiers: unlockedByForge,
+    forgedPieces,
     lastPortalTier: (r.lastPortalTier as string) || undefined,
     customization: normalizeCustomization(r.customization),
     photoUrl: (r.photoUrl as string) || undefined,
@@ -79,12 +92,6 @@ export function normalizeAvatarProfile(raw: unknown): AvatarProfile {
     diamondBalance: typeof r.diamondBalance === 'number' ? r.diamondBalance : undefined,
     updatedAt: (r.updatedAt as string) || new Date().toISOString(),
     // Preserve legacy fields if present
-    ...migrateEquippedToForged(
-      Array.isArray(r.equippedPieces) ? r.equippedPieces as string[] : [],
-      (r.forgedPieces && typeof r.forgedPieces === 'object' && !Array.isArray(r.forgedPieces))
-        ? r.forgedPieces as Record<string, Record<string, { forgedAt: string }>>
-        : undefined,
-    ),
     ...(r.baseCharacterUrl ? { baseCharacterUrl: r.baseCharacterUrl as string } : {}),
     ...(r.photoTransformUrl ? { photoTransformUrl: r.photoTransformUrl as string } : {}),
     ...(r.armorSheetUrls ? { armorSheetUrls: r.armorSheetUrls as Record<string, string> } : {}),
