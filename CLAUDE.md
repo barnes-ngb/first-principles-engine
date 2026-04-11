@@ -168,6 +168,13 @@ Use clear prefixes: `chore:`, `feat:`, `fix:`, `refactor:`, `docs:`, `test:`
 
 Aim for commits that implement one component/flow, can be reverted cleanly, and do not mix scope areas.
 
+### Cross-platform npm scripts
+Nathan develops on Windows PowerShell. Never use bash-style inline env vars (`FOO=bar cmd`) in npm scripts — they break on Windows. Always use `cross-env`:
+```json
+"my-script": "cross-env FOO=bar tsx scripts/my-script.ts"
+```
+See `docs/SCRIPT_CONVENTIONS.md` for full conventions.
+
 ## Firestore Collections
 
 All under `families/{familyId}/`:
