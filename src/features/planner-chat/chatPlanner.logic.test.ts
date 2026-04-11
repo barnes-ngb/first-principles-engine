@@ -7,12 +7,14 @@ import {
   applySnapshotSuggestions,
   buildMinimumWinText,
   buildPlannerPrompt,
+  dateKeyForDayPlan,
   dayTotalMinutes,
   fillMissingDaysFromRoutine,
   generateDraftPlanFromInputs,
   parseAIResponse,
   planTotalMinutes,
   resetIdCounter,
+  WEEK_DAYS,
 } from './chatPlanner.logic'
 import type { PlanGeneratorInputs } from './chatPlanner.logic'
 
@@ -1047,5 +1049,40 @@ describe('fillMissingDaysFromRoutine', () => {
     expect(result.days.map(d => d.day)).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])
     // Friday should still have the AI item
     expect(result.days[4].items[0].title).toBe('Friday item')
+  })
+})
+
+describe('dateKeyForDayPlan', () => {
+  it('returns Monday date from Sunday-based week start', () => {
+    expect(dateKeyForDayPlan('2026-04-05', 'Monday')).toBe('2026-04-06')
+  })
+
+  it('returns Friday date from Sunday-based week start', () => {
+    expect(dateKeyForDayPlan('2026-04-05', 'Friday')).toBe('2026-04-10')
+  })
+
+  it('returns correct dates for all 5 weekdays', () => {
+    const results = WEEK_DAYS.map((day) => dateKeyForDayPlan('2026-04-05', day))
+    expect(results).toEqual([
+      '2026-04-06',
+      '2026-04-07',
+      '2026-04-08',
+      '2026-04-09',
+      '2026-04-10',
+    ])
+  })
+
+  it('handles month boundary (March → April)', () => {
+    expect(dateKeyForDayPlan('2026-03-29', 'Friday')).toBe('2026-04-03')
+  })
+
+  it('handles year boundary (December → January)', () => {
+    expect(dateKeyForDayPlan('2025-12-28', 'Friday')).toBe('2026-01-02')
+  })
+
+  it('throws on invalid day name', () => {
+    expect(() => dateKeyForDayPlan('2026-04-05', 'Saturday' as typeof WEEK_DAYS[number])).toThrow(
+      /Invalid day/,
+    )
   })
 })
