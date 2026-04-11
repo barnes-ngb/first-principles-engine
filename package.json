@@ -13,7 +13,8 @@
     "deploy": "npm run build && firebase deploy --except extensions",
     "deploy:hosting": "npm run build && firebase deploy --only hosting",
     "deploy:rules": "firebase deploy --only firestore:rules,storage",
-    "deploy:functions": "npm --prefix functions run lint && npm --prefix functions run build && firebase deploy --only functions"
+    "deploy:functions": "npm --prefix functions run lint && npm --prefix functions run build && firebase deploy --only functions",
+    "set:lincoln-level": "NODE_PATH=functions/node_modules npx tsx scripts/setLincolnPhonicsLevel.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
