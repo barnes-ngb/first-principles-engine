@@ -9,9 +9,11 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
+import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Container from '@mui/material/Container'
 import Dialog from '@mui/material/Dialog'
+import Divider from '@mui/material/Divider'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogContentText from '@mui/material/DialogContentText'
@@ -26,7 +28,7 @@ import MenuItem from '@mui/material/MenuItem'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { limit, onSnapshot, orderBy, query, where } from 'firebase/firestore'
+import { doc, getDoc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import ScanAnalysisPanel from '../../components/ScanAnalysisPanel'
@@ -35,15 +37,21 @@ import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
-import { scansCollection } from '../../core/firebase/firestore'
+import {
+  scansCollection,
+  ufliLessonsCollection,
+  ufliProgressDoc,
+} from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import type { NewActivityConfig } from '../../core/hooks/useActivityConfigs'
 import { useScan } from '../../core/hooks/useScan'
 import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
-import type { ActivityConfig, CurriculumDetected, ScanRecord } from '../../core/types'
+import type { ActivityConfig, CurriculumDetected, ScanRecord, UFLILesson, UFLIProgress } from '../../core/types'
 import { isWorksheetScan } from '../../core/types/planning'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
+import { DEFAULT_UFLI_PROGRESS } from '../../core/ufli/getUfliProgress'
+import { setStartingLesson } from '../../core/ufli/setLincolnStartingLesson'
 import AddActivityDialog from './AddActivityDialog'
 import EditRoutinesDialog from './EditRoutinesDialog'
 
@@ -158,6 +166,84 @@ export default function CurriculumTab() {
   const { scan, scanResult, scanning, error: scanError, clearScan } = useScan()
   const { syncScanToConfig } = useScanToActivityConfig()
   const [scanSnack, setScanSnack] = useState<string | null>(null)
+
+  // ── UFLI Progress state ───────────────────────────────────────
+  const [ufliProgress, setUfliProgress] = useState<UFLIProgress | null>(null)
+  const [ufliLesson, setUfliLesson] = useState<UFLILesson | null>(null)
+  const [ufliSaving, setUfliSaving] = useState(false)
+  const [ufliFeedback, setUfliFeedback] = useState<{
+    severity: 'success' | 'error'
+    message: string
+  } | null>(null)
+
+  // Listen to UFLI progress for active child
+  useEffect(() => {
+    if (!familyId || !activeChildId) return
+    const unsub = onSnapshot(
+      ufliProgressDoc(familyId, activeChildId),
+      (snap) => {
+        setUfliProgress(snap.exists() ? snap.data() : { ...DEFAULT_UFLI_PROGRESS })
+      },
+      (err) => {
+        console.error('[CurriculumTab] UFLI progress listen failed:', err)
+        setUfliProgress({ ...DEFAULT_UFLI_PROGRESS })
+      },
+    )
+    return unsub
+  }, [familyId, activeChildId])
+
+  // Load current UFLI lesson details
+  useEffect(() => {
+    if (!familyId || !ufliProgress) {
+      setUfliLesson(null)
+      return
+    }
+    const lessonRef = doc(ufliLessonsCollection(familyId), String(ufliProgress.currentLesson))
+    getDoc(lessonRef)
+      .then((snap) => setUfliLesson(snap.exists() ? (snap.data() as UFLILesson) : null))
+      .catch(() => setUfliLesson(null))
+  }, [familyId, ufliProgress?.currentLesson, ufliProgress])
+
+  const handleUfliSetTo62 = useCallback(async () => {
+    if (!activeChildId) return
+    setUfliSaving(true)
+    try {
+      await setStartingLesson(familyId, activeChildId, 62)
+      setUfliFeedback({ severity: 'success', message: 'Set to Lesson 62.' })
+    } catch {
+      setUfliFeedback({ severity: 'error', message: 'Failed to set lesson.' })
+    } finally {
+      setUfliSaving(false)
+    }
+  }, [familyId, activeChildId])
+
+  const handleUfliAdvance = useCallback(async () => {
+    if (!activeChildId || !ufliProgress) return
+    const next = Math.min(ufliProgress.currentLesson + 1, 128)
+    setUfliSaving(true)
+    try {
+      await setStartingLesson(familyId, activeChildId, next)
+      setUfliFeedback({ severity: 'success', message: `Advanced to Lesson ${next}.` })
+    } catch {
+      setUfliFeedback({ severity: 'error', message: 'Failed to advance.' })
+    } finally {
+      setUfliSaving(false)
+    }
+  }, [familyId, activeChildId, ufliProgress])
+
+  const handleUfliGoBack = useCallback(async () => {
+    if (!activeChildId || !ufliProgress) return
+    const prev = Math.max(ufliProgress.currentLesson - 1, 1)
+    setUfliSaving(true)
+    try {
+      await setStartingLesson(familyId, activeChildId, prev)
+      setUfliFeedback({ severity: 'success', message: `Moved back to Lesson ${prev}.` })
+    } catch {
+      setUfliFeedback({ severity: 'error', message: 'Failed to go back.' })
+    } finally {
+      setUfliSaving(false)
+    }
+  }, [familyId, activeChildId, ufliProgress])
 
   // Snackbar
   const [snack, setSnack] = useState<string | null>(null)
@@ -345,6 +431,86 @@ export default function CurriculumTab() {
         <Typography variant="h5" fontWeight={600}>
           {childName}&apos;s Curriculum
         </Typography>
+
+        {/* ── UFLI Progress ──────────────────────────────────── */}
+        <SectionCard title="UFLI Progress">
+          <Alert severity="info" variant="outlined" sx={{ mb: 2 }}>
+            Manage UFLI Foundations lesson progression. Normal advancement
+            happens automatically after the weekly encoding check.
+          </Alert>
+
+          {ufliProgress && (
+            <Stack spacing={2}>
+              <Stack spacing={1}>
+                <Typography variant="body1">
+                  <strong>Current Lesson:</strong> {ufliProgress.currentLesson}
+                  {ufliLesson ? ` \u2014 ${ufliLesson.concept}` : ''}
+                </Typography>
+
+                {ufliLesson && ufliLesson.targetGraphemes.length > 0 && (
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                    <Typography variant="body2" color="text.secondary">
+                      Graphemes:
+                    </Typography>
+                    {ufliLesson.targetGraphemes.map((g) => (
+                      <Chip key={g} label={g} size="small" variant="outlined" />
+                    ))}
+                  </Stack>
+                )}
+
+                <Typography variant="body2" color="text.secondary">
+                  <strong>Mastered Lessons:</strong>{' '}
+                  {ufliProgress.masteredLessons.length} of 128
+                </Typography>
+
+                <Typography variant="body2" color="text.secondary">
+                  <strong>Last Encoding Score:</strong>{' '}
+                  {ufliProgress.lastEncodingScore != null
+                    ? `${ufliProgress.lastEncodingScore}% (${ufliProgress.lastEncodingDate})`
+                    : 'Not yet assessed'}
+                </Typography>
+              </Stack>
+
+              <Divider />
+
+              <Stack direction="row" spacing={1} flexWrap="wrap">
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={handleUfliSetTo62}
+                  disabled={ufliSaving}
+                >
+                  Set to Lesson 62
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={handleUfliAdvance}
+                  disabled={ufliSaving || ufliProgress.currentLesson >= 128}
+                >
+                  Advance Lesson (+1)
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={handleUfliGoBack}
+                  disabled={ufliSaving || ufliProgress.currentLesson <= 1}
+                >
+                  Back a Lesson (-1)
+                </Button>
+              </Stack>
+
+              {ufliFeedback && (
+                <Alert
+                  severity={ufliFeedback.severity}
+                  onClose={() => setUfliFeedback(null)}
+                >
+                  {ufliFeedback.message}
+                </Alert>
+              )}
+            </Stack>
+          )}
+        </SectionCard>
 
         {/* This Week's Scans */}
         <SectionCard

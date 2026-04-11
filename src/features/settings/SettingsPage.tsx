@@ -33,7 +33,6 @@ import AccountSection from './AccountSection'
 import AIUsagePanel from './AIUsagePanel'
 import AvatarAdminTab from './AvatarAdminTab'
 import StickerLibraryTab from './StickerLibraryTab'
-import UfliAdminTab from './UfliAdminTab'
 
 type SnackbarState = {
   open: boolean
@@ -107,7 +106,6 @@ export default function SettingsPage() {
             <Tab label="General" />
             <Tab label="Avatar & XP" />
             <Tab label="Sticker Library" />
-            <Tab label="UFLI Progress" />
           </Tabs>
         )}
 
@@ -185,9 +183,6 @@ export default function SettingsPage() {
 
         {/* ── Sticker Library tab (parent only) ───────────────── */}
         {isParent && activeTab === 2 && <StickerLibraryTab />}
-
-        {/* ── UFLI Progress tab (parent only) ────────────────── */}
-        {isParent && activeTab === 3 && <UfliAdminTab />}
       </SectionCard>
 
       <AIUsagePanel />

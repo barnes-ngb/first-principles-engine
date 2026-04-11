@@ -16,7 +16,6 @@ import {
   ufliProgressDoc,
 } from '../../core/firebase/firestore'
 import type { UFLILesson, UFLIProgress } from '../../core/types'
-import { DEFAULT_UFLI_PROGRESS } from '../../core/ufli/getUfliProgress'
 
 interface LincolnUfliCardProps {
   familyId: string
@@ -32,7 +31,9 @@ export default function LincolnUfliCard({
   today,
 }: LincolnUfliCardProps) {
   const [progress, setProgress] = useState<UFLIProgress | null>(null)
+  const [progressExists, setProgressExists] = useState(false)
   const [lesson, setLesson] = useState<UFLILesson | null>(null)
+  const [lessonLoaded, setLessonLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
   const [completing, setCompleting] = useState(false)
   const [completedToday, setCompletedToday] = useState(false)
@@ -44,11 +45,13 @@ export default function LincolnUfliCard({
     const unsub = onSnapshot(
       ufliProgressDoc(familyId, childId),
       (snap) => {
-        setProgress(snap.exists() ? snap.data() : { ...DEFAULT_UFLI_PROGRESS })
+        setProgressExists(snap.exists())
+        setProgress(snap.exists() ? snap.data() : null)
         setLoading(false)
       },
       () => {
-        setProgress({ ...DEFAULT_UFLI_PROGRESS })
+        setProgressExists(false)
+        setProgress(null)
         setLoading(false)
       },
     )
@@ -59,15 +62,23 @@ export default function LincolnUfliCard({
   useEffect(() => {
     if (!familyId || !progress) {
       setLesson(null)
+      setLessonLoaded(false)
       return
     }
+    setLessonLoaded(false)
     const lessonRef = doc(
       ufliLessonsCollection(familyId),
       String(progress.currentLesson),
     )
     getDoc(lessonRef)
-      .then((snap) => setLesson(snap.exists() ? snap.data() : null))
-      .catch(() => setLesson(null))
+      .then((snap) => {
+        setLesson(snap.exists() ? snap.data() : null)
+        setLessonLoaded(true)
+      })
+      .catch(() => {
+        setLesson(null)
+        setLessonLoaded(true)
+      })
   }, [familyId, progress?.currentLesson, progress])
 
   const handleMarkComplete = useCallback(async () => {
@@ -91,30 +102,69 @@ export default function LincolnUfliCard({
     }
   }, [familyId, childId, today, progress, lesson, completedToday])
 
+  // ── Loading state ────────────────────────────────────────────
   if (loading) {
     return (
       <SectionCard title={`${childName}'s Phonics`}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <CircularProgress size={20} />
-          <Typography color="text.secondary">Loading UFLI progress...</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Loading UFLI progress...
+          </Typography>
         </Box>
       </SectionCard>
     )
   }
 
-  if (!progress) return null
+  // ── Progress not initialized ─────────────────────────────────
+  if (!progressExists || !progress) {
+    return (
+      <SectionCard title={`${childName}'s Phonics`}>
+        <Alert severity="info">
+          UFLI progress not initialized. Run the seed script or use
+          Progress &gt; Curriculum to set starting lesson.
+        </Alert>
+      </SectionCard>
+    )
+  }
 
   const lessonNum = progress.currentLesson
-  const concept = lesson?.concept ?? 'Loading...'
+
+  // ── Lesson data missing ──────────────────────────────────────
+  if (lessonLoaded && !lesson) {
+    return (
+      <SectionCard title={`${childName}'s Phonics \u2014 Lesson ${lessonNum}`}>
+        <Alert severity="warning">
+          Lesson data missing \u2014 run{' '}
+          <Typography component="code" variant="body2" sx={{ fontFamily: 'monospace' }}>
+            npm run seed:ufli
+          </Typography>
+        </Alert>
+      </SectionCard>
+    )
+  }
+
+  // ── Normal render ────────────────────────────────────────────
+  const concept = lesson?.concept
   const graphemes = lesson?.targetGraphemes ?? []
   const heartWords = lesson?.heartWords ?? []
   const slideUrl = lesson?.toolboxSlideUrl
 
   return (
     <SectionCard
-      title={`${childName}'s Phonics — Lesson ${lessonNum}: ${concept}`}
+      title={`${childName}'s Phonics \u2014 Lesson ${lessonNum}${concept ? `: ${concept}` : ''}`}
     >
       <Stack spacing={1.5}>
+        {/* Lesson details still loading */}
+        {!lessonLoaded && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CircularProgress size={16} />
+            <Typography variant="body2" color="text.secondary">
+              Loading lesson details...
+            </Typography>
+          </Box>
+        )}
+
         {/* Target graphemes */}
         {graphemes.length > 0 && (
           <Stack direction="row" spacing={0.5} flexWrap="wrap" alignItems="center">
@@ -151,7 +201,7 @@ export default function LincolnUfliCard({
           </Stack>
         )}
 
-        {heartWords.length === 0 && (
+        {heartWords.length === 0 && lessonLoaded && (
           <Typography variant="body2" color="text.secondary">
             No heart words for this lesson.
           </Typography>
@@ -169,11 +219,11 @@ export default function LincolnUfliCard({
           >
             Open UFLI Toolbox slides
           </Button>
-        ) : (
+        ) : lessonLoaded ? (
           <Alert severity="info" variant="outlined">
-            Slide link not set — add via Settings &gt; UFLI Progress
+            Slide link not set \u2014 add via Progress &gt; Curriculum
           </Alert>
-        )}
+        ) : null}
 
         {/* Mark complete */}
         {completedToday ? (

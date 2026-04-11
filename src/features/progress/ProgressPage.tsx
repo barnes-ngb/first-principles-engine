@@ -34,7 +34,8 @@ export default function ProgressPage() {
             value={tab}
             onChange={handleChange}
             variant="scrollable"
-            scrollButtons="auto"
+            scrollButtons={true}
+            allowScrollButtonsMobile={true}
           >
             <Tab label="Learning Profile" />
             <Tab label="Learning Map" />
