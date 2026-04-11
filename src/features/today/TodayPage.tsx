@@ -75,6 +75,7 @@ import { ensureDefaultActivityConfigs } from '../../core/firebase/migrateActivit
 import { useUnifiedCapture } from './useUnifiedCapture'
 import QuickAddHours from '../records/QuickAddHours'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
+import LincolnUfliCard from './LincolnUfliCard'
 import WeekFocusCard from './WeekFocusCard'
 import WorkshopGameCards from './WorkshopGameCards'
 
@@ -768,6 +769,18 @@ export default function TodayPage() {
           </Stack>
         </Stack>
       </SectionCard>
+
+      {/* --- Lincoln's UFLI Lesson (phonics anchor) --- */}
+      {selectedChild && selectedChild.name.toLowerCase() === 'lincoln' && selectedChildId && (
+        <SectionErrorBoundary section="ufli lesson">
+          <LincolnUfliCard
+            familyId={familyId}
+            childId={selectedChildId}
+            childName={selectedChild.name}
+            today={today}
+          />
+        </SectionErrorBoundary>
+      )}
 
       {/* --- Week Focus + Conundrum --- */}
       {weekFocus && (
