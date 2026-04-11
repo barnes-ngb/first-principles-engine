@@ -6,13 +6,30 @@
 ## Project Summary
 Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builder), Lincoln (10, neurodivergent, speech challenges), London (6, drawing/story-first).
 
+---
+
+## North Star: Lincoln Acceleration (April–July 2026)
+
+Everything else pauses. Lincoln's reading is the #1 priority for the next 3 months.
+
+**Goal:** Move Lincoln from UFLI Lesson 62 → Lesson 90+ by end of July 2026 using structured phonics (UFLI Foundations) with the Phonics Forge guided flow.
+
+**Key decisions:**
+- UFLI Foundations is the backbone — 128 lessons, systematic scope & sequence
+- Lincoln starts at Lesson 62 (VCe Review 3; Exceptions) — assessed anchor point
+- Shelly delivers lessons using free UFLI Toolbox PDFs + the app's tracking layer
+- Weekly encoding checks gate advancement (not time-based)
+- Minecraft "Phonics Forge" theming on kid-facing UI
+
+**Reference:** See `docs/LINCOLN_ACCELERATION.md` and `docs/UFLI_INTEGRATION.md` for full design.
+
 **Tech:** React + TypeScript + Vite, Firebase (Auth/Firestore/Storage/Functions/Hosting), MUI, Claude + OpenAI image stack.
 
 **Scale (current):**
 - TypeScript lines: **120,662** total (`src/` 108,370 + `functions/src/` 12,292)
 - Commits: **1,429**
 - Tests: **59 test files**, **1,004 test cases**
-- Firestore collections: **33** (31 family-scoped + 2 global)
+- Firestore collections: **34** (32 family-scoped + 2 global)
 - Cloud Functions: **18**
 - Chat task types: **14**
 - Routes: **27**
@@ -82,6 +99,25 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 - Chapter question and conundrum generation now use Stonebridge context.
 - Sets continuity foundation for Banner Rally mission layer.
 
+### UFLI Foundations — Lincoln Acceleration (Sprint 1)
+- 128-lesson scope & sequence seeded as static data (`functions/src/data/ufliLessons.json`).
+- `UFLILesson` + `UFLIProgress` types in `src/core/types/ufli.ts`.
+- Per-child UFLI progress tracking (`families/{familyId}/children/{childId}/ufliProgress/current`).
+- UFLI lesson collection (`families/{familyId}/ufliLessons/{lessonNumber}`).
+- Settings > UFLI Progress admin tab — view/adjust current lesson, mastered count, encoding scores.
+- Parent Today: "Lincoln's UFLI Lesson" card — shows current lesson, graphemes, heart words, toolbox link, mark-complete.
+- Kid Today: "Phonics Forge" Minecraft-themed card — shows quest label, tapping shows toast ("Shelly will open this with you").
+- Migration script for seeding lesson data (`functions/src/migrations/seedUfliLessons.ts`).
+
+---
+
+### Paused for Lincoln Acceleration
+- Math Quest (Knowledge Mine math domain expansion)
+- Speech Quest (Knowledge Mine speech domain)
+- London's Avatar customization UI
+- Avatar Customization UI polish
+- Barnes Bros dashboard
+
 ---
 
 ## What's Built but Untested with Real Users
@@ -122,6 +158,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 | Working Levels Data Model | Apr 9, 2026 | Per-domain working level tracking for Knowledge Mine progression (phonics/comprehension/math). Starting levels persist across sessions via `workingLevels` field on skill snapshot. Updated by quest completion, guided evaluation, and curriculum scans. Manual overrides protected for 48 hours. Fixes "starts at Level 2 every session" regression. (Part 1 — plumbing only; parent UI in Part 2.) |
 | Bugfix Apr 10 | Apr 10, 2026 | Planner lock-in off-by-one: Friday plans were written to Thursday's date key because WEEK_DAYS (Monday=0) was added to a Sunday-based weekRange.start. Extracted `dateKeyForDayPlan` pure helper + unit tests. |
 | Chapter Pool P1 | Apr 10, 2026 | Chapter book question pool foundation: ChapterBook + BookProgress types, Narnia seed data (17 chapters with summaries), chapterQuestions Cloud Function task handler, Firestore collection helpers. |
+| Lincoln Acceleration Sprint 1 | Apr 11, 2026 | UFLI Foundations data layer: 128-lesson scope & sequence JSON, UFLILesson + UFLIProgress types, per-child progress tracking, ufliLessons Firestore collection, Settings admin tab, parent Today lesson card, kid Phonics Forge card, migration script. Lincoln anchored at Lesson 62. |
 
 ## Removed Features / Concepts
 - Ghost armor visual state (moved to binary on/off only).
