@@ -192,7 +192,7 @@ export async function checkAndUnlockArmor(
     }
     forgedPieces = { wood: woodForged }
   }
-  const progressionProfile = { ...profile, forgedPieces } as AvatarProfile
+  const progressionProfile = { ...profile, forgedPieces, totalXp: xp } as AvatarProfile
   const unlockedTiers = deriveUnlockedTiersFromForged(progressionProfile)
   const activeTier = getActiveForgeTierFromProgress(progressionProfile)
 

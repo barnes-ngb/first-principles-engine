@@ -1,10 +1,16 @@
 import { ARMOR_PIECE_TO_VOXEL } from '../../core/types'
-import type { ArmorPiece, AvatarProfile, VoxelArmorPieceId } from '../../core/types'
+import type { ArmorPiece, ArmorTier, AvatarProfile, VoxelArmorPieceId } from '../../core/types'
 import { XP_THRESHOLDS } from './voxel/buildArmorPiece'
-import { ALL_ARMOR_VOXEL_PIECES, getActiveForgeTierFromProgress } from './armorTierProgress'
+import {
+  ALL_ARMOR_VOXEL_PIECES,
+  deriveUnlockedTiersFromForged,
+  getActiveForgeTierFromProgress,
+  getTierLockReason,
+} from './armorTierProgress'
 
 export type ArmorPieceState =
   | 'locked_by_xp'
+  | 'locked_by_tier'
   | 'forgeable'
   | 'forged_not_equipped_today'
   | 'equipped_today'
@@ -56,6 +62,12 @@ export function getArmorPieceState(params: {
   const { profile, pieceId, appliedTodayVoxel = [] } = params
   const activeForgeTier = params.activeForgeTier ?? getActiveForgeTier(profile)
 
+  // Check if the tier itself is accessible (dual requirement gate)
+  const unlockedTiers = deriveUnlockedTiersFromForged(profile)
+  if (!unlockedTiers.includes(activeForgeTier as ArmorTier)) {
+    return 'locked_by_tier'
+  }
+
   if (profile.totalXp < XP_THRESHOLDS[pieceId]) {
     return 'locked_by_xp'
   }
@@ -66,4 +78,12 @@ export function getArmorPieceState(params: {
   if (!isForged) return 'forgeable'
   if (appliedTodayVoxel.includes(pieceId)) return 'equipped_today'
   return 'forged_not_equipped_today'
+}
+
+/**
+ * Returns the human-readable lock reason for a piece.
+ * Empty string if the piece is not locked by tier.
+ */
+export function getPieceLockReason(profile: AvatarProfile, tier: string): string {
+  return getTierLockReason(profile, tier)
 }
