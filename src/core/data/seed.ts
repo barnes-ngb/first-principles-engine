@@ -2,9 +2,11 @@ import { doc, type DocumentReference, getDoc, setDoc } from 'firebase/firestore'
 
 import {
   artifactsCollection,
+  chapterBooksCollection,
   childrenCollection,
   weeksCollection,
 } from '../firebase/firestore'
+import { SEED_CHAPTER_BOOKS } from './chapterBooks'
 import {
   DayBlockType,
   EngineStage,
@@ -174,4 +176,15 @@ export const seedDemoFamily = async (familyId: string): Promise<void> => {
       },
     }),
   ])
+
+  await seedChapterBooks()
+}
+
+/** Seed global chapter book library (curriculum/chapterBooks). */
+export const seedChapterBooks = async (): Promise<void> => {
+  await Promise.all(
+    SEED_CHAPTER_BOOKS.map((book) =>
+      ensureDocument(doc(chapterBooksCollection(), book.id), book),
+    ),
+  )
 }
