@@ -13,6 +13,13 @@ service cloud.firestore {
                          && request.auth.uid == familyId;
     }
 
+    // Chapter book library — global, shared across families.
+    // Readable by any authenticated user; writable only via Cloud Functions / seed.
+    match /chapterBooks/{bookId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
     // Shelly Chat threads + messages (explicit for subcollection clarity)
     function isFamily(familyId) {
       return request.auth != null && request.auth.uid == familyId;

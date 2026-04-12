@@ -470,9 +470,9 @@ export const chapterResponsesCollection = (
 
 // ── Chapter Books (Global Curriculum Library) ───────────────────
 
-/** Global chapter book library. Path: curriculum/chapterBooks/{bookId} */
+/** Global chapter book library. Path: chapterBooks/{bookId} */
 export const chapterBooksCollection = (): CollectionReference<ChapterBook> =>
-  collection(db, 'curriculum', 'chapterBooks') as unknown as CollectionReference<ChapterBook>
+  collection(db, 'chapterBooks') as CollectionReference<ChapterBook>
 
 // ── Book Progress (Per-Family Read-Aloud Tracking) ──────────────
 
