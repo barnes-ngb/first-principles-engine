@@ -98,6 +98,7 @@ import PlanSummaryPanel from './PlanSummaryPanel'
 import { useScan } from '../../core/hooks/useScan'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
 import { buildMaterialsPrompt, openPrintWindow } from './generateMaterials'
+import ChapterBookPicker from './ChapterBookPicker'
 import PlannerSetupWizard from './PlannerSetupWizard'
 import WeekFocusPanel from './WeekFocusPanel'
 import PlanDayCards from './PlanDayCards'
@@ -336,6 +337,8 @@ export default function PlannerChatPage() {
       const books = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
       books.sort((a, b) => a.title.localeCompare(b.title))
       setChapterBooks(books)
+    }).catch((err) => {
+      console.warn('Failed to load chapter book library:', err)
     })
   }, [])
 
@@ -630,6 +633,23 @@ export default function PlannerChatPage() {
     },
     [weekPlan, debouncedWriteWeekField],
   )
+
+  // Persist book change to plannerDefaults + weekPlan (used in review/active phases)
+  const handleBookChangeAndPersist = useCallback((book: ChapterBook | null) => {
+    handleSelectedBookChange(book)
+    // Persist to plannerDefaults
+    void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
+      readAloudBook: book?.title ?? '',
+      readAloudBookId: book?.id ?? null,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true })
+    // If plan is already applied, also update the week document
+    if (applied) {
+      void updateDoc(weekPlanRef, {
+        ...(book ? { readAloudBookId: book.id } : { readAloudBookId: null }),
+      })
+    }
+  }, [handleSelectedBookChange, familyId, applied, weekPlanRef])
 
   // Add welcome message on first load when child is selected (only after setup wizard is complete)
   useEffect(() => {
@@ -2218,6 +2238,23 @@ ${dayPrompts}`
             <WeekFocusPanel weekPlan={weekPlan} onUpdateField={updateWeekField} />
           )}
 
+          {phase === 'review' && (
+            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+              <Typography variant="subtitle2" gutterBottom>Read-Aloud Book</Typography>
+              <ChapterBookPicker
+                chapterBooks={chapterBooks}
+                selectedBook={selectedBook}
+                onSelectedBookChange={handleBookChangeAndPersist}
+                bookProgress={bookProgress}
+                readAloudBook={readAloudBook}
+                onReadAloudBookChange={setReadAloudBook}
+                readAloudChapters={readAloudChapters}
+                onReadAloudChaptersChange={setReadAloudChapters}
+                variant="card"
+              />
+            </Box>
+          )}
+
           {phase === 'review' && currentDraft && (
             <PlanDayCards
               draft={currentDraft}
@@ -2252,6 +2289,25 @@ ${dayPrompts}`
                   Go to Today
                 </Button>
               </Alert>
+
+              {/* Read-aloud book picker (active phase) */}
+              <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+                <Typography variant="subtitle2" gutterBottom>Read-Aloud Book</Typography>
+                <ChapterBookPicker
+                  chapterBooks={chapterBooks}
+                  selectedBook={selectedBook}
+                  onSelectedBookChange={handleBookChangeAndPersist}
+                  bookProgress={bookProgress}
+                  readAloudBook={readAloudBook}
+                  onReadAloudBookChange={setReadAloudBook}
+                  readAloudChapters={readAloudChapters}
+                  onReadAloudChaptersChange={setReadAloudChapters}
+                  variant="card"
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  Changing the book updates your Today page. Re-lock the plan to generate questions for this book.
+                </Typography>
+              </Box>
 
               {/* Chat history (scrollable) */}
               <PlannerChatMessages messages={messages} messagesEndRef={chatEndRef} />
