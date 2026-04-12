@@ -12,6 +12,8 @@ interface ArmorSuitUpPanelProps {
   appliedVoxel: string[]
   allEarnedApplied: boolean
   allSixUnlocked: boolean
+  /** Total number of forged pieces the child owns (across all tiers) */
+  forgedCount: number
   nextUnlock: { piece: ArmorPieceMeta; xpNeeded: number } | null
   currentTierName: string
   nextUnlockProgress: number
@@ -34,6 +36,7 @@ export default function ArmorSuitUpPanel({
   appliedVoxel,
   allEarnedApplied,
   allSixUnlocked,
+  forgedCount,
   nextUnlock,
   currentTierName,
   nextUnlockProgress,
@@ -161,21 +164,23 @@ export default function ArmorSuitUpPanel({
               fontWeight: 500,
             }}
           >
-            {appliedVoxel.length}/{Math.max(unlockedVoxel.length, 0)} equipped today
+            {appliedVoxel.length}/{forgedCount} equipped today{allEarnedApplied && forgedCount > 0 ? ' ✓' : ''}
           </Typography>
-          <Typography
-            sx={{
-              mt: 0.6,
-              textAlign: 'center',
-              fontFamily: titleFont,
-              fontSize: isLincoln ? '9px' : '12px',
-              color: isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)',
-            }}
-          >
-            Forge all 6 pieces to unlock the next armor material.
-          </Typography>
+          {forgedCount < 6 && (
+            <Typography
+              sx={{
+                mt: 0.6,
+                textAlign: 'center',
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '9px' : '12px',
+                color: isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)',
+              }}
+            >
+              {forgedCount}/6 pieces forged. Forge more to unlock the next material.
+            </Typography>
+          )}
         </Box>
-      ) : allEarnedApplied && unlockedVoxel.length > 0 ? (
+      ) : allEarnedApplied && forgedCount > 0 ? (
         <Box sx={{ textAlign: 'center', py: 2, mb: 0.5 }}>
           <Typography
             key={`count-${appliedVoxel.length}`}
@@ -193,9 +198,9 @@ export default function ArmorSuitUpPanel({
               },
             }}
           >
-            {allSixUnlocked
+            {forgedCount >= 6
               ? 'Full armor equipped!'
-              : `${unlockedVoxel.length}/6 pieces on`}
+              : `${forgedCount}/${forgedCount} equipped ✓`}
           </Typography>
           {/* Streak display */}
           {(profile.armorStreak ?? 0) > 1 && (
@@ -225,11 +230,11 @@ export default function ArmorSuitUpPanel({
             </Box>
           )}
         </Box>
-      ) : unlockedVoxel.length > 0 && appliedVoxel.length < unlockedVoxel.length ? (
+      ) : forgedCount > 0 && !allEarnedApplied ? (
         <Box sx={{ textAlign: 'center', py: 1, mb: 0.5 }}>
-          {/* Equipped count dots */}
+          {/* Equipped count dots — one per forged piece */}
           <Box sx={{ display: 'flex', justifyContent: 'center', gap: '6px', mb: 1.5 }}>
-            {Array.from({ length: 6 }).map((_, i) => (
+            {Array.from({ length: forgedCount }).map((_, i) => (
               <Box
                 key={i}
                 sx={{
@@ -238,9 +243,7 @@ export default function ArmorSuitUpPanel({
                   borderRadius: isLincoln ? '2px' : '50%',
                   bgcolor: i < appliedVoxel.length
                     ? accentColor
-                    : i < unlockedVoxel.length
-                      ? (isLincoln ? 'rgba(126,252,32,0.2)' : 'rgba(232,160,191,0.25)')
-                      : (isLincoln ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'),
+                    : (isLincoln ? 'rgba(126,252,32,0.2)' : 'rgba(232,160,191,0.25)'),
                   transition: 'all 0.3s ease',
                   boxShadow: i < appliedVoxel.length
                     ? `0 0 6px ${accentColor}44`
@@ -264,7 +267,7 @@ export default function ArmorSuitUpPanel({
               },
             }}
           >
-            {appliedVoxel.length}/{unlockedVoxel.length} equipped
+            {appliedVoxel.length}/{forgedCount} equipped
           </Typography>
           {/* Suit Up! button */}
           <Box
