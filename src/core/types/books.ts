@@ -267,6 +267,12 @@ export interface BookPage {
   sightWordsOnPage?: string[]
 }
 
+export interface ImageVersion {
+  url: string
+  replacedAt: string
+  replacedBy: 'reimagine' | 'upload' | 'gallery' | 'generate'
+}
+
 export interface PageImage {
   id: string
   url: string
@@ -290,6 +296,8 @@ export interface PageImage {
   position?: { x: number; y: number; width: number; height: number; rotation?: number; zIndex?: number; flipH?: boolean; flipV?: boolean }
   /** Sticker tags (copied from sticker library when placed) */
   tags?: StickerTag[]
+  /** Previous image versions — kept when image URL is replaced (max 5). */
+  previousVersions?: ImageVersion[]
 }
 
 export interface Sticker {

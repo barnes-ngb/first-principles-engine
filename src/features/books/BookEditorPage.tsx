@@ -64,6 +64,9 @@ import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
 import { useBackgroundReimagine } from './useBackgroundReimagine'
 import ReimagineResultDialog from './ReimagineResultDialog'
+import { useEditorHistory, useUndoRedoKeys } from './useEditorHistory'
+import UndoIcon from '@mui/icons-material/Undo'
+import RedoIcon from '@mui/icons-material/Redo'
 
 type VoiceMode = 'record' | 'dictate'
 
@@ -148,16 +151,20 @@ export default function BookEditorPage() {
     addSketchToPage,
     applySketchEnhancement,
     pickSketchVersion,
+    restoreImageVersion,
   } = useBook(familyId, bookId)
 
   const { generateImage, enhanceSketch, loading: aiLoading, error: aiError } = useAI()
+
+  // ── Undo / Redo ───────────────────────────────────────────────
+  const editorHistory = useEditorHistory()
 
   const bgReimagine = useBackgroundReimagine({
     familyId,
     childId: activeChild?.id ?? '',
     childName,
     bookTheme: book?.theme,
-    onAddToPage: (pageId, imageId, url, storagePath) => {
+    onReplaceBackground: (pageId, imageId, url, storagePath) => {
       applySketchEnhancement(pageId, imageId, url, storagePath)
     },
     onAddSticker: (pageId, url, storagePath, label) => {
@@ -230,6 +237,14 @@ export default function BookEditorPage() {
   // Overlay guidance (shown after placing an AI scene)
   const [showOverlayGuide, setShowOverlayGuide] = useState(false)
 
+  // Contextual action bar: track which image is selected in PageEditor
+  const [selectedEditorImageId, setSelectedEditorImageId] = useState<string | null>(null)
+  const [selectedEditorImageType, setSelectedEditorImageType] = useState<'sticker' | 'background' | null>(null)
+  const handleSelectedImageChange = useCallback((imageId: string | null, imageType: 'sticker' | 'background' | null) => {
+    setSelectedEditorImageId(imageId)
+    setSelectedEditorImageType(imageType)
+  }, [])
+
   // Finish flow state
   const [showFinishDialog, setShowFinishDialog] = useState(false)
   const [selectedCoverUrl, setSelectedCoverUrl] = useState<string | null>(null)
@@ -287,6 +302,63 @@ export default function BookEditorPage() {
     },
     [activePage, addImageToPage, autoCleanSketch],
   )
+
+  // ── History-tracked page mutations ──────────────────────────────
+  /** Snapshot the active page before a mutation, push history after. */
+  const trackPageChange = useCallback(
+    (action: string, mutate: () => void) => {
+      if (!activePage || !book) return
+      const before = structuredClone(activePage)
+      mutate()
+      // Re-read updated page from book state (next render will have it;
+      // we schedule the push via microtask so the state has settled)
+      queueMicrotask(() => {
+        // book may have updated by now — read latest from ref
+        const updatedPage = bookRef.current?.pages.find((p) => p.id === before.id)
+        if (updatedPage) {
+          editorHistory.push({ pageId: before.id, action, before, after: structuredClone(updatedPage) })
+        }
+      })
+    },
+    [activePage, book, editorHistory],
+  )
+
+  // Keep a mutable ref to book for async history reads
+  const bookRef = useRef(book)
+  bookRef.current = book
+
+  const handleTrackedRemoveImage = useCallback(
+    (imageId: string) => {
+      trackPageChange('remove_image', () => handleRemoveImage(imageId))
+    },
+    [trackPageChange, handleRemoveImage],
+  )
+
+  const handleTrackedPageUpdate = useCallback(
+    (changes: Partial<BookPage>) => {
+      // Only track non-trivial changes (not every keystroke)
+      if ('text' in changes) {
+        handlePageUpdate(changes)
+        return
+      }
+      trackPageChange('page_update', () => handlePageUpdate(changes))
+    },
+    [trackPageChange, handlePageUpdate],
+  )
+
+  const handleUndo = useCallback(() => {
+    const result = editorHistory.undo()
+    if (!result) return
+    updatePage(result.pageId, result.state)
+  }, [editorHistory, updatePage])
+
+  const handleRedo = useCallback(() => {
+    const result = editorHistory.redo()
+    if (!result) return
+    updatePage(result.pageId, result.state)
+  }, [editorHistory, updatePage])
+
+  useUndoRedoKeys(handleUndo, handleRedo)
 
   // ── Sketch: enhance ─────────────────────────────────────────────
   const handleEnhanceSketch = useCallback(async () => {
@@ -831,6 +903,52 @@ export default function BookEditorPage() {
         }}
       >
         <Chip
+          icon={<UndoIcon />}
+          label="Undo"
+          onClick={handleUndo}
+          disabled={!editorHistory.canUndo}
+          variant="outlined"
+          size="small"
+        />
+        <Chip
+          icon={<RedoIcon />}
+          label="Redo"
+          onClick={handleRedo}
+          disabled={!editorHistory.canRedo}
+          variant="outlined"
+          size="small"
+        />
+        {/* Contextual chips based on image selection */}
+        {selectedEditorImageType === 'sticker' && selectedEditorImageId && (
+          <Chip
+            icon={<DeleteOutlineIcon />}
+            label="Delete sticker"
+            onClick={() => { handleTrackedRemoveImage(selectedEditorImageId); deselect() }}
+            color="error"
+            size="small"
+          />
+        )}
+        {selectedEditorImageType === 'background' && selectedEditorImageId && (
+          <>
+            <Chip
+              icon={<DeleteOutlineIcon />}
+              label="Remove background"
+              onClick={() => { handleTrackedRemoveImage(selectedEditorImageId); deselect() }}
+              color="error"
+              size="small"
+            />
+            {handleChangeBackground && (
+              <Chip
+                icon={<AutoAwesomeIcon />}
+                label="Change"
+                onClick={() => { handleChangeBackground(); deselect() }}
+                variant="outlined"
+                size="small"
+              />
+            )}
+          </>
+        )}
+        <Chip
           label="Read"
           icon={<AutoStoriesIcon />}
           onClick={() => navigate(`/books/${bookId}/read`)}
@@ -906,14 +1024,18 @@ export default function BookEditorPage() {
         >
           <PageEditor
             page={activePage}
-            onUpdate={handlePageUpdate}
+            onUpdate={handleTrackedPageUpdate}
             onAddImage={handleAddImageFile}
-            onRemoveImage={handleRemoveImage}
+            onRemoveImage={handleTrackedRemoveImage}
             onChangeBackground={handleChangeBackground}
             onImagePositionChange={handleImagePositionChange}
             onReRecord={() => { setShowVoicePanel(true); setVoiceMode('record') }}
             childName={childName}
             deselectSignal={deselectSignal}
+            onSelectedImageChange={handleSelectedImageChange}
+            onRestoreVersion={(imageId, versionIndex) => {
+              if (activePage) restoreImageVersion(activePage.id, imageId, versionIndex)
+            }}
           />
         </Box>
       )}
@@ -1864,10 +1986,10 @@ export default function BookEditorPage() {
         open={bgReimagine.showChoiceDialog}
         job={bgReimagine.job}
         onClose={bgReimagine.dismissNotification}
-        onAddToPage={bgReimagine.handleAddToPage}
-        onMakeSticker={bgReimagine.handleMakeSticker}
+        onReplaceBackground={bgReimagine.handleReplaceBackground}
+        onAddAsSticker={bgReimagine.handleAddAsSticker}
         onSaveToGallery={() => { void bgReimagine.handleSaveToGallery() }}
-        onDiscard={() => { void bgReimagine.handleDiscard() }}
+        onDiscard={bgReimagine.handleDiscard}
       />
 
       {/* Celebration overlay */}
