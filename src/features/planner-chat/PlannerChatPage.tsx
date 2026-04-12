@@ -98,6 +98,7 @@ import PlanSummaryPanel from './PlanSummaryPanel'
 import { useScan } from '../../core/hooks/useScan'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
 import { buildMaterialsPrompt, openPrintWindow } from './generateMaterials'
+import ChapterBookPicker from './ChapterBookPicker'
 import PlannerSetupWizard from './PlannerSetupWizard'
 import WeekFocusPanel from './WeekFocusPanel'
 import PlanDayCards from './PlanDayCards'
@@ -336,6 +337,8 @@ export default function PlannerChatPage() {
       const books = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
       books.sort((a, b) => a.title.localeCompare(b.title))
       setChapterBooks(books)
+    }).catch((err) => {
+      console.warn('Failed to load chapter book library:', err)
     })
   }, [])
 
@@ -630,6 +633,23 @@ export default function PlannerChatPage() {
     },
     [weekPlan, debouncedWriteWeekField],
   )
+
+  // Persist book change to plannerDefaults + weekPlan (used in review/active phases)
+  const handleBookChangeAndPersist = useCallback((book: ChapterBook | null) => {
+    handleSelectedBookChange(book)
+    // Persist to plannerDefaults
+    void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
+      readAloudBook: book?.title ?? '',
+      readAloudBookId: book?.id ?? null,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true })
+    // If plan is already applied, also update the week document
+    if (applied) {
+      void updateDoc(weekPlanRef, {
+        ...(book ? { readAloudBookId: book.id } : { readAloudBookId: null }),
+      })
+    }
+  }, [handleSelectedBookChange, familyId, applied, weekPlanRef])
 
   // Add welcome message on first load when child is selected (only after setup wizard is complete)
   useEffect(() => {
@@ -1391,7 +1411,31 @@ Return as JSON:
           taskType: TaskType.Plan,
           messages: [{ role: 'user', content: fullPrompt }],
         })
+        // TODO(chapter-pool-p2): remove after Monday corruption diagnosed
+        // TEMP DIAGNOSTIC — persist raw AI response for Monday plan fragment investigation
+        try {
+          if (response?.message) {
+            await setDoc(
+              doc(db, 'families', familyId, 'diagnostics', `plan_${Date.now()}`),
+              {
+                rawResponse: response.message.substring(0, 20000),
+                childId: activeChildId,
+                createdAt: new Date().toISOString(),
+                weekKey: weekRange.start,
+                note: 'Monday corruption diagnostic — safe to delete',
+              }
+            )
+          }
+        } catch (err) {
+          console.warn('Diagnostic logging failed:', err)
+        }
+        // TEMP DIAGNOSTIC end
         const rawAiDraft = response ? parseAIResponse(response) : null
+        // TEMP DIAGNOSTIC — log Monday parsed items
+        if (rawAiDraft?.days?.[0]) {
+          console.log('[DIAG] Monday parsed items:', JSON.stringify(rawAiDraft.days[0].items, null, 2))
+        }
+        // TEMP DIAGNOSTIC end
         const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
         if (aiDraft) {
           draft = ensureEvaluationItems(aiDraft)
@@ -2218,6 +2262,23 @@ ${dayPrompts}`
             <WeekFocusPanel weekPlan={weekPlan} onUpdateField={updateWeekField} />
           )}
 
+          {phase === 'review' && (
+            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+              <Typography variant="subtitle2" gutterBottom>Read-Aloud Book</Typography>
+              <ChapterBookPicker
+                chapterBooks={chapterBooks}
+                selectedBook={selectedBook}
+                onSelectedBookChange={handleBookChangeAndPersist}
+                bookProgress={bookProgress}
+                readAloudBook={readAloudBook}
+                onReadAloudBookChange={setReadAloudBook}
+                readAloudChapters={readAloudChapters}
+                onReadAloudChaptersChange={setReadAloudChapters}
+                variant="card"
+              />
+            </Box>
+          )}
+
           {phase === 'review' && currentDraft && (
             <PlanDayCards
               draft={currentDraft}
@@ -2252,6 +2313,25 @@ ${dayPrompts}`
                   Go to Today
                 </Button>
               </Alert>
+
+              {/* Read-aloud book picker (active phase) */}
+              <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+                <Typography variant="subtitle2" gutterBottom>Read-Aloud Book</Typography>
+                <ChapterBookPicker
+                  chapterBooks={chapterBooks}
+                  selectedBook={selectedBook}
+                  onSelectedBookChange={handleBookChangeAndPersist}
+                  bookProgress={bookProgress}
+                  readAloudBook={readAloudBook}
+                  onReadAloudBookChange={setReadAloudBook}
+                  readAloudChapters={readAloudChapters}
+                  onReadAloudChaptersChange={setReadAloudChapters}
+                  variant="card"
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  Changing the book updates your Today page. Re-lock the plan to generate questions for this book.
+                </Typography>
+              </Box>
 
               {/* Chat history (scrollable) */}
               <PlannerChatMessages messages={messages} messagesEndRef={chatEndRef} />

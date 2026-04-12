@@ -3,10 +3,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import Accordion from '@mui/material/Accordion'
 import AccordionDetails from '@mui/material/AccordionDetails'
 import AccordionSummary from '@mui/material/AccordionSummary'
-import Autocomplete from '@mui/material/Autocomplete'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
@@ -24,6 +22,7 @@ import type {
 import type { ScanResult } from '../../core/types/planning'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
 import type { ActivityFrequency } from '../../core/types/enums'
+import ChapterBookPicker from './ChapterBookPicker'
 import PhotoLabelForm from './PhotoLabelForm'
 
 type MasterySummary = {
@@ -119,84 +118,17 @@ export default function PlannerSetupWizard({
       </Box>
 
       {/* Step 1b: Read-aloud book picker */}
-      <Stack spacing={1.5}>
-        <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          Read-Aloud This Week
-        </Typography>
-        <Autocomplete
-          freeSolo
-          size="small"
-          options={chapterBooks}
-          value={selectedBook ?? (readAloudBook || null)}
-          getOptionLabel={(option) => {
-            if (typeof option === 'string') return option
-            return `${option.title} \u2014 ${option.author}`
-          }}
-          isOptionEqualToValue={(option, value) => {
-            if (typeof option === 'string' || typeof value === 'string') return option === value
-            return option.id === value.id
-          }}
-          renderOption={(props, option) => (
-            <li {...props} key={option.id}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ width: '100%' }}>
-                <Typography variant="body2" sx={{ flex: 1 }}>
-                  {option.title} &mdash; {option.author}
-                </Typography>
-                {bookProgress && selectedBook?.id === option.id && (
-                  <Chip
-                    label={`${bookProgress.questionPool.filter((q) => q.answered).length}/${bookProgress.totalChapters} chapters`}
-                    size="small"
-                    color="primary"
-                    variant="outlined"
-                  />
-                )}
-              </Stack>
-            </li>
-          )}
-          onChange={(_, value) => {
-            if (value === null) {
-              onSelectedBookChange(null)
-            } else if (typeof value === 'string') {
-              onSelectedBookChange(null)
-              onReadAloudBookChange(value)
-            } else {
-              onSelectedBookChange(value)
-            }
-          }}
-          onInputChange={(_, value, reason) => {
-            if (reason === 'input' && !selectedBook) {
-              onReadAloudBookChange(value)
-            }
-          }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Book"
-              placeholder="Search library or type a title..."
-            />
-          )}
-          fullWidth
-        />
-        {selectedBook && bookProgress && (
-          <Chip
-            label={`${bookProgress.questionPool.filter((q) => q.answered).length}/${bookProgress.totalChapters} chapters answered`}
-            size="small"
-            color="primary"
-            variant="outlined"
-          />
-        )}
-        {!selectedBook && (
-          <TextField
-            size="small"
-            label="Chapters this week"
-            placeholder="e.g., Ch 5-8"
-            value={readAloudChapters}
-            onChange={(e) => onReadAloudChaptersChange(e.target.value)}
-            fullWidth
-            helperText="The AI will generate a discussion question for each chapter"
-          />
-        )}
-      </Stack>
+      <ChapterBookPicker
+        chapterBooks={chapterBooks}
+        selectedBook={selectedBook}
+        onSelectedBookChange={onSelectedBookChange}
+        bookProgress={bookProgress}
+        readAloudBook={readAloudBook}
+        onReadAloudBookChange={onReadAloudBookChange}
+        readAloudChapters={readAloudChapters}
+        onReadAloudChaptersChange={onReadAloudChaptersChange}
+        variant="wizard"
+      />
 
       {/* Step 1c: Notes */}
       <TextField
