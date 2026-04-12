@@ -843,7 +843,7 @@ export default function MyAvatarPage() {
   )
 
   // ── Suit Up! — equip all forged pieces with staggered animation ──
-  const suitUpAll = useCallback(() => {
+  const suitUpAll = useCallback(async () => {
     if (!profile || !session || !familyId || !childId) return
     const forgedIds = getForgedVoxelPieces(profile)
     const currentVoxel = getAppliedVoxelPieces(session.appliedPieces ?? [])
@@ -856,12 +856,56 @@ export default function MyAvatarPage() {
     const pieceLabel = pieceCount === 1 ? 'piece' : 'pieces'
     speakStatus(`Suiting up ${pieceCount} ${pieceLabel}. Great choice!`)
 
-    toEquip.forEach((voxelId, i) => {
-      setTimeout(() => {
-        void handleApplyPiece(voxelId as VoxelArmorPieceId)
-      }, i * 200) // Stagger 200ms apart for a cascading effect
+    // Map voxel IDs to ArmorPiece IDs for the session
+    const toEquipArmorIds = toEquip
+      .map((vid) => ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id)
+      .filter((id): id is ArmorPiece => Boolean(id))
+
+    // Build the complete applied list atomically (avoids stale closure overwrites)
+    const updatedApplied = [...(session.appliedPieces ?? []), ...toEquipArmorIds]
+    const allEquippedVoxel = [...getAppliedVoxelPieces(updatedApplied)]
+    const allApplied = forgedIds.length > 0 && forgedIds.every((vid) => allEquippedVoxel.includes(vid))
+
+    // Single Firestore write for the session — all pieces at once
+    const docId = dailyArmorSessionDocId(childId, today)
+    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+    await setDoc(sessionRef, stripUndefined({
+      ...session,
+      appliedPieces: updatedApplied,
+      manuallyUnequipped: [],
+      ...(allApplied ? { completedAt: new Date().toISOString() } : {}),
+    }) as unknown as DailyArmorSession)
+
+    // Update profile equippedPieces in one write
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    await safeUpdateProfile(profileRef, {
+      equippedPieces: allEquippedVoxel,
+      lastArmorEquipDate: today,
     })
-  }, [profile, session, familyId, childId, handleApplyPiece])
+
+    // Stagger visual equip animations for cascading effect
+    toEquip.forEach((voxelId, i) => {
+      setTimeout(() => setAnimateEquipId(voxelId), i * 200)
+    })
+
+    if (allApplied) {
+      playArmorFanfare(1.5)
+      if ('speechSynthesis' in window) {
+        setTimeout(() => {
+          const utterance = new SpeechSynthesisUtterance(
+            "Full armor on! You're ready for battle, warrior!",
+          )
+          utterance.rate = 0.85
+          window.speechSynthesis.speak(utterance)
+        }, 1800)
+      }
+      void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
+        .catch((err) => console.error('[XP] Award failed:', err))
+      void checkArmorStreak(profile)
+    }
+
+    setMorningReset(false)
+  }, [profile, session, familyId, childId, today, checkArmorStreak])
 
   // ── Screen flash on equip ──────────────────────────────────────
   const flashContainerRef = useRef<HTMLDivElement>(null)
@@ -951,6 +995,7 @@ export default function MyAvatarPage() {
       forgedPiecesTiers: profile.forgedPieces ? Object.keys(profile.forgedPieces) : 'none',
       activeForgeTier: getActiveForgeTier(profile),
       totalXp: profile.totalXp,
+      sessionAppliedCount: session?.appliedPieces?.length ?? 0,
     })
   }
 
@@ -1015,6 +1060,22 @@ export default function MyAvatarPage() {
       action: () => navigate('/today'),
     }
   })()
+
+  // Three-source consistency check — remove after confirming fix in production
+  if (profile && armorGateStatus) {
+    const missionIsSuitUp = mission.cta === 'Suit Up & Begin'
+    const actionIsSuitUp = nextRecommendedAction.type === 'suit_up'
+    const gateIncomplete = !armorGateStatus.complete && armorGateStatus.hasForgedPieces
+    if (missionIsSuitUp !== gateIncomplete || actionIsSuitUp !== gateIncomplete) {
+      console.warn('[SuitUpConsistency] MISMATCH', {
+        gateComplete: armorGateStatus.complete,
+        gateMissing: armorGateStatus.missing,
+        missionIsSuitUp,
+        actionIsSuitUp,
+        gateIncomplete,
+      })
+    }
+  }
 
   // ── Screenshot capture ──────────────────────────────────────────
   const playShutterSound = useCallback(() => {
