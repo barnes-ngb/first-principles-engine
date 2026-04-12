@@ -237,6 +237,305 @@ describe('computeHoursSummary', () => {
     expect(summary.coreHomeMinutes).toBe(30)
   })
 
+  it('uses checklist when no block has actualMinutes', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [],
+        checklist: [
+          {
+            label: 'Math worksheet (20m)',
+            completed: true,
+            subjectBucket: SubjectBucket.Math,
+          },
+          {
+            label: 'Reading practice (15m)',
+            completed: true,
+            subjectBucket: SubjectBucket.Reading,
+          },
+          {
+            label: 'Skipped item (10m)',
+            completed: false,
+            subjectBucket: SubjectBucket.Science,
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    // Should use checklist items: 20 (Math) + 15 (Reading) = 35
+    // Skipped item should not count
+    expect(summary.totalMinutes).toBe(35)
+    expect(summary.coreMinutes).toBe(35)
+    expect(summary.bySubject.length).toBe(2)
+    expect(summary.byDate['2026-01-10']).toBe(35)
+  })
+
+  it('uses checklist estimatedMinutes when available, falls back to label parsing', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [],
+        checklist: [
+          {
+            label: 'Reading Eggs (45m)',
+            completed: true,
+            subjectBucket: SubjectBucket.Reading,
+            estimatedMinutes: 30, // estimatedMinutes takes precedence over label
+          },
+          {
+            label: 'Handwriting (20m)',
+            completed: true,
+            subjectBucket: SubjectBucket.LanguageArts,
+            // no estimatedMinutes — falls back to label parsing
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    // 30 (estimatedMinutes) + 20 (parsed from label) = 50
+    expect(summary.totalMinutes).toBe(50)
+  })
+
+  it('uses plannedMinutes as fallback before label parsing', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [],
+        checklist: [
+          {
+            label: 'Free reading',
+            completed: true,
+            subjectBucket: SubjectBucket.Reading,
+            plannedMinutes: 25,
+            // no estimatedMinutes, no (Xm) in label
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    expect(summary.totalMinutes).toBe(25)
+  })
+
+  it('prefers block actualMinutes over checklist when ANY block has actualMinutes', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 30,
+            location: 'Home',
+          },
+          {
+            type: DayBlockType.Math,
+            subjectBucket: SubjectBucket.Math,
+            // no actualMinutes on this block
+            location: 'Home',
+          },
+        ],
+        checklist: [
+          {
+            label: 'Math worksheet (40m)',
+            completed: true,
+            subjectBucket: SubjectBucket.Math,
+          },
+          {
+            label: 'Reading (45m)',
+            completed: true,
+            subjectBucket: SubjectBucket.Reading,
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    // hasActualBlockMinutes = true (block 1 has 30), so uses block path
+    // Only block 1 contributes 30 min; block 2 has 0 actualMinutes, skipped
+    // Checklist is ignored entirely when hasActualBlockMinutes is true
+    expect(summary.totalMinutes).toBe(30)
+    expect(summary.bySubject.length).toBe(1)
+    expect(summary.bySubject[0].subjectBucket).toBe('Reading')
+  })
+
+  it('combines all 3 sources: entries + day logs + adjustments', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 30,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const entries: HoursEntry[] = [
+      {
+        date: '2026-01-11',
+        minutes: 45,
+        subjectBucket: SubjectBucket.Science,
+        location: 'Home',
+        blockType: 'DadLab',
+      },
+    ]
+
+    const adjustments: HoursAdjustment[] = [
+      {
+        date: '2026-01-10',
+        minutes: 10,
+        reason: 'Extra time not tracked',
+        subjectBucket: SubjectBucket.Reading,
+        location: 'Home',
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, entries, adjustments)
+
+    // 30 (log) + 45 (entry) + 10 (adjustment) = 85
+    expect(summary.totalMinutes).toBe(85)
+    expect(summary.adjustmentMinutes).toBe(10)
+    // Reading: 30 + 10 = 40, Science: 45 → core = 40 + 45 = 85
+    expect(summary.coreMinutes).toBe(85)
+    expect(summary.byDate['2026-01-10']).toBe(40) // 30 log + 10 adj
+    expect(summary.byDate['2026-01-11']).toBe(45)
+  })
+
+  it('checklist items without time info contribute 0 minutes', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [],
+        checklist: [
+          {
+            label: 'Activity with no time info',
+            completed: true,
+            subjectBucket: SubjectBucket.Other,
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    // No estimatedMinutes, no plannedMinutes, no (Xm) in label → 0
+    expect(summary.totalMinutes).toBe(0)
+  })
+
+  it('checklist assumes home location for all items', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [],
+        checklist: [
+          {
+            label: 'Reading (30m)',
+            completed: true,
+            subjectBucket: SubjectBucket.Reading,
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    expect(summary.coreHomeMinutes).toBe(30) // checklist always assumes home
+  })
+
+  it('filters entries and adjustments by childId', () => {
+    const entries: HoursEntry[] = [
+      {
+        date: '2026-01-10',
+        minutes: 30,
+        childId: 'child-a',
+        subjectBucket: SubjectBucket.Reading,
+      },
+      {
+        date: '2026-01-10',
+        minutes: 20,
+        childId: 'child-b',
+        subjectBucket: SubjectBucket.Math,
+      },
+    ]
+
+    const adjustments: HoursAdjustment[] = [
+      {
+        date: '2026-01-10',
+        minutes: 10,
+        reason: 'Extra',
+        childId: 'child-a',
+        subjectBucket: SubjectBucket.Reading,
+      },
+      {
+        date: '2026-01-10',
+        minutes: 15,
+        reason: 'Extra',
+        childId: 'child-b',
+        subjectBucket: SubjectBucket.Math,
+      },
+    ]
+
+    const summary = computeHoursSummary([], entries, adjustments, 'child-a')
+
+    // Only child-a: 30 entry + 10 adjustment = 40
+    expect(summary.totalMinutes).toBe(40)
+  })
+
+  it('includes adjustments without childId when filtering', () => {
+    const adjustments: HoursAdjustment[] = [
+      {
+        date: '2026-01-10',
+        minutes: 20,
+        reason: 'Family adjustment',
+        subjectBucket: SubjectBucket.Other,
+        // no childId — should be included for any childId filter
+      },
+    ]
+
+    const summary = computeHoursSummary([], [], adjustments, 'child-a')
+
+    expect(summary.totalMinutes).toBe(20)
+    expect(summary.adjustmentMinutes).toBe(20)
+  })
+
+  it('tracks non-home hours entries separately', () => {
+    const entries: HoursEntry[] = [
+      {
+        date: '2026-01-10',
+        minutes: 60,
+        subjectBucket: SubjectBucket.Science,
+        location: 'FieldTrip',
+      },
+    ]
+
+    const summary = computeHoursSummary([], entries, [])
+
+    expect(summary.totalMinutes).toBe(60)
+    expect(summary.coreMinutes).toBe(60)
+    // Not at home, so coreHomeMinutes should be 0
+    expect(summary.coreHomeMinutes).toBe(0)
+    const scienceRow = summary.bySubject.find(r => r.subjectBucket === 'Science')
+    expect(scienceRow?.homeMinutes).toBe(0)
+    expect(scienceRow?.totalMinutes).toBe(60)
+  })
+
   it('returns empty summary for no data', () => {
     const summary = computeHoursSummary([], [], [])
 
