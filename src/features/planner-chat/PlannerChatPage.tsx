@@ -1411,7 +1411,31 @@ Return as JSON:
           taskType: TaskType.Plan,
           messages: [{ role: 'user', content: fullPrompt }],
         })
+        // TODO(chapter-pool-p2): remove after Monday corruption diagnosed
+        // TEMP DIAGNOSTIC — persist raw AI response for Monday plan fragment investigation
+        try {
+          if (response?.message) {
+            await setDoc(
+              doc(db, 'families', familyId, 'diagnostics', `plan_${Date.now()}`),
+              {
+                rawResponse: response.message.substring(0, 20000),
+                childId: activeChildId,
+                createdAt: new Date().toISOString(),
+                weekKey: weekRange.start,
+                note: 'Monday corruption diagnostic — safe to delete',
+              }
+            )
+          }
+        } catch (err) {
+          console.warn('Diagnostic logging failed:', err)
+        }
+        // TEMP DIAGNOSTIC end
         const rawAiDraft = response ? parseAIResponse(response) : null
+        // TEMP DIAGNOSTIC — log Monday parsed items
+        if (rawAiDraft?.days?.[0]) {
+          console.log('[DIAG] Monday parsed items:', JSON.stringify(rawAiDraft.days[0].items, null, 2))
+        }
+        // TEMP DIAGNOSTIC end
         const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
         if (aiDraft) {
           draft = ensureEvaluationItems(aiDraft)
