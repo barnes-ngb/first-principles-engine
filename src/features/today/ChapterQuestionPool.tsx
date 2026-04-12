@@ -3,6 +3,11 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
@@ -61,6 +66,10 @@ export default function ChapterQuestionPool({
   const [chapterBlobs, setChapterBlobs] = useState<Record<number, Blob>>({})
   const [chapterNotes, setChapterNotes] = useState<Record<number, string>>({})
   const [savingChapter, setSavingChapter] = useState<number | null>(null)
+  const [skipConfirmChapter, setSkipConfirmChapter] = useState<number | null>(
+    null,
+  )
+  const [skippingChapter, setSkippingChapter] = useState<number | null>(null)
 
   const recorder = useAudioRecorder()
 
@@ -83,7 +92,9 @@ export default function ChapterQuestionPool({
 
   const pool = bookProgress.questionPool
   const unanswered = pool.filter((item) => !item.answered)
-  const answered = pool.filter((item) => item.answered)
+  const answered = pool.filter((item) => item.answered && !item.skipped)
+  const skipped = pool.filter((item) => item.answered && item.skipped)
+  const doneCount = answered.length + skipped.length
 
   // All chapters answered — celebration state
   if (unanswered.length === 0) {
@@ -92,7 +103,7 @@ export default function ChapterQuestionPool({
         <Stack spacing={2} alignItems="center" sx={{ py: 2 }}>
           <Typography variant="h6">{'\u{1F389}'} You finished {book.title}!</Typography>
           <Typography variant="body2" color="text.secondary">
-            All {pool.length} chapters discussed.
+            {answered.length} answered{skipped.length > 0 ? ` \u00B7 ${skipped.length} skipped` : ''} \u00B7 {pool.length} chapters total
           </Typography>
           <Button
             variant="outlined"
@@ -183,6 +194,7 @@ export default function ChapterQuestionPool({
       await addDoc(chapterResponsesCollection(familyId), {
         childId,
         date: today,
+        bookId: bookProgress.bookId,
         bookTitle: book.title,
         chapter: `Ch ${item.chapter}${item.chapterTitle ? `: ${item.chapterTitle}` : ''}`,
         questionType: item.questionType,
@@ -226,24 +238,60 @@ export default function ChapterQuestionPool({
     setSavingChapter(null)
   }
 
+  const handleSkipConfirm = async () => {
+    if (skipConfirmChapter == null) return
+    const chapter = skipConfirmChapter
+    setSkipConfirmChapter(null)
+    setSkippingChapter(chapter)
+    try {
+      await onChapterAnswered(chapter, {
+        answered: true,
+        answeredDate: todayKey(),
+        skipped: true,
+      })
+      setSelectedChapters((prev) => {
+        const next = new Set(prev)
+        next.delete(chapter)
+        return next
+      })
+    } catch (err) {
+      console.error('Chapter skip failed:', err)
+    }
+    setSkippingChapter(null)
+  }
+
+  // Build progress label
+  const progressParts: string[] = []
+  if (answered.length > 0) progressParts.push(`${answered.length} answered`)
+  if (skipped.length > 0) progressParts.push(`${skipped.length} skipped`)
+  if (unanswered.length > 0) progressParts.push(`${unanswered.length} to go`)
+  const progressLabel = `${doneCount}/${pool.length} chapters`
+
   return (
     <SectionCard title={`\u{1F4D6} ${book.title}`}>
       <Stack spacing={2}>
         {/* Progress chip */}
-        <Chip
-          label={`${answered.length}/${pool.length} chapters`}
-          size="small"
-          color={answered.length > 0 ? 'primary' : 'default'}
-          variant="outlined"
-          sx={{ alignSelf: 'flex-start' }}
-        />
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+          <Chip
+            label={progressLabel}
+            size="small"
+            color={doneCount > 0 ? 'primary' : 'default'}
+            variant="outlined"
+          />
+          {progressParts.length > 0 && (
+            <Typography variant="caption" color="text.secondary">
+              {progressParts.join(' \u00B7 ')}
+            </Typography>
+          )}
+        </Stack>
 
         {/* Chapter picker — horizontal scrollable chips */}
-        <Box
+        <Stack
+          direction="row"
+          spacing={0.75}
           sx={{
-            display: 'flex',
-            gap: 0.75,
             overflowX: 'auto',
+            flexWrap: 'nowrap',
             pb: 0.5,
             '&::-webkit-scrollbar': { height: 4 },
           }}
@@ -265,7 +313,7 @@ export default function ChapterQuestionPool({
               sx={{ flexShrink: 0 }}
             />
           ))}
-        </Box>
+        </Stack>
 
         {/* Stacked question cards for selected chapters */}
         {selectedItems.map((item) => {
@@ -273,6 +321,7 @@ export default function ChapterQuestionPool({
           const hasBlob = !!chapterBlobs[item.chapter]
           const isRecordingThis = recordingChapter === item.chapter
           const isSavingThis = savingChapter === item.chapter
+          const isSkippingThis = skippingChapter === item.chapter
 
           return (
             <Box
@@ -351,10 +400,41 @@ export default function ChapterQuestionPool({
                     </Button>
                   </Stack>
                 )}
+
+                {/* Skip button */}
+                <Button
+                  variant="text"
+                  size="small"
+                  color="inherit"
+                  onClick={() => setSkipConfirmChapter(item.chapter)}
+                  disabled={isSavingThis || isSkippingThis}
+                  sx={{ alignSelf: 'flex-start', color: 'text.secondary' }}
+                >
+                  {isSkippingThis ? 'Skipping...' : 'Skip this chapter'}
+                </Button>
               </Stack>
             </Box>
           )
         })}
+
+        {/* Skip confirmation dialog */}
+        <Dialog
+          open={skipConfirmChapter != null}
+          onClose={() => setSkipConfirmChapter(null)}
+        >
+          <DialogTitle>Skip Chapter {skipConfirmChapter}?</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              This chapter won&apos;t be asked again. You can still see it in Records.
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setSkipConfirmChapter(null)}>Cancel</Button>
+            <Button onClick={handleSkipConfirm} color="warning">
+              Skip
+            </Button>
+          </DialogActions>
+        </Dialog>
       </Stack>
     </SectionCard>
   )

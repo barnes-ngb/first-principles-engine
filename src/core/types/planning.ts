@@ -49,6 +49,7 @@ export interface ChapterQuestionPoolItem {
   audioUrl?: string
   responseNote?: string
   artifactId?: string
+  skipped?: boolean
 }
 
 export interface BookProgress {
@@ -324,6 +325,7 @@ export interface ChapterResponse {
   id?: string
   childId: string
   date: string
+  bookId?: string
   bookTitle: string
   chapter: string
   questionType: string

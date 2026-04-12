@@ -120,10 +120,11 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 - Migration script for seeding lesson data (`functions/src/migrations/seedUfliLessons.ts`).
 
 ### Chapter Book Progress Tracking (Chapter Pool P1-P3)
-- Chapter Question Pool card — book picker in planner generates per-chapter questions into a pool. Today renders unanswered chapters as tappable chips; picked chapters stack with audio recording per chapter. Progress persists across weeks.
+- Chapter Question Pool card — book picker in planner generates per-chapter questions into a pool. Today renders unanswered chapters as tappable chips; picked chapters stack with audio recording per chapter. Progress persists across weeks. (Apr 12 fix: chapter chip picker with multi-select + skip action; Records Chapter Responses grouped by book with expandable chapter lists)
 - `useBookProgress` hook — live `onSnapshot` subscription on `bookProgress/{childId}_{bookId}` doc. Provides `updateChapter` callback for atomic pool entry updates.
-- `ChapterQuestionPool` component — four render states: no book selected, loading (pool generation in flight), in-progress (chapter picker + stacked cards), complete (celebration).
-- Per-chapter audio recording uses shared `useAudioRecorder` hook. Save flow writes to Storage + `chapterResponses` + `artifacts` + `bookProgress`.
+- `ChapterQuestionPool` component — four render states: no book selected, loading (pool generation in flight), in-progress (chapter picker + stacked cards), complete (celebration). Skip action per chapter with confirmation dialog writes `skipped: true` to pool entry.
+- Per-chapter audio recording uses shared `useAudioRecorder` hook. Save flow writes to Storage + `chapterResponses` + `artifacts` + `bookProgress`. New writes include `bookId` on ChapterResponse for reliable grouping.
+- Records "Book Responses" tab groups chapter responses by book in expandable accordions. Shows all chapters: answered (with inline audio), skipped, and unanswered. Legacy responses without `bookId` fall back to title match; unmatched entries bucket to "Other Books".
 - Legacy `ChapterQuestionCard` deleted. `DayLog.chapterQuestion` deprecated (reads only, no new writes). `DraftDayPlan.chapterQuestion` removed.
 
 ---
