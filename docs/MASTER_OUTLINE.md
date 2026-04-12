@@ -182,6 +182,7 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 | Chapter Pool P1 | Apr 10, 2026 | Chapter book question pool foundation: ChapterBook + BookProgress types, Narnia seed data (17 chapters with summaries), chapterQuestions Cloud Function task handler, Firestore collection helpers. |
 | Lincoln Acceleration Sprint 1 | Apr 11, 2026 | UFLI Foundations data layer: 128-lesson scope & sequence JSON, UFLILesson + UFLIProgress types, per-child progress tracking, ufliLessons Firestore collection, Settings admin tab, parent Today lesson card, kid Phonics Forge card, migration script. Lincoln anchored at Lesson 62. |
 | Chapter Pool P2 | Apr 12, 2026 | Planner book picker (Autocomplete from library), readAloudBookId persistence on WeekPlan + plannerDefaults, handleApplyPlan triggers chapter question pool generation via chapterQuestions task, removed inline chapterQuestion prompt injection. |
+| Hotfix: chapterBooks path | Apr 12, 2026 | Moved chapterBooks from invalid `curriculum/chapterBooks` path (even segment count = document ref, not collection) to top-level `chapterBooks` collection. Updated Firestore rules, seed, and all references. |
 
 ## Removed Features / Concepts
 - Ghost armor visual state (moved to binary on/off only).

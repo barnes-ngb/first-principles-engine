@@ -219,7 +219,7 @@ All under `families/{familyId}/`:
 
 | Collection | Purpose |
 |---|---|
-| `curriculum/chapterBooks` | Chapter book library (global, shared across families) |
+| `chapterBooks` | Chapter book library (global, shared across families) |
 
 **Subcollections:**
 - `shellyChatThreads/{threadId}/messages` — Messages within a Shelly chat thread
