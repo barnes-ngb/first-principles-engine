@@ -501,7 +501,12 @@ MASTERY GUIDANCE:
 When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.
 
 CRITICAL SIZE CONSTRAINTS:
-- Keep item titles SHORT (max 6 words). Example: "GATB Reading Lesson 21" not "Good and the Beautiful Reading — Lesson 21: Short vowel review with comprehension questions"
+- Item titles MUST be short activity names (≤6 words, ≤60 characters).
+  NEVER embed word lists, phonics patterns, drill instructions, or per-word detail in titles.
+  Put that kind of detail in skipGuidance or description fields only.
+  Examples of CORRECT titles: "Sight word games", "Booster cards", "Math workbook", "Knowledge Mine — Reading"
+  Examples of WRONG titles: "words: when, whip, what, where, why" (embeds word list — use skipGuidance),
+  "cards from th- and ch- cards. Say each sound aloud." (embeds instruction — use description)
 - Keep skillTags to max 1 tag per item (the most relevant one)
 - Keep skipGuidance to max 15 words or omit if not needed
 - Do NOT include explanations, descriptions, or commentary in the JSON
