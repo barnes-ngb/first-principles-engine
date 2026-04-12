@@ -31,18 +31,6 @@ const BLOCK_HEADER: Record<string, { label: string; color: string }> = {
 /** Ordered list of blocks for consistent rendering. */
 const BLOCK_ORDER = ['formation', 'readaloud', 'choice', 'core-reading', 'core-math', 'flex', 'independent', 'other'] as const
 
-const QUESTION_TYPE_EMOJI: Record<string, string> = {
-  comprehension: '\uD83D\uDD0D',
-  application: '\uD83C\uDF0E',
-  connection: '\uD83D\uDD17',
-  opinion: '\uD83D\uDCAD',
-  prediction: '\uD83D\uDD2E',
-}
-
-function questionTypeEmoji(questionType: string): string {
-  const key = questionType.toLowerCase().trim()
-  return QUESTION_TYPE_EMOJI[key] ?? '\u2753'
-}
 
 interface PlanPreviewCardProps {
   plan: DraftWeeklyPlan
@@ -328,29 +316,6 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                       )
                     })}
 
-                    {/* Chapter question for the day */}
-                    {day.chapterQuestion && (
-                      <Box
-                        sx={{
-                          mt: 1,
-                          ml: 1,
-                          p: 1.25,
-                          bgcolor: 'grey.50',
-                          borderRadius: 1.5,
-                          border: '1px solid',
-                          borderColor: 'divider',
-                        }}
-                      >
-                        <Stack direction="row" spacing={0.5} alignItems="center">
-                          <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                            {questionTypeEmoji(day.chapterQuestion.questionType)} {day.chapterQuestion.book} — {day.chapterQuestion.chapter}
-                          </Typography>
-                        </Stack>
-                        <Typography variant="body2" sx={{ fontStyle: 'italic', mt: 0.5 }}>
-                          &ldquo;{day.chapterQuestion.question}&rdquo;
-                        </Typography>
-                      </Box>
-                    )}
                   </>
                 )
               }
@@ -398,29 +363,6 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                     </Box>
                   )}
 
-                  {/* Chapter question for the day */}
-                  {day.chapterQuestion && (
-                    <Box
-                      sx={{
-                        mt: 1,
-                        ml: 1,
-                        p: 1.25,
-                        bgcolor: 'grey.50',
-                        borderRadius: 1.5,
-                        border: '1px solid',
-                        borderColor: 'divider',
-                      }}
-                    >
-                      <Stack direction="row" spacing={0.5} alignItems="center">
-                        <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                          {questionTypeEmoji(day.chapterQuestion.questionType)} {day.chapterQuestion.book} — {day.chapterQuestion.chapter}
-                        </Typography>
-                      </Stack>
-                      <Typography variant="body2" sx={{ fontStyle: 'italic', mt: 0.5 }}>
-                        &ldquo;{day.chapterQuestion.question}&rdquo;
-                      </Typography>
-                    </Box>
-                  )}
                 </>
               )
             })()}

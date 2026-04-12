@@ -42,11 +42,12 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   artifactsCollection,
+  chapterBooksCollection,
   scansCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, LadderCardDefinition, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
+import type { Artifact, ChapterBook, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, LadderCardDefinition, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
 import { effectiveRecommendation, isWorksheetScan } from '../../core/types'
 import { getLaddersForChild } from '../ladders/laddersCatalog'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
@@ -61,7 +62,8 @@ import {
 import { getWeekRange } from '../../core/utils/time'
 import { getTemplateForChild } from './dailyPlanTemplates'
 import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
-import ChapterQuestionCard from './ChapterQuestionCard'
+import ChapterQuestionPool from './ChapterQuestionPool'
+import { useBookProgress } from './useBookProgress'
 import CreativeTimeLog from './CreativeTimeLog'
 import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
@@ -187,6 +189,7 @@ export default function TodayPage() {
     lastSavedAt,
     weekPlanId,
     weekFocus,
+    readAloudBookId,
     snackMessage,
     setSnackMessage,
     persistDayLogImmediate,
@@ -198,6 +201,34 @@ export default function TodayPage() {
     activeTemplate,
     activeRoutineItems,
   })
+
+  // --- Chapter book progress (pool-based read-aloud tracking) ---
+  const [selectedBook, setSelectedBook] = useState<ChapterBook | null>(null)
+
+  useEffect(() => {
+    if (!readAloudBookId) {
+      setSelectedBook(null)
+      return
+    }
+    // One-shot fetch — books don't change mid-session
+    const bookRef = doc(chapterBooksCollection(), readAloudBookId)
+    getDoc(bookRef).then((snap) => {
+      if (snap.exists()) {
+        setSelectedBook({ ...snap.data(), id: snap.id })
+      } else {
+        setSelectedBook(null)
+      }
+    }).catch((err) => {
+      console.error('Failed to fetch chapter book:', err)
+      setSelectedBook(null)
+    })
+  }, [readAloudBookId])
+
+  const { bookProgress, loading: bookProgressLoading, updateChapter } = useBookProgress(
+    familyId,
+    selectedChildId,
+    readAloudBookId,
+  )
 
   // Load/persist daily plan (energy + planType) to Firestore
   const { dailyPlan, saveDailyPlan } = useDailyPlan({
@@ -799,11 +830,16 @@ export default function TodayPage() {
         </SectionErrorBoundary>
       )}
 
-      {/* --- Chapter Question (read-aloud discussion) — daily formation, shown prominently --- */}
+      {/* --- Chapter Question Pool (read-aloud discussion) --- */}
       <SectionErrorBoundary section="chapter question">
-        <ChapterQuestionCard
-          dayLog={dayLog}
-          persistDayLogImmediate={persistDayLogImmediate}
+        <ChapterQuestionPool
+          book={selectedBook}
+          bookProgress={bookProgress}
+          bookProgressLoading={bookProgressLoading}
+          familyId={familyId}
+          childId={selectedChildId}
+          weekFocus={weekFocus}
+          onChapterAnswered={updateChapter}
         />
       </SectionErrorBoundary>
 
