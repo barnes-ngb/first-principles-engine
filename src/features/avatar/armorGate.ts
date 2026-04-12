@@ -1,6 +1,6 @@
 import type { ArmorPiece, AvatarProfile, DailyArmorSession, VoxelArmorPieceId } from '../../core/types'
 import { getAppliedVoxelPieces, getEquippablePieces } from './armorPieceState'
-import { ALL_ARMOR_VOXEL_PIECES } from './armorTierProgress'
+import { ALL_ARMOR_VOXEL_PIECES, MINECRAFT_TIER_ORDER, getActiveForgeTierFromProgress } from './armorTierProgress'
 
 export interface ArmorGateStatus {
   /** True when every forged piece is equipped for the current day */
@@ -19,11 +19,20 @@ export interface ArmorGateStatus {
 function getForgedVoxelPieces(profile: AvatarProfile): VoxelArmorPieceId[] {
   const forgedByTier = profile.forgedPieces
   if (forgedByTier) {
+    // Count pieces from tiers up to and including the active forge tier.
+    // Tiers above the active one shouldn't have forged pieces (the active
+    // tier is the lowest with unforged slots). If they do — e.g. from
+    // legacy data — ignore them so phantom pieces don't inflate the gate
+    // total beyond what suitUpAll / gallery can actually equip.
+    const activeTier = getActiveForgeTierFromProgress(profile)
+    const activeTierIdx = MINECRAFT_TIER_ORDER.indexOf(activeTier)
     const forged = new Set<VoxelArmorPieceId>()
 
-    for (const tierPieces of Object.values(forgedByTier)) {
+    for (let i = 0; i <= activeTierIdx; i++) {
+      const tierPieces = forgedByTier[MINECRAFT_TIER_ORDER[i]]
+      if (!tierPieces) continue
       for (const pieceId of ALL_ARMOR_VOXEL_PIECES) {
-        if (tierPieces?.[pieceId]) forged.add(pieceId)
+        if (tierPieces[pieceId]) forged.add(pieceId)
       }
     }
 
