@@ -3,6 +3,7 @@ import Typography from '@mui/material/Typography'
 
 import type { AvatarProfile } from '../../core/types'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
+import { ALL_ARMOR_VOXEL_PIECES } from './armorTierProgress'
 import { getTierTextColor } from './voxel/tierMaterials'
 
 interface ArmorSuitUpPanelProps {
@@ -166,7 +167,7 @@ export default function ArmorSuitUpPanel({
           >
             {appliedVoxel.length}/{forgedCount} equipped today{allEarnedApplied && forgedCount > 0 ? ' ✓' : ''}
           </Typography>
-          {forgedCount < 6 && (
+          {forgedCount < ALL_ARMOR_VOXEL_PIECES.length && (
             <Typography
               sx={{
                 mt: 0.6,
@@ -176,7 +177,7 @@ export default function ArmorSuitUpPanel({
                 color: isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)',
               }}
             >
-              {forgedCount}/6 pieces forged. Forge more to unlock the next material.
+              {forgedCount}/{ALL_ARMOR_VOXEL_PIECES.length} pieces forged. Forge more to unlock the next material.
             </Typography>
           )}
         </Box>
@@ -198,7 +199,7 @@ export default function ArmorSuitUpPanel({
               },
             }}
           >
-            {forgedCount >= 6
+            {forgedCount >= ALL_ARMOR_VOXEL_PIECES.length
               ? 'Full armor equipped!'
               : `${forgedCount}/${forgedCount} equipped ✓`}
           </Typography>

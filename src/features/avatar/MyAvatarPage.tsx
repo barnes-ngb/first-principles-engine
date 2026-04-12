@@ -1099,7 +1099,7 @@ export default function MyAvatarPage() {
         title: `${activeChild?.name ?? 'Avatar'} - ${currentTierName} Tier Armor`,
         type: EvidenceType.Photo,
         createdAt: new Date().toISOString(),
-        content: `Avatar screenshot: ${currentTierName} tier, ${profile.totalXp} XP, ${appliedVoxel.length}/6 pieces equipped`,
+        content: `Avatar screenshot: ${currentTierName} tier, ${profile.totalXp} XP, ${appliedVoxel.length}/${forgedCount} pieces equipped`,
         tags: {
           engineStage: EngineStage.Share,
           domain: 'Character',
