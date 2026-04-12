@@ -24,6 +24,7 @@ export function useBookProgress(
   const [bookProgress, setBookProgress] = useState<BookProgress | null>(null)
   const [loading, setLoading] = useState(true)
 
+  /* eslint-disable react-hooks/set-state-in-effect -- Standard Firestore subscription: guard reset + loading flag before onSnapshot */
   useEffect(() => {
     if (!familyId || !childId || !bookId) {
       setBookProgress(null)
@@ -32,6 +33,7 @@ export function useBookProgress(
     }
 
     setLoading(true)
+    /* eslint-enable react-hooks/set-state-in-effect */
     const docId = bookProgressDocId(childId, bookId)
     const docRef = doc(bookProgressCollection(familyId), docId)
 
