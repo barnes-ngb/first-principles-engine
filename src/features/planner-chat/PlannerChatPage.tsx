@@ -26,6 +26,9 @@ import type { ChatMessage as AIChatMessage, GeneratedActivity } from '../../core
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
+  bookProgressCollection,
+  bookProgressDocId,
+  chapterBooksCollection,
   daysCollection,
   evaluationSessionsCollection,
   lessonCardsCollection,
@@ -41,6 +44,9 @@ import { useDebounce } from '../../core/hooks/useDebounce'
 import type {
   AppBlock,
   AssignmentCandidate,
+  BookProgress,
+  ChapterBook,
+  ChapterQuestionPoolItem,
   ChatMessage,
   ChecklistItem,
   DayBlock,
@@ -67,6 +73,7 @@ import {
   SubjectBucket,
 } from '../../core/types/enums'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
+import { todayKey } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
@@ -266,6 +273,11 @@ export default function PlannerChatPage() {
   const [readAloudChapters, setReadAloudChapters] = useState('')
   const [weekNotes, setWeekNotes] = useState('')
 
+  // Chapter book library + selection
+  const [chapterBooks, setChapterBooks] = useState<ChapterBook[]>([])
+  const [selectedBook, setSelectedBook] = useState<ChapterBook | null>(null)
+  const [bookProgress, setBookProgress] = useState<BookProgress | null>(null)
+
   // Per-subject default time overrides (minutes per day)
   const [subjectTimeDefaults, setSubjectTimeDefaults] = useState<SubjectTimeDefaults>({})
   const [generatingWeek, setGeneratingWeek] = useState(false)
@@ -318,7 +330,17 @@ export default function PlannerChatPage() {
     [weekRange.start, activeChildId],
   )
 
-  // Load planner defaults (family-level)
+  // Load chapter book library
+  useEffect(() => {
+    void getDocs(chapterBooksCollection()).then((snap) => {
+      const books = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
+      books.sort((a, b) => a.title.localeCompare(b.title))
+      setChapterBooks(books)
+    })
+  }, [])
+
+  // Load planner defaults (family-level) and initialize selectedBook from readAloudBookId
+  const plannerDefaultsBookIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (!familyId) return
     const settingsRef = doc(db, `families/${familyId}/settings/plannerDefaults`)
@@ -328,9 +350,50 @@ export default function PlannerChatPage() {
         if (data.weekEnergy) setWeekEnergy(data.weekEnergy)
         if (data.readAloudBook) setReadAloudBook(data.readAloudBook)
         if (data.readAloudChapters) setReadAloudChapters(data.readAloudChapters)
+        if (data.readAloudBookId) plannerDefaultsBookIdRef.current = data.readAloudBookId as string
       }
     })
   }, [familyId])
+
+  // Initialize selectedBook once chapterBooks are loaded and plannerDefaults has been read
+  useEffect(() => {
+    if (chapterBooks.length === 0 || !plannerDefaultsBookIdRef.current) return
+    const match = chapterBooks.find((b) => b.id === plannerDefaultsBookIdRef.current)
+    if (match) {
+      setSelectedBook(match)
+      setReadAloudBook(match.title)
+      plannerDefaultsBookIdRef.current = null // Only initialize once
+    }
+  }, [chapterBooks])
+
+  // Load BookProgress for selected book + active child
+  useEffect(() => {
+    if (!familyId || !activeChildId || !selectedBook) {
+      setBookProgress(null)
+      return
+    }
+    const progressId = bookProgressDocId(activeChildId, selectedBook.id)
+    const progressRef = doc(bookProgressCollection(familyId), progressId)
+    void getDoc(progressRef).then((snap) => {
+      if (snap.exists()) {
+        setBookProgress({ ...snap.data(), id: snap.id })
+      } else {
+        setBookProgress(null)
+      }
+    })
+  }, [familyId, activeChildId, selectedBook])
+
+  // When selectedBook changes, sync legacy readAloudBook field and clear chapters
+  const handleSelectedBookChange = useCallback((book: ChapterBook | null) => {
+    setSelectedBook(book)
+    if (book) {
+      setReadAloudBook(book.title)
+      setReadAloudChapters('')
+    } else {
+      setReadAloudBook('')
+      setReadAloudChapters('')
+    }
+  }, [])
 
   // dailyRoutine is now derived from activity configs (already filtered for completed)
   // No need to filter for completed programs — activity configs handle that via `completed` flag
@@ -1321,9 +1384,6 @@ Return as JSON:
           `Weekly focus context:\n${buildWeekFocusContext()}`,
           `Daily routine context:\n${filteredDailyRoutine}`,
           focusInstruction,
-          readAloudBook && readAloudChapters
-            ? `Read-aloud: ${readAloudBook} (${readAloudChapters}). Generate ONE chapterQuestion per school day for these SPECIFIC chapters in order. Do NOT start from Chapter 1 unless the parent specified it. The "chapter" field must use the actual chapter numbers from the entered range.`
-            : '',
         ].filter(Boolean).join('\n\n')
         const response = await aiChat({
           familyId,
@@ -1367,7 +1427,7 @@ Return as JSON:
     } finally {
       setGeneratingWeek(false)
     }
-  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef, readAloudBook, readAloudChapters])
+  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
@@ -1389,6 +1449,7 @@ Return as JSON:
       weekEnergy,
       readAloudBook,
       readAloudChapters,
+      readAloudBookId: selectedBook?.id ?? null,
       updatedAt: new Date().toISOString(),
     }, { merge: true })
 
@@ -1417,14 +1478,6 @@ Hours/day: ${hoursPerDay}
 Workbooks:
 ${allWorkbookLines || '(none configured)'}
 ${readAloudBook ? `\nRead-aloud book: ${readAloudBook}${readAloudChapters ? ` (${readAloudChapters})` : ''}` : ''}
-${readAloudBook && readAloudChapters ? `\nThe parent specified these chapters for this week: ${readAloudChapters}
-Generate ONE discussion question per school day (Monday–Friday) for these specific chapters IN ORDER.
-Do NOT start from Chapter 1 unless the parent specified Chapter 1.
-If the parent said "Ch 5-8", generate questions for Ch 5, Ch 6, Ch 7, Ch 8, and one review/prediction question for Friday.
-Each question must have a questionType: comprehension, application, connection, opinion, or prediction.
-Vary the question types across the week.
-The "chapter" field in each chapterQuestion must match the actual chapter numbers from the entered range, not auto-numbered from 1.
-Include the question in a "chapterQuestion" field on each day.` : ''}
 
 Subject time defaults (use these as the baseline for estimatedMinutes per item):
 ${subjectDefaultsLines}
@@ -1433,7 +1486,7 @@ ${weekNotes ? `\nNotes: ${weekNotes}` : ''}
 Generate a plan for Monday through Friday.`.trim()
 
     await handleGenerateWeek(contextMessage, true)
-  }, [weekEnergy, hoursPerDay, workbookConfigs, readAloudBook, readAloudChapters, weekNotes, activeChild, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek])
+  }, [weekEnergy, hoursPerDay, workbookConfigs, readAloudBook, readAloudChapters, weekNotes, activeChild, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek, selectedBook])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -1604,7 +1657,13 @@ Generate a plan for Monday through Friday.`.trim()
         } else {
           updatedGoals.push({ childId: activeChildId, goals: planGoals })
         }
-        await setDoc(weekRef, { ...existing, childGoals: updatedGoals })
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { readAloudBookId: _prevBookId, ...weekBase } = existing
+        await setDoc(weekRef, {
+          ...weekBase,
+          childGoals: updatedGoals,
+          ...(selectedBook ? { readAloudBookId: selectedBook.id } : {}),
+        })
       }
 
       // Write DayLog checklist items for each day
@@ -1661,7 +1720,6 @@ Generate a plan for Monday through Friday.`.trim()
             ...existing,
             checklist: [...existingChecklist, ...checklist],
             blocks: [...existingBlocks, ...blocks],
-            ...(dayPlan.chapterQuestion ? { chapterQuestion: dayPlan.chapterQuestion } : {}),
             updatedAt: new Date().toISOString(),
           })
         } else {
@@ -1670,7 +1728,6 @@ Generate a plan for Monday through Friday.`.trim()
             date: dateKey,
             blocks,
             checklist,
-            ...(dayPlan.chapterQuestion ? { chapterQuestion: dayPlan.chapterQuestion } : {}),
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }
@@ -1696,11 +1753,106 @@ Generate a plan for Monday through Friday.`.trim()
       })
 
       setSnack({ text: 'Plan applied! Check This Week and Today.', severity: 'success' })
+
+      // Non-blocking: generate chapter question pool for selected library book
+      if (selectedBook && activeChildId) {
+        const generatePool = async () => {
+          try {
+            setSnack({ text: `Generating chapter questions for ${selectedBook.title}...`, severity: 'info' })
+
+            const progressId = bookProgressDocId(activeChildId, selectedBook.id)
+            const progressRef = doc(bookProgressCollection(familyId), progressId)
+            const progressSnap = await getDoc(progressRef)
+            const existing = progressSnap.exists() ? (progressSnap.data() as BookProgress) : null
+
+            const existingChapters = existing?.questionPool?.map((q) => q.chapter) ?? []
+            const missingChapters = selectedBook.chapters?.filter(
+              (c) => !existingChapters.includes(c.number),
+            ) ?? []
+
+            if (missingChapters.length === 0) {
+              setSnack({ text: 'Chapter questions already generated.', severity: 'info' })
+              return
+            }
+
+            const result = await aiChat({
+              familyId,
+              childId: activeChildId,
+              taskType: TaskType.ChapterQuestions,
+              messages: [{
+                role: 'user',
+                content: JSON.stringify({
+                  bookTitle: selectedBook.title,
+                  author: selectedBook.author,
+                  chapters: missingChapters,
+                  childName: activeChild?.name,
+                  weekTheme: weekPlan?.theme,
+                  weekVirtue: weekPlan?.virtue,
+                }),
+              }],
+            })
+
+            if (!result?.message) {
+              setSnack({ text: "Couldn't generate chapter questions \u2014 try regenerating from Plan My Week.", severity: 'warning' })
+              return
+            }
+
+            let questions: Array<{ chapter: number; questionType: string; question: string }> = []
+            try {
+              const parsed = JSON.parse(result.message) as unknown
+              questions = Array.isArray(parsed) ? parsed as typeof questions : []
+            } catch {
+              setSnack({ text: "Couldn't parse chapter questions \u2014 try regenerating from Plan My Week.", severity: 'warning' })
+              return
+            }
+
+            const newPoolItems: ChapterQuestionPoolItem[] = questions.map((q) => ({
+              chapter: q.chapter,
+              chapterTitle: selectedBook.chapters?.find((c) => c.number === q.chapter)?.title,
+              questionType: q.questionType as ChapterQuestionPoolItem['questionType'],
+              question: q.question,
+              answered: false,
+            }))
+
+            if (existing) {
+              await updateDoc(progressRef, {
+                questionPool: [...existing.questionPool, ...newPoolItems],
+                updatedAt: new Date().toISOString(),
+              })
+            } else {
+              const newProgress: BookProgress = {
+                bookId: selectedBook.id,
+                childId: activeChildId,
+                bookTitle: selectedBook.title,
+                author: selectedBook.author,
+                totalChapters: selectedBook.totalChapters,
+                questionPool: newPoolItems,
+                startedAt: todayKey(),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              }
+              await setDoc(progressRef, newProgress)
+            }
+
+            setSnack({ text: `Generated ${newPoolItems.length} chapter questions for ${selectedBook.title}!`, severity: 'success' })
+
+            // Refresh bookProgress state
+            const refreshed = await getDoc(progressRef)
+            if (refreshed.exists()) {
+              setBookProgress({ ...refreshed.data() as BookProgress, id: refreshed.id })
+            }
+          } catch (err) {
+            console.error('Failed to generate chapter questions', err)
+            setSnack({ text: "Couldn't generate chapter questions \u2014 try regenerating from Plan My Week.", severity: 'warning' })
+          }
+        }
+        void generatePool()
+      }
     } catch (err) {
       console.error('Failed to apply plan', err)
       setSnack({ text: 'Failed to apply plan.', severity: 'error' })
     }
-  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType])
+  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat])
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
@@ -2036,6 +2188,10 @@ ${dayPrompts}`
               onReadAloudBookChange={setReadAloudBook}
               readAloudChapters={readAloudChapters}
               onReadAloudChaptersChange={setReadAloudChapters}
+              chapterBooks={chapterBooks}
+              selectedBook={selectedBook}
+              onSelectedBookChange={handleSelectedBookChange}
+              bookProgress={bookProgress}
               weekNotes={weekNotes}
               onWeekNotesChange={setWeekNotes}
               masterySummary={masterySummary}
