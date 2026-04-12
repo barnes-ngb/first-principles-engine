@@ -16,7 +16,7 @@ export interface ArmorGateStatus {
 }
 
 
-function getForgedVoxelPieces(profile: AvatarProfile): VoxelArmorPieceId[] {
+export function getForgedVoxelPieces(profile: AvatarProfile): VoxelArmorPieceId[] {
   const forgedByTier = profile.forgedPieces
   if (forgedByTier) {
     // Count pieces from tiers up to and including the active forge tier.

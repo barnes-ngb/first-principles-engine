@@ -48,7 +48,7 @@ import { ACCESSORY_SLOTS } from '../../core/types'
 
 import type { VoxelCharacterHandle } from './VoxelCharacter'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
-import { getActiveForgeTier, getAppliedVoxelPieces, getArmorPieceState, getEquippablePieces, getForgedPiecesForTier, getPieceLockReason, getVisiblePieces } from './armorPieceState'
+import { getActiveForgeTier, getAppliedVoxelPieces, getArmorPieceState, getForgedPiecesForTier, getPieceLockReason, getVisiblePieces } from './armorPieceState'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import ArmorVerseCard from './ArmorVerseCard'
 import { speakStatus, speakVerse } from './speakVerse'
@@ -68,7 +68,7 @@ import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
-import { getArmorGateStatusFromSession } from './armorGate'
+import { getArmorGateStatusFromSession, getForgedVoxelPieces } from './armorGate'
 import { getWeekRange } from '../../core/utils/time'
 import { dayLogDocId } from '../today/daylog.model'
 import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
@@ -703,7 +703,7 @@ export default function MyAvatarPage() {
       setAnimateEquipId(voxelPieceId)
 
       const updatedApplied = [...(session.appliedPieces ?? []), armorPieceId]
-      const equippable = getEquippablePieces(profile)
+      const equippable = getForgedVoxelPieces(profile)
       const allApplied = equippable.length > 0 && equippable.every((vid) => {
         const aid = ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id
         return aid && updatedApplied.includes(aid)
@@ -845,7 +845,7 @@ export default function MyAvatarPage() {
   // ── Suit Up! — equip all forged pieces with staggered animation ──
   const suitUpAll = useCallback(() => {
     if (!profile || !session || !familyId || !childId) return
-    const forgedIds = getEquippablePieces(profile)
+    const forgedIds = getForgedVoxelPieces(profile)
     const currentVoxel = getAppliedVoxelPieces(session.appliedPieces ?? [])
     // Canonical equip order: belt → breastplate → shoes → shield → helmet → sword
     const equipOrder: VoxelArmorPieceId[] = ['belt', 'breastplate', 'shoes', 'shield', 'helmet', 'sword']
@@ -936,6 +936,24 @@ export default function MyAvatarPage() {
   const currentTierName = profile ? calculateTier(profile.totalXp) : 'WOOD'
   const forgedCount = armorGateStatus?.total ?? 0
   const nextForgeAction = profile ? getNextForgeAction(profile) : null
+
+  // Debug logging — remove after confirming fix in production
+  if (profile && armorGateStatus) {
+    console.log('[ArmorGate]', {
+      forgedCount,
+      gateTotal: armorGateStatus.total,
+      gateEquipped: armorGateStatus.equipped,
+      gateComplete: armorGateStatus.complete,
+      gateMissing: armorGateStatus.missing,
+      appliedVoxelLength: appliedVoxel.length,
+      appliedVoxel,
+      allEarnedApplied,
+      forgedPiecesTiers: profile.forgedPieces ? Object.keys(profile.forgedPieces) : 'none',
+      activeForgeTier: getActiveForgeTier(profile),
+      totalXp: profile.totalXp,
+    })
+  }
+
   const nextRecommendedAction: NextRecommendedAction = (() => {
     // All owned pieces equipped → ready to go
     if (allEarnedApplied && armorGateStatus?.hasForgedPieces) {
