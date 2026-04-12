@@ -15,7 +15,7 @@ import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import { artifactsCollection, booksCollection, hoursCollection, stripUndefined } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { useDebounce } from '../../core/hooks/useDebounce'
-import type { Artifact, Book, BookPage, PageImage, StickerTag } from '../../core/types'
+import type { Artifact, Book, BookPage, ImageVersion, PageImage, StickerTag } from '../../core/types'
 import type { SaveState } from '../../components/SaveIndicator'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
@@ -47,6 +47,8 @@ interface UseBookResult {
   applySketchEnhancement: (pageId: string, imageId: string, enhancedUrl: string, enhancedStoragePath: string) => void
   /** Switch which version (original vs enhanced) is the active URL for a sketch image. */
   pickSketchVersion: (pageId: string, imageId: string, version: 'original' | 'enhanced') => void
+  /** Restore a previous version of an image by index (0 = most recent previous). */
+  restoreImageVersion: (pageId: string, imageId: string, versionIndex: number) => void
   /** Whether this session used AI image generation (for Art hours) */
   usedAiGeneration: boolean
 }
@@ -56,6 +58,19 @@ interface UseBookshelfResult {
   loading: boolean
   createBook: (title: string, coverStyle: Book['coverStyle'], isTogetherBook?: boolean, contributorIds?: string[]) => Promise<string>
   deleteBook: (bookId: string) => Promise<void>
+}
+
+/** Push the current URL onto previousVersions (max 5). */
+function pushVersion(
+  image: PageImage,
+  replacedBy: ImageVersion['replacedBy'],
+): ImageVersion[] {
+  const entry: ImageVersion = {
+    url: image.url,
+    replacedAt: new Date().toISOString(),
+    replacedBy,
+  }
+  return [entry, ...(image.previousVersions ?? []).slice(0, 4)]
 }
 
 /** Get today as YYYY-MM-DD string. */
@@ -528,11 +543,15 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           p.id === pageId
             ? {
                 ...p,
-                images: p.images.map((img) =>
-                  img.id === imageId
-                    ? { ...img, enhancedUrl, enhancedStoragePath }
-                    : img,
-                ),
+                images: p.images.map((img) => {
+                  if (img.id !== imageId) return img
+                  return {
+                    ...img,
+                    enhancedUrl,
+                    enhancedStoragePath,
+                    previousVersions: pushVersion(img, 'reimagine'),
+                  }
+                }),
                 updatedAt: new Date().toISOString(),
               }
             : p,
@@ -556,7 +575,41 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
                     ? img.enhancedUrl
                     : img.originalSketchUrl ?? img.url
                   const newStyle = version === 'enhanced' ? 'ai-enhanced' as const : 'sketch' as const
-                  return { ...img, url: newUrl, style: newStyle }
+                  return {
+                    ...img,
+                    url: newUrl,
+                    style: newStyle,
+                    previousVersions: pushVersion(img, 'reimagine'),
+                  }
+                }),
+                updatedAt: new Date().toISOString(),
+              }
+            : p,
+        ),
+      }))
+    },
+    [applyUpdate],
+  )
+
+  const restoreImageVersion = useCallback(
+    (pageId: string, imageId: string, versionIndex: number) => {
+      applyUpdate((prev) => ({
+        ...prev,
+        pages: prev.pages.map((p) =>
+          p.id === pageId
+            ? {
+                ...p,
+                images: p.images.map((img) => {
+                  if (img.id !== imageId) return img
+                  const versions = img.previousVersions ?? []
+                  const target = versions[versionIndex]
+                  if (!target) return img
+                  // Push current to front, remove the restored one
+                  const newVersions = [
+                    { url: img.url, replacedAt: new Date().toISOString(), replacedBy: 'reimagine' as const },
+                    ...versions.filter((_, i) => i !== versionIndex),
+                  ].slice(0, 5)
+                  return { ...img, url: target.url, previousVersions: newVersions }
                 }),
                 updatedAt: new Date().toISOString(),
               }
@@ -608,6 +661,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     addSketchToPage,
     applySketchEnhancement,
     pickSketchVersion,
+    restoreImageVersion,
     usedAiGeneration,
   }
 }

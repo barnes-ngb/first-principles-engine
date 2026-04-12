@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { addDoc } from 'firebase/firestore'
-import { ref, deleteObject } from 'firebase/storage'
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
-import { storage } from '../../core/firebase/storage'
 import { useAI } from '../../core/ai/useAI'
 import type { EnhanceSketchRequest } from '../../core/ai/useAI'
 
@@ -25,8 +23,8 @@ interface UseBackgroundReimagineOptions {
   childName: string
   /** Book theme ID — influences reimagine style to match the book's visual identity. */
   bookTheme?: string
-  /** Called when user picks "Add to page" */
-  onAddToPage: (pageId: string, imageId: string, url: string, storagePath: string) => void
+  /** Called when user picks "Replace background" — replaces the source image's URL */
+  onReplaceBackground: (pageId: string, imageId: string, url: string, storagePath: string) => void
   /** Called to add a sticker to the current page */
   onAddSticker: (pageId: string, url: string, storagePath: string, label: string) => void
 }
@@ -41,7 +39,7 @@ export function useBackgroundReimagine({
   childId,
   childName,
   bookTheme,
-  onAddToPage,
+  onReplaceBackground,
   onAddSticker,
 }: UseBackgroundReimagineOptions) {
   const [job, setJob] = useState<ReimagineJob | null>(null)
@@ -68,7 +66,8 @@ export function useBackgroundReimagine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.id, job?.status])
 
-  // ── Auto-dismiss: save to gallery after 5 minutes ────────────────
+  // ── Auto-dismiss: close notification after 5 minutes ──────────────
+  // (Image is already auto-saved to gallery on completion.)
   useEffect(() => {
     if (autoDismissRef.current) {
       clearTimeout(autoDismissRef.current)
@@ -77,10 +76,7 @@ export function useBackgroundReimagine({
     if (!job || job.status !== 'done') return
 
     autoDismissRef.current = setTimeout(() => {
-      if (job.resultUrl) {
-        void saveToGallery(job.resultUrl, job.resultStoragePath)
-        setAutoDismissedMessage('Your reimagined drawing was saved to your sticker library')
-      }
+      setAutoDismissedMessage('Your reimagined drawing was saved to your sticker library')
       setJob(null)
       setShowChoiceDialog(false)
     }, AUTO_DISMISS_MS)
@@ -171,14 +167,14 @@ export function useBackgroundReimagine({
     setShowChoiceDialog(false)
   }, [])
 
-  const handleAddToPage = useCallback(() => {
+  const handleReplaceBackground = useCallback(() => {
     if (!job || job.status !== 'done' || !job.resultUrl) return
-    onAddToPage(job.sourcePageId, job.sourceImageId, job.resultUrl, job.resultStoragePath ?? '')
+    onReplaceBackground(job.sourcePageId, job.sourceImageId, job.resultUrl, job.resultStoragePath ?? '')
     setJob(null)
     setShowChoiceDialog(false)
-  }, [job, onAddToPage])
+  }, [job, onReplaceBackground])
 
-  const handleMakeSticker = useCallback(() => {
+  const handleAddAsSticker = useCallback(() => {
     if (!job || job.status !== 'done' || !job.resultUrl) return
     onAddSticker(job.sourcePageId, job.resultUrl, job.resultStoragePath ?? '', `${childName}'s reimagined drawing`)
     setJob(null)
@@ -211,24 +207,29 @@ export function useBackgroundReimagine({
     [familyId, childId, childName, job?.resultUrl, job?.resultStoragePath],
   )
 
-  const handleSaveToGallery = useCallback(async () => {
-    await saveToGallery()
-    setJob(null)
-    setShowChoiceDialog(false)
-  }, [saveToGallery])
+  // ── Auto-save every reimagine result to gallery ──────────────────
+  const autoSavedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!job || job.status !== 'done' || !job.resultUrl) return
+    // Only auto-save once per job
+    if (autoSavedRef.current === job.id) return
+    autoSavedRef.current = job.id
+    void saveToGallery(job.resultUrl, job.resultStoragePath)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.id, job?.status, saveToGallery])
 
-  const handleDiscard = useCallback(async () => {
-    // Delete the reimagined image from Storage
-    if (job?.resultStoragePath) {
-      try {
-        await deleteObject(ref(storage, job.resultStoragePath))
-      } catch {
-        // Best effort
-      }
-    }
+  const handleSaveToGallery = useCallback(async () => {
+    // Already auto-saved, just dismiss
     setJob(null)
     setShowChoiceDialog(false)
-  }, [job?.resultStoragePath])
+  }, [])
+
+  const handleDiscard = useCallback(() => {
+    // Don't delete from storage — auto-saved to gallery, so the reference remains valid.
+    // "Discard" means "don't add to this page right now."
+    setJob(null)
+    setShowChoiceDialog(false)
+  }, [])
 
   const dismissError = useCallback(() => {
     setJob(null)
@@ -242,8 +243,8 @@ export function useBackgroundReimagine({
     openChoiceDialog,
     dismissNotification,
     dismissError,
-    handleAddToPage,
-    handleMakeSticker,
+    handleReplaceBackground,
+    handleAddAsSticker,
     handleSaveToGallery,
     handleDiscard,
     setAutoDismissedMessage,
