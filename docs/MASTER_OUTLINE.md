@@ -120,10 +120,11 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 - Migration script for seeding lesson data (`functions/src/migrations/seedUfliLessons.ts`).
 
 ### Chapter Book Progress Tracking (Chapter Pool P1-P3)
-- Chapter Question Pool card — book picker in planner generates per-chapter questions into a pool. Today renders unanswered chapters as tappable chips; picked chapters stack with audio recording per chapter. Progress persists across weeks.
+- Chapter Question Pool card — book picker in planner generates per-chapter questions into a pool. Today renders unanswered chapters as tappable chips; picked chapters stack with audio recording per chapter. Progress persists across weeks. (Apr 12 fix: chapter chip picker with multi-select + skip action; Records Chapter Responses grouped by book with expandable chapter lists)
 - `useBookProgress` hook — live `onSnapshot` subscription on `bookProgress/{childId}_{bookId}` doc. Provides `updateChapter` callback for atomic pool entry updates.
-- `ChapterQuestionPool` component — four render states: no book selected, loading (pool generation in flight), in-progress (chapter picker + stacked cards), complete (celebration).
-- Per-chapter audio recording uses shared `useAudioRecorder` hook. Save flow writes to Storage + `chapterResponses` + `artifacts` + `bookProgress`.
+- `ChapterQuestionPool` component — four render states: no book selected, loading (pool generation in flight), in-progress (chapter picker + stacked cards), complete (celebration). Skip action per chapter with confirmation dialog writes `skipped: true` to pool entry.
+- Per-chapter audio recording uses shared `useAudioRecorder` hook. Save flow writes to Storage + `chapterResponses` + `artifacts` + `bookProgress`. New writes include `bookId` on ChapterResponse for reliable grouping.
+- Records "Book Responses" tab groups chapter responses by book in expandable accordions. Shows all chapters: answered (with inline audio), skipped, and unanswered. Legacy responses without `bookId` fall back to title match; unmatched entries bucket to "Other Books".
 - Legacy `ChapterQuestionCard` deleted. `DayLog.chapterQuestion` deprecated (reads only, no new writes). `DraftDayPlan.chapterQuestion` removed.
 
 ---
@@ -211,6 +212,7 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 9. **Loose tier gate** — next tier visible but locked with clear requirement, aspirational not hidden.
 10. **Daily Suit Up = equip all OWNED pieces** — not all 6 total. Can't equip what you haven't forged.
 11. **Gateway functions for currency** — `addXpEvent()` and `addDiamondEvent()` are the ONLY paths. All direct Firestore writes to balances are bugs.
+12. **Nothing is ever lost** — Reimagined drawings always auto-save to gallery, even when placed on page or discarded. Image replacements preserve previous URLs in `previousVersions[]` (max 5).
 
 ---
 
@@ -220,7 +222,7 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 | File | Lines | Status |
 |---|---:|---|
 | `src/features/planner-chat/PlannerChatPage.tsx` | 2,249 | Still primary planner shell/state center |
-| `src/features/books/BookEditorPage.tsx` | 1,907 | Stable high-complexity editor |
+| `src/features/books/BookEditorPage.tsx` | ~2,000 | Grew with undo/redo + contextual action bar |
 | `src/features/quest/useQuestSession.ts` | 1,763 | Largest hook; future split candidate |
 | `src/features/avatar/MyAvatarPage.tsx` | 1,703 | Grew with Hero Hub layout + mission surfaces |
 | `src/features/shelly-chat/ShellyChatPage.tsx` | 1,653 | Stable, still large |
@@ -228,6 +230,13 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 ### Decomposition Status
 - Today page, Kid Today view, Planner render layers, and Avatar subpanels have all been partially decomposed.
 - Remaining risk concentration is state-heavy files (`PlannerChatPage`, `useQuestSession`, `MyAvatarPage`).
+
+### Book Editor Features
+- **Undo/Redo**: 20-entry history stack (`useEditorHistory`). Keyboard shortcuts: Ctrl+Z / Ctrl+Shift+Z. Tracks page-level changes (image add/remove, layout changes).
+- **Image version history**: `PageImage.previousVersions[]` preserves up to 5 previous URLs when images are replaced (reimagine, sketch enhance). Accessible via "Previous versions" in background menu.
+- **Contextual action bar**: Top chip row shows "Delete sticker" / "Remove background" / "Change" based on which image is selected in PageEditor.
+- **Reimagine placement clarity**: Dialog splits "Add to page" into "Replace background" (full-page) vs "Add as sticker" (movable/resizable).
+- **Auto-save to gallery**: Every reimagine result auto-saves to sticker gallery on completion, regardless of placement choice.
 
 ---
 

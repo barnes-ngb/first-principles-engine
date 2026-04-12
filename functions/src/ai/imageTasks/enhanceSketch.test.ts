@@ -34,4 +34,55 @@ describe("buildEnhancePrompt", () => {
     const result = buildEnhancePrompt("storybook", "some caption");
     expect(result).toContain("Safe for children, family-friendly, no text overlays");
   });
+
+  // ── Theme-aware reimagine tests ─────────────────────────────────
+
+  it("injects minecraft theme style into prompt", () => {
+    const result = buildEnhancePrompt("storybook", undefined, "minecraft");
+    expect(result).toContain("Visual theme:");
+    expect(result).toContain("pixel-art");
+    expect(result).toContain("Minecraft");
+  });
+
+  it("injects fantasy theme style into prompt", () => {
+    const result = buildEnhancePrompt("storybook", undefined, "fantasy");
+    expect(result).toContain("Visual theme:");
+    expect(result).toContain("fairy-tale");
+  });
+
+  it("injects adventure theme style into prompt", () => {
+    const result = buildEnhancePrompt("storybook", undefined, "adventure");
+    expect(result).toContain("Visual theme:");
+    expect(result).toContain("adventure");
+  });
+
+  it("ignores unknown theme IDs gracefully", () => {
+    const result = buildEnhancePrompt("storybook", undefined, "unknown-theme");
+    expect(result).not.toContain("Visual theme:");
+  });
+
+  it("omits theme clause when theme is undefined", () => {
+    const result = buildEnhancePrompt("storybook", undefined, undefined);
+    expect(result).not.toContain("Visual theme:");
+  });
+
+  it("combines caption and theme in prompt", () => {
+    const result = buildEnhancePrompt("comic", "a castle", "fantasy");
+    expect(result).toContain('The child described this as: "a castle"');
+    expect(result).toContain("Visual theme:");
+    expect(result).toContain("fairy-tale");
+    expect(result).toContain("bold, colorful comic book");
+  });
+
+  it("includes theme style for all preset themes", () => {
+    const themes = [
+      "minecraft", "fantasy", "adventure", "animals", "science",
+      "space", "faith", "dinosaurs", "ocean", "superheroes",
+      "holidays", "cooking", "sports", "family", "sight_words",
+    ];
+    for (const theme of themes) {
+      const result = buildEnhancePrompt("storybook", undefined, theme);
+      expect(result).toContain("Visual theme:");
+    }
+  });
 });
