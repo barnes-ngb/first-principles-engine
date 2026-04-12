@@ -424,6 +424,7 @@ export default function KnowledgeMinePage() {
           onSkip={quest.handleSkip}
           domainLabel={activeDomain?.label || 'Reading Quest'}
           domain={activeDomain?.domain || 'reading'}
+          questMode={quest.questMode}
         />
       )}
 
