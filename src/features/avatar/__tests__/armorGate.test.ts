@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isArmorComplete, getArmorGateStatus } from '../armorGate'
+import { isArmorComplete, getArmorGateStatus, getForgedVoxelPieces } from '../armorGate'
 import type { AvatarProfile } from '../../../core/types'
 
 function makeProfile(overrides: Partial<AvatarProfile> = {}): AvatarProfile {
@@ -147,5 +147,80 @@ describe('getArmorGateStatus', () => {
     expect(status.equipped).toBe(5)
     expect(status.complete).toBe(true)
     expect(status.missing).toEqual([])
+  })
+
+  it('counts cross-tier pieces when wood complete and stone partially forged', () => {
+    // Lincoln's actual bug: wood 6/6 complete, stone 5/6 forged.
+    // Active tier = stone (lowest incomplete). Gate iterates wood+stone.
+    // All 6 voxel IDs are covered by wood, so total = 6.
+    // With 5 pieces applied, should report 5/6 NOT complete.
+    const profile = makeProfile({
+      totalXp: 1000,
+      forgedPieces: {
+        wood: {
+          belt: forgedEntry,
+          shoes: forgedEntry,
+          breastplate: forgedEntry,
+          shield: forgedEntry,
+          helmet: forgedEntry,
+          sword: forgedEntry,
+        },
+        stone: {
+          belt: forgedEntry,
+          shoes: forgedEntry,
+          breastplate: forgedEntry,
+          shield: forgedEntry,
+          helmet: forgedEntry,
+          // sword NOT forged in stone
+        },
+      },
+    })
+    // Active forge tier should be stone (wood is complete, stone is not)
+    const forged = getForgedVoxelPieces(profile)
+    expect(forged).toHaveLength(6) // All 6 IDs covered from wood+stone union
+    expect(forged).toContain('sword') // sword comes from wood tier
+
+    // With only 5 applied pieces, gate should show 5/6
+    const status = getArmorGateStatus(profile, [
+      'belt_of_truth',
+      'breastplate_of_righteousness',
+      'shoes_of_peace',
+      'shield_of_faith',
+      'helmet_of_salvation',
+    ])
+    expect(status.total).toBe(6)
+    expect(status.equipped).toBe(5)
+    expect(status.complete).toBe(false)
+    expect(status.missing).toEqual(['sword'])
+  })
+
+  it('getForgedVoxelPieces returns all equippable IDs for suitUpAll', () => {
+    // Verify that getForgedVoxelPieces (used by suitUpAll after fix)
+    // includes pieces from completed lower tiers, not just the active tier.
+    const profile = makeProfile({
+      totalXp: 1000,
+      forgedPieces: {
+        wood: {
+          belt: forgedEntry,
+          shoes: forgedEntry,
+          breastplate: forgedEntry,
+          shield: forgedEntry,
+          helmet: forgedEntry,
+          sword: forgedEntry,
+        },
+        stone: {
+          belt: forgedEntry,
+          shoes: forgedEntry,
+          breastplate: forgedEntry,
+          shield: forgedEntry,
+          helmet: forgedEntry,
+          // sword missing in stone
+        },
+      },
+    })
+    const forged = getForgedVoxelPieces(profile)
+    // suitUpAll should be able to equip ALL 6 — including sword from wood
+    expect(forged).toHaveLength(6)
+    expect(new Set(forged)).toEqual(new Set(['belt', 'shoes', 'breastplate', 'shield', 'helmet', 'sword']))
   })
 })

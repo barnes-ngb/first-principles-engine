@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-04-05.
+> Where everything lives. Updated 2026-04-12.
 
 ---
 
@@ -8,7 +8,7 @@
 
 | Document | Status | Notes |
 |---|---|---|
-| `MASTER_OUTLINE.md` | **CURRENT** (v15) | Single source of truth: features, status, sprint history. Updated Apr 5: Two-currency economy, curriculum pipeline, activity configs, Learning Map, quest expansion, book themes, planning improvements |
+| `MASTER_OUTLINE.md` | **CURRENT** (v15) | Single source of truth: features, status, sprint history. Updated Apr 12: Hero Hub, two-currency economy, Stonebridge narrative, armor progression gating, capture pipeline, working levels, chapter pool, Lincoln Acceleration |
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
@@ -18,6 +18,9 @@
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
 | `ENGINE_V2.md` | **CURRENT** | Learning framework: family snapshot, curriculum mapping, energy modes, weekly rhythm |
 | `FIRST_PRINCIPLES_ALIGNMENT.md` | **NEW** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
+| `ECONOMY_AUDIT_PART1.md` | **CURRENT** | Economy code inventory — earning/spending paths, collection audit, event types |
+| `ECONOMY_AUDIT_PART2.md` | **CURRENT** | Economy unified model — two-currency design, balance reconciliation, pacing math |
+| `STONEBRIDGE_BIBLE.md` | **CURRENT** | Canonical narrative world bible — 8 places, 10+ characters, values, tone, continuity rules |
 | `GAME_WORLD_ECONOMY.md` | **CURRENT** | Two-currency economy design (XP + Diamonds), choice-based armor forging, Stonebridge world |
 | `HEALTH_REPORT.md` | **CURRENT** | Weekly code health metrics — line counts, test coverage, bundle size, tech debt tracking |
 | `PROFILE_LIMITS_AUDIT.md` | **CURRENT** | Profile-based rate limits and experience audit — AI usage caps, generation limits, cost controls |
@@ -57,6 +60,9 @@
 | `ENGINE_V2.md` | Working on engine/flywheel framework |
 | `FIRESTORE_AUDIT.md` | Working on data model, indexes, collections |
 | `WEEKLY_CONUNDRUM_ARC.md` | Working on conundrums, weekly theme integration |
+| `ECONOMY_AUDIT_PART1.md` | Working on XP/Diamond economy code paths, event wiring |
+| `ECONOMY_AUDIT_PART2.md` | Working on economy pacing, balance reconciliation, currency model |
+| `STONEBRIDGE_BIBLE.md` | Working on narrative content, conundrums, chapter questions, Banner Rally |
 | `GAME_WORLD_ECONOMY.md` | Working on XP/Diamond economy, armor forging, tier progression |
 | `HEALTH_REPORT.md` | Working on code health, tech debt, bundle size optimization |
 | `PROFILE_LIMITS_AUDIT.md` | Working on rate limits, AI usage caps, cost controls |
