@@ -149,11 +149,10 @@ describe('getArmorGateStatus', () => {
     expect(status.missing).toEqual([])
   })
 
-  it('counts cross-tier pieces when wood complete and stone partially forged', () => {
-    // Lincoln's actual bug: wood 6/6 complete, stone 5/6 forged.
-    // Active tier = stone (lowest incomplete). Gate iterates wood+stone.
-    // All 6 voxel IDs are covered by wood, so total = 6.
-    // With 5 pieces applied, should report 5/6 NOT complete.
+  it('gate counts only active forge tier — wood sword does not block stone suit-up', () => {
+    // Lincoln's scenario: wood 6/6 complete, stone 5/6 forged (sword missing).
+    // Active tier = stone (lowest incomplete). Gate should count ONLY stone
+    // pieces (5), not cross-tier union (6). This matches the gallery view.
     const profile = makeProfile({
       totalXp: 1000,
       forgedPieces: {
@@ -175,12 +174,13 @@ describe('getArmorGateStatus', () => {
         },
       },
     })
-    // Active forge tier should be stone (wood is complete, stone is not)
+    // getForgedVoxelPieces returns cross-tier union (for visual suitUpAll)
     const forged = getForgedVoxelPieces(profile)
     expect(forged).toHaveLength(6) // All 6 IDs covered from wood+stone union
     expect(forged).toContain('sword') // sword comes from wood tier
 
-    // With only 5 applied pieces, gate should show 5/6
+    // Gate should count only active tier (stone) = 5 pieces
+    // With 5 applied pieces, kid IS suited up — sword not required by gate
     const status = getArmorGateStatus(profile, [
       'belt_of_truth',
       'breastplate_of_righteousness',
@@ -188,10 +188,10 @@ describe('getArmorGateStatus', () => {
       'shield_of_faith',
       'helmet_of_salvation',
     ])
-    expect(status.total).toBe(6)
+    expect(status.total).toBe(5)
     expect(status.equipped).toBe(5)
-    expect(status.complete).toBe(false)
-    expect(status.missing).toEqual(['sword'])
+    expect(status.complete).toBe(true)
+    expect(status.missing).toEqual([])
   })
 
   it('getForgedVoxelPieces returns all equippable IDs for suitUpAll', () => {

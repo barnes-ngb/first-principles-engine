@@ -68,7 +68,7 @@ import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
-import { getArmorGateStatusFromSession, getForgedVoxelPieces } from './armorGate'
+import { getDailyArmorStatusFromSession, getAllForgedSlots } from './armorStatus'
 import { getWeekRange } from '../../core/utils/time'
 import { dayLogDocId } from '../today/daylog.model'
 import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
@@ -703,11 +703,9 @@ export default function MyAvatarPage() {
       setAnimateEquipId(voxelPieceId)
 
       const updatedApplied = [...(session.appliedPieces ?? []), armorPieceId]
-      const equippable = getForgedVoxelPieces(profile)
-      const allApplied = equippable.length > 0 && equippable.every((vid) => {
-        const aid = ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id
-        return aid && updatedApplied.includes(aid)
-      })
+      // Use unified status for completion check (active-tier gate, not cross-tier)
+      const status = getDailyArmorStatusFromSession(profile, { appliedPieces: updatedApplied })
+      const allApplied = status.isSuitedUp
 
       if (allApplied) {
         playArmorFanfare(1.5)
@@ -845,11 +843,12 @@ export default function MyAvatarPage() {
   // ── Suit Up! — equip all forged pieces with staggered animation ──
   const suitUpAll = useCallback(async () => {
     if (!profile || !session || !familyId || !childId) return
-    const forgedIds = getForgedVoxelPieces(profile)
+    // Use getAllForgedSlots for visual equip (cross-tier — equips all forged pieces on 3D model)
+    const allSlots = getAllForgedSlots(profile)
     const currentVoxel = getAppliedVoxelPieces(session.appliedPieces ?? [])
     // Canonical equip order: belt → breastplate → shoes → shield → helmet → sword
     const equipOrder: VoxelArmorPieceId[] = ['belt', 'breastplate', 'shoes', 'shield', 'helmet', 'sword']
-    const toEquip = equipOrder.filter((vid) => forgedIds.includes(vid) && !currentVoxel.includes(vid))
+    const toEquip = equipOrder.filter((vid) => allSlots.includes(vid) && !currentVoxel.includes(vid))
     if (toEquip.length === 0) return
 
     const pieceCount = toEquip.length
@@ -864,7 +863,9 @@ export default function MyAvatarPage() {
     // Build the complete applied list atomically (avoids stale closure overwrites)
     const updatedApplied = [...(session.appliedPieces ?? []), ...toEquipArmorIds]
     const allEquippedVoxel = [...getAppliedVoxelPieces(updatedApplied)]
-    const allApplied = forgedIds.length > 0 && forgedIds.every((vid) => allEquippedVoxel.includes(vid))
+    // Gate completion uses active-tier pieces (matches gallery), not cross-tier union
+    const status = getDailyArmorStatusFromSession(profile, { appliedPieces: updatedApplied })
+    const allApplied = status.isSuitedUp
 
     // Single Firestore write for the session — all pieces at once
     const docId = dailyArmorSessionDocId(childId, today)
@@ -958,12 +959,12 @@ export default function MyAvatarPage() {
     setAnimateUnequipId(null)
   }, [])
 
-  // ── Computed values ────────────────────────────────────────────
+  // ── Computed values (unified via getDailyArmorStatus) ────────────
   const appliedPieces = Array.isArray(session?.appliedPieces) ? session.appliedPieces : []
   const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
   const unlockedVoxel = profile ? getVisiblePieces(profile) : []
-  const armorGateStatus = profile ? getArmorGateStatusFromSession(profile, session) : null
-  const allEarnedApplied = armorGateStatus?.hasForgedPieces ? armorGateStatus.complete : false
+  const armorStatus = profile ? getDailyArmorStatusFromSession(profile, session) : null
+  const allEarnedApplied = armorStatus?.isSuitedUp ?? false
   const nextUnlock = profile ? getNextUnlock(profile) : null
   const allSixUnlocked = unlockedVoxel.length === 6
   const nextUnlockProgress = (() => {
@@ -978,34 +979,16 @@ export default function MyAvatarPage() {
 
   // Always compute display tier from totalXp so it stays honest (not stale stored value).
   const currentTierName = profile ? calculateTier(profile.totalXp) : 'WOOD'
-  const forgedCount = armorGateStatus?.total ?? 0
+  const forgedCount = armorStatus?.gateTotal ?? 0
   const nextForgeAction = profile ? getNextForgeAction(profile) : null
 
-  // Debug logging — remove after confirming fix in production
-  if (profile && armorGateStatus) {
-    console.log('[ArmorGate]', {
-      forgedCount,
-      gateTotal: armorGateStatus.total,
-      gateEquipped: armorGateStatus.equipped,
-      gateComplete: armorGateStatus.complete,
-      gateMissing: armorGateStatus.missing,
-      appliedVoxelLength: appliedVoxel.length,
-      appliedVoxel,
-      allEarnedApplied,
-      forgedPiecesTiers: profile.forgedPieces ? Object.keys(profile.forgedPieces) : 'none',
-      activeForgeTier: getActiveForgeTier(profile),
-      totalXp: profile.totalXp,
-      sessionAppliedCount: session?.appliedPieces?.length ?? 0,
-    })
-  }
-
   const nextRecommendedAction: NextRecommendedAction = (() => {
-    // All owned pieces equipped → ready to go
-    if (allEarnedApplied && armorGateStatus?.hasForgedPieces) {
+    // All gate-required pieces equipped → ready to go
+    if (allEarnedApplied && armorStatus?.hasForgedPieces) {
       return { type: 'start_day', label: 'Start your day' }
     }
     // Forged pieces exist but not all equipped today → suit up
-    if (armorGateStatus && armorGateStatus.hasForgedPieces && !armorGateStatus.complete) {
+    if (armorStatus && armorStatus.hasForgedPieces && !armorStatus.isSuitedUp) {
       return { type: 'suit_up', label: 'Suit up' }
     }
     // Next forge action: show diamond cost / tier lock reason
@@ -1060,22 +1043,6 @@ export default function MyAvatarPage() {
       action: () => navigate('/today'),
     }
   })()
-
-  // Three-source consistency check — remove after confirming fix in production
-  if (profile && armorGateStatus) {
-    const missionIsSuitUp = mission.cta === 'Suit Up & Begin'
-    const actionIsSuitUp = nextRecommendedAction.type === 'suit_up'
-    const gateIncomplete = !armorGateStatus.complete && armorGateStatus.hasForgedPieces
-    if (missionIsSuitUp !== gateIncomplete || actionIsSuitUp !== gateIncomplete) {
-      console.warn('[SuitUpConsistency] MISMATCH', {
-        gateComplete: armorGateStatus.complete,
-        gateMissing: armorGateStatus.missing,
-        missionIsSuitUp,
-        actionIsSuitUp,
-        gateIncomplete,
-      })
-    }
-  }
 
   // ── Screenshot capture ──────────────────────────────────────────
   const playShutterSound = useCallback(() => {
