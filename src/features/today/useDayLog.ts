@@ -48,6 +48,7 @@ interface UseDayLogResult {
       discussedAt?: string
     }
   } | null
+  readAloudBookId: string | undefined
   snackMessage: { text: string; severity: 'success' | 'error' } | null
   setSnackMessage: React.Dispatch<
     React.SetStateAction<{ text: string; severity: 'success' | 'error' } | null>
@@ -73,6 +74,7 @@ export function useDayLog({
   }
 
   const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
+  const [readAloudBookId, setReadAloudBookId] = useState<string | undefined>()
   const [weekFocus, setWeekFocus] = useState<{
     theme?: string
     virtue?: string
@@ -266,9 +268,11 @@ export function useDayLog({
             formationPrompt: data.formationPrompt || undefined,
             conundrum: data.conundrum || undefined,
           })
+          setReadAloudBookId(data.readAloudBookId || undefined)
         } else {
           setWeekPlanId(undefined)
           setWeekFocus(null)
+          setReadAloudBookId(undefined)
         }
       },
       (err) => {
@@ -289,6 +293,7 @@ export function useDayLog({
     lastSavedAt,
     weekPlanId,
     weekFocus,
+    readAloudBookId,
     snackMessage,
     setSnackMessage,
     persistDayLog,
