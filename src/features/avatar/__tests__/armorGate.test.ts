@@ -123,4 +123,29 @@ describe('getArmorGateStatus', () => {
     expect(status.total).toBe(2)
     expect(status.missing).toEqual(['belt', 'breastplate'])
   })
+
+  it('ignores phantom pieces in non-active tiers (cross-tier bug)', () => {
+    // Lincoln scenario: 5 pieces forged in wood (active tier), phantom sword in stone
+    const profile = makeProfile({
+      totalXp: 500,
+      equippedPieces: ['belt', 'shoes', 'breastplate', 'shield', 'helmet'],
+      unlockedTiers: ['wood'],
+      forgedPieces: {
+        wood: {
+          belt: forgedEntry,
+          shoes: forgedEntry,
+          breastplate: forgedEntry,
+          shield: forgedEntry,
+          helmet: forgedEntry,
+        },
+        stone: { sword: forgedEntry }, // phantom — should NOT inflate total
+      },
+    })
+    const status = getArmorGateStatus(profile)
+    // Gate should report 5 total (active tier only), not 6
+    expect(status.total).toBe(5)
+    expect(status.equipped).toBe(5)
+    expect(status.complete).toBe(true)
+    expect(status.missing).toEqual([])
+  })
 })
