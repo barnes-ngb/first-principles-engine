@@ -1,4 +1,4 @@
-> **STALE** — does not reflect `chapterBooks` (global, top-level) and `bookProgress` (family-scoped) collections added Apr 10, 2026.
+> **STALE** — does not reflect `chapterBooks` (global, top-level) and `bookProgress` (family-scoped) collections added Apr 10, 2026. Chapter Pool P3 (Apr 12, 2026) added real-time `bookProgress` subscription via `useBookProgress` hook and continued `chapterResponses` writes from the new `ChapterQuestionPool` component.
 
 # Firestore Audit — 2026-03-21
 
