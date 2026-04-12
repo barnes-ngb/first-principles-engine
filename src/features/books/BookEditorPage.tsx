@@ -40,11 +40,13 @@ import CloseIcon from '@mui/icons-material/Close'
 import CollectionsIcon from '@mui/icons-material/Collections'
 import Paper from '@mui/material/Paper'
 import Snackbar from '@mui/material/Snackbar'
+import { getDocs, orderBy, query } from 'firebase/firestore'
 import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
+import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { SubjectBucket } from '../../core/types/enums'
@@ -229,6 +231,30 @@ export default function BookEditorPage() {
   // Background source picker state
   const [showBgSourcePicker, setShowBgSourcePicker] = useState(false)
   const [showGalleryPicker, setShowGalleryPicker] = useState(false)
+  const [galleryStickers, setGalleryStickers] = useState<Sticker[]>([])
+  const [galleryStickersLoading, setGalleryStickersLoading] = useState(false)
+
+  // Load sticker library images when gallery picker opens
+  useEffect(() => {
+    if (!showGalleryPicker || !familyId) return
+    let cancelled = false
+    const load = async () => {
+      setGalleryStickersLoading(true)
+      try {
+        const q = query(stickerLibraryCollection(familyId), orderBy('createdAt', 'desc'))
+        const snap = await getDocs(q)
+        if (!cancelled) {
+          setGalleryStickers(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
+        }
+      } catch {
+        // Best effort — gallery still shows book backgrounds
+      } finally {
+        if (!cancelled) setGalleryStickersLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [showGalleryPicker, familyId])
 
   // Deselect signal — increment to tell PageEditor to deselect all images
   const [deselectSignal, setDeselectSignal] = useState(0)
@@ -1562,7 +1588,7 @@ export default function BookEditorPage() {
                 borderColor: 'divider',
                 cursor: 'pointer',
                 '&:hover': { bgcolor: 'action.hover', borderColor: 'primary.main' },
-                ...(!bookBackgrounds.length ? { opacity: 0.4, pointerEvents: 'none' } : {}),
+                // Always enabled — gallery shows book backgrounds + sticker library
               }}
             >
               <CollectionsIcon sx={{ fontSize: 32, color: 'success.main', mb: 0.5 }} />
@@ -1589,7 +1615,7 @@ export default function BookEditorPage() {
       >
         <DialogTitle>Pick a background</DialogTitle>
         <DialogContent>
-          {bookBackgrounds.length > 0 ? (
+          {bookBackgrounds.length > 0 && (
             <>
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
                 From this book
@@ -1611,7 +1637,39 @@ export default function BookEditorPage() {
                 ))}
               </ImageList>
             </>
-          ) : (
+          )}
+
+          {/* Sticker library section */}
+          {galleryStickersLoading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={24} />
+            </Stack>
+          ) : galleryStickers.length > 0 ? (
+            <>
+              {bookBackgrounds.length > 0 && <Divider sx={{ my: 2 }} />}
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                From your gallery
+              </Typography>
+              <ImageList cols={3} gap={8}>
+                {galleryStickers.map((sticker) => (
+                  <ImageListItem
+                    key={sticker.id}
+                    onClick={() => handleSelectGalleryBackground(sticker.url)}
+                    sx={{ cursor: 'pointer', borderRadius: 1, overflow: 'hidden' }}
+                  >
+                    <img
+                      src={sticker.url}
+                      alt={sticker.label ?? 'Sticker'}
+                      loading="lazy"
+                      style={{ borderRadius: 8, objectFit: 'cover', height: 100, width: '100%' }}
+                    />
+                  </ImageListItem>
+                ))}
+              </ImageList>
+            </>
+          ) : null}
+
+          {bookBackgrounds.length === 0 && galleryStickers.length === 0 && !galleryStickersLoading && (
             <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
               No backgrounds yet — add some scenes to your book first!
             </Typography>
