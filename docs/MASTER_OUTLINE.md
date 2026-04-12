@@ -1,7 +1,7 @@
 # Barnes Family Homeschool — Master Project Outline v15
 
-**Version:** v15 — April 7, 2026  
-**Status:** Updated since v14 — Hero Hub reframe, two-currency economy hardening, and Stonebridge narrative foundation.
+**Version:** v15 — April 12, 2026  
+**Status:** Updated since v14 — Hero Hub reframe, two-currency economy hardening, Stonebridge narrative foundation, armor progression gating, capture pipeline unification, working levels, chapter book pool, and Lincoln Acceleration Sprint 1 (UFLI Foundations).
 
 ## Project Summary
 Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builder), Lincoln (10, neurodivergent, speech challenges), London (6, drawing/story-first).
@@ -26,9 +26,9 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 **Tech:** React + TypeScript + Vite, Firebase (Auth/Firestore/Storage/Functions/Hosting), MUI, Claude + OpenAI image stack.
 
 **Scale (current):**
-- TypeScript lines: **120,662** total (`src/` 108,370 + `functions/src/` 12,292)
-- Commits: **1,429**
-- Tests: **59 test files**, **1,004 test cases**
+- TypeScript lines: **124,045** total (`src/` 111,106 + `functions/src/` 12,939)
+- Commits: **~1,541**
+- Tests: **52 test files**
 - Firestore collections: **34** (32 family-scoped + 2 global)
 - Cloud Functions: **18**
 - Chat task types: **14**
@@ -92,6 +92,16 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 - `diamondBalance` cache/read-path work added for responsive UI.
 - Lincoln backfill applied to restore fair early-progress economics.
 
+### Armor Progression Gating
+- **Loose gate** — next-tier pieces visible but locked with clear reason text (aspirational, not hidden).
+- **Dual requirement** — both XP threshold AND prior tier fully forged needed to unlock next tier.
+- **`forgedPieces[]`** field on AvatarProfile (distinct from `equippedPieces`).
+- **Migration backfill** — infers forged pieces from current equipped state + ledger history.
+- **`armorGate.ts`** with `isTierComplete()`, `canForgePiece()`, `getHighestCompletedTier()`.
+- **Milestone rewards** — diamond bonuses on tier completion: Wood 20, Stone 30, Iron 50, Gold 75, Diamond 120, Netherite 200.
+- **Daily Suit Up** — based on OWNED pieces, not all 6 total (can't equip what you haven't forged).
+- **Phantom piece fix** — gate counts from active forge tier down, ignoring stale data in higher tiers.
+
 ### Stonebridge Narrative Foundation
 - Canonical narrative bible documented at `docs/STONEBRIDGE_BIBLE.md`.
 - Shared world model with recurring places/characters (designed for continuity over novelty).
@@ -146,11 +156,23 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 
 | Sprint | Date | Outcome |
 |---|---|---|
-| Character Proportions + Mobile Polish | Apr 2026 | Family-tuned proportions, edge outlines, mobile sizing improvements |
-| Armor Visual Fixes | Apr 2026 | Open-face helmet, shield positioning correction, ghost armor removal |
-| Economy Audit + Fixes | Apr 2026 | Two-part audit, gateway hardening, admin adjustment fixes, backfill policy |
-| Legends Visual Overhaul | Apr 2026 | Lighting/material pass, particles, gradient sky, pedestal scene polish |
-| Hero Hub Phase 1 | Apr 2026 | My Armor → Hero Hub, mission card, Stonebridge preview card |
+| Phase 2-3 Polish | Apr 2026 | XP toasts, tier-up ceremony, armor detail, scene polish, London avatar with younger proportions |
+| Parent XP Mgmt | Apr 2026 | XP dashboard, award/adjust UI with presets |
+| Legends Overhaul | Apr 2026 | Lighting, materials, gradient sky, particles, pedestal, dye/enchant glow/cape/emblem |
+| Proportions Playground | Apr 2026 | In-chat slider tuner, Lincoln designed his own character, family-approved values applied |
+| Edge Outlines + Mobile Fix | Apr 2026 | EdgesGeometry on all blocks, accessories grid overflow fixes, pose button truncation |
+| Ghost Armor Removed | Apr 2026 | Binary on/off visibility only |
+| Shield/Helmet Fix | Apr 2026 | Open-face helmet (5 pieces), shield positioned in front of body |
+| Dream Features | Apr 2026 | Accessories (10 items), screenshot/share, Minecraft skin export, seasonal themes |
+| Economy Audit | Apr 2026 | 2-part read-only audit, 7 bugs identified, pacing math, fix plan |
+| Economy P0 Fixes | Apr 2026 | Consolidated voxel tier system, addXpEvent for admin, valid XP_EVENTS keys, transactional spendDiamonds, WOOD default tier |
+| Economy P1 Fixes | Apr 2026 | WEEKLY_ALL_COMPLETE wired, BOOK_PAGE_READ wired, diamonds on evals, chapter response earning, conundrum dedup split |
+| Economy P2 Cleanup | Apr 2026 | Cached balance used everywhere, forge helpers extracted to shared util |
+| Diamond Gateway | Apr 2026 | addDiamondEvent(), DIAMOND_EVENTS constants, parent admin UI, spendDiamonds uses gateway |
+| Phase 1A Stonebridge | Apr 2026 | Story bible, AI prompt injection for conundrum + chapter questions |
+| Phase 1B Hero Hub | Apr 2026 | Nav rename, mission card, Stonebridge preview, above/below-fold layout |
+| Armor Progression Gate | Apr 2026 | forgedPieces tracking, isTierComplete, canForgePiece, milestone bonuses, loose gate UI |
+| Suit Up Bug Hunt | Apr 2026 | Tier display fixed (compute from XP), suit up counts owned pieces, phantom tier data bug fixed |
 | Crash Cascade Stabilization | Apr 7, 2026 | Quest graceful error paths, `/quest` error boundary, AvatarThumbnail WebGL safety |
 | Unified Capture Pipeline | Apr 8, 2026 | Merged 3 Today capture entry points into 1 AI-routed handler. Worksheets/textbooks/tests → scans + curriculum update; everything else → artifacts. Fixes "Last updated" staleness on Progress. |
 | Scan Analysis + Parent Override | Apr 9, 2026 | Post-capture scan analysis visible inline on Today (expandable panel on "Captured ✓"). Progress Recent scans now tap-to-expand. New "This Week's Scans" section on Progress — 7-day rolling list. Parent override on AI recommendations — Shelly can correct classifications, originals preserved for audit. Shared ScanAnalysisPanel component. |
@@ -165,6 +187,7 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 - Legacy tier model (consolidated around voxel tier thresholds).
 - “Forge” as separate currency (re-merged into Diamonds economy).
 - `parent_adjustment` event type (replaced by `MANUAL_AWARD` / `MANUAL_DEDUCT`).
+- Hardcoded `/6` denominators in suit up UI (now uses actual forgedCount).
 
 ## Key Design Decisions
 1. **Two currencies, distinct roles** — XP = progression, Diamonds = choice.
@@ -175,6 +198,9 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 6. **Family-tuned proportions** — design with the child in a live playground, not by guesswork.
 7. **Edge outlines for readability** — biggest visual clarity gain per implementation cost.
 8. **Open-face helmet** — identity and recognition beat full visual coverage.
+9. **Loose tier gate** — next tier visible but locked with clear requirement, aspirational not hidden.
+10. **Daily Suit Up = equip all OWNED pieces** — not all 6 total. Can't equip what you haven't forged.
+11. **Gateway functions for currency** — `addXpEvent()` and `addDiamondEvent()` are the ONLY paths. All direct Firestore writes to balances are bugs.
 
 ---
 
@@ -183,10 +209,10 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 ### Top 5 Largest Files (Current)
 | File | Lines | Status |
 |---|---:|---|
-| `src/features/planner-chat/PlannerChatPage.tsx` | 2,257 | Still primary planner shell/state center |
-| `src/features/books/BookEditorPage.tsx` | 1,886 | Stable high-complexity editor |
-| `src/features/quest/useQuestSession.ts` | 1,758 | Largest hook; future split candidate |
-| `src/features/avatar/MyAvatarPage.tsx` | 1,666 | Grew with Hero Hub layout + mission surfaces |
+| `src/features/planner-chat/PlannerChatPage.tsx` | 2,249 | Still primary planner shell/state center |
+| `src/features/books/BookEditorPage.tsx` | 1,907 | Stable high-complexity editor |
+| `src/features/quest/useQuestSession.ts` | 1,763 | Largest hook; future split candidate |
+| `src/features/avatar/MyAvatarPage.tsx` | 1,703 | Grew with Hero Hub layout + mission surfaces |
 | `src/features/shelly-chat/ShellyChatPage.tsx` | 1,653 | Stable, still large |
 
 ### Decomposition Status
@@ -210,8 +236,9 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 | `src/features/avatar/StonebridgePreviewCard.tsx` | Stonebridge narrative preview surface |
 | `src/features/avatar/BrothersVoxelScene.tsx` | Side-by-side brothers scene |
 | `src/features/avatar/AccessoriesPanel.tsx` | Accessories system UI + slot conflicts |
+| `src/features/avatar/armorGate.ts` | Forge tier gate logic + phantom piece fix |
 | `functions/src/ai/tasks/index.ts` | Chat task registry (14 task types) |
 
 ---
 
-Last updated: April 7, 2026
+Last updated: April 12, 2026
