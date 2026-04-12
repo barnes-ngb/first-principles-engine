@@ -235,16 +235,6 @@ export default function PlannerChatPage() {
     if (weekPlan && currentDraft) return 'review'
     return 'setup'
   }, [weekPlan, currentDraft, applied])
-  const chapterQuestionsByDay = useMemo(() => {
-    if (!currentDraft) return []
-    return currentDraft.days
-      .filter((day) => day.chapterQuestion)
-      .map((day) => ({
-        day: day.day,
-        chapterQuestion: day.chapterQuestion!,
-      }))
-  }, [currentDraft])
-
   // Confirmation dialog state
   const [confirmNewPlan, setConfirmNewPlan] = useState(false)
 
@@ -1411,31 +1401,7 @@ Return as JSON:
           taskType: TaskType.Plan,
           messages: [{ role: 'user', content: fullPrompt }],
         })
-        // TODO(chapter-pool-p2): remove after Monday corruption diagnosed
-        // TEMP DIAGNOSTIC — persist raw AI response for Monday plan fragment investigation
-        try {
-          if (response?.message) {
-            await setDoc(
-              doc(db, 'families', familyId, 'diagnostics', `plan_${Date.now()}`),
-              {
-                rawResponse: response.message.substring(0, 20000),
-                childId: activeChildId,
-                createdAt: new Date().toISOString(),
-                weekKey: weekRange.start,
-                note: 'Monday corruption diagnostic — safe to delete',
-              }
-            )
-          }
-        } catch (err) {
-          console.warn('Diagnostic logging failed:', err)
-        }
-        // TEMP DIAGNOSTIC end
         const rawAiDraft = response ? parseAIResponse(response) : null
-        // TEMP DIAGNOSTIC — log Monday parsed items
-        if (rawAiDraft?.days?.[0]) {
-          console.log('[DIAG] Monday parsed items:', JSON.stringify(rawAiDraft.days[0].items, null, 2))
-        }
-        // TEMP DIAGNOSTIC end
         const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
         if (aiDraft) {
           draft = ensureEvaluationItems(aiDraft)
@@ -2034,7 +2000,7 @@ Generate a plan for Monday through Friday.`.trim()
         ))
         return { ...day, items: focusItems }
       })
-      .filter((day) => day.items.length > 0 || day.chapterQuestion)
+      .filter((day) => day.items.length > 0)
 
     if (printableDays.length === 0) {
       setSnack({
@@ -2046,14 +2012,6 @@ Generate a plan for Monday through Friday.`.trim()
 
     const childName = activeChild?.name ?? 'Student'
     const dayPrompts = printableDays.map((day) => {
-      const chapterPrompt = day.chapterQuestion
-        ? `\nAdd a dedicated chapter-discussion page for ${day.day} using:
-- Book: ${day.chapterQuestion.book}
-- Chapter: ${day.chapterQuestion.chapter}
-- Question type: ${day.chapterQuestion.questionType}
-- Question: ${day.chapterQuestion.question}
-`
-        : ''
       return `===== ${day.day} =====
 ${buildMaterialsPrompt(
   day,
@@ -2065,14 +2023,13 @@ ${buildMaterialsPrompt(
   weekPlan?.scriptureRef,
   weekPlan?.scriptureText,
 )}
-${chapterPrompt}
 `
     }).join('\n\n')
 
     const packetPrompt = `Create ONE weekly printable packet in valid HTML (single <html> document) using the day-by-day prompts below.
 
 PACKET REQUIREMENTS:
-- Focus on themed/focus work (Stonebridge theme, conundrum tie-ins, chapter questions, reflection/discussion prompts).
+- Focus on themed/focus work (Stonebridge theme, conundrum tie-ins, reflection/discussion prompts).
 - Do NOT generate routine workbook blocks or repetitive daily drill sheets.
 - Keep each day in its own section with clear ${childName}-friendly headings.
 - Include concise answer keys where appropriate.
@@ -2284,7 +2241,6 @@ ${dayPrompts}`
               draft={currentDraft}
               hoursPerDay={hoursPerDay}
               masteryReviewLine={masteryReviewLine}
-              chapterQuestionsByDay={chapterQuestionsByDay}
               readAloudBook={readAloudBook}
               onToggleItem={handleToggleItem}
               onGenerateActivity={handleGenerateActivity}

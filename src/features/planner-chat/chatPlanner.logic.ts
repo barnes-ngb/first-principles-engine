@@ -1125,19 +1125,10 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
         continue
       }
 
-      const rawChapterQ = rawDay.chapterQuestion as Record<string, unknown> | undefined
-      const chapterQuestion = rawChapterQ ? {
-        book: String(rawChapterQ.book ?? ''),
-        chapter: String(rawChapterQ.chapter ?? ''),
-        questionType: String(rawChapterQ.questionType ?? 'comprehension'),
-        question: String(rawChapterQ.question ?? ''),
-      } : undefined
-
       days.push({
         day: dayName,
         timeBudgetMinutes: typeof rawDay.timeBudgetMinutes === 'number' ? rawDay.timeBudgetMinutes : 150,
         items,
-        ...(chapterQuestion ? { chapterQuestion } : {}),
       })
     }
 

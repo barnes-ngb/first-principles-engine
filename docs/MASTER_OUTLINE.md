@@ -119,6 +119,13 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 - Kid Today: "Phonics Forge" Minecraft-themed card — shows quest label, tapping shows toast ("Shelly will open this with you").
 - Migration script for seeding lesson data (`functions/src/migrations/seedUfliLessons.ts`).
 
+### Chapter Book Progress Tracking (Chapter Pool P1-P3)
+- Chapter Question Pool card — book picker in planner generates per-chapter questions into a pool. Today renders unanswered chapters as tappable chips; picked chapters stack with audio recording per chapter. Progress persists across weeks.
+- `useBookProgress` hook — live `onSnapshot` subscription on `bookProgress/{childId}_{bookId}` doc. Provides `updateChapter` callback for atomic pool entry updates.
+- `ChapterQuestionPool` component — four render states: no book selected, loading (pool generation in flight), in-progress (chapter picker + stacked cards), complete (celebration).
+- Per-chapter audio recording uses shared `useAudioRecorder` hook. Save flow writes to Storage + `chapterResponses` + `artifacts` + `bookProgress`.
+- Legacy `ChapterQuestionCard` deleted. `DayLog.chapterQuestion` deprecated (reads only, no new writes). `DraftDayPlan.chapterQuestion` removed.
+
 ---
 
 ### Paused for Lincoln Acceleration
@@ -183,6 +190,7 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 | Lincoln Acceleration Sprint 1 | Apr 11, 2026 | UFLI Foundations data layer: 128-lesson scope & sequence JSON, UFLILesson + UFLIProgress types, per-child progress tracking, ufliLessons Firestore collection, Settings admin tab, parent Today lesson card, kid Phonics Forge card, migration script. Lincoln anchored at Lesson 62. |
 | Chapter Pool P2 | Apr 12, 2026 | Planner book picker (Autocomplete from library), readAloudBookId persistence on WeekPlan + plannerDefaults, handleApplyPlan triggers chapter question pool generation via chapterQuestions task, removed inline chapterQuestion prompt injection. (Apr 12 fix: picker now visible in review and active phases, not just setup wizard). (Apr 12 diagnostic: temp raw-response logging added for Monday plan fragment investigation). |
 | Hotfix: chapterBooks path | Apr 12, 2026 | Moved chapterBooks from invalid `curriculum/chapterBooks` path (even segment count = document ref, not collection) to top-level `chapterBooks` collection. Updated Firestore rules, seed, and all references. |
+| Chapter Pool P3 | Apr 12, 2026 | Today ChapterQuestionPool component (parent view): chapter picker + stacked question cards + per-chapter audio recording + live bookProgress updates. Deleted legacy ChapterQuestionCard. Deprecated DayLog.chapterQuestion field (reads only, no new writes). Removed P2 Monday diagnostic logging. Cleaned chapterQuestion from DraftDayPlan and AI plan schema. |
 
 ## Removed Features / Concepts
 - Ghost armor visual state (moved to binary on/off only).
