@@ -1079,6 +1079,13 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
         title = title.replace(/[",;]+$/, '').trim()
         // Strip leading quotes
         title = title.replace(/^["']+/, '').trim()
+        // Safety net: AI occasionally embeds context in titles despite prompt constraints.
+        // Truncate egregiously long titles at a word boundary so Today doesn't display garbage.
+        if (title.length > 80) {
+          const truncated = title.substring(0, 80).replace(/\s+\S*$/, '').trim()
+          console.warn(`[parseAIResponse] Title exceeded 80 chars, truncated from "${title}" to "${truncated}"`)
+          title = truncated
+        }
         if (!title) {
           console.warn(`[parseAIResponse] Day ${dayIdx} item ${itemIdx}: empty title, skipping`)
           continue
