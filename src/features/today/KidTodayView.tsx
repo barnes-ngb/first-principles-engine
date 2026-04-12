@@ -34,7 +34,7 @@ import { addXpEvent } from '../../core/xp/addXpEvent'
 import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
 import { useAvatarProfile } from '../avatar/useAvatarProfile'
-import { getArmorGateStatusFromSession } from '../avatar/armorGate'
+import { getDailyArmorStatusFromSession } from '../avatar/armorStatus'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../avatar/voxel/buildArmorPiece'
 import { calculateTier } from '../avatar/voxel/tierMaterials'
 import ArmorGateScreen from '../avatar/ArmorGateScreen'
@@ -458,13 +458,13 @@ export default function KidTodayView({
     return unsub
   }, [familyId, child.id, today])
 
-  // ── Armor Gate: use today's daily session (not stale profile state) ──
-  const armorGateStatus = avatarProfile
-    ? getArmorGateStatusFromSession(avatarProfile, dailyArmorSession)
+  // ── Armor Gate: use unified status (not stale profile state) ──
+  const armorStatus = avatarProfile
+    ? getDailyArmorStatusFromSession(avatarProfile, dailyArmorSession)
     : null
-  const armorReady = armorGateStatus?.complete ?? false
-  const showArmorGateBlocker = Boolean(armorGateStatus?.hasForgedPieces && !armorReady)
-  const showArmorPrompt = Boolean(armorGateStatus && !armorGateStatus.hasForgedPieces)
+  const armorReady = armorStatus?.isSuitedUp ?? false
+  const showArmorGateBlocker = Boolean(armorStatus?.hasForgedPieces && !armorReady)
+  const showArmorPrompt = Boolean(armorStatus && !armorStatus.hasForgedPieces)
   const equippedTodayVoxel = useMemo(
     () => getAppliedVoxelPieces(dailyArmorSession?.appliedPieces ?? []),
     [dailyArmorSession?.appliedPieces],
@@ -589,10 +589,16 @@ export default function KidTodayView({
     isLincoln && !dayLog.teachBackDone && (totalCompleted >= 3 || hasEngagementFeedback)
 
   // ── Armor Gate early return (after all hooks) ──
-  if (avatarProfile && showArmorGateBlocker && armorGateStatus) {
+  if (avatarProfile && showArmorGateBlocker && armorStatus) {
     return (
       <ArmorGateScreen
-        gateStatus={armorGateStatus}
+        gateStatus={{
+          complete: armorStatus.isSuitedUp,
+          equipped: armorStatus.equippedCount,
+          total: armorStatus.gateTotal,
+          missing: armorStatus.missing,
+          hasForgedPieces: armorStatus.hasForgedPieces,
+        }}
         avatarProfile={avatarProfile}
         childName={child.name}
         equippedToday={equippedTodayVoxel}
