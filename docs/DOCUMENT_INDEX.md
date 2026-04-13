@@ -29,6 +29,7 @@
 | `SCRIPT_CONVENTIONS.md` | **CURRENT** | Cross-platform npm script conventions (cross-env, path separators, admin scripts) |
 | `KNOWLEDGE_MINE_AUDIT_2026-04.md` | **NEW** | Knowledge Mine audit (Part 1/4): quest type inventory, level system analysis, Level 7 mystery resolution, difficulty progression, Lincoln constraint compliance |
 | `KNOWLEDGE_MINE_CRASH_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Crash investigation: session ejection + precision TypeError + resume card failure after Level 6→7 promotion in comprehension quest. Root cause chain identified, 4 fixes landed (try/catch, WebGL safety, forceContextLoss, errorElement). |
+| `FINDINGS_PIPELINE.md` | **CURRENT** | End-to-end trace of EvaluationFinding data flow |
 | `CAPTURE_PIPELINE_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Today page capture pipeline: 3 fragmented entry points (camera icon, pre-completion scan, post-completion scan) competing for same visibility gate. Unified into single AI-routed handler. Worksheets→scans, everything else→artifacts. |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `archive/01–07_*.md` | ARCHIVED | Phase 1–5 specs, original testing plan, Saturday lab runbook — all superseded by current docs |
