@@ -32,7 +32,16 @@ import {
 import AccountSection from './AccountSection'
 import AIUsagePanel from './AIUsagePanel'
 import AvatarAdminTab from './AvatarAdminTab'
+import DevAdminTab from './DevAdminTab'
 import StickerLibraryTab from './StickerLibraryTab'
+
+/**
+ * Nathan's Firebase Auth UID. The "Dev" admin tab in Settings is only
+ * rendered when the authenticated user matches this UID. This is a
+ * lightweight feature-gate that works on the production site without
+ * any infrastructure changes.
+ */
+const ADMIN_UID = 'rqQMDnF3ltTlUzdj6oNTcYlL1br2'
 
 type SnackbarState = {
   open: boolean
@@ -60,6 +69,7 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState(0)
 
   const isParent = profile === UserProfile.Parents
+  const isAdmin = familyId === ADMIN_UID
 
   const handleSeedDemoData = async () => {
     try {
@@ -106,6 +116,7 @@ export default function SettingsPage() {
             <Tab label="General" />
             <Tab label="Avatar & XP" />
             <Tab label="Sticker Library" />
+            {isAdmin && <Tab label="Dev" />}
           </Tabs>
         )}
 
@@ -183,6 +194,9 @@ export default function SettingsPage() {
 
         {/* ── Sticker Library tab (parent only) ───────────────── */}
         {isParent && activeTab === 2 && <StickerLibraryTab />}
+
+        {/* ── Dev admin tab (admin UID only) ──────────────────── */}
+        {isAdmin && activeTab === 3 && <DevAdminTab />}
       </SectionCard>
 
       <AIUsagePanel />
