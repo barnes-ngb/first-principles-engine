@@ -1058,30 +1058,7 @@ Return as JSON:
         })
       }
 
-      // TEMP DIAGNOSTIC — TODO(chapter-pool): remove after Monday corruption verified fixed for 3+ consecutive plan generations
-      try {
-        if (response?.message) {
-          await setDoc(
-            doc(db, 'families', familyId, 'diagnostics', `plan_${Date.now()}`),
-            {
-              rawResponse: response.message.substring(0, 20000),
-              childId: activeChildId,
-              createdAt: new Date().toISOString(),
-              weekKey: weekRange.start,
-              note: 'Monday corruption diagnostic (generatePlan path) — safe to delete',
-            }
-          )
-        }
-      } catch (err) {
-        console.warn('Diagnostic logging failed:', err)
-      }
-      // END TEMP DIAGNOSTIC
       const rawAiDraft = response ? parseAIResponse(response) : null
-      // TEMP DIAGNOSTIC
-      if (rawAiDraft?.days?.[0]) {
-        console.log('[DIAG] Monday parsed items (generatePlan):', JSON.stringify(rawAiDraft.days[0].items, null, 2))
-      }
-      // END TEMP DIAGNOSTIC
       const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
       if (aiDraft) {
         draft = ensureEvaluationItems(aiDraft)
@@ -1192,31 +1169,8 @@ Return as JSON:
         messages: aiMessages,
       })
 
-      // TEMP DIAGNOSTIC — TODO(chapter-pool): remove after Monday corruption verified fixed for 3+ consecutive plan generations
-      try {
-        if (response?.message) {
-          await setDoc(
-            doc(db, 'families', familyId, 'diagnostics', `plan_${Date.now()}`),
-            {
-              rawResponse: response.message.substring(0, 20000),
-              childId: activeChildId,
-              createdAt: new Date().toISOString(),
-              weekKey: weekRange.start,
-              note: 'Monday corruption diagnostic (adjustment path) — safe to delete',
-            }
-          )
-        }
-      } catch (err) {
-        console.warn('Diagnostic logging failed:', err)
-      }
-      // END TEMP DIAGNOSTIC
       // Try to parse as structured DraftWeeklyPlan JSON
       const rawAiDraft = response ? parseAIResponse(response) : null
-      // TEMP DIAGNOSTIC
-      if (rawAiDraft?.days?.[0]) {
-        console.log('[DIAG] Monday parsed items (adjustment):', JSON.stringify(rawAiDraft.days[0].items, null, 2))
-      }
-      // END TEMP DIAGNOSTIC
       const aiDraft = rawAiDraft ? ensureEvaluationItems(rawAiDraft) : null
       let assistantMsg: ChatMessage
       if (aiDraft) {
@@ -1447,30 +1401,7 @@ Return as JSON:
           taskType: TaskType.Plan,
           messages: [{ role: 'user', content: fullPrompt }],
         })
-        // TEMP DIAGNOSTIC — TODO(chapter-pool): remove after Monday corruption verified fixed for 3+ consecutive plan generations
-        try {
-          if (response?.message) {
-            await setDoc(
-              doc(db, 'families', familyId, 'diagnostics', `plan_${Date.now()}`),
-              {
-                rawResponse: response.message.substring(0, 20000),
-                childId: activeChildId,
-                createdAt: new Date().toISOString(),
-                weekKey: weekRange.start,
-                note: 'Monday corruption diagnostic — safe to delete',
-              }
-            )
-          }
-        } catch (err) {
-          console.warn('Diagnostic logging failed:', err)
-        }
-        // END TEMP DIAGNOSTIC
         const rawAiDraft = response ? parseAIResponse(response) : null
-        // TEMP DIAGNOSTIC
-        if (rawAiDraft?.days?.[0]) {
-          console.log('[DIAG] Monday parsed items:', JSON.stringify(rawAiDraft.days[0].items, null, 2))
-        }
-        // END TEMP DIAGNOSTIC
         const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
         if (aiDraft) {
           draft = ensureEvaluationItems(aiDraft)

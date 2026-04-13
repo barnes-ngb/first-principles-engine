@@ -612,7 +612,7 @@ export default function TodayPage() {
 
   // Kid profile early return — render dedicated kid view
   if (isKidProfile && dayLog && activeChild) {
-    const weekRange = getWeekRange(parseDateYmd(today) ?? new Date())
+    const weekRange = getWeekRange(parseDateYmd(today) ?? new Date(), 1)
     return (
       <KidTodayView
         dayLog={dayLog}
