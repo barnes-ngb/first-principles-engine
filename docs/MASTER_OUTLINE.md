@@ -217,6 +217,9 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 - **Reimagine placement clarity**: Dialog splits "Add to page" into "Replace background" (full-page) vs "Add as sticker" (movable/resizable).
 - **Auto-save to gallery**: Every reimagine result auto-saves to sticker gallery on completion, regardless of placement choice.
 
+### Known Technical Debt
+- **AvatarThumbnail WebGL instances** — Console warns "many active instances — consider static mode." The `forceContextLoss()` fix from the Crash Cascade sprint resolved the hard crash, but multiple active `WebGLRenderer` instances still get created when several thumbnails mount. Long-term fix: render thumbnails as static pre-captured images or share a single offscreen renderer. Low urgency while instance count stays below browser limits.
+
 ---
 
 ## Key Files Reference
