@@ -27,9 +27,18 @@ import {
   updateDoc,
 } from 'firebase/firestore'
 
+import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { db } from '../../core/firebase/firestore'
+import {
+  bookProgressCollection,
+  bookProgressDocId,
+  chapterBooksCollection,
+  db,
+} from '../../core/firebase/firestore'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
+import type { BookProgress, ChapterBook, ChapterQuestionPoolItem } from '../../core/types'
 import { SEED_CHAPTER_BOOKS } from '../../core/data/chapterBooks'
+import { todayKey } from '../../core/utils/dateKey'
 import { getWeekRange } from '../../core/utils/time'
 import { parseDateYmd } from '../../core/utils/format'
 
@@ -46,8 +55,12 @@ type StatusMsg = {
 }
 
 export default function DevAdminTab() {
-  // ── Section A: Chapter Book Library ──────────────────────────────
+  // ── Shared hooks ───────────────────────────────────────────────────
   const familyId = useFamilyId()
+  const { activeChild, activeChildId: selectedChildId } = useActiveChild()
+  const { chat: aiChat } = useAI()
+
+  // ── Section A: Chapter Book Library ──────────────────────────────
   const [bookCount, setBookCount] = useState<number | null>(null)
   const [narniaExists, setNarniaExists] = useState<boolean | null>(null)
   const [loadingBooks, setLoadingBooks] = useState(false)
@@ -231,6 +244,151 @@ export default function DevAdminTab() {
     }
   }
 
+  // ── Section D: Generate Chapter Questions ────────────────────────
+  const [poolStatus, setPoolStatus] = useState<StatusMsg | null>(null)
+  const [generatingPool, setGeneratingPool] = useState(false)
+  const [poolInfo, setPoolInfo] = useState<{
+    bookId: string
+    bookTitle: string
+    totalChapters: number
+    poolCount: number
+    loaded: boolean
+  } | null>(null)
+
+  useEffect(() => {
+    if (!weekInfo?.readAloudBookId || !selectedChildId || !familyId) {
+      setPoolInfo(null)
+      return
+    }
+    const bookId = weekInfo.readAloudBookId
+    const check = async () => {
+      try {
+        const bookSnap = await getDoc(doc(chapterBooksCollection(), bookId))
+        const book = bookSnap.exists() ? (bookSnap.data() as ChapterBook) : null
+        if (!book) { setPoolInfo(null); return }
+
+        const progressId = bookProgressDocId(selectedChildId, bookId)
+        const progressSnap = await getDoc(doc(bookProgressCollection(familyId), progressId))
+        const progress = progressSnap.exists() ? (progressSnap.data() as BookProgress) : null
+
+        setPoolInfo({
+          bookId,
+          bookTitle: book.title ?? bookId,
+          totalChapters: book.totalChapters ?? book.chapters?.length ?? 0,
+          poolCount: progress?.questionPool?.length ?? 0,
+          loaded: true,
+        })
+      } catch (err) {
+        console.error('Failed to check pool info', err)
+        setPoolInfo(null)
+      }
+    }
+    void check()
+  }, [weekInfo?.readAloudBookId, selectedChildId, familyId])
+
+  const handleGenerateChapterQuestions = async () => {
+    if (!weekInfo?.readAloudBookId || !selectedChildId || !familyId) return
+    setGeneratingPool(true)
+    setPoolStatus(null)
+    try {
+      const bookId = weekInfo.readAloudBookId
+      const bookSnap = await getDoc(doc(chapterBooksCollection(), bookId))
+      const book = bookSnap.exists() ? ({ ...bookSnap.data(), id: bookSnap.id } as ChapterBook) : null
+      if (!book) {
+        setPoolStatus({ severity: 'error', text: `Book ${bookId} not found in library.` })
+        setGeneratingPool(false)
+        return
+      }
+
+      const progressId = bookProgressDocId(selectedChildId, bookId)
+      const progressRef = doc(bookProgressCollection(familyId), progressId)
+      const progressSnap = await getDoc(progressRef)
+      const existing = progressSnap.exists() ? (progressSnap.data() as BookProgress) : null
+
+      const existingChapters = existing?.questionPool?.map((q) => q.chapter) ?? []
+      const missingChapters = book.chapters?.filter(
+        (c) => !existingChapters.includes(c.number),
+      ) ?? []
+
+      if (missingChapters.length === 0) {
+        setPoolStatus({ severity: 'info', text: 'All chapters already have questions.' })
+        setGeneratingPool(false)
+        return
+      }
+
+      const result = await aiChat({
+        familyId,
+        childId: selectedChildId,
+        taskType: TaskType.ChapterQuestions,
+        messages: [{
+          role: 'user',
+          content: JSON.stringify({
+            bookTitle: book.title,
+            author: book.author,
+            chapters: missingChapters,
+            childName: activeChild?.name,
+          }),
+        }],
+      })
+
+      if (!result?.message) {
+        setPoolStatus({ severity: 'error', text: 'AI returned empty response.' })
+        setGeneratingPool(false)
+        return
+      }
+
+      let questions: Array<{ chapter: number; questionType: string; question: string }> = []
+      try {
+        const parsed = JSON.parse(result.message) as unknown
+        questions = Array.isArray(parsed) ? parsed as typeof questions : []
+      } catch {
+        setPoolStatus({ severity: 'error', text: 'Failed to parse AI response.' })
+        setGeneratingPool(false)
+        return
+      }
+
+      const newPoolItems: ChapterQuestionPoolItem[] = questions.map((q) => ({
+        chapter: q.chapter,
+        chapterTitle: book.chapters?.find((c) => c.number === q.chapter)?.title,
+        questionType: q.questionType as ChapterQuestionPoolItem['questionType'],
+        question: q.question,
+        answered: false,
+      }))
+
+      if (existing) {
+        await updateDoc(progressRef, {
+          questionPool: [...existing.questionPool, ...newPoolItems],
+          updatedAt: new Date().toISOString(),
+        })
+      } else {
+        const newProgress: BookProgress = {
+          bookId: book.id,
+          childId: selectedChildId,
+          bookTitle: book.title,
+          author: book.author,
+          totalChapters: book.totalChapters,
+          questionPool: newPoolItems,
+          startedAt: todayKey(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+        await setDoc(progressRef, newProgress)
+      }
+
+      setPoolStatus({ severity: 'success', text: `Generated ${newPoolItems.length} chapter questions!` })
+      // Refresh pool info
+      setPoolInfo((prev) => prev ? { ...prev, poolCount: (prev.poolCount ?? 0) + newPoolItems.length } : prev)
+    } catch (err) {
+      console.error('Failed to generate chapter questions', err)
+      setPoolStatus({ severity: 'error', text: `Failed: ${err}` })
+    } finally {
+      setGeneratingPool(false)
+    }
+  }
+
+  const showGenButton = poolInfo?.loaded && weekInfo?.readAloudBookId &&
+    (poolInfo.poolCount === 0 || poolInfo.poolCount < poolInfo.totalChapters)
+
   return (
     <Stack spacing={4}>
       {/* ── Section A: Chapter Book Library ─────────────────────── */}
@@ -396,6 +554,63 @@ export default function DevAdminTab() {
           </Stack>
         ) : (
           <CircularProgress size={24} />
+        )}
+      </Box>
+
+      <Divider />
+
+      {/* ── Section D: Generate Chapter Questions ─────────────── */}
+      <Box>
+        <Typography variant="h6" gutterBottom>
+          Generate Chapter Questions
+        </Typography>
+        {poolInfo?.loaded ? (
+          <Stack spacing={1}>
+            <Typography variant="body2" color="text.secondary">
+              Book: <strong>{poolInfo.bookTitle}</strong>
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Pool: <strong>{poolInfo.poolCount}</strong> / {poolInfo.totalChapters} chapters
+            </Typography>
+            {selectedChildId && (
+              <Typography variant="body2" color="text.secondary">
+                Child: <strong>{activeChild?.name ?? selectedChildId}</strong>
+              </Typography>
+            )}
+            {showGenButton && (
+              <Button
+                variant="contained"
+                onClick={() => void handleGenerateChapterQuestions()}
+                disabled={generatingPool}
+                sx={{ mt: 1, minHeight: 48, alignSelf: 'flex-start' }}
+              >
+                {generatingPool ? (
+                  <CircularProgress size={20} />
+                ) : (
+                  'Generate Chapter Questions Now'
+                )}
+              </Button>
+            )}
+            {poolInfo.poolCount > 0 && poolInfo.poolCount >= poolInfo.totalChapters && (
+              <Chip
+                label="All chapters have questions"
+                color="success"
+                size="small"
+                sx={{ alignSelf: 'flex-start' }}
+              />
+            )}
+            {poolStatus && (
+              <Alert severity={poolStatus.severity} sx={{ mt: 1 }}>
+                {poolStatus.text}
+              </Alert>
+            )}
+          </Stack>
+        ) : weekInfo?.readAloudBookId ? (
+          <CircularProgress size={24} />
+        ) : (
+          <Typography variant="body2" color="text.secondary">
+            No read-aloud book set for this week.
+          </Typography>
         )}
       </Box>
     </Stack>

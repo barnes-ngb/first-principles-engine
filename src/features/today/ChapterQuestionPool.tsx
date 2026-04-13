@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -39,6 +39,7 @@ interface ChapterQuestionPoolProps {
   ) => Promise<void>
   dayLog?: DayLog | null
   persistDayLogImmediate?: (updated: DayLog) => void
+  onRetryGeneration?: () => void
 }
 
 export default function ChapterQuestionPool({
@@ -48,6 +49,7 @@ export default function ChapterQuestionPool({
   onChapterAnswered,
   dayLog,
   persistDayLogImmediate,
+  onRetryGeneration,
 }: ChapterQuestionPoolProps) {
   const [selectedChapters, setSelectedChapters] = useState<Set<number>>(
     new Set(),
@@ -79,6 +81,20 @@ export default function ChapterQuestionPool({
     }
   }
 
+  // Track how long the loading state has been visible
+  const [showRetry, setShowRetry] = useState(false)
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isLoading = book && (bookProgressLoading || !bookProgress)
+
+  useEffect(() => {
+    if (!isLoading) return
+    loadingTimerRef.current = setTimeout(() => setShowRetry(true), 60_000)
+    return () => {
+      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
+      setShowRetry(false)
+    }
+  }, [isLoading])
+
   // No book selected — render nothing
   if (!book) return null
 
@@ -91,6 +107,15 @@ export default function ChapterQuestionPool({
           <Typography variant="body2" color="text.secondary">
             Preparing chapter questions...
           </Typography>
+          {showRetry && onRetryGeneration && (
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => { setShowRetry(false); onRetryGeneration() }}
+            >
+              Retry generation
+            </Button>
+          )}
         </Stack>
       </SectionCard>
     )

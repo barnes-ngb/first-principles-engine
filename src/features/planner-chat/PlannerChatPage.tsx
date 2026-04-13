@@ -226,7 +226,7 @@ export default function PlannerChatPage() {
   // showPhotos state removed — photo upload now lives in setup phase accordion
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [applied, setApplied] = useState(false)
-  const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' | 'warning' } | null>(null)
+  const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' | 'warning'; action?: { label: string; onClick: () => void } } | null>(null)
 
   // Week plan state (theme/virtue/scripture/heartQuestion)
   const [weekPlan, setWeekPlan] = useState<WeekPlan | null>(null)
@@ -976,10 +976,16 @@ Return as JSON:
       })
 
       const rawAiDraft = response ? parseAIResponse(response) : null
-      const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
-      if (aiDraft) {
-        draft = ensureEvaluationItems(aiDraft)
+      if (rawAiDraft) {
+        const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
+        draft = ensureEvaluationItems(fillResult.plan)
         usedAI = true
+        if (fillResult.filledDays.length > 0) {
+          setSnack({
+            text: `AI plan was incomplete — ${fillResult.filledDays.join(', ')} filled from routine. Consider regenerating.`,
+            severity: 'warning',
+          })
+        }
       } else {
         // Fallback to local logic
         draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
@@ -1059,10 +1065,16 @@ Return as JSON:
       }
 
       const rawAiDraft = response ? parseAIResponse(response) : null
-      const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
-      if (aiDraft) {
-        draft = ensureEvaluationItems(aiDraft)
+      if (rawAiDraft) {
+        const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
+        draft = ensureEvaluationItems(fillResult.plan)
         usedAI = true
+        if (fillResult.filledDays.length > 0) {
+          setSnack({
+            text: `AI plan was incomplete — ${fillResult.filledDays.join(', ')} filled from routine. Consider regenerating.`,
+            severity: 'warning',
+          })
+        }
       } else {
         draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
         if (!response) {
@@ -1098,7 +1110,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext, weekRange.start])
+  }, [photoLabels, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -1315,7 +1327,7 @@ Return as JSON:
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Applied } : {}),
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, filteredAppBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, filteredDailyRoutine, handleGeneratePlan, subjectTimeDefaults, weekRange.start])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, filteredAppBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, filteredDailyRoutine, handleGeneratePlan, subjectTimeDefaults])
 
   const buildWeekFocusContext = useCallback(() => {
     const contextParts: string[] = []
@@ -1402,10 +1414,16 @@ Return as JSON:
           messages: [{ role: 'user', content: fullPrompt }],
         })
         const rawAiDraft = response ? parseAIResponse(response) : null
-        const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay) : null
-        if (aiDraft) {
-          draft = ensureEvaluationItems(aiDraft)
+        if (rawAiDraft) {
+          const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
+          draft = ensureEvaluationItems(fillResult.plan)
           usedAI = true
+          if (fillResult.filledDays.length > 0) {
+            setSnack({
+              text: `AI plan was incomplete — ${fillResult.filledDays.join(', ')} filled from routine. Consider regenerating.`,
+              severity: 'warning',
+            })
+          }
           if (!skipFocusGeneration) {
             const themedFields = response ? parsePlanThemeFields(response.message) : null
             if (themedFields) {
@@ -1437,7 +1455,7 @@ Return as JSON:
     } finally {
       setGeneratingWeek(false)
     }
-  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef, weekRange.start])
+  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
@@ -1801,7 +1819,11 @@ Generate a plan for Monday through Friday.`.trim()
             })
 
             if (!result?.message) {
-              setSnack({ text: "Couldn't generate chapter questions \u2014 try regenerating from Plan My Week.", severity: 'warning' })
+              setSnack({
+                text: "Couldn't generate chapter questions.",
+                severity: 'warning',
+                action: { label: 'Retry', onClick: () => void generatePool() },
+              })
               return
             }
 
@@ -1810,7 +1832,11 @@ Generate a plan for Monday through Friday.`.trim()
               const parsed = JSON.parse(result.message) as unknown
               questions = Array.isArray(parsed) ? parsed as typeof questions : []
             } catch {
-              setSnack({ text: "Couldn't parse chapter questions \u2014 try regenerating from Plan My Week.", severity: 'warning' })
+              setSnack({
+                text: "Couldn't parse chapter questions.",
+                severity: 'warning',
+                action: { label: 'Retry', onClick: () => void generatePool() },
+              })
               return
             }
 
@@ -1842,7 +1868,7 @@ Generate a plan for Monday through Friday.`.trim()
               await setDoc(progressRef, newProgress)
             }
 
-            setSnack({ text: `Generated ${newPoolItems.length} chapter questions for ${selectedBook.title}!`, severity: 'success' })
+            setSnack({ text: `Chapter questions ready for ${selectedBook.title}!`, severity: 'success' })
 
             // Refresh bookProgress state
             const refreshed = await getDoc(progressRef)
@@ -1851,7 +1877,11 @@ Generate a plan for Monday through Friday.`.trim()
             }
           } catch (err) {
             console.error('Failed to generate chapter questions', err)
-            setSnack({ text: "Couldn't generate chapter questions \u2014 try regenerating from Plan My Week.", severity: 'warning' })
+            setSnack({
+              text: "Couldn't generate chapter questions.",
+              severity: 'warning',
+              action: { label: 'Retry', onClick: () => void generatePool() },
+            })
           }
         }
         void generatePool()
@@ -2386,7 +2416,7 @@ ${dayPrompts}`
 
       <Snackbar
         open={snack !== null}
-        autoHideDuration={4000}
+        autoHideDuration={snack?.action ? 10000 : 4000}
         onClose={() => setSnack(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
@@ -2395,6 +2425,11 @@ ${dayPrompts}`
           severity={snack?.severity ?? 'error'}
           variant="filled"
           sx={{ width: '100%' }}
+          action={snack?.action ? (
+            <Button color="inherit" size="small" onClick={() => { snack.action!.onClick(); setSnack(null) }}>
+              {snack.action.label}
+            </Button>
+          ) : undefined}
         >
           {snack?.text}
         </Alert>

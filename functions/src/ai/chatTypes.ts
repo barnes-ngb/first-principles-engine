@@ -45,7 +45,7 @@ export async function callClaude(opts: {
   maxTokens: number;
   systemPrompt: string;
   messages: Array<{ role: string; content: string }>;
-}): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+}): Promise<{ text: string; inputTokens: number; outputTokens: number; stopReason: string }> {
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey: opts.apiKey });
 
@@ -67,6 +67,7 @@ export async function callClaude(opts: {
     text,
     inputTokens: completion.usage.input_tokens,
     outputTokens: completion.usage.output_tokens,
+    stopReason: completion.stop_reason ?? "unknown",
   };
 }
 

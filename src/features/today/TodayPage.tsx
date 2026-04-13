@@ -27,6 +27,8 @@ import {
   onSnapshot,
   orderBy,
   query,
+  setDoc,
+  updateDoc,
   where,
 } from 'firebase/firestore'
 
@@ -42,12 +44,14 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   artifactsCollection,
+  bookProgressCollection,
+  bookProgressDocId,
   chapterBooksCollection,
   scansCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, ChapterBook, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, LadderCardDefinition, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
+import type { Artifact, BookProgress, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, LadderCardDefinition, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
 import { effectiveRecommendation, isWorksheetScan } from '../../core/types'
 import { getLaddersForChild } from '../ladders/laddersCatalog'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
@@ -59,6 +63,7 @@ import {
   SubjectBucket,
   UserProfile,
 } from '../../core/types/enums'
+import { todayKey } from '../../core/utils/dateKey'
 import { getWeekRange } from '../../core/utils/time'
 import { getTemplateForChild } from './dailyPlanTemplates'
 import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
@@ -265,6 +270,91 @@ export default function TodayPage() {
   })
 
   const { chat: aiChat } = useAI()
+
+  const handleRetryChapterGen = useCallback(async () => {
+    if (!selectedBook || !selectedChildId || !familyId) return
+    try {
+      setSnackMessage({ text: 'Generating chapter questions...', severity: 'success' })
+      const progressId = bookProgressDocId(selectedChildId, selectedBook.id)
+      const progressRef = doc(bookProgressCollection(familyId), progressId)
+      const progressSnap = await getDoc(progressRef)
+      const existing = progressSnap.exists() ? (progressSnap.data() as BookProgress) : null
+
+      const existingChapters = existing?.questionPool?.map((q) => q.chapter) ?? []
+      const missingChapters = selectedBook.chapters?.filter(
+        (c) => !existingChapters.includes(c.number),
+      ) ?? []
+
+      if (missingChapters.length === 0) {
+        setSnackMessage({ text: 'Chapter questions already generated.', severity: 'success' })
+        return
+      }
+
+      const result = await aiChat({
+        familyId,
+        childId: selectedChildId,
+        taskType: TaskType.ChapterQuestions,
+        messages: [{
+          role: 'user',
+          content: JSON.stringify({
+            bookTitle: selectedBook.title,
+            author: selectedBook.author,
+            chapters: missingChapters,
+            childName: activeChild?.name,
+            weekTheme: weekFocus?.theme,
+            weekVirtue: weekFocus?.virtue,
+          }),
+        }],
+      })
+
+      if (!result?.message) {
+        setSnackMessage({ text: "Couldn't generate chapter questions.", severity: 'error' })
+        return
+      }
+
+      let questions: Array<{ chapter: number; questionType: string; question: string }> = []
+      try {
+        const parsed = JSON.parse(result.message) as unknown
+        questions = Array.isArray(parsed) ? parsed as typeof questions : []
+      } catch {
+        setSnackMessage({ text: "Couldn't parse chapter questions.", severity: 'error' })
+        return
+      }
+
+      const newPoolItems: ChapterQuestionPoolItem[] = questions.map((q) => ({
+        chapter: q.chapter,
+        chapterTitle: selectedBook.chapters?.find((c) => c.number === q.chapter)?.title,
+        questionType: q.questionType as ChapterQuestionPoolItem['questionType'],
+        question: q.question,
+        answered: false,
+      }))
+
+      if (existing) {
+        await updateDoc(progressRef, {
+          questionPool: [...existing.questionPool, ...newPoolItems],
+          updatedAt: new Date().toISOString(),
+        })
+      } else {
+        const newProgress: BookProgress = {
+          bookId: selectedBook.id,
+          childId: selectedChildId,
+          bookTitle: selectedBook.title,
+          author: selectedBook.author,
+          totalChapters: selectedBook.totalChapters,
+          questionPool: newPoolItems,
+          startedAt: todayKey(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+        await setDoc(progressRef, newProgress)
+      }
+
+      setSnackMessage({ text: `Chapter questions ready for ${selectedBook.title}!`, severity: 'success' })
+    } catch (err) {
+      console.error('Failed to retry chapter question generation', err)
+      setSnackMessage({ text: "Couldn't generate chapter questions.", severity: 'error' })
+    }
+  }, [selectedBook, selectedChildId, familyId, activeChild, weekFocus, aiChat, setSnackMessage])
 
   // Ensure default activity configs exist (routine, formation, workbooks)
   // so the planner generates full-length plans even if the user hasn't visited Settings.
@@ -822,6 +912,7 @@ export default function TodayPage() {
           onChapterAnswered={updateChapter}
           dayLog={dayLog}
           persistDayLogImmediate={persistDayLogImmediate}
+          onRetryGeneration={() => void handleRetryChapterGen()}
         />
       </SectionErrorBoundary>
 

@@ -158,6 +158,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 | Hotfix: chapterBooks path | Apr 12, 2026 | Moved chapterBooks from invalid `curriculum/chapterBooks` path (even segment count = document ref, not collection) to top-level `chapterBooks` collection. Updated Firestore rules, seed, and all references. |
 | Chapter Pool P3 | Apr 12, 2026 | Today ChapterQuestionPool component (parent view): chapter picker + stacked question cards + per-chapter audio recording + live bookProgress updates. Deleted legacy ChapterQuestionCard. Deprecated DayLog.chapterQuestion field (reads only, no new writes). Removed P2 Monday diagnostic logging. Cleaned chapterQuestion from DraftDayPlan and AI plan schema. (Apr 13 fix: preserve readAloudBookId across plan applies, harden title prompt to prevent phonics context bleeding, parser safety net for long titles, re-added diagnostic logging). (Apr 13 fix: parent-only chip picker with multi-select + text notes (audio removed from parent); kid view gets KidChapterPool with audio recording positioned below verse card; single shared answered state; todaysSelectedChapters persisted on DayLog). (Apr 13 cleanup: ExplorerMap weekStart → Monday-based; removed temp diagnostic writes). |
 | Dev Admin Tab | Apr 13, 2026 | Mobile-friendly dev admin tab in Settings for one-off data ops: seed Narnia to chapterBooks, scan/delete stale Sunday DayLogs, set readAloudBookId on current week. Gated to Nathan's UID; delete or re-scope if the project has other developers. Firestore rules updated to allow admin UID writes to chapterBooks. |
+| Plan + Pool Reliability | Apr 13, 2026 | Increased plan AI max_tokens to 16000, surface truncation as user error instead of silent routine fallback, added pool generation success/failure toasts with retry, manual pool gen trigger in Dev admin tab and on Today chapter card after 60s loading. |
 
 ### Sprint Cleanup — April 2026
 - Deleted Sprint 1 UFLI scaffolding (9 files, dormant since creation, seed never ran)
@@ -218,7 +219,8 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 - **Auto-save to gallery**: Every reimagine result auto-saves to sticker gallery on completion, regardless of placement choice.
 
 ### Known Technical Debt
-- **AvatarThumbnail WebGL instances** — Console warns "many active instances — consider static mode." The `forceContextLoss()` fix from the Crash Cascade sprint resolved the hard crash, but multiple active `WebGLRenderer` instances still get created when several thumbnails mount. Long-term fix: render thumbnails as static pre-captured images or share a single offscreen renderer. Low urgency while instance count stays below browser limits.
+- **AvatarThumbnail WebGL instances** — Console warns "many active instances — consider static mode." The `forceContextLoss()` fix from the Crash Cascade sprint resolved the hard crash, but multiple active `WebGLRenderer` instances still get created when several thumbnails mount (N thumbnails = N renderers). Consider: single shared renderer with static snapshots, or CSS/canvas 2D fallback for thumbnails where 3D isn't needed. Not blocking but worth addressing before avatar features expand.
+- **Hardcoded admin UID** — Admin access is hardcoded to a single UID in `SettingsPage.tsx` (`ADMIN_UID` constant). Works for current single-admin use case but blocks multi-admin, role management, or admin handoff scenarios. Consider moving to a role flag on family/user document if admin access needs to change.
 
 ---
 
