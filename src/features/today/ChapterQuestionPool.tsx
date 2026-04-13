@@ -87,13 +87,11 @@ export default function ChapterQuestionPool({
   const isLoading = book && (bookProgressLoading || !bookProgress)
 
   useEffect(() => {
-    if (isLoading) {
-      loadingTimerRef.current = setTimeout(() => setShowRetry(true), 60_000)
-    } else {
-      setShowRetry(false)
-    }
+    if (!isLoading) return
+    loadingTimerRef.current = setTimeout(() => setShowRetry(true), 60_000)
     return () => {
       if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
+      setShowRetry(false)
     }
   }, [isLoading])
 
