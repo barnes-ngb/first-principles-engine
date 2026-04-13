@@ -11,22 +11,14 @@ import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { addDoc } from 'firebase/firestore'
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
 import SectionCard from '../../components/SectionCard'
-import {
-  artifactsCollection,
-  chapterResponsesCollection,
-} from '../../core/firebase/firestore'
-import { storage } from '../../core/firebase/storage'
-import { useAudioRecorder } from '../../core/hooks/useAudioRecorder'
 import type {
   BookProgress,
   ChapterBook,
   ChapterQuestionPoolItem,
+  DayLog,
 } from '../../core/types'
-import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { todayKey } from '../../core/utils/dateKey'
 
 const questionTypeEmoji: Record<string, string> = {
@@ -41,29 +33,25 @@ interface ChapterQuestionPoolProps {
   book: ChapterBook | null
   bookProgress: BookProgress | null
   bookProgressLoading: boolean
-  familyId: string
-  childId: string
-  weekFocus?: { theme?: string; virtue?: string; scriptureRef?: string } | null
   onChapterAnswered: (
     chapter: number,
     update: Partial<ChapterQuestionPoolItem>,
   ) => Promise<void>
+  dayLog?: DayLog | null
+  persistDayLogImmediate?: (updated: DayLog) => void
 }
 
 export default function ChapterQuestionPool({
   book,
   bookProgress,
   bookProgressLoading,
-  familyId,
-  childId,
-  weekFocus,
   onChapterAnswered,
+  dayLog,
+  persistDayLogImmediate,
 }: ChapterQuestionPoolProps) {
   const [selectedChapters, setSelectedChapters] = useState<Set<number>>(
     new Set(),
   )
-  const [recordingChapter, setRecordingChapter] = useState<number | null>(null)
-  const [chapterBlobs, setChapterBlobs] = useState<Record<number, Blob>>({})
   const [chapterNotes, setChapterNotes] = useState<Record<number, string>>({})
   const [savingChapter, setSavingChapter] = useState<number | null>(null)
   const [skipConfirmChapter, setSkipConfirmChapter] = useState<number | null>(
@@ -71,7 +59,25 @@ export default function ChapterQuestionPool({
   )
   const [skippingChapter, setSkippingChapter] = useState<number | null>(null)
 
-  const recorder = useAudioRecorder()
+  // Restore persisted selections from dayLog when bookProgress first arrives
+  const [prevBookProgress, setPrevBookProgress] = useState<BookProgress | null>(
+    null,
+  )
+  if (bookProgress && !prevBookProgress) {
+    setPrevBookProgress(bookProgress)
+    const persisted = dayLog?.todaysSelectedChapters
+    if (persisted && persisted.length > 0) {
+      const unansweredSet = new Set(
+        bookProgress.questionPool
+          .filter((item) => !item.answered)
+          .map((item) => item.chapter),
+      )
+      const valid = persisted.filter((ch) => unansweredSet.has(ch))
+      if (valid.length > 0) {
+        setSelectedChapters(new Set(valid))
+      }
+    }
+  }
 
   // No book selected — render nothing
   if (!book) return null
@@ -123,117 +129,52 @@ export default function ChapterQuestionPool({
       ? selectedChapters
       : new Set([unanswered[0].chapter])
 
+  const persistSelectedChapters = (chapters: Set<number>) => {
+    if (!dayLog || !persistDayLogImmediate) return
+    persistDayLogImmediate({
+      ...dayLog,
+      todaysSelectedChapters: [...chapters].sort((a, b) => a - b),
+    })
+  }
+
   const toggleChapter = (chapter: number) => {
     setSelectedChapters((prev) => {
       const next = new Set(prev)
+      // If nothing was explicitly selected yet, start from the auto-default
+      if (prev.size === 0) {
+        // Add the auto-selected one plus this toggle
+        next.add(unanswered[0].chapter)
+      }
       if (next.has(chapter)) {
         next.delete(chapter)
       } else {
         next.add(chapter)
       }
+      persistSelectedChapters(next)
       return next
     })
   }
 
-  const selectedItems = pool.filter(
-    (item) => !item.answered && effectiveSelected.has(item.chapter),
-  )
+  const selectedItems = pool
+    .filter((item) => !item.answered && effectiveSelected.has(item.chapter))
+    .sort((a, b) => a.chapter - b.chapter)
 
-  const handleStartRecording = async (chapter: number) => {
-    if (recorder.isRecording) {
-      await recorder.stopRecording()
-    }
-    recorder.clearRecording()
-    setRecordingChapter(chapter)
-    await recorder.startRecording()
-  }
-
-  const handleStopRecording = async (chapter: number) => {
-    const blob = await recorder.stopRecording()
-    if (blob) {
-      setChapterBlobs((prev) => ({ ...prev, [chapter]: blob }))
-    }
-    setRecordingChapter(null)
-  }
-
-  const handleSaveResponse = async (item: ChapterQuestionPoolItem) => {
+  const handleSaveNote = async (item: ChapterQuestionPoolItem) => {
     setSavingChapter(item.chapter)
     try {
-      let audioUrl: string | undefined
-      const blob = chapterBlobs[item.chapter]
-
-      // Upload audio if recorded
-      if (blob) {
-        const ext = blob.type.includes('mp4') ? 'mp4' : 'webm'
-        const storageRef = ref(
-          storage,
-          `families/${familyId}/chapterResponses/${childId}/${bookProgress.bookId}/ch${item.chapter}_${Date.now()}.${ext}`,
-        )
-        await uploadBytes(storageRef, blob)
-        audioUrl = await getDownloadURL(storageRef)
-      }
-
-      // Create artifact
-      const artifactRef = await addDoc(artifactsCollection(familyId), {
-        childId,
-        type: EvidenceType.Audio,
-        tags: {
-          engineStage: EngineStage.Reflect,
-          subjectBucket: SubjectBucket.Reading,
-          domain: 'reading',
-          location: 'home',
-        },
-        title: `${book.title} \u2014 Ch ${item.chapter}${item.chapterTitle ? `: ${item.chapterTitle}` : ''}`,
-        content: `Q: ${item.question}`,
-        ...(audioUrl ? { mediaUrl: audioUrl } : {}),
-        createdAt: new Date().toISOString(),
-      })
-
-      // Create ChapterResponse doc
-      const today = todayKey()
-      await addDoc(chapterResponsesCollection(familyId), {
-        childId,
-        date: today,
-        bookId: bookProgress.bookId,
-        bookTitle: book.title,
-        chapter: `Ch ${item.chapter}${item.chapterTitle ? `: ${item.chapterTitle}` : ''}`,
-        questionType: item.questionType,
-        question: item.question,
-        audioUrl: audioUrl ?? null,
-        weekTheme: weekFocus?.theme ?? '',
-        virtue: weekFocus?.virtue ?? '',
-        scripture: weekFocus?.scriptureRef ?? '',
-        createdAt: new Date().toISOString(),
-      })
-
-      // Update bookProgress pool entry
       const note = chapterNotes[item.chapter]
+      // Persist note only — do NOT mark answered (kid records audio to complete)
       await onChapterAnswered(item.chapter, {
-        answered: true,
-        answeredDate: today,
-        audioUrl,
         responseNote: note || undefined,
-        artifactId: artifactRef.id,
       })
-
-      // Clear local state for this chapter
-      setChapterBlobs((prev) => {
-        const next = { ...prev }
-        delete next[item.chapter]
-        return next
-      })
+      // Clear local note state
       setChapterNotes((prev) => {
         const next = { ...prev }
         delete next[item.chapter]
         return next
       })
-      setSelectedChapters((prev) => {
-        const next = new Set(prev)
-        next.delete(item.chapter)
-        return next
-      })
     } catch (err) {
-      console.error('Chapter response save failed:', err)
+      console.error('Chapter note save failed:', err)
     }
     setSavingChapter(null)
   }
@@ -252,6 +193,7 @@ export default function ChapterQuestionPool({
       setSelectedChapters((prev) => {
         const next = new Set(prev)
         next.delete(chapter)
+        persistSelectedChapters(next)
         return next
       })
     } catch (err) {
@@ -318,10 +260,9 @@ export default function ChapterQuestionPool({
         {/* Stacked question cards for selected chapters */}
         {selectedItems.map((item) => {
           const emoji = questionTypeEmoji[item.questionType] ?? '\u2753'
-          const hasBlob = !!chapterBlobs[item.chapter]
-          const isRecordingThis = recordingChapter === item.chapter
           const isSavingThis = savingChapter === item.chapter
           const isSkippingThis = skippingChapter === item.chapter
+          const noteValue = chapterNotes[item.chapter] ?? item.responseNote ?? ''
 
           return (
             <Box
@@ -347,71 +288,46 @@ export default function ChapterQuestionPool({
                   {item.question}
                 </Typography>
 
-                {/* Record button */}
-                <Button
-                  variant="outlined"
-                  onClick={
-                    isRecordingThis
-                      ? () => handleStopRecording(item.chapter)
-                      : () => handleStartRecording(item.chapter)
-                  }
-                  color={isRecordingThis ? 'error' : 'primary'}
-                  disabled={
-                    (recorder.isRecording && !isRecordingThis) || isSavingThis
-                  }
-                >
-                  {isRecordingThis
-                    ? '\u23F9 Stop Recording'
-                    : '\u{1F3A4} Record Your Answer'}
-                </Button>
-
-                {/* Preview + save */}
-                {(hasBlob || recorder.recordingUrl) && recordingChapter !== item.chapter && hasBlob && (
-                  <Stack spacing={1}>
-                    <audio
-                      src={URL.createObjectURL(chapterBlobs[item.chapter])}
-                      controls
-                      style={{ width: '100%' }}
-                    />
-                    <TextField
-                      label="Note (optional)"
-                      placeholder="What did you notice about the response?"
-                      size="small"
-                      multiline
-                      rows={2}
-                      value={chapterNotes[item.chapter] ?? ''}
-                      onChange={(e) =>
-                        setChapterNotes((prev) => ({
-                          ...prev,
-                          [item.chapter]: e.target.value,
-                        }))
-                      }
-                      disabled={isSavingThis}
-                    />
-                    <Button
-                      variant="contained"
-                      color="success"
-                      onClick={() => handleSaveResponse(item)}
-                      disabled={isSavingThis}
-                    >
-                      {isSavingThis
-                        ? 'Saving...'
-                        : '\u{1F48E} Save Response'}
-                    </Button>
-                  </Stack>
-                )}
-
-                {/* Skip button */}
-                <Button
-                  variant="text"
+                {/* Shelly's note */}
+                <TextField
+                  label="Shelly's note (optional)"
+                  placeholder="What did you notice about the response?"
                   size="small"
-                  color="inherit"
-                  onClick={() => setSkipConfirmChapter(item.chapter)}
-                  disabled={isSavingThis || isSkippingThis}
-                  sx={{ alignSelf: 'flex-start', color: 'text.secondary' }}
-                >
-                  {isSkippingThis ? 'Skipping...' : 'Skip this chapter'}
-                </Button>
+                  multiline
+                  rows={2}
+                  value={noteValue}
+                  onChange={(e) =>
+                    setChapterNotes((prev) => ({
+                      ...prev,
+                      [item.chapter]: e.target.value,
+                    }))
+                  }
+                  disabled={isSavingThis}
+                />
+
+                <Stack direction="row" spacing={1}>
+                  {/* Save note button */}
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={() => handleSaveNote(item)}
+                    disabled={isSavingThis || !noteValue.trim()}
+                  >
+                    {isSavingThis ? 'Saving...' : 'Save Note'}
+                  </Button>
+
+                  {/* Skip button */}
+                  <Button
+                    variant="text"
+                    size="small"
+                    color="inherit"
+                    onClick={() => setSkipConfirmChapter(item.chapter)}
+                    disabled={isSavingThis || isSkippingThis}
+                    sx={{ color: 'text.secondary' }}
+                  >
+                    {isSkippingThis ? 'Skipping...' : 'Skip this chapter'}
+                  </Button>
+                </Stack>
               </Stack>
             </Box>
           )

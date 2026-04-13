@@ -217,6 +217,8 @@ export interface DayLog {
   retro?: string
   checklist?: ChecklistItem[]
   teachBackDone?: boolean
+  /** Chapters Shelly selected for today's read-aloud discussion (persisted from parent chip picker). */
+  todaysSelectedChapters?: number[]
   /**
    * @deprecated Replaced by BookProgress pool (Chapter Pool P1-P3, Apr 2026).
    * Field retained for backwards-compat reads of old DayLogs. No new writes.

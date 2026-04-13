@@ -11,7 +11,7 @@ import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import TextField from '@mui/material/TextField'
-import { doc, getDocs, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore'
+import { doc, getDoc, getDocs, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore'
 
 import { useNavigate } from 'react-router-dom'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
@@ -24,12 +24,13 @@ import SectionCard from '../../components/SectionCard'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import {
   artifactsCollection,
+  chapterBooksCollection,
   dailyArmorSessionDocId,
   dailyArmorSessionsCollection,
   evaluationSessionsCollection,
   stripUndefined,
 } from '../../core/firebase/firestore'
-import type { Artifact, ChecklistItem, Child, DailyArmorSession, DayLog } from '../../core/types'
+import type { Artifact, ChapterBook, ChecklistItem, Child, DailyArmorSession, DayLog } from '../../core/types'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
@@ -54,7 +55,8 @@ import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
 import KidChecklist from './KidChecklist'
 import KidCelebration from './KidCelebration'
-import KidChapterResponse from './KidChapterResponse'
+import KidChapterPool from './KidChapterPool'
+import { useBookProgress } from './useBookProgress'
 import KidConundrumResponse from './KidConundrumResponse'
 import KidTeachBack from './KidTeachBack'
 import { useUnifiedCapture } from './useUnifiedCapture'
@@ -263,6 +265,7 @@ interface KidTodayViewProps {
   today: string
   weekStart: string
   isMvd?: boolean
+  readAloudBookId?: string
   weekFocus?: {
     theme?: string
     virtue?: string
@@ -363,6 +366,7 @@ export default function KidTodayView({
   today,
   weekStart,
   isMvd,
+  readAloudBookId,
   weekFocus,
 }: KidTodayViewProps) {
   const navigate = useNavigate()
@@ -395,6 +399,30 @@ export default function KidTodayView({
   const { draftBook } = useDraftBook(familyId, child.id)
   const { completedBook } = useCompletedBook(familyId, child.id)
   const { children: allChildren } = useActiveChild()
+
+  // --- Chapter book progress for KidChapterPool ---
+  const [selectedBook, setSelectedBook] = useState<ChapterBook | null>(null)
+  // Clear book selection during render when no book ID (avoids setState in effect)
+  if (!readAloudBookId && selectedBook !== null) {
+    setSelectedBook(null)
+  }
+  useEffect(() => {
+    if (!readAloudBookId) return
+    const bookRef = doc(chapterBooksCollection(), readAloudBookId)
+    getDoc(bookRef).then((snap) => {
+      if (snap.exists()) {
+        setSelectedBook({ ...(snap.data() as ChapterBook), id: snap.id })
+      } else {
+        setSelectedBook(null)
+      }
+    }).catch(() => setSelectedBook(null))
+  }, [readAloudBookId])
+
+  const { bookProgress, updateChapter } = useBookProgress(
+    familyId,
+    child.id,
+    readAloudBookId,
+  )
 
   const checklist = useMemo(() => dayLog.checklist ?? [], [dayLog.checklist])
   const { mustDo, choose } = useMemo(() => categorizeItems(checklist), [checklist])
@@ -750,6 +778,21 @@ export default function KidTodayView({
         </Box>
       )}
 
+      {/* ── KID CHAPTER POOL (read-aloud discussion) ── */}
+      {selectedBook && bookProgress && bookProgress.questionPool.some((item) => !item.answered) && (
+        <SectionErrorBoundary section="chapter pool">
+          <KidChapterPool
+            book={selectedBook}
+            bookProgress={bookProgress}
+            familyId={familyId}
+            childId={child.id}
+            dayLog={dayLog}
+            weekFocus={weekFocus}
+            onChapterAnswered={updateChapter}
+          />
+        </SectionErrorBoundary>
+      )}
+
       {/* Diamonds Mined — today's quest summary */}
       <SectionErrorBoundary section="diamonds-mined">
         <DiamondsMined
@@ -843,19 +886,6 @@ export default function KidTodayView({
           onXpToast={setXpToast}
         />
       </SectionErrorBoundary>
-
-      {/* ── CHAPTER RESPONSE (Lincoln only) ── */}
-      {dayLog?.chapterQuestion && isLincoln && (
-        <SectionErrorBoundary section="chapter response">
-          <KidChapterResponse
-            dayLog={dayLog}
-            child={child}
-            familyId={familyId}
-            persistDayLogImmediate={persistDayLogImmediate}
-            weekFocus={weekFocus}
-          />
-        </SectionErrorBoundary>
-      )}
 
       {/* ── CONUNDRUM RESPONSE ── */}
       {weekFocus?.conundrum && (

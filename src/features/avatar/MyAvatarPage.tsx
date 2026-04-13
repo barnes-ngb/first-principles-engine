@@ -1164,7 +1164,7 @@ export default function MyAvatarPage() {
     } finally {
       setSavingToPortfolio(false)
     }
-  }, [familyId, childId, profile, activeChild, currentTierName, appliedVoxel.length])
+  }, [familyId, childId, profile, activeChild, currentTierName, appliedVoxel.length, forgedCount])
 
   if (loading) {
     return (
