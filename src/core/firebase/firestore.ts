@@ -1,8 +1,6 @@
 import {
   collection,
   type CollectionReference,
-  doc,
-  type DocumentReference,
   type FirestoreDataConverter,
   getFirestore,
   type QueryDocumentSnapshot,
@@ -36,8 +34,6 @@ import type {
   SkillSnapshot,
   Sticker,
   StoryGame,
-  UFLILesson,
-  UFLIProgress,
   WeekPlan,
   WeeklyReview,
   WorkbookConfig,
@@ -441,24 +437,6 @@ export const childSkillMapsCollection = (
   familyId: string,
 ): CollectionReference<ChildSkillMap> =>
   collection(db, `families/${familyId}/childSkillMaps`) as CollectionReference<ChildSkillMap>
-
-// ── UFLI Lessons (Phonics Scope & Sequence) ─────────────────────
-
-/** UFLI lesson definitions. Doc ID: lesson number (e.g., "62"). */
-export const ufliLessonsCollection = (
-  familyId: string,
-): CollectionReference<UFLILesson> =>
-  collection(db, `families/${familyId}/ufliLessons`) as CollectionReference<UFLILesson>
-
-/** UFLI progress per child. Single doc at children/{childId}/ufliProgress/current. */
-export const ufliProgressDoc = (
-  familyId: string,
-  childId: string,
-): DocumentReference<UFLIProgress> =>
-  doc(
-    db,
-    `families/${familyId}/children/${childId}/ufliProgress/current`,
-  ) as DocumentReference<UFLIProgress>
 
 // ── Chapter Responses (Read-Aloud Discussion Evidence) ──────────
 

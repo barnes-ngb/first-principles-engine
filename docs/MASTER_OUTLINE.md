@@ -1,27 +1,12 @@
 # Barnes Family Homeschool — Master Project Outline v15
 
 **Version:** v15 — April 12, 2026  
-**Status:** Updated since v14 — Hero Hub reframe, two-currency economy hardening, Stonebridge narrative foundation, armor progression gating, capture pipeline unification, working levels, chapter book pool, and Lincoln Acceleration Sprint 1 (UFLI Foundations).
+**Status:** Updated since v14 — Hero Hub reframe, two-currency economy hardening, Stonebridge narrative foundation, armor progression gating, capture pipeline unification, working levels, chapter book pool.
 
 ## Project Summary
 Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builder), Lincoln (10, neurodivergent, speech challenges), London (6, drawing/story-first).
 
 ---
-
-## North Star: Lincoln Acceleration (April–July 2026)
-
-Everything else pauses. Lincoln's reading is the #1 priority for the next 3 months.
-
-**Goal:** Move Lincoln from UFLI Lesson 62 → Lesson 90+ by end of July 2026 using structured phonics (UFLI Foundations) with the Phonics Forge guided flow.
-
-**Key decisions:**
-- UFLI Foundations is the backbone — 128 lessons, systematic scope & sequence
-- Lincoln starts at Lesson 62 (VCe Review 3; Exceptions) — assessed anchor point
-- Shelly delivers lessons using free UFLI Toolbox PDFs + the app's tracking layer
-- Weekly encoding checks gate advancement (not time-based)
-- Minecraft "Phonics Forge" theming on kid-facing UI
-
-**Reference:** See `docs/LINCOLN_ACCELERATION.md` and `docs/UFLI_INTEGRATION.md` for full design.
 
 **Tech:** React + TypeScript + Vite, Firebase (Auth/Firestore/Storage/Functions/Hosting), MUI, Claude + OpenAI image stack.
 
@@ -29,7 +14,7 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 - TypeScript lines: **124,045** total (`src/` 111,106 + `functions/src/` 12,939)
 - Commits: **~1,541**
 - Tests: **52 test files**
-- Firestore collections: **34** (32 family-scoped + 2 global)
+- Firestore collections/doc helpers: **34** in `firestore.ts`
 - Cloud Functions: **18**
 - Chat task types: **14**
 - Routes: **27**
@@ -109,16 +94,6 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 - Chapter question and conundrum generation now use Stonebridge context.
 - Sets continuity foundation for Banner Rally mission layer.
 
-### UFLI Foundations — Lincoln Acceleration (Sprint 1)
-- 128-lesson scope & sequence seeded as static data (`functions/src/data/ufliLessons.json`).
-- `UFLILesson` + `UFLIProgress` types in `src/core/types/ufli.ts`.
-- Per-child UFLI progress tracking (`families/{familyId}/children/{childId}/ufliProgress/current`).
-- UFLI lesson collection (`families/{familyId}/ufliLessons/{lessonNumber}`).
-- Settings > UFLI Progress admin tab — view/adjust current lesson, mastered count, encoding scores.
-- Parent Today: "Lincoln's UFLI Lesson" card — shows current lesson, graphemes, heart words, toolbox link, mark-complete.
-- Kid Today: "Phonics Forge" Minecraft-themed card — shows quest label, tapping shows toast ("Shelly will open this with you").
-- Migration script for seeding lesson data (`functions/src/migrations/seedUfliLessons.ts`).
-
 ### Chapter Book Progress Tracking (Chapter Pool P1-P3)
 - **Role split:** Parent (Shelly) stages chapters via chip picker + text notes; Kid (Lincoln) performs via audio recording. Single shared `answered` state — kid recording marks `answered: true` globally, removing from both views.
 - **Parent view (`ChapterQuestionPool`)** — horizontal scrollable chip row of unanswered chapters with multi-select. Stacked question cards show text note field only (no audio). "Save Note" persists `responseNote` without marking `answered`. Skip action marks `answered: true, skipped: true`. Chip selections persisted to `DayLog.todaysSelectedChapters`.
@@ -126,15 +101,6 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 - `useBookProgress` hook — live `onSnapshot` subscription on `bookProgress/{childId}_{bookId}` doc. Provides `updateChapter` callback for atomic pool entry updates.
 - Records "Book Responses" tab groups chapter responses by book in expandable accordions. Shows all chapters: answered (with inline audio), skipped, and unanswered. Legacy responses without `bookId` fall back to title match; unmatched entries bucket to "Other Books".
 - Legacy `ChapterQuestionCard` deleted. `DayLog.chapterQuestion` deprecated (reads only, no new writes). `DraftDayPlan.chapterQuestion` removed.
-
----
-
-### Paused for Lincoln Acceleration
-- Math Quest (Knowledge Mine math domain expansion)
-- Speech Quest (Knowledge Mine speech domain)
-- London's Avatar customization UI
-- Avatar Customization UI polish
-- Barnes Bros dashboard
 
 ---
 
@@ -188,10 +154,16 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 | Working Levels Data Model | Apr 9, 2026 | Per-domain working level tracking for Knowledge Mine progression (phonics/comprehension/math). Starting levels persist across sessions via `workingLevels` field on skill snapshot. Updated by quest completion, guided evaluation, and curriculum scans. Manual overrides protected for 48 hours. Fixes "starts at Level 2 every session" regression. (Part 1 — plumbing only; parent UI in Part 2.) |
 | Bugfix Apr 10 | Apr 10, 2026 | Planner lock-in off-by-one: Friday plans were written to Thursday's date key because WEEK_DAYS (Monday=0) was added to a Sunday-based weekRange.start. Extracted `dateKeyForDayPlan` pure helper + unit tests. |
 | Chapter Pool P1 | Apr 10, 2026 | Chapter book question pool foundation: ChapterBook + BookProgress types, Narnia seed data (17 chapters with summaries), chapterQuestions Cloud Function task handler, Firestore collection helpers. |
-| Lincoln Acceleration Sprint 1 | Apr 11, 2026 | UFLI Foundations data layer: 128-lesson scope & sequence JSON, UFLILesson + UFLIProgress types, per-child progress tracking, ufliLessons Firestore collection, Settings admin tab, parent Today lesson card, kid Phonics Forge card, migration script. Lincoln anchored at Lesson 62. |
 | Chapter Pool P2 | Apr 12, 2026 | Planner book picker (Autocomplete from library), readAloudBookId persistence on WeekPlan + plannerDefaults, handleApplyPlan triggers chapter question pool generation via chapterQuestions task, removed inline chapterQuestion prompt injection. (Apr 12 fix: picker now visible in review and active phases, not just setup wizard). (Apr 12 diagnostic: temp raw-response logging added for Monday plan fragment investigation). |
 | Hotfix: chapterBooks path | Apr 12, 2026 | Moved chapterBooks from invalid `curriculum/chapterBooks` path (even segment count = document ref, not collection) to top-level `chapterBooks` collection. Updated Firestore rules, seed, and all references. |
-| Chapter Pool P3 | Apr 12, 2026 | Today ChapterQuestionPool component (parent view): chapter picker + stacked question cards + per-chapter audio recording + live bookProgress updates. Deleted legacy ChapterQuestionCard. Deprecated DayLog.chapterQuestion field (reads only, no new writes). Removed P2 Monday diagnostic logging. Cleaned chapterQuestion from DraftDayPlan and AI plan schema. (Apr 13 fix: preserve readAloudBookId across plan applies, harden title prompt to prevent phonics context bleeding, parser safety net for long titles, re-added diagnostic logging). (Apr 13 fix: parent-only chip picker with multi-select + text notes (audio removed from parent); kid view gets KidChapterPool with audio recording positioned below verse card; single shared answered state; todaysSelectedChapters persisted on DayLog). |
+| Chapter Pool P3 | Apr 12, 2026 | Today ChapterQuestionPool component (parent view): chapter picker + stacked question cards + per-chapter audio recording + live bookProgress updates. Deleted legacy ChapterQuestionCard. Deprecated DayLog.chapterQuestion field (reads only, no new writes). Removed P2 Monday diagnostic logging. Cleaned chapterQuestion from DraftDayPlan and AI plan schema. (Apr 13 fix: preserve readAloudBookId across plan applies, harden title prompt to prevent phonics context bleeding, parser safety net for long titles, re-added diagnostic logging). (Apr 13 fix: parent-only chip picker with multi-select + text notes (audio removed from parent); kid view gets KidChapterPool with audio recording positioned below verse card; single shared answered state; todaysSelectedChapters persisted on DayLog). (Apr 13 cleanup: ExplorerMap weekStart → Monday-based; removed temp diagnostic writes). |
+| Dev Admin Tab | Apr 13, 2026 | Mobile-friendly dev admin tab in Settings for one-off data ops: seed Narnia to chapterBooks, scan/delete stale Sunday DayLogs, set readAloudBookId on current week. Gated to Nathan's UID; delete or re-scope if the project has other developers. Firestore rules updated to allow admin UID writes to chapterBooks. |
+
+### Sprint Cleanup — April 2026
+- Deleted Sprint 1 UFLI scaffolding (9 files, dormant since creation, seed never ran)
+- Kept: scripts/setLincolnPhonicsLevel.ts (sets workingLevels, not UFLI-specific)
+- Kept: voice-first Knowledge Mine changes (tap-to-hear, speaker icons)
+- Decision: rely on existing Knowledge Mine + findings pipeline for Lincoln acceleration
 
 ## Removed Features / Concepts
 - Ghost armor visual state (moved to binary on/off only).
@@ -260,4 +232,4 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 
 ---
 
-Last updated: April 12, 2026
+Last updated: April 13, 2026
