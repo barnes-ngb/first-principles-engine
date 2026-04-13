@@ -994,7 +994,8 @@ describe('fillMissingDaysFromRoutine', () => {
       minimumWin: 'test',
     }
     const result = fillMissingDaysFromRoutine(plan, 'Handwriting — 20 min — LanguageArts', 2.5)
-    expect(result.days).toHaveLength(5)
+    expect(result.plan.days).toHaveLength(5)
+    expect(result.filledDays).toHaveLength(0)
   })
 
   it('fills missing days from routine text', () => {
@@ -1015,15 +1016,16 @@ describe('fillMissingDaysFromRoutine', () => {
       minimumWin: 'test',
     }
     const result = fillMissingDaysFromRoutine(plan, 'Handwriting — 20 min — LanguageArts', 2.5)
-    expect(result.days).toHaveLength(5)
+    expect(result.plan.days).toHaveLength(5)
+    expect(result.filledDays).toEqual(['Wednesday', 'Thursday', 'Friday'])
     // Monday/Tuesday should keep AI items
-    expect(result.days[0].items[0].title).toBe('AI item')
-    expect(result.days[1].items[0].title).toBe('AI item 2')
+    expect(result.plan.days[0].items[0].title).toBe('AI item')
+    expect(result.plan.days[1].items[0].title).toBe('AI item 2')
     // Wed/Thu/Fri should have routine items
-    expect(result.days[2].day).toBe('Wednesday')
-    expect(result.days[2].items[0].title).toBe('Handwriting')
-    expect(result.days[3].day).toBe('Thursday')
-    expect(result.days[4].day).toBe('Friday')
+    expect(result.plan.days[2].day).toBe('Wednesday')
+    expect(result.plan.days[2].items[0].title).toBe('Handwriting')
+    expect(result.plan.days[3].day).toBe('Thursday')
+    expect(result.plan.days[4].day).toBe('Friday')
   })
 
   it('returns plan unchanged when no routine provided', () => {
@@ -1033,7 +1035,8 @@ describe('fillMissingDaysFromRoutine', () => {
       minimumWin: 'test',
     }
     const result = fillMissingDaysFromRoutine(plan, undefined, 2.5)
-    expect(result.days).toHaveLength(1)
+    expect(result.plan.days).toHaveLength(1)
+    expect(result.filledDays).toHaveLength(0)
   })
 
   it('maintains weekday order after filling', () => {
@@ -1045,10 +1048,11 @@ describe('fillMissingDaysFromRoutine', () => {
       minimumWin: 'test',
     }
     const result = fillMissingDaysFromRoutine(plan, 'Math — 30 min — Math', 2.5)
-    expect(result.days).toHaveLength(5)
-    expect(result.days.map(d => d.day)).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])
+    expect(result.plan.days).toHaveLength(5)
+    expect(result.plan.days.map(d => d.day)).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])
     // Friday should still have the AI item
-    expect(result.days[4].items[0].title).toBe('Friday item')
+    expect(result.plan.days[4].items[0].title).toBe('Friday item')
+    expect(result.filledDays).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday'])
   })
 })
 
