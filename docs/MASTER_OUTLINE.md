@@ -11,10 +11,10 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 **Tech:** React + TypeScript + Vite, Firebase (Auth/Firestore/Storage/Functions/Hosting), MUI, Claude + OpenAI image stack.
 
 **Scale (current):**
-- TypeScript lines: **124,045** total (`src/` 111,106 + `functions/src/` 12,939)
-- Commits: **~1,541**
-- Tests: **52 test files**
-- Firestore collections/doc helpers: **34** in `firestore.ts`
+- TypeScript lines: **126,034** total
+- Commits: **112**
+- Tests: **69 test files**
+- Firestore collections/doc helpers: **33** in `firestore.ts`
 - Cloud Functions: **18**
 - Chat task types: **14**
 - Routes: **27**
@@ -165,6 +165,13 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 - Kept: voice-first Knowledge Mine changes (tap-to-hear, speaker icons)
 - Decision: rely on existing Knowledge Mine + findings pipeline for Lincoln acceleration
 
+### Findings Pipeline Doc + UFLI Cleanup Polish — Apr 13, 2026
+
+- Added `docs/FINDINGS_PIPELINE.md` — end-to-end trace of EvaluationFinding data flow from Knowledge Mine → skillSnapshot → AI context windows
+- Updated CLAUDE.md accuracy: CF count, collections, imageTasks, ladder TODOs, terminology
+- Fixed ExplorerMap weekStart to Monday-based, removed temp diagnostic writes
+- Decision documented: rely on existing Knowledge Mine + findings pipeline rather than separate UFLI tracking layer
+
 ## Removed Features / Concepts
 - Ghost armor visual state (moved to binary on/off only).
 - Legacy tier model (consolidated around voxel tier thresholds).
@@ -193,10 +200,10 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 ### Top 5 Largest Files (Current)
 | File | Lines | Status |
 |---|---:|---|
-| `src/features/planner-chat/PlannerChatPage.tsx` | 2,249 | Still primary planner shell/state center |
-| `src/features/books/BookEditorPage.tsx` | ~2,000 | Grew with undo/redo + contextual action bar |
+| `src/features/planner-chat/PlannerChatPage.tsx` | 2,439 | Still primary planner shell/state center |
+| `src/features/books/BookEditorPage.tsx` | 2,087 | Grew with undo/redo + contextual action bar |
 | `src/features/quest/useQuestSession.ts` | 1,763 | Largest hook; future split candidate |
-| `src/features/avatar/MyAvatarPage.tsx` | 1,703 | Grew with Hero Hub layout + mission surfaces |
+| `src/features/avatar/MyAvatarPage.tsx` | 1,749 | Grew with Hero Hub layout + mission surfaces |
 | `src/features/shelly-chat/ShellyChatPage.tsx` | 1,653 | Stable, still large |
 
 ### Decomposition Status
