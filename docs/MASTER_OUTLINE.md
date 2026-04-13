@@ -218,7 +218,8 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 - **Auto-save to gallery**: Every reimagine result auto-saves to sticker gallery on completion, regardless of placement choice.
 
 ### Known Technical Debt
-- **AvatarThumbnail WebGL instances** — Console warns "many active instances — consider static mode." The `forceContextLoss()` fix from the Crash Cascade sprint resolved the hard crash, but multiple active `WebGLRenderer` instances still get created when several thumbnails mount. Long-term fix: render thumbnails as static pre-captured images or share a single offscreen renderer. Low urgency while instance count stays below browser limits.
+- **AvatarThumbnail WebGL instances** — Console warns "many active instances — consider static mode." The `forceContextLoss()` fix from the Crash Cascade sprint resolved the hard crash, but multiple active `WebGLRenderer` instances still get created when several thumbnails mount (N thumbnails = N renderers). Consider: single shared renderer with static snapshots, or CSS/canvas 2D fallback for thumbnails where 3D isn't needed. Not blocking but worth addressing before avatar features expand.
+- **Hardcoded admin UID** — Admin access is hardcoded to a single UID in `SettingsPage.tsx` (`ADMIN_UID` constant). Works for current single-admin use case but blocks multi-admin, role management, or admin handoff scenarios. Consider moving to a role flag on family/user document if admin access needs to change.
 
 ---
 
