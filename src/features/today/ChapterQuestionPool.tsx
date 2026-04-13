@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -58,14 +58,15 @@ export default function ChapterQuestionPool({
     null,
   )
   const [skippingChapter, setSkippingChapter] = useState<number | null>(null)
-  const [initialized, setInitialized] = useState(false)
 
-  // Restore persisted selections from dayLog on mount
-  useEffect(() => {
-    if (initialized || !bookProgress) return
+  // Restore persisted selections from dayLog when bookProgress first arrives
+  const [prevBookProgress, setPrevBookProgress] = useState<BookProgress | null>(
+    null,
+  )
+  if (bookProgress && !prevBookProgress) {
+    setPrevBookProgress(bookProgress)
     const persisted = dayLog?.todaysSelectedChapters
     if (persisted && persisted.length > 0) {
-      // Filter to only chapters that are still unanswered
       const unansweredSet = new Set(
         bookProgress.questionPool
           .filter((item) => !item.answered)
@@ -76,8 +77,7 @@ export default function ChapterQuestionPool({
         setSelectedChapters(new Set(valid))
       }
     }
-    setInitialized(true)
-  }, [initialized, bookProgress, dayLog?.todaysSelectedChapters])
+  }
 
   // No book selected — render nothing
   if (!book) return null

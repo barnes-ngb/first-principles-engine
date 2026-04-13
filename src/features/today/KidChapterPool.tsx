@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
@@ -62,59 +62,13 @@ export default function KidChapterPool({
 
   const mcFont = '"Press Start 2P", monospace'
 
-  // Determine which chapters to show
-  const pool = bookProgress.questionPool
-  const unanswered = pool.filter((item) => !item.answered)
-
-  // Use Shelly's picks from dayLog, fall back to lowest unanswered
-  const todaysChapters = dayLog.todaysSelectedChapters
-  let chaptersToShow: ChapterQuestionPoolItem[]
-
-  if (todaysChapters && todaysChapters.length > 0) {
-    chaptersToShow = pool
-      .filter(
-        (item) => !item.answered && todaysChapters.includes(item.chapter),
-      )
-      .sort((a, b) => a.chapter - b.chapter)
-  } else if (unanswered.length > 0) {
-    // Fallback: show lowest unanswered chapter
-    chaptersToShow = [unanswered[0]]
-  } else {
-    chaptersToShow = []
-  }
-
-  // Nothing to show
-  if (chaptersToShow.length === 0) return null
-
-  const startRecording = async (chapter: number) => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
-      const chunks: Blob[] = []
-      recorder.ondataavailable = (e) => chunks.push(e.data)
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' })
-        setChapterBlobs((prev) => ({ ...prev, [chapter]: blob }))
-        setChapterAudioUrls((prev) => ({
-          ...prev,
-          [chapter]: URL.createObjectURL(blob),
-        }))
-        stream.getTracks().forEach((t) => t.stop())
-      }
-      recorder.start()
-      mediaRecorderRef.current = recorder
-      setRecordingChapter(chapter)
-    } catch (err) {
-      console.error('Mic access failed:', err)
-    }
-  }
-
+  // All hooks must be called before early returns
   const stopRecording = useCallback(() => {
     mediaRecorderRef.current?.stop()
     setRecordingChapter(null)
   }, [])
 
-  const handleSaveResponse = async (item: ChapterQuestionPoolItem) => {
+  const handleSaveResponse = useCallback(async (item: ChapterQuestionPoolItem) => {
     const blob = chapterBlobs[item.chapter]
     if (!blob) return
 
@@ -122,9 +76,10 @@ export default function KidChapterPool({
     try {
       // Upload audio
       const ext = blob.type.includes('mp4') ? 'mp4' : 'webm'
+      const timestamp = Date.now()
       const storageRef = ref(
         storage,
-        `families/${familyId}/chapterResponses/${childId}/${bookProgress.bookId}/ch${item.chapter}_${Date.now()}.${ext}`,
+        `families/${familyId}/chapterResponses/${childId}/${bookProgress.bookId}/ch${item.chapter}_${timestamp}.${ext}`,
       )
       await uploadBytes(storageRef, blob)
       const audioUrl = await getDownloadURL(storageRef)
@@ -185,6 +140,51 @@ export default function KidChapterPool({
       console.error('Chapter response save failed:', err)
     }
     setSavingChapter(null)
+  }, [chapterBlobs, familyId, childId, bookProgress.bookId, book.title, weekFocus, onChapterAnswered])
+
+  // Determine which chapters to show
+  const pool = bookProgress.questionPool
+  const unanswered = pool.filter((item) => !item.answered)
+
+  // Use Shelly's picks from dayLog, fall back to lowest unanswered
+  const todaysChapters = dayLog.todaysSelectedChapters
+  const chaptersToShow = useMemo(() => {
+    if (todaysChapters && todaysChapters.length > 0) {
+      return pool
+        .filter(
+          (item) => !item.answered && todaysChapters.includes(item.chapter),
+        )
+        .sort((a, b) => a.chapter - b.chapter)
+    } else if (unanswered.length > 0) {
+      return [unanswered[0]]
+    }
+    return []
+  }, [pool, todaysChapters, unanswered])
+
+  // Nothing to show
+  if (chaptersToShow.length === 0) return null
+
+  const startRecording = async (chapter: number) => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      const chunks: Blob[] = []
+      recorder.ondataavailable = (e) => chunks.push(e.data)
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' })
+        setChapterBlobs((prev) => ({ ...prev, [chapter]: blob }))
+        setChapterAudioUrls((prev) => ({
+          ...prev,
+          [chapter]: URL.createObjectURL(blob),
+        }))
+        stream.getTracks().forEach((t) => t.stop())
+      }
+      recorder.start()
+      mediaRecorderRef.current = recorder
+      setRecordingChapter(chapter)
+    } catch (err) {
+      console.error('Mic access failed:', err)
+    }
   }
 
   return (
