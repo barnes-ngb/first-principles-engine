@@ -1,6 +1,7 @@
 import { type SyntheticEvent, useState } from 'react'
 import {
   Alert,
+  Box,
   Button,
   Divider,
   FormControl,
@@ -71,6 +72,9 @@ export default function SettingsPage() {
   const isParent = profile === UserProfile.Parents
   const isAdmin = familyId === ADMIN_UID
 
+  // TEMP DIAG — remove after Dev tab confirmed working
+  console.log('[SettingsPage] familyId:', familyId, 'ADMIN_UID:', ADMIN_UID, 'match:', familyId === ADMIN_UID)
+
   const handleSeedDemoData = async () => {
     try {
       await seedDemoFamily(familyId)
@@ -106,6 +110,12 @@ export default function SettingsPage() {
 
   return (
     <Page>
+      {/* TEMP DIAG — remove after Dev tab confirmed working */}
+      <Box sx={{ p: 2, bgcolor: 'warning.light', fontSize: '0.75rem', fontFamily: 'monospace' }}>
+        familyId: {familyId ?? 'null'}<br />
+        ADMIN_UID: {ADMIN_UID}<br />
+        isAdmin: {String(familyId === ADMIN_UID)}
+      </Box>
       <SectionCard title="Settings">
         {isParent && (
           <Tabs
