@@ -1176,6 +1176,11 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
   }
 }
 
+export interface FillResult {
+  plan: DraftWeeklyPlan
+  filledDays: string[]
+}
+
 /**
  * If a parsed plan has fewer than 5 days (e.g., due to truncation repair),
  * fill missing days using items parsed from the daily routine text.
@@ -1184,17 +1189,17 @@ export function fillMissingDaysFromRoutine(
   plan: DraftWeeklyPlan,
   dailyRoutine: string | undefined,
   hoursPerDay: number,
-): DraftWeeklyPlan {
-  if (plan.days.length >= 5 || !dailyRoutine) return plan
+): FillResult {
+  if (plan.days.length >= 5 || !dailyRoutine) return { plan, filledDays: [] }
 
   const existingDayNames = new Set(plan.days.map(d => d.day))
   const missingDays = WEEK_DAYS.filter(d => !existingDayNames.has(d))
 
-  if (missingDays.length === 0) return plan
+  if (missingDays.length === 0) return { plan, filledDays: [] }
 
   // Parse routine items from the text (reuse the same parsing as generateDraftPlanFromInputs)
   const routineItems = parseRoutineText(dailyRoutine)
-  if (routineItems.length === 0) return plan
+  if (routineItems.length === 0) return { plan, filledDays: [] }
 
   const filledDays = [...plan.days]
   for (const day of missingDays) {
@@ -1209,9 +1214,9 @@ export function fillMissingDaysFromRoutine(
   const dayOrder = new Map(WEEK_DAYS.map((d, i) => [d, i]))
   filledDays.sort((a, b) => (dayOrder.get(a.day as WeekDay) ?? 99) - (dayOrder.get(b.day as WeekDay) ?? 99))
 
-  console.log(`[fillMissingDaysFromRoutine] Added ${missingDays.length} days from routine (AI provided ${plan.days.length})`)
+  console.warn(`[fillMissingDaysFromRoutine] Added ${missingDays.length} days from routine (AI provided ${plan.days.length})`)
 
-  return { ...plan, days: filledDays }
+  return { plan: { ...plan, days: filledDays }, filledDays: missingDays }
 }
 
 /** Parse daily routine text into DraftPlanItems (shared helper). */

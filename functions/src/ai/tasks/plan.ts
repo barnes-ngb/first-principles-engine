@@ -1,3 +1,4 @@
+import { HttpsError } from "firebase-functions/v2/https";
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
@@ -370,7 +371,7 @@ export const handlePlan = async (
   const result = await callClaude({
     apiKey,
     model,
-    maxTokens: 8192,
+    maxTokens: 16000,
     systemPrompt,
     messages,
   });
@@ -379,7 +380,17 @@ export const handlePlan = async (
     console.warn("Claude returned empty response", { model, taskType: "plan" });
   }
 
-  console.log(`[AI] taskType=plan inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`);
+  if (result.stopReason === "max_tokens") {
+    console.error(
+      `[AI] taskType=plan TRUNCATED — stop_reason=max_tokens, outputTokens=${result.outputTokens}`,
+    );
+    throw new HttpsError(
+      "resource-exhausted",
+      "Plan generation hit token limit — response was truncated. Try regenerating.",
+    );
+  }
+
+  console.log(`[AI] taskType=plan inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens} stopReason=${result.stopReason}`);
 
   await logAiUsage(db, familyId, {
     childId,

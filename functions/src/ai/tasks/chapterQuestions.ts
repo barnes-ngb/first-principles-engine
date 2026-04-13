@@ -102,6 +102,15 @@ export const handleChapterQuestions = async (
     }
   }
 
+  console.log(`[chapterQuestions] Starting generation`, {
+    bookTitle,
+    author,
+    childId,
+    childName,
+    chaptersRequested: chapters.length,
+    chapterNumbers: chapters.map((c) => c.number),
+  });
+
   const chapterList = chapters
     .map((ch) => {
       let line = `- Chapter ${ch.number}`;
@@ -150,10 +159,24 @@ Return ONLY a JSON array, no prose, no code fences:
     }
     // Re-serialize to ensure clean JSON in the response
     result.text = JSON.stringify(parsed);
+    console.log(`[chapterQuestions] Success`, {
+      bookTitle,
+      childId,
+      chaptersRequested: chapters.length,
+      chaptersReturned: parsed.length,
+      questionTypes: parsed.map((q) => q.questionType),
+    });
   } catch (err) {
-    console.warn("[chapterQuestions] Failed to parse response, returning raw:", err);
+    console.error("[chapterQuestions] Failed to parse response", {
+      bookTitle,
+      childId,
+      error: String(err),
+      responsePreview: result.text.substring(0, 200),
+    });
     // Return raw text — caller can handle parse errors
   }
+
+  console.log(`[AI] taskType=chapterQuestions inputTokens=${result.inputTokens} outputTokens=${result.outputTokens} stopReason=${result.stopReason}`);
 
   await logAiUsage(db, familyId, {
     childId,
