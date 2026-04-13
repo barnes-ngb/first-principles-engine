@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-04-12.
+> Where everything lives. Updated 2026-04-13.
 
 ---
 
@@ -31,6 +31,12 @@
 | `KNOWLEDGE_MINE_CRASH_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Crash investigation: session ejection + precision TypeError + resume card failure after Level 6→7 promotion in comprehension quest. Root cause chain identified, 4 fixes landed (try/catch, WebGL safety, forceContextLoss, errorElement). |
 | `FINDINGS_PIPELINE.md` | **CURRENT** | End-to-end trace of EvaluationFinding data flow |
 | `CAPTURE_PIPELINE_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Today page capture pipeline: 3 fragmented entry points (camera icon, pre-completion scan, post-completion scan) competing for same visibility gate. Unified into single AI-routed handler. Worksheets→scans, everything else→artifacts. |
+| `CLEANUP_AUDIT_2026_04_07.md` | **HISTORICAL** | Point-in-time audit (Apr 7): ladder deprecation status, milestone reachability, WorkbookConfig→ActivityConfig migration gaps |
+| `HERO_HUB_ANIMATION_TUNING.md` | **CURRENT** | Hero Hub animation debug workflow — `?heroDebug=1` tuning panel, centralized config in `heroAnimationTuning.ts` |
+| `HERO_HUB_ANIMATION_PR_QUEUE_TRIAGE_2026-04-07.md` | **RESOLVED** | PR queue triage for Hero Hub animation chain — merge order, duplicate branch cleanup |
+| `HERO_HUB_DEPLOY_AUDIT_2026-04-07.md` | **RESOLVED** | Deploy audit validating merged animation guardrails/tuning reached production |
+| `WORKBOOK_ACTIVITYCONFIG_BACKFILL.md` | **CURRENT** | Server-side guaranteed backfill: legacy workbookConfigs → activityConfigs before quest/AI dispatch |
+| `first-principles-system-review.md` | **CURRENT** | Full-loop system review: evaluation → planning → execution, curriculum pacing, disposition tracking |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `archive/01–07_*.md` | ARCHIVED | Phase 1–5 specs, original testing plan, Saturday lab runbook — all superseded by current docs |
 | `08_RUNBOOK.md` | **CURRENT** (Reference) | Operational runbook: deploy, backups, key rotation, troubleshooting |
