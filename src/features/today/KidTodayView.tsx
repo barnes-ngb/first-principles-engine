@@ -402,11 +402,12 @@ export default function KidTodayView({
 
   // --- Chapter book progress for KidChapterPool ---
   const [selectedBook, setSelectedBook] = useState<ChapterBook | null>(null)
+  // Clear book selection during render when no book ID (avoids setState in effect)
+  if (!readAloudBookId && selectedBook !== null) {
+    setSelectedBook(null)
+  }
   useEffect(() => {
-    if (!readAloudBookId) {
-      setSelectedBook(null)
-      return
-    }
+    if (!readAloudBookId) return
     const bookRef = doc(chapterBooksCollection(), readAloudBookId)
     getDoc(bookRef).then((snap) => {
       if (snap.exists()) {

@@ -489,7 +489,7 @@ export default function TodayPage() {
       )
       persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
     }
-  }, [runScan, familyId, selectedChildId, syncScanToConfig, setSnackMessage, dayLog, persistDayLogImmediate])
+  }, [runScan, familyId, selectedChildId, syncScanToConfig, setSnackMessage, dayLog, persistDayLogImmediate, setScanItemIndex])
 
   const handleScanAddToPlan = useCallback(() => {
     if (!scanResult?.results || scanItemIndex == null || !dayLog?.checklist) return
@@ -514,18 +514,18 @@ export default function TodayPage() {
     if (scanResult) void recordScanAction(familyId, scanResult, 'added')
     clearScan()
     setScanItemIndex(null)
-  }, [scanResult, scanItemIndex, dayLog, familyId, persistDayLogImmediate, recordScanAction, clearScan])
+  }, [scanResult, scanItemIndex, dayLog, familyId, persistDayLogImmediate, recordScanAction, clearScan, setScanItemIndex])
 
   const handleScanSkip = useCallback(() => {
     if (scanResult) void recordScanAction(familyId, scanResult, 'skipped')
     clearScan()
     setScanItemIndex(null)
-  }, [scanResult, familyId, recordScanAction, clearScan])
+  }, [scanResult, familyId, recordScanAction, clearScan, setScanItemIndex])
 
   const handleClearScan = useCallback(() => {
     clearScan()
     setScanItemIndex(null)
-  }, [clearScan])
+  }, [clearScan, setScanItemIndex])
 
   const handleScanUpdatePosition = useCallback(
     async (curriculum: CurriculumDetected) => {
