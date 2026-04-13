@@ -627,6 +627,7 @@ export default function TodayPage() {
         weekStart={weekRange.start}
         isMvd={planType === PlanType.Mvd}
         weekFocus={weekFocus}
+        readAloudBookId={readAloudBookId}
       />
     )
   }
@@ -836,10 +837,9 @@ export default function TodayPage() {
           book={selectedBook}
           bookProgress={bookProgress}
           bookProgressLoading={bookProgressLoading}
-          familyId={familyId}
-          childId={selectedChildId}
-          weekFocus={weekFocus}
           onChapterAnswered={updateChapter}
+          dayLog={dayLog}
+          persistDayLogImmediate={persistDayLogImmediate}
         />
       </SectionErrorBoundary>
 
