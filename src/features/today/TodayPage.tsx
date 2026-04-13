@@ -77,10 +77,6 @@ import { ensureDefaultActivityConfigs } from '../../core/firebase/migrateActivit
 import { useUnifiedCapture } from './useUnifiedCapture'
 import QuickAddHours from '../records/QuickAddHours'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
-// HIDDEN 2026-04-11: Sprint 1 UFLI card disabled pending Phase 0
-// validation. See LINCOLN_ACCELERATION.md. Do not re-enable without
-// running the seed and verifying Firestore has ufliLessons collection.
-// import LincolnUfliCard from './LincolnUfliCard'
 import WeekFocusCard from './WeekFocusCard'
 import WorkshopGameCards from './WorkshopGameCards'
 
@@ -804,20 +800,6 @@ export default function TodayPage() {
           </Stack>
         </Stack>
       </SectionCard>
-
-      {/* HIDDEN 2026-04-11: Sprint 1 UFLI card disabled pending Phase 0
-          validation. See LINCOLN_ACCELERATION.md. Do not re-enable without
-          running the seed and verifying Firestore has ufliLessons collection. */}
-      {/* {selectedChild && selectedChild.name.toLowerCase() === 'lincoln' && selectedChildId && (
-        <SectionErrorBoundary section="ufli lesson">
-          <LincolnUfliCard
-            familyId={familyId}
-            childId={selectedChildId}
-            childName={selectedChild.name}
-            today={today}
-          />
-        </SectionErrorBoundary>
-      )} */}
 
       {/* --- Week Focus + Conundrum --- */}
       {weekFocus && (
