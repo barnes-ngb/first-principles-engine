@@ -163,8 +163,7 @@ Scans don't produce `EvaluationFinding` objects directly, but `CurriculumTab.tsx
 - [ ] Reading a practice story generating new findings (loop doesn't close)
 - [ ] Findings expiring or being re-tested on a schedule
 - [ ] Scan-derived findings appearing in `recentEval` AI context
-- [ ] Math evaluation findings deriving working levels (TODO in code at `EvaluateChatPage.tsx:540`)
-- [ ] London-specific findings pipeline (quests are Lincoln-focused; London has no evaluation sessions)
+- [ ] Math-domain working level derivation from eval findings (reading domain works; math has a TODO at `EvaluateChatPage.tsx:540`)
 
 ## File Index
 
