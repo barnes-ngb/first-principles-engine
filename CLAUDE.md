@@ -109,7 +109,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/shelly-chat/` — Shelly AI chat assistant (ShellyChatPage, ChatThreadDrawer, ChatMessageBubble, openChatWithContext, formatRelativeTime)
 - `src/components/ScanButton.tsx` — Camera capture for curriculum photo scanning
 - `src/components/ScanResultsPanel.tsx` — AI scan results display
-- `src/features/today/` — Parent Today (decomposed: TodayPage shell + TodayChecklist, WeekFocusCard, QuickCaptureSection, TeachBackSection, ChapterQuestionCard) + Kid Today (decomposed: KidTodayView shell + KidChecklist, KidTeachBack, KidChapterResponse, KidConundrumResponse, KidExtraLogger, KidCelebration) + routine sync, XP
+- `src/features/today/` — Parent Today (decomposed: TodayPage shell + TodayChecklist, WeekFocusCard, QuickCaptureSection, TeachBackSection, ChapterQuestionPool) + Kid Today (decomposed: KidTodayView shell + KidChecklist, KidTeachBack, KidChapterResponse, KidConundrumResponse, KidExtraLogger, KidCelebration) + routine sync, XP
 - `src/features/weekly-review/` — Weekly review page
 - `src/features/workshop/` — Story Game Workshop (board/adventure/card games)
 - `functions/src/` — Firebase Cloud Functions (AI endpoints)
@@ -160,6 +160,9 @@ Store dates as `YYYY-MM-DD` strings for easy Firestore queries and sorting.
 - Prefer dropdowns + templates
 - Keep forms short
 
+### Terminology
+**Terminology**: Use "sight words" throughout. The `sightWordProgress` collection is the canonical store. "Heart words" (a UFLI term) is not used in this codebase.
+
 ### Plan type terminology
 Use `'normal'` / `'mvd'` (not the legacy `'A'` / `'B'`) for `DailyPlan.planType`. The `PlanType` const enum in `enums.ts` is the source of truth. Display labels come from `PlanTypeLabel` ("Normal Day" / "Minimum Viable Day"). The Firestore converter in `firestore.ts` normalizes legacy `'A'`→`'normal'` and `'B'`→`'mvd'` on read.
 
@@ -188,9 +191,7 @@ All under `families/{familyId}/`:
 | `hours` | Manual hours entries |
 | `hoursAdjustments` | Hours adjustments |
 | `evaluations` | Skill evaluations |
-| `ladders` | Skill ladder definitions |
 | `ladderProgress` | Per-child ladder progression |
-| `milestoneProgress` | Milestone achievement tracking |
 | `dailyPlans` | Daily session plans |
 | `dadLabReports` | Dad Lab session reports |
 | `skillSnapshots` | Per-child skill snapshots |
@@ -219,7 +220,7 @@ All under `families/{familyId}/`:
 
 | Collection | Purpose |
 |---|---|
-| `curriculum/chapterBooks` | Chapter book library (global, shared across families) |
+| `chapterBooks` | Chapter book library (global, shared across families) |
 
 **Subcollections:**
 - `shellyChatThreads/{threadId}/messages` — Messages within a Shelly chat thread
@@ -259,7 +260,7 @@ All under `families/{familyId}/`:
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
 - `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions)
 
-### Cloud Functions (19 exported)
+### Cloud Functions (18 exported)
 - `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, chapterQuestions)
 - `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
@@ -281,7 +282,7 @@ All under `families/{familyId}/`:
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/imageGen.ts` — Image generation routing
-- `functions/src/ai/imageTasks/` — 13 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, enhanceSketch, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar, + index)
+- `functions/src/ai/imageTasks/` — 12 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, enhanceSketch, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar) + index
 - `functions/src/ai/providers/` — Claude + OpenAI provider adapters (with `__stubs__/` for test mocking)
 
 ## Family Context (for AI prompt reference)
@@ -299,15 +300,15 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 
 ## Known Technical Debt
 
-- **PlannerChatPage.tsx (2,252L)** — Decomposed render (800→500L) but state management is still ~1,700L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
-- **BookEditorPage.tsx (1,886L)** — Grew from themes + drawing flows. Handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
+- **PlannerChatPage.tsx (2,508L)** — Decomposed render (800→500L) but state management is still ~1,700L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **BookEditorPage.tsx (2,087L)** — Grew from themes + drawing flows. Handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
 - **ShellyChatPage.tsx (1,653L)** — 23+ useState hooks. Image generation, thread management, follow-up suggestions, image refinement flow. Decomposition candidate after usage patterns stabilize.
-- **WorkshopPage.tsx (1,606L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
+- **WorkshopPage.tsx (1,623L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
 - **chat.ts CF (1,599L)** — Grew +420 from quest expansion. buildQuestPrompt alone is 400+ lines. Consider extracting prompt builders to separate files.
-- **useQuestSession.ts (1,544L)** — Grew from 954L. Quest, comprehension, fluency all in one hook. Consider splitting by quest domain.
-- **MyAvatarPage.tsx (1,386L)** — Decomposed from 1,862L. Grew +152 from forge + portal. State management + ceremony flow. Stable.
-- **VoxelCharacter.tsx (1,242L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
-- **Ladder system** — Partially deprecated. Disposition system replacing it. 5 files have TODO comments marking ladder references for removal.
+- **useQuestSession.ts (1,763L)** — Grew from 954L. Quest, comprehension, fluency all in one hook. Consider splitting by quest domain.
+- **MyAvatarPage.tsx (1,749L)** — Decomposed from 1,862L. Grew +152 from forge + portal. State management + ceremony flow. Stable.
+- **VoxelCharacter.tsx (1,433L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
+- **Ladder system** — Partially deprecated. Disposition system replacing it. 3 files have TODO comments marking ladder references for removal.
 - **evaluate.ts (weekly review)** — Now uses CHARTER_PREAMBLE + addendum, but still separate from the task system. Not in task registry.
 - **WorkbookConfig → ActivityConfig migration** — Both systems exist. ActivityConfig is the new primary (66 refs vs 27). workbookConfigs still read by quest starting level check and certificate scan. Plan: complete migration, remove workbookConfig references.
 - **Bundle size** — Main chunk is 3.4MB (1MB gzipped). Should code-split Three.js, jsPDF, and heavy features.

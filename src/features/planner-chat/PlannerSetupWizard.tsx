@@ -14,12 +14,15 @@ import Typography from '@mui/material/Typography'
 
 import type {
   ActivityConfig,
+  BookProgress,
+  ChapterBook,
   PhotoLabel,
   WorkbookConfig,
 } from '../../core/types'
 import type { ScanResult } from '../../core/types/planning'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
 import type { ActivityFrequency } from '../../core/types/enums'
+import ChapterBookPicker from './ChapterBookPicker'
 import PhotoLabelForm from './PhotoLabelForm'
 
 type MasterySummary = {
@@ -37,6 +40,10 @@ interface PlannerSetupWizardProps {
   onReadAloudBookChange: (v: string) => void
   readAloudChapters: string
   onReadAloudChaptersChange: (v: string) => void
+  chapterBooks: ChapterBook[]
+  selectedBook: ChapterBook | null
+  onSelectedBookChange: (book: ChapterBook | null) => void
+  bookProgress: BookProgress | null
   weekNotes: string
   onWeekNotesChange: (v: string) => void
   masterySummary: MasterySummary | null
@@ -71,6 +78,10 @@ export default function PlannerSetupWizard({
   onReadAloudBookChange,
   readAloudChapters,
   onReadAloudChaptersChange,
+  chapterBooks,
+  selectedBook,
+  onSelectedBookChange,
+  bookProgress,
   weekNotes,
   onWeekNotesChange,
   masterySummary,
@@ -106,29 +117,18 @@ export default function PlannerSetupWizard({
         </ToggleButtonGroup>
       </Box>
 
-      {/* Step 1b: Read-aloud info */}
-      <Stack spacing={1.5}>
-        <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          Read-Aloud This Week
-        </Typography>
-        <TextField
-          size="small"
-          label="Book"
-          placeholder="e.g., Charlotte's Web"
-          value={readAloudBook}
-          onChange={(e) => onReadAloudBookChange(e.target.value)}
-          fullWidth
-        />
-        <TextField
-          size="small"
-          label="Chapters this week"
-          placeholder="e.g., Ch 5-8"
-          value={readAloudChapters}
-          onChange={(e) => onReadAloudChaptersChange(e.target.value)}
-          fullWidth
-          helperText="The AI will generate a discussion question for each chapter"
-        />
-      </Stack>
+      {/* Step 1b: Read-aloud book picker */}
+      <ChapterBookPicker
+        chapterBooks={chapterBooks}
+        selectedBook={selectedBook}
+        onSelectedBookChange={onSelectedBookChange}
+        bookProgress={bookProgress}
+        readAloudBook={readAloudBook}
+        onReadAloudBookChange={onReadAloudBookChange}
+        readAloudChapters={readAloudChapters}
+        onReadAloudChaptersChange={onReadAloudChaptersChange}
+        variant="wizard"
+      />
 
       {/* Step 1c: Notes */}
       <TextField

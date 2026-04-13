@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-04-05.
+> Where everything lives. Updated 2026-04-13.
 
 ---
 
@@ -8,7 +8,7 @@
 
 | Document | Status | Notes |
 |---|---|---|
-| `MASTER_OUTLINE.md` | **CURRENT** (v15) | Single source of truth: features, status, sprint history. Updated Apr 5: Two-currency economy, curriculum pipeline, activity configs, Learning Map, quest expansion, book themes, planning improvements |
+| `MASTER_OUTLINE.md` | **CURRENT** (v15) | Single source of truth: features, status, sprint history. Updated Apr 12: Hero Hub, two-currency economy, Stonebridge narrative, armor progression gating, capture pipeline, working levels, chapter pool |
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
@@ -18,18 +18,25 @@
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
 | `ENGINE_V2.md` | **CURRENT** | Learning framework: family snapshot, curriculum mapping, energy modes, weekly rhythm |
 | `FIRST_PRINCIPLES_ALIGNMENT.md` | **NEW** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
+| `ECONOMY_AUDIT_PART1.md` | **CURRENT** | Economy code inventory — earning/spending paths, collection audit, event types |
+| `ECONOMY_AUDIT_PART2.md` | **CURRENT** | Economy unified model — two-currency design, balance reconciliation, pacing math |
+| `STONEBRIDGE_BIBLE.md` | **CURRENT** | Canonical narrative world bible — 8 places, 10+ characters, values, tone, continuity rules |
 | `GAME_WORLD_ECONOMY.md` | **CURRENT** | Two-currency economy design (XP + Diamonds), choice-based armor forging, Stonebridge world |
 | `HEALTH_REPORT.md` | **CURRENT** | Weekly code health metrics — line counts, test coverage, bundle size, tech debt tracking |
 | `PROFILE_LIMITS_AUDIT.md` | **CURRENT** | Profile-based rate limits and experience audit — AI usage caps, generation limits, cost controls |
 | `SYSTEM_PROMPTS.md` | **CURRENT** (v4) | Task dispatch, model selection, context slices — 13 task types including scan + shellyChat |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
-| `LINCOLN_ACCELERATION.md` | **CURRENT** | Lincoln reading acceleration plan: UFLI Foundations integration, Phonics Forge design, sprint roadmap (April–July 2026) |
-| `UFLI_INTEGRATION.md` | **CURRENT** | UFLI Foundations technical integration: data model, lesson types, progress tracking, encoding check flow |
-| `CLAUDE_CODE_PROMPTS.md` | **CURRENT** | Claude Code implementation prompts for Lincoln Acceleration sprints |
 | `SCRIPT_CONVENTIONS.md` | **CURRENT** | Cross-platform npm script conventions (cross-env, path separators, admin scripts) |
 | `KNOWLEDGE_MINE_AUDIT_2026-04.md` | **NEW** | Knowledge Mine audit (Part 1/4): quest type inventory, level system analysis, Level 7 mystery resolution, difficulty progression, Lincoln constraint compliance |
 | `KNOWLEDGE_MINE_CRASH_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Crash investigation: session ejection + precision TypeError + resume card failure after Level 6→7 promotion in comprehension quest. Root cause chain identified, 4 fixes landed (try/catch, WebGL safety, forceContextLoss, errorElement). |
+| `FINDINGS_PIPELINE.md` | **CURRENT** | End-to-end trace of EvaluationFinding data flow |
 | `CAPTURE_PIPELINE_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Today page capture pipeline: 3 fragmented entry points (camera icon, pre-completion scan, post-completion scan) competing for same visibility gate. Unified into single AI-routed handler. Worksheets→scans, everything else→artifacts. |
+| `CLEANUP_AUDIT_2026_04_07.md` | **HISTORICAL** | Point-in-time audit (Apr 7): ladder deprecation status, milestone reachability, WorkbookConfig→ActivityConfig migration gaps |
+| `HERO_HUB_ANIMATION_TUNING.md` | **CURRENT** | Hero Hub animation debug workflow — `?heroDebug=1` tuning panel, centralized config in `heroAnimationTuning.ts` |
+| `HERO_HUB_ANIMATION_PR_QUEUE_TRIAGE_2026-04-07.md` | **RESOLVED** | PR queue triage for Hero Hub animation chain — merge order, duplicate branch cleanup |
+| `HERO_HUB_DEPLOY_AUDIT_2026-04-07.md` | **RESOLVED** | Deploy audit validating merged animation guardrails/tuning reached production |
+| `WORKBOOK_ACTIVITYCONFIG_BACKFILL.md` | **CURRENT** | Server-side guaranteed backfill: legacy workbookConfigs → activityConfigs before quest/AI dispatch |
+| `first-principles-system-review.md` | **CURRENT** | Full-loop system review: evaluation → planning → execution, curriculum pacing, disposition tracking |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `archive/01–07_*.md` | ARCHIVED | Phase 1–5 specs, original testing plan, Saturday lab runbook — all superseded by current docs |
 | `08_RUNBOOK.md` | **CURRENT** (Reference) | Operational runbook: deploy, backups, key rotation, troubleshooting |
@@ -57,11 +64,12 @@
 | `ENGINE_V2.md` | Working on engine/flywheel framework |
 | `FIRESTORE_AUDIT.md` | Working on data model, indexes, collections |
 | `WEEKLY_CONUNDRUM_ARC.md` | Working on conundrums, weekly theme integration |
+| `ECONOMY_AUDIT_PART1.md` | Working on XP/Diamond economy code paths, event wiring |
+| `ECONOMY_AUDIT_PART2.md` | Working on economy pacing, balance reconciliation, currency model |
+| `STONEBRIDGE_BIBLE.md` | Working on narrative content, conundrums, chapter questions, Banner Rally |
 | `GAME_WORLD_ECONOMY.md` | Working on XP/Diamond economy, armor forging, tier progression |
 | `HEALTH_REPORT.md` | Working on code health, tech debt, bundle size optimization |
 | `PROFILE_LIMITS_AUDIT.md` | Working on rate limits, AI usage caps, cost controls |
-| `LINCOLN_ACCELERATION.md` | Working on Lincoln's reading acceleration, UFLI integration, Phonics Forge |
-| `UFLI_INTEGRATION.md` | Working on UFLI data model, progress tracking, encoding checks |
 | `08_RUNBOOK.md` | Working on deployment, backups, operations |
 | `barnes-testing-guide-v2.md` | Working on tests (stale — needs Knowledge Mine, Workshop, Books, Armor coverage) |
 

@@ -772,12 +772,12 @@ export default function BrothersVoxelScene({
   // Build label data for overlay
   const labelData: { name: string; tier: string; xp: number; side: 'left' | 'right' | 'center' }[] = []
   if (lincoln && london) {
-    labelData.push({ name: lincoln.name, tier: (lincoln.profile.currentTier ?? calculateTier(lincoln.totalXp)).toUpperCase(), xp: lincoln.totalXp, side: 'left' })
-    labelData.push({ name: london.name, tier: (london.profile.currentTier ?? calculateTier(london.totalXp)).toUpperCase(), xp: london.totalXp, side: 'right' })
+    labelData.push({ name: lincoln.name, tier: calculateTier(lincoln.totalXp), xp: lincoln.totalXp, side: 'left' })
+    labelData.push({ name: london.name, tier: calculateTier(london.totalXp), xp: london.totalXp, side: 'right' })
   } else if (lincoln) {
-    labelData.push({ name: lincoln.name, tier: (lincoln.profile.currentTier ?? calculateTier(lincoln.totalXp)).toUpperCase(), xp: lincoln.totalXp, side: 'center' })
+    labelData.push({ name: lincoln.name, tier: calculateTier(lincoln.totalXp), xp: lincoln.totalXp, side: 'center' })
   } else if (london) {
-    labelData.push({ name: london.name, tier: (london.profile.currentTier ?? calculateTier(london.totalXp)).toUpperCase(), xp: london.totalXp, side: 'center' })
+    labelData.push({ name: london.name, tier: calculateTier(london.totalXp), xp: london.totalXp, side: 'center' })
   }
 
   return (

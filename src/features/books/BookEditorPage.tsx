@@ -40,11 +40,13 @@ import CloseIcon from '@mui/icons-material/Close'
 import CollectionsIcon from '@mui/icons-material/Collections'
 import Paper from '@mui/material/Paper'
 import Snackbar from '@mui/material/Snackbar'
+import { getDocs, orderBy, query } from 'firebase/firestore'
 import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
+import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { SubjectBucket } from '../../core/types/enums'
@@ -64,6 +66,9 @@ import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
 import { useBackgroundReimagine } from './useBackgroundReimagine'
 import ReimagineResultDialog from './ReimagineResultDialog'
+import { useEditorHistory, useUndoRedoKeys } from './useEditorHistory'
+import UndoIcon from '@mui/icons-material/Undo'
+import RedoIcon from '@mui/icons-material/Redo'
 
 type VoiceMode = 'record' | 'dictate'
 
@@ -148,16 +153,20 @@ export default function BookEditorPage() {
     addSketchToPage,
     applySketchEnhancement,
     pickSketchVersion,
+    restoreImageVersion,
   } = useBook(familyId, bookId)
 
   const { generateImage, enhanceSketch, loading: aiLoading, error: aiError } = useAI()
+
+  // ── Undo / Redo ───────────────────────────────────────────────
+  const editorHistory = useEditorHistory()
 
   const bgReimagine = useBackgroundReimagine({
     familyId,
     childId: activeChild?.id ?? '',
     childName,
     bookTheme: book?.theme,
-    onAddToPage: (pageId, imageId, url, storagePath) => {
+    onReplaceBackground: (pageId, imageId, url, storagePath) => {
       applySketchEnhancement(pageId, imageId, url, storagePath)
     },
     onAddSticker: (pageId, url, storagePath, label) => {
@@ -222,6 +231,30 @@ export default function BookEditorPage() {
   // Background source picker state
   const [showBgSourcePicker, setShowBgSourcePicker] = useState(false)
   const [showGalleryPicker, setShowGalleryPicker] = useState(false)
+  const [galleryStickers, setGalleryStickers] = useState<Sticker[]>([])
+  const [galleryStickersLoading, setGalleryStickersLoading] = useState(false)
+
+  // Load sticker library images when gallery picker opens
+  useEffect(() => {
+    if (!showGalleryPicker || !familyId) return
+    let cancelled = false
+    const load = async () => {
+      setGalleryStickersLoading(true)
+      try {
+        const q = query(stickerLibraryCollection(familyId), orderBy('createdAt', 'desc'))
+        const snap = await getDocs(q)
+        if (!cancelled) {
+          setGalleryStickers(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
+        }
+      } catch {
+        // Best effort — gallery still shows book backgrounds
+      } finally {
+        if (!cancelled) setGalleryStickersLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [showGalleryPicker, familyId])
 
   // Deselect signal — increment to tell PageEditor to deselect all images
   const [deselectSignal, setDeselectSignal] = useState(0)
@@ -229,6 +262,14 @@ export default function BookEditorPage() {
 
   // Overlay guidance (shown after placing an AI scene)
   const [showOverlayGuide, setShowOverlayGuide] = useState(false)
+
+  // Contextual action bar: track which image is selected in PageEditor
+  const [selectedEditorImageId, setSelectedEditorImageId] = useState<string | null>(null)
+  const [selectedEditorImageType, setSelectedEditorImageType] = useState<'sticker' | 'background' | null>(null)
+  const handleSelectedImageChange = useCallback((imageId: string | null, imageType: 'sticker' | 'background' | null) => {
+    setSelectedEditorImageId(imageId)
+    setSelectedEditorImageType(imageType)
+  }, [])
 
   // Finish flow state
   const [showFinishDialog, setShowFinishDialog] = useState(false)
@@ -287,6 +328,63 @@ export default function BookEditorPage() {
     },
     [activePage, addImageToPage, autoCleanSketch],
   )
+
+  // ── History-tracked page mutations ──────────────────────────────
+  /** Snapshot the active page before a mutation, push history after. */
+  const trackPageChange = useCallback(
+    (action: string, mutate: () => void) => {
+      if (!activePage || !book) return
+      const before = structuredClone(activePage)
+      mutate()
+      // Re-read updated page from book state (next render will have it;
+      // we schedule the push via microtask so the state has settled)
+      queueMicrotask(() => {
+        // book may have updated by now — read latest from ref
+        const updatedPage = bookRef.current?.pages.find((p) => p.id === before.id)
+        if (updatedPage) {
+          editorHistory.push({ pageId: before.id, action, before, after: structuredClone(updatedPage) })
+        }
+      })
+    },
+    [activePage, book, editorHistory],
+  )
+
+  // Keep a mutable ref to book for async history reads
+  const bookRef = useRef(book)
+  bookRef.current = book
+
+  const handleTrackedRemoveImage = useCallback(
+    (imageId: string) => {
+      trackPageChange('remove_image', () => handleRemoveImage(imageId))
+    },
+    [trackPageChange, handleRemoveImage],
+  )
+
+  const handleTrackedPageUpdate = useCallback(
+    (changes: Partial<BookPage>) => {
+      // Only track non-trivial changes (not every keystroke)
+      if ('text' in changes) {
+        handlePageUpdate(changes)
+        return
+      }
+      trackPageChange('page_update', () => handlePageUpdate(changes))
+    },
+    [trackPageChange, handlePageUpdate],
+  )
+
+  const handleUndo = useCallback(() => {
+    const result = editorHistory.undo()
+    if (!result) return
+    updatePage(result.pageId, result.state)
+  }, [editorHistory, updatePage])
+
+  const handleRedo = useCallback(() => {
+    const result = editorHistory.redo()
+    if (!result) return
+    updatePage(result.pageId, result.state)
+  }, [editorHistory, updatePage])
+
+  useUndoRedoKeys(handleUndo, handleRedo)
 
   // ── Sketch: enhance ─────────────────────────────────────────────
   const handleEnhanceSketch = useCallback(async () => {
@@ -831,6 +929,52 @@ export default function BookEditorPage() {
         }}
       >
         <Chip
+          icon={<UndoIcon />}
+          label="Undo"
+          onClick={handleUndo}
+          disabled={!editorHistory.canUndo}
+          variant="outlined"
+          size="small"
+        />
+        <Chip
+          icon={<RedoIcon />}
+          label="Redo"
+          onClick={handleRedo}
+          disabled={!editorHistory.canRedo}
+          variant="outlined"
+          size="small"
+        />
+        {/* Contextual chips based on image selection */}
+        {selectedEditorImageType === 'sticker' && selectedEditorImageId && (
+          <Chip
+            icon={<DeleteOutlineIcon />}
+            label="Delete sticker"
+            onClick={() => { handleTrackedRemoveImage(selectedEditorImageId); deselect() }}
+            color="error"
+            size="small"
+          />
+        )}
+        {selectedEditorImageType === 'background' && selectedEditorImageId && (
+          <>
+            <Chip
+              icon={<DeleteOutlineIcon />}
+              label="Remove background"
+              onClick={() => { handleTrackedRemoveImage(selectedEditorImageId); deselect() }}
+              color="error"
+              size="small"
+            />
+            {handleChangeBackground && (
+              <Chip
+                icon={<AutoAwesomeIcon />}
+                label="Change"
+                onClick={() => { handleChangeBackground(); deselect() }}
+                variant="outlined"
+                size="small"
+              />
+            )}
+          </>
+        )}
+        <Chip
           label="Read"
           icon={<AutoStoriesIcon />}
           onClick={() => navigate(`/books/${bookId}/read`)}
@@ -906,14 +1050,18 @@ export default function BookEditorPage() {
         >
           <PageEditor
             page={activePage}
-            onUpdate={handlePageUpdate}
+            onUpdate={handleTrackedPageUpdate}
             onAddImage={handleAddImageFile}
-            onRemoveImage={handleRemoveImage}
+            onRemoveImage={handleTrackedRemoveImage}
             onChangeBackground={handleChangeBackground}
             onImagePositionChange={handleImagePositionChange}
             onReRecord={() => { setShowVoicePanel(true); setVoiceMode('record') }}
             childName={childName}
             deselectSignal={deselectSignal}
+            onSelectedImageChange={handleSelectedImageChange}
+            onRestoreVersion={(imageId, versionIndex) => {
+              if (activePage) restoreImageVersion(activePage.id, imageId, versionIndex)
+            }}
           />
         </Box>
       )}
@@ -1440,7 +1588,7 @@ export default function BookEditorPage() {
                 borderColor: 'divider',
                 cursor: 'pointer',
                 '&:hover': { bgcolor: 'action.hover', borderColor: 'primary.main' },
-                ...(!bookBackgrounds.length ? { opacity: 0.4, pointerEvents: 'none' } : {}),
+                // Always enabled — gallery shows book backgrounds + sticker library
               }}
             >
               <CollectionsIcon sx={{ fontSize: 32, color: 'success.main', mb: 0.5 }} />
@@ -1467,7 +1615,7 @@ export default function BookEditorPage() {
       >
         <DialogTitle>Pick a background</DialogTitle>
         <DialogContent>
-          {bookBackgrounds.length > 0 ? (
+          {bookBackgrounds.length > 0 && (
             <>
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
                 From this book
@@ -1489,7 +1637,39 @@ export default function BookEditorPage() {
                 ))}
               </ImageList>
             </>
-          ) : (
+          )}
+
+          {/* Sticker library section */}
+          {galleryStickersLoading ? (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={24} />
+            </Stack>
+          ) : galleryStickers.length > 0 ? (
+            <>
+              {bookBackgrounds.length > 0 && <Divider sx={{ my: 2 }} />}
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                From your gallery
+              </Typography>
+              <ImageList cols={3} gap={8}>
+                {galleryStickers.map((sticker) => (
+                  <ImageListItem
+                    key={sticker.id}
+                    onClick={() => handleSelectGalleryBackground(sticker.url)}
+                    sx={{ cursor: 'pointer', borderRadius: 1, overflow: 'hidden' }}
+                  >
+                    <img
+                      src={sticker.url}
+                      alt={sticker.label ?? 'Sticker'}
+                      loading="lazy"
+                      style={{ borderRadius: 8, objectFit: 'cover', height: 100, width: '100%' }}
+                    />
+                  </ImageListItem>
+                ))}
+              </ImageList>
+            </>
+          ) : null}
+
+          {bookBackgrounds.length === 0 && galleryStickers.length === 0 && !galleryStickersLoading && (
             <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
               No backgrounds yet — add some scenes to your book first!
             </Typography>
@@ -1864,10 +2044,10 @@ export default function BookEditorPage() {
         open={bgReimagine.showChoiceDialog}
         job={bgReimagine.job}
         onClose={bgReimagine.dismissNotification}
-        onAddToPage={bgReimagine.handleAddToPage}
-        onMakeSticker={bgReimagine.handleMakeSticker}
+        onReplaceBackground={bgReimagine.handleReplaceBackground}
+        onAddAsSticker={bgReimagine.handleAddAsSticker}
         onSaveToGallery={() => { void bgReimagine.handleSaveToGallery() }}
-        onDiscard={() => { void bgReimagine.handleDiscard() }}
+        onDiscard={bgReimagine.handleDiscard}
       />
 
       {/* Celebration overlay */}

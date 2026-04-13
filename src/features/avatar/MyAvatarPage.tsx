@@ -33,6 +33,7 @@ import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums
 import type {
   AccessoryId,
   ArmorPiece,
+  ArmorTier,
   Artifact,
   AvatarBackground,
   AvatarProfile,
@@ -47,7 +48,7 @@ import { ACCESSORY_SLOTS } from '../../core/types'
 
 import type { VoxelCharacterHandle } from './VoxelCharacter'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
-import { getActiveForgeTier, getAppliedVoxelPieces, getArmorPieceState, getEquippablePieces, getPieceLockReason, getVisiblePieces } from './armorPieceState'
+import { getActiveForgeTier, getAppliedVoxelPieces, getArmorPieceState, getForgedPiecesForTier, getPieceLockReason, getVisiblePieces } from './armorPieceState'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import ArmorVerseCard from './ArmorVerseCard'
 import { speakStatus, speakVerse } from './speakVerse'
@@ -61,12 +62,13 @@ import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
 import TierUpCeremony from '../../components/avatar/TierUpCeremony'
-import { getDisplayArmorTier } from './armorTierProgress'
+import { deriveUnlockedTiersFromForged, getDisplayArmorTier, getTierLockReason } from './armorTierProgress'
+import { calculateTier } from './voxel/tierMaterials'
 import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
-import { getArmorGateStatusFromSession } from './armorGate'
+import { getDailyArmorStatusFromSession, getAllForgedSlots } from './armorStatus'
 import { getWeekRange } from '../../core/utils/time'
 import { dayLogDocId } from '../today/daylog.model'
 import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
@@ -102,6 +104,51 @@ function getNextUnlock(profile: AvatarProfile): { piece: ArmorPieceMeta; xpNeede
   const next = VOXEL_ARMOR_PIECES.find((p) => !visible.has(p.id))
   if (!next) return null
   return { piece: next, xpNeeded: Math.max(XP_THRESHOLDS[next.id] - profile.totalXp, 0) }
+}
+
+/** Returns the next forgeable piece with diamond cost info, or null if nothing to forge. */
+function getNextForgeAction(profile: AvatarProfile): {
+  piece: ArmorPieceMeta
+  diamondCost: number
+  canAfford: boolean
+  tier: string
+  tierLocked: boolean
+  lockReason: string
+} | null {
+  const activeTier = getActiveForgeTier(profile)
+  const forgedInTier = getForgedPiecesForTier(profile, activeTier)
+  const forgedSet = new Set(forgedInTier)
+
+  // Find next unforged piece in active tier that's XP-visible
+  const nextPiece = VOXEL_ARMOR_PIECES.find(
+    (p) => !forgedSet.has(p.id) && profile.totalXp >= XP_THRESHOLDS[p.id],
+  )
+  if (!nextPiece) return null
+
+  const unlockedTiers = deriveUnlockedTiersFromForged(profile)
+  const tierUnlocked = unlockedTiers.includes(activeTier as ArmorTier)
+  const cost = getForgeCost(activeTier, nextPiece.id)
+  const balance = profile.diamondBalance ?? 0
+
+  if (!tierUnlocked) {
+    return {
+      piece: nextPiece,
+      diamondCost: cost,
+      canAfford: false,
+      tier: activeTier,
+      tierLocked: true,
+      lockReason: getTierLockReason(profile, activeTier),
+    }
+  }
+
+  return {
+    piece: nextPiece,
+    diamondCost: cost,
+    canAfford: balance >= cost,
+    tier: activeTier,
+    tierLocked: false,
+    lockReason: '',
+  }
 }
 
 /** Check if yesterday's date string is exactly one day before today */
@@ -656,11 +703,9 @@ export default function MyAvatarPage() {
       setAnimateEquipId(voxelPieceId)
 
       const updatedApplied = [...(session.appliedPieces ?? []), armorPieceId]
-      const equippable = getEquippablePieces(profile)
-      const allApplied = equippable.length > 0 && equippable.every((vid) => {
-        const aid = ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id
-        return aid && updatedApplied.includes(aid)
-      })
+      // Use unified status for completion check (active-tier gate, not cross-tier)
+      const status = getDailyArmorStatusFromSession(profile, { appliedPieces: updatedApplied })
+      const allApplied = status.isSuitedUp
 
       if (allApplied) {
         playArmorFanfare(1.5)
@@ -796,25 +841,72 @@ export default function MyAvatarPage() {
   )
 
   // ── Suit Up! — equip all forged pieces with staggered animation ──
-  const suitUpAll = useCallback(() => {
+  const suitUpAll = useCallback(async () => {
     if (!profile || !session || !familyId || !childId) return
-    const forgedIds = getEquippablePieces(profile)
+    // Use getAllForgedSlots for visual equip (cross-tier — equips all forged pieces on 3D model)
+    const allSlots = getAllForgedSlots(profile)
     const currentVoxel = getAppliedVoxelPieces(session.appliedPieces ?? [])
     // Canonical equip order: belt → breastplate → shoes → shield → helmet → sword
     const equipOrder: VoxelArmorPieceId[] = ['belt', 'breastplate', 'shoes', 'shield', 'helmet', 'sword']
-    const toEquip = equipOrder.filter((vid) => forgedIds.includes(vid) && !currentVoxel.includes(vid))
+    const toEquip = equipOrder.filter((vid) => allSlots.includes(vid) && !currentVoxel.includes(vid))
     if (toEquip.length === 0) return
 
     const pieceCount = toEquip.length
     const pieceLabel = pieceCount === 1 ? 'piece' : 'pieces'
     speakStatus(`Suiting up ${pieceCount} ${pieceLabel}. Great choice!`)
 
-    toEquip.forEach((voxelId, i) => {
-      setTimeout(() => {
-        void handleApplyPiece(voxelId as VoxelArmorPieceId)
-      }, i * 200) // Stagger 200ms apart for a cascading effect
+    // Map voxel IDs to ArmorPiece IDs for the session
+    const toEquipArmorIds = toEquip
+      .map((vid) => ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id)
+      .filter((id): id is ArmorPiece => Boolean(id))
+
+    // Build the complete applied list atomically (avoids stale closure overwrites)
+    const updatedApplied = [...(session.appliedPieces ?? []), ...toEquipArmorIds]
+    const allEquippedVoxel = [...getAppliedVoxelPieces(updatedApplied)]
+    // Gate completion uses active-tier pieces (matches gallery), not cross-tier union
+    const status = getDailyArmorStatusFromSession(profile, { appliedPieces: updatedApplied })
+    const allApplied = status.isSuitedUp
+
+    // Single Firestore write for the session — all pieces at once
+    const docId = dailyArmorSessionDocId(childId, today)
+    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+    await setDoc(sessionRef, stripUndefined({
+      ...session,
+      appliedPieces: updatedApplied,
+      manuallyUnequipped: [],
+      ...(allApplied ? { completedAt: new Date().toISOString() } : {}),
+    }) as unknown as DailyArmorSession)
+
+    // Update profile equippedPieces in one write
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    await safeUpdateProfile(profileRef, {
+      equippedPieces: allEquippedVoxel,
+      lastArmorEquipDate: today,
     })
-  }, [profile, session, familyId, childId, handleApplyPiece])
+
+    // Stagger visual equip animations for cascading effect
+    toEquip.forEach((voxelId, i) => {
+      setTimeout(() => setAnimateEquipId(voxelId), i * 200)
+    })
+
+    if (allApplied) {
+      playArmorFanfare(1.5)
+      if ('speechSynthesis' in window) {
+        setTimeout(() => {
+          const utterance = new SpeechSynthesisUtterance(
+            "Full armor on! You're ready for battle, warrior!",
+          )
+          utterance.rate = 0.85
+          window.speechSynthesis.speak(utterance)
+        }, 1800)
+      }
+      void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
+        .catch((err) => console.error('[XP] Award failed:', err))
+      void checkArmorStreak(profile)
+    }
+
+    setMorningReset(false)
+  }, [profile, session, familyId, childId, today, checkArmorStreak])
 
   // ── Screen flash on equip ──────────────────────────────────────
   const flashContainerRef = useRef<HTMLDivElement>(null)
@@ -867,12 +959,12 @@ export default function MyAvatarPage() {
     setAnimateUnequipId(null)
   }, [])
 
-  // ── Computed values ────────────────────────────────────────────
+  // ── Computed values (unified via getDailyArmorStatus) ────────────
   const appliedPieces = Array.isArray(session?.appliedPieces) ? session.appliedPieces : []
   const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
   const unlockedVoxel = profile ? getVisiblePieces(profile) : []
-  const armorGateStatus = profile ? getArmorGateStatusFromSession(profile, session) : null
-  const allEarnedApplied = armorGateStatus?.hasForgedPieces ? armorGateStatus.complete : false
+  const armorStatus = profile ? getDailyArmorStatusFromSession(profile, session) : null
+  const allEarnedApplied = armorStatus?.isSuitedUp ?? false
   const nextUnlock = profile ? getNextUnlock(profile) : null
   const allSixUnlocked = unlockedVoxel.length === 6
   const nextUnlockProgress = (() => {
@@ -885,20 +977,30 @@ export default function MyAvatarPage() {
     return Math.min(Math.max((unlockProgress / unlockRange) * 100, 0), 100)
   })()
 
-  // Armor material progression is forge-based (not raw XP based).
-  const currentTierName = profile ? getDisplayArmorTier(profile).toUpperCase() : 'WOOD'
+  // Always compute display tier from totalXp so it stays honest (not stale stored value).
+  const currentTierName = profile ? calculateTier(profile.totalXp) : 'WOOD'
+  const forgedCount = armorStatus?.gateTotal ?? 0
+  const nextForgeAction = profile ? getNextForgeAction(profile) : null
+
   const nextRecommendedAction: NextRecommendedAction = (() => {
-    if (allEarnedApplied && unlockedVoxel.length > 0) {
+    // All gate-required pieces equipped → ready to go
+    if (allEarnedApplied && armorStatus?.hasForgedPieces) {
       return { type: 'start_day', label: 'Start your day' }
     }
-    if (unlockedVoxel.length > 0 && appliedVoxel.length < unlockedVoxel.length) {
+    // Forged pieces exist but not all equipped today → suit up
+    if (armorStatus && armorStatus.hasForgedPieces && !armorStatus.isSuitedUp) {
       return { type: 'suit_up', label: 'Suit up' }
     }
-    if (!allSixUnlocked && nextUnlock) {
-      if (nextUnlock.xpNeeded <= 0) {
-        return { type: 'forge', label: `Forge ${nextUnlock.piece.shortName}` }
+    // Next forge action: show diamond cost / tier lock reason
+    if (nextForgeAction) {
+      if (nextForgeAction.tierLocked) {
+        return { type: 'earn_xp', label: nextForgeAction.lockReason }
       }
-      return { type: 'earn_xp', label: `Earn ${nextUnlock.xpNeeded} XP for ${nextUnlock.piece.shortName}` }
+      if (nextForgeAction.canAfford) {
+        return { type: 'forge', label: `Forge ${nextForgeAction.piece.shortName} — ${nextForgeAction.diamondCost} ◆` }
+      }
+      const needed = nextForgeAction.diamondCost - (profile?.diamondBalance ?? 0)
+      return { type: 'earn_xp', label: `Earn ${needed} more ◆ to forge ${nextForgeAction.piece.shortName}` }
     }
     return { type: 'start_day', label: 'Start your day' }
   })()
@@ -1043,7 +1145,7 @@ export default function MyAvatarPage() {
         title: `${activeChild?.name ?? 'Avatar'} - ${currentTierName} Tier Armor`,
         type: EvidenceType.Photo,
         createdAt: new Date().toISOString(),
-        content: `Avatar screenshot: ${currentTierName} tier, ${profile.totalXp} XP, ${appliedVoxel.length}/6 pieces equipped`,
+        content: `Avatar screenshot: ${currentTierName} tier, ${profile.totalXp} XP, ${appliedVoxel.length}/${forgedCount} pieces equipped`,
         tags: {
           engineStage: EngineStage.Share,
           domain: 'Character',
@@ -1062,7 +1164,7 @@ export default function MyAvatarPage() {
     } finally {
       setSavingToPortfolio(false)
     }
-  }, [familyId, childId, profile, activeChild, currentTierName, appliedVoxel.length])
+  }, [familyId, childId, profile, activeChild, currentTierName, appliedVoxel.length, forgedCount])
 
   if (loading) {
     return (
@@ -1323,6 +1425,7 @@ export default function MyAvatarPage() {
           appliedVoxel={appliedVoxel}
           allEarnedApplied={allEarnedApplied}
           allSixUnlocked={allSixUnlocked}
+          forgedCount={forgedCount}
           nextUnlock={nextUnlock}
           currentTierName={currentTierName}
           nextUnlockProgress={nextUnlockProgress}
@@ -1332,8 +1435,8 @@ export default function MyAvatarPage() {
           nextRecommendedAction={nextRecommendedAction}
           onSuitUpAll={suitUpAll}
           onForgeNext={() => {
-            if (!nextUnlock) return
-            setSelectedPiece(nextUnlock.piece)
+            if (!nextForgeAction) return
+            setSelectedPiece(nextForgeAction.piece)
           }}
           onStartDay={() => navigate('/today')}
         />

@@ -6,7 +6,7 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import ImageIcon from '@mui/icons-material/Image'
+import WallpaperIcon from '@mui/icons-material/Wallpaper'
 import StarIcon from '@mui/icons-material/Star'
 import SaveAltIcon from '@mui/icons-material/SaveAlt'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
@@ -17,8 +17,8 @@ interface ReimagineResultDialogProps {
   open: boolean
   job: ReimagineJob | null
   onClose: () => void
-  onAddToPage: () => void
-  onMakeSticker: () => void
+  onReplaceBackground: () => void
+  onAddAsSticker: () => void
   onSaveToGallery: () => void
   onDiscard: () => void
 }
@@ -27,8 +27,8 @@ export default function ReimagineResultDialog({
   open,
   job,
   onClose,
-  onAddToPage,
-  onMakeSticker,
+  onReplaceBackground,
+  onAddAsSticker,
   onSaveToGallery,
   onDiscard,
 }: ReimagineResultDialogProps) {
@@ -83,12 +83,12 @@ export default function ReimagineResultDialog({
           <Box
             sx={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
+              gridTemplateColumns: 'repeat(2, 1fr)',
               gap: 1.5,
             }}
           >
             <Box
-              onClick={onAddToPage}
+              onClick={onReplaceBackground}
               sx={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -107,13 +107,16 @@ export default function ReimagineResultDialog({
                 '&:active': { transform: 'scale(0.97)' },
               }}
             >
-              <ImageIcon color="primary" />
+              <WallpaperIcon color="primary" />
               <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.2 }}>
-                Add to page
+                Replace background
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.2 }}>
+                Full page background
               </Typography>
             </Box>
             <Box
-              onClick={onMakeSticker}
+              onClick={onAddAsSticker}
               sx={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -134,7 +137,10 @@ export default function ReimagineResultDialog({
             >
               <StarIcon color="primary" />
               <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.2 }}>
-                Make a sticker
+                Add as sticker
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.2 }}>
+                Movable & resizable
               </Typography>
             </Box>
             <Box
@@ -161,21 +167,28 @@ export default function ReimagineResultDialog({
               <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.2 }}>
                 Save to gallery
               </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.2 }}>
+                Save for later
+              </Typography>
             </Box>
           </Box>
         </Stack>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button
-          startIcon={<DeleteOutlineIcon />}
-          color="error"
-          onClick={onDiscard}
-          size="small"
-        >
-          Discard
-        </Button>
-        <Box sx={{ flex: 1 }} />
-        <Button onClick={onClose}>Cancel</Button>
+      <DialogActions sx={{ px: 3, pb: 2, flexDirection: 'column', alignItems: 'stretch', gap: 1 }}>
+        <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
+          Saved to your gallery automatically
+        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Button
+            startIcon={<DeleteOutlineIcon />}
+            color="error"
+            onClick={onDiscard}
+            size="small"
+          >
+            Discard
+          </Button>
+          <Button onClick={onClose}>Cancel</Button>
+        </Box>
       </DialogActions>
     </Dialog>
   )

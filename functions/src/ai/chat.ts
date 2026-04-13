@@ -439,11 +439,8 @@ PLAN CONTENT RULES:
   - "choose": Enrichment activities the child picks from AFTER completing must-do items (3-4 options per day, child picks 2). Examples: Reading Eggs, Minecraft reading, read-aloud time, art, sight word games, science exploration.
 - On MVD (Minimum Viable Day) weeks, ONLY must-do items are required. Choose items are bonus.
 - Items with category "must-do" should always have "mvdEssential": true.
-- If the user specified a read-aloud book with chapters, include a "chapterQuestion" object on each day that has a reading assignment. Distribute chapters across the school days (Mon-Fri). Vary the questionType across days — never use the same type two days in a row.
-- "chapterQuestion" is optional — only include it when the user has specified a read-aloud book.
-- Chapter questions should align with the Stonebridge Story Bible context below when possible:
-  - Use at least one named Stonebridge character or place as an analogy or reflection anchor.
-  - Keep continuity with ongoing village restoration themes.
+- Chapter questions are now generated separately via the BookProgress pool — do NOT include "chapterQuestion" in the day plan output.
+- Read-aloud chapter discussions are handled by the Chapter Question Pool system and should not be duplicated here.
 
 STONEBRIDGE WORLD CONTEXT:
 ${STONEBRIDGE_BIBLE}
@@ -469,12 +466,6 @@ ${STONEBRIDGE_BIBLE}
           "link": null // route path (e.g. "/quest") — only set for in-app activities like evaluation items
         }
       ],
-      "chapterQuestion": {
-        "book": "Book title",
-        "chapter": "Chapter number or name",
-        "questionType": "comprehension|application|connection|opinion|prediction",
-        "question": "The discussion question for this chapter"
-      }
     }
   ],
   "skipSuggestions": [],
@@ -510,7 +501,12 @@ MASTERY GUIDANCE:
 When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.
 
 CRITICAL SIZE CONSTRAINTS:
-- Keep item titles SHORT (max 6 words). Example: "GATB Reading Lesson 21" not "Good and the Beautiful Reading — Lesson 21: Short vowel review with comprehension questions"
+- Item titles MUST be short activity names (≤6 words, ≤60 characters).
+  NEVER embed word lists, phonics patterns, drill instructions, or per-word detail in titles.
+  Put that kind of detail in skipGuidance or description fields only.
+  Examples of CORRECT titles: "Sight word games", "Booster cards", "Math workbook", "Knowledge Mine — Reading"
+  Examples of WRONG titles: "words: when, whip, what, where, why" (embeds word list — use skipGuidance),
+  "cards from th- and ch- cards. Say each sound aloud." (embeds instruction — use description)
 - Keep skillTags to max 1 tag per item (the most relevant one)
 - Keep skipGuidance to max 15 words or omit if not needed
 - Do NOT include explanations, descriptions, or commentary in the JSON

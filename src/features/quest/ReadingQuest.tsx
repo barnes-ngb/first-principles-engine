@@ -12,7 +12,7 @@ import { useSpeechRecognition } from '../../core/hooks/useSpeechRecognition'
 import { useTTS } from '../../core/hooks/useTTS'
 import { sanitizeStimulus } from './questHelpers'
 import TappableText from './TappableText'
-import type { AnswerInputMethod, QuestQuestion, QuestState } from './questTypes'
+import type { AnswerInputMethod, QuestMode, QuestQuestion, QuestState } from './questTypes'
 import { MAX_QUESTIONS } from './questTypes'
 
 // ── Minecraft color palette ────────────────────────────────────
@@ -430,6 +430,8 @@ interface QuestQuestionScreenProps {
   domainLabel?: string
   /** Quest domain — enables TTS for math questions */
   domain?: string
+  /** Quest mode — enables voice-first auto-speak for phonics/comprehension */
+  questMode?: QuestMode
 }
 
 export default function QuestQuestionScreen({
@@ -441,10 +443,12 @@ export default function QuestQuestionScreen({
   onSkip,
   domainLabel = 'Reading Quest',
   domain = 'reading',
+  questMode,
 }: QuestQuestionScreenProps) {
   const progress = (questState.totalQuestions / MAX_QUESTIONS) * 100
   const isMathQuest = domain === 'math'
-  const tts = useTTS({ rate: 0.9 })
+  const isVoiceFirst = questMode === 'phonics' || questMode === 'comprehension'
+  const tts = useTTS({ rate: 0.85 })
   const [muted, setMuted] = useState(false)
 
   const [timerElapsed, setTimerElapsed] = useState(false)
@@ -457,22 +461,6 @@ export default function QuestQuestionScreen({
     setTimerElapsed(false)
     setRevealingAnswer(false)
   }
-
-  // Auto-read math questions when they appear
-  useEffect(() => {
-    if (!muted && isMathQuest && question) {
-      const timer = setTimeout(() => tts.speak(question.prompt), 500)
-      return () => clearTimeout(timer)
-    }
-  }, [question.id, isMathQuest, muted]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Speak a word via TTS (cancels any in-progress speech first)
-  const speakWord = useCallback(
-    (word: string) => {
-      if (!muted) tts.speak(blendForTTS(word))
-    },
-    [muted, tts],
-  )
 
   // Detect passage-based comprehension questions (passage separated by double newline)
   const passageParts = useMemo(() => {
@@ -489,6 +477,37 @@ export default function QuestQuestionScreen({
     }
     return null
   }, [question.prompt])
+
+  // Build speech text for auto-speak (prompt only — stimulus is visual, not spoken)
+  const questionSpeechText = useMemo(() => {
+    if (passageParts) return passageParts.question
+    return question.prompt
+  }, [question.prompt, passageParts])
+
+  // Auto-read questions when they appear (math, phonics, comprehension)
+  useEffect(() => {
+    if (muted) return
+    if (!isMathQuest && !isVoiceFirst) return
+    const text = isMathQuest ? question.prompt : questionSpeechText
+    const timer = setTimeout(() => tts.speak(text), 500)
+    return () => clearTimeout(timer)
+  }, [question.id, isMathQuest, isVoiceFirst, muted]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Replay the question prompt via TTS
+  const replayQuestion = useCallback(() => {
+    if (!muted) {
+      const text = isMathQuest ? question.prompt : questionSpeechText
+      tts.speak(text)
+    }
+  }, [muted, tts, isMathQuest, question.prompt, questionSpeechText])
+
+  // Speak a word via TTS (cancels any in-progress speech first)
+  const speakWord = useCallback(
+    (word: string) => {
+      if (!muted) tts.speak(blendForTTS(word))
+    },
+    [muted, tts],
+  )
 
   // Show skip button after 8 seconds on current question
   useEffect(() => {
@@ -562,19 +581,71 @@ export default function QuestQuestionScreen({
         }}
       />
 
-      {/* Diamond counter + mute toggle */}
+      {/* Diamond counter + speaker controls */}
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-        <IconButton
-          onClick={() => {
-            setMuted((m) => !m)
-            tts.cancel()
-          }}
-          size="small"
-          sx={{ color: muted ? MC.stone : MC.diamond, p: 0.5 }}
-          aria-label={muted ? 'Unmute' : 'Mute'}
-        >
-          {muted ? <VolumeOffIcon fontSize="small" /> : <VolumeUpIcon fontSize="small" />}
-        </IconButton>
+        {isVoiceFirst ? (
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            {/* Prominent replay button */}
+            <IconButton
+              onClick={replayQuestion}
+              disabled={muted}
+              sx={{
+                color: muted ? MC.stone : MC.diamond,
+                p: 1,
+                minWidth: 40,
+                minHeight: 40,
+                ...(tts.isSpeaking && !muted && {
+                  animation: 'speaker-pulse 1s ease-in-out infinite',
+                  '@keyframes speaker-pulse': {
+                    '0%, 100%': { transform: 'scale(1)', boxShadow: `0 0 0px ${MC.diamond}00` },
+                    '50%': { transform: 'scale(1.15)', boxShadow: `0 0 12px ${MC.diamond}60` },
+                  },
+                }),
+              }}
+              aria-label="Hear question again"
+            >
+              <VolumeUpIcon sx={{ fontSize: 28 }} />
+            </IconButton>
+            <Typography
+              component="span"
+              onClick={replayQuestion}
+              sx={{
+                fontFamily: MC.font,
+                fontSize: '0.35rem',
+                color: muted ? MC.stone : MC.diamond,
+                cursor: muted ? 'default' : 'pointer',
+                userSelect: 'none',
+                '&:hover': muted ? {} : { color: MC.gold },
+              }}
+            >
+              Tap to hear again
+            </Typography>
+            {/* Small mute toggle */}
+            <IconButton
+              onClick={() => {
+                setMuted((m) => !m)
+                tts.cancel()
+              }}
+              size="small"
+              sx={{ color: muted ? MC.red : MC.stone, p: 0.5, ml: 0.5 }}
+              aria-label={muted ? 'Unmute' : 'Mute'}
+            >
+              {muted ? <VolumeOffIcon sx={{ fontSize: 16 }} /> : <VolumeOffIcon sx={{ fontSize: 16, opacity: 0.4 }} />}
+            </IconButton>
+          </Stack>
+        ) : (
+          <IconButton
+            onClick={() => {
+              setMuted((m) => !m)
+              tts.cancel()
+            }}
+            size="small"
+            sx={{ color: muted ? MC.stone : MC.diamond, p: 0.5 }}
+            aria-label={muted ? 'Unmute' : 'Mute'}
+          >
+            {muted ? <VolumeOffIcon fontSize="small" /> : <VolumeUpIcon fontSize="small" />}
+          </IconButton>
+        )}
         <Typography
           sx={{
             fontFamily: MC.font,
@@ -788,22 +859,53 @@ export default function QuestQuestionScreen({
                 },
               }}
             >
-              <Box sx={{ textAlign: 'center' }}>
-                {revealCorrect && (
-                  <Typography
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                {/* Voice-first: speaker icon to hear option without committing */}
+                {isVoiceFirst && !revealingAnswer && !muted && (
+                  <Box
                     component="span"
-                    sx={{ fontFamily: MC.font, fontSize: '0.7rem', color: MC.green }}
+                    role="button"
+                    aria-label={`Hear option: ${option}`}
+                    onClick={(e: React.MouseEvent) => {
+                      e.stopPropagation()
+                      speakWord(option)
+                    }}
+                    sx={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: MC.stone,
+                      mr: 1.5,
+                      p: 0.5,
+                      borderRadius: 1,
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                      minWidth: 32,
+                      minHeight: 32,
+                      '&:hover': { color: MC.diamond, bgcolor: 'rgba(91,252,238,0.1)' },
+                      '&:active': { color: MC.gold },
+                    }}
                   >
-                    {'✅ '}
-                  </Typography>
+                    <VolumeUpIcon sx={{ fontSize: 20 }} />
+                  </Box>
                 )}
-                <TappableText
-                  text={option}
-                  onTapWord={speakWord}
-                  fontFamily={MC.font}
-                  fontSize="0.7rem"
-                  color={revealCorrect ? MC.green : MC.white}
-                />
+                <Box sx={{ textAlign: 'center' }}>
+                  {revealCorrect && (
+                    <Typography
+                      component="span"
+                      sx={{ fontFamily: MC.font, fontSize: '0.7rem', color: MC.green }}
+                    >
+                      {'✅ '}
+                    </Typography>
+                  )}
+                  <TappableText
+                    text={option}
+                    onTapWord={speakWord}
+                    fontFamily={MC.font}
+                    fontSize="0.7rem"
+                    color={revealCorrect ? MC.green : MC.white}
+                  />
+                </Box>
               </Box>
             </Box>
           )

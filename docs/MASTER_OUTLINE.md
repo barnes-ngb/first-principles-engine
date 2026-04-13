@@ -1,35 +1,20 @@
 # Barnes Family Homeschool — Master Project Outline v15
 
-**Version:** v15 — April 7, 2026  
-**Status:** Updated since v14 — Hero Hub reframe, two-currency economy hardening, and Stonebridge narrative foundation.
+**Version:** v15 — April 12, 2026  
+**Status:** Updated since v14 — Hero Hub reframe, two-currency economy hardening, Stonebridge narrative foundation, armor progression gating, capture pipeline unification, working levels, chapter book pool.
 
 ## Project Summary
 Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builder), Lincoln (10, neurodivergent, speech challenges), London (6, drawing/story-first).
 
 ---
 
-## North Star: Lincoln Acceleration (April–July 2026)
-
-Everything else pauses. Lincoln's reading is the #1 priority for the next 3 months.
-
-**Goal:** Move Lincoln from UFLI Lesson 62 → Lesson 90+ by end of July 2026 using structured phonics (UFLI Foundations) with the Phonics Forge guided flow.
-
-**Key decisions:**
-- UFLI Foundations is the backbone — 128 lessons, systematic scope & sequence
-- Lincoln starts at Lesson 62 (VCe Review 3; Exceptions) — assessed anchor point
-- Shelly delivers lessons using free UFLI Toolbox PDFs + the app's tracking layer
-- Weekly encoding checks gate advancement (not time-based)
-- Minecraft "Phonics Forge" theming on kid-facing UI
-
-**Reference:** See `docs/LINCOLN_ACCELERATION.md` and `docs/UFLI_INTEGRATION.md` for full design.
-
 **Tech:** React + TypeScript + Vite, Firebase (Auth/Firestore/Storage/Functions/Hosting), MUI, Claude + OpenAI image stack.
 
 **Scale (current):**
-- TypeScript lines: **120,662** total (`src/` 108,370 + `functions/src/` 12,292)
-- Commits: **1,429**
-- Tests: **59 test files**, **1,004 test cases**
-- Firestore collections: **34** (32 family-scoped + 2 global)
+- TypeScript lines: **126,034** total
+- Commits: **112**
+- Tests: **69 test files**
+- Firestore collections/doc helpers: **33** in `firestore.ts`
 - Cloud Functions: **18**
 - Chat task types: **14**
 - Routes: **27**
@@ -92,6 +77,16 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 - `diamondBalance` cache/read-path work added for responsive UI.
 - Lincoln backfill applied to restore fair early-progress economics.
 
+### Armor Progression Gating
+- **Loose gate** — next-tier pieces visible but locked with clear reason text (aspirational, not hidden).
+- **Dual requirement** — both XP threshold AND prior tier fully forged needed to unlock next tier.
+- **`forgedPieces[]`** field on AvatarProfile (distinct from `equippedPieces`).
+- **Migration backfill** — infers forged pieces from current equipped state + ledger history.
+- **`armorGate.ts`** with `isTierComplete()`, `canForgePiece()`, `getHighestCompletedTier()`.
+- **Milestone rewards** — diamond bonuses on tier completion: Wood 20, Stone 30, Iron 50, Gold 75, Diamond 120, Netherite 200.
+- **Daily Suit Up** — based on OWNED pieces, not all 6 total (can't equip what you haven't forged).
+- **Phantom piece fix** — gate counts from active forge tier down, ignoring stale data in higher tiers.
+
 ### Stonebridge Narrative Foundation
 - Canonical narrative bible documented at `docs/STONEBRIDGE_BIBLE.md`.
 - Shared world model with recurring places/characters (designed for continuity over novelty).
@@ -99,24 +94,13 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 - Chapter question and conundrum generation now use Stonebridge context.
 - Sets continuity foundation for Banner Rally mission layer.
 
-### UFLI Foundations — Lincoln Acceleration (Sprint 1)
-- 128-lesson scope & sequence seeded as static data (`functions/src/data/ufliLessons.json`).
-- `UFLILesson` + `UFLIProgress` types in `src/core/types/ufli.ts`.
-- Per-child UFLI progress tracking (`families/{familyId}/children/{childId}/ufliProgress/current`).
-- UFLI lesson collection (`families/{familyId}/ufliLessons/{lessonNumber}`).
-- Settings > UFLI Progress admin tab — view/adjust current lesson, mastered count, encoding scores.
-- Parent Today: "Lincoln's UFLI Lesson" card — shows current lesson, graphemes, heart words, toolbox link, mark-complete.
-- Kid Today: "Phonics Forge" Minecraft-themed card — shows quest label, tapping shows toast ("Shelly will open this with you").
-- Migration script for seeding lesson data (`functions/src/migrations/seedUfliLessons.ts`).
-
----
-
-### Paused for Lincoln Acceleration
-- Math Quest (Knowledge Mine math domain expansion)
-- Speech Quest (Knowledge Mine speech domain)
-- London's Avatar customization UI
-- Avatar Customization UI polish
-- Barnes Bros dashboard
+### Chapter Book Progress Tracking (Chapter Pool P1-P3)
+- **Role split:** Parent (Shelly) stages chapters via chip picker + text notes; Kid (Lincoln) performs via audio recording. Single shared `answered` state — kid recording marks `answered: true` globally, removing from both views.
+- **Parent view (`ChapterQuestionPool`)** — horizontal scrollable chip row of unanswered chapters with multi-select. Stacked question cards show text note field only (no audio). "Save Note" persists `responseNote` without marking `answered`. Skip action marks `answered: true, skipped: true`. Chip selections persisted to `DayLog.todaysSelectedChapters`.
+- **Kid view (`KidChapterPool`)** — reads `dayLog.todaysSelectedChapters` (falls back to lowest unanswered). Each chapter shows question + audio record button. Save uploads audio → creates artifact + ChapterResponse docs → marks `answered: true` on bookProgress. Positioned below verse card. No skip, no text note.
+- `useBookProgress` hook — live `onSnapshot` subscription on `bookProgress/{childId}_{bookId}` doc. Provides `updateChapter` callback for atomic pool entry updates.
+- Records "Book Responses" tab groups chapter responses by book in expandable accordions. Shows all chapters: answered (with inline audio), skipped, and unanswered. Legacy responses without `bookId` fall back to title match; unmatched entries bucket to "Other Books".
+- Legacy `ChapterQuestionCard` deleted. `DayLog.chapterQuestion` deprecated (reads only, no new writes). `DraftDayPlan.chapterQuestion` removed.
 
 ---
 
@@ -146,11 +130,23 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 
 | Sprint | Date | Outcome |
 |---|---|---|
-| Character Proportions + Mobile Polish | Apr 2026 | Family-tuned proportions, edge outlines, mobile sizing improvements |
-| Armor Visual Fixes | Apr 2026 | Open-face helmet, shield positioning correction, ghost armor removal |
-| Economy Audit + Fixes | Apr 2026 | Two-part audit, gateway hardening, admin adjustment fixes, backfill policy |
-| Legends Visual Overhaul | Apr 2026 | Lighting/material pass, particles, gradient sky, pedestal scene polish |
-| Hero Hub Phase 1 | Apr 2026 | My Armor → Hero Hub, mission card, Stonebridge preview card |
+| Phase 2-3 Polish | Apr 2026 | XP toasts, tier-up ceremony, armor detail, scene polish, London avatar with younger proportions |
+| Parent XP Mgmt | Apr 2026 | XP dashboard, award/adjust UI with presets |
+| Legends Overhaul | Apr 2026 | Lighting, materials, gradient sky, particles, pedestal, dye/enchant glow/cape/emblem |
+| Proportions Playground | Apr 2026 | In-chat slider tuner, Lincoln designed his own character, family-approved values applied |
+| Edge Outlines + Mobile Fix | Apr 2026 | EdgesGeometry on all blocks, accessories grid overflow fixes, pose button truncation |
+| Ghost Armor Removed | Apr 2026 | Binary on/off visibility only |
+| Shield/Helmet Fix | Apr 2026 | Open-face helmet (5 pieces), shield positioned in front of body |
+| Dream Features | Apr 2026 | Accessories (10 items), screenshot/share, Minecraft skin export, seasonal themes |
+| Economy Audit | Apr 2026 | 2-part read-only audit, 7 bugs identified, pacing math, fix plan |
+| Economy P0 Fixes | Apr 2026 | Consolidated voxel tier system, addXpEvent for admin, valid XP_EVENTS keys, transactional spendDiamonds, WOOD default tier |
+| Economy P1 Fixes | Apr 2026 | WEEKLY_ALL_COMPLETE wired, BOOK_PAGE_READ wired, diamonds on evals, chapter response earning, conundrum dedup split |
+| Economy P2 Cleanup | Apr 2026 | Cached balance used everywhere, forge helpers extracted to shared util |
+| Diamond Gateway | Apr 2026 | addDiamondEvent(), DIAMOND_EVENTS constants, parent admin UI, spendDiamonds uses gateway |
+| Phase 1A Stonebridge | Apr 2026 | Story bible, AI prompt injection for conundrum + chapter questions |
+| Phase 1B Hero Hub | Apr 2026 | Nav rename, mission card, Stonebridge preview, above/below-fold layout |
+| Armor Progression Gate | Apr 2026 | forgedPieces tracking, isTierComplete, canForgePiece, milestone bonuses, loose gate UI |
+| Suit Up Bug Hunt | Apr 2026 | Tier display fixed (compute from XP), suit up counts owned pieces, phantom tier data bug fixed |
 | Crash Cascade Stabilization | Apr 7, 2026 | Quest graceful error paths, `/quest` error boundary, AvatarThumbnail WebGL safety |
 | Unified Capture Pipeline | Apr 8, 2026 | Merged 3 Today capture entry points into 1 AI-routed handler. Worksheets/textbooks/tests → scans + curriculum update; everything else → artifacts. Fixes "Last updated" staleness on Progress. |
 | Scan Analysis + Parent Override | Apr 9, 2026 | Post-capture scan analysis visible inline on Today (expandable panel on "Captured ✓"). Progress Recent scans now tap-to-expand. New "This Week's Scans" section on Progress — 7-day rolling list. Parent override on AI recommendations — Shelly can correct classifications, originals preserved for audit. Shared ScanAnalysisPanel component. |
@@ -158,13 +154,30 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 | Working Levels Data Model | Apr 9, 2026 | Per-domain working level tracking for Knowledge Mine progression (phonics/comprehension/math). Starting levels persist across sessions via `workingLevels` field on skill snapshot. Updated by quest completion, guided evaluation, and curriculum scans. Manual overrides protected for 48 hours. Fixes "starts at Level 2 every session" regression. (Part 1 — plumbing only; parent UI in Part 2.) |
 | Bugfix Apr 10 | Apr 10, 2026 | Planner lock-in off-by-one: Friday plans were written to Thursday's date key because WEEK_DAYS (Monday=0) was added to a Sunday-based weekRange.start. Extracted `dateKeyForDayPlan` pure helper + unit tests. |
 | Chapter Pool P1 | Apr 10, 2026 | Chapter book question pool foundation: ChapterBook + BookProgress types, Narnia seed data (17 chapters with summaries), chapterQuestions Cloud Function task handler, Firestore collection helpers. |
-| Lincoln Acceleration Sprint 1 | Apr 11, 2026 | UFLI Foundations data layer: 128-lesson scope & sequence JSON, UFLILesson + UFLIProgress types, per-child progress tracking, ufliLessons Firestore collection, Settings admin tab, parent Today lesson card, kid Phonics Forge card, migration script. Lincoln anchored at Lesson 62. |
+| Chapter Pool P2 | Apr 12, 2026 | Planner book picker (Autocomplete from library), readAloudBookId persistence on WeekPlan + plannerDefaults, handleApplyPlan triggers chapter question pool generation via chapterQuestions task, removed inline chapterQuestion prompt injection. (Apr 12 fix: picker now visible in review and active phases, not just setup wizard). (Apr 12 diagnostic: temp raw-response logging added for Monday plan fragment investigation). |
+| Hotfix: chapterBooks path | Apr 12, 2026 | Moved chapterBooks from invalid `curriculum/chapterBooks` path (even segment count = document ref, not collection) to top-level `chapterBooks` collection. Updated Firestore rules, seed, and all references. |
+| Chapter Pool P3 | Apr 12, 2026 | Today ChapterQuestionPool component (parent view): chapter picker + stacked question cards + per-chapter audio recording + live bookProgress updates. Deleted legacy ChapterQuestionCard. Deprecated DayLog.chapterQuestion field (reads only, no new writes). Removed P2 Monday diagnostic logging. Cleaned chapterQuestion from DraftDayPlan and AI plan schema. (Apr 13 fix: preserve readAloudBookId across plan applies, harden title prompt to prevent phonics context bleeding, parser safety net for long titles, re-added diagnostic logging). (Apr 13 fix: parent-only chip picker with multi-select + text notes (audio removed from parent); kid view gets KidChapterPool with audio recording positioned below verse card; single shared answered state; todaysSelectedChapters persisted on DayLog). (Apr 13 cleanup: ExplorerMap weekStart → Monday-based; removed temp diagnostic writes). |
+| Dev Admin Tab | Apr 13, 2026 | Mobile-friendly dev admin tab in Settings for one-off data ops: seed Narnia to chapterBooks, scan/delete stale Sunday DayLogs, set readAloudBookId on current week. Gated to Nathan's UID; delete or re-scope if the project has other developers. Firestore rules updated to allow admin UID writes to chapterBooks. |
+
+### Sprint Cleanup — April 2026
+- Deleted Sprint 1 UFLI scaffolding (9 files, dormant since creation, seed never ran)
+- Kept: scripts/setLincolnPhonicsLevel.ts (sets workingLevels, not UFLI-specific)
+- Kept: voice-first Knowledge Mine changes (tap-to-hear, speaker icons)
+- Decision: rely on existing Knowledge Mine + findings pipeline for Lincoln acceleration
+
+### Findings Pipeline Doc + UFLI Cleanup Polish — Apr 13, 2026
+
+- Added `docs/FINDINGS_PIPELINE.md` — end-to-end trace of EvaluationFinding data flow from Knowledge Mine → skillSnapshot → AI context windows
+- Updated CLAUDE.md accuracy: CF count, collections, imageTasks, ladder TODOs, terminology
+- Fixed ExplorerMap weekStart to Monday-based, removed temp diagnostic writes
+- Decision documented: rely on existing Knowledge Mine + findings pipeline rather than separate UFLI tracking layer
 
 ## Removed Features / Concepts
 - Ghost armor visual state (moved to binary on/off only).
 - Legacy tier model (consolidated around voxel tier thresholds).
 - “Forge” as separate currency (re-merged into Diamonds economy).
 - `parent_adjustment` event type (replaced by `MANUAL_AWARD` / `MANUAL_DEDUCT`).
+- Hardcoded `/6` denominators in suit up UI (now uses actual forgedCount).
 
 ## Key Design Decisions
 1. **Two currencies, distinct roles** — XP = progression, Diamonds = choice.
@@ -175,6 +188,10 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 6. **Family-tuned proportions** — design with the child in a live playground, not by guesswork.
 7. **Edge outlines for readability** — biggest visual clarity gain per implementation cost.
 8. **Open-face helmet** — identity and recognition beat full visual coverage.
+9. **Loose tier gate** — next tier visible but locked with clear requirement, aspirational not hidden.
+10. **Daily Suit Up = equip all OWNED pieces** — not all 6 total. Can't equip what you haven't forged.
+11. **Gateway functions for currency** — `addXpEvent()` and `addDiamondEvent()` are the ONLY paths. All direct Firestore writes to balances are bugs.
+12. **Nothing is ever lost** — Reimagined drawings always auto-save to gallery, even when placed on page or discarded. Image replacements preserve previous URLs in `previousVersions[]` (max 5).
 
 ---
 
@@ -183,15 +200,26 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 ### Top 5 Largest Files (Current)
 | File | Lines | Status |
 |---|---:|---|
-| `src/features/planner-chat/PlannerChatPage.tsx` | 2,257 | Still primary planner shell/state center |
-| `src/features/books/BookEditorPage.tsx` | 1,886 | Stable high-complexity editor |
-| `src/features/quest/useQuestSession.ts` | 1,758 | Largest hook; future split candidate |
-| `src/features/avatar/MyAvatarPage.tsx` | 1,666 | Grew with Hero Hub layout + mission surfaces |
+| `src/features/planner-chat/PlannerChatPage.tsx` | 2,439 | Still primary planner shell/state center |
+| `src/features/books/BookEditorPage.tsx` | 2,087 | Grew with undo/redo + contextual action bar |
+| `src/features/quest/useQuestSession.ts` | 1,763 | Largest hook; future split candidate |
+| `src/features/avatar/MyAvatarPage.tsx` | 1,749 | Grew with Hero Hub layout + mission surfaces |
 | `src/features/shelly-chat/ShellyChatPage.tsx` | 1,653 | Stable, still large |
 
 ### Decomposition Status
 - Today page, Kid Today view, Planner render layers, and Avatar subpanels have all been partially decomposed.
 - Remaining risk concentration is state-heavy files (`PlannerChatPage`, `useQuestSession`, `MyAvatarPage`).
+
+### Book Editor Features
+- **Undo/Redo**: 20-entry history stack (`useEditorHistory`). Keyboard shortcuts: Ctrl+Z / Ctrl+Shift+Z. Tracks page-level changes (image add/remove, layout changes).
+- **Image version history**: `PageImage.previousVersions[]` preserves up to 5 previous URLs when images are replaced (reimagine, sketch enhance). Accessible via "Previous versions" in background menu.
+- **Contextual action bar**: Top chip row shows "Delete sticker" / "Remove background" / "Change" based on which image is selected in PageEditor.
+- **Reimagine placement clarity**: Dialog splits "Add to page" into "Replace background" (full-page) vs "Add as sticker" (movable/resizable).
+- **Auto-save to gallery**: Every reimagine result auto-saves to sticker gallery on completion, regardless of placement choice.
+
+### Known Technical Debt
+- **AvatarThumbnail WebGL instances** — Console warns "many active instances — consider static mode." The `forceContextLoss()` fix from the Crash Cascade sprint resolved the hard crash, but multiple active `WebGLRenderer` instances still get created when several thumbnails mount (N thumbnails = N renderers). Consider: single shared renderer with static snapshots, or CSS/canvas 2D fallback for thumbnails where 3D isn't needed. Not blocking but worth addressing before avatar features expand.
+- **Hardcoded admin UID** — Admin access is hardcoded to a single UID in `SettingsPage.tsx` (`ADMIN_UID` constant). Works for current single-admin use case but blocks multi-admin, role management, or admin handoff scenarios. Consider moving to a role flag on family/user document if admin access needs to change.
 
 ---
 
@@ -210,8 +238,9 @@ Everything else pauses. Lincoln's reading is the #1 priority for the next 3 mont
 | `src/features/avatar/StonebridgePreviewCard.tsx` | Stonebridge narrative preview surface |
 | `src/features/avatar/BrothersVoxelScene.tsx` | Side-by-side brothers scene |
 | `src/features/avatar/AccessoriesPanel.tsx` | Accessories system UI + slot conflicts |
+| `src/features/avatar/armorGate.ts` | Forge tier gate logic + phantom piece fix |
 | `functions/src/ai/tasks/index.ts` | Chat task registry (14 task types) |
 
 ---
 
-Last updated: April 7, 2026
+Last updated: April 13, 2026

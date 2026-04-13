@@ -49,6 +49,7 @@ export interface ChapterQuestionPoolItem {
   audioUrl?: string
   responseNote?: string
   artifactId?: string
+  skipped?: boolean
 }
 
 export interface BookProgress {
@@ -216,16 +217,19 @@ export interface DayLog {
   retro?: string
   checklist?: ChecklistItem[]
   teachBackDone?: boolean
+  /** Chapters Shelly selected for today's read-aloud discussion (persisted from parent chip picker). */
+  todaysSelectedChapters?: number[]
+  /**
+   * @deprecated Replaced by BookProgress pool (Chapter Pool P1-P3, Apr 2026).
+   * Field retained for backwards-compat reads of old DayLogs. No new writes.
+   */
   chapterQuestion?: {
     book: string
     chapter: string
     questionType: string
     question: string
-    /** Lincoln's audio response URL (set when he records) */
     responseUrl?: string
-    /** Text summary of response (optional, Shelly can add) */
     responseNote?: string
-    /** Whether Lincoln has responded */
     responded?: boolean
   }
   createdAt?: string
@@ -323,6 +327,7 @@ export interface ChapterResponse {
   id?: string
   childId: string
   date: string
+  bookId?: string
   bookTitle: string
   chapter: string
   questionType: string
@@ -450,12 +455,6 @@ export interface DraftDayPlan {
   day: string
   timeBudgetMinutes: number
   items: DraftPlanItem[]
-  chapterQuestion?: {
-    book: string
-    chapter: string
-    questionType: string
-    question: string
-  }
 }
 
 export interface DraftPlanItem {

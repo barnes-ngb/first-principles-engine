@@ -15,11 +15,15 @@ import Tooltip from '@mui/material/Tooltip'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import HistoryIcon from '@mui/icons-material/History'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import WallpaperIcon from '@mui/icons-material/Wallpaper'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import ImageList from '@mui/material/ImageList'
+import ImageListItem from '@mui/material/ImageListItem'
 
 import type { BookPage } from '../../core/types'
 import { PAGE_LAYOUTS, TEXT_SIZES, TEXT_FONTS, TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
@@ -37,6 +41,10 @@ interface PageEditorProps {
   childName: string
   /** Increment to deselect all images from parent (e.g. when action buttons are clicked) */
   deselectSignal?: number
+  /** Notifies parent when the selected image changes (for contextual action bar). */
+  onSelectedImageChange?: (imageId: string | null, imageType: 'sticker' | 'background' | null) => void
+  /** Called when user restores a previous version of an image. */
+  onRestoreVersion?: (imageId: string, versionIndex: number) => void
 }
 
 export default function PageEditor({
@@ -49,16 +57,34 @@ export default function PageEditor({
   onImagePositionChange,
   childName,
   deselectSignal,
+  onSelectedImageChange,
+  onRestoreVersion,
 }: PageEditorProps) {
   const isLincoln = childName.toLowerCase() === 'lincoln'
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
   const [confirmRemoveBg, setConfirmRemoveBg] = useState(false)
   const [bgMenuAnchor, setBgMenuAnchor] = useState<HTMLElement | null>(null)
+  const [versionHistoryImageId, setVersionHistoryImageId] = useState<string | null>(null)
   const imageContainerRef = useRef<HTMLDivElement>(null)
 
   // Deselect when parent signals (action buttons, dialogs, etc.)
   // eslint-disable-next-line react-hooks/set-state-in-effect -- signal-driven deselect from parent
   useEffect(() => { setSelectedImageId(null) }, [deselectSignal])
+
+  // Notify parent of selection changes for contextual action bar
+  useEffect(() => {
+    if (!onSelectedImageChange) return
+    if (!selectedImageId) {
+      onSelectedImageChange(null, null)
+      return
+    }
+    const img = page.images.find((i) => i.id === selectedImageId)
+    if (!img) {
+      onSelectedImageChange(null, null)
+      return
+    }
+    onSelectedImageChange(selectedImageId, img.type === 'sticker' ? 'sticker' : 'background')
+  }, [selectedImageId, page.images, onSelectedImageChange])
 
   const handleTextChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -137,6 +163,16 @@ export default function PageEditor({
               <MenuItem onClick={() => { setBgMenuAnchor(null); setConfirmRemoveBg(true) }}>
                 <ListItemIcon><DeleteOutlineIcon fontSize="small" color="error" /></ListItemIcon>
                 <ListItemText>Remove background</ListItemText>
+              </MenuItem>
+            )}
+            {onRestoreVersion && backgroundImages.some((img) => (img.previousVersions?.length ?? 0) > 0) && (
+              <MenuItem onClick={() => {
+                setBgMenuAnchor(null)
+                const imgWithVersions = backgroundImages.find((img) => (img.previousVersions?.length ?? 0) > 0)
+                if (imgWithVersions) setVersionHistoryImageId(imgWithVersions.id)
+              }}>
+                <ListItemIcon><HistoryIcon fontSize="small" /></ListItemIcon>
+                <ListItemText>Previous versions</ListItemText>
               </MenuItem>
             )}
           </Menu>
@@ -398,6 +434,70 @@ export default function PageEditor({
           >
             Remove
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Previous versions dialog */}
+      <Dialog
+        open={!!versionHistoryImageId}
+        onClose={() => setVersionHistoryImageId(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Previous versions</DialogTitle>
+        <DialogContent>
+          {(() => {
+            const img = page.images.find((i) => i.id === versionHistoryImageId)
+            if (!img?.previousVersions?.length) {
+              return (
+                <Typography variant="body2" color="text.secondary">
+                  No previous versions available.
+                </Typography>
+              )
+            }
+            return (
+              <Stack spacing={1}>
+                <Box sx={{ textAlign: 'center' }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                    Current
+                  </Typography>
+                  <Box
+                    component="img"
+                    src={img.url}
+                    sx={{ width: '100%', maxHeight: 120, objectFit: 'contain', borderRadius: 1, border: '2px solid', borderColor: 'primary.main' }}
+                  />
+                </Box>
+                <ImageList cols={3} gap={8}>
+                  {img.previousVersions.map((v, idx) => (
+                    <ImageListItem
+                      key={idx}
+                      onClick={() => {
+                        onRestoreVersion?.(img.id, idx)
+                        setVersionHistoryImageId(null)
+                      }}
+                      sx={{ cursor: 'pointer', borderRadius: 1, overflow: 'hidden' }}
+                    >
+                      <img
+                        src={v.url}
+                        alt={`Version from ${new Date(v.replacedAt).toLocaleDateString()}`}
+                        loading="lazy"
+                        style={{ borderRadius: 8, objectFit: 'cover', height: 80, width: '100%' }}
+                      />
+                      <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', display: 'block' }}>
+                        {v.replacedBy}
+                      </Typography>
+                    </ImageListItem>
+                  ))}
+                </ImageList>
+                <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
+                  Tap any version to restore it
+                </Typography>
+              </Stack>
+            )
+          })()}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setVersionHistoryImageId(null)}>Close</Button>
         </DialogActions>
       </Dialog>
     </Stack>

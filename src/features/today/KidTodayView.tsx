@@ -11,7 +11,7 @@ import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import TextField from '@mui/material/TextField'
-import { doc, getDocs, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore'
+import { doc, getDoc, getDocs, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore'
 
 import { useNavigate } from 'react-router-dom'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
@@ -24,17 +24,18 @@ import SectionCard from '../../components/SectionCard'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import {
   artifactsCollection,
+  chapterBooksCollection,
   dailyArmorSessionDocId,
   dailyArmorSessionsCollection,
   evaluationSessionsCollection,
   stripUndefined,
 } from '../../core/firebase/firestore'
-import type { Artifact, ChecklistItem, Child, DailyArmorSession, DayLog } from '../../core/types'
+import type { Artifact, ChapterBook, ChecklistItem, Child, DailyArmorSession, DayLog } from '../../core/types'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
 import { useAvatarProfile } from '../avatar/useAvatarProfile'
-import { getArmorGateStatusFromSession } from '../avatar/armorGate'
+import { getDailyArmorStatusFromSession } from '../avatar/armorStatus'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../avatar/voxel/buildArmorPiece'
 import { calculateTier } from '../avatar/voxel/tierMaterials'
 import ArmorGateScreen from '../avatar/ArmorGateScreen'
@@ -45,16 +46,13 @@ import { useXpLedger } from '../../core/xp/useXpLedger'
 import { useDraftBook, useCompletedBook } from '../books/useBook'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import ExplorerMap from './ExplorerMap'
-// HIDDEN 2026-04-11: Sprint 1 UFLI card disabled pending Phase 0
-// validation. See LINCOLN_ACCELERATION.md. Do not re-enable without
-// running the seed and verifying Firestore has ufliLessons collection.
-// import PhonicsForgeCard from './kid/PhonicsForgeCard'
 import KidExtraLogger from './KidExtraLogger'
 import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
 import KidChecklist from './KidChecklist'
 import KidCelebration from './KidCelebration'
-import KidChapterResponse from './KidChapterResponse'
+import KidChapterPool from './KidChapterPool'
+import { useBookProgress } from './useBookProgress'
 import KidConundrumResponse from './KidConundrumResponse'
 import KidTeachBack from './KidTeachBack'
 import { useUnifiedCapture } from './useUnifiedCapture'
@@ -263,6 +261,7 @@ interface KidTodayViewProps {
   today: string
   weekStart: string
   isMvd?: boolean
+  readAloudBookId?: string
   weekFocus?: {
     theme?: string
     virtue?: string
@@ -363,6 +362,7 @@ export default function KidTodayView({
   today,
   weekStart,
   isMvd,
+  readAloudBookId,
   weekFocus,
 }: KidTodayViewProps) {
   const navigate = useNavigate()
@@ -395,6 +395,30 @@ export default function KidTodayView({
   const { draftBook } = useDraftBook(familyId, child.id)
   const { completedBook } = useCompletedBook(familyId, child.id)
   const { children: allChildren } = useActiveChild()
+
+  // --- Chapter book progress for KidChapterPool ---
+  const [selectedBook, setSelectedBook] = useState<ChapterBook | null>(null)
+  // Clear book selection during render when no book ID (avoids setState in effect)
+  if (!readAloudBookId && selectedBook !== null) {
+    setSelectedBook(null)
+  }
+  useEffect(() => {
+    if (!readAloudBookId) return
+    const bookRef = doc(chapterBooksCollection(), readAloudBookId)
+    getDoc(bookRef).then((snap) => {
+      if (snap.exists()) {
+        setSelectedBook({ ...(snap.data() as ChapterBook), id: snap.id })
+      } else {
+        setSelectedBook(null)
+      }
+    }).catch(() => setSelectedBook(null))
+  }, [readAloudBookId])
+
+  const { bookProgress, updateChapter } = useBookProgress(
+    familyId,
+    child.id,
+    readAloudBookId,
+  )
 
   const checklist = useMemo(() => dayLog.checklist ?? [], [dayLog.checklist])
   const { mustDo, choose } = useMemo(() => categorizeItems(checklist), [checklist])
@@ -458,13 +482,13 @@ export default function KidTodayView({
     return unsub
   }, [familyId, child.id, today])
 
-  // ── Armor Gate: use today's daily session (not stale profile state) ──
-  const armorGateStatus = avatarProfile
-    ? getArmorGateStatusFromSession(avatarProfile, dailyArmorSession)
+  // ── Armor Gate: use unified status (not stale profile state) ──
+  const armorStatus = avatarProfile
+    ? getDailyArmorStatusFromSession(avatarProfile, dailyArmorSession)
     : null
-  const armorReady = armorGateStatus?.complete ?? false
-  const showArmorGateBlocker = Boolean(armorGateStatus?.hasForgedPieces && !armorReady)
-  const showArmorPrompt = Boolean(armorGateStatus && !armorGateStatus.hasForgedPieces)
+  const armorReady = armorStatus?.isSuitedUp ?? false
+  const showArmorGateBlocker = Boolean(armorStatus?.hasForgedPieces && !armorReady)
+  const showArmorPrompt = Boolean(armorStatus && !armorStatus.hasForgedPieces)
   const equippedTodayVoxel = useMemo(
     () => getAppliedVoxelPieces(dailyArmorSession?.appliedPieces ?? []),
     [dailyArmorSession?.appliedPieces],
@@ -589,10 +613,16 @@ export default function KidTodayView({
     isLincoln && !dayLog.teachBackDone && (totalCompleted >= 3 || hasEngagementFeedback)
 
   // ── Armor Gate early return (after all hooks) ──
-  if (avatarProfile && showArmorGateBlocker && armorGateStatus) {
+  if (avatarProfile && showArmorGateBlocker && armorStatus) {
     return (
       <ArmorGateScreen
-        gateStatus={armorGateStatus}
+        gateStatus={{
+          complete: armorStatus.isSuitedUp,
+          equipped: armorStatus.equippedCount,
+          total: armorStatus.gateTotal,
+          missing: armorStatus.missing,
+          hasForgedPieces: armorStatus.hasForgedPieces,
+        }}
         avatarProfile={avatarProfile}
         childName={child.name}
         equippedToday={equippedTodayVoxel}
@@ -744,6 +774,21 @@ export default function KidTodayView({
         </Box>
       )}
 
+      {/* ── KID CHAPTER POOL (read-aloud discussion) ── */}
+      {selectedBook && bookProgress && bookProgress.questionPool.some((item) => !item.answered) && (
+        <SectionErrorBoundary section="chapter pool">
+          <KidChapterPool
+            book={selectedBook}
+            bookProgress={bookProgress}
+            familyId={familyId}
+            childId={child.id}
+            dayLog={dayLog}
+            weekFocus={weekFocus}
+            onChapterAnswered={updateChapter}
+          />
+        </SectionErrorBoundary>
+      )}
+
       {/* Diamonds Mined — today's quest summary */}
       <SectionErrorBoundary section="diamonds-mined">
         <DiamondsMined
@@ -801,15 +846,6 @@ export default function KidTodayView({
         />
       )}
 
-      {/* HIDDEN 2026-04-11: Sprint 1 UFLI card disabled pending Phase 0
-          validation. See LINCOLN_ACCELERATION.md. Do not re-enable without
-          running the seed and verifying Firestore has ufliLessons collection. */}
-      {/* {isLincoln && (
-        <SectionErrorBoundary section="phonics forge">
-          <PhonicsForgeCard familyId={familyId} childId={child.id} />
-        </SectionErrorBoundary>
-      )} */}
-
       {/* ── CHECKLIST (Must-Do + Choose) ── */}
       <SectionErrorBoundary section="checklist">
         <KidChecklist
@@ -837,19 +873,6 @@ export default function KidTodayView({
           onXpToast={setXpToast}
         />
       </SectionErrorBoundary>
-
-      {/* ── CHAPTER RESPONSE (Lincoln only) ── */}
-      {dayLog?.chapterQuestion && isLincoln && (
-        <SectionErrorBoundary section="chapter response">
-          <KidChapterResponse
-            dayLog={dayLog}
-            child={child}
-            familyId={familyId}
-            persistDayLogImmediate={persistDayLogImmediate}
-            weekFocus={weekFocus}
-          />
-        </SectionErrorBoundary>
-      )}
 
       {/* ── CONUNDRUM RESPONSE ── */}
       {weekFocus?.conundrum && (
