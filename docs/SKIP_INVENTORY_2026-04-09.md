@@ -593,3 +593,246 @@ A grep for `activityConfig|activityId|configId` in `src/core/types/planning.ts` 
 | `contentGuide` (line 311) | **None** — free text | AI-generated guidance that may reference a lesson number, but is unstructured prose. |
 
 **Bottom line:** There is no reliable way to link a `ChecklistItem` back to its originating `ActivityConfig` using existing fields. The only connection paths are fuzzy label matching and subject bucket convention, both of which are fragile and non-unique.
+
+---
+
+## Hours & Compliance
+
+### How hours are computed
+
+**Primary function:** `computeHoursSummary(dayLogs, hoursEntries, adjustments, childId?)` at `src/features/records/records.logic.ts:52-157`.
+
+The function aggregates minutes from three additive sources into a `HoursSummary` object (`src/features/records/records.logic.ts:32-39`):
+
+```ts
+{
+  totalMinutes: number
+  coreMinutes: number
+  coreHomeMinutes: number
+  adjustmentMinutes: number
+  bySubject: HoursSummaryRow[]   // { subjectBucket, totalMinutes, homeMinutes }
+  byDate: Record<string, number>
+}
+```
+
+#### Source 1: HoursEntry records (lines 72-82)
+
+Collection: `families/{familyId}/hours` (`src/core/firebase/firestore.ts:116-121`).
+
+Type: `HoursEntry` (`src/core/types/compliance.ts:6-20`). Fields read: `minutes`, `hours` (legacy), `subjectBucket`, `location`, `date`, `childId`.
+
+Minutes extracted via `entryMinutes()` (lines 41-45): returns `entry.minutes` if present, otherwise `Math.round(entry.hours * 60)`, else `0`.
+
+These are created by:
+- **Dad Lab reports:** `src/features/dad-lab/useDadLabReports.ts:67` — writes to `hoursCollection(familyId)` with `source: 'dadLab'`.
+- **"Generate Hours" button** on RecordsPage: `src/features/records/RecordsPage.tsx:289-322` — batch-writes one `HoursEntry` per DayLog block that has `actualMinutes > 0`.
+
+#### Source 2: DayLog blocks and checklists (lines 84-115)
+
+Collection: `families/{familyId}/days` (`src/core/firebase/firestore.ts` — `daysCollection`).
+
+Type: `DayLog` (`src/core/types/planning.ts:204-237`) containing `blocks: DayBlock[]` and optional `checklist: ChecklistItem[]`.
+
+Two mutually exclusive processing modes per DayLog:
+
+- **Mode A — Block-level actual minutes (lines 87-100):** If *any* block in the DayLog has `actualMinutes > 0` (`DayBlock.actualMinutes`, `planning.ts:246`), each block's `actualMinutes` is counted. Fields read: `block.actualMinutes`, `block.subjectBucket`, `block.location`.
+
+- **Mode B — Checklist completion (lines 101-114):** If no blocks have actual minutes, the top-level `log.checklist` array is scanned. Only items with `completed === true` are counted (line 104). Minutes are resolved via fallback chain: `item.estimatedMinutes` → `item.plannedMinutes` → regex parse of label `(\d+)m` (via `parseMinutesFromChecklist`, line 47-50). **Location is assumed `Home` for all checklist items** (line 110). Fields read: `item.completed`, `item.estimatedMinutes`, `item.plannedMinutes`, `item.label`, `item.subjectBucket`.
+
+**Important edge:** Block-level checklists (`DayBlock.checklist`, `planning.ts:251`) are **not** read by `computeHoursSummary`. Only `DayLog.checklist` (the top-level array) is used in Mode B. Block-level checklists are ignored for hours.
+
+#### Source 3: HoursAdjustment records (lines 117-127)
+
+Collection: `families/{familyId}/hoursAdjustments` (`src/core/firebase/firestore.ts:128-133`).
+
+Type: `HoursAdjustment` (`src/core/types/compliance.ts:22-32`). Fields read: `minutes` (can be negative), `subjectBucket`, `location`, `date`, `childId`.
+
+Adjustments are summed into `adjustmentMinutes` (line 118) and also added to per-subject and per-date maps.
+
+#### Roll-up into totals (lines 129-156)
+
+After all three sources populate the `bySubjectMap`, the function iterates over it to compute:
+- `totalMinutes`: sum of all subjects
+- `coreMinutes`: sum of subjects in `coreBuckets` (line 18-24)
+- `coreHomeMinutes`: sum of `homeMinutes` for core subjects only
+
+---
+
+### Do skipped checklist items contribute time?
+
+**No.** The hours computation at `records.logic.ts:104` filters with `if (!item.completed) continue`. The `skipped` field (`planning.ts:299`) is never referenced by `computeHoursSummary`. An item with `{ completed: false, skipped: true }` is excluded from hours the same way any uncompleted item is.
+
+---
+
+### Is there a distinction between "completed" and "excused" or "justified" time?
+
+**No.** There are no fields for "excused", "justified", "absence", or "exemption" on any hours-related type:
+
+- `ChecklistItem` (`planning.ts:262-324`): has `completed: boolean` and `skipped?: boolean`. No exemption status.
+- `HoursEntry` (`compliance.ts:6-20`): has `minutes`, `source`, `notes`. No status field.
+- `HoursAdjustment` (`compliance.ts:22-32`): has `minutes`, `reason` (free-text string), `source`. No status/category field.
+
+All counted time is treated identically. To account for absences or corrections, a parent creates a manual adjustment with a free-text `reason` — there is no structured categorization.
+
+---
+
+### Missouri compliance requirements
+
+**Constants:** `TOTAL_HOURS_TARGET = 1000` and `CORE_HOURS_TARGET = 600` at `src/features/records/ComplianceDashboard.tsx:12-13`.
+
+**Core subjects (5):** Defined in two places (kept in sync manually):
+
+1. `coreBuckets` Set at `src/features/records/records.logic.ts:18-24`:
+   ```ts
+   const coreBuckets = new Set<SubjectBucket>([
+     SubjectBucket.Reading,
+     SubjectBucket.LanguageArts,
+     SubjectBucket.Math,
+     SubjectBucket.Science,
+     SubjectBucket.SocialStudies,
+   ])
+   ```
+
+2. `MO_REQUIRED_SUBJECTS` array at `src/core/utils/complianceMapping.ts:13-19`:
+   ```ts
+   export const MO_REQUIRED_SUBJECTS: readonly SubjectBucket[] = [
+     'Reading', 'LanguageArts', 'Math', 'Science', 'SocialStudies',
+   ] as const
+   ```
+
+3. Local duplicate in `ComplianceDashboard.tsx:15-21` (same 5 values).
+
+**Non-core subjects** (PE, Art, Music, Other) count toward the 1,000 total but not the 600 core.
+
+**Core-at-home tracking:** `coreHomeMinutes` in `HoursSummary` counts core-subject minutes where `location === LearningLocation.Home`. This supports MO's "regular place of instruction" requirement. Note that checklist-based hours (Mode B) assume `Home` for all items (line 110).
+
+**School year range:** `getSchoolYearRange()` at `src/core/utils/time.ts:28-42` — July 1 to June 30. If current month >= July (index 6), year runs from current year to next; otherwise previous year to current.
+
+---
+
+### Subject classification
+
+**File:** `src/core/utils/complianceMapping.ts` (entire file, 293 lines).
+
+Block-type defaults (lines 24-28):
+- `Reading` block → `Reading`
+- `Math` block → `Math`
+- `Speech` block → `LanguageArts`
+
+Content-based inference via `inferMoSubjects(input)` (lines 161-224):
+- Read-aloud sessions → `Reading` + `LanguageArts` (lines 182-185)
+- Formation blocks with civic/historical keywords → `SocialStudies` (lines 191-197)
+- Any block with civic/historical/geography keywords → `SocialStudies` (lines 200-206)
+- Nature journal blocks → `Science` (lines 209-211)
+- Blocks with science keywords (non-Reading, non-Math) → `Science` (lines 214-221)
+- Fallback → `Other` (line 223)
+
+`resolveSubjectBucket(input)` (lines 232-238) returns a single primary subject for hours reporting.
+
+`autoTagBlocks(blocks, weekTheme?)` (lines 267-293) applies inference to all blocks, with week-theme fallback for blocks that would otherwise resolve to `Other`.
+
+---
+
+### Compliance dashboard
+
+**File:** `src/features/records/ComplianceDashboard.tsx` (309 lines).
+
+Called from `RecordsPage.tsx` with the computed `HoursSummary`, `startDate`, and `endDate`.
+
+**Displays:**
+
+1. **School year progress bar** (line 149): Shows percent of year elapsed.
+
+2. **Total Hours gauge** (lines 153-158): Current hours / 1,000 target. Projected total by year-end via `projectTotal(current, yearProgress)` (line 62-65). Color-coded status: green (≥90% of expected pace), yellow (≥75%), red (<75%) — `getHoursStatus()` (lines 67-77).
+
+3. **Core Hours gauge** (lines 161-168): Same layout for current / 600 target.
+
+4. **Per-subject breakdown** (lines 174-186): Status dot + hours for each of the 5 required subjects. Per-subject target is `600 / 5 = 120h`. Status thresholds via `getSubjectStatus()` (lines 79-91): green (≥85% of expected pace), yellow (≥60%), red (<60%).
+
+5. **Alerts box** (lines 189-222): Red box listing any metric that is significantly behind (red status). Green "On track" box if no alerts.
+
+---
+
+### Adjustment mechanisms
+
+#### 1. Manual adjustment form
+
+**File:** `src/features/records/RecordsPage.tsx:324-349` — `handleAddAdjustment`.
+
+**Inputs:** date (`adjDate`), minutes (`adjMinutes` — can be negative), reason (`adjReason` — required), subject (`adjSubject` — optional).
+
+**Writes to:** `families/{familyId}/hoursAdjustments` via `addDoc(hoursAdjustmentsCollection(familyId), ...)`.
+
+**No location field** is set on manual adjustments (unlike Quick Add and Quick Estimate which set location).
+
+#### 2. Quick Add Activity
+
+**File:** `src/features/records/QuickAddHours.tsx` (185 lines).
+
+Pre-defined activity list (lines 18-46): 21 activities in 6 groups (Physical, Creative, Music, Life Skills, Enrichment, Screen Learning). Each has a `label`, `emoji`, and `subject: SubjectBucket`.
+
+Duration picker (lines 48-55): 15m, 30m, 45m, 1h, 1.5h, 2h.
+
+**Writes to:** `hoursAdjustmentsCollection(familyId)` (line 75) with `source: 'quick-add'`. Location is auto-assigned: `PE` activities get `'Outside'`, all others get `'Home'` (line 82).
+
+#### 3. Historical backfill
+
+**File:** `src/features/records/RecordsPage.tsx:351-384` — `handleSaveBackfill`.
+
+**Inputs:** Target month (YYYY-MM), hours per core subject (5 fields: Reading, LanguageArts, Math, Science, SocialStudies).
+
+One adjustment doc per subject where hours > 0. Date set to mid-month (`YYYY-MM-15`). `source: 'backfill'`.
+
+#### 4. Quick estimate
+
+**File:** `src/features/records/RecordsPage.tsx:386-439` — `handleSaveQuickEstimate`.
+
+**Inputs:** Start month, end month, daily hours, days per week (default 4).
+
+Auto-splits across 5 core subjects with fixed percentages (lines 396-402):
+- Reading: 25%
+- LanguageArts: 20%
+- Math: 25%
+- Science: 15%
+- SocialStudies: 15%
+
+Monthly hours calculated as `dailyHours × daysPerWeek × 4.33` (line 412). One adjustment doc per subject per month. Date set to mid-month. `source: 'backfill'`, `location: 'Home'`.
+
+#### 5. Clear all hours (destructive)
+
+**File:** `src/features/records/RecordsPage.tsx:549-578`.
+
+Deletes ALL hours entries and ALL adjustments across ALL children. Requires confirmation dialog (line 552). Deletes from both `hoursCollection` and `hoursAdjustmentsCollection`.
+
+---
+
+### Data flow summary
+
+```
+DayLog.blocks[].actualMinutes ──┐
+                                 ├──→ computeHoursSummary() ──→ HoursSummary
+DayLog.checklist[].completed ───┤                                  │
+  (estimatedMinutes/planned/    │                                  ├──→ ComplianceDashboard
+   label regex)                 │                                  ├──→ CSV/HTML reports
+                                │                                  └──→ Compliance ZIP export
+HoursEntry (Dad Lab, manual) ───┤
+                                │
+HoursAdjustment ────────────────┘
+  (manual, quick-add, backfill,
+   quick-estimate)
+```
+
+### Firestore paths
+
+| Collection | Path | Type |
+|---|---|---|
+| Hours entries | `families/{familyId}/hours` | `HoursEntry` |
+| Day logs | `families/{familyId}/days` | `DayLog` |
+| Hours adjustments | `families/{familyId}/hoursAdjustments` | `HoursAdjustment` |
+
+### Known edge cases
+
+- **Partial-day edge** (from CLAUDE.md): If a day has some blocks with `actualMinutes` and others without, only tracked blocks count. Mode A activates if *any* block has `actualMinutes > 0`, so blocks without `actualMinutes` in the same DayLog contribute 0 — the checklist fallback (Mode B) is not used.
+- **Checklist location assumption:** Mode B assumes all checklist items are at `Home` (line 110). There is no per-item location field on `ChecklistItem`.
+- **No deduplication:** If both an `HoursEntry` and a `DayLog` exist for the same day/block, both are counted. The "Generate Hours" button on RecordsPage creates `HoursEntry` docs from DayLog blocks, which could double-count with Mode A if both sources are present for the same DayLog.
+- **Adjustment minutes can go negative:** `HoursAdjustment.minutes` accepts negative values, allowing corrections (e.g., overcounting). No floor enforcement — a subject's `totalMinutes` can go negative in theory.
