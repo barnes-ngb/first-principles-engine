@@ -40,6 +40,7 @@ import {
 import type { ScanRecord } from '../../core/types/planning'
 import { autoFillBlockMinutes } from './daylog.model'
 import { syncChecklistToRoutine } from './checklistRoutineSync'
+import { formatRolloverSource } from './rollover'
 import { calculateXp } from './xp'
 
 const subjectBucketColor: Record<string, string> = {
@@ -144,6 +145,7 @@ interface TodayChecklistProps {
   onClearScan: () => void
   onUpdatePosition?: (curriculum: CurriculumDetected) => void
   onSkipToNext?: (nextLesson: number) => void
+  onAcceptSkip?: () => void
   onPrintMaterials: () => void
   printingMaterials: boolean
   scanFeedbackBySubject?: Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
@@ -169,6 +171,7 @@ export default function TodayChecklist({
   onClearScan,
   onUpdatePosition,
   onSkipToNext,
+  onAcceptSkip,
   onPrintMaterials,
   printingMaterials,
   scanFeedbackBySubject = {},
@@ -519,6 +522,11 @@ export default function TodayChecklist({
                   <Typography variant="body2" sx={{ flex: 1 }}>
                     {item.label}
                   </Typography>
+                  {item.rolledOver && item.rolledOverFrom && (
+                    <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem', whiteSpace: 'nowrap' }}>
+                      &#8635; from {formatRolloverSource(item.rolledOverFrom)}
+                    </Typography>
+                  )}
                   {item.plannedMinutes != null && item.plannedMinutes > 0 && (
                     <Typography variant="caption" color="text.secondary">
                       {item.plannedMinutes}m
@@ -673,6 +681,7 @@ export default function TodayChecklist({
                     onSkip={onScanSkip}
                     onUpdatePosition={onUpdatePosition}
                     onSkipToNext={onSkipToNext}
+                    onAcceptSkip={onAcceptSkip}
                     onScanAnother={() => { onClearScan() }}
                     childName={selectedChild.name}
                   />

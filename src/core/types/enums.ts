@@ -381,6 +381,13 @@ export const DadLabStatus = {
 } as const
 export type DadLabStatus = (typeof DadLabStatus)[keyof typeof DadLabStatus]
 
+export const SkipReason = {
+  TooHard: 'too-hard',
+  NotRelevant: 'not-relevant',
+  AiRecommended: 'ai-recommended',
+} as const
+export type SkipReason = (typeof SkipReason)[keyof typeof SkipReason]
+
 export const QuestionType = {
   Comprehension: 'comprehension',
   Application: 'application',

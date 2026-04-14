@@ -7,8 +7,10 @@ import { useScan } from '../../core/hooks/useScan'
 import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import type { Artifact, DayLog, ScanRecord, WorksheetScanResult } from '../../core/types'
+import { isWorksheetScan } from '../../core/types/planning'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type { ScanConfigResult } from '../../core/hooks/useScanToActivityConfig'
+import { autoCompleteBypassedItems } from './scanAdvance'
 
 export interface UseUnifiedCaptureOptions {
   familyId: string
@@ -86,12 +88,13 @@ export function useUnifiedCapture({
 
         if (isCurriculumScan && record?.results && record.id) {
           // ── SCANS path: curriculum evidence ──
+          let configResult: ScanConfigResult = { action: 'none' }
           try {
-            const result = await syncScanToConfig(childId, record.results as WorksheetScanResult)
-            if (result.action === 'created') {
-              onMessage?.({ text: `New workbook added: ${result.configName}`, severity: 'success' })
-            } else if (result.action === 'updated' && result.position) {
-              onMessage?.({ text: `Updated ${result.configName} to lesson ${result.position}`, severity: 'success' })
+            configResult = await syncScanToConfig(childId, record.results as WorksheetScanResult)
+            if (configResult.action === 'created') {
+              onMessage?.({ text: `New workbook added: ${configResult.configName}`, severity: 'success' })
+            } else if (configResult.action === 'updated' && configResult.position) {
+              onMessage?.({ text: `Updated ${configResult.configName} to lesson ${configResult.position}`, severity: 'success' })
             } else {
               onMessage?.({ text: 'Work captured!', severity: 'success' })
             }
@@ -117,11 +120,28 @@ export function useUnifiedCapture({
           }
 
           // Link scan doc to checklist item
-          const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
+          let updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
             i === index
               ? { ...ci, evidenceArtifactId: record!.id!, evidenceCollection: 'scans' as const, scanned: true }
               : ci,
           )
+
+          // Auto-complete bypassed checklist items when scan advances position
+          if (configResult.position != null) {
+            const wsResult = record.results as WorksheetScanResult
+            const recommendation = isWorksheetScan(wsResult) ? wsResult.recommendation : undefined
+            const autoCompleted = autoCompleteBypassedItems(
+              updatedChecklist,
+              index,
+              configResult.configId,
+              configResult.position,
+              recommendation,
+            )
+            if (autoCompleted) {
+              updatedChecklist = autoCompleted
+            }
+          }
+
           persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
         } else {
           // ── ARTIFACTS path: non-curriculum or scan failed ──

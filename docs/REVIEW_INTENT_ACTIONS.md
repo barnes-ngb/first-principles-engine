@@ -6,10 +6,10 @@ Ordered by priority. Effort: S (< 1 day), M (1-3 days), L (3-5 days).
 
 ## Priority 1 — Violations
 
-### 1. Add "Apply All Skip Recommendations" and parent-override skip
+### 1. ✅ PARTIAL — Accept AI skip recommendation (Phase 1, 2026-04-14)
 **Principle:** #9 (No busywork)
 **Effort:** M
-**What:** Add a bulk-apply button to `PlanPreviewCard` that unchecks all items where `skipAdvisor` recommends `'skip'` or `'modify'`. Allow parent to force-skip any item regardless of mastery level — the mastery gate should be advisory, not a lock. File: `src/features/planner-chat/PlanPreviewCard.tsx`, `skipAdvisor.logic.ts`.
+**What:** Phase 1 landed: "Accept & advance" button on ScanResultsPanel when AI recommends skip. Marks checklist item as `skipped: true, skipReason: 'ai-recommended'`, advances `ActivityConfig.currentPosition` by +1, records `parentOverride` on scan record. Auto-rollover of unchecked items to next school day (no manual re-add). Scan-advance auto-completes bypassed checklist items. Remaining: bulk-apply button on `PlanPreviewCard` (Phase 2). Files: `ScanResultsPanel.tsx`, `TodayPage.tsx`, `rollover.ts`, `scanAdvance.ts`, `useUnifiedCapture.ts`.
 
 ### 2. Add week-level workbook pause
 **Principle:** #9 (No busywork)
@@ -70,7 +70,7 @@ Ordered by priority. Effort: S (< 1 day), M (1-3 days), L (3-5 days).
 
 | # | Action | Principle | Effort | Rating |
 |---|---|---|---|---|
-| 1 | Bulk skip + parent override | #9 No busywork | M | Violated |
+| 1 | ✅ Partial: Accept AI skip (Phase 1) | #9 No busywork | M | Improving |
 | 2 | Week-level workbook pause | #9 No busywork | M | Violated |
 | 3 | ✅ Editable disposition narrative | #5 AI suggests | S | Done |
 | 4 | ✅ Remove quest scores from kid UI | #2 No grades | S | Done |
