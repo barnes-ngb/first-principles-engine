@@ -8,7 +8,7 @@ import { getForgeCost } from '../../core/xp/forgeCosts'
 import { ArmorIcon } from './icons/ArmorIcons'
 import type { ArmorTierColor } from './icons/ArmorIcons'
 import { getAppliedVoxelPieces, getArmorPieceState, getPieceLockReason } from './armorPieceState'
-import { VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
+import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 
 interface ArmorPieceGalleryProps {
@@ -38,22 +38,68 @@ export default function ArmorPieceGallery({
 
   const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
   const tierLockReason = getPieceLockReason(profile, activeForgeTier)
+  const isTierLocked = tierLockReason !== ''
 
   return (
-    <Box
-      ref={cardScrollRef}
-      sx={{
-        overflowX: 'auto',
-        display: 'flex',
-        gap: '12px',
-        pb: 2,
-        pt: 0.5,
-        px: '16px',
-        scrollSnapType: 'x mandatory',
-        scrollbarWidth: 'none',
-        '&::-webkit-scrollbar': { display: 'none' },
-      }}
-    >
+    <Box sx={{ position: 'relative' }}>
+      {/* Tier lock banner — shows when the displayed tier isn't unlocked yet */}
+      {isTierLocked && (
+        <Box
+          sx={{
+            mx: 2,
+            mb: 1,
+            px: 2,
+            py: 1.5,
+            borderRadius: isLincoln ? '6px' : '14px',
+            background: isLincoln
+              ? 'linear-gradient(90deg, rgba(255,152,0,0.12) 0%, rgba(255,152,0,0.04) 100%)'
+              : 'linear-gradient(90deg, rgba(255,152,0,0.08) 0%, rgba(255,152,0,0.02) 100%)',
+            border: `1px solid ${isLincoln ? 'rgba(255,152,0,0.25)' : 'rgba(255,152,0,0.2)'}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+          }}
+        >
+          <Typography sx={{ fontSize: '18px', lineHeight: 1 }}>
+            {'\uD83D\uDD12'}
+          </Typography>
+          <Box>
+            <Typography sx={{
+              fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+              fontSize: isLincoln ? '11px' : '14px',
+              fontWeight: 700,
+              color: isLincoln ? '#FFA726' : '#E65100',
+              lineHeight: 1.3,
+            }}>
+              {activeForgeTier.charAt(0).toUpperCase() + activeForgeTier.slice(1)} Tier Locked
+            </Typography>
+            <Typography sx={{
+              fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+              fontSize: isLincoln ? '9px' : '12px',
+              color: isLincoln ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.5)',
+              lineHeight: 1.4,
+              mt: 0.25,
+            }}>
+              {tierLockReason}
+            </Typography>
+          </Box>
+        </Box>
+      )}
+
+      <Box
+        ref={cardScrollRef}
+        sx={{
+          overflowX: 'auto',
+          display: 'flex',
+          gap: '12px',
+          pb: 2,
+          pt: 0.5,
+          px: '16px',
+          scrollSnapType: 'x mandatory',
+          scrollbarWidth: 'none',
+          '&::-webkit-scrollbar': { display: 'none' },
+        }}
+      >
       {VOXEL_ARMOR_PIECES.map((piece) => {
         const armorPieceId = VOXEL_TO_ARMOR_PIECE[piece.id]
         const pieceState = getArmorPieceState({
@@ -70,7 +116,7 @@ export default function ArmorPieceGallery({
         const statusLabel = pieceState === 'locked_by_tier'
           ? tierLockReason || 'Locked'
           : pieceState === 'locked_by_xp'
-            ? 'Locked'
+            ? `Need ${XP_THRESHOLDS[piece.id]} XP`
             : pieceState === 'forgeable'
               ? `\u25C6 ${forgeCost} Forge`
               : pieceState === 'forged_not_equipped_today'
@@ -227,6 +273,7 @@ export default function ArmorPieceGallery({
           </Box>
         )
       })}
+      </Box>
     </Box>
   )
 }

@@ -55,8 +55,9 @@ export async function forgeArmorPiece(
     return { success: false, error: 'already_forged' }
   }
 
-  // Enforce XP lock server-side (single source of truth for unlock eligibility)
-  if (profile.totalXp < XP_THRESHOLDS[piece]) {
+  // Per-piece XP thresholds only apply within Wood tier (staggered unlock).
+  // Higher tiers use tier-level gates — once a tier is unlocked, all pieces are forgeable.
+  if (tier === 'wood' && profile.totalXp < XP_THRESHOLDS[piece]) {
     return { success: false, error: 'xp_locked' }
   }
 
