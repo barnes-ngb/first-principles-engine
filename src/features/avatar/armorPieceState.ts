@@ -40,6 +40,11 @@ export function getForgedPiecesForTier(profile: AvatarProfile, tier: string): Vo
 }
 
 export function getVisiblePieces(profile: AvatarProfile): VoxelArmorPieceId[] {
+  const activeTier = getActiveForgeTierFromProgress(profile)
+  // Per-piece XP thresholds only gate visibility in Wood tier.
+  // Once past Wood, all 6 pieces are visible — tier gates handle progression.
+  if (activeTier !== 'wood') return [...ALL_ARMOR_VOXEL_PIECES]
+
   const xp = profile.totalXp
   return ALL_ARMOR_VOXEL_PIECES.filter((pieceId) => xp >= XP_THRESHOLDS[pieceId])
 }
@@ -68,7 +73,10 @@ export function getArmorPieceState(params: {
     return 'locked_by_tier'
   }
 
-  if (profile.totalXp < XP_THRESHOLDS[pieceId]) {
+  // Per-piece XP thresholds only gate pieces in Wood tier (staggered unlock).
+  // Higher tiers use tier-level gates for progression — once a tier is unlocked,
+  // all 6 pieces are forgeable (subject to diamond cost).
+  if (activeForgeTier === 'wood' && profile.totalXp < XP_THRESHOLDS[pieceId]) {
     return 'locked_by_xp'
   }
 

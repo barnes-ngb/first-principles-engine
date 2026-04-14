@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { AvatarProfile } from '../../../core/types'
-import { getActiveForgeTier, getArmorPieceState, getEquippablePieces } from '../armorPieceState'
+import { getActiveForgeTier, getArmorPieceState, getEquippablePieces, getVisiblePieces } from '../armorPieceState'
 
 function makeProfile(overrides: Partial<AvatarProfile> = {}): AvatarProfile {
   return {
@@ -98,5 +98,116 @@ describe('getArmorPieceState', () => {
       activeForgeTier: 'stone',
       appliedTodayVoxel: [],
     })).toBe('forgeable')
+  })
+
+  it('returns locked_by_xp for sword in WOOD tier when XP < 1000', () => {
+    // Per-piece XP thresholds apply within Wood tier
+    const profile = makeProfile({ totalXp: 750 })
+    expect(getArmorPieceState({
+      profile,
+      pieceId: 'sword',
+      activeForgeTier: 'wood',
+      appliedTodayVoxel: [],
+    })).toBe('locked_by_xp')
+  })
+
+  it('returns forgeable for sword in STONE tier even when XP < 1000', () => {
+    // Per-piece XP thresholds do NOT apply to non-Wood tiers.
+    // Lincoln scenario: 793 XP, Stone tier, 5/6 forged — sword should be forgeable.
+    const profile = makeProfile({
+      totalXp: 793,
+      forgedPieces: {
+        wood: allForged,
+        stone: {
+          belt: forgedEntry,
+          shoes: forgedEntry,
+          breastplate: forgedEntry,
+          shield: forgedEntry,
+          helmet: forgedEntry,
+        },
+      },
+    })
+    expect(getArmorPieceState({
+      profile,
+      pieceId: 'sword',
+      activeForgeTier: 'stone',
+      appliedTodayVoxel: [],
+    })).toBe('forgeable')
+  })
+
+  it('iron pieces are locked_by_tier when stone is incomplete (5/6)', () => {
+    // Tier gate: iron requires stone complete (6/6) + 500 XP.
+    // Lincoln has 793 XP (>500) but only 5/6 stone. Iron must be locked.
+    const profile = makeProfile({
+      totalXp: 793,
+      forgedPieces: {
+        wood: allForged,
+        stone: {
+          belt: forgedEntry,
+          shoes: forgedEntry,
+          breastplate: forgedEntry,
+          shield: forgedEntry,
+          helmet: forgedEntry,
+          // sword NOT forged — stone is 5/6
+        },
+      },
+    })
+    expect(getArmorPieceState({
+      profile,
+      pieceId: 'belt',
+      activeForgeTier: 'iron',
+      appliedTodayVoxel: [],
+    })).toBe('locked_by_tier')
+  })
+
+  it('iron pieces become forgeable once stone is complete AND xp >= 500', () => {
+    const profile = makeProfile({
+      totalXp: 500,
+      forgedPieces: {
+        wood: allForged,
+        stone: allForged,
+      },
+    })
+    expect(getArmorPieceState({
+      profile,
+      pieceId: 'belt',
+      activeForgeTier: 'iron',
+      appliedTodayVoxel: [],
+    })).toBe('forgeable')
+  })
+})
+
+describe('getVisiblePieces', () => {
+  it('filters by XP thresholds in Wood tier', () => {
+    const profile = makeProfile({ totalXp: 400 })
+    const visible = getVisiblePieces(profile)
+    // belt(0), breastplate(150), shoes(300) = 3 pieces visible at 400 XP
+    expect(visible).toHaveLength(3)
+    expect(visible).toContain('belt')
+    expect(visible).toContain('breastplate')
+    expect(visible).toContain('shoes')
+    expect(visible).not.toContain('shield')    // needs 500
+    expect(visible).not.toContain('sword')     // needs 1000
+  })
+
+  it('returns all 6 pieces when past Wood tier', () => {
+    // Lincoln scenario: stone tier, 793 XP (< sword threshold of 1000)
+    // All 6 should still be visible because XP thresholds don't apply past Wood
+    const profile = makeProfile({
+      totalXp: 793,
+      forgedPieces: {
+        wood: allForged,
+        stone: {
+          belt: forgedEntry,
+          shoes: forgedEntry,
+          breastplate: forgedEntry,
+          shield: forgedEntry,
+          helmet: forgedEntry,
+        },
+      },
+    })
+    const visible = getVisiblePieces(profile)
+    expect(visible).toHaveLength(6)
+    expect(visible).toContain('sword')
   })
 })
