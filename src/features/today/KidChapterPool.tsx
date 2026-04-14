@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
@@ -58,6 +59,7 @@ export default function KidChapterPool({
     Record<number, string>
   >({})
   const [savingChapter, setSavingChapter] = useState<number | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
 
   const mcFont = '"Press Start 2P", monospace'
@@ -138,6 +140,7 @@ export default function KidChapterPool({
       })
     } catch (err) {
       console.error('Chapter response save failed:', err)
+      setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
     setSavingChapter(null)
   }, [chapterBlobs, familyId, childId, bookProgress.bookId, book.title, weekFocus, onChapterAnswered])
@@ -165,6 +168,7 @@ export default function KidChapterPool({
   if (chaptersToShow.length === 0) return null
 
   const startRecording = async (chapter: number) => {
+    setSaveError(null)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream)
@@ -206,6 +210,15 @@ export default function KidChapterPool({
       >
         {'\u{1F4D6}'} {book.title}
       </Typography>
+      {saveError && (
+        <Alert
+          severity="error"
+          onClose={() => setSaveError(null)}
+          sx={{ mb: 2 }}
+        >
+          {saveError}
+        </Alert>
+      )}
       <Stack spacing={2}>
         {chaptersToShow.map((item) => {
           const emoji = questionTypeEmoji[item.questionType] ?? '\u2753'

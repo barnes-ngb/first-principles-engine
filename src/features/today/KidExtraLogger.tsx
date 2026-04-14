@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
@@ -30,6 +31,7 @@ export default function KidExtraLogger({
   const [extraActivity, setExtraActivity] = useState<{ label: string; subject: string } | null>(null)
   const [extraMinutes, setExtraMinutes] = useState<number | null>(null)
   const [savingExtra, setSavingExtra] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const extraItems = useMemo(() => {
     const items = dayLog.checklist
@@ -84,6 +86,7 @@ export default function KidExtraLogger({
       setExtraMinutes(null)
     } catch (err) {
       console.error('Extra activity save failed:', err)
+      setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
     setSavingExtra(false)
   }, [extraActivity, extraMinutes, dayLog, persistDayLogImmediate, familyId, childId, today])
@@ -94,13 +97,22 @@ export default function KidExtraLogger({
         <Typography variant="body2" sx={{ textAlign: 'center' }}>
           Did extra work on your tablet or on your own? Log it here!
         </Typography>
+        {saveError && (
+          <Alert
+            severity="error"
+            onClose={() => setSaveError(null)}
+            sx={{ width: '100%' }}
+          >
+            {saveError}
+          </Alert>
+        )}
 
         {!showExtraLog ? (
           <Button
             variant="outlined"
             color="primary"
             size="large"
-            onClick={() => setShowExtraLog(true)}
+            onClick={() => { setShowExtraLog(true); setSaveError(null) }}
             sx={{ alignSelf: 'center' }}
           >
             ⛏️ I Did More!
