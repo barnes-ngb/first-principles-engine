@@ -87,6 +87,34 @@ export function getAllForgedSlots(profile: AvatarProfile): VoxelArmorPieceId[] {
   return [...forged]
 }
 
+/**
+ * Returns one entry per armor slot: the highest-tier forged version of each piece.
+ * Used by suitUpAll to ensure the best version of each piece is equipped.
+ */
+export function getBestOfSlotForgedPieces(profile: AvatarProfile): Array<{ pieceId: VoxelArmorPieceId; tier: string }> {
+  const forgedByTier = profile.forgedPieces
+  if (!forgedByTier) {
+    // Legacy: treat equipped/unlocked as wood-forged
+    return getForgedPiecesForTier(profile, 'wood').map((id) => ({ pieceId: id, tier: 'wood' }))
+  }
+
+  const activeTier = getActiveForgeTierFromProgress(profile)
+  const activeTierIdx = MINECRAFT_TIER_ORDER.indexOf(activeTier)
+  const bestBySlot = new Map<VoxelArmorPieceId, string>()
+
+  // Walk from lowest to highest tier; later tiers overwrite earlier ones.
+  for (let i = 0; i <= activeTierIdx; i++) {
+    const tier = MINECRAFT_TIER_ORDER[i]
+    const tierPieces = forgedByTier[tier]
+    if (!tierPieces) continue
+    for (const pieceId of ALL_ARMOR_VOXEL_PIECES) {
+      if (tierPieces[pieceId]) bestBySlot.set(pieceId, tier)
+    }
+  }
+
+  return [...bestBySlot.entries()].map(([pieceId, tier]) => ({ pieceId, tier }))
+}
+
 function getAppliedTodayVoxel(profile: AvatarProfile, appliedPieces: ArmorPiece[] | undefined): VoxelArmorPieceId[] {
   if (Array.isArray(appliedPieces)) {
     return getAppliedVoxelPieces(appliedPieces)
