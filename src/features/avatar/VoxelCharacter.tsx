@@ -946,7 +946,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
               postPoseArmClearanceBoost,
               tuning,
             )
-            armLObj.rotation.z = constrained.rotZ
+            armLObj.rotation.z = -constrained.rotZ  // negate: +rotZ is outward convention, but left arm at -X needs negative rotation.z
             armLObj.rotation.x = constrained.rotX
             armLObj.position.y = baseArmLY + Math.max(0, -weightShift) * 0.018 * tuning.shoulderSwing
           }

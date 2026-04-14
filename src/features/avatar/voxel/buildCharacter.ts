@@ -317,9 +317,10 @@ export function buildCharacter(
   const forearmW = armW - 0.01 * s // slightly thinner than sleeve
 
   // Left arm
+  const armGap = 0.02 * s // tiny gap so rotations don't clip the torso edge
   const armL = new THREE.Group()
   armL.name = 'armL'
-  armL.position.set(-(torsoW / 2 + armW / 2), shoulderY, 0)
+  armL.position.set(-(torsoW / 2 + armW / 2 + armGap), shoulderY, 0)
   character.add(armL)
 
   const sleeveGeoL = new THREE.BoxGeometry(armW, sleeveH, armW)
@@ -348,7 +349,7 @@ export function buildCharacter(
   // Right arm
   const armR = new THREE.Group()
   armR.name = 'armR'
-  armR.position.set(torsoW / 2 + armW / 2, shoulderY, 0)
+  armR.position.set(torsoW / 2 + armW / 2 + armGap, shoulderY, 0)
   character.add(armR)
 
   const sleeveGeoR = new THREE.BoxGeometry(armW, sleeveH, armW)
