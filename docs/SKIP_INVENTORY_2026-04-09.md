@@ -236,3 +236,191 @@ With an optional "Skip to lesson {nextLesson}" button. **This button is user-ini
 | Checklist feedback display | `src/features/today/TodayChecklist.tsx:558-609` |
 | Scan results display | `src/components/ScanResultsPanel.tsx` |
 | TodayPage handlers | `src/features/today/TodayPage.tsx:580-668` |
+
+---
+
+## Workbook / Lesson Tracking
+
+### ActivityConfig document shape (full type)
+
+**File:** `src/core/types/planning.ts:810-868`
+
+```ts
+export interface ActivityConfig {
+  id: string
+  name: string                         // e.g., "Good and the Beautiful Reading"
+  type: ActivityType                   // 'formation' | 'workbook' | 'routine' | 'activity' | 'app' | 'evaluation'
+  subjectBucket: SubjectBucket
+  defaultMinutes: number
+  frequency: ActivityFrequency         // 'daily' | '3x' | '2x' | '1x' | 'as-needed'
+  childId: string | 'both'
+  sortOrder: number
+
+  // Workbook-specific (optional)
+  curriculum?: string                  // e.g., "GATB", "Explode the Code"
+  totalUnits?: number
+  currentPosition?: number             // lesson/page number
+  unitLabel?: string                   // "lesson", "chapter", "unit"
+  curriculumMeta?: CurriculumMeta      // certificate-derived metadata (migration bridge)
+
+  // Completion tracking
+  completed: boolean
+  completedDate?: string               // ISO date
+
+  // Scan/map connection
+  scannable: boolean
+  linkedCurriculumNodes?: string[]
+
+  // Block-based schedule grouping
+  block?: ScheduleBlock                // 'formation' | 'readaloud' | 'choice' | 'core-reading' | 'core-math' | 'flex' | 'independent'
+  pairedWith?: string                  // activity ID to run simultaneously with
+  choiceGroup?: string                 // group ID for "pick your order" items
+  droppableOnLightDay?: boolean
+  aspirational?: boolean               // don't count as missed if unchecked
+
+  // Metadata
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+```
+
+**Supporting types:**
+
+- `ActivityType` — `src/core/types/enums.ts:308-316` — `'formation' | 'workbook' | 'routine' | 'activity' | 'app' | 'evaluation'`
+- `ActivityFrequency` — `src/core/types/enums.ts:318-325` — `'daily' | '3x' | '2x' | '1x' | 'as-needed'`
+- `ScheduleBlock` — `src/core/types/enums.ts:336-345` — `'formation' | 'readaloud' | 'choice' | 'core-reading' | 'core-math' | 'flex' | 'independent'`
+- `CurriculumMeta` — `src/core/types/planning.ts:534-549` — `{ provider, level?, lastMilestone?, milestoneDate?, completed?, masteredSkills?, activeSkills? }`
+
+**Firestore collection:** `families/{familyId}/activityConfigs` — helper at `src/core/firebase/firestore.ts:274-277`.
+
+---
+
+### `currentPosition` — where defined, read, and written
+
+#### Definition
+
+- `ActivityConfig.currentPosition?: number` — `src/core/types/planning.ts:833`. Optional. Absent on non-workbook configs.
+- Legacy `WorkbookConfig.currentPosition: number` — `src/core/types/planning.ts:560`. Required (non-optional) in the old type.
+
+#### Written (updated)
+
+| Trigger | File : Lines | Behavior |
+|---|---|---|
+| Scan → auto-sync | `src/core/hooks/useScanToActivityConfig.ts:60-64` | If `lessonNumber > current`, sets `currentPosition = lessonNumber`. Only advances forward. |
+| Scan → new config | `src/core/hooks/useScanToActivityConfig.ts:111` | Sets `currentPosition: lessonNumber ?? 1` on creation. |
+| "Update workbook position" button | `src/core/firebase/updateActivityPosition.ts:38-40` | Unconditionally sets `currentPosition = lessonNumber` (no forward-only guard). |
+| "Skip to lesson N" button | `src/core/hooks/useScanToActivityConfig.ts:60-64` | Same `syncScanToConfig` path but called with `lessonNumber: detectedLesson + 1`. |
+| Certificate scan → progress | `src/core/hooks/useCertificateProgress.ts:83` | Sets `currentPosition: newPosition`. |
+| Migration backfill | `functions/src/ai/workbookActivityConfigBackfill.ts:110` | `Math.max(existing, legacy)`. |
+| Migration script | `src/core/firebase/migrateActivityConfigs.ts:148` | Copies `wb.currentPosition` from legacy `WorkbookConfig`. |
+
+#### Read (consumed)
+
+| Consumer | File : Lines | What it does |
+|---|---|---|
+| AI context assembly | `functions/src/ai/contextSlices.ts:411-413` | Injects `"lesson {currentPosition} of {totalUnits} covered"` into AI prompts. |
+| GATB enrichment | `functions/src/ai/contextSlices.ts:433-446` | Feeds `currentPosition` to `getGatbProgress()` for covered/upcoming skills. |
+| Chat CF workbook context | `functions/src/ai/chat.ts:97, 166-178` | Reads `currentPosition` from Firestore, passes to context assembly. |
+| Pace gauge (planner) | `src/features/planner-chat/PaceGaugePanel.tsx:64` | Computes `(currentPosition / totalUnits) * 100` for progress bar. |
+| Planner logic | `src/features/planner-chat/chatPlanner.logic.ts:50-51` | Appends `"(at lesson N of M)"` to planner prompt context. |
+| Planner prompts test | `src/core/ai/prompts/plannerPrompts.test.ts:94` | Test fixture. |
+
+---
+
+### Does anything track "upcoming" content?
+
+**Yes — for GATB curricula only.** There is a static scope-and-sequence map in `src/core/data/gatbCurriculum.ts` (and a duplicate at `functions/src/ai/data/gatbCurriculum.ts`).
+
+**`getGatbProgress(curriculumKey, currentLesson)`** — `src/core/data/gatbCurriculum.ts:505-545`
+
+Given a GATB curriculum key (e.g., `'gatb-math-2'`) and the `currentPosition`, this function returns:
+- `coveredSkills: string[]` — all skills from completed + current units
+- `coveredPhonics: string[]` — phonics patterns covered (LA only)
+- `currentUnit: CurriculumUnit | null` — the unit the child is currently in
+- `upcomingUnits: CurriculumUnit[]` — all future units (topics, skills, lesson ranges)
+- `percentComplete: number`
+
+**Where upcoming is consumed:**
+
+| Consumer | File : Lines | What it does |
+|---|---|---|
+| AI prompt context | `functions/src/ai/contextSlices.ts:442-443` | Injects `"Upcoming: {topic1}, {topic2}"` (first 2 upcoming units) into prompts for plan/eval/shellyChat. |
+| `GatbLessonInfo` component | `src/components/GatbLessonInfo.tsx:81-84` | Displays `"Up next: {topic}"` in the UI (first upcoming unit). |
+
+**For non-GATB curricula:** There is no upcoming content tracking. The system only stores `currentPosition` and `totalUnits` — it knows *where* you are but not *what comes next*.
+
+---
+
+### How does a checklist item reference a workbook/lesson?
+
+**There is no structured reference.** A `ChecklistItem` (`src/core/types/planning.ts:262-324`) has no `workbookConfigId`, `activityConfigId`, `lessonNumber`, `curriculum`, or any other field linking it to an `ActivityConfig` document. This was explicitly noted in `docs/CAPTURE_PIPELINE_INVESTIGATION_2026-04-07.md:89`.
+
+The connection is implicit, via two soft signals:
+
+1. **`itemType: 'workbook'`** — `src/core/types/planning.ts:301`. Set by the AI planner when generating the plan (`functions/src/ai/chat.ts:464`). Used by `TodayChecklist.tsx:111` to determine if an item is scannable. No back-reference to which config it came from.
+
+2. **`subjectBucket`** — `src/core/types/planning.ts:269`. Matches the `ActivityConfig.subjectBucket` by convention. Used by `scanFeedbackBySubject` (`src/features/today/TodayPage.tsx:377-412`) to attach scan results to checklist items by subject bucket.
+
+3. **`label` (title string)** — `src/core/types/planning.ts:264`. The AI planner generates a title like `"Good and the Beautiful Math Level 2"` that textually matches the `ActivityConfig.name`. The scan pipeline uses fuzzy name matching (`useScanToActivityConfig.ts:177-227`) to find the config, but the checklist item itself carries only the label string.
+
+4. **`contentGuide`** — `src/core/types/planning.ts:311, 494`. The AI planner can embed lesson-specific guidance like `"Continue from lesson 53. Content: multisyllable words"` in a free-text string. This is generated by the AI from the context assembly (which includes `currentPosition`), but the checklist item does not store a structured lesson number. The prompt instructions are at `functions/src/ai/tasks/plan.ts:322-340`.
+
+**In summary:** Checklist items are connected to workbooks by (label text + subject bucket) convention, not by document ID. The scan pipeline bridges from scan → config by fuzzy name match, not through the checklist item.
+
+---
+
+### "Skip to lesson N" button — location, behavior, and interaction with `currentPosition`
+
+#### Where it lives
+
+The button is rendered in **`src/components/ScanResultsPanel.tsx`** at two locations:
+
+- **Lines 191-208**: Shown when `recommendation === 'skip'` — green success alert: *"{childName} has this mastered. Skip ahead to the next new content."*
+- **Lines 218-235**: Shown when `recommendation === 'quick-review'` — blue info alert: *"{childName} knows most of this. Quick 5-minute review, then move on."*
+
+Both render: `<Button>Skip to lesson {lessonNumber + 1}</Button>`
+
+The button is gated on: `onSkipToNext` prop is provided AND `results.curriculumDetected.lessonNumber` is truthy.
+
+#### What it does
+
+The button calls `onSkipToNext((results.curriculumDetected!.lessonNumber ?? 0) + 1)`.
+
+The handler is implemented identically in three places:
+
+| Surface | File : Lines |
+|---|---|
+| Today page | `src/features/today/TodayPage.tsx:647-668` |
+| Curriculum tab | `src/features/progress/CurriculumTab.tsx:292-311` |
+| Certificate scan section | `src/features/progress/CertificateScanSection.tsx:143-164` |
+
+Each handler:
+1. Takes the scan result's `curriculumDetected` object.
+2. Clones it with `lessonNumber` overridden to `nextLesson` (detected + 1).
+3. Calls `syncScanToConfig(childId, { ...results, curriculumDetected: { ...curriculum, lessonNumber: nextLesson } })`.
+4. Shows a snack: `"Skipping ahead — next lesson: {nextLesson}"`.
+
+#### How it interacts with `currentPosition`
+
+Inside `syncScanToConfig` (`src/core/hooks/useScanToActivityConfig.ts:57-64`):
+
+```ts
+if (lessonNumber > current) {
+  updates.currentPosition = lessonNumber
+}
+```
+
+Because the handler passes `detectedLesson + 1` as `lessonNumber`, and the guard is `>`, the effect is:
+- If `currentPosition` is at or below the detected lesson, it advances to `detectedLesson + 1`.
+- If `currentPosition` is already beyond `detectedLesson + 1` (e.g., someone manually advanced further), no update occurs.
+
+There is also a separate **"Update workbook position to Lesson N"** button at `ScanResultsPanel.tsx:245-260` that sets `currentPosition` to the *detected* lesson (not +1). This uses the `onUpdatePosition` callback, which flows through to either `syncScanToConfig` (in CurriculumTab/TodayPage) or `updateActivityConfigPosition` (direct Firestore write at `src/core/firebase/updateActivityPosition.ts:13-48` — notably this one has no forward-only guard).
+
+#### Summary of position-update paths from scan
+
+| Button | Position set to | Forward-only? | Files |
+|---|---|---|---|
+| "Skip to lesson N" | `detectedLesson + 1` | Yes (`>` guard in `syncScanToConfig`) | `ScanResultsPanel.tsx:201,228` → `useScanToActivityConfig.ts:62` |
+| "Update workbook position" | `detectedLesson` | Via `syncScanToConfig`: Yes. Via `updateActivityPosition`: No. | `ScanResultsPanel.tsx:255` → `useScanToActivityConfig.ts:62` or `updateActivityPosition.ts:39` |
+| Auto-sync on scan capture | `detectedLesson` | Yes (`>` guard) | `useUnifiedCapture.ts:90` → `useScanToActivityConfig.ts:62` |
