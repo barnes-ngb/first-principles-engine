@@ -338,10 +338,11 @@ describe('generateDailyLogCsv', () => {
     const csv = generateDailyLogCsv(logs, [])
     const lines = csv.split('\n')
 
-    expect(lines[0]).toBe('Date,Block Type,Subject,Location,Minutes,Notes')
+    expect(lines[0]).toBe('Date,Block Type,Subject,Location,Minutes,Notes,Source')
     expect(lines[1]).toContain('2026-01-10')
     expect(lines[1]).toContain('Reading')
     expect(lines[1]).toContain('Read chapter 5')
+    expect(lines[1]).toContain('day-log')
   })
 
   it('includes both hours entries and dayLogs in CSV', () => {
@@ -399,6 +400,32 @@ describe('generateDailyLogCsv', () => {
 
     // Notes with commas and quotes should be properly escaped
     expect(csv).toContain('""To Kill a Mockingbird""')
+  })
+
+  it('includes source column for auto-tracked sessions', () => {
+    const entries: HoursEntry[] = [
+      {
+        date: '2026-01-10',
+        minutes: 15,
+        subjectBucket: SubjectBucket.Reading,
+        source: 'evaluation-session',
+        notes: 'Reading evaluation session',
+      },
+      {
+        date: '2026-01-11',
+        minutes: 20,
+        subjectBucket: SubjectBucket.Math,
+        source: 'quest-session',
+        notes: 'math quest session',
+      },
+    ]
+
+    const csv = generateDailyLogCsv([], entries)
+    const lines = csv.split('\n')
+
+    expect(lines[0]).toContain('Source')
+    expect(lines[1]).toContain('evaluation-session')
+    expect(lines[2]).toContain('quest-session')
   })
 })
 

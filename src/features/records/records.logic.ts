@@ -195,6 +195,7 @@ export const generateDailyLogCsv = (
     'Location',
     'Minutes',
     'Notes',
+    'Source',
   ])
 
   // Include rows from BOTH sources (additive)
@@ -209,6 +210,7 @@ export const generateDailyLogCsv = (
         entry.location ?? '',
         entryMinutes(entry),
         entry.notes ?? '',
+        entry.source ?? '',
       ]),
     )
 
@@ -225,6 +227,7 @@ export const generateDailyLogCsv = (
             block.location ?? '',
             block.actualMinutes ?? 0,
             block.notes ?? '',
+            'day-log',
           ]),
         ),
     )
