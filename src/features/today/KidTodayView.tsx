@@ -11,7 +11,7 @@ import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import TextField from '@mui/material/TextField'
-import { doc, getDoc, getDocs, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore'
+import { doc, getDoc, getDocs, onSnapshot, orderBy, query, where } from 'firebase/firestore'
 
 import { useNavigate } from 'react-router-dom'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
@@ -28,8 +28,8 @@ import {
   dailyArmorSessionDocId,
   dailyArmorSessionsCollection,
   evaluationSessionsCollection,
-  stripUndefined,
 } from '../../core/firebase/firestore'
+import { getDailyArmorSession } from '../../core/avatar/getDailyArmorSession'
 import type { Artifact, ChapterBook, ChecklistItem, Child, DailyArmorSession, DayLog } from '../../core/types'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { XP_AWARDS } from '../avatar/xpAwards'
@@ -470,14 +470,10 @@ export default function KidTodayView({
         return
       }
 
-      const newSession: DailyArmorSession = {
-        familyId,
-        childId: child.id,
-        date: today,
-        appliedPieces: [],
-      }
-      await setDoc(sessionRef, stripUndefined(newSession as unknown as Record<string, unknown>) as unknown as DailyArmorSession)
-      setDailyArmorSession(newSession)
+      // New day — getDailyArmorSession atomically creates session
+      // AND clears equippedPieces on the avatar profile
+      await getDailyArmorSession(familyId, child.id)
+      // onSnapshot will fire again with the new doc
     })
     return unsub
   }, [familyId, child.id, today])
