@@ -241,15 +241,11 @@ This also applies to Knowledge Mine (quest) sessions -- they track `startedAt`/`
 
 ---
 
-## Proposed Fixes (Not Implemented)
+## Proposed Fixes
 
-### Fix 1: Bootstrap workingLevels from existing data
+### Fix 1: Bootstrap workingLevels from existing data — ✅ DONE (Apr 14, 2026)
 
-Lincoln likely has evaluation findings already in Firestore from sessions before April 9. A one-time backfill script could:
-- Read existing `evaluationSessions` for each child
-- Run `deriveWorkingLevelFromEvaluation` on the most recent complete session's findings
-- Write the resulting `workingLevels` to the skillSnapshot
-- This would give Lincoln an immediate working level without waiting for a new quest/eval session
+Implemented as a "Backfill from history" button in Settings → Dev tab. For each child, reads recent evaluation sessions and quest history (30-day window), derives working levels using existing `deriveWorkingLevelFromEvaluation` and `computeWorkingLevelFromSession` helpers, and writes only absent modes. Idempotent — safe to run repeatedly. See `src/features/settings/backfillWorkingLevels.ts`.
 
 ### Fix 2: Add duration tracking to EvaluationSession
 
