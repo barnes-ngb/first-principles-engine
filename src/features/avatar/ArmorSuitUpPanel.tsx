@@ -3,6 +3,7 @@ import Typography from '@mui/material/Typography'
 
 import type { AvatarProfile } from '../../core/types'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
+import { getMorningSuitUpMessage } from '../../core/avatar/getDailyArmorSession'
 import { ALL_ARMOR_VOXEL_PIECES } from './armorTierProgress'
 import { getTierTextColor } from './voxel/tierMaterials'
 
@@ -83,7 +84,7 @@ export default function ArmorSuitUpPanel({
               lineHeight: 1.6,
             }}
           >
-            Good morning! Put on the armor of God today.
+            {getMorningSuitUpMessage()}
           </Typography>
         </Box>
       )}

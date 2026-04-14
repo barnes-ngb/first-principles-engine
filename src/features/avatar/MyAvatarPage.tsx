@@ -24,7 +24,7 @@ import { uploadArtifactFile, generateFilename } from '../../core/firebase/upload
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { addXpEvent } from '../../core/xp/addXpEvent'
-import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
+import { getDailyArmorSession, getMorningSuitUpMessage, getTodayDateString } from '../../core/avatar/getDailyArmorSession'
 import { normalizeAvatarProfile } from './normalizeProfile'
 import { useAvatarProfile } from './useAvatarProfile'
 import { safeUpdateProfile, safeSetProfile } from './safeProfileWrite'
@@ -372,32 +372,11 @@ export default function MyAvatarPage() {
     }
   }, [optimisticDiamondBalance, profile?.diamondBalance])
 
-  // ── Real-time session listener ─────────────────────────────────
-  useEffect(() => {
-    if (!familyId || !childId) return
-    const docId = dailyArmorSessionDocId(childId, today)
-    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
-
-    const unsub = onSnapshot(sessionRef, async (snap) => {
-      if (snap.exists()) {
-        setSession(normalizeDailyArmorSession(snap.data()))
-      } else {
-        const newSession: DailyArmorSession = {
-          familyId,
-          childId,
-          date: today,
-          appliedPieces: [],
-        }
-        await setDoc(sessionRef, stripUndefined(newSession as unknown as Record<string, unknown>) as unknown as DailyArmorSession)
-        setSession(newSession)
-      }
-    })
-    return unsub
-  }, [familyId, childId, today])
-
-  // ── Daily armor reset — armor unequips each morning ────────────
+  // ── Real-time session listener + daily armor reset ──────────────
   // "Put on the full armor of God" — Ephesians 6:11
-  // Each day is a fresh opportunity to suit up.
+  // Each day is a fresh opportunity to suit up. When a new day's session is
+  // created, equippedPieces is cleared atomically so the character appears
+  // bare and the kid re-equips each piece as a morning devotional ritual.
   const resetRanRef = useRef(false)
   const resetChildRef = useRef(childId)
   const [morningReset, setMorningReset] = useState(false)
@@ -412,38 +391,46 @@ export default function MyAvatarPage() {
   }
 
   useEffect(() => {
-    if (!profile || !session || !familyId || !childId) return
-    if (resetRanRef.current) return
-    resetRanRef.current = true
+    if (!familyId || !childId) return
+    const docId = dailyArmorSessionDocId(childId, today)
+    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
 
-    const isNewDay = profile.lastArmorEquipDate !== today
+    const unsub = onSnapshot(sessionRef, async (snap) => {
+      if (snap.exists()) {
+        const sessionData = normalizeDailyArmorSession(snap.data())
+        setSession(sessionData)
 
-    if (isNewDay && (profile.equippedPieces?.length ?? 0) > 0) {
-      // New day — reset armor so child can intentionally put it on
-      setMorningReset(true)
-      const profileRef = doc(avatarProfilesCollection(familyId), childId)
-      void safeUpdateProfile(profileRef, {
-        equippedPieces: [],
-        lastArmorEquipDate: today,
-      })
-
-      // Morning TTS greeting
-      if ('speechSynthesis' in window) {
-        setTimeout(() => {
-          const utterance = new SpeechSynthesisUtterance(
-            'Good morning warrior! Time to put on the armor of God.',
-          )
-          utterance.rate = 0.85
-          const voices = window.speechSynthesis.getVoices()
-          const preferred = voices.find((v) =>
-            v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Moira'),
-          ) || voices.find((v) => v.lang.startsWith('en-US')) || voices[0]
-          if (preferred) utterance.voice = preferred
-          window.speechSynthesis.speak(utterance)
-        }, 1000)
+        // First load: if no pieces applied yet, this is a morning reset
+        if (!resetRanRef.current) {
+          resetRanRef.current = true
+          if (sessionData.appliedPieces.length === 0) {
+            setMorningReset(true)
+            // Morning TTS greeting
+            if ('speechSynthesis' in window) {
+              setTimeout(() => {
+                const utterance = new SpeechSynthesisUtterance(
+                  'Good morning warrior! Time to put on the armor of God.',
+                )
+                utterance.rate = 0.85
+                const voices = window.speechSynthesis.getVoices()
+                const preferred = voices.find((v) =>
+                  v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Moira'),
+                ) || voices.find((v) => v.lang.startsWith('en-US')) || voices[0]
+                if (preferred) utterance.voice = preferred
+                window.speechSynthesis.speak(utterance)
+              }, 1000)
+            }
+          }
+        }
+      } else {
+        // New day — getDailyArmorSession atomically creates session
+        // AND clears equippedPieces on the avatar profile
+        await getDailyArmorSession(familyId, childId)
+        // onSnapshot will fire again with the new doc
       }
-    }
-  }, [profile, session, familyId, childId, today])
+    })
+    return unsub
+  }, [familyId, childId, today])
 
   useEffect(() => {
     if (!familyId || !childId) return
@@ -1010,7 +997,7 @@ export default function MyAvatarPage() {
       return {
         icon: '⚡',
         title: "Today's Mission",
-        text: 'Suit up your armor and head to the village square.',
+        text: getMorningSuitUpMessage(),
         cta: 'Suit Up & Begin',
         action: () => {
           document.getElementById('hero-hub-customize')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
