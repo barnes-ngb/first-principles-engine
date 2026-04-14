@@ -60,6 +60,7 @@ import {
   EnergyLevelLabel,
   PlanType,
   PlanTypeLabel,
+  SkipReason,
   SubjectBucket,
   UserProfile,
 } from '../../core/types/enums'
@@ -677,6 +678,50 @@ export default function TodayPage() {
     [familyId, selectedChildId, scanResult, syncScanToConfig, setSnackMessage],
   )
 
+  const handleAcceptSkip = useCallback(
+    async () => {
+      if (!familyId || !selectedChildId || !dayLog || !scanResult?.results || scanItemIndex == null) return
+      const results = scanResult.results
+      if (results.pageType === 'certificate') return
+
+      const curriculum = results.curriculumDetected
+      if (!curriculum?.lessonNumber) return
+
+      try {
+        // 1. Mark checklist item as skipped with ai-recommended reason
+        const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
+          i === scanItemIndex
+            ? { ...ci, skipped: true, skipReason: SkipReason.AiRecommended }
+            : ci,
+        )
+
+        // 2. Advance currentPosition by +1
+        await syncScanToConfig(selectedChildId, {
+          ...results,
+          curriculumDetected: { ...curriculum, lessonNumber: curriculum.lessonNumber + 1 },
+        })
+
+        // 3. Record parentOverride on the scan record
+        if (scanResult.id) {
+          const override = {
+            recommendation: 'skip' as const,
+            overriddenBy: familyId,
+            overriddenAt: new Date().toISOString(),
+            note: 'Accepted AI skip recommendation',
+          }
+          await updateDoc(doc(scansCollection(familyId), scanResult.id), { parentOverride: override })
+        }
+
+        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+        setSnackMessage({ text: 'Skipped. Moving forward.', severity: 'success' })
+      } catch (err) {
+        console.error('[TodayPage] Failed to accept skip recommendation', err)
+        setSnackMessage({ text: 'Failed to accept skip', severity: 'error' })
+      }
+    },
+    [familyId, selectedChildId, dayLog, scanResult, scanItemIndex, syncScanToConfig, persistDayLogImmediate, setSnackMessage],
+  )
+
   // --- Loading state ---
 
   const scrollToArtifacts = useCallback(() => {
@@ -954,6 +999,7 @@ export default function TodayPage() {
           onClearScan={handleClearScan}
           onUpdatePosition={handleScanUpdatePosition}
           onSkipToNext={handleSkipToNext}
+          onAcceptSkip={handleAcceptSkip}
           onPrintMaterials={handlePrintTodayMaterials}
           printingMaterials={printingMaterials}
           scanFeedbackBySubject={scanFeedbackBySubject}

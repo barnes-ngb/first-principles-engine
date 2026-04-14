@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -50,6 +51,8 @@ interface ScanResultsPanelProps {
   onUpdatePosition?: (curriculum: CurriculumDetected) => void
   /** Called when user wants to skip ahead to the next lesson (for skip/quick-review). */
   onSkipToNext?: (nextLesson: number) => void
+  /** Called when user accepts an AI skip recommendation (advances position + marks item skipped). */
+  onAcceptSkip?: () => void
   /** Child name for the "Update Progress" button label. */
   childName?: string
   /** Hide action buttons (e.g. when viewing history). */
@@ -69,11 +72,13 @@ export default function ScanResultsPanel({
   onApplyCertificate,
   onUpdatePosition,
   onSkipToNext,
+  onAcceptSkip,
   childName,
   hideActions,
   configSyncStatus,
   overrideRecommendation,
 }: ScanResultsPanelProps) {
+  const [skipAccepted, setSkipAccepted] = useState(false)
   if (isCertificateScan(results)) {
     return (
       <CertificateResultsView
@@ -193,17 +198,41 @@ export default function ScanResultsPanel({
             <Typography variant="body2">
               {childName || 'Your child'} has this mastered. Skip ahead to the next new content.
             </Typography>
-            {onSkipToNext && results.curriculumDetected?.lessonNumber && (
-              <Button
-                size="small"
-                variant="outlined"
-                color="success"
-                onClick={() => onSkipToNext((results.curriculumDetected!.lessonNumber ?? 0) + 1)}
-                sx={{ mt: 0.5, textTransform: 'none' }}
-              >
-                Skip to lesson {(results.curriculumDetected.lessonNumber ?? 0) + 1}
-              </Button>
-            )}
+            <Stack direction="row" spacing={1} sx={{ mt: 0.5 }} flexWrap="wrap" useFlexGap>
+              {onAcceptSkip && !skipAccepted && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="success"
+                  onClick={() => {
+                    onAcceptSkip()
+                    setSkipAccepted(true)
+                  }}
+                  sx={{ textTransform: 'none' }}
+                >
+                  Accept &amp; advance
+                </Button>
+              )}
+              {skipAccepted && (
+                <Chip
+                  size="small"
+                  label="✓ Accepted"
+                  color="success"
+                  variant="filled"
+                />
+              )}
+              {onSkipToNext && results.curriculumDetected?.lessonNumber && !skipAccepted && (
+                <Button
+                  size="small"
+                  variant="text"
+                  color="success"
+                  onClick={() => onSkipToNext((results.curriculumDetected!.lessonNumber ?? 0) + 1)}
+                  sx={{ textTransform: 'none' }}
+                >
+                  Skip to lesson {(results.curriculumDetected.lessonNumber ?? 0) + 1}
+                </Button>
+              )}
+            </Stack>
           </Alert>
         )}
 

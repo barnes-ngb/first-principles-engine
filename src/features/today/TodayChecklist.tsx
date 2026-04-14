@@ -145,6 +145,7 @@ interface TodayChecklistProps {
   onClearScan: () => void
   onUpdatePosition?: (curriculum: CurriculumDetected) => void
   onSkipToNext?: (nextLesson: number) => void
+  onAcceptSkip?: () => void
   onPrintMaterials: () => void
   printingMaterials: boolean
   scanFeedbackBySubject?: Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
@@ -170,6 +171,7 @@ export default function TodayChecklist({
   onClearScan,
   onUpdatePosition,
   onSkipToNext,
+  onAcceptSkip,
   onPrintMaterials,
   printingMaterials,
   scanFeedbackBySubject = {},
@@ -679,6 +681,7 @@ export default function TodayChecklist({
                     onSkip={onScanSkip}
                     onUpdatePosition={onUpdatePosition}
                     onSkipToNext={onSkipToNext}
+                    onAcceptSkip={onAcceptSkip}
                     onScanAnother={() => { onClearScan() }}
                     childName={selectedChild.name}
                   />
