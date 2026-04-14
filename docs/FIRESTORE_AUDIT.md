@@ -76,6 +76,15 @@ All collections live under `families/{familyId}/`. No subcollections go deeper t
 > ```
 > Stored as a **separate field** from `dispositionCache` so AI regeneration (which overwrites `dispositionCache.result` + `generatedAt`) cannot blow away parent overrides. The canonical way to read the current narrative for a disposition is `effectiveDispositionText(entry, override)` from `src/core/types/disposition.ts`, which returns `override?.text ?? entry.narrative`. When no overrides remain, the field is deleted via `deleteField()`.
 
+> **Update (Apr 14, 2026):** ChecklistItem (on `days` collection `DayLog.checklist[]`) gains four optional fields for the skip/rollover system:
+> ```typescript
+> activityConfigId?: string       // doc ID into activityConfigs collection
+> skipReason?: 'too-hard' | 'not-relevant' | 'ai-recommended'
+> rolledOver?: boolean            // true on items carried forward from a previous school day
+> rolledOverFrom?: string         // YYYY-MM-DD of the original day
+> ```
+> `activityConfigId` links checklist items to their originating `ActivityConfig`, enabling deduplication during rollover and auto-complete on scan-advance. `skipReason` augments the existing `skipped: boolean` field — when `skipped: true` and `skipReason` is absent, it's a legacy kid-side skip. `rolledOver`/`rolledOverFrom` mark items that were auto-carried from a previous school day's incomplete checklist. Hours computation is unaffected (it filters on `completed`, never touches `skipped` or `skipReason`).
+
 > **Update (Apr 9, 2026):** Scan documents now support an optional `parentOverride` field:
 > ```typescript
 > parentOverride?: {

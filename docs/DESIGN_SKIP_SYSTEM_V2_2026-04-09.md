@@ -1,6 +1,6 @@
 # Design: Skip System v2
 
-**Status:** Proposal (2026-04-09, revised from v1)
+**Status:** Phase 1 ✅ Landed (2026-04-14) | Phase 2 Proposal
 **Supersedes:** [DESIGN_SKIP_SYSTEM_2026-04-09.md](./DESIGN_SKIP_SYSTEM_2026-04-09.md)
 **Depends on:** [SKIP_INVENTORY_2026-04-09.md](./SKIP_INVENTORY_2026-04-09.md)
 
@@ -210,19 +210,16 @@ When built, explicit skip will be:
 
 ## 7 — Phased Build
 
-### Phase 1: Rollover + activityConfigId (build first)
+### Phase 1: Rollover + activityConfigId + scan-advance + accept skip — ✅ Landed 2026-04-14
 
-The highest-value change. Eliminates "lost" unchecked items and establishes the structured config link needed by everything else.
-
-| Area | Files | Lines (est.) |
-|------|-------|-------------|
-| **Type: `activityConfigId`** | `src/core/types/planning.ts` | ~2 |
-| **Type: `rolledOver`** | `src/core/types/planning.ts` | ~2 |
-| **Planner emits configId** | `functions/src/ai/tasks/plan.ts` | ~15 |
-| **Rollover logic** | `src/features/today/TodayPage.tsx` (new helper, called on mount) | ~60 |
-| **Rollover rendering** | `src/features/today/TodayChecklist.tsx` (dimmed style for source-day items) | ~15 |
-| **Merge with planner** | `src/features/today/TodayPage.tsx` (dedupe on configId when plan applied) | ~20 |
-| **Total** | 4 files | **~115 lines** |
+| Area | Files | Lines |
+|------|-------|-------|
+| **Data model** | `enums.ts`, `planning.ts` | 16 |
+| **Rollover logic + tests** | `rollover.ts`, `rollover.test.ts`, `useRolloverUnchecked.ts` | 471 |
+| **Rollover wiring + UI** | `TodayPage.tsx`, `TodayChecklist.tsx` | 19 |
+| **Scan-advance logic + tests** | `scanAdvance.ts`, `scanAdvance.test.ts`, `useUnifiedCapture.ts` | 179 |
+| **Accept AI skip + tests** | `ScanResultsPanel.tsx`, `ScanResultsPanel.test.tsx`, `TodayPage.tsx`, `TodayChecklist.tsx` | 193 |
+| **Total** | 12 files | **~878 lines** |
 
 ### Phase 2: Explicit skip (build second)
 
