@@ -16,10 +16,10 @@ Ordered by priority. Effort: S (< 1 day), M (1-3 days), L (3-5 days).
 **Effort:** M
 **What:** In `CurriculumTab.tsx`, add a "Pause for 1 week" action alongside "Mark complete" and "Remove". Store a `pausedUntil: string` (YYYY-MM-DD) on `ActivityConfig`. Planner filters out paused configs when generating plans. Files: `src/core/types/dadlab.ts` or relevant type file for ActivityConfig, `CurriculumTab.tsx`, `useActivityConfigs.ts`, planner prompt assembly.
 
-### 3. Add edit/override to disposition narrative
+### 3. ✅ DONE — Editable disposition narrative (2026-04-14)
 **Principle:** #5 (AI suggests, humans decide)
 **Effort:** S
-**What:** Add an edit button to the disposition narrative card in `DispositionProfile.tsx`. On tap, open a modal with pre-filled AI text that Shelly can revise before saving. Store edited text alongside the AI-generated version so regeneration doesn't clobber edits. File: `src/features/progress/DispositionProfile.tsx`.
+**What:** Per-disposition inline edit with reason note, "Edited by Shelly" indicator, revert to AI. Overrides stored as separate `dispositionOverrides` field on child document (not inside `dispositionCache`) so regeneration cannot blow away edits. `effectiveDispositionText()` helper centralizes override-vs-AI resolution. "Newer AI available" notice shown when AI regenerates after an override. Types extracted to `src/core/types/disposition.ts`. Files changed: `DispositionProfile.tsx`, `src/core/types/disposition.ts`, `src/core/types/index.ts`.
 
 ### 4. ✅ DONE — Remove score display from Quest kid UI (2026-04-14)
 **Principle:** #2 (No grades/scores/rankings on kid UI)
@@ -72,7 +72,7 @@ Ordered by priority. Effort: S (< 1 day), M (1-3 days), L (3-5 days).
 |---|---|---|---|---|
 | 1 | Bulk skip + parent override | #9 No busywork | M | Violated |
 | 2 | Week-level workbook pause | #9 No busywork | M | Violated |
-| 3 | Editable disposition narrative | #5 AI suggests | S | Violated |
+| 3 | ✅ Editable disposition narrative | #5 AI suggests | S | Done |
 | 4 | ✅ Remove quest scores from kid UI | #2 No grades | S | Done |
 | 5 | Subject-level skip | #9 No busywork | M | Gap |
 | 6 | Print records/compliance | #11 Print the stack | M | Gap |
