@@ -324,7 +324,10 @@ export class PoseAnimator {
           Math.min(sideConfig.rotZMax, val),
         )
       }
-      obj.rotation.z = val
+      // Left arm is at -X; positive rotation.z swings it inward (toward
+      // the torso).  Negate so the same positive "outward" values used by
+      // poses and guardrails produce outward motion on both sides.
+      obj.rotation.z = armSide === 'L' ? -val : val
     }
   }
 
