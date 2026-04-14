@@ -37,7 +37,7 @@ interface ArmorPieceGalleryProps {
   accentColor: string
   textColor: string
   bgColor: string
-  onPieceTap: (piece: ArmorPieceMeta) => void
+  onPieceTap: (piece: ArmorPieceMeta, displayTier: string) => void
 }
 
 export default function ArmorPieceGallery({
@@ -215,7 +215,7 @@ export default function ArmorPieceGallery({
         return (
           <Box
             key={piece.id}
-            onClick={() => onPieceTap(piece)}
+            onClick={() => onPieceTap(piece, displayTier)}
             sx={{
               minWidth: 140,
               maxWidth: 140,

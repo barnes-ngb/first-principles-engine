@@ -198,6 +198,7 @@ export default function MyAvatarPage() {
   const [session, setSession] = useState<DailyArmorSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedPiece, setSelectedPiece] = useState<ArmorPieceMeta | null>(null)
+  const [selectedTier, setSelectedTier] = useState<string | null>(null)
   const [optimisticDiamondBalance, setOptimisticDiamondBalance] = useState<number | null>(null)
   const [, setUnequipPiece] = useState<VoxelArmorPieceId | null>(null)
 
@@ -656,6 +657,7 @@ export default function MyAvatarPage() {
       const result = await forgeArmorPiece(familyId, childId, activeTier, voxelPieceId, verseResponse, verseResponseAudio)
       if (result.success) {
         setSelectedPiece(null)
+        setSelectedTier(null)
         if (typeof result.newBalance === 'number') {
           setOptimisticDiamondBalance(result.newBalance)
         }
@@ -798,17 +800,18 @@ export default function MyAvatarPage() {
 
   // ── Piece tap handler — single tap to equip/unequip ────────────
   const handlePieceTap = useCallback(
-    (piece: ArmorPieceMeta) => {
+    (piece: ArmorPieceMeta, displayTier: string) => {
       if (!profile || !session || ceremonyActive) return
       const armorPieceId = ARMOR_PIECES.find(
         (p) => ARMOR_PIECE_TO_VOXEL[p.id] === piece.id,
       )?.id
 
       const isApplied = armorPieceId && (session.appliedPieces ?? []).includes(armorPieceId)
+      // Use the gallery's displayed tier so the state matches what the user sees
       const pieceState = getArmorPieceState({
         profile,
         pieceId: piece.id,
-        activeForgeTier: getActiveForgeTier(profile),
+        activeForgeTier: displayTier,
         appliedTodayVoxel: getAppliedVoxelPieces(session.appliedPieces ?? []),
       })
 
@@ -823,8 +826,12 @@ export default function MyAvatarPage() {
       } else {
         // Locked/forgeable/equipped state details are shown in verse card
         setSelectedPiece((prev) => {
-          if (prev?.id === piece.id) return null
+          if (prev?.id === piece.id) {
+            setSelectedTier(null)
+            return null
+          }
           speakVerse(piece.name, piece.verseText)
+          setSelectedTier(displayTier)
           return piece
         })
       }
@@ -900,6 +907,15 @@ export default function MyAvatarPage() {
 
     setMorningReset(false)
   }, [profile, session, familyId, childId, today, checkArmorStreak])
+
+  // ── Verse card scroll-into-view ─────────────────────────────────
+  const verseCardRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (selectedPiece && verseCardRef.current) {
+      // Small delay so the verse card renders before scrolling
+      setTimeout(() => verseCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100)
+    }
+  }, [selectedPiece])
 
   // ── Screen flash on equip ──────────────────────────────────────
   const flashContainerRef = useRef<HTMLDivElement>(null)
@@ -1466,25 +1482,30 @@ export default function MyAvatarPage() {
         </SectionErrorBoundary>
 
         {/* ── Verse Card (for selected piece) ──────────────────── */}
-        {selectedPiece && (
-          <ArmorVerseCard
-            piece={selectedPiece}
-            pieceState={getArmorPieceState({
-              profile,
-              pieceId: selectedPiece.id,
-              activeForgeTier: getActiveForgeTier(profile),
-              appliedTodayVoxel: appliedVoxel,
-            })}
-            forgeCost={getForgeCost(getActiveForgeTier(profile), selectedPiece.id)}
-            isLincoln={isLincoln}
-            accentColor={accentColor}
-            textColor={textColor}
-            lockReason={getPieceLockReason(profile, getActiveForgeTier(profile))}
-            onEquip={() => void handleApplyPiece(selectedPiece.id)}
-            onForge={(verseResponse, verseResponseAudio) => handleForgePiece(selectedPiece.id, verseResponse, verseResponseAudio)}
-            onClose={() => setSelectedPiece(null)}
-          />
-        )}
+        {selectedPiece && (() => {
+          const verseTier = selectedTier ?? getActiveForgeTier(profile)
+          return (
+            <div ref={verseCardRef}>
+              <ArmorVerseCard
+                piece={selectedPiece}
+                pieceState={getArmorPieceState({
+                  profile,
+                  pieceId: selectedPiece.id,
+                  activeForgeTier: verseTier,
+                  appliedTodayVoxel: appliedVoxel,
+                })}
+                forgeCost={getForgeCost(verseTier, selectedPiece.id)}
+                isLincoln={isLincoln}
+                accentColor={accentColor}
+                textColor={textColor}
+                lockReason={getPieceLockReason(profile, verseTier)}
+                onEquip={() => void handleApplyPiece(selectedPiece.id)}
+                onForge={(verseResponse, verseResponseAudio) => handleForgePiece(selectedPiece.id, verseResponse, verseResponseAudio)}
+                onClose={() => { setSelectedPiece(null); setSelectedTier(null) }}
+              />
+            </div>
+          )
+        })()}
 
         {/* ── Customizer (outfit, dye, accessories, emblem, crest, skin, photo) ── */}
         {isChildProfile ? (

@@ -73,10 +73,12 @@ export function getArmorPieceState(params: {
     return 'locked_by_tier'
   }
 
-  // Per-piece XP thresholds only gate pieces in Wood tier (staggered unlock).
-  // Higher tiers use tier-level gates for progression — once a tier is unlocked,
-  // all 6 pieces are forgeable (subject to diamond cost).
-  if (activeForgeTier === 'wood' && profile.totalXp < XP_THRESHOLDS[pieceId]) {
+  // Per-piece XP thresholds only gate pieces in Wood tier (staggered unlock)
+  // AND only when the child's actual progression is still in Wood.
+  // Once they've advanced past Wood, all Wood pieces are unlocked — the XP
+  // drip-feed was an onboarding feature, not a permanent gate.
+  const actualActiveTier = getActiveForgeTierFromProgress(profile)
+  if (activeForgeTier === 'wood' && actualActiveTier === 'wood' && profile.totalXp < XP_THRESHOLDS[pieceId]) {
     return 'locked_by_xp'
   }
 
