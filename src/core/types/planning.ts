@@ -15,6 +15,7 @@ import type {
   ReviewStatus,
   ScheduleBlock,
   SessionResult,
+  SkipReason,
   StreamId,
   SubjectBucket,
   SupportTag,
@@ -297,6 +298,14 @@ export interface ChecklistItem {
   skipGuidance?: string
   /** Whether this item was explicitly skipped by the child. */
   skipped?: boolean
+  /** Why this item was skipped (only set when skipped: true). */
+  skipReason?: SkipReason
+  /** Links this checklist item to its originating ActivityConfig doc ID. */
+  activityConfigId?: string
+  /** True on items that were rolled over from a previous school day. */
+  rolledOver?: boolean
+  /** ISO date string (YYYY-MM-DD) of the original day this item was rolled from. */
+  rolledOverFrom?: string
   /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), or activity. */
   itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity'
   /** Evaluation mode when itemType is 'evaluation'. */
