@@ -435,7 +435,6 @@ export default function KnowledgeMinePage() {
           correctAnswer={quest.lastAnswer.correctAnswer}
           encouragement={quest.lastAnswer.encouragement}
           childAnswer={quest.lastAnswer.correctAnswer}
-          totalCorrect={quest.questState.totalCorrect}
         />
       )}
 
@@ -443,7 +442,6 @@ export default function KnowledgeMinePage() {
       {quest.screen === QuestScreen.Summary && quest.questState && (
         <QuestSummary
           totalCorrect={quest.questState.totalCorrect}
-          totalQuestions={quest.questState.totalQuestions}
           finalLevel={quest.questState.currentLevel}
           streak={quest.streak}
           findings={quest.findings}
@@ -655,7 +653,7 @@ function ResumeCard({
               mt: 0.3,
             }}
           >
-            {modeLabel} · {session.totalCorrect ?? 0}/{session.totalQuestions ?? 0} correct · Level {session.finalLevel ?? '?'} · {timeLabel}
+            {modeLabel} · Level {session.finalLevel ?? '?'} · {timeLabel}
           </Typography>
         </Box>
       </Stack>

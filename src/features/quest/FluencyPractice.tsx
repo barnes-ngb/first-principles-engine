@@ -270,7 +270,7 @@ export default function FluencyPractice({ quest }: FluencyPracticeProps) {
 
         {/* Diamond counter */}
         <Typography sx={{ fontFamily: MC.font, fontSize: '0.35rem', color: MC.diamond, mt: 2, textAlign: 'center' }}>
-          {'💎'.repeat(fluencyDiamonds)} {fluencyDiamonds}/5 diamonds
+          {'💎'.repeat(fluencyDiamonds)}{fluencyDiamonds === 0 ? '💎' : ''} diamonds mined
         </Typography>
       </Box>
     )

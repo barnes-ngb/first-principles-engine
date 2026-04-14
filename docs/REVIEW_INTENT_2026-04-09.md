@@ -15,13 +15,11 @@ The Progress page leads with the "Learning Profile" tab (`src/features/progress/
 
 ## 2. No grades/scores/rankings on kid UI
 
-**Partially Aligned — Quest UI violates this.**
+**Aligned** (updated 2026-04-14).
 
-The Knowledge Mine quest shows score-like metrics directly to kids:
-- Running question counter `X/30` in the header (`src/features/quest/ReadingQuest.tsx:564`).
-- Running diamond count "X diamonds mined so far" after each answer (`:165`).
-- Final summary screen shows `totalCorrect` and `totalQuestions` (`src/features/quest/QuestSummary.tsx:132-142`).
-- `EvaluationHistoryTab.tsx:81,130` displays `X/Y correct` for past sessions (parent-facing but navigable by kids).
+Quest UI score displays removed: question counter (`X/10`), running `totalCorrect` tally, `totalQuestions` on summary, `X/5` fluency ratio, and `X/Y correct` on resume card. Progress bar (no numbers) remains for session pacing. Diamond counts kept as achievement framing ("X diamonds mined!") per charter — diamonds are rewards, not scores.
+
+Remaining minor item: `EvaluationHistoryTab.tsx:81,130` displays `X/Y correct` for past sessions (parent-facing but navigable by kids) — tracked separately as Action #10.
 
 All other kid-facing surfaces (KidChecklist, KidTeachBack, KidChapterPool, KidConundrumResponse) are clean — no scores, percentages, or rankings.
 
