@@ -101,6 +101,8 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 - `useBookProgress` hook — live `onSnapshot` subscription on `bookProgress/{childId}_{bookId}` doc. Provides `updateChapter` callback for atomic pool entry updates.
 - Records "Book Responses" tab groups chapter responses by book in expandable accordions. Shows all chapters: answered (with inline audio), skipped, and unanswered. Legacy responses without `bookId` fall back to title match; unmatched entries bucket to "Other Books".
 - Legacy `ChapterQuestionCard` deleted. `DayLog.chapterQuestion` deprecated (reads only, no new writes). `DraftDayPlan.chapterQuestion` removed.
+- **Storage rule fix:** `chapterResponses/` path added to `storage.rules` (was missing — caused 403 on audio upload). Chapter response audio capture now fully working end-to-end.
+- **Save error surfacing:** All kid recording/save components (`KidChapterPool`, `KidTeachBack`, `KidConundrumResponse`, `KidExtraLogger`) now show a visible MUI Alert on save failure instead of silently swallowing errors. Dismissible with retry guidance.
 
 ---
 
@@ -163,6 +165,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 | Editable Disposition Narrative | Apr 14, 2026 | Per-disposition inline edit on Learning Profile tab. Parent overrides stored separately (`dispositionOverrides` on child doc) so AI regeneration cannot blow away edits. `effectiveDispositionText()` helper centralizes override-vs-AI resolution. "Edited by Shelly" indicator, revert to AI, optional reason note. "Newer AI available" notice when AI regenerates after an override. Types extracted to shared `src/core/types/disposition.ts`. Charter principle #5 now Aligned. |
 | Working Levels Backfill | Apr 14, 2026 | One-time backfill action in Dev tab: derives workingLevels from evaluation findings + quest history for children missing them. Pure logic extracted for testing. Closes Fix #1 from workingLevels inspection. |
 | Skip System Phase 1 | Apr 14, 2026 | Data model (`activityConfigId`, `skipReason`, `rolledOver`, `rolledOverFrom` on ChecklistItem) + `SkipReason` const enum. Auto-rollover of unchecked items to next school day (Mon←Fri, dedup by configId/label, chain-rollover, weekend skip). Scan-advance auto-completes bypassed checklist items when `syncScanToConfig` advances position. "Accept & advance" button on ScanResultsPanel for AI skip recommendations (marks skipped + advances position + records parentOverride). 38 new tests across 3 test files. Design: `DESIGN_SKIP_SYSTEM_V2_2026-04-09.md`. |
+| Chapter Response Save Fix | Apr 14, 2026 | Added missing `chapterResponses/` storage rule (caused 403 on kid audio upload). Surfaced save errors in all kid recording components (KidChapterPool, KidTeachBack, KidConundrumResponse, KidExtraLogger) — failures now show dismissible MUI Alert instead of silently swallowing. |
 
 ### Sprint Cleanup — April 2026
 - Deleted Sprint 1 UFLI scaffolding (9 files, dormant since creation, seed never ran)

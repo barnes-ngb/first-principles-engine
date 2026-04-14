@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
@@ -35,12 +36,14 @@ export default function KidTeachBack({
   const [showTeachBack, setShowTeachBack] = useState(false)
   const [teachSubject, setTeachSubject] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [isRecording, setIsRecording] = useState(false)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
 
   const startRecording = useCallback(async () => {
+    setSaveError(null)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream)
@@ -117,6 +120,7 @@ export default function KidTeachBack({
       setShowTeachBack(false)
     } catch (err) {
       console.error('Teach-back save failed:', err)
+      setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
     setSaving(false)
   }, [teachSubject, child.id, familyId, audioBlob, today, dayLog, persistDayLogImmediate])
@@ -127,6 +131,15 @@ export default function KidTeachBack({
         <Typography variant="body1" sx={{ textAlign: 'center' }}>
           Did you explain something to London today? Tap to mine a knowledge diamond!
         </Typography>
+        {saveError && (
+          <Alert
+            severity="error"
+            onClose={() => setSaveError(null)}
+            sx={{ width: '100%' }}
+          >
+            {saveError}
+          </Alert>
+        )}
 
         {!showTeachBack ? (
           <Button
