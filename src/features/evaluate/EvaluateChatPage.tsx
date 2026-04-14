@@ -22,7 +22,7 @@ import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
+import { addDoc, doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -31,8 +31,12 @@ import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   evaluationSessionsCollection,
+  hoursCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
+import { domainToSubjectBucket } from '../../core/utils/domainMapping'
+import { useSessionTimer } from '../../core/utils/sessionTimer'
+import { todayKey } from '../../core/utils/dateKey'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -182,11 +186,38 @@ export default function EvaluateChatPage() {
   const [conceptualBlocks, setConceptualBlocks] = useState<ConceptualBlock[]>([])
   const [blocksSummary, setBlocksSummary] = useState<string | undefined>(undefined)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const sessionTimer = useSessionTimer()
+  const hoursLoggedRef = useRef(false)
 
   // Auto-scroll on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // ── Log session hours when evaluation completes ────────────
+
+  const logSessionHours = useCallback(async () => {
+    if (hoursLoggedRef.current || !activeChildId) return
+    hoursLoggedRef.current = true
+
+    const activeSeconds = sessionTimer.stop()
+    const minutes = Math.ceil(activeSeconds / 60 / 5) * 5 // round up to nearest 5
+    if (minutes < 5) return // too short to log
+
+    try {
+      await addDoc(hoursCollection(familyId), {
+        childId: activeChildId,
+        date: todayKey(),
+        minutes,
+        subjectBucket: domainToSubjectBucket(domain),
+        quickCapture: true,
+        notes: `${domain.charAt(0).toUpperCase() + domain.slice(1)} evaluation session`,
+        source: 'evaluation-session',
+      })
+    } catch (err) {
+      console.error('[SessionTimer] Failed to log evaluation hours:', err)
+    }
+  }, [activeChildId, familyId, domain, sessionTimer])
 
   // ── Load or create session ──────────────────────────────────
 
@@ -223,6 +254,9 @@ export default function EvaluateChatPage() {
           setSessionStatus('in-progress')
           setCompleteSummary(inProgress.summary || null)
           setNextEvalDate(inProgress.nextEvalDate)
+          // Resume timer for continued in-progress session
+          hoursLoggedRef.current = false
+          sessionTimer.startTimer()
         } else {
           // Fresh session
           setSessionDocId(null)
@@ -323,6 +357,9 @@ export default function EvaluateChatPage() {
   const startEvaluation = useCallback(async () => {
     if (!activeChildId || !activeChild) return
 
+    hoursLoggedRef.current = false
+    sessionTimer.startTimer()
+
     const aiMessages: AIChatMessage[] = [
       {
         role: 'user',
@@ -370,6 +407,7 @@ export default function EvaluateChatPage() {
       setCompleteSummary(complete.summary)
       setNextEvalDate(complete.nextEvalDate)
       setSessionStatus('complete')
+      void logSessionHours()
     }
 
     await persistSession(newMessages, allFindings, complete)
@@ -379,7 +417,7 @@ export default function EvaluateChatPage() {
       const sid = sessionDocId ?? `${activeChildId}_${domain}_${new Date().toISOString().slice(0, 10)}`
       void triggerPatternAnalysis(sid, allFindings)
     }
-  }, [activeChildId, activeChild, familyId, domain, chat, persistSession, sessionDocId, triggerPatternAnalysis])
+  }, [activeChildId, activeChild, familyId, domain, chat, persistSession, sessionDocId, triggerPatternAnalysis, sessionTimer, logSessionHours])
 
   // ── Send message ────────────────────────────────────────────
 
@@ -437,6 +475,7 @@ export default function EvaluateChatPage() {
       setCompleteSummary(complete.summary)
       setNextEvalDate(complete.nextEvalDate)
       setSessionStatus('complete')
+      void logSessionHours()
     }
 
     await persistSession(finalMessages, allFindings, complete)
@@ -445,7 +484,7 @@ export default function EvaluateChatPage() {
       const sid = sessionDocId ?? `${activeChildId}_${domain}_${new Date().toISOString().slice(0, 10)}`
       void triggerPatternAnalysis(sid, allFindings)
     }
-  }, [inputText, activeChildId, aiLoading, messages, findings, familyId, domain, chat, persistSession, sessionDocId, triggerPatternAnalysis])
+  }, [inputText, activeChildId, aiLoading, messages, findings, familyId, domain, chat, persistSession, sessionDocId, triggerPatternAnalysis, logSessionHours])
 
   // ── Save & Apply (update skill snapshot) ────────────────────
 
@@ -590,6 +629,8 @@ export default function EvaluateChatPage() {
   // ── Clear & Restart ───────────────────────────────────────
 
   const handleClear = useCallback(() => {
+    sessionTimer.stop() // discard timer without logging
+    hoursLoggedRef.current = false
     setMessages([])
     setFindings([])
     setRecommendations([])
@@ -603,7 +644,7 @@ export default function EvaluateChatPage() {
     setPatternAnalysisState('idle')
     setConceptualBlocks([])
     setBlocksSummary(undefined)
-  }, [])
+  }, [sessionTimer])
 
   // ── Download Report ─────────────────────────────────────────
 
