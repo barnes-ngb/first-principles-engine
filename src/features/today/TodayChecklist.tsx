@@ -40,6 +40,7 @@ import {
 import type { ScanRecord } from '../../core/types/planning'
 import { autoFillBlockMinutes } from './daylog.model'
 import { syncChecklistToRoutine } from './checklistRoutineSync'
+import { formatRolloverSource } from './rollover'
 import { calculateXp } from './xp'
 
 const subjectBucketColor: Record<string, string> = {
@@ -519,6 +520,11 @@ export default function TodayChecklist({
                   <Typography variant="body2" sx={{ flex: 1 }}>
                     {item.label}
                   </Typography>
+                  {item.rolledOver && item.rolledOverFrom && (
+                    <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem', whiteSpace: 'nowrap' }}>
+                      &#8635; from {formatRolloverSource(item.rolledOverFrom)}
+                    </Typography>
+                  )}
                   {item.plannedMinutes != null && item.plannedMinutes > 0 && (
                     <Typography variant="caption" color="text.secondary">
                       {item.plannedMinutes}m

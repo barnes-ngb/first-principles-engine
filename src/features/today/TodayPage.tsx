@@ -79,6 +79,7 @@ import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { ensureDefaultActivityConfigs } from '../../core/firebase/migrateActivityConfigs'
+import { useRolloverUnchecked } from './useRolloverUnchecked'
 import { useUnifiedCapture } from './useUnifiedCapture'
 import QuickAddHours from '../records/QuickAddHours'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
@@ -201,6 +202,15 @@ export default function TodayPage() {
     selectedChild,
     activeTemplate,
     activeRoutineItems,
+  })
+
+  // --- Rollover: carry forward unchecked items from previous school day ---
+  useRolloverUnchecked({
+    familyId,
+    childId: selectedChildId,
+    today,
+    dayLog,
+    persistDayLogImmediate,
   })
 
   // --- Chapter book progress (pool-based read-aloud tracking) ---
