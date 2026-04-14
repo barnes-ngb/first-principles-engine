@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { collection, doc, getDoc, getDocs, limit as firestoreLimit, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
+import { addDoc, collection, doc, getDoc, getDocs, limit as firestoreLimit, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
@@ -8,11 +8,14 @@ import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { activityConfigsCollection, db, evaluationSessionsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { activityConfigsCollection, db, evaluationSessionsCollection, hoursCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'
 import type { EvaluationDomain } from '../../core/types/enums'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
+import { domainToSubjectBucket } from '../../core/utils/domainMapping'
+import { useSessionTimer } from '../../core/utils/sessionTimer'
+import { todayKey } from '../../core/utils/dateKey'
 import { calculateStreak, computeNextState, formatSkillLabel, shouldEndSession } from './questAdaptive'
 import { checkAnswer, extractPattern, extractTargetWord, generateFallbackQuestion, shouldFlagAsError, validateQuestion } from './questHelpers'
 import type {
@@ -344,6 +347,8 @@ export function useQuestSession() {
   const questionStartRef = useRef<number>(0)
   const bonusRoundUsedRef = useRef(false)
   const sessionIdRef = useRef<string | null>(null)
+  const sessionTimer = useSessionTimer()
+  const hoursLoggedRef = useRef(false)
 
   // ── Load previous sessions + streak ───────────────────────────
 
@@ -500,6 +505,8 @@ export function useQuestSession() {
       conversationRef.current = []
       bonusRoundUsedRef.current = false
       sessionIdRef.current = null
+      hoursLoggedRef.current = false
+      sessionTimer.startTimer()
 
       // Fluency mode has a different flow
       if (questMode === 'fluency') {
@@ -782,6 +789,24 @@ export function useQuestSession() {
         console.error('Failed to save quest session', err)
       }
 
+      // Log instructional hours (idle-aware timer)
+      if (!hoursLoggedRef.current) {
+        hoursLoggedRef.current = true
+        const activeSeconds = sessionTimer.stop()
+        const minutes = Math.ceil(activeSeconds / 60 / 5) * 5
+        if (minutes >= 5) {
+          addDoc(hoursCollection(familyId), {
+            childId: activeChildId,
+            date: todayKey(),
+            minutes,
+            subjectBucket: domainToSubjectBucket(domain),
+            quickCapture: true,
+            notes: `${questMode || domain} quest session`,
+            source: 'quest-session',
+          }).catch((err) => console.error('[SessionTimer] Failed to log quest hours:', err))
+        }
+      }
+
       // Award XP via addXpEvent (handles dedup, avatar profile update, armor unlocks)
       // 1) Quest completion bonus (flat 15 XP)
       addXpEvent(
@@ -1028,7 +1053,7 @@ export function useQuestSession() {
         console.warn('[Quest] Failed to auto-complete evaluation item (non-blocking):', err)
       }
     },
-    [activeChildId, familyId, findings, previousSessions, chat, analyzePatterns, questState?.elapsedSeconds],
+    [activeChildId, familyId, findings, previousSessions, chat, analyzePatterns, questState?.elapsedSeconds, sessionTimer],
   )
 
   // ── Submit answer ─────────────────────────────────────────────
@@ -1518,6 +1543,24 @@ export function useQuestSession() {
         console.error('Failed to save fluency session', err)
       }
 
+      // Log instructional hours (idle-aware timer)
+      if (!hoursLoggedRef.current) {
+        hoursLoggedRef.current = true
+        const activeSeconds = sessionTimer.stop()
+        const minutes = Math.ceil(activeSeconds / 60 / 5) * 5
+        if (minutes >= 5) {
+          addDoc(hoursCollection(familyId), {
+            childId: activeChildId,
+            date: todayKey(),
+            minutes,
+            subjectBucket: domainToSubjectBucket('reading'),
+            quickCapture: true,
+            notes: 'fluency quest session',
+            source: 'quest-session',
+          }).catch((err) => console.error('[SessionTimer] Failed to log fluency hours:', err))
+        }
+      }
+
       if (diamonds > 0) {
         const XP_PER_DIAMOND = 2
         addXpEvent(
@@ -1577,7 +1620,7 @@ export function useQuestSession() {
 
       setScreen(QuestScreen.FluencySummary)
     },
-    [activeChildId, familyId, questState, fluencyPassages, fluencyDiamonds],
+    [activeChildId, familyId, questState, fluencyPassages, fluencyDiamonds, sessionTimer],
   )
 
   // ── Resume session from partial save ──────────────────────────
@@ -1643,6 +1686,10 @@ export function useQuestSession() {
           prev ? { ...prev, elapsedSeconds: prev.elapsedSeconds + 1 } : prev,
         )
       }, 1000)
+
+      // Start idle-aware timer for hours logging
+      hoursLoggedRef.current = false
+      sessionTimer.startTimer()
 
       // Show the question screen (or loading if we need a new question)
       if (alreadyAnswered) {
@@ -1711,6 +1758,7 @@ export function useQuestSession() {
       clearInterval(timerRef.current)
       timerRef.current = null
     }
+    sessionTimer.stop() // discard idle-aware timer without logging
     setScreen(QuestScreen.Intro)
     setQuestState(null)
     setCurrentQuestion(null)
@@ -1728,7 +1776,7 @@ export function useQuestSession() {
     bonusRoundUsedRef.current = false
     activeQuestModeRef.current = undefined
     sessionIdRef.current = null
-  }, [questState, currentQuestion, activeChildId, familyId, answeredQuestions, findings, streak.currentStreak, sessionSaved])
+  }, [questState, currentQuestion, activeChildId, familyId, answeredQuestions, findings, streak.currentStreak, sessionSaved, sessionTimer])
 
   return {
     screen,
