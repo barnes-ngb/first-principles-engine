@@ -47,7 +47,6 @@ const XP_PER_DIAMOND = 2
 
 interface QuestSummaryProps {
   totalCorrect: number
-  totalQuestions: number
   finalLevel: number
   streak: QuestStreak
   findings: EvaluationFinding[]
@@ -67,7 +66,6 @@ interface QuestSummaryProps {
 
 export default function QuestSummary({
   totalCorrect,
-  totalQuestions,
   finalLevel,
   streak,
   findings,
@@ -148,7 +146,7 @@ export default function QuestSummary({
             color: MC.stone,
           }}
         >
-          {totalQuestions} questions explored · Level {finalLevel}
+          Level {finalLevel} reached
         </Typography>
       </Box>
 

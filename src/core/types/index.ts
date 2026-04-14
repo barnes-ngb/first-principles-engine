@@ -2,6 +2,7 @@
 export * from './common'
 export * from './family'
 export * from './planning'
+export * from './disposition'
 export * from './evaluation'
 export * from './xp'
 export * from './books'

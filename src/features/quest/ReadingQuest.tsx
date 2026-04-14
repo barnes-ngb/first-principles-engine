@@ -71,7 +71,6 @@ interface QuestFeedbackProps {
   correctAnswer: string
   encouragement?: string
   childAnswer: string
-  totalCorrect: number
 }
 
 export function QuestFeedback({
@@ -79,7 +78,6 @@ export function QuestFeedback({
   correctAnswer,
   encouragement,
   childAnswer,
-  totalCorrect,
 }: QuestFeedbackProps) {
   return (
     <Box
@@ -162,7 +160,7 @@ export function QuestFeedback({
           mt: 2,
         }}
       >
-        {totalCorrect} diamond{totalCorrect !== 1 ? 's' : ''} mined so far
+        Keep mining! ⛏️
       </Typography>
     </Box>
   )
@@ -554,15 +552,17 @@ export default function QuestQuestionScreen({
         >
           ⛏️ {domainLabel} — Level {questState.currentLevel}
         </Typography>
-        <Typography
-          sx={{
-            fontFamily: MC.font,
-            fontSize: '0.45rem',
-            color: MC.stone,
-          }}
-        >
-          {question.isBonusRound ? 'BONUS' : `${questState.totalQuestions + 1}/${MAX_QUESTIONS}`}
-        </Typography>
+        {question.isBonusRound && (
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.45rem',
+              color: MC.gold,
+            }}
+          >
+            BONUS
+          </Typography>
+        )}
       </Stack>
 
       {/* Progress bar */}
@@ -653,7 +653,7 @@ export default function QuestQuestionScreen({
             color: MC.diamond,
           }}
         >
-          💎 {questState.totalCorrect}
+          💎
         </Typography>
       </Stack>
 
