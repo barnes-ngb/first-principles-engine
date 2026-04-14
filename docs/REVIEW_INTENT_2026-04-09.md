@@ -43,16 +43,16 @@ Kids log extra activities via `KidExtraLogger.tsx` (tap activity type, tap durat
 
 ## 5. AI suggests, humans decide
 
-**Partially Aligned — Disposition narrative has no edit control.**
+**Aligned** (updated 2026-04-14).
 
 | AI Output | Override? | Evidence |
 |---|---|---|
 | Skill Snapshot | Full edit | `SkillSnapshotPage.tsx:138-280` — add/edit/delete priorities, supports, stop rules |
-| Disposition Narrative | **None** | `DispositionProfile.tsx:220-290` — display-only Card, no edit/override UI. Only option is full regeneration. |
+| Disposition Narrative | Per-disposition edit | `DispositionProfile.tsx` — inline edit per disposition with reason note, "Edited by Shelly" indicator, revert to AI. Overrides stored separately (`dispositionOverrides` on child doc) and survive AI regeneration. |
 | Week Plan | Partial | `PlanPreviewCard.tsx:160-250` — accept/reject items, edit minutes, remove items. Cannot edit day structure or plan type. |
 | Quest Levels | Time-gated | `workingLevels.ts:14-27` — 48-hour manual override guard; automated sources can overwrite after window expires. |
 
-The disposition narrative is the most prominent AI artifact parents will share and it cannot be edited. This is the clearest violation of the principle.
+Remaining gap: Week plan macro-level control (day structure, plan type per day) — tracked as Action #8.
 
 ---
 

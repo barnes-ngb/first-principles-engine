@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import EditIcon from '@mui/icons-material/Edit'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -6,41 +7,30 @@ import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
+import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
+import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { doc, getDoc, updateDoc } from 'firebase/firestore'
+import { deleteField, doc, getDoc, updateDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { db } from '../../core/firebase/firestore'
+import type {
+  DispositionCache,
+  DispositionKey,
+  DispositionNarrativeOverride,
+  DispositionOverrides,
+  DispositionResult,
+} from '../../core/types/disposition'
+import { effectiveDispositionText } from '../../core/types/disposition'
 
-// ── Types ──────────────────────────────────────────────────────
-
-interface DispositionEntry {
-  level: 'growing' | 'steady' | 'emerging' | 'not-yet-visible'
-  narrative: string
-  trend: 'up' | 'stable' | 'down' | 'insufficient-data'
-}
-
-interface DispositionResult {
-  profileDate: string
-  periodWeeks: number
-  dispositions: {
-    curiosity: DispositionEntry
-    persistence: DispositionEntry
-    articulation: DispositionEntry
-    selfAwareness: DispositionEntry
-    ownership: DispositionEntry
-  }
-  celebration: string
-  nudge: string
-  parentNote: string
-}
+// ── Constants ─────────────────────────────────────────────────
 
 const DISPOSITION_META: Array<{
-  key: keyof DispositionResult['dispositions']
+  key: DispositionKey
   label: string
   icon: string
 }> = [
@@ -75,7 +65,7 @@ function formatCacheAge(isoDate: string): string {
   return `${Math.floor(hours / 24)}d`
 }
 
-// ── Component ──────────────────────────────────────────────────
+// ── Component ─────────────────────────────────────────────────
 
 export default function DispositionProfile() {
   const familyId = useFamilyId()
@@ -94,20 +84,39 @@ export default function DispositionProfile() {
   const [error, setError] = useState<string | null>(null)
   const [cacheAge, setCacheAge] = useState<string | null>(null)
 
-  // Load cached disposition on mount / child change
+  // Override state — loaded from Firestore `dispositionOverrides` field
+  const [overrides, setOverrides] = useState<DispositionOverrides>({})
+
+  // Per-disposition inline edit state
+  const [editingKey, setEditingKey] = useState<DispositionKey | null>(null)
+  const [editText, setEditText] = useState('')
+  const [editNote, setEditNote] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  // Track AI generatedAt so we can detect "newer AI available"
+  const [aiGeneratedAt, setAiGeneratedAt] = useState<string | null>(null)
+
+  // Load cached disposition + overrides on mount / child change
   useEffect(() => {
     if (!familyId || !activeChildId) return
+    setOverrides({})
+    setEditingKey(null)
     const childRef = doc(db, `families/${familyId}/children/${activeChildId}`)
     void getDoc(childRef).then((snap) => {
-      const cached = snap.data()?.dispositionCache as { result: DispositionResult; generatedAt: string } | undefined
+      const data = snap.data()
+      const cached = data?.dispositionCache as DispositionCache | undefined
       if (cached?.generatedAt && cached.result) {
         const age = Date.now() - new Date(cached.generatedAt).getTime()
         const ONE_DAY = 24 * 60 * 60 * 1000
         if (age < ONE_DAY) {
           setResult(cached.result)
           setCacheAge(cached.generatedAt)
+          setAiGeneratedAt(cached.generatedAt)
         }
       }
+      // Load overrides (separate field, survives regeneration)
+      const savedOverrides = data?.dispositionOverrides as DispositionOverrides | undefined
+      if (savedOverrides) setOverrides(savedOverrides)
     })
   }, [familyId, activeChildId])
 
@@ -118,13 +127,18 @@ export default function DispositionProfile() {
     if (!bypassCache) {
       const childRef = doc(db, `families/${familyId}/children/${activeChildId}`)
       const snap = await getDoc(childRef)
-      const cached = snap.data()?.dispositionCache as { result: DispositionResult; generatedAt: string } | undefined
+      const data = snap.data()
+      const cached = data?.dispositionCache as DispositionCache | undefined
       if (cached?.generatedAt && cached.result) {
         const age = Date.now() - new Date(cached.generatedAt).getTime()
         const ONE_DAY = 24 * 60 * 60 * 1000
         if (age < ONE_DAY) {
           setResult(cached.result)
           setCacheAge(cached.generatedAt)
+          setAiGeneratedAt(cached.generatedAt)
+          // Also refresh overrides
+          const savedOverrides = data?.dispositionOverrides as DispositionOverrides | undefined
+          if (savedOverrides) setOverrides(savedOverrides)
           return
         }
       }
@@ -155,9 +169,11 @@ export default function DispositionProfile() {
       const parsed = JSON.parse(jsonMatch[0]) as DispositionResult
       setResult(parsed)
 
-      // Cache the result to Firestore
+      // Cache the result to Firestore — only write dispositionCache,
+      // NOT dispositionOverrides. Overrides persist independently.
       const now = new Date().toISOString()
       setCacheAge(now)
+      setAiGeneratedAt(now)
       const childRef = doc(db, `families/${familyId}/children/${activeChildId}`)
       await updateDoc(childRef, {
         dispositionCache: {
@@ -172,6 +188,74 @@ export default function DispositionProfile() {
       setLoading(false)
     }
   }, [familyId, activeChildId, chat, aiError?.message])
+
+  // ── Override handlers ─────────────────────────────────────────
+
+  const handleEditStart = (key: DispositionKey) => {
+    if (!result) return
+    const entry = result.dispositions[key]
+    setEditingKey(key)
+    // Pre-fill with current effective text
+    setEditText(effectiveDispositionText(entry, overrides[key]))
+    setEditNote('')
+  }
+
+  const handleEditCancel = () => {
+    setEditingKey(null)
+    setEditText('')
+    setEditNote('')
+  }
+
+  const handleEditSave = useCallback(async () => {
+    if (!editingKey || !familyId || !activeChildId || !editText.trim()) return
+    setSaving(true)
+    try {
+      const override: DispositionNarrativeOverride = {
+        text: editText.trim(),
+        overriddenBy: 'parent',
+        overriddenAt: new Date().toISOString(),
+        ...(editNote.trim() ? { note: editNote.trim() } : {}),
+      }
+      const updated = { ...overrides, [editingKey]: override }
+      const childRef = doc(db, `families/${familyId}/children/${activeChildId}`)
+      await updateDoc(childRef, { dispositionOverrides: updated })
+      setOverrides(updated)
+      setEditingKey(null)
+      setEditText('')
+      setEditNote('')
+    } catch (err) {
+      console.error('[DispositionProfile] Failed to save override:', err)
+    } finally {
+      setSaving(false)
+    }
+  }, [editingKey, familyId, activeChildId, editText, editNote, overrides])
+
+  const handleRevert = useCallback(async (key: DispositionKey) => {
+    if (!familyId || !activeChildId) return
+    setSaving(true)
+    try {
+      const updated = { ...overrides }
+      delete updated[key]
+      const childRef = doc(db, `families/${familyId}/children/${activeChildId}`)
+      // If no overrides remain, remove the field entirely
+      if (Object.keys(updated).length === 0) {
+        await updateDoc(childRef, { dispositionOverrides: deleteField() })
+      } else {
+        await updateDoc(childRef, { dispositionOverrides: updated })
+      }
+      setOverrides(updated)
+    } catch (err) {
+      console.error('[DispositionProfile] Failed to revert override:', err)
+    } finally {
+      setSaving(false)
+    }
+  }, [familyId, activeChildId, overrides])
+
+  /** Check if override is stale (AI regenerated after override was written). */
+  const hasNewerAi = (override?: DispositionNarrativeOverride): boolean => {
+    if (!override || !aiGeneratedAt) return false
+    return new Date(aiGeneratedAt).getTime() > new Date(override.overriddenAt).getTime()
+  }
 
   return (
     <Box sx={{ px: { xs: 2, md: 3 }, py: 2, maxWidth: 800, mx: 'auto' }}>
@@ -234,6 +318,11 @@ export default function DispositionProfile() {
             const d = result.dispositions[key]
             if (!d) return null
             const trend = trendDisplay[d.trend] ?? trendDisplay['insufficient-data']
+            const override = overrides[key]
+            const isEditing = editingKey === key
+            const narrative = effectiveDispositionText(d, override)
+            const newerAiAvailable = hasNewerAi(override)
+
             return (
               <Card key={key} variant="outlined">
                 <CardContent>
@@ -254,9 +343,127 @@ export default function DispositionProfile() {
                       {trend.symbol}
                     </Typography>
                   </Stack>
-                  <Typography variant="body2" color="text.secondary">
-                    {d.narrative}
-                  </Typography>
+
+                  {isEditing ? (
+                    /* ── Inline edit mode ──────────────────── */
+                    <Stack spacing={1.5} sx={{ mt: 1 }}>
+                      <TextField
+                        multiline
+                        minRows={3}
+                        maxRows={8}
+                        fullWidth
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        size="small"
+                        placeholder="Edit the narrative..."
+                        sx={{ '& .MuiInputBase-input': { fontSize: '0.875rem' } }}
+                      />
+                      <TextField
+                        size="small"
+                        fullWidth
+                        placeholder="Reason for edit (optional)"
+                        value={editNote}
+                        onChange={(e) => setEditNote(e.target.value)}
+                        sx={{ '& .MuiInputBase-input': { fontSize: '0.8rem' } }}
+                      />
+                      <Stack direction="row" spacing={1}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          onClick={() => void handleEditSave()}
+                          disabled={saving || !editText.trim()}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={handleEditCancel}
+                          disabled={saving}
+                        >
+                          Cancel
+                        </Button>
+                      </Stack>
+                    </Stack>
+                  ) : (
+                    /* ── Display mode ─────────────────────── */
+                    <>
+                      <Stack direction="row" alignItems="flex-start" spacing={0.5}>
+                        <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+                          {narrative}
+                        </Typography>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditStart(key)}
+                          disabled={saving}
+                          sx={{ mt: -0.5, opacity: 0.6, '&:hover': { opacity: 1 } }}
+                          aria-label={`Edit ${label} narrative`}
+                        >
+                          <EditIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </Stack>
+
+                      {/* Override indicators */}
+                      {override && (
+                        <Stack spacing={0.5} sx={{ mt: 1 }}>
+                          <Stack direction="row" alignItems="center" spacing={1}>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ fontStyle: 'italic' }}
+                            >
+                              Edited by Shelly
+                              {override.note && <> &mdash; &ldquo;{override.note}&rdquo;</>}
+                            </Typography>
+                          </Stack>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Button
+                              size="small"
+                              variant="text"
+                              onClick={() => void handleRevert(key)}
+                              disabled={saving}
+                              sx={{
+                                textTransform: 'none',
+                                fontSize: '0.75rem',
+                                p: 0,
+                                minWidth: 0,
+                                color: 'text.secondary',
+                              }}
+                            >
+                              Revert to AI narrative
+                            </Button>
+                          </Stack>
+
+                          {/* "Newer AI available" notice */}
+                          {newerAiAvailable && (
+                            <Alert
+                              severity="info"
+                              variant="outlined"
+                              sx={{
+                                py: 0,
+                                px: 1,
+                                fontSize: '0.75rem',
+                                '& .MuiAlert-message': { py: 0.5 },
+                              }}
+                              action={
+                                <Button
+                                  size="small"
+                                  color="info"
+                                  onClick={() => handleEditStart(key)}
+                                  sx={{ textTransform: 'none', fontSize: '0.7rem' }}
+                                >
+                                  View & edit
+                                </Button>
+                              }
+                            >
+                              AI has a new take &mdash; the original AI narrative has been
+                              updated since your edit.
+                            </Alert>
+                          )}
+                        </Stack>
+                      )}
+                    </>
+                  )}
                 </CardContent>
               </Card>
             )

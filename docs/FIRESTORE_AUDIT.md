@@ -57,6 +57,25 @@ All collections live under `families/{familyId}/`. No subcollections go deeper t
 
 > **Update (Apr 8, 2026):** The `scans` collection (not listed above — added post-audit) stores AI-analyzed curriculum evidence (workbook pages, worksheets, tests). The `artifacts` collection stores non-curriculum evidence (creative builds, drawings, etc.). As of the unified capture pipeline, checklist items have an `evidenceCollection` field (`'scans' | 'artifacts'`) alongside `evidenceArtifactId` to indicate which collection the evidence doc lives in. Legacy items without `evidenceCollection` are in `artifacts`.
 
+> **Update (Apr 14, 2026):** Child documents now support an optional `dispositionOverrides` field (separate from `dispositionCache`):
+> ```typescript
+> dispositionOverrides?: {
+>   curiosity?: DispositionNarrativeOverride
+>   persistence?: DispositionNarrativeOverride
+>   articulation?: DispositionNarrativeOverride
+>   selfAwareness?: DispositionNarrativeOverride
+>   ownership?: DispositionNarrativeOverride
+> }
+>
+> interface DispositionNarrativeOverride {
+>   text: string               // Shelly's corrected narrative
+>   overriddenBy: string       // 'parent'
+>   overriddenAt: string       // ISO timestamp
+>   note?: string              // reason for the edit
+> }
+> ```
+> Stored as a **separate field** from `dispositionCache` so AI regeneration (which overwrites `dispositionCache.result` + `generatedAt`) cannot blow away parent overrides. The canonical way to read the current narrative for a disposition is `effectiveDispositionText(entry, override)` from `src/core/types/disposition.ts`, which returns `override?.text ?? entry.narrative`. When no overrides remain, the field is deleted via `deleteField()`.
+
 > **Update (Apr 9, 2026):** Scan documents now support an optional `parentOverride` field:
 > ```typescript
 > parentOverride?: {
