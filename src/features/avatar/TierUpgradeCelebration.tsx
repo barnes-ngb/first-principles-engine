@@ -1,10 +1,9 @@
 import { useEffect } from 'react'
 import Box from '@mui/material/Box'
-import LinearProgress from '@mui/material/LinearProgress'
 import Typography from '@mui/material/Typography'
 
 import type { AvatarProfile } from '../../core/types'
-import { ARMOR_PIECES } from '../../core/types'
+import { TIER_COMPLETION_BONUSES } from '../../core/xp/forgeCosts'
 
 export interface TierUpgrade {
   from: string
@@ -28,12 +27,12 @@ const PARTICLES = Array.from({ length: 30 }, (_, i) => ({
 }))
 
 const TIER_LABELS: Record<string, string> = {
+  wood: 'WOOD',
   stone: 'STONE',
+  iron: 'IRON',
+  gold: 'GOLD',
   diamond: 'DIAMOND',
-  netherite: 'OBSIDIAN DARK',
-  basic: 'BASIC',
-  powerup: 'POWER-UP',
-  champion: 'CHAMPION',
+  netherite: 'NETHERITE',
 }
 
 export default function TierUpgradeCelebration({
@@ -43,7 +42,7 @@ export default function TierUpgradeCelebration({
 }: TierUpgradeCelebrationProps) {
   useEffect(() => {
     if (!upgrade) return
-    const timer = setTimeout(onDismiss, 6000)
+    const timer = setTimeout(onDismiss, 8000)
     return () => clearTimeout(timer)
   }, [upgrade, onDismiss])
 
@@ -54,13 +53,9 @@ export default function TierUpgradeCelebration({
   const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
-  const readyCount = ARMOR_PIECES.filter((pieceDef) => {
-    const entry = (profile.pieces ?? []).find((p) => p.pieceId === pieceDef.id)
-    return entry && (entry.generatedImageUrls as Record<string, string | undefined>)[toTier]
-  }).length
-
   const fromLabel = TIER_LABELS[fromTier] ?? fromTier.toUpperCase()
   const toLabel   = TIER_LABELS[toTier]   ?? toTier.toUpperCase()
+  const bonus = TIER_COMPLETION_BONUSES[fromTier] ?? 0
 
   const particleColors = isLincoln
     ? ['#7EFC20', '#FFD700', '#00BFFF', '#FF6B35']
@@ -113,11 +108,42 @@ export default function TierUpgradeCelebration({
       </Box>
 
       {/* Content */}
-      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2.5, px: 3, zIndex: 1 }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, px: 3, zIndex: 1 }}>
+        {/* Sword emoji for dramatic effect */}
+        <Typography
+          sx={{
+            fontSize: '48px',
+            animation: 'swordSpin 1s ease-out',
+            '@keyframes swordSpin': {
+              '0%': { transform: 'scale(0) rotate(-180deg)', opacity: 0 },
+              '60%': { transform: 'scale(1.2) rotate(10deg)', opacity: 1 },
+              '100%': { transform: 'scale(1) rotate(0deg)', opacity: 1 },
+            },
+          }}
+        >
+          {'\u2694\uFE0F'}
+        </Typography>
+
+        {/* Tier name */}
         <Typography
           sx={{
             fontFamily: titleFont,
-            fontSize: isLincoln ? '16px' : '1.4rem',
+            fontSize: isLincoln ? '14px' : '1.2rem',
+            fontWeight: 700,
+            color: isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)',
+            textAlign: 'center',
+            letterSpacing: '0.15em',
+            textTransform: 'uppercase',
+          }}
+        >
+          {fromLabel} ARMOR
+        </Typography>
+
+        {/* COMPLETE! */}
+        <Typography
+          sx={{
+            fontFamily: titleFont,
+            fontSize: isLincoln ? '20px' : '1.6rem',
             fontWeight: 700,
             color: accentColor,
             textAlign: 'center',
@@ -129,101 +155,102 @@ export default function TierUpgradeCelebration({
             },
           }}
         >
-          {fromLabel} COMPLETE!
+          COMPLETE!
         </Typography>
 
+        {/* Piece count */}
         <Typography
           sx={{
             fontFamily: titleFont,
-            fontSize: isLincoln ? '14px' : '1.1rem',
-            color: isLincoln ? '#FFD700' : '#9C27B0',
+            fontSize: isLincoln ? '11px' : '0.9rem',
+            color: isLincoln ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
             textAlign: 'center',
           }}
         >
-          → {toLabel} ARMOR UNLOCKED!
+          You forged all 6 pieces.
         </Typography>
 
-        {/* All 6 piece images grid */}
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1 }}>
-          {ARMOR_PIECES.map((pieceDef, idx) => {
-            const entry = (profile.pieces ?? []).find((p) => p.pieceId === pieceDef.id)
-            const url = entry
-              ? (entry.generatedImageUrls as Record<string, string | undefined>)[toTier]
-              : undefined
-
-            return (
-              <Box
-                key={pieceDef.id}
-                sx={{
-                  width: 70,
-                  height: 70,
-                  border: `2px solid ${accentColor}`,
-                  borderRadius: isLincoln ? 0 : 2,
-                  overflow: 'hidden',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  bgcolor: isLincoln ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.6)',
-                  animation: `pieceAppear 0.4s ease-out ${idx * 120}ms both`,
-                  '@keyframes pieceAppear': {
-                    from: { transform: 'scale(0)', opacity: 0 },
-                    to: { transform: 'scale(1)', opacity: 1 },
-                  },
-                }}
-              >
-                {url ? (
-                  <Box
-                    component="img"
-                    src={url}
-                    alt={pieceDef.name}
-                    sx={{ width: '90%', height: '90%', objectFit: 'contain', imageRendering: isLincoln ? 'pixelated' : 'auto' }}
-                  />
-                ) : (
-                  <Typography sx={{ fontSize: '1.5rem' }}>⏳</Typography>
-                )}
-              </Box>
-            )
-          })}
-        </Box>
-
-        {readyCount < ARMOR_PIECES.length && (
-          <Box sx={{ width: '100%', maxWidth: 280 }}>
+        {/* Milestone bonus */}
+        {bonus > 0 && (
+          <Box
+            sx={{
+              mt: 0.5,
+              px: 3,
+              py: 1.5,
+              borderRadius: isLincoln ? '6px' : '16px',
+              background: isLincoln
+                ? 'linear-gradient(135deg, rgba(0,188,212,0.15) 0%, rgba(0,188,212,0.05) 100%)'
+                : 'linear-gradient(135deg, rgba(156,39,176,0.12) 0%, rgba(156,39,176,0.04) 100%)',
+              border: `1.5px solid ${isLincoln ? 'rgba(0,188,212,0.3)' : 'rgba(156,39,176,0.25)'}`,
+              animation: 'bonusAppear 0.6s ease-out 0.8s both',
+              '@keyframes bonusAppear': {
+                from: { transform: 'scale(0.8)', opacity: 0 },
+                to: { transform: 'scale(1)', opacity: 1 },
+              },
+            }}
+          >
             <Typography
               sx={{
                 fontFamily: titleFont,
-                fontSize: isLincoln ? '12px' : '0.7rem',
-                color: isLincoln ? '#aaa' : '#888',
+                fontSize: isLincoln ? '14px' : '1.1rem',
+                fontWeight: 700,
+                color: isLincoln ? '#00BCD4' : '#9C27B0',
                 textAlign: 'center',
-                mb: 0.5,
               }}
             >
-              Forging {toLabel.toLowerCase()} armor... ({readyCount}/{ARMOR_PIECES.length})
+              +{bonus} {'\u25C6'} Milestone Bonus
             </Typography>
-            <LinearProgress
-              variant="determinate"
-              value={(readyCount / ARMOR_PIECES.length) * 100}
-              sx={{
-                height: 8,
-                borderRadius: isLincoln ? 0 : 4,
-                bgcolor: isLincoln ? '#333' : '#eee',
-                '& .MuiLinearProgress-bar': {
-                  bgcolor: accentColor,
-                  borderRadius: isLincoln ? 0 : 4,
-                },
-              }}
-            />
           </Box>
         )}
 
+        {/* Next tier teaser */}
         <Typography
           sx={{
-            fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-            fontSize: isLincoln ? '12px' : '0.7rem',
-            color: isLincoln ? '#555' : '#aaa',
+            mt: 1,
+            fontFamily: titleFont,
+            fontSize: isLincoln ? '13px' : '1rem',
+            fontWeight: 700,
+            color: isLincoln ? '#FFD700' : '#E65100',
+            textAlign: 'center',
+            animation: 'nextTierSlide 0.5s ease-out 1.2s both',
+            '@keyframes nextTierSlide': {
+              from: { transform: 'translateY(10px)', opacity: 0 },
+              to: { transform: 'translateY(0)', opacity: 1 },
+            },
           }}
         >
-          tap to continue
+          {toLabel} tier now available.
         </Typography>
+
+        {/* Continue button */}
+        <Box
+          sx={{
+            mt: 1.5,
+            px: 4,
+            py: 1.5,
+            borderRadius: isLincoln ? '6px' : '22px',
+            border: `2px solid ${accentColor}44`,
+            background: isLincoln
+              ? 'rgba(126,252,32,0.08)'
+              : 'rgba(232,160,191,0.08)',
+            animation: 'continueAppear 0.4s ease-out 1.6s both',
+            '@keyframes continueAppear': {
+              from: { opacity: 0 },
+              to: { opacity: 1 },
+            },
+          }}
+        >
+          <Typography
+            sx={{
+              fontFamily: titleFont,
+              fontSize: isLincoln ? '11px' : '0.85rem',
+              color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)',
+              textAlign: 'center',
+            }}
+          >
+            Continue {'\u2192'}
+          </Typography>
+        </Box>
       </Box>
     </Box>
   )

@@ -58,6 +58,7 @@ import XpDiamondBar from '../../components/XpDiamondBar'
 import PortalTransition from './PortalTransition'
 import { getNextTierKey } from './tierBiomes'
 import ArmorPieceGallery from './ArmorPieceGallery'
+import TierRevealBanner from './TierRevealBanner'
 import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
@@ -68,7 +69,7 @@ import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
-import { getDailyArmorStatusFromSession, getAllForgedSlots } from './armorStatus'
+import { getDailyArmorStatusFromSession, getBestOfSlotForgedPieces } from './armorStatus'
 import { getWeekRange } from '../../core/utils/time'
 import { dayLogDocId } from '../today/daylog.model'
 import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
@@ -119,9 +120,10 @@ function getNextForgeAction(profile: AvatarProfile): {
   const forgedInTier = getForgedPiecesForTier(profile, activeTier)
   const forgedSet = new Set(forgedInTier)
 
-  // Find next unforged piece in active tier that's XP-visible
+  // Find next unforged piece in active tier that's XP-visible.
+  // Per-piece XP thresholds only apply in Wood tier. Higher tiers unlock all 6 pieces.
   const nextPiece = VOXEL_ARMOR_PIECES.find(
-    (p) => !forgedSet.has(p.id) && profile.totalXp >= XP_THRESHOLDS[p.id],
+    (p) => !forgedSet.has(p.id) && (activeTier !== 'wood' || profile.totalXp >= XP_THRESHOLDS[p.id]),
   )
   if (!nextPiece) return null
 
@@ -630,12 +632,15 @@ export default function MyAvatarPage() {
   const handleForgePiece = useCallback(
     async (voxelPieceId: VoxelArmorPieceId, verseResponse?: string, verseResponseAudio?: string): Promise<boolean> => {
       if (!profile || !familyId || !childId) return false
-      if (profile.totalXp < XP_THRESHOLDS[voxelPieceId]) {
+
+      const activeTier = getActiveForgeTier(profile)
+
+      // Per-piece XP thresholds only apply in Wood tier (staggered unlock).
+      // Higher tiers use tier-level gates — once a tier is unlocked, all 6 pieces are forgeable.
+      if (activeTier === 'wood' && profile.totalXp < XP_THRESHOLDS[voxelPieceId]) {
         console.warn(`[Forge] XP locked: ${voxelPieceId}`)
         return false
       }
-
-      const activeTier = getActiveForgeTier(profile)
       const appliedTodayVoxel = getAppliedVoxelPieces(session?.appliedPieces ?? [])
       const pieceState = getArmorPieceState({
         profile,
@@ -830,8 +835,9 @@ export default function MyAvatarPage() {
   // ── Suit Up! — equip all forged pieces with staggered animation ──
   const suitUpAll = useCallback(async () => {
     if (!profile || !session || !familyId || !childId) return
-    // Use getAllForgedSlots for visual equip (cross-tier — equips all forged pieces on 3D model)
-    const allSlots = getAllForgedSlots(profile)
+    // Use getBestOfSlotForgedPieces to equip the highest-tier version of each slot
+    const bestOfSlot = getBestOfSlotForgedPieces(profile)
+    const allSlots = bestOfSlot.map((b) => b.pieceId)
     const currentVoxel = getAppliedVoxelPieces(session.appliedPieces ?? [])
     // Canonical equip order: belt → breastplate → shoes → shield → helmet → sword
     const equipOrder: VoxelArmorPieceId[] = ['belt', 'breastplate', 'shoes', 'shield', 'helmet', 'sword']
@@ -968,6 +974,16 @@ export default function MyAvatarPage() {
   const currentTierName = profile ? calculateTier(profile.totalXp) : 'WOOD'
   const forgedCount = armorStatus?.gateTotal ?? 0
   const nextForgeAction = profile ? getNextForgeAction(profile) : null
+
+  // Show tier reveal banner when active tier just unlocked and no pieces forged in it yet
+  const activeForgeTierComputed = profile ? getActiveForgeTier(profile) : 'wood'
+  const showTierRevealBanner = (() => {
+    if (!profile || activeForgeTierComputed === 'wood') return false
+    const unlockedTiers = deriveUnlockedTiersFromForged(profile)
+    if (!unlockedTiers.includes(activeForgeTierComputed as ArmorTier)) return false
+    const forgedInActive = getForgedPiecesForTier(profile, activeForgeTierComputed)
+    return forgedInActive.length === 0
+  })()
 
   const nextRecommendedAction: NextRecommendedAction = (() => {
     // All gate-required pieces equipped → ready to go
@@ -1428,6 +1444,11 @@ export default function MyAvatarPage() {
           onStartDay={() => navigate('/today')}
         />
 
+        {/* ── New tier reveal banner ─────────────────────────── */}
+        {showTierRevealBanner && (
+          <TierRevealBanner tierName={activeForgeTierComputed} isLincoln={isLincoln} />
+        )}
+
         {/* ── Armor Piece Cards (horizontal scroll) ────────────── */}
         <SectionErrorBoundary section="armor gallery">
           <ArmorPieceGallery
@@ -1435,6 +1456,7 @@ export default function MyAvatarPage() {
             appliedPieces={appliedPieces}
             selectedPiece={selectedPiece}
             activeForgeTier={getActiveForgeTier(profile)}
+            unlockedTiers={deriveUnlockedTiersFromForged(profile)}
             isLincoln={isLincoln}
             accentColor={accentColor}
             textColor={textColor}
