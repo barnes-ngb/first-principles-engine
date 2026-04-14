@@ -6,7 +6,7 @@
  * disagreements between components.
  */
 import { describe, it, expect } from 'vitest'
-import { getDailyArmorStatus, getAllForgedSlots } from '../armorStatus'
+import { getDailyArmorStatus, getAllForgedSlots, getBestOfSlotForgedPieces } from '../armorStatus'
 import type { AvatarProfile, ArmorPiece } from '../../../core/types'
 
 const forgedEntry = { forgedAt: new Date().toISOString() }
@@ -239,5 +239,70 @@ describe('getDailyArmorStatus — single source of truth', () => {
       expect(status.isSuitedUp).toBe(true)
       expect(status.equippedCount).toBe(1)
     })
+  })
+})
+
+describe('getBestOfSlotForgedPieces', () => {
+  it('returns highest tier per slot when multiple tiers forged', () => {
+    const profile = makeProfile({
+      totalXp: 975,
+      forgedPieces: {
+        wood: {
+          belt: forgedEntry,
+          breastplate: forgedEntry,
+          shoes: forgedEntry,
+          shield: forgedEntry,
+          helmet: forgedEntry,
+          sword: forgedEntry,
+        },
+        stone: {
+          belt: forgedEntry,
+          breastplate: forgedEntry,
+          shoes: forgedEntry,
+          shield: forgedEntry,
+          helmet: forgedEntry,
+          // sword NOT forged in stone
+        },
+      },
+    })
+    const best = getBestOfSlotForgedPieces(profile)
+    // 5 pieces at stone tier + sword at wood tier = 6 total
+    expect(best).toHaveLength(6)
+
+    const beltEntry = best.find((b) => b.pieceId === 'belt')
+    expect(beltEntry?.tier).toBe('stone')
+
+    const swordEntry = best.find((b) => b.pieceId === 'sword')
+    expect(swordEntry?.tier).toBe('wood')
+  })
+
+  it('returns wood pieces when only wood is forged', () => {
+    const profile = makeProfile({
+      totalXp: 100,
+      forgedPieces: {
+        wood: { belt: forgedEntry, shoes: forgedEntry },
+      },
+    })
+    const best = getBestOfSlotForgedPieces(profile)
+    expect(best).toHaveLength(2)
+    expect(best.every((b) => b.tier === 'wood')).toBe(true)
+  })
+
+  it('returns iron as highest when all three tiers are forged', () => {
+    const profile = makeProfile({
+      totalXp: 500,
+      forgedPieces: {
+        wood: { belt: forgedEntry, breastplate: forgedEntry, shoes: forgedEntry, shield: forgedEntry, helmet: forgedEntry, sword: forgedEntry },
+        stone: { belt: forgedEntry, breastplate: forgedEntry, shoes: forgedEntry, shield: forgedEntry, helmet: forgedEntry, sword: forgedEntry },
+        iron: { belt: forgedEntry },
+      },
+    })
+    const best = getBestOfSlotForgedPieces(profile)
+    const beltEntry = best.find((b) => b.pieceId === 'belt')
+    expect(beltEntry?.tier).toBe('iron')
+
+    // Other pieces still at stone
+    const shieldEntry = best.find((b) => b.pieceId === 'shield')
+    expect(shieldEntry?.tier).toBe('stone')
   })
 })

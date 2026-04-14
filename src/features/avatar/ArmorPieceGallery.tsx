@@ -1,21 +1,38 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
-import type { ArmorPiece, AvatarProfile } from '../../core/types'
+import type { ArmorPiece, ArmorTier, AvatarProfile } from '../../core/types'
 import { VOXEL_TO_ARMOR_PIECE } from '../../core/types'
 import { getForgeCost } from '../../core/xp/forgeCosts'
 import { ArmorIcon } from './icons/ArmorIcons'
 import type { ArmorTierColor } from './icons/ArmorIcons'
-import { getAppliedVoxelPieces, getArmorPieceState, getPieceLockReason } from './armorPieceState'
+import { getAppliedVoxelPieces, getArmorPieceState, getForgedPiecesForTier, getPieceLockReason } from './armorPieceState'
+import { MINECRAFT_TIER_ORDER } from './armorTierProgress'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
+
+/** Find the highest tier below `activeTier` where this piece has been forged. */
+function getPriorForgedTier(
+  profile: AvatarProfile,
+  pieceId: string,
+  activeTier: string,
+): string | null {
+  const activeIdx = MINECRAFT_TIER_ORDER.indexOf(activeTier as typeof MINECRAFT_TIER_ORDER[number])
+  if (activeIdx <= 0) return null
+  for (let i = activeIdx - 1; i >= 0; i--) {
+    const tier = MINECRAFT_TIER_ORDER[i]
+    if (profile.forgedPieces?.[tier]?.[pieceId]) return tier
+  }
+  return null
+}
 
 interface ArmorPieceGalleryProps {
   profile: AvatarProfile
   appliedPieces: ArmorPiece[]
   selectedPiece: ArmorPieceMeta | null
   activeForgeTier: string
+  unlockedTiers: ArmorTier[]
   isLincoln: boolean
   accentColor: string
   textColor: string
@@ -28,6 +45,7 @@ export default function ArmorPieceGallery({
   appliedPieces,
   selectedPiece,
   activeForgeTier,
+  unlockedTiers,
   isLincoln,
   accentColor,
   textColor,
@@ -35,13 +53,70 @@ export default function ArmorPieceGallery({
   onPieceTap,
 }: ArmorPieceGalleryProps) {
   const cardScrollRef = useRef<HTMLDivElement>(null)
+  const [viewingTier, setViewingTier] = useState<string | null>(null)
+
+  // If viewing a different tier than active, use that for display.
+  // Reset to null (active) if the viewed tier becomes invalid.
+  const displayTier = viewingTier && unlockedTiers.includes(viewingTier as ArmorTier)
+    ? viewingTier
+    : activeForgeTier
+  const showTierSelector = unlockedTiers.length > 1
 
   const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
-  const tierLockReason = getPieceLockReason(profile, activeForgeTier)
+  const tierLockReason = getPieceLockReason(profile, displayTier)
   const isTierLocked = tierLockReason !== ''
 
   return (
     <Box sx={{ position: 'relative' }}>
+      {/* ── Tier selector tabs ─────────────────────────────────── */}
+      {showTierSelector && (
+        <Box
+          sx={{
+            display: 'flex',
+            gap: '8px',
+            px: 2,
+            mb: 1,
+            overflowX: 'auto',
+            scrollbarWidth: 'none',
+            '&::-webkit-scrollbar': { display: 'none' },
+          }}
+        >
+          {unlockedTiers.map((tier) => {
+            const isActive = tier === displayTier
+            const forgedInTier = getForgedPiecesForTier(profile, tier).length
+            const capLabel = tier.charAt(0).toUpperCase() + tier.slice(1)
+            const isNewTier = tier === activeForgeTier && forgedInTier === 0 && tier !== 'wood'
+
+            return (
+              <Box
+                key={tier}
+                component="button"
+                onClick={() => setViewingTier(tier === activeForgeTier ? null : tier)}
+                sx={{
+                  px: 1.5,
+                  py: 0.75,
+                  borderRadius: isLincoln ? '4px' : '12px',
+                  border: `1.5px solid ${isActive ? accentColor : (isLincoln ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)')}`,
+                  background: isActive
+                    ? (isLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
+                    : 'transparent',
+                  color: isActive ? accentColor : (isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)'),
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                  fontSize: isLincoln ? '10px' : '13px',
+                  fontWeight: isActive ? 700 : 500,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                {capLabel}{isNewTier ? ' \u2728' : forgedInTier === 6 ? ' \u2713' : ''}
+              </Box>
+            )
+          })}
+        </Box>
+      )}
+
       {/* Tier lock banner — shows when the displayed tier isn't unlocked yet */}
       {isTierLocked && (
         <Box
@@ -71,7 +146,7 @@ export default function ArmorPieceGallery({
               color: isLincoln ? '#FFA726' : '#E65100',
               lineHeight: 1.3,
             }}>
-              {activeForgeTier.charAt(0).toUpperCase() + activeForgeTier.slice(1)} Tier Locked
+              {displayTier.charAt(0).toUpperCase() + displayTier.slice(1)} Tier Locked
             </Typography>
             <Typography sx={{
               fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
@@ -105,20 +180,26 @@ export default function ArmorPieceGallery({
         const pieceState = getArmorPieceState({
           profile,
           pieceId: piece.id,
-          activeForgeTier,
+          activeForgeTier: displayTier,
           appliedTodayVoxel: appliedVoxel,
         })
         const isApplied = pieceState === 'equipped_today'
         const isLocked = pieceState === 'locked_by_xp' || pieceState === 'locked_by_tier'
         const isSelected = selectedPiece?.id === piece.id
-        const forgeCost = getForgeCost(activeForgeTier, piece.id)
+        const forgeCost = getForgeCost(displayTier, piece.id)
+
+        // Check if this piece exists at a lower tier (upgrade indicator)
+        const priorTier = pieceState === 'forgeable'
+          ? getPriorForgedTier(profile, piece.id, displayTier)
+          : null
+        const isUpgrade = priorTier !== null
 
         const statusLabel = pieceState === 'locked_by_tier'
           ? tierLockReason || 'Locked'
           : pieceState === 'locked_by_xp'
             ? `Need ${XP_THRESHOLDS[piece.id]} XP`
             : pieceState === 'forgeable'
-              ? `\u25C6 ${forgeCost} Forge`
+              ? `\u25C6 ${forgeCost} ${isUpgrade ? 'Upgrade' : 'Forge'}`
               : pieceState === 'forged_not_equipped_today'
                 ? 'Equip'
                 : 'Equipped'
@@ -126,7 +207,7 @@ export default function ArmorPieceGallery({
         const statusColor = isLocked
           ? (isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.5)')
           : pieceState === 'forgeable'
-            ? '#00BCD4'
+            ? (isUpgrade ? '#FF9800' : '#00BCD4')
             : pieceState === 'forged_not_equipped_today'
               ? '#FFA726'
               : '#4caf50'
@@ -242,6 +323,28 @@ export default function ArmorPieceGallery({
                 </Box>
               )}
 
+              {/* Upgrade badge */}
+              {isUpgrade && (
+                <Box sx={{
+                  position: 'absolute', top: -4, right: -4,
+                  px: 0.6, py: 0.2,
+                  borderRadius: isLincoln ? '3px' : '8px',
+                  bgcolor: '#FF9800',
+                  border: `1.5px solid ${bgColor}`,
+                  boxShadow: '0 1px 4px rgba(255,152,0,0.3)',
+                }}>
+                  <Typography sx={{
+                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                    fontSize: isLincoln ? '7px' : '9px',
+                    fontWeight: 700,
+                    color: '#fff',
+                    lineHeight: 1,
+                  }}>
+                    {'\u2B06'}
+                  </Typography>
+                </Box>
+              )}
+
             </Box>
 
             <Typography
@@ -255,6 +358,21 @@ export default function ArmorPieceGallery({
             >
               {piece.shortName}
             </Typography>
+
+            {/* Current tier indicator for upgrades */}
+            {isUpgrade && priorTier && (
+              <Typography
+                sx={{
+                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
+                  fontSize: isLincoln ? '8px' : '10px',
+                  color: isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)',
+                  lineHeight: 1,
+                  mt: '-4px',
+                }}
+              >
+                Current: {priorTier.charAt(0).toUpperCase() + priorTier.slice(1)}
+              </Typography>
+            )}
 
             <Typography
               sx={{
