@@ -424,3 +424,172 @@ There is also a separate **"Update workbook position to Lesson N"** button at `S
 | "Skip to lesson N" | `detectedLesson + 1` | Yes (`>` guard in `syncScanToConfig`) | `ScanResultsPanel.tsx:201,228` → `useScanToActivityConfig.ts:62` |
 | "Update workbook position" | `detectedLesson` | Via `syncScanToConfig`: Yes. Via `updateActivityPosition`: No. | `ScanResultsPanel.tsx:255` → `useScanToActivityConfig.ts:62` or `updateActivityPosition.ts:39` |
 | Auto-sync on scan capture | `detectedLesson` | Yes (`>` guard) | `useUnifiedCapture.ts:90` → `useScanToActivityConfig.ts:62` |
+
+---
+
+## Checklist State
+
+### ChecklistItem type definition (full)
+
+**File:** `src/core/types/planning.ts:262-324`
+
+```ts
+export interface ChecklistItem {
+  id?: string
+  label: string
+  completed: boolean
+  /** Planned duration in minutes for this item. */
+  plannedMinutes?: number
+  /** Subject bucket for color-coding. */
+  subjectBucket?: SubjectBucket
+  /** Skill tags for engine/ladder alignment */
+  skillTags?: SkillTag[]
+  /** Optional ladder rung reference */
+  ladderRef?: { ladderId: string; rungId: string }
+  /** When true, this item is part of the Minimum Viable Day (MVD) set. */
+  mvdEssential?: boolean
+  /** Source of this item: 'planner' for AI/planner-generated, 'manual' for user-added. */
+  source?: 'planner' | 'manual'
+  /** Category for kid-facing view: must-do, choose, or routine. */
+  category?: 'must-do' | 'choose' | 'routine'
+  /** Estimated duration in minutes (kid-facing display). */
+  estimatedMinutes?: number
+  /** Linked lesson card document ID (auto-generated on plan apply). */
+  lessonCardId?: string
+  /** Linked book ID (for "Make a Book" plan items). */
+  bookId?: string
+  /** Engagement feedback: how the activity went */
+  engagement?: 'engaged' | 'okay' | 'struggled' | 'refused'
+  /** Linked evidence document ID (from unified capture — may point to scans or artifacts). */
+  evidenceArtifactId?: string
+  /** Which Firestore collection the evidence doc lives in. Absent on legacy items means 'artifacts'. */
+  evidenceCollection?: 'scans' | 'artifacts'
+  /** Manual or AI-generated review result for the captured work. */
+  gradeResult?: string
+  /** Mastery level observed by parent after completion */
+  mastery?: 'got-it' | 'working' | 'stuck'
+  /** Guidance note when an item is skipped. */
+  skipGuidance?: string
+  /** Whether this item was explicitly skipped by the child. */
+  skipped?: boolean
+  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), or activity. */
+  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity'
+  /** Evaluation mode when itemType is 'evaluation'. */
+  evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
+  /** Route to navigate to (e.g., '/quest') for in-app activities. */
+  link?: string
+  /** Actual minutes spent (set on auto-complete from quest/fluency). */
+  actualMinutes?: number
+  /** ISO timestamp when item was completed. */
+  completedAt?: string
+  /** Brief content guide for workbook items (what to cover today). */
+  contentGuide?: string
+  /** Whether this workbook item has been scanned after completion. */
+  scanned?: boolean
+  /** Which schedule block this item belongs to */
+  block?: ScheduleBlock
+  /** Activity ID this runs simultaneously with */
+  pairedWith?: string
+  /** Group ID for "pick your order" items */
+  choiceGroup?: string
+  /** Can be dropped on light days */
+  droppableOnLightDay?: boolean
+  /** Building toward this — don't nag if unchecked */
+  aspirational?: boolean
+}
+```
+
+Total: 28 optional fields + 2 required fields (`label: string`, `completed: boolean`).
+
+---
+
+### All possible states a checklist item can be in
+
+A ChecklistItem has **three mutually exclusive outcome states**, determined by two boolean fields:
+
+| State | `completed` | `skipped` | Visual treatment |
+|---|---|---|---|
+| **Not done** | `false` | `false` / absent | Normal: unchecked checkbox, full opacity |
+| **Completed** | `true` | `false` / absent | Checked checkbox, line-through text, `bgcolor: 'success.50'` |
+| **Skipped** | `false` | `true` | Line-through text, `opacity: 0.4`, label suffix "— skipped" |
+
+There is no `'in-progress'`, `'deferred'`, or `'partial'` state. The item is either not done, completed, or skipped.
+
+**Note:** `completed` and `skipped` are not enforced to be mutually exclusive by the type system (both are writable independently). In practice, `skipped` is only ever set to `true` — it is never toggled back to `false`. And `completed` is toggled via checkbox clicks. No code sets both `completed: true` and `skipped: true` simultaneously.
+
+#### Where each state is set
+
+| State | Where set | File : Lines |
+|---|---|---|
+| Completed (toggle) | `handleToggleItem` | `src/features/today/KidChecklist.tsx:74-98` — toggles `completed` on the item |
+| Completed (toggle) | `handleToggleItem` | `src/features/today/TodayChecklist.tsx:296-348` — toggles `completed`, sets `completedAt` on check |
+| Skipped | `handleSkipItem` | `src/features/today/KidChecklist.tsx:100-108` — sets `skipped: true` |
+
+#### Where each state is read
+
+| Consumer | File : Lines | Logic |
+|---|---|---|
+| Must-do remaining count | `src/features/today/KidTodayView.tsx:427` | `mustDo.filter((item) => !item.completed && !item.skipped).length` |
+| Must-do completed count | `src/features/today/KidTodayView.tsx:430` | `mustDo.filter((i) => i.completed).length` |
+| Must-do skipped count | `src/features/today/KidTodayView.tsx:431` | `mustDo.filter((i) => i.skipped).length` |
+| Must-do all done | `src/features/today/KidTodayView.tsx:426` | `mustDo.every((item) => item.completed)` — skipped items do NOT count as done |
+| Gate unlock | `src/features/today/KidTodayView.tsx:433` | `mustDoCompleted >= gateThreshold` — only `completed` items count, not `skipped` |
+| Skipped item rendering | `src/features/today/KidChecklist.tsx:134-141` | Renders dimmed, struck-through, with "— skipped" suffix |
+| Shelly context assembly | `functions/src/ai/tasks/shellyChat.ts:178` | Counts skipped activities by label for engagement context |
+
+---
+
+### Is there a concept of "skipped" today on checklist items?
+
+**Yes.** The `skipped?: boolean` field exists at `src/core/types/planning.ts:299`. It is:
+
+- **Set** by `handleSkipItem` in `KidChecklist.tsx:100-108` — the kid-facing view has a skip affordance.
+- **Rendered** as a dimmed, struck-through row with "— skipped" label in `KidChecklist.tsx:134-141`.
+- **Counted** separately from completed: `mustDoSkipped` at `KidTodayView.tsx:431`.
+- **Excluded** from "remaining" count: items that are `skipped` are not counted in `mustDoRemaining` (`KidTodayView.tsx:427`).
+- **Does NOT unlock the gate**: only `completed` items count toward `gateThreshold` (`KidTodayView.tsx:433`).
+- **Consumed by AI**: `shellyChat.ts:178` tallies skipped activities by label to give Shelly engagement context.
+
+Separately, `skipGuidance?: string` (line 297) is a different concept — it is AI-generated advice about *whether* to skip or modify a workbook item, set during plan generation or scan analysis. It is display-only text and does not affect the `skipped` boolean.
+
+---
+
+### Does anything track "why" an item is in its current state?
+
+**Partially — for completed items only.** There is no `reason` or `note` field on ChecklistItem explaining why it was completed, not completed, or skipped. However, three post-completion annotation fields exist:
+
+| Field | Type | Set where | Purpose |
+|---|---|---|---|
+| `engagement` | `'engaged' \| 'okay' \| 'struggled' \| 'refused'` | Parent taps emoji row after completion — `TodayChecklist.tsx:686-706` | Records *how* the activity went, not *why* it was completed |
+| `mastery` | `'got-it' \| 'working' \| 'stuck'` | Parent or kid selects after completion — `TodayChecklist.tsx:726-750`, `KidChecklist.tsx:118-124` | Records observed mastery level |
+| `completedAt` | ISO timestamp string | Set on completion toggle — `TodayChecklist.tsx:310` | Records *when*, not *why* |
+
+**For skipped items:** There is **no "why skipped" field**. The `skipGuidance` field is AI-generated *before* the skip happens (it's planning advice, not a skip reason). When a child skips an item via `handleSkipItem`, only `skipped: true` is recorded — no reason, no timestamp, no annotation.
+
+**For not-completed items:** Nothing tracks why an item remained unchecked. The `aspirational` flag (`line 323`) signals "don't nag if unchecked" but is set at plan time, not as a post-hoc explanation.
+
+---
+
+### Confirming: ChecklistItem has NO structured reference to ActivityConfig
+
+**Confirmed.** The `ChecklistItem` interface (`src/core/types/planning.ts:262-324`) contains **zero fields** that reference an `ActivityConfig` document by ID. Specifically:
+
+- No `activityConfigId` field
+- No `activityId` field
+- No `configId` field
+- No `curriculum` field
+- No `lessonNumber` field
+
+A grep for `activityConfig|activityId|configId` in `src/core/types/planning.ts` returns **no matches** within the `ChecklistItem` interface.
+
+#### Fields that *could* be used for a soft link
+
+| Field | Reliability as link | Why |
+|---|---|---|
+| `label` (line 264) | **Low** — fuzzy, AI-generated text | The AI planner generates labels like "Good and the Beautiful Math Level 2" that textually overlap with `ActivityConfig.name`. The scan pipeline uses fuzzy name matching (`useScanToActivityConfig.ts:177-227`), but this is not a stable identifier. |
+| `subjectBucket` (line 269) | **Low** — many-to-many | Multiple checklist items can share a subject bucket, and multiple `ActivityConfig` docs can have the same `subjectBucket`. Not unique in either direction. |
+| `itemType: 'workbook'` (line 301) | **None** — boolean signal only | Indicates the item came from a workbook config but does not identify *which* one. |
+| `block` (line 315) | **None** — shared grouping | Maps to `ScheduleBlock`, which is shared across items. Not specific to a config. |
+| `contentGuide` (line 311) | **None** — free text | AI-generated guidance that may reference a lesson number, but is unstructured prose. |
+
+**Bottom line:** There is no reliable way to link a `ChecklistItem` back to its originating `ActivityConfig` using existing fields. The only connection paths are fuzzy label matching and subject bucket convention, both of which are fragile and non-unique.
