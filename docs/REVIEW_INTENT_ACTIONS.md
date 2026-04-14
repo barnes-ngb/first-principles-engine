@@ -21,10 +21,10 @@ Ordered by priority. Effort: S (< 1 day), M (1-3 days), L (3-5 days).
 **Effort:** S
 **What:** Add an edit button to the disposition narrative card in `DispositionProfile.tsx`. On tap, open a modal with pre-filled AI text that Shelly can revise before saving. Store edited text alongside the AI-generated version so regeneration doesn't clobber edits. File: `src/features/progress/DispositionProfile.tsx`.
 
-### 4. Remove score display from Quest kid UI
+### 4. ✅ DONE — Remove score display from Quest kid UI (2026-04-14)
 **Principle:** #2 (No grades/scores/rankings on kid UI)
 **Effort:** S
-**What:** In `ReadingQuest.tsx`, remove or restyle the `X/30` question counter and `totalCorrect` running tally. Replace with progress metaphor (e.g., mine depth indicator, pickaxe progress bar). In `QuestSummary.tsx`, replace `totalCorrect / totalQuestions` with narrative celebration ("You explored deep into the mine!") and keep diamond count only. Files: `src/features/quest/ReadingQuest.tsx:564,656`, `QuestSummary.tsx:132-142`.
+**What:** Removed `X/10` question counter, running `totalCorrect` tally, `totalQuestions` on summary, `X/5` fluency ratio, and `X/Y correct` on resume card. Progress bar remains for session pacing. Diamond counts kept as achievement framing. Files changed: `ReadingQuest.tsx`, `KnowledgeMinePage.tsx`, `QuestSummary.tsx`, `FluencyPractice.tsx`.
 
 ---
 
@@ -73,7 +73,7 @@ Ordered by priority. Effort: S (< 1 day), M (1-3 days), L (3-5 days).
 | 1 | Bulk skip + parent override | #9 No busywork | M | Violated |
 | 2 | Week-level workbook pause | #9 No busywork | M | Violated |
 | 3 | Editable disposition narrative | #5 AI suggests | S | Violated |
-| 4 | Remove quest scores from kid UI | #2 No grades | S | Violated |
+| 4 | ✅ Remove quest scores from kid UI | #2 No grades | S | Done |
 | 5 | Subject-level skip | #9 No busywork | M | Gap |
 | 6 | Print records/compliance | #11 Print the stack | M | Gap |
 | 7 | Portfolio PDF export | #11 Print the stack | S | Gap |
