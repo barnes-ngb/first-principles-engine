@@ -105,7 +105,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/progress/DispositionProfile.tsx` — AI disposition narrative from day log data, with per-disposition parent overrides (inline edit, revert to AI)
 - `src/features/quest/` — Knowledge Mine (interactive reading quest)
 - `src/features/records/` — Hours, compliance, evaluations, portfolio
-- `src/features/settings/` — AI usage, account, avatar admin, sticker library
+- `src/features/settings/` — AI usage, account, avatar admin, sticker library, Dev tab (admin-only: chapter book seeding, Sunday cleanup, working levels backfill)
 - `src/features/shelly-chat/` — Shelly AI chat assistant (ShellyChatPage, ChatThreadDrawer, ChatMessageBubble, openChatWithContext, formatRelativeTime)
 - `src/components/ScanButton.tsx` — Camera capture for curriculum photo scanning
 - `src/components/ScanResultsPanel.tsx` — AI scan results display

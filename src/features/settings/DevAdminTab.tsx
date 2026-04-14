@@ -27,6 +27,8 @@ import {
   updateDoc,
 } from 'firebase/firestore'
 
+import type { BackfillResult } from './backfillWorkingLevels'
+import { backfillWorkingLevels } from './backfillWorkingLevels'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
@@ -386,6 +388,34 @@ export default function DevAdminTab() {
     }
   }
 
+  // ── Section E: Working Levels Backfill ────────────────────────
+  const [backfillRunning, setBackfillRunning] = useState(false)
+  const [backfillResults, setBackfillResults] = useState<BackfillResult[] | null>(null)
+  const [backfillStatus, setBackfillStatus] = useState<StatusMsg | null>(null)
+
+  const handleBackfill = async () => {
+    setBackfillRunning(true)
+    setBackfillStatus(null)
+    setBackfillResults(null)
+    try {
+      const results = await backfillWorkingLevels(familyId)
+      setBackfillResults(results)
+      const totalWritten = results.reduce((sum, r) => sum + r.modesWritten.length, 0)
+      const totalChildren = results.filter((r) => r.modesWritten.length > 0).length
+      setBackfillStatus({
+        severity: totalWritten > 0 ? 'success' : 'info',
+        text: totalWritten > 0
+          ? `Backfill complete. ${totalWritten} value(s) written across ${totalChildren} child(ren).`
+          : 'Backfill complete. No changes needed — all modes already set or no evidence available.',
+      })
+    } catch (err) {
+      console.error('Backfill failed', err)
+      setBackfillStatus({ severity: 'error', text: `Backfill failed: ${err}` })
+    } finally {
+      setBackfillRunning(false)
+    }
+  }
+
   const showGenButton = poolInfo?.loaded && weekInfo?.readAloudBookId &&
     (poolInfo.poolCount === 0 || poolInfo.poolCount < poolInfo.totalChapters)
 
@@ -611,6 +641,74 @@ export default function DevAdminTab() {
           <Typography variant="body2" color="text.secondary">
             No read-aloud book set for this week.
           </Typography>
+        )}
+      </Box>
+
+      <Divider />
+
+      {/* ── Section E: Working Levels Backfill ─────────────────── */}
+      <Box>
+        <Typography variant="h6" gutterBottom>
+          Working Levels Backfill
+        </Typography>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          One-time backfill of workingLevels from evaluation findings and quest
+          history. Only writes modes that are currently unset.
+        </Typography>
+        <Button
+          variant="contained"
+          onClick={() => void handleBackfill()}
+          disabled={backfillRunning}
+          sx={{ mt: 1, minHeight: 48 }}
+        >
+          {backfillRunning ? (
+            <CircularProgress size={20} />
+          ) : (
+            'Backfill from history'
+          )}
+        </Button>
+
+        {backfillStatus && (
+          <Alert severity={backfillStatus.severity} sx={{ mt: 1 }}>
+            {backfillStatus.text}
+          </Alert>
+        )}
+
+        {backfillResults && (
+          <Stack spacing={2} sx={{ mt: 2 }}>
+            {backfillResults.map((r) => (
+              <Box key={r.childId}>
+                <Typography variant="subtitle2">{r.childName}</Typography>
+                {r.modesWritten.length > 0 && (
+                  <Stack spacing={0.5} sx={{ ml: 2, mt: 0.5 }}>
+                    {r.modesWritten.map((m) => (
+                      <Typography
+                        key={m.mode}
+                        variant="body2"
+                        color="success.main"
+                      >
+                        {m.mode}: Level {m.level} (source: {m.source}) —{' '}
+                        {m.evidence}
+                      </Typography>
+                    ))}
+                  </Stack>
+                )}
+                {r.modesSkipped.length > 0 && (
+                  <Stack spacing={0.5} sx={{ ml: 2, mt: 0.5 }}>
+                    {r.modesSkipped.map((m) => (
+                      <Typography
+                        key={m.mode}
+                        variant="body2"
+                        color="text.secondary"
+                      >
+                        {m.mode}: skipped — {m.reason}
+                      </Typography>
+                    ))}
+                  </Stack>
+                )}
+              </Box>
+            ))}
+          </Stack>
         )}
       </Box>
     </Stack>

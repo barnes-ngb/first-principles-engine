@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
@@ -49,6 +50,7 @@ export default function KidConundrumResponse({
   const [conundrumAudioUrl, setConundrumAudioUrl] = useState<string | null>(null)
   const [conundrumAudioBlob, setConundrumAudioBlob] = useState<Blob | null>(null)
   const [savingConundrum, setSavingConundrum] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [conundrumSaved, setConundrumSaved] = useState(false)
   const conundrumRecorderRef = useRef<MediaRecorder | null>(null)
 
@@ -72,6 +74,7 @@ export default function KidConundrumResponse({
   }, [conundrum?.scenario, ttsSupported, speak])
 
   const startConundrumRecording = useCallback(async () => {
+    setSaveError(null)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream)
@@ -146,6 +149,7 @@ export default function KidConundrumResponse({
       setConundrumSaved(true)
     } catch (err) {
       console.error('Conundrum response save failed:', err)
+      setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
     setSavingConundrum(false)
   }, [conundrumAudioBlob, familyId, child.id, conundrum, selectedPick])
@@ -190,6 +194,7 @@ export default function KidConundrumResponse({
       setShowConundrumPhoto(false)
     } catch (err) {
       console.error('Conundrum photo save failed:', err)
+      setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
   }, [familyId, child.id, conundrum])
 
@@ -208,6 +213,14 @@ export default function KidConundrumResponse({
     return (
       <SectionCard title={`\u{1F5FA}\u{FE0F} ${conundrum.title}`}>
         <Stack spacing={2} sx={{ py: 1 }}>
+          {saveError && (
+            <Alert
+              severity="error"
+              onClose={() => setSaveError(null)}
+            >
+              {saveError}
+            </Alert>
+          )}
           {/* Scenario text */}
           {conundrum.scenario && (
             <Typography variant="body2" sx={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
@@ -310,6 +323,14 @@ export default function KidConundrumResponse({
   return (
     <SectionCard title={`\u{1F3A8} ${conundrum.title}`}>
       <Stack spacing={2} sx={{ py: 1 }}>
+        {saveError && (
+          <Alert
+            severity="error"
+            onClose={() => setSaveError(null)}
+          >
+            {saveError}
+          </Alert>
+        )}
         {/* Scenario text for London too */}
         {conundrum.scenario && (
           <Typography variant="body2" sx={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
