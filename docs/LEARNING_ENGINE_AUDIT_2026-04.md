@@ -536,3 +536,135 @@ if (stableCeiling !== null) {
 | G17 | `stableCeiling` not persisted | Low | The derived `newLevel` captures the effect, but debugging/analytics cannot see why a level was chosen. Reconstructable from stored `questions[]` if needed. |
 | G18 | AI prompt has no per-question history from prior session | Medium | AI may repeat the same question types/words. `wordMastery` slice partially mitigates for word-level data, but question format/style repetition is unchecked. |
 | G19 | Prior session's `workingLevels` not in AI prompt (server) | Medium | Restatement of G9+G12 in quest-start context: client uses `workingLevels.phonics` for `startLevel`, but the AI prompt's `STARTING LEVEL:` directive comes only from curriculum data, not from the prior quest's computed level. The two can disagree. |
+
+---
+
+## Journey 2 (Part C): Quest Visibility Downstream
+
+**Trace:** After Lincoln finishes a Knowledge Mine quest, where can Shelly see the results? For each downstream surface: does it reflect quest data, how, and what's missing?
+
+---
+
+### 1. Skill Snapshot — does it reflect quest-derived workingLevels?
+
+**Partially. Data is stored but not displayed.**
+
+The quest end flow writes `workingLevels` to the skill snapshot document (`src/features/quest/useQuestSession.ts:894-921`). The write path:
+
+1. `computeWorkingLevelFromSession()` returns a `WorkingLevel` with `source: 'quest'` (`src/features/quest/workingLevels.ts:85-140`).
+2. Merged into existing `workingLevels` map on the snapshot (`useQuestSession.ts:904-906`).
+3. Written via `setDoc(snapshotRef, ...)` (`useQuestSession.ts:921`).
+
+Quest findings also update `prioritySkills` on the same document (`useQuestSession.ts:863-887`): emerging/not-yet findings → `SkillLevel.Emerging`, mastered findings → `SkillLevel.Secure`.
+
+**However, the Skill Snapshot UI (`src/features/evaluation/SkillSnapshotPage.tsx`) does not render `workingLevels` anywhere.** A grep for `workingLevel` in that file returns zero matches. Shelly can see the updated `prioritySkills[].level` values (displayed in the skill table at line 357-368), but she cannot see:
+
+- The numeric working level (e.g., "Phonics Level 5")
+- The source (`'quest'` vs `'evaluation'` vs `'manual'`)
+- The evidence string (e.g., "Session ended at Level 5 with 7/10 correct")
+- When the level was last updated
+
+| Verdict | **Gap** — `workingLevels` stored but invisible in UI. Priority skills reflect quest findings (yes), but the numeric progression level that drives the next quest is hidden from Shelly. |
+|---|---|
+
+---
+
+### 2. Learning Profile (disposition narrative) — does it cite quest performance?
+
+**Weakly. Sees evaluation session findings text, but not structured quest data.**
+
+The disposition task context slices are `["charter", "childProfile", "engagement", "gradeResults"]` (`functions/src/ai/contextSlices.ts:56`). Notably absent: `recentEval`, `skillSnapshot`, `wordMastery`, `sightWords`.
+
+However, the disposition task handler (`functions/src/ai/tasks/disposition.ts:280-410`) runs its own data loaders beyond the shared context system. One of these is `loadRecentEvaluations()` (line 82-106), which:
+
+1. Queries `evaluationSessions` where `status == 'complete'`, `limit(3)` (line 87-93).
+2. Extracts `findings[].text` from each session (line 100-101).
+3. Injects into the AI user message as `RECENT EVALUATION SESSIONS:` (line 380-381).
+
+Since Knowledge Mine quest sessions are stored as `evaluationSessions` with `status: 'complete'`, they **do** appear here — but only as a flat text summary of findings (e.g., `"reading (2026-04-15): CVC blending secure; vowel teams emerging"`).
+
+**What the disposition AI does NOT see from quests:**
+
+| Missing | Why |
+|---|---|
+| Accuracy / score (e.g., 7/10) | `loadRecentEvaluations` extracts only `findings[].text`, not `totalCorrect` / `totalQuestions` |
+| Level progression (e.g., Level 3 → 5) | `workingLevels` not loaded; `finalLevel` not extracted |
+| Word mastery trends | `wordMastery` slice not in disposition context |
+| Session duration / engagement | Not extracted from session record |
+| Quest mode (phonics vs comprehension) | Domain included but mode is not |
+
+**Additionally:** The `childProfile` slice (included for disposition) formats `prioritySkills` as `- {label} ({tag}): {level}` (`contextSlices.ts:255-280`). This means the disposition AI sees skill levels that quest sessions updated — but without knowing they came from a quest.
+
+| Verdict | **Gap** — quest findings appear as flat text in 3-session window. No performance metrics, no level data, no quest-specific attribution. The disposition narrative cannot say "Lincoln jumped two levels in phonics this week" because it never sees the level numbers. |
+|---|---|
+
+---
+
+### 3. Records / Portfolio — does the session show up?
+
+**Hours: Yes. Evaluation History tab: Yes. Portfolio: No. Compliance exports: Partial.**
+
+#### 3a. Hours (compliance tracking)
+
+Quest sessions write hours entries to `families/{familyId}/hours` (`src/features/quest/useQuestSession.ts:798-806`) with `source: 'quest-session'`. These entries flow into the Records page hours aggregation at `src/features/records/records.logic.ts:72-82` with no source-based filtering — quest hours count toward compliance totals.
+
+**Gap:** Unlike `creative-timer` entries (which get a UI callout at `RecordsPage.tsx:677-681`), `quest-session` entries have no special display. They blend silently into totals. Shelly cannot filter or identify quest time in the hours view.
+
+#### 3b. Evaluation History tab
+
+The Records page renders `EvaluationHistoryTab` at tab index 1 (`src/features/records/RecordsPage.tsx:117`). This component queries `evaluationSessionsCollection` directly (`src/features/records/EvaluationHistoryTab.tsx:485`) and displays quest sessions with:
+
+- Session type badge (`⛏️ Phonics Quest` etc.) via `questModeLabel()` (line 50-52)
+- Question count, final level, score (line 117)
+- Per-question breakdown with correct/incorrect (line 215-228)
+- Struggling words extracted from missed questions (line 94-106)
+
+**This is the richest quest visibility surface for Shelly.** Full session detail including individual questions.
+
+#### 3c. Portfolio
+
+Portfolio queries only `artifactsCollection` (`src/features/records/PortfolioPage.tsx:144-159`). Quest sessions do not create artifacts. A grep for `evaluationSession`, `quest`, and `Knowledge Mine` in `PortfolioPage.tsx` returns zero matches.
+
+| Verdict | **No** — quest sessions are invisible in portfolio. |
+|---|---|
+
+#### 3d. Compliance exports
+
+The compliance pack (`records.logic.ts:409-419`) includes `hoursEntries` (which contain quest-session hours) but not `evaluationSessions`. The generated CSVs and HTML report include quest time in hour totals but contain no quest session detail.
+
+| Component | Quest visible? | File:Line |
+|---|---|---|
+| Hours totals | **Yes** (silent) | `useQuestSession.ts:798-806` → `records.logic.ts:72-82` |
+| Hours UI callout | **No** | `RecordsPage.tsx:677-681` (only `creative-timer` called out) |
+| Evaluation History tab | **Yes** (full detail) | `EvaluationHistoryTab.tsx:485, 50-52, 117` |
+| Portfolio page | **No** | `PortfolioPage.tsx:144-159` (artifacts only) |
+| Compliance CSV/HTML | **Partial** (hours only) | `records.logic.ts:164, 476` |
+
+---
+
+### 4. Progress page tabs — which surface quest data, which don't?
+
+The Progress page has 5 tabs (`src/features/progress/ProgressPage.tsx:39-43`):
+
+| Tab | Index | Component | Quest data? | Detail |
+|---|---|---|---|---|
+| Learning Profile | 0 | `DispositionProfile` | **Weak** | Sees evaluation findings text only (see §2 above). `DispositionProfile.tsx` has zero references to `evaluationSession`, `quest`, or `workingLevel`. |
+| Learning Map | 1 | `LearningMap` | **Yes** | `useSkillMap` hook reads `childSkillMaps` collection. Initialization backfills from all `evaluationSessions` via `initializeSkillMapFromHistory()` (`src/core/curriculum/updateSkillMapFromFindings.ts:102-129`, query at line 112-116). Quest end also calls `updateSkillMapFromFindings()` directly (`useQuestSession.ts:927-930`). Skill nodes reflect quest findings. |
+| Curriculum | 2 | `CurriculumTab` | **Indirect** | Does not query quest data directly. When a curriculum scan runs, it calls `updateSkillMapFromFindings()` (`CurriculumTab.tsx:253`) which feeds the Learning Map. No direct quest display. |
+| Skill Snapshot | 3 | `SkillSnapshotPage` | **Partial** | Priority skill levels reflect quest findings (updated at quest end). `workingLevels` stored but not rendered (see §1 above). |
+| Word Wall | 4 | `WordWall` | **Yes** | Data sourced entirely from quest sessions. `useWordWall` reads `children/{childId}/wordProgress` subcollection (`src/features/progress/useWordWall.ts:42`), written by quest end flow (`useQuestSession.ts:940-984`). `WordDetail` shows `questSessions.length` per word (line 67). Empty state: "Complete a Knowledge Mine quest to start tracking words!" (`WordWall.tsx:125`). |
+
+**Not rendered but exists:** `ArmorTab` (`src/features/progress/ArmorTab.tsx`) references `QUEST_DIAMOND` and `QUEST_COMPLETE` XP events (line 67-98) in the ledger history display. This tab is not currently wired into `ProgressPage.tsx`.
+
+---
+
+### Summary of New Gaps
+
+| # | Gap | Severity | Notes |
+|---|---|---|---|
+| G20 | `workingLevels` not displayed in Skill Snapshot UI | Medium | Data written by quest but invisible to Shelly; she cannot see the child's current level or how it was derived |
+| G21 | Disposition narrative lacks quest performance metrics | Medium | Sees findings text but not accuracy, level progression, or word mastery trends; cannot generate growth narratives from quest data |
+| G22 | Quest hours have no UI callout in Records | Low | `source: 'quest-session'` entries blend silently into totals; `creative-timer` gets a callout but quest does not |
+| G23 | Portfolio has zero quest visibility | Low | Quest sessions create no artifacts; portfolio queries only artifacts collection |
+| G24 | Compliance exports exclude session-level quest data | Low | Quest hours counted in totals but session findings, scores, and level progression not included in CSV/HTML exports |
+| G25 | Learning Profile tab has no direct quest data path | Medium | The `disposition` context slices omit `recentEval`, `skillSnapshot`, `wordMastery`; quest performance enters only through the handler's own `loadRecentEvaluations()` (3-session, findings-text-only) |
