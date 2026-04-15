@@ -363,3 +363,176 @@ if (!hoursLoggedRef.current) {
 | G13 | workingLevels not written if < 5 answered questions | Medium | Short sessions (timeout after 3 questions, or quick child) produce no level signal despite real performance data |
 | G14 | Cumulative XP doc written twice per session | Low | Once for QUEST_COMPLETE, once for QUEST_DIAMOND — race-safe because sequential, but two full `setDoc` overwrites where one could suffice |
 | G15 | Hours not logged if active time < 5 minutes | Low | By design for compliance accuracy, but a valid 3-minute session leaves no hours trace |
+
+---
+
+## Journey 2 (Part B): Quest Start Reads
+
+**Trace:** Lincoln finishes a Phonics Quest session. Later, he starts the NEXT Phonics Quest. What carries over?
+
+---
+
+### 1. Does the new starting level reflect `workingLevels.phonics` from the prior session?
+
+**Yes (client-side). No (server-side).**
+
+**Client-side read path:**
+
+When `startQuest()` fires (`src/features/quest/useQuestSession.ts:397`), it:
+
+1. **Loads the skill snapshot** from Firestore (`useQuestSession.ts:409-412`):
+   ```
+   const snapshotRef = doc(skillSnapshotsCollection(familyId), activeChildId)
+   const snapshotSnap = await getDoc(snapshotRef)
+   ```
+2. **Calls `computeStartLevel(snapshot, questMode, curriculumHint)`** (`useQuestSession.ts:477`).
+3. **`computeStartLevel`** (`src/features/quest/workingLevels.ts:44-72`) uses a fallback chain:
+   - `workingLevels[questMode].level` if present → **authoritative** (line 53-56)
+   - `curriculumHint.level` from `activityConfigs` if no working level (line 58-60)
+   - Default `2` (line 49)
+   - Capped at `QUEST_MODE_LEVEL_CAP[phonics] = 8` (line 63-66)
+   - Floored at `1` (line 69)
+
+The prior session's `endSession()` wrote `workingLevels.phonics` to Firestore (`useQuestSession.ts:894-907`), so the new session reads it back. The chain works.
+
+**Server-side (Cloud Function) divergence:**
+
+The quest task handler (`functions/src/ai/tasks/quest.ts:28-89`) computes `suggestedStartLevel` from **`activityConfigs` curriculum data only** — it never reads `workingLevels` from the skill snapshot. The `loadSkillSnapshotContext` function (`functions/src/ai/contextSlices.ts:643-732`) also omits `workingLevels` from the formatted text. The AI prompt receives `STARTING LEVEL:` only from curriculum completion evidence, not from the prior quest session's computed level.
+
+**Result:** The client correctly starts at the prior session's working level. The AI prompt may receive a different (or no) starting level directive. This is pre-existing gap G9 + G12 from Journey 1.
+
+| Verdict | Detail |
+|---|---|
+| **Client** | **Yes** — `computeStartLevel` reads `workingLevels.phonics.level` written by prior session (`workingLevels.ts:53-56`, `useQuestSession.ts:477`) |
+| **Server** | **Gap** — `quest.ts:28-89` only reads `activityConfigs`, never `workingLevels`; AI may get stale or no starting level |
+
+---
+
+### 2. Does the AI quest prompt include the previous session's data?
+
+**Partially. One prior session summary, but no question-level history.**
+
+The quest task assembles context via `buildContextForTask("quest", ...)` (`functions/src/ai/contextSlices.ts:51`):
+
+```
+quest: ["childProfile", "sightWords", "recentEval", "wordMastery", "skillSnapshot", "workbookPaces"]
+```
+
+The **`recentEval`** slice (`functions/src/ai/chatTypes.ts:188-258`) loads the most recent `complete` evaluation session:
+
+```
+db.collection(`families/${familyId}/evaluationSessions`)
+  .where("childId", "==", childId)
+  .where("status", "==", "complete")
+  .orderBy("evaluatedAt", "desc")
+  .limit(1)
+```
+
+If the prior session was a Phonics Quest (sessionType `interactive`), the AI receives (`chatTypes.ts:226-250`):
+
+| Data included | Line | Example |
+|---|---|---|
+| Domain | 231 | `Domain: reading` |
+| Date | 232 | `Date: 2026-04-14T...` |
+| Final Level + Score | 233-234 | `Final Level: 4, Score: 7/10` |
+| Summary | 236 | AI-generated narrative |
+| Findings (skill + status + evidence) | 237-241 | `- CVC blending: secure — ...` |
+| Recommendations | 243-249 | `- Priority 1: vowel teams — ...` |
+
+**What is NOT included:**
+
+| Missing data | Impact |
+|---|---|
+| Individual questions from prior session | AI cannot avoid repeating the same questions |
+| `stableCeiling` | AI doesn't know the proven-stable level (only `finalLevel`, which may have been post-crash) |
+| `workingLevels.phonics` numeric value | AI doesn't see the computed working level (G12) |
+| Session duration / engagement | AI cannot adjust pacing based on prior stamina |
+| Word-level progress per question | Partially covered by separate `wordMastery` + `wordProgress` slices |
+
+**Note:** The `recentEval` query loads `limit(1)` — only the single most recent session across ALL domains and session types. If a comprehension evaluation happened after the phonics quest, the phonics quest data is eclipsed entirely.
+
+| Verdict | Detail |
+|---|---|
+| **Partial** | `recentEval` includes prior session's `finalLevel`, findings, recommendations (`chatTypes.ts:202-250`). Omits question history, `stableCeiling`, and `workingLevels` numeric value. Only 1 session loaded — can be eclipsed by a newer non-phonics session. |
+
+---
+
+### 3. Does the new quest see the diamonds/XP from the prior session?
+
+**Yes — cumulative totals are persisted; per-session counts reset to zero.**
+
+When the prior session ends (`useQuestSession.ts:810-852`), three reward writes fire:
+
+| Reward | Call site | Persistence |
+|---|---|---|
+| Quest completion XP (15 flat) | `useQuestSession.ts:812-819` → `addXpEvent()` | Cumulative in `xpLedger/{childId}` and `avatarProfiles/{childId}.totalXp` |
+| Diamond XP (2 × correct) | `useQuestSession.ts:827-839` → `addXpEvent()` | Same cumulative stores |
+| Diamonds (1 × correct) | `useQuestSession.ts:843-851` → `addDiamondEvent()` | Cumulative in `avatarProfiles/{childId}.diamondBalance` via Firestore `increment()` |
+
+All three use `dedupKey` to prevent double-writes on retry.
+
+When the **new** session starts (`useQuestSession.ts:480-489`), session-local counters reset:
+
+```ts
+const initialState: QuestState = {
+  totalQuestions: 0,
+  totalCorrect: 0,     // diamonds this session start at 0
+  consecutiveCorrect: 0,
+  ...
+}
+```
+
+The **cumulative** diamond balance and XP total are read reactively via `useDiamondBalance` and `useXpLedger` hooks, which stream from Firestore docs — these reflect all prior sessions.
+
+| Verdict | Detail |
+|---|---|
+| **Yes (cumulative)** | XP and diamonds from prior sessions are committed to `xpLedger` + `avatarProfiles` before the new session starts. UI hooks stream cumulative totals. Per-session counters reset to zero — no confusion between session-local and global. |
+
+---
+
+### 4. Does the new quest know the previous session's stable ceiling?
+
+**No. `stableCeiling` is ephemeral — only its derivative (`workingLevels.level`) persists.**
+
+**Computation:** `computeWorkingLevelFromSession()` (`src/features/quest/workingLevels.ts:85-140`) calculates `stableCeiling` as the highest level with ≥2 correct answers (line 105-112, threshold at line 79). It then derives `newLevel`:
+
+```ts
+// workingLevels.ts:114-121
+if (stableCeiling !== null) {
+  newLevel = sessionEndLevel >= stableCeiling ? stableCeiling : sessionEndLevel
+} else {
+  newLevel = sessionEndLevel - 1  // gentle downstep
+}
+```
+
+**Storage:** The function returns a `WorkingLevel` object with `level: newLevel` (line 134-139). The raw `stableCeiling` value is **not** in the return type and is **not** stored anywhere.
+
+**Persistence chain:**
+
+| Step | What | Where | Persistent? |
+|---|---|---|---|
+| 1 | `stableCeiling` computed | `workingLevels.ts:105-112` (local variable) | No |
+| 2 | `newLevel` derived from it | `workingLevels.ts:114-121` | No (local) |
+| 3 | `WorkingLevel.level = newLevel` | `workingLevels.ts:134` | Returned |
+| 4 | Written to Firestore | `useQuestSession.ts:904-906` → `skillSnapshots/{childId}.workingLevels.phonics` | **Yes** |
+| 5 | New session reads it back | `useQuestSession.ts:409-412` → `computeStartLevel` → line 53-56 | **Yes** |
+
+**What is lost:** If Session 1 ended at Level 6 but `stableCeiling` was 4 (crashed above 4), `newLevel = 4` is stored. Session 2 starts at Level 4 — correct behavior. But Session 2 cannot see *why* Level 4 was chosen (crash vs. stable performance vs. gentle downstep). The evidence string (`workingLevels.ts:138`) gives a hint (`"Session ended at Level 6 with 7/10 correct"`) but not the ceiling itself.
+
+**Reconstruction possible but not done:** The prior session's full `questions[]` array is stored in the `evaluationSessions` document (`questTypes.ts:128-148`, field `questions: SessionQuestion[]`). Theoretically, `stableCeiling` could be recomputed from that data — but no code does this.
+
+| Verdict | Detail |
+|---|---|
+| **No (raw value)** | `stableCeiling` is a local variable in `computeWorkingLevelFromSession` (`workingLevels.ts:105`), never persisted. Only its derivative `newLevel` is stored as `workingLevels.phonics.level`. |
+| **Yes (effect)** | The *effect* of `stableCeiling` carries forward via the stored `newLevel` → next session's `startLevel`. The causal chain works, but the raw ceiling is lost. |
+
+---
+
+### Summary of New Gaps
+
+| # | Gap | Severity | Notes |
+|---|---|---|---|
+| G16 | `recentEval` loads only 1 session across all domains | Medium | A comprehension eval after a phonics quest eclipses the phonics data entirely; the new phonics quest AI sees no phonics-specific prior session |
+| G17 | `stableCeiling` not persisted | Low | The derived `newLevel` captures the effect, but debugging/analytics cannot see why a level was chosen. Reconstructable from stored `questions[]` if needed. |
+| G18 | AI prompt has no per-question history from prior session | Medium | AI may repeat the same question types/words. `wordMastery` slice partially mitigates for word-level data, but question format/style repetition is unchecked. |
+| G19 | Prior session's `workingLevels` not in AI prompt (server) | Medium | Restatement of G9+G12 in quest-start context: client uses `workingLevels.phonics` for `startLevel`, but the AI prompt's `STARTING LEVEL:` directive comes only from curriculum data, not from the prior quest's computed level. The two can disagree. |
