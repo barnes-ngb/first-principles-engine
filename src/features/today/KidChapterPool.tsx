@@ -2,12 +2,30 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import MicIcon from '@mui/icons-material/Mic'
 import StopIcon from '@mui/icons-material/Stop'
-import { addDoc } from 'firebase/firestore'
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
+import {
+  addDoc,
+  deleteDoc,
+  doc,
+  getDocs,
+  query,
+  where,
+} from 'firebase/firestore'
+import {
+  deleteObject,
+  getDownloadURL,
+  ref,
+  uploadBytes,
+} from 'firebase/storage'
 
 import {
   artifactsCollection,
@@ -60,6 +78,9 @@ export default function KidChapterPool({
   >({})
   const [savingChapter, setSavingChapter] = useState<number | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [deletingChapter, setDeletingChapter] = useState<number | null>(null)
+  const [confirmDeleteItem, setConfirmDeleteItem] =
+    useState<ChapterQuestionPoolItem | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
 
   const mcFont = '"Press Start 2P", monospace'
@@ -113,6 +134,7 @@ export default function KidChapterPool({
         questionType: item.questionType,
         question: item.question,
         audioUrl,
+        artifactId: artifactRef.id,
         weekTheme: weekFocus?.theme ?? '',
         virtue: weekFocus?.virtue ?? '',
         scripture: weekFocus?.scriptureRef ?? '',
@@ -145,9 +167,78 @@ export default function KidChapterPool({
     setSavingChapter(null)
   }, [chapterBlobs, familyId, childId, bookProgress.bookId, book.title, weekFocus, onChapterAnswered])
 
+  const handleDeleteResponse = useCallback(
+    async (item: ChapterQuestionPoolItem) => {
+      setDeletingChapter(item.chapter)
+      setSaveError(null)
+      const today = todayKey()
+
+      try {
+        // Find the matching ChapterResponse doc
+        const responseSnap = await getDocs(
+          query(
+            chapterResponsesCollection(familyId),
+            where('childId', '==', childId),
+            where('bookId', '==', bookProgress.bookId),
+            where('date', '==', today),
+          ),
+        )
+        const matchingDoc = responseSnap.docs.find((d) => {
+          const data = d.data()
+          return data.chapter === `Ch ${item.chapter}${item.chapterTitle ? `: ${item.chapterTitle}` : ''}`
+        })
+
+        // Delete storage object (best-effort)
+        if (item.audioUrl) {
+          try {
+            const audioRef = ref(storage, item.audioUrl)
+            await deleteObject(audioRef)
+          } catch (err) {
+            console.warn('[ChapterPool] Storage cleanup failed (non-blocking):', err)
+          }
+        }
+
+        // Delete linked artifact (best-effort)
+        if (item.artifactId) {
+          try {
+            await deleteDoc(doc(artifactsCollection(familyId), item.artifactId))
+          } catch (err) {
+            console.warn('[ChapterPool] Artifact cleanup failed (non-blocking):', err)
+          }
+        }
+
+        // Delete ChapterResponse doc
+        if (matchingDoc) {
+          await deleteDoc(matchingDoc.ref)
+        }
+
+        // Put chapter back in the pool
+        await onChapterAnswered(item.chapter, {
+          answered: false,
+          answeredDate: undefined,
+          audioUrl: undefined,
+          artifactId: undefined,
+        })
+      } catch (err) {
+        console.error('Chapter response delete failed:', err)
+        setSaveError('Failed to delete recording. Check your connection and try again.')
+      }
+      setDeletingChapter(null)
+      setConfirmDeleteItem(null)
+    },
+    [familyId, childId, bookProgress.bookId, onChapterAnswered],
+  )
+
   // Determine which chapters to show
   const pool = bookProgress.questionPool
   const unanswered = pool.filter((item) => !item.answered)
+  const today = todayKey()
+
+  // Answered-today items: show as compact "saved" cards with delete option
+  const answeredToday = useMemo(
+    () => pool.filter((item) => item.answered && item.answeredDate === today),
+    [pool, today],
+  )
 
   // Use Shelly's picks from dayLog, fall back to lowest unanswered
   const todaysChapters = dayLog.todaysSelectedChapters
@@ -164,8 +255,8 @@ export default function KidChapterPool({
     return []
   }, [pool, todaysChapters, unanswered])
 
-  // Nothing to show
-  if (chaptersToShow.length === 0) return null
+  // Nothing to show (neither unanswered nor answered-today)
+  if (chaptersToShow.length === 0 && answeredToday.length === 0) return null
 
   const startRecording = async (chapter: number) => {
     setSaveError(null)
@@ -220,6 +311,55 @@ export default function KidChapterPool({
         </Alert>
       )}
       <Stack spacing={2}>
+        {/* Answered-today: compact "saved" cards with delete option */}
+        {answeredToday.map((item) => {
+          const isDeletingThis = deletingChapter === item.chapter
+          return (
+            <Box
+              key={`saved-${item.chapter}`}
+              sx={{
+                p: 1.5,
+                borderRadius: 2,
+                border: '1px solid #4CAF50',
+                bgcolor: 'rgba(76,175,80,0.15)',
+              }}
+            >
+              <Stack
+                direction="row"
+                spacing={1}
+                alignItems="center"
+              >
+                <Typography
+                  sx={{
+                    fontFamily: mcFont,
+                    fontSize: '0.45rem',
+                    color: '#4CAF50',
+                    flex: 1,
+                  }}
+                >
+                  {'\u2713'} Saved — Ch {item.chapter}
+                  {item.chapterTitle ? `: ${item.chapterTitle}` : ''}
+                </Typography>
+                <Button
+                  size="small"
+                  startIcon={<DeleteOutlineIcon sx={{ fontSize: '0.9rem' }} />}
+                  onClick={() => setConfirmDeleteItem(item)}
+                  disabled={isDeletingThis}
+                  sx={{
+                    fontFamily: mcFont,
+                    fontSize: '0.35rem',
+                    color: '#ff6b6b',
+                    textTransform: 'none',
+                  }}
+                >
+                  {isDeletingThis ? 'Deleting...' : 'Delete & redo'}
+                </Button>
+              </Stack>
+            </Box>
+          )
+        })}
+
+        {/* Unanswered chapter cards */}
         {chaptersToShow.map((item) => {
           const emoji = questionTypeEmoji[item.questionType] ?? '\u2753'
           const isRecordingThis = recordingChapter === item.chapter
@@ -352,6 +492,30 @@ export default function KidChapterPool({
           )
         })}
       </Stack>
+
+      {/* Confirm delete dialog */}
+      <Dialog
+        open={confirmDeleteItem != null}
+        onClose={() => setConfirmDeleteItem(null)}
+      >
+        <DialogTitle>Delete this recording?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Delete this recording and try again? The audio file will be removed.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDeleteItem(null)}>Cancel</Button>
+          <Button
+            color="error"
+            onClick={() => {
+              if (confirmDeleteItem) handleDeleteResponse(confirmDeleteItem)
+            }}
+          >
+            Delete & redo
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }
