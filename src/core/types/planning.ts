@@ -347,6 +347,7 @@ export interface ChapterResponse {
   virtue: string
   scripture: string
   createdAt: string
+  artifactId?: string
 }
 
 export interface Session {
