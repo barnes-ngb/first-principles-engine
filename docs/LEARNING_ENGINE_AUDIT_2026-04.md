@@ -189,3 +189,7 @@ A helper `getEffectiveMasteryGate()` (line 154-157) exists to fall back from `ma
 | G6 | `masteryGate` not formatted into AI prompt text | Low | AI sees `level` but not the granular gate evidence |
 | G7 | Disposition narrative has no mastery progression signal | Low | Cannot distinguish newly-mastered from always-secure |
 | G8 | `setDoc` (full overwrite) on every field edit | Low | Risk of race condition if two tabs edit simultaneously |
+| G9 | Client vs server starting-level divergence | Medium | Client reads `workingLevels` (authoritative); server CF (`functions/src/ai/tasks/quest.ts:29-88`) reads only `activityConfigs` curriculum data — they can disagree |
+| G10 | Math quests have no AI starting-level injection | Low | `buildQuestPrompt` only injects `STARTING LEVEL:` for reading domain modes; math gets no level directive in the prompt |
+| G11 | `applySnapshotSuggestions` ignores mastery gates | Medium | `src/features/planner-chat/chatPlanner.logic.ts` plan generation uses stop rules + duration heuristics, not `evaluateSkipEligibility` — the code-driven skip path is fully bypassed |
+| G12 | `workingLevels` not included in AI context text | Low | `loadSkillSnapshotContext` formats priority skills, stops, supports, blocks — but omits the numeric `workingLevels` field; the AI never sees quest progression levels |
