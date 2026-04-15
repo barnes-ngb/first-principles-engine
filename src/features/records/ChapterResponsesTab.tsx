@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Accordion from '@mui/material/Accordion'
 import AccordionDetails from '@mui/material/AccordionDetails'
 import AccordionSummary from '@mui/material/AccordionSummary'
@@ -6,19 +6,28 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Container from '@mui/material/Container'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import PauseIcon from '@mui/icons-material/Pause'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
-import { getDocs, orderBy, query, where } from 'firebase/firestore'
+import { deleteDoc, doc, getDocs, orderBy, query, where } from 'firebase/firestore'
+import { deleteObject, ref } from 'firebase/storage'
 
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
+  artifactsCollection,
   bookProgressCollection,
   chapterResponsesCollection,
 } from '../../core/firebase/firestore'
+import { storage } from '../../core/firebase/storage'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { BookProgress, ChapterResponse } from '../../core/types'
 
@@ -147,6 +156,54 @@ export default function ChapterResponsesTab() {
       cancelled = true
     }
   }, [familyId, activeChild?.id])
+
+  const [confirmDelete, setConfirmDelete] = useState<ChapterResponse | null>(
+    null,
+  )
+  const [deleting, setDeleting] = useState(false)
+
+  const handleDeleteResponse = useCallback(
+    async (response: ChapterResponse) => {
+      if (!familyId || !response.id) return
+      setDeleting(true)
+
+      try {
+        // Delete storage object (best-effort)
+        if (response.audioUrl) {
+          try {
+            const audioRef = ref(storage, response.audioUrl)
+            await deleteObject(audioRef)
+          } catch (err) {
+            console.warn('[Records] Storage cleanup failed (non-blocking):', err)
+          }
+        }
+
+        // Delete linked artifact (best-effort)
+        if (response.artifactId) {
+          try {
+            await deleteDoc(
+              doc(artifactsCollection(familyId), response.artifactId),
+            )
+          } catch (err) {
+            console.warn('[Records] Artifact cleanup failed (non-blocking):', err)
+          }
+        }
+
+        // Delete ChapterResponse doc
+        await deleteDoc(
+          doc(chapterResponsesCollection(familyId), response.id),
+        )
+
+        // Remove from local state
+        setResponses((prev) => prev.filter((r) => r.id !== response.id))
+      } catch (err) {
+        console.error('Chapter response delete failed:', err)
+      }
+      setDeleting(false)
+      setConfirmDelete(null)
+    },
+    [familyId],
+  )
 
   // Build book groups
   const bookGroups = useMemo(() => {
@@ -314,14 +371,52 @@ export default function ChapterResponsesTab() {
     <Container maxWidth="lg" sx={{ py: 3 }}>
       <Stack spacing={2}>
         {bookGroups.map((group) => (
-          <BookAccordion key={group.bookId ?? group.bookTitle} group={group} />
+          <BookAccordion
+            key={group.bookId ?? group.bookTitle}
+            group={group}
+            onDeleteResponse={setConfirmDelete}
+          />
         ))}
       </Stack>
+
+      {/* Confirm delete dialog */}
+      <Dialog
+        open={confirmDelete != null}
+        onClose={() => setConfirmDelete(null)}
+      >
+        <DialogTitle>Delete recording?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Delete {activeChild?.name ?? 'this child'}&apos;s response to{' '}
+            {confirmDelete?.chapter}? This can&apos;t be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDelete(null)} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            disabled={deleting}
+            onClick={() => {
+              if (confirmDelete) handleDeleteResponse(confirmDelete)
+            }}
+          >
+            {deleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   )
 }
 
-function BookAccordion({ group }: { group: BookGroup }) {
+function BookAccordion({
+  group,
+  onDeleteResponse,
+}: {
+  group: BookGroup
+  onDeleteResponse: (response: ChapterResponse) => void
+}) {
   const hasPool = group.poolItems.length > 0
   const answeredCount = hasPool
     ? group.poolItems.filter((p) => p.answered && !p.skipped).length
@@ -405,7 +500,11 @@ function BookAccordion({ group }: { group: BookGroup }) {
       <AccordionDetails>
         <Stack spacing={1}>
           {chapterRows.map((row) => (
-            <ChapterRow key={row.chapter} row={row} />
+            <ChapterRow
+              key={row.chapter}
+              row={row}
+              onDeleteResponse={onDeleteResponse}
+            />
           ))}
           {/* Unmatched responses (no parseable chapter number) */}
           {group.unmatchedResponses.map((r) => (
@@ -419,9 +518,26 @@ function BookAccordion({ group }: { group: BookGroup }) {
               }}
             >
               <Stack spacing={0.5}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  {formatResponseDate(r.date)} — {r.chapter}
-                </Typography>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography
+                    variant="subtitle2"
+                    color="text.secondary"
+                    sx={{ flex: 1 }}
+                  >
+                    {formatResponseDate(r.date)} — {r.chapter}
+                  </Typography>
+                  {r.id && (
+                    <Button
+                      size="small"
+                      color="error"
+                      startIcon={<DeleteOutlineIcon fontSize="small" />}
+                      onClick={() => onDeleteResponse(r)}
+                      sx={{ textTransform: 'none', minWidth: 0 }}
+                    >
+                      Delete
+                    </Button>
+                  )}
+                </Stack>
                 <Typography
                   variant="body2"
                   sx={{ fontStyle: 'italic', lineHeight: 1.5 }}
@@ -444,6 +560,7 @@ function BookAccordion({ group }: { group: BookGroup }) {
 
 function ChapterRow({
   row,
+  onDeleteResponse,
 }: {
   row: {
     chapter: number
@@ -451,6 +568,7 @@ function ChapterRow({
     state: 'answered' | 'skipped' | 'unanswered'
     response?: ChapterResponse
   }
+  onDeleteResponse: (response: ChapterResponse) => void
 }) {
   const label = row.chapterTitle
     ? `Ch ${row.chapter}: ${row.chapterTitle}`
@@ -508,6 +626,17 @@ function ChapterRow({
             <Typography variant="caption" color="text.secondary">
               {formatResponseDate(r.date)}
             </Typography>
+          )}
+          {r?.id && (
+            <Button
+              size="small"
+              color="error"
+              startIcon={<DeleteOutlineIcon fontSize="small" />}
+              onClick={() => onDeleteResponse(r)}
+              sx={{ textTransform: 'none', minWidth: 0 }}
+            >
+              Delete
+            </Button>
           )}
         </Stack>
         {r && (
