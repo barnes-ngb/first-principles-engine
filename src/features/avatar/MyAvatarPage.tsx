@@ -569,6 +569,12 @@ export default function MyAvatarPage() {
       }
 
       const customization: OutfitCustomization = { ...profile.customization, accessories: updated }
+
+      // Optimistic local update — prevents stale reads on rapid taps.
+      // Without this, the next tap could read pre-update state from the
+      // onSnapshot listener and overwrite this change.
+      setProfile((prev) => prev ? { ...prev, customization } : prev)
+
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
       await safeUpdateProfile(profileRef, { customization })
     },
