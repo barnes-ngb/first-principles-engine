@@ -316,33 +316,64 @@ function buildParrot(U: number, layout: ReturnType<typeof getBodyLayout>): THREE
   const tT = layout.torsoTop / U
   const tW = layout.p.torsoPxW
 
-  // Body — sits on right shoulder
-  const pX = U * (tW / 2 + 3) // On the right shoulder
-  const pY = U * tT            // At shoulder height
+  // Parrot sits on right shoulder — scaled up 1.6× for readable presence
+  const pX = U * (tW / 2 + 3)
+  const pY = U * tT
   const pZ = 0
 
-  // Body (red)
-  const body = box(U * 2, U * 2.5, U * 2, 0xcc2222)
-  body.position.set(pX, pY, pZ)
-  g.add(body)
+  // Body group — animated as a unit (bob + sway)
+  const parrotBody = new THREE.Group()
+  parrotBody.name = 'parrotBody'
+
+  // Body (bright red, chunky)
+  const body = box(U * 3.2, U * 4, U * 3.2, 0xe94f37)
+  body.position.set(0, 0, 0)
+  parrotBody.add(body)
+
   // Head (green)
-  const head = box(U * 1.6, U * 1.6, U * 1.6, 0x22aa44)
-  head.position.set(pX, pY + U * 2.2, pZ + U * 0.3)
+  const head = box(U * 2.6, U * 2.6, U * 2.6, 0x22aa44)
+  head.position.set(0, U * 3.5, U * 0.4)
   head.name = 'parrotHead'
-  g.add(head)
-  // Beak (yellow)
-  const beak = box(U * 0.6, U * 0.5, U * 1, 0xffcc00)
-  beak.position.set(pX, pY + U * 2, pZ + U * 1.5)
-  g.add(beak)
-  // Tail (blue)
-  const tail = box(U * 1, U * 3, U * 0.8, 0x2266cc)
-  tail.position.set(pX, pY - U * 2.8, pZ - U * 0.8)
+  parrotBody.add(head)
+
+  // Beak (yellow, pointed forward)
+  const beak = box(U * 1, U * 0.8, U * 1.6, 0xf6ae2d)
+  beak.position.set(0, U * 3.2, U * 2.4)
+  parrotBody.add(beak)
+
+  // Eyes (dark with white rim)
+  const eyeL = box(U * 0.5, U * 0.5, U * 0.4, 0x111111)
+  eyeL.position.set(-U * 0.8, U * 4.0, U * 1.6)
+  parrotBody.add(eyeL)
+  const eyeR = box(U * 0.5, U * 0.5, U * 0.4, 0x111111)
+  eyeR.position.set(U * 0.8, U * 4.0, U * 1.6)
+  parrotBody.add(eyeR)
+
+  // Wings (green, folded against sides)
+  const wingL = box(U * 0.5, U * 2.8, U * 2, 0x4cb944)
+  wingL.position.set(-U * 1.8, U * 0.2, -U * 0.2)
+  parrotBody.add(wingL)
+  const wingR = box(U * 0.5, U * 2.8, U * 2, 0x4cb944)
+  wingR.position.set(U * 1.8, U * 0.2, -U * 0.2)
+  parrotBody.add(wingR)
+
+  // Tail (blue, long, angled down-back)
+  const tail = box(U * 1.6, U * 4.8, U * 1.3, 0x2266cc)
+  tail.position.set(0, -U * 4.5, -U * 1.3)
   tail.rotation.x = 0.3
-  g.add(tail)
-  // Eye (tiny white dot)
-  const eye = box(U * 0.4, U * 0.4, U * 0.3, 0xffffff)
-  eye.position.set(pX + U * 0.5, pY + U * 2.5, pZ + U * 1)
-  g.add(eye)
+  parrotBody.add(tail)
+
+  // Feet (small yellow talons gripping shoulder)
+  const footL = box(U * 0.6, U * 0.5, U * 1, 0xf6ae2d)
+  footL.position.set(-U * 0.7, -U * 2.3, U * 0.3)
+  parrotBody.add(footL)
+  const footR = box(U * 0.6, U * 0.5, U * 1, 0xf6ae2d)
+  footR.position.set(U * 0.7, -U * 2.3, U * 0.3)
+  parrotBody.add(footR)
+
+  // Position entire parrot on shoulder
+  parrotBody.position.set(pX, pY, pZ)
+  g.add(parrotBody)
 
   return g
 }
@@ -352,7 +383,7 @@ function buildParrot(U: number, layout: ReturnType<typeof getBodyLayout>): THREE
 /**
  * Animate accessories each frame. Call from the animation loop.
  * - Wings: subtle flutter (rotate Z ±3° on sine wave)
- * - Parrot: gentle head bob
+ * - Parrot: body bob + gentle head look-around
  */
 export function animateAccessories(scene: THREE.Scene, time: number): void {
   // Wing flutter
@@ -361,12 +392,18 @@ export function animateAccessories(scene: THREE.Scene, time: number): void {
   if (wingL) wingL.rotation.z = Math.sin(time * 2.5) * 0.052  // ~3°
   if (wingR) wingR.rotation.z = -Math.sin(time * 2.5) * 0.052
 
-  // Parrot head bob
+  // Parrot body bob — whole bird rises and falls gently
+  const parrotBody = scene.getObjectByName('parrotBody')
+  if (parrotBody) {
+    parrotBody.position.y = parrotBody.userData.baseY ??
+      (parrotBody.userData.baseY = parrotBody.position.y)
+    parrotBody.position.y = (parrotBody.userData.baseY as number) + Math.sin(time * 2) * 0.03
+  }
+
+  // Parrot head — gentle side-to-side look
   const parrotHead = scene.getObjectByName('parrotHead')
   if (parrotHead) {
-    parrotHead.position.y = parrotHead.userData.baseY ??
-      (parrotHead.userData.baseY = parrotHead.position.y)
-    parrotHead.position.y = (parrotHead.userData.baseY as number) + Math.sin(time * 3) * 0.02
+    parrotHead.rotation.y = Math.sin(time * 0.7) * 0.15
   }
 }
 
