@@ -7,11 +7,19 @@ export interface ChatTaskMessage {
   content: string;
 }
 
+export interface WorkingLevelEntry {
+  level: number;
+  updatedAt: string;
+  source: string;
+  evidence?: string;
+}
+
 export interface SnapshotData {
   prioritySkills?: Array<{ tag: string; label: string; level: string }>;
   supports?: Array<{ label: string; description: string }>;
   stopRules?: Array<{ label: string; trigger: string; action: string }>;
   completedPrograms?: string[];
+  workingLevels?: Record<string, WorkingLevelEntry>;
 }
 
 /** Context passed to every chat task handler. */

@@ -664,6 +664,7 @@ async function loadSkillSnapshotContext(
       strategies?: string[];
     }>;
     completedPrograms?: string[];
+    workingLevels?: Record<string, { level: number; updatedAt: string; source: string; evidence?: string }>;
   };
 
   const lines: string[] = ["SKILL SNAPSHOT (from evaluations):"];
@@ -703,6 +704,18 @@ async function loadSkillSnapshotContext(
     for (const b of addressNow) {
       const strategies = b.strategies?.length ? ` — Strategies: ${b.strategies.join("; ")}` : "";
       lines.push(`- ${b.name} (affects: ${b.affectedSkills.join(", ")}): ${b.rationale}${strategies}`);
+    }
+  }
+
+  // Working levels (quest progression)
+  const wl = data.workingLevels;
+  if (wl && Object.keys(wl).length > 0) {
+    lines.push("Working levels (updated when quest/eval completes):");
+    for (const [mode, entry] of Object.entries(wl)) {
+      const dateStr = entry.updatedAt ? new Date(entry.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "unknown";
+      const evidenceStr = entry.evidence ? ` — ${entry.evidence}` : "";
+      const label = mode.charAt(0).toUpperCase() + mode.slice(1);
+      lines.push(`- ${label}: Level ${entry.level} (source: ${entry.source}, ${dateStr}${evidenceStr})`);
     }
   }
 
