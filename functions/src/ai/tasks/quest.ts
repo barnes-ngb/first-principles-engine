@@ -5,7 +5,7 @@ import { buildContextForTask } from "../contextSlices.js";
 
 /**
  * Task: quest
- * Context: childProfile + sightWords + recentEval + wordMastery (via buildContextForTask)
+ * Context: childProfile + sightWords + recentHistoryByDomain + wordMastery (via buildContextForTask)
  *          + per-child word progress (struggling/mastered words loaded separately)
  * Model: Sonnet
  */
@@ -18,14 +18,10 @@ export const handleQuest = async (
 ): Promise<ChatTaskResult> => {
   const { db, familyId, childId, childData, snapshotData, messages, domain, apiKey } = ctx;
 
-  // Quest only needs childProfile + sightWords + recentEval (no charter, no enriched)
+  // Quest only needs childProfile + sightWords + recentHistoryByDomain (no charter, no enriched)
   console.log(`[quest] Starting quest for child=${childId}, domain=${domain}`);
 
-  const sections = await buildContextForTask("quest", {
-    db, familyId, childId, childData, snapshotData,
-  });
-
-  // Detect questMode early — needed for workingLevels lookup and prompt building
+  // Detect questMode early — needed for domain-filtered history and workingLevels lookup
   let questMode: string | undefined;
   if (messages.length > 0) {
     try {
@@ -35,6 +31,16 @@ export const handleQuest = async (
       // Not JSON or missing questMode — use default
     }
   }
+
+  // Map questMode to eval domain for domain-scoped history.
+  // Quest modes map 1:1 to eval domains except "reading" which is either
+  // phonics or comprehension — default to questMode itself.
+  const evalDomain = questMode ?? (domain === "math" ? "math" : "phonics");
+
+  const sections = await buildContextForTask("quest", {
+    db, familyId, childId, childData, snapshotData,
+    domain: evalDomain,
+  });
 
   // Per-quest-mode level ceilings (must match client-side QUEST_MODE_LEVEL_CAP)
   const QUEST_MODE_LEVEL_CAP: Record<string, number> = {

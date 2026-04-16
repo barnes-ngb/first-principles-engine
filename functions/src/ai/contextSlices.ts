@@ -10,7 +10,7 @@ import {
   loadSightWordSummary,
   loadWordMasterySummary,
 } from "./chat.js";
-import { loadRecentEvalContext } from "./chatTypes.js";
+import { loadRecentEvalContext, loadRecentEvalHistoryByDomain, formatEvalHistoryByDomain } from "./chatTypes.js";
 import { getGatbProgress } from "./data/gatbCurriculum.js";
 
 // ── Slice definitions ───────────────────────────────────────────
@@ -33,6 +33,7 @@ export const ContextSlice = {
   SkillSnapshot: "skillSnapshot",
   RecentScans: "recentScans",
   ActivityConfigs: "activityConfigs",
+  RecentHistoryByDomain: "recentHistoryByDomain",
 } as const;
 export type ContextSlice = (typeof ContextSlice)[keyof typeof ContextSlice];
 
@@ -48,7 +49,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   chat: ["charter", "childProfile"],
   generate: ["charter", "childProfile"],
   evaluate: ["charter", "childProfile", "sightWords", "wordMastery"],
-  quest: ["childProfile", "sightWords", "recentEval", "wordMastery", "skillSnapshot", "workbookPaces"],
+  quest: ["childProfile", "sightWords", "recentHistoryByDomain", "wordMastery", "skillSnapshot", "workbookPaces"],
   generateStory: ["childProfile", "sightWords", "wordMastery"],
   analyzePatterns: ["childProfile"],
   workshop: ["charter", "childProfile", "workshopGames"],
@@ -287,6 +288,8 @@ export interface SliceContext {
   childId: string;
   childData: { name: string; grade?: string };
   snapshotData: SnapshotData | undefined;
+  /** Optional domain hint for domain-scoped slices (e.g. quest mode). */
+  domain?: string;
 }
 
 /**
@@ -345,6 +348,14 @@ export async function buildContextForTask(
   }
   if (slices.includes("recentEval")) {
     fetches.push({ slice: "recentEval", promise: loadRecentEvalContext(db, familyId, childId) });
+  }
+  if (slices.includes("recentHistoryByDomain")) {
+    fetches.push({
+      slice: "recentHistoryByDomain",
+      promise: loadRecentEvalHistoryByDomain(db, familyId, childId, {
+        filterDomain: ctx.domain,
+      }),
+    });
   }
   if (slices.includes("wordMastery")) {
     fetches.push({ slice: "wordMastery", promise: loadWordMasterySummary(db, familyId, childId) });
@@ -516,10 +527,17 @@ export async function buildContextForTask(
     if (sightWordContext) sections.push(sightWordContext);
   }
 
-  // Recent eval
+  // Recent eval (cross-domain most-recent — kept for plan/scan/shellyChat backward compat)
   if (sliceData.has("recentEval")) {
     const evalContext = sliceData.get("recentEval") as string;
     if (evalContext) sections.push(evalContext);
+  }
+
+  // Recent eval history by domain (per-domain depth — used by quest)
+  if (sliceData.has("recentHistoryByDomain")) {
+    const historyText = sliceData.get("recentHistoryByDomain") as string;
+    const formatted = formatEvalHistoryByDomain(historyText);
+    if (formatted) sections.push(formatted);
   }
 
   // Word mastery (quest word progress)

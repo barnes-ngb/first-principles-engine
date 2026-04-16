@@ -532,7 +532,7 @@ if (stableCeiling !== null) {
 
 | # | Gap | Severity | Notes |
 |---|---|---|---|
-| G16 | `recentEval` loads only 1 session across all domains | Medium | A comprehension eval after a phonics quest eclipses the phonics data entirely; the new phonics quest AI sees no phonics-specific prior session |
+| G16 | ~~`recentEval` loads only 1 session across all domains~~ | ~~Medium~~ | **FIXED** (R2). Quest now uses `recentHistoryByDomain` slice — queries per-domain (3 sessions each) so cross-domain evals never eclipse domain-specific history. |
 | G17 | `stableCeiling` not persisted | Low | The derived `newLevel` captures the effect, but debugging/analytics cannot see why a level was chosen. Reconstructable from stored `questions[]` if needed. |
 | G18 | AI prompt has no per-question history from prior session | Medium | AI may repeat the same question types/words. `wordMastery` slice partially mitigates for word-level data, but question format/style repetition is unchecked. |
 | G19 | ~~Prior session's `workingLevels` not in AI prompt (server)~~ | ~~Medium~~ | **FIXED** (R1). Server now reads `workingLevels[questMode]` as authoritative starting level; AI prompt's `STARTING LEVEL:` directive reflects the same value the client uses. |
@@ -800,7 +800,7 @@ The `quest` task context is `["childProfile", "sightWords", "recentEval", "wordM
 
 **However**, the quest task handler (`functions/src/ai/tasks/quest.ts:15-89`) computes `suggestedStartLevel` solely from `activityConfigs` curriculum completion data (lines 28-88) — it **never reads** `workingLevels` or `prioritySkills` from the snapshot for level selection. The AI prompt text includes the skill snapshot context (so the model can see shaky areas), but no structured directive forces avoidance or targeting.
 
-**Also**: `recentEval` loads only 1 session across all domains (`limit(1)`, `chatTypes.ts:199`). If a math eval happened after the reading eval, the reading findings are eclipsed — the quest AI sees no reading-specific findings (pre-existing G16).
+~~**Also**: `recentEval` loads only 1 session across all domains (`limit(1)`, `chatTypes.ts:199`). If a math eval happened after the reading eval, the reading findings are eclipsed — the quest AI sees no reading-specific findings (pre-existing G16).~~ **FIXED** (R2) — quest now uses `recentHistoryByDomain` with per-domain queries and depth 3.
 
 | Verdict | **Partial** — AI prompt includes findings and "Secure → SKIP" guidance from `skillSnapshot` (`contextSlices.ts:723-728`) + raw findings from `recentEval` (`chatTypes.ts:237-241`). But starting level is derived only from curriculum data (`quest.ts:28-88`), not from eval findings or `workingLevels`. No structured "focus on shaky skill X" directive exists. |
 |---|---|
@@ -854,7 +854,7 @@ The Learning Map (`src/features/progress/learning-map/`) also has no references 
 | # | Gap | Severity | Notes |
 |---|---|---|---|
 | G29 | ~~Quest starting level ignores eval-derived `workingLevels`~~ | ~~Medium~~ | **FIXED** (R1). `quest.ts` now reads `snapshotData.workingLevels[questMode]` as primary starting level source. Eval-derived, quest-derived, and scan-derived workingLevels all flow through. |
-| G30 | `recentEval` eclipses cross-domain for quest | Medium | `limit(1)` across all domains — a newer math eval hides reading findings from next reading quest (restatement of G16 in eval context) |
+| G30 | ~~`recentEval` eclipses cross-domain for quest~~ | ~~Medium~~ | **FIXED** (R2). Quest switched from `recentEval` to `recentHistoryByDomain` with per-domain querying. A math eval no longer hides phonics data from the next phonics quest. |
 | G31 | Disposition sees only `findings[].text`, not structured findings | Medium | `loadRecentEvaluations` at `disposition.ts:100-101` extracts `.text` only; loses `skill`, `status`, `evidence` structure; cannot generate targeted growth narratives |
 | G32 | Disposition omits `skillSnapshot` and `recentEval` shared slices | Medium | Context config at `contextSlices.ts:56` lacks both; handler rolls its own weaker loader instead |
 | G33 | Curriculum view has no eval skip guidance display | Low | Skip advisor logic exists but is dead code (G5); no UI surface shows "skip this" or "focus here" from eval findings |
@@ -1130,9 +1130,11 @@ Based on Parts A and B, these are the three missing context items with the highe
 
 ### G41 — Quest history limited to single most-recent cross-domain session
 
-**What's missing:** `loadRecentEvalContext` (`chatTypes.ts:188-200`) queries `evaluationSessions` with `.limit(1)` across all domains and session types. No domain filter, no mode filter. The quest AI sees at most one prior session's findings and recommendations — and if a comprehension eval or math eval happened after the last phonics quest, the phonics data is completely eclipsed.
+**FIXED** (R2). `loadRecentEvalHistoryByDomain` (`chatTypes.ts`) replaces the cross-domain `limit(1)` query with per-domain queries of 3 sessions each. Quest now receives a `recentHistoryByDomain` context slice filtered to the active quest mode's domain. The AI can see multi-session trends (e.g. "consistently misses vowel teams at Level 5") and session type (quest vs guided eval).
 
-**Why it matters:** Without domain-filtered history, the AI generating a phonics quest cannot see what phonics skills were tested last time, what patterns the child struggled with, or what level the prior phonics session reached. It cannot avoid repeating question types or target known weak spots. The `wordMastery` slice partially compensates for word-level repetition, but question format, skill focus, and difficulty trajectory across sessions are invisible. This compounds the single-session limit: even when the most recent session IS phonics, the AI sees only one session — it cannot detect multi-session trends like "consistently misses vowel teams at Level 5."
+~~**What's missing:** `loadRecentEvalContext` (`chatTypes.ts:188-200`) queries `evaluationSessions` with `.limit(1)` across all domains and session types. No domain filter, no mode filter. The quest AI sees at most one prior session's findings and recommendations — and if a comprehension eval or math eval happened after the last phonics quest, the phonics data is completely eclipsed.~~
+
+~~**Why it matters:** Without domain-filtered history, the AI generating a phonics quest cannot see what phonics skills were tested last time, what patterns the child struggled with, or what level the prior phonics session reached. It cannot avoid repeating question types or target known weak spots. The `wordMastery` slice partially compensates for word-level repetition, but question format, skill focus, and difficulty trajectory across sessions are invisible. This compounds the single-session limit: even when the most recent session IS phonics, the AI sees only one session — it cannot detect multi-session trends like "consistently misses vowel teams at Level 5."~~
 
 ### G42 — No engagement or disposition signal
 
@@ -1146,7 +1148,7 @@ Based on Parts A and B, these are the three missing context items with the highe
 |---|---|---|---|---|
 | `persist` (SkillSnapshotPage.tsx:111) | `prioritySkills[n].level`, `updatedAt` (full doc overwrite via `setDoc`) | `skillSnapshots/{childId}` | Skill Snapshot UI (SkillSnapshotPage.tsx:357), AI `childProfile` slice (contextSlices.ts:316), AI `skillSnapshot` slice (contextSlices.ts:674), disposition handler via `childProfile` (contextSlices.ts:313) | — |
 | `handleQuickLevelUpdate` (SkillSnapshotPage.tsx:225) | `prioritySkills[n].level` (converges on `persist`) | `skillSnapshots/{childId}` | Same as `persist` above | — |
-| `endSession` (useQuestSession.ts:786) | Full session record (`questions`, `findings`, `recommendations`, `summary`, `finalLevel`, `totalCorrect`, `diamondsMined`, `streakDays`, etc.) | `evaluationSessions/{docId}` | EvaluationHistoryTab (EvaluationHistoryTab.tsx:485), `recentEval` slice for plan/quest/scan (chatTypes.ts:188), disposition `loadRecentEvaluations` (disposition.ts:87), Learning Map init (updateSkillMapFromFindings.ts:112) | G16 — `recentEval` loads only `limit(1)` cross-domain; eclipsed by newer non-matching session |
+| `endSession` (useQuestSession.ts:786) | Full session record (`questions`, `findings`, `recommendations`, `summary`, `finalLevel`, `totalCorrect`, `diamondsMined`, `streakDays`, etc.) | `evaluationSessions/{docId}` | EvaluationHistoryTab (EvaluationHistoryTab.tsx:485), `recentEval` slice for plan/scan (chatTypes.ts), `recentHistoryByDomain` slice for quest (chatTypes.ts), disposition `loadRecentEvaluations` (disposition.ts:87), Learning Map init (updateSkillMapFromFindings.ts:112) | ~~G16~~ FIXED — quest now uses per-domain history with depth 3 |
 | `endSession` → `computeWorkingLevelFromSession` (useQuestSession.ts:921) | `workingLevels.{mode}` (level, source, evidence) | `skillSnapshots/{childId}.workingLevels` | Client `computeStartLevel` (workingLevels.ts:53); Server `quest.ts` starting level + `loadSkillSnapshotContext` AI prompt | G20 — not displayed in Skill Snapshot UI; ~~G40~~ FIXED |
 | `endSession` (useQuestSession.ts:863–887) | `prioritySkills[n].level` (from quest findings: emerging→Emerging, mastered→Secure) | `skillSnapshots/{childId}.prioritySkills` | Same readers as `persist` above | — |
 | `endSession` (useQuestSession.ts:890–917) | `prioritySkills[n].masteryGate` | `skillSnapshots/{childId}.prioritySkills[n].masteryGate` | `evaluateSkipEligibility` in skip advisor (dead code — G5); `loadSkillSnapshotContext` loads but does not format into prompt (G6) | G4, G5, G6 — functionally unread; skip advisor not wired to UI, AI prompt ignores it |
@@ -1199,7 +1201,7 @@ Not yet. The capture layer is strong — quests, evals, scans, and daily logs al
 
 ### 4. Where does the AI operate with incomplete info the system actually has?
 
-- **Quest AI** is the worst case: no `workingLevels` (G40), only 1 cross-domain session history (G41), no engagement emoji or disposition signal (G42), no scan data (G37). It generates questions blind to Lincoln's proven stable level, prior session patterns, current energy, and workbook progress — all of which exist in Firestore.
+- **Quest AI** is the worst case: ~~no `workingLevels` (G40)~~ FIXED, ~~only 1 cross-domain session history (G41)~~ FIXED, no engagement emoji or disposition signal (G42), no scan data (G37). It generates questions blind to ~~Lincoln's proven stable level, prior session patterns,~~ current energy, and workbook progress — all of which exist in Firestore.
 - **Disposition AI** omits the `skillSnapshot` and `recentEval` shared context slices (G32), rolling its own weaker loader that extracts only `findings[].text` from 3 sessions (G31). It cannot say "Lincoln jumped two phonics levels this week" because it never sees the numbers.
 - **Planner AI** sees scan positions but not scan recommendations (G36), so it cannot honor a skip verdict. It receives skill snapshot data including "Secure → SKIP" guidance, but the client-side skip advisor that could enforce this structurally is dead code (G5, G11).
 
@@ -1217,11 +1219,11 @@ Ordered by impact-per-effort. Each closes the gaps most responsible for the "wel
 **Effort:** S
 **Status:** Implemented 2026-04-16. `workingLevels` added to `SnapshotData` type and `chat.ts` loader. `loadSkillSnapshotContext` now formats working levels with level/source/date/evidence. `quest.ts` reads `workingLevels[questMode]` as authoritative starting level, falls back to curriculum data, caps at `QUEST_MODE_LEVEL_CAP`. Client and server now use the same source of truth.
 
-### R2. Per-domain `recentEval` with depth > 1
+### R2. Per-domain `recentEval` with depth > 1 ✅ FIXED
 
 **Closes:** G16, G30, G41
 **Effort:** S
-Change `loadRecentEvalContext` to query by the requesting task's domain (or return the most recent per domain) and increase the limit to 2–3. Prevents a math eval from eclipsing phonics data before the next phonics quest. Every AI task that consumes `recentEval` immediately benefits.
+**Status:** Implemented 2026-04-16. Added `loadRecentEvalHistoryByDomain` in `chatTypes.ts` — queries per-domain (phonics, comprehension, math, fluency) with configurable depth (default 3 sessions). New `recentHistoryByDomain` context slice added to `contextSlices.ts`, used by quest task instead of the old cross-domain `recentEval`. Quest passes `questMode` as domain filter so phonics quest sees phonics history only. Existing `recentEval` slice preserved for plan/scan/shellyChat backward compatibility. Output format includes session type (quest vs guided), level, score, and most-recent findings.
 
 ### R3. Wire disposition task to shared context slices
 
