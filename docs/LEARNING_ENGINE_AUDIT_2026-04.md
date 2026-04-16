@@ -858,3 +858,171 @@ The Learning Map (`src/features/progress/learning-map/`) also has no references 
 | G31 | Disposition sees only `findings[].text`, not structured findings | Medium | `loadRecentEvaluations` at `disposition.ts:100-101` extracts `.text` only; loses `skill`, `status`, `evidence` structure; cannot generate targeted growth narratives |
 | G32 | Disposition omits `skillSnapshot` and `recentEval` shared slices | Medium | Context config at `contextSlices.ts:56` lacks both; handler rolls its own weaker loader instead |
 | G33 | Curriculum view has no eval skip guidance display | Low | Skip advisor logic exists but is dead code (G5); no UI surface shows "skip this" or "focus here" from eval findings |
+
+## Journey 4: Scan Returns 'Skip' Recommendation
+
+**Trace:** Shelly scans a workbook page, AI recommends skip.
+
+---
+
+### 1. Scan saved to `scans` collection?
+
+**Yes.** `src/core/hooks/useScan.ts:135-143`.
+
+`addDoc(scansCollection(familyId), {...})` fires immediately after the AI vision response is parsed, regardless of recommendation. The document is saved with `action: 'pending'` (line 130) — the skip recommendation lives inside `results.recommendation` on the document, not in the top-level `action` field.
+
+When Shelly later explicitly dismisses the scan (the "Skip" button in ScanResultsPanel), `recordAction` at `useScan.ts:159-168` updates the document: `updateDoc(docRef, { action: 'skipped' })`. This marks the *user's disposition* of the scan — separate from the AI's recommendation.
+
+When Shelly accepts the AI skip via "Accept & advance", `handleAcceptSkip` at `TodayPage.tsx:704-712` writes a `parentOverride` field onto the scan document with `recommendation: 'skip'` and `overriddenAt` timestamp.
+
+| Step | Written? | File:Line |
+|---|---|---|
+| Initial scan doc (action: `'pending'`) | **Yes** | `useScan.ts:135-143` |
+| User dismisses ("Skip" button) | **Yes** — action → `'skipped'` | `useScan.ts:164-165` |
+| User accepts ("Accept & advance") | **Yes** — parentOverride added | `TodayPage.tsx:704-712` |
+
+---
+
+### 2. `syncScanToConfig` advances `currentPosition`?
+
+**Conditionally — only on the "Accept & advance" path.**
+
+There are two distinct skip paths, and they differ:
+
+**Path A — Post-completion capture (useUnifiedCapture).** When Shelly captures a photo after completing a checklist item, `useUnifiedCapture.ts:93` calls `syncScanToConfig(childId, record.results)` with the **detected** lesson number. `syncScanToConfig` (`useScanToActivityConfig.ts:60-64`) only advances `currentPosition` if `lessonNumber > current`. If the AI recommended skip, the detected lesson number is the *current* lesson — it won't exceed `currentPosition`, so **no advancement occurs** through this path alone.
+
+**Path B — Explicit "Accept & advance" (handleAcceptSkip).** `TodayPage.tsx:699-702`:
+
+```ts
+await syncScanToConfig(selectedChildId, {
+  ...results,
+  curriculumDetected: { ...curriculum, lessonNumber: curriculum.lessonNumber + 1 },
+})
+```
+
+The caller **manually increments** `lessonNumber + 1` before passing to `syncScanToConfig`. Inside `syncScanToConfig` at `useScanToActivityConfig.ts:60-64`, the `+1` value exceeds `currentPosition`, so `updates.currentPosition = lessonNumber` fires.
+
+**Path C — "Skip to Next" button (handleSkipToNext).** `TodayPage.tsx:658-678` — user specifies a target lesson number. Same mechanism: caller passes the desired lesson number, `syncScanToConfig` writes it if it exceeds current.
+
+| Path | Advances position? | File:Line |
+|---|---|---|
+| Post-completion capture | **No** — detected lesson ≤ current | `useUnifiedCapture.ts:93` → `useScanToActivityConfig.ts:60-64` |
+| "Accept & advance" button | **Yes** — `lessonNumber + 1` forced | `TodayPage.tsx:699-702` → `useScanToActivityConfig.ts:62-63` |
+| "Skip to Next" button | **Yes** — user-specified target | `TodayPage.tsx:668-671` → `useScanToActivityConfig.ts:62-63` |
+
+---
+
+### 3. Auto-completes bypassed checklist items?
+
+**Yes, but only on the post-completion capture path. NOT on the "Accept & advance" path.**
+
+`autoCompleteBypassedItems` (`scanAdvance.ts:9-43`) marks checklist items sharing the same `activityConfigId` as `completed: true` with `gradeResult: "Scanned via lesson {N}"`. When `recommendation === 'skip'`, it additionally sets `skipReason: 'ai-recommended'` (line 18, 37).
+
+**Called from:** `useUnifiedCapture.ts:130-143` — fires after `syncScanToConfig` returns, gated on `configResult.position != null`.
+
+**NOT called from:** `handleAcceptSkip` (`TodayPage.tsx:681-723`). This handler manually builds its own checklist update at line 692-695: it sets `skipped: true` + `skipReason: SkipReason.AiRecommended` on the single scanned item only. Other items sharing the same `activityConfigId` are **not** auto-completed.
+
+| Path | Auto-completes? | What happens | File:Line |
+|---|---|---|---|
+| Post-completion capture | **Yes** — all items with same `activityConfigId` | `completed: true`, `skipReason: 'ai-recommended'` | `scanAdvance.ts:18-39`, called from `useUnifiedCapture.ts:133-142` |
+| "Accept & advance" | **No** — only the scanned item | `skipped: true`, `skipReason: 'ai-recommended'` on single item | `TodayPage.tsx:692-695` |
+
+**Gap:** The "Accept & advance" path does not call `autoCompleteBypassedItems`. If multiple checklist items reference the same workbook config, the other items remain uncompleted even though the position has advanced past them.
+
+---
+
+### 4. Updates `workingLevels` for that mode?
+
+**Only for math curricula. Not for reading or other subjects.**
+
+`syncScanToConfig` fires `updateMathWorkingLevel` as a fire-and-forget side effect (`useScanToActivityConfig.ts:81-83` for existing configs, lines 122-124 for new configs):
+
+```ts
+if (subject === SubjectBucket.Math) {
+  void updateMathWorkingLevel(familyId, childId, lessonNumber, curriculumName)
+}
+```
+
+`updateMathWorkingLevel` (`useScanToActivityConfig.ts:139-166`):
+1. Calls `deriveMathWorkingLevelFromScan(lessonNumber, curriculumName)` to map lesson ranges to quest levels.
+2. Reads the existing `skillSnapshots/{childId}` document (line 150).
+3. Guards with `canOverwriteWorkingLevel(currentMath)` — respects 48-hour manual override lock (line 156).
+4. Merges into `workingLevels.math` via `updateDoc` (line 159).
+
+**This logic is recommendation-agnostic.** It fires on any scan that hits a math curriculum, whether the recommendation is `'do'`, `'skip'`, `'quick-review'`, or `'modify'`. The skip recommendation itself has no effect on the level derivation — only the lesson number matters.
+
+| Subject | Updates `workingLevels`? | File:Line |
+|---|---|---|
+| Math | **Yes** — `deriveMathWorkingLevelFromScan` maps lesson → quest level | `useScanToActivityConfig.ts:81-83, 139-166` |
+| Reading / Phonics | **No** — no equivalent `updateReadingWorkingLevel` exists | — |
+| Language Arts / Other | **No** | — |
+
+**Gap:** Reading/phonics scans never update `workingLevels`. A child advancing through a phonics workbook via scans produces no working level signal for the quest system. Only math scans bridge this gap.
+
+---
+
+### 5. Updates Skill Snapshot?
+
+**Only the `workingLevels.math` field (via §4 above). No other Skill Snapshot fields are written.**
+
+The scan flow does NOT update:
+- `prioritySkills` — no mastery gate or level changes from scans
+- `supports`, `stopRules`, `evidenceDefinitions` — untouched
+- `conceptualBlocks` — untouched
+- `completedPrograms` — untouched
+
+The scan flow DOES write:
+- `workingLevels.math` via `updateDoc(snapshotRef, { workingLevels: merged, updatedAt })` at `useScanToActivityConfig.ts:159-162` — math only, fire-and-forget
+
+Additionally, `useUnifiedCapture.ts:107-119` feeds scan skills into the **Learning Map** (`childSkillMaps` collection) via `updateSkillMapFromFindings`, mapping scanned skills to mastered/emerging findings. This is a **separate** collection from `skillSnapshots` — it updates the curriculum knowledge graph, not the Skill Snapshot document.
+
+| Snapshot field | Updated? | File:Line |
+|---|---|---|
+| `workingLevels.math` | **Yes** (math curricula only) | `useScanToActivityConfig.ts:159-162` |
+| `workingLevels.phonics` | **No** | — |
+| `workingLevels.comprehension` | **No** | — |
+| `prioritySkills` | **No** | — |
+| Learning Map (`childSkillMaps`) | **Yes** (separate collection) | `useUnifiedCapture.ts:110-119` |
+
+---
+
+### 6. Triggers any downstream AI reaction in quest or planner?
+
+**No immediate trigger. Context available on next plan generation only.**
+
+**Planner (next plan generation):** The `plan` task context includes `recentScans` (`contextSlices.ts:46`). `loadRecentScansContext` (`contextSlices.ts:869-914`) loads the 10 most recent scans per child, groups by workbook (most recent per workbook), and formats as:
+
+```
+RECENT WORKBOOK SCANS (where the child left off):
+- GATB Math: Last at lesson/page 53 (multisyllable words) on 4/16/2026
+Use this to know what lesson to assign next. Cross-reference with Skill Snapshot to determine skip guidance.
+```
+
+The loader does **not** include the `recommendation` or `action` fields — it only extracts `lessonNumber` and `specificTopic`. The planner AI cannot see that the scan recommended "skip."
+
+**Quest (next quest session):** The `quest` task context does **NOT** include `recentScans` (`contextSlices.ts:51`). Quest sessions have no awareness of scan data. Working levels (§4) bridge math scans to quest starting levels, but nothing bridges reading/phonics scans.
+
+**Cloud Function triggers:** No Firestore triggers exist on the `scans` collection (`functions/src/index.ts` — zero `onWrite`/`onCreate`/`onUpdate` handlers for scans). All scan processing is client-driven.
+
+**Weekly review:** The `weeklyReview` Cloud Function (`functions/src/ai/evaluate.ts`) does not load scans. Its context includes day logs and evaluation sessions but not scan records.
+
+| Downstream system | Reads scan data? | Sees skip recommendation? | File:Line |
+|---|---|---|---|
+| Planner (next `plan` generation) | **Yes** — lesson position only | **No** — `recommendation` field not extracted | `contextSlices.ts:869-914` |
+| Quest (next session) | **No** — `recentScans` not in quest context | **No** | `contextSlices.ts:51` |
+| Weekly review | **No** | **No** | — |
+| Shelly Chat | **No** — `recentScans` not in shellyChat context | **No** | `contextSlices.ts:58-61` |
+| Cloud Function triggers | **None exist** on `scans` collection | N/A | `functions/src/index.ts` |
+
+---
+
+### Summary of Gaps
+
+| # | Gap | Severity | Notes |
+|---|---|---|---|
+| G34 | "Accept & advance" does not call `autoCompleteBypassedItems` | Medium | Other checklist items sharing the same `activityConfigId` remain uncompleted after position advances past them (`TodayPage.tsx:681-723` vs `useUnifiedCapture.ts:133-142`) |
+| G35 | Reading/phonics scans never update `workingLevels` | Medium | Only math scans bridge to quest levels via `deriveMathWorkingLevelFromScan`; a child advancing through a phonics workbook produces no quest-level signal (`useScanToActivityConfig.ts:81-83`) |
+| G36 | Planner does not see scan `recommendation` field | Medium | `loadRecentScansContext` extracts only `lessonNumber` and `specificTopic` — the AI planner cannot distinguish "do" from "skip" scans (`contextSlices.ts:886-903`) |
+| G37 | Quest context has no scan awareness | Low | `recentScans` not in quest task context (`contextSlices.ts:51`); quest starting level depends on `workingLevels` (math only) or `activityConfigs` — scan position changes are invisible to quest for reading |
+| G38 | No Cloud Function trigger on scan writes | Low | All scan-to-config processing is client-side and fire-and-forget; a failed `syncScanToConfig` or `updateMathWorkingLevel` is silently swallowed (`useScanToActivityConfig.ts:82, 123`) |
+| G39 | Scan skip has no skill snapshot signal for non-math | Medium | A "skip" recommendation implies mastery, but for reading/LA/other subjects, no `prioritySkills` level, `masteryGate`, or `workingLevels` update occurs — the mastery signal is lost |
