@@ -1113,3 +1113,27 @@ Context slices for quest (`contextSlices.ts:51`): `["childProfile", "sightWords"
 | Quest session history beyond the single most recent eval (multiple `evaluationSessions`) | Yes — `evaluationSessions` collection holds all completed sessions | No — `loadRecentEvalContext` at `functions/src/ai/chatTypes.ts:188-200` uses `.limit(1)`, returning only the single most recent session |
 | Word mastery progression over time (`wordProgress` subcollection — trend, not just current) | Yes — `children/{childId}/wordProgress` stores per-word `correctCount`, `wrongCount`, `skippedCount` | No — `functions/src/ai/tasks/quest.ts:92-131` loads current counts only; no timestamps, no deltas, no trend |
 | Hours/time data (`hours` collection — time per subject) | Yes — `hours` + `hoursAdjustments` collections; loaded by `hoursProgress` slice at `contextSlices.ts:332-333` | No — `hoursProgress` is not in quest's slice list (`contextSlices.ts:51`); only used by `plan` |
+
+---
+
+## Journey 5 (Part C): Quest AI — Top 3 Context Gaps
+
+Based on Parts A and B, these are the three missing context items with the highest impact on question quality.
+
+### G40 — `workingLevels` not in AI prompt
+
+**What's missing:** The `workingLevels` map on `skillSnapshots/{childId}` — the authoritative numeric progression level computed from prior quest sessions — is never loaded or formatted by any Cloud Function code. The quest task handler (`quest.ts:28-88`) derives `suggestedStartLevel` solely from `activityConfigs` curriculum mastery data; `loadSkillSnapshotContext` (`contextSlices.ts:643-732`) formats priority skills, stop rules, supports, and conceptual blocks but omits `workingLevels` entirely.
+
+**Why it matters:** The client uses `workingLevels.phonics` to set the session's numeric starting level (`computeStartLevel` at `workingLevels.ts:53-56`), but the AI generating questions never sees this number. When the client says "start at Level 5" and the AI's own `STARTING LEVEL:` directive says Level 3 (from curriculum data) — or says nothing at all (no matching curriculum) — the AI may generate questions misaligned with the adaptive level the client is enforcing. This is the root cause of the client/server starting-level divergence (G9, G12, G19, G29).
+
+### G41 — Quest history limited to single most-recent cross-domain session
+
+**What's missing:** `loadRecentEvalContext` (`chatTypes.ts:188-200`) queries `evaluationSessions` with `.limit(1)` across all domains and session types. No domain filter, no mode filter. The quest AI sees at most one prior session's findings and recommendations — and if a comprehension eval or math eval happened after the last phonics quest, the phonics data is completely eclipsed.
+
+**Why it matters:** Without domain-filtered history, the AI generating a phonics quest cannot see what phonics skills were tested last time, what patterns the child struggled with, or what level the prior phonics session reached. It cannot avoid repeating question types or target known weak spots. The `wordMastery` slice partially compensates for word-level repetition, but question format, skill focus, and difficulty trajectory across sessions are invisible. This compounds the single-session limit: even when the most recent session IS phonics, the AI sees only one session — it cannot detect multi-session trends like "consistently misses vowel teams at Level 5."
+
+### G42 — No engagement or disposition signal
+
+**What's missing:** Neither the `engagement` context slice (day-log emoji data from checklist items) nor `dispositionCache`/`dispositionOverrides` (parent-confirmed or parent-edited disposition narratives on `children/{childId}`) are included in the quest context. The quest slice list (`contextSlices.ts:51`) omits `engagement` entirely; disposition data has no loader in Cloud Functions at all.
+
+**Why it matters:** The quest AI generates questions in a fixed adaptive pattern (level up after 2 correct, level down after 2 wrong) with no awareness of the child's current energy, motivation, or disposition profile. For Lincoln — whose engagement varies significantly with energy mode and who has speech + neurodivergence accommodations — a "low energy" signal should bias toward shorter prompts, familiar formats, and more scaffolding. A "high engagement" signal could allow the AI to introduce harder question types or unfamiliar patterns. Without this data, the AI treats every session identically regardless of the child's state, missing the disposition-over-content-mastery principle that is the project's pedagogical north star.
