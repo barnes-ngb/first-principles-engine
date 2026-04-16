@@ -759,3 +759,102 @@ All three are conditional on `sessionDocId` being truthy (XP/diamonds) or fire-a
 | G26 | Math working levels not derived from evaluation | Medium | TODO at `EvaluateChatPage.tsx:579` — math evaluations don't update `workingLevels.math` |
 | G27 | `setDoc` without `merge` erases unlisted fields | High | Line 598 uses bare `setDoc`, not `{ merge: true }`. Any fields on the existing snapshot not rebuilt by `handleSaveAndApply` (e.g. `completedPrograms`) are silently dropped |
 | G28 | Hours logged on eval complete, not on apply | Low | By design, but if Shelly never taps "Apply", hours are still counted without any snapshot update — the hours exist without a corresponding skill record |
+
+## Journey 3 (Part B): Eval Findings Downstream
+
+**Trace:** After Shelly taps "Apply to Skill Snapshot", what downstream systems read the eval findings on their next run?
+
+---
+
+### 1. Does the next planner generation use eval findings?
+
+**Yes — two paths.**
+
+The `plan` task context includes both `recentEval` and `skillSnapshot` (`functions/src/ai/contextSlices.ts:42-47`).
+
+**Path A — `recentEval` slice.** `loadRecentEvalContext` (`functions/src/ai/chatTypes.ts:188-258`) queries `evaluationSessions` for the single most recent `complete` session (`limit(1)`, line 199). The guided eval session record (written at eval completion, before Apply) contains the AI-generated `findings[]` and `recommendations[]`. These are formatted into the prompt as:
+- `Findings:` → `- {skill}: {status} — {evidence}` (`chatTypes.ts:238-241`)
+- `Recommendations:` → `- Priority {n}: {skill} — {action} ({frequency}, {duration})` (`chatTypes.ts:244-249`)
+
+**Path B — `skillSnapshot` slice.** `loadSkillSnapshotContext` (`functions/src/ai/contextSlices.ts:642-732`) reads the snapshot document that Apply just wrote. The planner AI sees:
+- Updated `prioritySkills` with levels set from findings (`contextSlices.ts:674-677`)
+- `stopRules` — topics to exclude from plans (`contextSlices.ts:682-686`)
+- `supports` — learning accommodations (`contextSlices.ts:692-695`)
+- `conceptualBlocks` (ADDRESS_NOW only) with strategies (`contextSlices.ts:700-706`)
+- Planning guidance: "Skills at 'Secure' → SKIP", "Emerging → short daily practice", etc. (`contextSlices.ts:723-728`)
+- `completedPrograms` exclusion list (`contextSlices.ts:710-717`)
+
+| Verdict | **Yes** — planner sees eval findings via both `recentEval` (raw findings/recommendations from session record, `chatTypes.ts:237-249`) and `skillSnapshot` (applied priority skills + stop rules + conceptual blocks + skip guidance, `contextSlices.ts:669-729`). |
+|---|---|
+
+---
+
+### 2. Does the next quest avoid or test shaky areas?
+
+**Partially. Sees findings text but not structured skip/focus directives.**
+
+The `quest` task context is `["childProfile", "sightWords", "recentEval", "wordMastery", "skillSnapshot", "workbookPaces"]` (`functions/src/ai/contextSlices.ts:51`).
+
+- **`recentEval`**: Same `limit(1)` session query as planner — findings + recommendations are in the prompt (`chatTypes.ts:237-249`). The AI sees which skills are `emerging`/`not-yet`/`secure`.
+- **`skillSnapshot`**: Priority skills with updated levels, stop rules, supports, conceptual blocks, and the same "Secure → SKIP" guidance (`contextSlices.ts:723-728`).
+
+**However**, the quest task handler (`functions/src/ai/tasks/quest.ts:15-89`) computes `suggestedStartLevel` solely from `activityConfigs` curriculum completion data (lines 28-88) — it **never reads** `workingLevels` or `prioritySkills` from the snapshot for level selection. The AI prompt text includes the skill snapshot context (so the model can see shaky areas), but no structured directive forces avoidance or targeting.
+
+**Also**: `recentEval` loads only 1 session across all domains (`limit(1)`, `chatTypes.ts:199`). If a math eval happened after the reading eval, the reading findings are eclipsed — the quest AI sees no reading-specific findings (pre-existing G16).
+
+| Verdict | **Partial** — AI prompt includes findings and "Secure → SKIP" guidance from `skillSnapshot` (`contextSlices.ts:723-728`) + raw findings from `recentEval` (`chatTypes.ts:237-241`). But starting level is derived only from curriculum data (`quest.ts:28-88`), not from eval findings or `workingLevels`. No structured "focus on shaky skill X" directive exists. |
+|---|---|
+
+---
+
+### 3. Does Learning Profile reflect the eval findings?
+
+**Weakly. Sees findings text but not the applied snapshot data.**
+
+The `disposition` task context is `["charter", "childProfile", "engagement", "gradeResults"]` (`functions/src/ai/contextSlices.ts:56`). Notably: **no `recentEval`, no `skillSnapshot`**.
+
+Instead, the disposition task handler runs its own `loadRecentEvaluations()` (`functions/src/ai/tasks/disposition.ts:82-106`), which:
+- Queries `evaluationSessions` where `status == 'complete'`, `limit(3)` (line 87-93)
+- Extracts only `findings[].text` — a single string per finding (line 100-101)
+- Formats as: `{domain} ({evaluatedAt}): {findings joined by "; "}` (line 103)
+- Injected as `RECENT EVALUATION SESSIONS:` into the user message (line 380-381)
+
+**What the disposition AI sees from eval findings:**
+- Flat text summaries of up to 3 recent sessions' findings
+
+**What it does NOT see:**
+- Applied priority skill levels (no `skillSnapshot` slice)
+- Structured `skill`/`status`/`evidence` fields (only `text` is extracted)
+- Stop rules, supports, or conceptual blocks
+- Recommendations (not extracted by `loadRecentEvaluations`)
+- `workingLevels` numeric progression
+
+The `childProfile` slice IS included, and it formats `prioritySkills` as `- {label} ({tag}): {level}` — so the disposition AI sees updated levels (e.g., `emerging`) but without attribution to the eval session.
+
+| Verdict | **Weak** — sees `findings[].text` from up to 3 sessions via handler's own loader (`disposition.ts:100-103`), not via shared context system. Does not see structured findings, stop rules, conceptual blocks, or recommendations. Cannot attribute skill level changes to the eval. |
+|---|---|
+
+---
+
+### 4. Does the curriculum view show eval-derived skip guidance?
+
+**No.** The skip advisor logic (`src/features/planner-chat/skipAdvisor.logic.ts`) is not imported by any UI component — it is only referenced in its own file and test file (`skipAdvisor.logic.test.ts`). Pre-existing G5.
+
+The Curriculum tab (`src/features/progress/CurriculumTab.tsx`) has no references to `conceptualBlock`, `skipGuid`, `evalFinding`, `finding`, or `skipAdvisor` (grep returns zero matches). It calls `updateSkillMapFromFindings` (line 253) only on **scan** events, not to display eval-derived guidance.
+
+The Learning Map (`src/features/progress/learning-map/`) also has no references to findings, conceptual blocks, or skip guidance (grep returns zero matches). It renders skill nodes from `childSkillMaps`, which are updated by eval findings via `updateSkillMapFromFindings` (`EvaluateChatPage.tsx:602`), but the rendering does not surface skip/focus recommendations.
+
+| Verdict | **No** — skip advisor logic is dead code (G5). Curriculum tab and Learning Map render skill status nodes (updated from findings) but display no skip guidance, conceptual blocks, or focus recommendations from evals. |
+|---|---|
+
+---
+
+### Summary of Gaps
+
+| # | Gap | Severity | Notes |
+|---|---|---|---|
+| G29 | Quest starting level ignores eval-derived `workingLevels` | Medium | `quest.ts:28-88` reads only `activityConfigs` for level; eval findings update `workingLevels` but the quest task never reads them (compounds G9, G12, G19) |
+| G30 | `recentEval` eclipses cross-domain for quest | Medium | `limit(1)` across all domains — a newer math eval hides reading findings from next reading quest (restatement of G16 in eval context) |
+| G31 | Disposition sees only `findings[].text`, not structured findings | Medium | `loadRecentEvaluations` at `disposition.ts:100-101` extracts `.text` only; loses `skill`, `status`, `evidence` structure; cannot generate targeted growth narratives |
+| G32 | Disposition omits `skillSnapshot` and `recentEval` shared slices | Medium | Context config at `contextSlices.ts:56` lacks both; handler rolls its own weaker loader instead |
+| G33 | Curriculum view has no eval skip guidance display | Low | Skip advisor logic exists but is dead code (G5); no UI surface shows "skip this" or "focus here" from eval findings |
