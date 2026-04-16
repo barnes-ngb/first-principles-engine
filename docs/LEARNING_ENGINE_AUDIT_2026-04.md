@@ -667,7 +667,7 @@ The Progress page has 5 tabs (`src/features/progress/ProgressPage.tsx:39-43`):
 | G22 | Quest hours have no UI callout in Records | Low | `source: 'quest-session'` entries blend silently into totals; `creative-timer` gets a callout but quest does not |
 | G23 | Portfolio has zero quest visibility | Low | Quest sessions create no artifacts; portfolio queries only artifacts collection |
 | G24 | Compliance exports exclude session-level quest data | Low | Quest hours counted in totals but session findings, scores, and level progression not included in CSV/HTML exports |
-| G25 | Learning Profile tab has no direct quest data path | Medium | The `disposition` context slices omit `recentEval`, `skillSnapshot`, `wordMastery`; quest performance enters only through the handler's own `loadRecentEvaluations()` (3-session, findings-text-only) |
+| G25 | ~~Learning Profile tab has no direct quest data path~~ | ~~Medium~~ | **FIXED** (R3). Disposition task now receives `recentHistoryByDomain`, `skillSnapshot`, and `wordMastery` shared slices. Quest performance (levels, scores, structured findings) flows into disposition narratives via the same per-domain eval history the quest system uses. |
 
 ## Journey 3 (Part A): Guided Eval Write Paths
 
@@ -855,8 +855,8 @@ The Learning Map (`src/features/progress/learning-map/`) also has no references 
 |---|---|---|---|
 | G29 | ~~Quest starting level ignores eval-derived `workingLevels`~~ | ~~Medium~~ | **FIXED** (R1). `quest.ts` now reads `snapshotData.workingLevels[questMode]` as primary starting level source. Eval-derived, quest-derived, and scan-derived workingLevels all flow through. |
 | G30 | ~~`recentEval` eclipses cross-domain for quest~~ | ~~Medium~~ | **FIXED** (R2). Quest switched from `recentEval` to `recentHistoryByDomain` with per-domain querying. A math eval no longer hides phonics data from the next phonics quest. |
-| G31 | Disposition sees only `findings[].text`, not structured findings | Medium | `loadRecentEvaluations` at `disposition.ts:100-101` extracts `.text` only; loses `skill`, `status`, `evidence` structure; cannot generate targeted growth narratives |
-| G32 | Disposition omits `skillSnapshot` and `recentEval` shared slices | Medium | Context config at `contextSlices.ts:56` lacks both; handler rolls its own weaker loader instead |
+| G31 | ~~Disposition sees only `findings[].text`, not structured findings~~ | ~~Medium~~ | **FIXED** (R3). Removed bespoke `loadRecentEvaluations` loader. Disposition now uses `recentHistoryByDomain` shared slice which provides structured `{skill, status, evidence}` findings per domain. Prompt updated to cite specific session scores, levels, and evidence. |
+| G32 | ~~Disposition omits `skillSnapshot` and `recentEval` shared slices~~ | ~~Medium~~ | **FIXED** (R3). Added `recentHistoryByDomain`, `skillSnapshot`, and `wordMastery` to disposition task context in `contextSlices.ts`. Handler now receives working levels, conceptual blocks, per-domain eval history, and word mastery data. |
 | G33 | Curriculum view has no eval skip guidance display | Low | Skip advisor logic exists but is dead code (G5); no UI surface shows "skip this" or "focus here" from eval findings |
 
 ## Journey 4: Scan Returns 'Skip' Recommendation
@@ -1225,11 +1225,11 @@ Ordered by impact-per-effort. Each closes the gaps most responsible for the "wel
 **Effort:** S
 **Status:** Implemented 2026-04-16. Added `loadRecentEvalHistoryByDomain` in `chatTypes.ts` — queries per-domain (phonics, comprehension, math, fluency) with configurable depth (default 3 sessions). New `recentHistoryByDomain` context slice added to `contextSlices.ts`, used by quest task instead of the old cross-domain `recentEval`. Quest passes `questMode` as domain filter so phonics quest sees phonics history only. Existing `recentEval` slice preserved for plan/scan/shellyChat backward compatibility. Output format includes session type (quest vs guided), level, score, and most-recent findings.
 
-### R3. Wire disposition task to shared context slices
+### R3. Wire disposition task to shared context slices — **DONE**
 
 **Closes:** G25, G31, G32
 **Effort:** S
-Add `skillSnapshot` and `recentEval` to the disposition task's slice list in `contextSlices.ts:56` and remove (or supplement) the handler's bespoke `loadRecentEvaluations` loader. Learning Profile becomes the first surface to synthesize structured quest metrics, eval findings, and skill levels into a growth narrative — matching the "disposition over content mastery" north star.
+~~Add `skillSnapshot` and `recentEval` to the disposition task's slice list in `contextSlices.ts:56` and remove (or supplement) the handler's bespoke `loadRecentEvaluations` loader.~~ Added `recentHistoryByDomain`, `skillSnapshot`, and `wordMastery` shared slices to the disposition task context. Removed the bespoke `loadRecentEvaluations` loader. Updated the disposition prompt to reference structured eval data (per-domain session scores/levels/findings, working levels, conceptual blocks, word mastery). Learning Profile now synthesizes the same structured quest metrics, eval findings, and skill levels that the planner receives.
 
 ### R4. Fix `setDoc` data loss in eval Apply ✅ FIXED
 
