@@ -36,13 +36,23 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.evaluate).not.toContain("hoursProgress");
   });
 
-  it("quest includes workbookPaces but not charter or enriched context", () => {
+  it("quest includes recentHistoryByDomain instead of recentEval", () => {
     expect(TASK_CONTEXT.quest).toContain("childProfile");
     expect(TASK_CONTEXT.quest).toContain("sightWords");
-    expect(TASK_CONTEXT.quest).toContain("recentEval");
+    expect(TASK_CONTEXT.quest).toContain("recentHistoryByDomain");
     expect(TASK_CONTEXT.quest).toContain("workbookPaces");
+    expect(TASK_CONTEXT.quest).not.toContain("recentEval");
     expect(TASK_CONTEXT.quest).not.toContain("charter");
     expect(TASK_CONTEXT.quest).not.toContain("engagement");
+  });
+
+  it("plan still uses recentEval (backward compat)", () => {
+    expect(TASK_CONTEXT.plan).toContain("recentEval");
+    expect(TASK_CONTEXT.plan).not.toContain("recentHistoryByDomain");
+  });
+
+  it("shellyChat still uses recentEval (backward compat)", () => {
+    expect(TASK_CONTEXT.shellyChat).toContain("recentEval");
   });
 });
 
