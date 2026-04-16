@@ -10,7 +10,7 @@ import {
   loadSightWordSummary,
   loadWordMasterySummary,
 } from "./chat.js";
-import { loadRecentEvalContext } from "./chatTypes.js";
+import { loadRecentEvalContext, loadRecentEvalHistoryByDomain, formatEvalHistoryByDomain } from "./chatTypes.js";
 import { getGatbProgress } from "./data/gatbCurriculum.js";
 
 // ── Slice definitions ───────────────────────────────────────────
@@ -33,6 +33,7 @@ export const ContextSlice = {
   SkillSnapshot: "skillSnapshot",
   RecentScans: "recentScans",
   ActivityConfigs: "activityConfigs",
+  RecentHistoryByDomain: "recentHistoryByDomain",
 } as const;
 export type ContextSlice = (typeof ContextSlice)[keyof typeof ContextSlice];
 
@@ -48,12 +49,15 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   chat: ["charter", "childProfile"],
   generate: ["charter", "childProfile"],
   evaluate: ["charter", "childProfile", "sightWords", "wordMastery"],
-  quest: ["childProfile", "sightWords", "recentEval", "wordMastery", "skillSnapshot", "workbookPaces"],
+  quest: ["childProfile", "sightWords", "recentHistoryByDomain", "wordMastery", "skillSnapshot", "workbookPaces", "recentScans"],
   generateStory: ["childProfile", "sightWords", "wordMastery"],
   analyzePatterns: ["childProfile"],
   workshop: ["charter", "childProfile", "workshopGames"],
   analyzeWorkbook: ["charter", "childProfile"],
-  disposition: ["charter", "childProfile", "engagement", "gradeResults"],
+  disposition: [
+    "charter", "childProfile", "engagement", "gradeResults",
+    "recentHistoryByDomain", "skillSnapshot", "wordMastery",
+  ],
   scan: ["childProfile", "recentEval", "skillSnapshot", "activityConfigs"],
   shellyChat: [
     "charter", "childProfile", "engagement", "gradeResults",
@@ -287,6 +291,8 @@ export interface SliceContext {
   childId: string;
   childData: { name: string; grade?: string };
   snapshotData: SnapshotData | undefined;
+  /** Optional domain hint for domain-scoped slices (e.g. quest mode). */
+  domain?: string;
 }
 
 /**
@@ -345,6 +351,14 @@ export async function buildContextForTask(
   }
   if (slices.includes("recentEval")) {
     fetches.push({ slice: "recentEval", promise: loadRecentEvalContext(db, familyId, childId) });
+  }
+  if (slices.includes("recentHistoryByDomain")) {
+    fetches.push({
+      slice: "recentHistoryByDomain",
+      promise: loadRecentEvalHistoryByDomain(db, familyId, childId, {
+        filterDomain: ctx.domain,
+      }),
+    });
   }
   if (slices.includes("wordMastery")) {
     fetches.push({ slice: "wordMastery", promise: loadWordMasterySummary(db, familyId, childId) });
@@ -516,10 +530,17 @@ export async function buildContextForTask(
     if (sightWordContext) sections.push(sightWordContext);
   }
 
-  // Recent eval
+  // Recent eval (cross-domain most-recent — kept for plan/scan/shellyChat backward compat)
   if (sliceData.has("recentEval")) {
     const evalContext = sliceData.get("recentEval") as string;
     if (evalContext) sections.push(evalContext);
+  }
+
+  // Recent eval history by domain (per-domain depth — used by quest)
+  if (sliceData.has("recentHistoryByDomain")) {
+    const historyText = sliceData.get("recentHistoryByDomain") as string;
+    const formatted = formatEvalHistoryByDomain(historyText);
+    if (formatted) sections.push(formatted);
   }
 
   // Word mastery (quest word progress)
@@ -664,6 +685,7 @@ async function loadSkillSnapshotContext(
       strategies?: string[];
     }>;
     completedPrograms?: string[];
+    workingLevels?: Record<string, { level: number; updatedAt: string; source: string; evidence?: string }>;
   };
 
   const lines: string[] = ["SKILL SNAPSHOT (from evaluations):"];
@@ -703,6 +725,18 @@ async function loadSkillSnapshotContext(
     for (const b of addressNow) {
       const strategies = b.strategies?.length ? ` — Strategies: ${b.strategies.join("; ")}` : "";
       lines.push(`- ${b.name} (affects: ${b.affectedSkills.join(", ")}): ${b.rationale}${strategies}`);
+    }
+  }
+
+  // Working levels (quest progression)
+  const wl = data.workingLevels;
+  if (wl && Object.keys(wl).length > 0) {
+    lines.push("Working levels (updated when quest/eval completes):");
+    for (const [mode, entry] of Object.entries(wl)) {
+      const dateStr = entry.updatedAt ? new Date(entry.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "unknown";
+      const evidenceStr = entry.evidence ? ` — ${entry.evidence}` : "";
+      const label = mode.charAt(0).toUpperCase() + mode.slice(1);
+      lines.push(`- ${label}: Level ${entry.level} (source: ${entry.source}, ${dateStr}${evidenceStr})`);
     }
   }
 
@@ -865,7 +899,38 @@ async function loadActivityConfigsContext(
 
 // ── Recent scans loader ─────────────────────────────────────
 
-/** Load recent curriculum scans to tell the planner where the child left off in each workbook. */
+/** Scan record shape used by the context loader. */
+interface ScanDocData {
+  createdAt?: string;
+  action?: string;
+  parentOverride?: {
+    recommendation?: string;
+  } | null;
+  results?: {
+    pageType?: string;
+    subject?: string;
+    specificTopic?: string;
+    recommendation?: string;
+    recommendationReason?: string;
+    curriculumDetected?: { name?: string; lessonNumber?: number; pageNumber?: number };
+  } | null;
+}
+
+/**
+ * Compute effective recommendation: parentOverride wins over AI recommendation.
+ * Returns undefined if neither is available.
+ */
+function getEffectiveRec(scan: ScanDocData): string | undefined {
+  if (scan.parentOverride?.recommendation) return scan.parentOverride.recommendation;
+  if (scan.results?.recommendation) return scan.results.recommendation;
+  return undefined;
+}
+
+/**
+ * Load recent curriculum scans with recommendations.
+ * Includes subject, pageType, recommendation (AI + parent override),
+ * curriculum detected, and date — so planner/quest can see skip/do verdicts.
+ */
 async function loadRecentScansContext(
   db: Firestore,
   familyId: string,
@@ -880,35 +945,71 @@ async function loadRecentScansContext(
 
   if (snap.empty) return "";
 
-  // Group by workbook, keep most recent per workbook
-  const byWorkbook = new Map<string, { topics: string; lesson: string; date: string }>();
+  // Keep up to 5 most recent non-certificate scans
+  const recent: Array<{
+    workbook: string;
+    lesson: string;
+    subject: string;
+    pageType: string;
+    topics: string;
+    recommendation: string;
+    effectiveRecommendation: string;
+    hasParentOverride: boolean;
+    date: string;
+  }> = [];
+
   for (const scanDoc of snap.docs) {
-    const scan = scanDoc.data() as {
-      createdAt?: string;
-      results?: {
-        pageType?: string;
-        specificTopic?: string;
-        curriculumDetected?: { name?: string; lessonNumber?: number; pageNumber?: number };
-      } | null;
-    };
+    if (recent.length >= 5) break;
+
+    const scan = scanDoc.data() as ScanDocData;
     if (!scan.results || scan.results.pageType === "certificate") continue;
+
     const detected = scan.results.curriculumDetected;
-    const wb = detected?.name || "Unknown";
-    if (byWorkbook.has(wb)) continue; // already have a more recent one
-
-    const topics = scan.results.specificTopic || "unknown content";
+    const workbook = detected?.name || "Unknown";
     const lesson = String(detected?.lessonNumber ?? detected?.pageNumber ?? "?");
+    const subject = scan.results.subject || "unknown";
+    const pageType = scan.results.pageType || "worksheet";
+    const topics = scan.results.specificTopic || "unknown content";
+    const recommendation = scan.results.recommendation || "do";
+    const effectiveRec = getEffectiveRec(scan) || recommendation;
+    const hasParentOverride = !!scan.parentOverride?.recommendation;
     const date = scan.createdAt ? new Date(scan.createdAt).toLocaleDateString() : "unknown date";
-    byWorkbook.set(wb, { topics, lesson, date });
+
+    recent.push({ workbook, lesson, subject, pageType, topics, recommendation, effectiveRecommendation: effectiveRec, hasParentOverride, date });
   }
 
-  if (byWorkbook.size === 0) return "";
+  if (recent.length === 0) return "";
 
-  const lines = ["RECENT WORKBOOK SCANS (where the child left off):"];
-  for (const [wb, info] of byWorkbook) {
-    lines.push(`- ${wb}: Last at lesson/page ${info.lesson} (${info.topics}) on ${info.date}`);
+  const lines = ["RECENT WORKBOOK SCANS (last scanned, with AI recommendations):"];
+  for (const s of recent) {
+    let line = `- ${s.workbook}: lesson/page ${s.lesson}, ${s.subject} (${s.topics}) on ${s.date}`;
+    line += ` — recommendation: ${s.effectiveRecommendation}`;
+    if (s.hasParentOverride) {
+      line += ` (parent override; AI said: ${s.recommendation})`;
+    }
+    lines.push(line);
   }
-  lines.push("Use this to know what lesson to assign next. Cross-reference with Skill Snapshot to determine skip guidance.");
+
+  // Summarize skip patterns
+  const skipCount = recent.filter((s) => s.effectiveRecommendation === "skip").length;
+  const quickReviewCount = recent.filter((s) => s.effectiveRecommendation === "quick-review").length;
+  if (skipCount > 0 || quickReviewCount > 0) {
+    lines.push("");
+    lines.push("SCAN RECOMMENDATION SUMMARY:");
+    if (skipCount > 0) {
+      lines.push(`- ${skipCount} scan(s) recommended SKIP — child may be ahead of this material. Consider advancing.`);
+    }
+    if (quickReviewCount > 0) {
+      lines.push(`- ${quickReviewCount} scan(s) recommended QUICK-REVIEW — child mostly knows this but needs brief reinforcement.`);
+    }
+  }
+
+  lines.push("");
+  lines.push("Use scan recommendations to calibrate plans and quest difficulty:");
+  lines.push("- 'skip' = child has mastered this content, advance past it");
+  lines.push("- 'quick-review' = mostly known, brief practice only");
+  lines.push("- 'do' = appropriate level, assign normally");
+  lines.push("- 'modify' = needs adaptation (see teacher notes on scan)");
 
   return lines.join("\n");
 }

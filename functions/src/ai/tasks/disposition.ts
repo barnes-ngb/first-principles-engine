@@ -6,8 +6,9 @@ import { buildContextForTask } from "../contextSlices.js";
 
 /**
  * Task: disposition
- * Context: charter + childProfile + engagement + gradeResults (via buildContextForTask)
- *          + specialized 4-week day log aggregation, recent evaluations, recent lab reports
+ * Context: charter + childProfile + engagement + gradeResults + recentHistoryByDomain
+ *          + skillSnapshot + wordMastery (via buildContextForTask)
+ *          + specialized 4-week day log aggregation, recent lab reports, chapter responses
  * Model: Sonnet
  */
 
@@ -77,32 +78,6 @@ async function loadRecentDayLogs(
       } as DayLogEntry;
     })
     .filter((d): d is DayLogEntry => d !== null);
-}
-
-async function loadRecentEvaluations(
-  db: Firestore,
-  familyId: string,
-  childId: string,
-): Promise<string> {
-  const snap = await db
-    .collection(`families/${familyId}/evaluationSessions`)
-    .where("childId", "==", childId)
-    .where("status", "==", "complete")
-    .orderBy("evaluatedAt", "desc")
-    .limit(3)
-    .get();
-
-  if (snap.empty) return "No recent evaluation sessions.";
-
-  return snap.docs
-    .map((doc) => {
-      const d = doc.data();
-      const findings = Array.isArray(d.findings)
-        ? (d.findings as Array<{ text?: string }>).map((f) => f.text ?? "").filter(Boolean).join("; ")
-        : "";
-      return `${d.domain ?? "unknown"} (${d.evaluatedAt ?? "?"}): ${findings || "no findings"}`;
-    })
-    .join("\n");
 }
 
 interface ChapterResponseEntry {
@@ -293,10 +268,12 @@ export const handleDisposition = async (
   });
   const familyContext = contextSections.join("\n\n");
 
-  // Load specialized data in parallel (beyond what buildContextForTask provides)
-  const [dayLogs, evalSummary, labSummary, chapterResponses] = await Promise.all([
+  // Load specialized data in parallel (beyond what buildContextForTask provides).
+  // Evaluation history, skill snapshot, word mastery, and engagement are now
+  // provided by shared context slices (recentHistoryByDomain, skillSnapshot,
+  // wordMastery, engagement) — no need for the old loadRecentEvaluations loader.
+  const [dayLogs, labSummary, chapterResponses] = await Promise.all([
     loadRecentDayLogs(db, familyId, childId, 4),
-    loadRecentEvaluations(db, familyId, childId),
     loadRecentLabReports(db, familyId, childId),
     loadRecentChapterResponses(db, familyId, childId, 4),
   ]);
@@ -319,19 +296,25 @@ You are generating a Learning Disposition Profile for ${childData.name}. This is
 FIVE DISPOSITIONS TO ASSESS:
 
 1. **Curiosity (Wonder)**: Does the child ask questions, explore new topics, show interest beyond requirements?
-   Observable signals: variety of subjects engaged with, evidence artifacts created voluntarily, engagement ratings of "engaged", new topics explored.
+   Observable signals: variety of subjects engaged with, evidence artifacts created voluntarily, engagement ratings of "engaged", new topics explored, word mastery breadth.
 
 2. **Persistence (Build)**: Does the child stick with hard things, complete tasks, return to challenges?
-   Observable signals: completion rates, engagement with struggled items (returning vs refusing), consistency across days, time spent on harder subjects.
+   Observable signals: completion rates, engagement with struggled items (returning vs refusing), consistency across days, time spent on harder subjects. Use evaluation history to cite specific evidence — e.g. "got 4/6 correct at Level 5 in phonics quest on Apr 8, then returned and improved to 5/6". Reference working levels and level progression across sessions when available.
 
 3. **Articulation (Explain)**: Can the child express what they've learned, teach others, narrate their thinking?
    Observable signals: grade results with explanations, teach-back artifacts, narration quality, chapter discussion audio recordings, lab report explanations.
 
 4. **Self-Awareness (Reflect)**: Does the child recognize their own patterns, energy, and needs?
-   Observable signals: engagement self-reports, retro notes, evidence of choosing appropriate difficulty, recognizing when to stop.
+   Observable signals: engagement self-reports, retro notes, evidence of choosing appropriate difficulty, recognizing when to stop. Reference conceptual blocks data when available — a child who avoids a blocked area may show self-awareness, not avoidance.
 
 5. **Ownership (Share)**: Does the child take initiative, contribute to family learning, share discoveries?
    Observable signals: manual checklist additions, evidence artifacts initiated by child, lab predictions, project notes.
+
+USE THE STRUCTURED DATA PROVIDED:
+- **Evaluation History by Domain**: Per-domain session results with scores, levels, and structured findings (skill/status/evidence). Cite specific sessions: "In the Apr 8 phonics quest, Lincoln scored 4/6 at Level 5 — showing persistence under challenge."
+- **Skill Snapshot**: Working levels (current quest/eval progression per domain), conceptual blocks (areas where the child is stuck), priority skills, and supports. Use working levels to contextualize: "Lincoln is working at Level 5 in phonics, up from Level 3 in March."
+- **Word Mastery**: Sight word and vocabulary progress. Use breadth/depth of mastered words as a curiosity and persistence signal.
+- **Activity Engagement**: How the child emotionally engages with different activities. This is the most direct disposition signal — "engaged" vs "struggled" vs "refused" maps directly to curiosity and persistence.
 
 LEVEL VALUES:
 - "growing": Clear, consistent evidence across multiple days/weeks
@@ -365,7 +348,7 @@ TONE:
 - Portfolio over grades. Diamonds, not scores.
 - Never shame. Thin data is honestly reported, not padded.
 - Rest by design. A light week is not failure.
-- Be specific — cite actual data patterns, not generic encouragements.
+- Be specific — cite actual data from evaluations, quest sessions, and skill snapshots rather than generic encouragements. Name dates, levels, scores, and domain when the data is available.
 
 Respond ONLY with valid JSON.`;
 
@@ -376,9 +359,6 @@ ${weekSummary || "(no day log data)"}
 
 CHAPTER DISCUSSION RESPONSES (last 4 weeks):
 ${chapterSummary}
-
-RECENT EVALUATION SESSIONS:
-${evalSummary}
 
 RECENT LAB REPORTS:
 ${labSummary}

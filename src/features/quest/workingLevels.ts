@@ -239,7 +239,7 @@ export function deriveWorkingLevelFromEvaluation(
   }
 }
 
-// ── Write path 3: curriculum scan → math working level ────────
+// ── Write path 3: curriculum scan → working level ───────────
 
 /**
  * Infers a math working level from a curriculum scan's lesson number.
@@ -269,6 +269,86 @@ export function deriveMathWorkingLevelFromScan(
   else level = 6
 
   const cap = QUEST_MODE_LEVEL_CAP['math'] ?? DEFAULT_LEVEL_CAP
+  level = Math.min(level, cap)
+
+  return {
+    level,
+    updatedAt: new Date().toISOString(),
+    source: 'curriculum',
+    evidence: `Scanned ${curriculumName} Lesson ${lessonNumber}`,
+  }
+}
+
+/**
+ * Infers a phonics working level from a curriculum scan's lesson number.
+ * Uses the GATB Language Arts / Phonics lesson progression as the baseline.
+ *
+ * Phonics curricula typically progress:
+ * - Lessons 1-20: letter sounds, letter recognition (Level 1)
+ * - Lessons 21-40: CVC words, short vowels (Level 2)
+ * - Lessons 41-60: consonant blends (Level 3)
+ * - Lessons 61-80: digraphs (Level 4)
+ * - Lessons 81-100: CVCe / silent-e / long vowels (Level 5)
+ * - Lessons 101-120: vowel teams (Level 6)
+ * - Lessons 121-140: diphthongs, r-controlled (Level 7)
+ * - Lessons 141+: multisyllable (Level 8)
+ *
+ * Returns null if no meaningful inference can be made.
+ */
+export function derivePhonicsWorkingLevelFromScan(
+  lessonNumber: number | null | undefined,
+  curriculumName: string,
+): WorkingLevel | null {
+  if (lessonNumber == null || lessonNumber <= 0) return null
+
+  let level: number
+  if (lessonNumber <= 20) level = 1
+  else if (lessonNumber <= 40) level = 2
+  else if (lessonNumber <= 60) level = 3
+  else if (lessonNumber <= 80) level = 4
+  else if (lessonNumber <= 100) level = 5
+  else if (lessonNumber <= 120) level = 6
+  else if (lessonNumber <= 140) level = 7
+  else level = 8
+
+  const cap = QUEST_MODE_LEVEL_CAP['phonics'] ?? DEFAULT_LEVEL_CAP
+  level = Math.min(level, cap)
+
+  return {
+    level,
+    updatedAt: new Date().toISOString(),
+    source: 'curriculum',
+    evidence: `Scanned ${curriculumName} Lesson ${lessonNumber}`,
+  }
+}
+
+/**
+ * Infers a comprehension/reading working level from a curriculum scan's lesson number.
+ * Uses a broad mapping — reading comprehension curricula vary more than phonics/math,
+ * so this is deliberately conservative.
+ *
+ * - Lessons 1-25: literal recall, sequencing (Level 1)
+ * - Lessons 26-50: main idea, character (Level 2-3)
+ * - Lessons 51-75: inference, cause-effect (Level 3-4)
+ * - Lessons 76-100: compare-contrast, theme (Level 4-5)
+ * - Lessons 101+: critical thinking, synthesis (Level 5-6)
+ *
+ * Returns null if no meaningful inference can be made.
+ */
+export function deriveReadingWorkingLevelFromScan(
+  lessonNumber: number | null | undefined,
+  curriculumName: string,
+): WorkingLevel | null {
+  if (lessonNumber == null || lessonNumber <= 0) return null
+
+  let level: number
+  if (lessonNumber <= 25) level = 1
+  else if (lessonNumber <= 50) level = 3
+  else if (lessonNumber <= 75) level = 4
+  else if (lessonNumber <= 100) level = 5
+  else level = 6
+
+  const cap = QUEST_MODE_LEVEL_CAP['comprehension'] ?? DEFAULT_LEVEL_CAP
   level = Math.min(level, cap)
 
   return {
