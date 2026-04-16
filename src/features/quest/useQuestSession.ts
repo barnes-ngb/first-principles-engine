@@ -918,7 +918,7 @@ export function useQuestSession() {
           updatedAt: new Date().toISOString(),
         }
 
-        await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)))
+        await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)), { merge: true })
       } catch (err) {
         // Don't block session save if snapshot update fails
         console.warn('Failed to auto-apply quest findings/working level to skill snapshot', err)
