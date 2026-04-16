@@ -25,9 +25,41 @@ export const handleQuest = async (
     db, familyId, childId, childData, snapshotData,
   });
 
-  // Determine starting level from curriculum completion data
+  // Detect questMode early — needed for workingLevels lookup and prompt building
+  let questMode: string | undefined;
+  if (messages.length > 0) {
+    try {
+      const firstMsg = JSON.parse(messages[0].content);
+      questMode = firstMsg.questMode;
+    } catch {
+      // Not JSON or missing questMode — use default
+    }
+  }
+
+  // Per-quest-mode level ceilings (must match client-side QUEST_MODE_LEVEL_CAP)
+  const QUEST_MODE_LEVEL_CAP: Record<string, number> = {
+    phonics: 8,
+    comprehension: 6,
+    math: 6,
+  };
+  const DEFAULT_LEVEL_CAP = 10;
+
+  // ── Determine starting level ──────────────────────────────────
+  // Priority: workingLevels[questMode] > activityConfigs curriculum > default (2)
+  // This mirrors the client-side computeStartLevel fallback chain.
   let suggestedStartLevel: number | undefined;
-  if (domain === "reading" || !domain) {
+
+  // 1. workingLevels (authoritative — set by prior quest sessions and evaluations)
+  const workingLevels = snapshotData?.workingLevels;
+  const modeKey = questMode ?? (domain === "math" ? "math" : "phonics");
+  const workingLevel = workingLevels?.[modeKey];
+  if (workingLevel) {
+    suggestedStartLevel = workingLevel.level;
+    console.log(`[quest] workingLevels.${modeKey} = ${workingLevel.level} (source: ${workingLevel.source})`);
+  }
+
+  // 2. Fallback: curriculum data from activityConfigs (only if no workingLevel)
+  if (!suggestedStartLevel && (domain === "reading" || !domain)) {
     try {
       const activitySnap = await db
         .collection(`families/${familyId}/activityConfigs`)
@@ -43,16 +75,15 @@ export const handleQuest = async (
         };
       });
 
+      let curriculumLevel: number | undefined;
       for (const config of curriculumDocs) {
         const curriculum = config.curriculumMeta;
         if (config.subjectBucket !== "Reading" && config.subjectBucket !== "LanguageArts") continue;
         if (!curriculum) continue;
 
-        // Completed reading curriculum → start past basic phonics
         if (curriculum.completed) {
-          suggestedStartLevel = Math.max(suggestedStartLevel ?? 0, 5);
+          curriculumLevel = Math.max(curriculumLevel ?? 0, 5);
         }
-        // Check specific mastered skills for finer-grained level (flexible matching)
         const masteredLower = (curriculum.masteredSkills ?? []).map((s) => s.toLowerCase());
         const hasVowelTeams = masteredLower.some(
           (s) => s.includes("vowel-team") || s.includes("vowel-digraph") || s.includes("vowel_team") || s === "vowel-teams-ea-ai-oa-ee-oo",
@@ -70,22 +101,30 @@ export const handleQuest = async (
           (s) => s.includes("multisyllab") || s.includes("multi-syllab"),
         );
         if (hasVowelTeams) {
-          suggestedStartLevel = Math.max(suggestedStartLevel ?? 0, 6);
+          curriculumLevel = Math.max(curriculumLevel ?? 0, 6);
         }
         if (hasDiphthongs || hasLeEndings) {
-          suggestedStartLevel = Math.max(suggestedStartLevel ?? 0, 7);
+          curriculumLevel = Math.max(curriculumLevel ?? 0, 7);
         }
         if (hasRControlled && hasMultiSyllable) {
-          suggestedStartLevel = Math.max(suggestedStartLevel ?? 0, 8);
+          curriculumLevel = Math.max(curriculumLevel ?? 0, 8);
         }
       }
 
-      if (suggestedStartLevel) {
-        console.log(`[quest] Curriculum data suggests starting level: ${suggestedStartLevel}`);
+      if (curriculumLevel) {
+        suggestedStartLevel = curriculumLevel;
+        console.log(`[quest] Curriculum data fallback suggests starting level: ${curriculumLevel}`);
       }
     } catch (err) {
-      console.warn("[quest] Failed to load workbook configs for starting level", err);
+      console.warn("[quest] Failed to load curriculum data for starting level", err);
     }
+  }
+
+  // 3. Cap at mode ceiling (same caps as client-side QUEST_MODE_LEVEL_CAP)
+  if (suggestedStartLevel) {
+    const cap = QUEST_MODE_LEVEL_CAP[modeKey] ?? DEFAULT_LEVEL_CAP;
+    suggestedStartLevel = Math.min(suggestedStartLevel, cap);
+    suggestedStartLevel = Math.max(suggestedStartLevel, 1);
   }
 
   // Load word progress for this child to inform question generation
@@ -128,17 +167,6 @@ export const handleQuest = async (
   } catch (err) {
     // Don't block quest if word progress loading fails
     console.warn("Failed to load word progress for quest context", err);
-  }
-
-  // Detect questMode from the first user message
-  let questMode: string | undefined;
-  if (messages.length > 0) {
-    try {
-      const firstMsg = JSON.parse(messages[0].content);
-      questMode = firstMsg.questMode;
-    } catch {
-      // Not JSON or missing questMode — use default
-    }
   }
 
   // Append quest-specific interactive prompt

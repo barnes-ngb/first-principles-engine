@@ -189,10 +189,10 @@ A helper `getEffectiveMasteryGate()` (line 154-157) exists to fall back from `ma
 | G6 | `masteryGate` not formatted into AI prompt text | Low | AI sees `level` but not the granular gate evidence |
 | G7 | Disposition narrative has no mastery progression signal | Low | Cannot distinguish newly-mastered from always-secure |
 | G8 | `setDoc` (full overwrite) on every field edit | Low | Risk of race condition if two tabs edit simultaneously |
-| G9 | Client vs server starting-level divergence | Medium | Client reads `workingLevels` (authoritative); server CF (`functions/src/ai/tasks/quest.ts:29-88`) reads only `activityConfigs` curriculum data — they can disagree |
+| G9 | ~~Client vs server starting-level divergence~~ | ~~Medium~~ | **FIXED** (R1). Server quest.ts now reads `workingLevels[questMode]` from `snapshotData` as authoritative source, falling back to activityConfigs curriculum data only if absent. Matches client-side `computeStartLevel` fallback chain. |
 | G10 | Math quests have no AI starting-level injection | Low | `buildQuestPrompt` only injects `STARTING LEVEL:` for reading domain modes; math gets no level directive in the prompt |
 | G11 | `applySnapshotSuggestions` ignores mastery gates | Medium | `src/features/planner-chat/chatPlanner.logic.ts` plan generation uses stop rules + duration heuristics, not `evaluateSkipEligibility` — the code-driven skip path is fully bypassed |
-| G12 | `workingLevels` not included in AI context text | Low | `loadSkillSnapshotContext` formats priority skills, stops, supports, blocks — but omits the numeric `workingLevels` field; the AI never sees quest progression levels |
+| G12 | ~~`workingLevels` not included in AI context text~~ | ~~Low~~ | **FIXED** (R1, partial). `loadSkillSnapshotContext` now formats `workingLevels` with level, source, date, and evidence. All tasks receiving `skillSnapshot` slice see quest progression levels. |
 
 ---
 
@@ -535,7 +535,7 @@ if (stableCeiling !== null) {
 | G16 | `recentEval` loads only 1 session across all domains | Medium | A comprehension eval after a phonics quest eclipses the phonics data entirely; the new phonics quest AI sees no phonics-specific prior session |
 | G17 | `stableCeiling` not persisted | Low | The derived `newLevel` captures the effect, but debugging/analytics cannot see why a level was chosen. Reconstructable from stored `questions[]` if needed. |
 | G18 | AI prompt has no per-question history from prior session | Medium | AI may repeat the same question types/words. `wordMastery` slice partially mitigates for word-level data, but question format/style repetition is unchecked. |
-| G19 | Prior session's `workingLevels` not in AI prompt (server) | Medium | Restatement of G9+G12 in quest-start context: client uses `workingLevels.phonics` for `startLevel`, but the AI prompt's `STARTING LEVEL:` directive comes only from curriculum data, not from the prior quest's computed level. The two can disagree. |
+| G19 | ~~Prior session's `workingLevels` not in AI prompt (server)~~ | ~~Medium~~ | **FIXED** (R1). Server now reads `workingLevels[questMode]` as authoritative starting level; AI prompt's `STARTING LEVEL:` directive reflects the same value the client uses. |
 
 ---
 
@@ -853,7 +853,7 @@ The Learning Map (`src/features/progress/learning-map/`) also has no references 
 
 | # | Gap | Severity | Notes |
 |---|---|---|---|
-| G29 | Quest starting level ignores eval-derived `workingLevels` | Medium | `quest.ts:28-88` reads only `activityConfigs` for level; eval findings update `workingLevels` but the quest task never reads them (compounds G9, G12, G19) |
+| G29 | ~~Quest starting level ignores eval-derived `workingLevels`~~ | ~~Medium~~ | **FIXED** (R1). `quest.ts` now reads `snapshotData.workingLevels[questMode]` as primary starting level source. Eval-derived, quest-derived, and scan-derived workingLevels all flow through. |
 | G30 | `recentEval` eclipses cross-domain for quest | Medium | `limit(1)` across all domains — a newer math eval hides reading findings from next reading quest (restatement of G16 in eval context) |
 | G31 | Disposition sees only `findings[].text`, not structured findings | Medium | `loadRecentEvaluations` at `disposition.ts:100-101` extracts `.text` only; loses `skill`, `status`, `evidence` structure; cannot generate targeted growth narratives |
 | G32 | Disposition omits `skillSnapshot` and `recentEval` shared slices | Medium | Context config at `contextSlices.ts:56` lacks both; handler rolls its own weaker loader instead |
@@ -1120,11 +1120,13 @@ Context slices for quest (`contextSlices.ts:51`): `["childProfile", "sightWords"
 
 Based on Parts A and B, these are the three missing context items with the highest impact on question quality.
 
-### G40 — `workingLevels` not in AI prompt
+### G40 — ~~`workingLevels` not in AI prompt~~ **FIXED**
 
-**What's missing:** The `workingLevels` map on `skillSnapshots/{childId}` — the authoritative numeric progression level computed from prior quest sessions — is never loaded or formatted by any Cloud Function code. The quest task handler (`quest.ts:28-88`) derives `suggestedStartLevel` solely from `activityConfigs` curriculum mastery data; `loadSkillSnapshotContext` (`contextSlices.ts:643-732`) formats priority skills, stop rules, supports, and conceptual blocks but omits `workingLevels` entirely.
+**FIXED** (R1). `workingLevels` is now loaded and formatted by both `loadSkillSnapshotContext` (for all tasks receiving the `skillSnapshot` slice) and read directly by `quest.ts` for starting-level computation. The `SnapshotData` type and `chat.ts` loader now include `workingLevels`. The quest task handler reads `workingLevels[questMode]` as the authoritative starting level, falling back to curriculum data only when absent, and caps at the same `QUEST_MODE_LEVEL_CAP` values as the client.
 
-**Why it matters:** The client uses `workingLevels.phonics` to set the session's numeric starting level (`computeStartLevel` at `workingLevels.ts:53-56`), but the AI generating questions never sees this number. When the client says "start at Level 5" and the AI's own `STARTING LEVEL:` directive says Level 3 (from curriculum data) — or says nothing at all (no matching curriculum) — the AI may generate questions misaligned with the adaptive level the client is enforcing. This is the root cause of the client/server starting-level divergence (G9, G12, G19, G29).
+~~**What's missing:** The `workingLevels` map on `skillSnapshots/{childId}` — the authoritative numeric progression level computed from prior quest sessions — is never loaded or formatted by any Cloud Function code.~~
+
+~~**Why it matters:** The client uses `workingLevels.phonics` to set the session's numeric starting level, but the AI generating questions never sees this number.~~
 
 ### G41 — Quest history limited to single most-recent cross-domain session
 
@@ -1145,7 +1147,7 @@ Based on Parts A and B, these are the three missing context items with the highe
 | `persist` (SkillSnapshotPage.tsx:111) | `prioritySkills[n].level`, `updatedAt` (full doc overwrite via `setDoc`) | `skillSnapshots/{childId}` | Skill Snapshot UI (SkillSnapshotPage.tsx:357), AI `childProfile` slice (contextSlices.ts:316), AI `skillSnapshot` slice (contextSlices.ts:674), disposition handler via `childProfile` (contextSlices.ts:313) | — |
 | `handleQuickLevelUpdate` (SkillSnapshotPage.tsx:225) | `prioritySkills[n].level` (converges on `persist`) | `skillSnapshots/{childId}` | Same as `persist` above | — |
 | `endSession` (useQuestSession.ts:786) | Full session record (`questions`, `findings`, `recommendations`, `summary`, `finalLevel`, `totalCorrect`, `diamondsMined`, `streakDays`, etc.) | `evaluationSessions/{docId}` | EvaluationHistoryTab (EvaluationHistoryTab.tsx:485), `recentEval` slice for plan/quest/scan (chatTypes.ts:188), disposition `loadRecentEvaluations` (disposition.ts:87), Learning Map init (updateSkillMapFromFindings.ts:112) | G16 — `recentEval` loads only `limit(1)` cross-domain; eclipsed by newer non-matching session |
-| `endSession` → `computeWorkingLevelFromSession` (useQuestSession.ts:921) | `workingLevels.{mode}` (level, source, evidence) | `skillSnapshots/{childId}.workingLevels` | Client `computeStartLevel` (workingLevels.ts:53) | G20 — not displayed in Skill Snapshot UI; G40 — not read by server quest.ts or any CF |
+| `endSession` → `computeWorkingLevelFromSession` (useQuestSession.ts:921) | `workingLevels.{mode}` (level, source, evidence) | `skillSnapshots/{childId}.workingLevels` | Client `computeStartLevel` (workingLevels.ts:53); Server `quest.ts` starting level + `loadSkillSnapshotContext` AI prompt | G20 — not displayed in Skill Snapshot UI; ~~G40~~ FIXED |
 | `endSession` (useQuestSession.ts:863–887) | `prioritySkills[n].level` (from quest findings: emerging→Emerging, mastered→Secure) | `skillSnapshots/{childId}.prioritySkills` | Same readers as `persist` above | — |
 | `endSession` (useQuestSession.ts:890–917) | `prioritySkills[n].masteryGate` | `skillSnapshots/{childId}.prioritySkills[n].masteryGate` | `evaluateSkipEligibility` in skip advisor (dead code — G5); `loadSkillSnapshotContext` loads but does not format into prompt (G6) | G4, G5, G6 — functionally unread; skip advisor not wired to UI, AI prompt ignores it |
 | `addXpEvent` (useQuestSession.ts:812) | QUEST_COMPLETE XP event (15 XP) | `xpLedger/{childId}_{dedupKey}` | XP ledger hooks, ArmorTab (ArmorTab.tsx:67) | — |
@@ -1158,8 +1160,8 @@ Based on Parts A and B, these are the three missing context items with the highe
 | `endSession` (useQuestSession.ts:940–984) | Per-word progress (correctCount, wrongCount, masteryLevel) | `children/{childId}/wordProgress` | Word Wall (useWordWall.ts:42), quest `wordMastery` loader (chat.ts:340), quest struggling words loader (quest.ts:97) | — |
 | `endSession` → `updateSkillMapFromFindings` (useQuestSession.ts:927) | Curriculum knowledge map nodes | `childSkillMaps/{childId}` | Learning Map UI (learning-map/) | — |
 | `handleSaveAndApply` (EvaluateChatPage.tsx:598) | Merge-write (`prioritySkills`, `supports`, `stopRules`, `evidenceDefinitions`, `updatedAt`) | `skillSnapshots/{childId}` | AI `skillSnapshot` slice (contextSlices.ts:674–717), Skill Snapshot UI, AI `childProfile` slice (contextSlices.ts:316) | ~~G27~~ ✅ FIXED — uses `setDoc` with `{ merge: true }`, unlisted fields preserved |
-| `handleSaveAndApply` (EvaluateChatPage.tsx:567) | `workingLevels.phonics` (from eval findings, mastered skills only) | `skillSnapshots/{childId}.workingLevels.phonics` | Client `computeStartLevel` (workingLevels.ts:53) | G40 — not read by server quest.ts |
-| `handleSaveAndApply` (EvaluateChatPage.tsx:572) | `workingLevels.comprehension` (from eval findings, mastered skills only) | `skillSnapshots/{childId}.workingLevels.comprehension` | Client `computeStartLevel` (workingLevels.ts:53) | G40 — not read by server quest.ts |
+| `handleSaveAndApply` (EvaluateChatPage.tsx:567) | `workingLevels.phonics` (from eval findings, mastered skills only) | `skillSnapshots/{childId}.workingLevels.phonics` | Client `computeStartLevel` (workingLevels.ts:53) | ~~G40~~ FIXED — now read by server quest.ts + loadSkillSnapshotContext |
+| `handleSaveAndApply` (EvaluateChatPage.tsx:572) | `workingLevels.comprehension` (from eval findings, mastered skills only) | `skillSnapshots/{childId}.workingLevels.comprehension` | Client `computeStartLevel` (workingLevels.ts:53) | ~~G40~~ FIXED — now read by server quest.ts + loadSkillSnapshotContext |
 | `handleSaveAndApply` (EvaluateChatPage.tsx:579) | `workingLevels.math` (stubbed TODO) | `skillSnapshots/{childId}.workingLevels.math` | — | G26 — not implemented; math evals produce no workingLevel |
 | `handleSaveAndApply` (EvaluateChatPage.tsx:592) | `conceptualBlocks` + `blocksUpdatedAt` (from pattern analysis, overwritten not merged) | `skillSnapshots/{childId}.conceptualBlocks` | AI `skillSnapshot` slice — ADDRESS_NOW blocks only (contextSlices.ts:700) | — |
 | `logSessionHours` (EvaluateChatPage.tsx:208) | Hours entry (`source: 'evaluation-session'`, on AI `<complete>` tag) | `hours/{auto-id}` | Records hours aggregation (records.logic.ts:72), compliance exports | G28 — logged on eval complete, not on apply; hours exist without snapshot update if Apply never tapped |
@@ -1209,11 +1211,11 @@ Yes — it is the only surface that attempts to synthesize across domains into a
 
 Ordered by impact-per-effort. Each closes the gaps most responsible for the "well-instrumented notebook, not a closed-loop engine" verdict.
 
-### R1. Feed `workingLevels` to the quest Cloud Function
+### R1. Feed `workingLevels` to the quest Cloud Function — **DONE**
 
-**Closes:** G9, G12, G19, G29, G40
+**Closes:** G9, G12 (partial), G19, G29, G40
 **Effort:** S
-Read `workingLevels` from the snapshot in `quest.ts` and inject the numeric level into the AI prompt alongside or replacing the curriculum-derived `suggestedStartLevel`. Format `workingLevels` in `loadSkillSnapshotContext` so every task that receives `skillSnapshot` also sees quest progression levels. This is the single change that aligns client and server on the most impactful adaptive signal.
+**Status:** Implemented 2026-04-16. `workingLevels` added to `SnapshotData` type and `chat.ts` loader. `loadSkillSnapshotContext` now formats working levels with level/source/date/evidence. `quest.ts` reads `workingLevels[questMode]` as authoritative starting level, falls back to curriculum data, caps at `QUEST_MODE_LEVEL_CAP`. Client and server now use the same source of truth.
 
 ### R2. Per-domain `recentEval` with depth > 1
 

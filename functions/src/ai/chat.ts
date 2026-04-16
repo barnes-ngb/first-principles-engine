@@ -1531,6 +1531,7 @@ export const chat = onCall(
           supports?: ChildContext["supports"];
           stopRules?: ChildContext["stopRules"];
           completedPrograms?: string[];
+          workingLevels?: Record<string, { level: number; updatedAt: string; source: string; evidence?: string }>;
         }
       | undefined;
 
@@ -1556,6 +1557,7 @@ export const chat = onCall(
             supports?: ChildContext["supports"];
             stopRules?: ChildContext["stopRules"];
             completedPrograms?: string[];
+            workingLevels?: Record<string, { level: number; updatedAt: string; source: string; evidence?: string }>;
           })
         : undefined;
       // Guaranteed server-side workbook backfill (Phase 2B hardening).
