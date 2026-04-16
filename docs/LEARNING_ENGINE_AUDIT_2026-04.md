@@ -1026,3 +1026,66 @@ The loader does **not** include the `recommendation` or `action` fields — it o
 | G37 | Quest context has no scan awareness | Low | `recentScans` not in quest task context (`contextSlices.ts:51`); quest starting level depends on `workingLevels` (math only) or `activityConfigs` — scan position changes are invisible to quest for reading |
 | G38 | No Cloud Function trigger on scan writes | Low | All scan-to-config processing is client-side and fire-and-forget; a failed `syncScanToConfig` or `updateMathWorkingLevel` is silently swallowed (`useScanToActivityConfig.ts:82, 123`) |
 | G39 | Scan skip has no skill snapshot signal for non-math | Medium | A "skip" recommendation implies mastery, but for reading/LA/other subjects, no `prioritySkills` level, `masteryGate`, or `workingLevels` update occurs — the mastery signal is lost |
+
+## Journey 5 (Part A): Quest AI Prompt — What's Included
+
+**Trace:** The quest task handler assembles its system prompt from shared context slices + quest-specific data loaders + the static quest prompt template. This table lists every piece of data the AI receives.
+
+Context slices for quest (`contextSlices.ts:51`): `["childProfile", "sightWords", "recentEval", "wordMastery", "skillSnapshot", "workbookPaces"]`
+
+### Shared context slices (via `buildContextForTask`)
+
+| Field / Data | Source Collection | Assembled At |
+|---|---|---|
+| **Child name** | `children/{childId}` | `contextSlices.ts:314` (via `formatChildProfile`) |
+| **Child grade** | `children/{childId}` | `contextSlices.ts:315` (via `formatChildProfile`) |
+| **Priority skills** (tag, label, level) | `skillSnapshots/{childId}` | `contextSlices.ts:316` (via `formatChildProfile`, from pre-loaded `snapshotData`) |
+| **Supports** (label, description) | `skillSnapshots/{childId}` | `contextSlices.ts:317` (via `formatChildProfile`, from pre-loaded `snapshotData`) |
+| **Stop rules** (label, trigger, action) | `skillSnapshots/{childId}` | `contextSlices.ts:318` (via `formatChildProfile`, from pre-loaded `snapshotData`) |
+| **Sight word progress** (mastered/familiar/practicing/new counts, weak words, mastered words) | `sightWordProgress` | `chat.ts:1425-1462` (via `loadSightWordSummary`) |
+| **Recent evaluation** — domain, date, summary | `evaluationSessions` (limit 1, most recent `complete`) | `chatTypes.ts:231-236` (via `loadRecentEvalContext`) |
+| **Recent evaluation** — final level, score | `evaluationSessions` (same doc, interactive only) | `chatTypes.ts:233-234` |
+| **Recent evaluation** — findings (skill, status, evidence) | `evaluationSessions` (same doc) | `chatTypes.ts:237-241` |
+| **Recent evaluation** — recommendations (priority, skill, action, frequency, duration) | `evaluationSessions` (same doc) | `chatTypes.ts:243-249` |
+| **Word mastery summary** (total words, counts by mastery level) | `children/{childId}/wordProgress` | `chat.ts:340-367` (via `loadWordMasterySummary`) |
+| **Struggling patterns** (words grouped by phonics pattern) | `children/{childId}/wordProgress` (filtered `struggling`/`not-yet`) | `chat.ts:370-393` (via `loadWordMasterySummary`) |
+| **Skill snapshot — priority skills** (tag, label, level, notes) | `skillSnapshots/{childId}` | `contextSlices.ts:674-677` (via `loadSkillSnapshotContext`) |
+| **Skill snapshot — stop rules** | `skillSnapshots/{childId}` | `contextSlices.ts:682-686` (via `loadSkillSnapshotContext`) |
+| **Skill snapshot — supports** | `skillSnapshots/{childId}` | `contextSlices.ts:692-695` (via `loadSkillSnapshotContext`) |
+| **Skill snapshot — conceptual blocks** (ADDRESS_NOW only, with strategies) | `skillSnapshots/{childId}` | `contextSlices.ts:700-706` (via `loadSkillSnapshotContext`) |
+| **Skill snapshot — completed programs** | `skillSnapshots/{childId}` | `contextSlices.ts:710-717` (via `loadSkillSnapshotContext`) |
+| **Skill snapshot — planning guidance** (static text: Secure→SKIP, Emerging→practice, etc.) | n/a (static) | `contextSlices.ts:721-729` (via `loadSkillSnapshotContext`) |
+| **Curriculum coverage** — name, unit label, currentPosition, totalUnits per workbook | `activityConfigs` (where `type == 'workbook'`, filtered not-completed) | `chat.ts:154-183` (via `loadWorkbookPaces`), formatted at `contextSlices.ts:392-449` |
+| **Curriculum metadata** — provider, level, lastMilestone, milestoneDate, masteredSkills, activeSkills | `activityConfigs` (same docs, `.curriculumMeta` field) | `contextSlices.ts:417-430` |
+| **GATB scope-and-sequence** — covered skills, current unit topic, upcoming units | Static data (`gatbCurriculum.ts`) keyed by curriculum position | `contextSlices.ts:433-447` (via `getGatbProgress`) |
+
+### Quest-specific data loaders (in `quest.ts`)
+
+| Field / Data | Source Collection | Assembled At |
+|---|---|---|
+| **Suggested start level** (from curriculum completion/mastered skills) | `activityConfigs` (where `type == 'workbook'`, Reading/LanguageArts) | `quest.ts:31-88` |
+| **Struggling words** (word, pattern, correct/total ratio; top 15 by wrongCount) | `children/{childId}/wordProgress` (where `masteryLevel` in `struggling`/`not-yet`) | `quest.ts:97-113` |
+| **Known words** (word list; top 30) | `children/{childId}/wordProgress` (where `masteryLevel == 'known'`) | `quest.ts:117-127` |
+| **Quest mode** (phonics/comprehension/fluency) | Client message payload (first message JSON) | `quest.ts:134-142` |
+| **Conversation messages** (action, answer, session state, recentQuestionTypes, bonusRound) | Client-side `messages` array passed to CF | `quest.ts:158` (passed to `callClaude`) |
+
+### Static prompt template (via `buildQuestPrompt`)
+
+| Field / Data | Source | Assembled At |
+|---|---|---|
+| **Quest role & interaction format** | Static text (Minecraft-themed quest master) | `chat.ts:933-939` (reading), `chat.ts:1169-1176` (math) |
+| **Starting level directive** (if `suggestedStartLevel` set) | Derived from `activityConfigs` in `quest.ts:29-88` | `chat.ts:929-931` (reading phonics), `chat.ts:774` (comprehension) |
+| **Skill progression ladder** (level → skill descriptions) | Static text | `chat.ts:941-952` (reading L1-10), `chat.ts:1178-1184` (math L1-6) |
+| **Question format rules** | Static text | `chat.ts:953-959` (reading), `chat.ts:1186-1191` (math) |
+| **Kid-friendly language rules** (banned terms, good/bad phrasing) | Static text | `chat.ts:961-986` (reading only) |
+| **Answer validity rules** | Static text | `chat.ts:988-1005` |
+| **Question type variety by level** (types to rotate through per level) | Static text | `chat.ts:1007-1055` (reading), `chat.ts:1193-1234` (math) |
+| **Stimulus field rules** | Static text | `chat.ts:1057-1062` (reading only) |
+| **Phoneme display rules** | Static text | `chat.ts:1064-1068` (reading only) |
+| **Answer matching rules** | Static text | `chat.ts:1070-1074` |
+| **Adaptive start / skill snapshot interpretation** | Static text | `chat.ts:1096-1103` |
+| **Adaptive behavior (level up/down rules)** | Static text | `chat.ts:1109-1114` |
+| **Bonus round rules** | Static text | `chat.ts:1116-1117` |
+| **Finding generation format** | Static text | `chat.ts:1119-1122` |
+| **Response JSON format** | Static text | `chat.ts:1124-1138` |
+| **Session summary format** | Static text | `chat.ts:1140-1166` |
