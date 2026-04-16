@@ -7,6 +7,8 @@ import {
   computeWorkingLevelFromSession,
   deriveWorkingLevelFromEvaluation,
   deriveMathWorkingLevelFromScan,
+  derivePhonicsWorkingLevelFromScan,
+  deriveReadingWorkingLevelFromScan,
   canOverwriteWorkingLevel,
 } from './workingLevels'
 
@@ -383,5 +385,135 @@ describe('deriveMathWorkingLevelFromScan', () => {
     expect(result).not.toBeNull()
     expect(result!.evidence).toContain('Good and the Beautiful Math')
     expect(result!.evidence).toContain('Lesson 107')
+  })
+})
+
+// ── derivePhonicsWorkingLevelFromScan ─────────────────────────
+
+describe('derivePhonicsWorkingLevelFromScan', () => {
+  it('returns null for null lesson number', () => {
+    expect(derivePhonicsWorkingLevelFromScan(null, 'GATB Phonics')).toBeNull()
+  })
+
+  it('returns null for zero lesson number', () => {
+    expect(derivePhonicsWorkingLevelFromScan(0, 'GATB Phonics')).toBeNull()
+  })
+
+  it('maps lesson 1-20 to level 1 (letter sounds)', () => {
+    const result = derivePhonicsWorkingLevelFromScan(10, 'GATB Language Arts Level K')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(1)
+    expect(result!.source).toBe('curriculum')
+  })
+
+  it('maps lesson 21-40 to level 2 (CVC)', () => {
+    const result = derivePhonicsWorkingLevelFromScan(35, 'GATB Language Arts Level 1')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(2)
+  })
+
+  it('maps lesson 41-60 to level 3 (blends)', () => {
+    const result = derivePhonicsWorkingLevelFromScan(50, 'GATB Language Arts Level 1')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(3)
+  })
+
+  it('maps lesson 61-80 to level 4 (digraphs)', () => {
+    const result = derivePhonicsWorkingLevelFromScan(75, 'GATB Language Arts Level 2')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(4)
+  })
+
+  it('maps lesson 81-100 to level 5 (CVCe / silent-e)', () => {
+    const result = derivePhonicsWorkingLevelFromScan(90, 'GATB Language Arts Level 2')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(5)
+  })
+
+  it('maps lesson 101-120 to level 6 (vowel teams)', () => {
+    const result = derivePhonicsWorkingLevelFromScan(110, 'GATB Language Arts Level 3')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(6)
+  })
+
+  it('maps lesson 121-140 to level 7 (diphthongs, r-controlled)', () => {
+    const result = derivePhonicsWorkingLevelFromScan(130, 'GATB Language Arts Level 3')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(7)
+  })
+
+  it('maps lesson 141+ to level 8 (capped at phonics ceiling)', () => {
+    const result = derivePhonicsWorkingLevelFromScan(160, 'GATB Language Arts Level 4')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(8)
+  })
+
+  it('does not exceed phonics level cap of 8', () => {
+    const result = derivePhonicsWorkingLevelFromScan(200, 'GATB Language Arts Level 5')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(8)
+  })
+
+  it('evidence includes curriculum name and lesson', () => {
+    const result = derivePhonicsWorkingLevelFromScan(75, 'Good and the Beautiful LA')
+    expect(result).not.toBeNull()
+    expect(result!.evidence).toContain('Good and the Beautiful LA')
+    expect(result!.evidence).toContain('Lesson 75')
+  })
+})
+
+// ── deriveReadingWorkingLevelFromScan ─────────────────────────
+
+describe('deriveReadingWorkingLevelFromScan', () => {
+  it('returns null for null lesson number', () => {
+    expect(deriveReadingWorkingLevelFromScan(null, 'Reading Comprehension')).toBeNull()
+  })
+
+  it('returns null for zero lesson number', () => {
+    expect(deriveReadingWorkingLevelFromScan(0, 'Reading Comprehension')).toBeNull()
+  })
+
+  it('maps lesson 1-25 to level 1 (literal recall)', () => {
+    const result = deriveReadingWorkingLevelFromScan(10, 'GATB Reading Level 1')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(1)
+    expect(result!.source).toBe('curriculum')
+  })
+
+  it('maps lesson 26-50 to level 3 (main idea, character)', () => {
+    const result = deriveReadingWorkingLevelFromScan(40, 'GATB Reading Level 2')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(3)
+  })
+
+  it('maps lesson 51-75 to level 4 (inference)', () => {
+    const result = deriveReadingWorkingLevelFromScan(60, 'GATB Reading Level 3')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(4)
+  })
+
+  it('maps lesson 76-100 to level 5 (compare-contrast, theme)', () => {
+    const result = deriveReadingWorkingLevelFromScan(85, 'GATB Reading Level 3')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(5)
+  })
+
+  it('maps lesson 101+ to level 6 (capped at comprehension ceiling)', () => {
+    const result = deriveReadingWorkingLevelFromScan(120, 'GATB Reading Level 4')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(6)
+  })
+
+  it('does not exceed comprehension level cap of 6', () => {
+    const result = deriveReadingWorkingLevelFromScan(200, 'GATB Reading Level 5')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(6)
+  })
+
+  it('evidence includes curriculum name and lesson', () => {
+    const result = deriveReadingWorkingLevelFromScan(60, 'Good and the Beautiful Reading')
+    expect(result).not.toBeNull()
+    expect(result!.evidence).toContain('Good and the Beautiful Reading')
+    expect(result!.evidence).toContain('Lesson 60')
   })
 })
