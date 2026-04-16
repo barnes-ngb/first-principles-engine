@@ -595,7 +595,7 @@ export default function EvaluateChatPage() {
         } : {}),
       }
 
-      await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)))
+      await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)), { merge: true })
       setSnackText('Skill snapshot updated! Priority skills, supports, stop rules, and evidence all set.')
 
       // Update Learning Map from findings (fire-and-forget)

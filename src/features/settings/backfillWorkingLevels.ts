@@ -232,7 +232,7 @@ export async function backfillWorkingLevels(
       }
       // Remove id field (doc ID, not a data field)
       delete (updated as Record<string, unknown>).id
-      await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)))
+      await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)), { merge: true })
     }
 
     results.push(result)

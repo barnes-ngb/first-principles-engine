@@ -757,7 +757,7 @@ All three are conditional on `sessionDocId` being truthy (XP/diamonds) or fire-a
 | # | Gap | Severity | Notes |
 |---|---|---|---|
 | G26 | Math working levels not derived from evaluation | Medium | TODO at `EvaluateChatPage.tsx:579` — math evaluations don't update `workingLevels.math` |
-| G27 | `setDoc` without `merge` erases unlisted fields | High | Line 598 uses bare `setDoc`, not `{ merge: true }`. Any fields on the existing snapshot not rebuilt by `handleSaveAndApply` (e.g. `completedPrograms`) are silently dropped |
+| G27 | ~~`setDoc` without `merge` erases unlisted fields~~ | ~~High~~ ✅ FIXED | Fixed: added `{ merge: true }` to `setDoc` calls in `EvaluateChatPage.tsx:598`, `useQuestSession.ts:921`, and `backfillWorkingLevels.ts:235`. Unlisted fields (e.g. `completedPrograms`, `createdAt`) are now preserved. |
 | G28 | Hours logged on eval complete, not on apply | Low | By design, but if Shelly never taps "Apply", hours are still counted without any snapshot update — the hours exist without a corresponding skill record |
 
 ## Journey 3 (Part B): Eval Findings Downstream
@@ -1157,7 +1157,7 @@ Based on Parts A and B, these are the three missing context items with the highe
 | `endSession` (useQuestSession.ts:798) | Hours entry (`source: 'quest-session'`, rounded to nearest 5 min) | `hours/{auto-id}` | Records hours aggregation (records.logic.ts:72), compliance exports (records.logic.ts:476) | G22 — no UI callout (unlike `creative-timer`); G15 — not logged if < 5 min active |
 | `endSession` (useQuestSession.ts:940–984) | Per-word progress (correctCount, wrongCount, masteryLevel) | `children/{childId}/wordProgress` | Word Wall (useWordWall.ts:42), quest `wordMastery` loader (chat.ts:340), quest struggling words loader (quest.ts:97) | — |
 | `endSession` → `updateSkillMapFromFindings` (useQuestSession.ts:927) | Curriculum knowledge map nodes | `childSkillMaps/{childId}` | Learning Map UI (learning-map/) | — |
-| `handleSaveAndApply` (EvaluateChatPage.tsx:598) | Full snapshot overwrite (`prioritySkills`, `supports`, `stopRules`, `evidenceDefinitions`, `updatedAt`) | `skillSnapshots/{childId}` | AI `skillSnapshot` slice (contextSlices.ts:674–717), Skill Snapshot UI, AI `childProfile` slice (contextSlices.ts:316) | G27 — bare `setDoc` erases unlisted fields (e.g. `completedPrograms`) |
+| `handleSaveAndApply` (EvaluateChatPage.tsx:598) | Merge-write (`prioritySkills`, `supports`, `stopRules`, `evidenceDefinitions`, `updatedAt`) | `skillSnapshots/{childId}` | AI `skillSnapshot` slice (contextSlices.ts:674–717), Skill Snapshot UI, AI `childProfile` slice (contextSlices.ts:316) | ~~G27~~ ✅ FIXED — uses `setDoc` with `{ merge: true }`, unlisted fields preserved |
 | `handleSaveAndApply` (EvaluateChatPage.tsx:567) | `workingLevels.phonics` (from eval findings, mastered skills only) | `skillSnapshots/{childId}.workingLevels.phonics` | Client `computeStartLevel` (workingLevels.ts:53) | G40 — not read by server quest.ts |
 | `handleSaveAndApply` (EvaluateChatPage.tsx:572) | `workingLevels.comprehension` (from eval findings, mastered skills only) | `skillSnapshots/{childId}.workingLevels.comprehension` | Client `computeStartLevel` (workingLevels.ts:53) | G40 — not read by server quest.ts |
 | `handleSaveAndApply` (EvaluateChatPage.tsx:579) | `workingLevels.math` (stubbed TODO) | `skillSnapshots/{childId}.workingLevels.math` | — | G26 — not implemented; math evals produce no workingLevel |
@@ -1227,11 +1227,13 @@ Change `loadRecentEvalContext` to query by the requesting task's domain (or retu
 **Effort:** S
 Add `skillSnapshot` and `recentEval` to the disposition task's slice list in `contextSlices.ts:56` and remove (or supplement) the handler's bespoke `loadRecentEvaluations` loader. Learning Profile becomes the first surface to synthesize structured quest metrics, eval findings, and skill levels into a growth narrative — matching the "disposition over content mastery" north star.
 
-### R4. Fix `setDoc` data loss in eval Apply
+### R4. Fix `setDoc` data loss in eval Apply ✅ FIXED
 
 **Closes:** G27
 **Effort:** S
-Replace the bare `setDoc` at `EvaluateChatPage.tsx:598` with `setDoc(..., { merge: true })` or a read-modify-write pattern. Currently, tapping Apply silently erases any snapshot fields not rebuilt by `handleSaveAndApply` (e.g. `completedPrograms`, `workingLevels` written by a concurrent quest). This is the only High-severity data-loss bug in the audit.
+~~Replace the bare `setDoc` at `EvaluateChatPage.tsx:598` with `setDoc(..., { merge: true })` or a read-modify-write pattern. Currently, tapping Apply silently erases any snapshot fields not rebuilt by `handleSaveAndApply` (e.g. `completedPrograms`, `workingLevels` written by a concurrent quest). This is the only High-severity data-loss bug in the audit.~~
+
+**Resolution:** Added `{ merge: true }` to all three bare `setDoc` calls on `skillSnapshots`: `EvaluateChatPage.tsx:598` (eval Apply), `useQuestSession.ts:921` (quest endSession), and `backfillWorkingLevels.ts:235` (admin backfill). Fields not included in the write payload (e.g. `completedPrograms`, `createdAt`) are now preserved.
 
 ### R5. Surface scan recommendations to planner and bridge non-math scans to `workingLevels`
 
