@@ -1089,3 +1089,15 @@ Context slices for quest (`contextSlices.ts:51`): `["childProfile", "sightWords"
 | **Finding generation format** | Static text | `chat.ts:1119-1122` |
 | **Response JSON format** | Static text | `chat.ts:1124-1138` |
 | **Session summary format** | Static text | `chat.ts:1140-1166` |
+
+---
+
+## Journey 5 (Part B-i): Missing from Quest Prompt — Structured Data
+
+| Field | In Firestore? | In Quest Prompt? |
+|---|---|---|
+| `workingLevels` on `skillSnapshots/{childId}` | Yes — `src/core/types/evaluation.ts:98` | No — absent from `functions/src/ai/` entirely |
+| `conceptualBlocks` on `skillSnapshots/{childId}` | Yes — `src/core/types/evaluation.ts:93` | Yes — `functions/src/ai/contextSlices.ts:659-704` (ADDRESS_NOW blocks injected via `skillSnapshot` slice) |
+| `dispositionCache` on `children/{childId}` | Yes — written at `src/features/progress/DispositionProfile.tsx:179`; typed `src/core/types/disposition.ts:42-45` | No — absent from `functions/src/ai/` entirely |
+| `parentOverride` on scans | Yes — `src/core/types/planning.ts:755` | No — absent from `functions/src/ai/` entirely |
+| `parentOverride` on dispositions (`dispositionOverrides` on `children/{childId}`) | Yes — `src/core/types/disposition.ts:37-39`; written at `src/features/progress/DispositionProfile.tsx:221` | No — absent from `functions/src/ai/` entirely |
