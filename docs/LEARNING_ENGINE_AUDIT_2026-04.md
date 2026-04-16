@@ -1176,3 +1176,31 @@ Based on Parts A and B, these are the three missing context items with the highe
 | `useUnifiedCapture` → `updateSkillMapFromFindings` (useUnifiedCapture.ts:110) | Curriculum knowledge map nodes from scan skills | `childSkillMaps/{childId}` | Learning Map UI (learning-map/) | — |
 | DispositionProfile (DispositionProfile.tsx:179) | `dispositionCache` (AI-generated disposition narratives) | `children/{childId}.dispositionCache` | DispositionProfile UI (client-side cache) | Written but never read by any CF or AI prompt |
 | DispositionProfile (DispositionProfile.tsx:221) | `dispositionOverrides` (parent inline edits/reverts per disposition) | `children/{childId}.dispositionOverrides` | DispositionProfile UI (client-side display) | Written but never read by any CF or AI prompt |
+
+## Coherence Verdict
+
+### 1. Does the system function as a coherent learning engine today?
+
+Not yet. The capture layer is strong — quests, evals, scans, and daily logs all reliably write structured data to Firestore. But the feedback loops that would make it an *engine* are broken. Data flows forward (capture → store) but rarely flows back (store → adapt → generate). The quest, planner, and disposition systems each assemble their own partial, incompatible view of the child (G9, G32, G40). The result is a well-instrumented notebook, not a closed-loop engine.
+
+### 2. Top 3 data flow gaps (evidence captured but unused downstream)
+
+1. **`workingLevels`** — the authoritative quest progression level, written by quest sessions, evals, and math scans, is never read by any Cloud Function (G40). The client and server disagree on starting level, which is the single most impactful adaptive signal.
+2. **`masteryGate`** — written by quest end flow, but the skip advisor that reads it is dead code (G5), `getEffectiveMasteryGate` is never called (G4), and the AI prompt ignores the field entirely (G6). Three layers of wiring exist; none are connected.
+3. **Scan `recommendation`** — the AI's skip/do/modify verdict is stored on every scan but the planner extracts only lesson position, not the recommendation (G36), and the quest context has no scan awareness at all (G37). Mastery signals from scans are lost for all non-math subjects (G35, G39).
+
+### 3. Where does Lincoln's data go to die (written but never read)?
+
+- **`dispositionCache` and `dispositionOverrides`** on `children/{childId}` — Shelly's parent-edited disposition narratives are written by DispositionProfile but never read by any Cloud Function or AI prompt. The parent's voice on Lincoln's growth profile is invisible to every AI task.
+- **`parentOverride`** on scans — written on "Accept & advance" (`TodayPage.tsx:704`) but never loaded by any AI context slice or CF. The parent's explicit curriculum judgment is silently discarded.
+- **`masteryGate`** on priority skills — written by quest sessions (`useQuestSession.ts:890-917`) but functionally dead: skip advisor unwired (G5), fallback helper uncalled (G4), AI prompt omits it (G6).
+
+### 4. Where does the AI operate with incomplete info the system actually has?
+
+- **Quest AI** is the worst case: no `workingLevels` (G40), only 1 cross-domain session history (G41), no engagement emoji or disposition signal (G42), no scan data (G37). It generates questions blind to Lincoln's proven stable level, prior session patterns, current energy, and workbook progress — all of which exist in Firestore.
+- **Disposition AI** omits the `skillSnapshot` and `recentEval` shared context slices (G32), rolling its own weaker loader that extracts only `findings[].text` from 3 sessions (G31). It cannot say "Lincoln jumped two phonics levels this week" because it never sees the numbers.
+- **Planner AI** sees scan positions but not scan recommendations (G36), so it cannot honor a skip verdict. It receives skill snapshot data including "Secure → SKIP" guidance, but the client-side skip advisor that could enforce this structurally is dead code (G5, G11).
+
+### 5. Is Learning Profile the right unified view surface?
+
+Yes — it is the only surface that attempts to synthesize across domains into a narrative, which aligns with the "disposition over content mastery" north star. But it is currently the *weakest* data consumer in the system (G25, G31, G32). It should aggregate quest performance metrics, eval findings, scan progression, parent overrides, and workingLevels into a coherent growth picture. Today it sees almost none of this structured data. The fix is not a new surface — it is wiring Learning Profile's disposition task to the same rich context the planner already receives (`skillSnapshot`, `recentEval`, `recentScans`) plus the parent signals (`dispositionOverrides`, `parentOverride`) that currently go to die.
