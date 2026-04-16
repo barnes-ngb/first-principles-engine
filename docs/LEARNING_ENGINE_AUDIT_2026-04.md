@@ -1021,17 +1021,17 @@ The loader does **not** include the `recommendation` or `action` fields — it o
 | # | Gap | Severity | Notes |
 |---|---|---|---|
 | G34 | "Accept & advance" does not call `autoCompleteBypassedItems` | Medium | Other checklist items sharing the same `activityConfigId` remain uncompleted after position advances past them (`TodayPage.tsx:681-723` vs `useUnifiedCapture.ts:133-142`) |
-| G35 | Reading/phonics scans never update `workingLevels` | Medium | Only math scans bridge to quest levels via `deriveMathWorkingLevelFromScan`; a child advancing through a phonics workbook produces no quest-level signal (`useScanToActivityConfig.ts:81-83`) |
-| G36 | Planner does not see scan `recommendation` field | Medium | `loadRecentScansContext` extracts only `lessonNumber` and `specificTopic` — the AI planner cannot distinguish "do" from "skip" scans (`contextSlices.ts:886-903`) |
-| G37 | Quest context has no scan awareness | Low | `recentScans` not in quest task context (`contextSlices.ts:51`); quest starting level depends on `workingLevels` (math only) or `activityConfigs` — scan position changes are invisible to quest for reading |
+| G35 | ~~Reading/phonics scans never update `workingLevels`~~ FIXED | Medium | `derivePhonicsWorkingLevelFromScan` and `deriveReadingWorkingLevelFromScan` added; `useScanToActivityConfig` now bridges Reading, LanguageArts, and Math scans to `workingLevels` via generalized `updateWorkingLevelFromScan` |
+| G36 | ~~Planner does not see scan `recommendation` field~~ FIXED | Medium | `loadRecentScansContext` now extracts `recommendation`, `effectiveRecommendation` (respecting `parentOverride`), `subject`, `pageType`, and includes skip/quick-review summary with usage guidance |
+| G37 | ~~Quest context has no scan awareness~~ FIXED | Low | `recentScans` added to quest task context (`contextSlices.ts` TASK_CONTEXT); quest AI now sees recent scan recommendations for the child's domain |
 | G38 | No Cloud Function trigger on scan writes | Low | All scan-to-config processing is client-side and fire-and-forget; a failed `syncScanToConfig` or `updateMathWorkingLevel` is silently swallowed (`useScanToActivityConfig.ts:82, 123`) |
-| G39 | Scan skip has no skill snapshot signal for non-math | Medium | A "skip" recommendation implies mastery, but for reading/LA/other subjects, no `prioritySkills` level, `masteryGate`, or `workingLevels` update occurs — the mastery signal is lost |
+| G39 | ~~Scan skip has no skill snapshot signal for non-math~~ FIXED | Medium | Reading/phonics/LA scans now update `workingLevels` via `derivePhonicsWorkingLevelFromScan` / `deriveReadingWorkingLevelFromScan`, providing a mastery signal for all scannable subjects |
 
 ## Journey 5 (Part A): Quest AI Prompt — What's Included
 
 **Trace:** The quest task handler assembles its system prompt from shared context slices + quest-specific data loaders + the static quest prompt template. This table lists every piece of data the AI receives.
 
-Context slices for quest (`contextSlices.ts:51`): `["childProfile", "sightWords", "recentEval", "wordMastery", "skillSnapshot", "workbookPaces"]`
+Context slices for quest (`contextSlices.ts:52`): `["childProfile", "sightWords", "recentHistoryByDomain", "wordMastery", "skillSnapshot", "workbookPaces", "recentScans"]`
 
 ### Shared context slices (via `buildContextForTask`)
 
@@ -1170,13 +1170,13 @@ Based on Parts A and B, these are the three missing context items with the highe
 | `handleSaveAndApply` → `addXpEvent` (EvaluateChatPage.tsx:607) | Eval XP event (25 XP) | `xpLedger/{childId}_{dedupKey}` | XP ledger hooks | — |
 | `handleSaveAndApply` → `addDiamondEvent` (EvaluateChatPage.tsx:615) | Eval diamond event (5 diamonds) | `xpLedger/{childId}_{dedupKey}` | Diamond hooks | — |
 | `handleSaveAndApply` → `updateSkillMapFromFindings` (EvaluateChatPage.tsx:602) | Curriculum knowledge map nodes (fire-and-forget) | `childSkillMaps/{childId}` | Learning Map UI (learning-map/) | — |
-| `useScan` (useScan.ts:135) | Scan doc (`action: 'pending'`, `results.recommendation`, image, curriculum detected) | `scans/{auto-id}` | `recentScans` slice for plan/scan tasks (contextSlices.ts:869) | G37 — not in quest context; G36 — `recommendation` field not extracted by planner |
-| `recordAction` (useScan.ts:164) | `action` → `'skipped'` | `scans/{docId}.action` | `recentScans` slice (position only) | G36 — `action` field not extracted by any AI loader |
+| `useScan` (useScan.ts:135) | Scan doc (`action: 'pending'`, `results.recommendation`, image, curriculum detected) | `scans/{auto-id}` | `recentScans` slice for plan/scan/quest tasks (contextSlices.ts) | ~~G37~~ FIXED — now in quest context; ~~G36~~ FIXED — `recommendation` + `effectiveRecommendation` extracted |
+| `recordAction` (useScan.ts:164) | `action` → `'skipped'` | `scans/{docId}.action` | `recentScans` slice | ~~G36~~ FIXED — recommendation fields now extracted by `loadRecentScansContext` |
 | `handleAcceptSkip` (TodayPage.tsx:704) | `parentOverride` (`recommendation: 'skip'`, `overriddenAt`) | `scans/{docId}.parentOverride` | Not read by any AI loader or CF | Written but never read (server-side) — G36 |
 | `syncScanToConfig` (useScanToActivityConfig.ts:62) | `currentPosition` advance | `activityConfigs/{configId}.currentPosition` | Planner `workbookPaces` slice (contextSlices.ts:392), quest `suggestedStartLevel` (quest.ts:31), `recentScans` slice (contextSlices.ts:886) | — |
 | `autoCompleteBypassedItems` (scanAdvance.ts:18) | Checklist items `completed: true`, `gradeResult`, `skipReason` (all items sharing activityConfigId) | `days/{dayId}.checklist[n]` | Today UI, `engagement` slice (contextSlices.ts — plan/disposition/shellyChat) | — |
 | `handleAcceptSkip` (TodayPage.tsx:692) | Single checklist item `skipped: true`, `skipReason: 'ai-recommended'` | `days/{dayId}.checklist[n]` | Today UI | G34 — other items with same activityConfigId NOT auto-completed |
-| `updateMathWorkingLevel` (useScanToActivityConfig.ts:159) | `workingLevels.math` (derived from lesson→level map) | `skillSnapshots/{childId}.workingLevels.math` | Client `computeStartLevel` (workingLevels.ts:53) | G40 — not read by server quest.ts; G35 — no reading/phonics equivalent |
+| `updateWorkingLevelFromScan` (useScanToActivityConfig.ts:175) | `workingLevels.{math,phonics,comprehension}` (derived from lesson→level maps) | `skillSnapshots/{childId}.workingLevels.*` | Client `computeStartLevel` (workingLevels.ts:53) | G40 — not read by server quest.ts; ~~G35~~ FIXED — reading/phonics now bridged |
 | `useUnifiedCapture` → `updateSkillMapFromFindings` (useUnifiedCapture.ts:110) | Curriculum knowledge map nodes from scan skills | `childSkillMaps/{childId}` | Learning Map UI (learning-map/) | — |
 | DispositionProfile (DispositionProfile.tsx:179) | `dispositionCache` (AI-generated disposition narratives) | `children/{childId}.dispositionCache` | DispositionProfile UI (client-side cache) | Written but never read by any CF or AI prompt |
 | DispositionProfile (DispositionProfile.tsx:221) | `dispositionOverrides` (parent inline edits/reverts per disposition) | `children/{childId}.dispositionOverrides` | DispositionProfile UI (client-side display) | Written but never read by any CF or AI prompt |
@@ -1191,7 +1191,7 @@ Not yet. The capture layer is strong — quests, evals, scans, and daily logs al
 
 1. **`workingLevels`** — the authoritative quest progression level, written by quest sessions, evals, and math scans, is never read by any Cloud Function (G40). The client and server disagree on starting level, which is the single most impactful adaptive signal.
 2. **`masteryGate`** — written by quest end flow, but the skip advisor that reads it is dead code (G5), `getEffectiveMasteryGate` is never called (G4), and the AI prompt ignores the field entirely (G6). Three layers of wiring exist; none are connected.
-3. **Scan `recommendation`** — the AI's skip/do/modify verdict is stored on every scan but the planner extracts only lesson position, not the recommendation (G36), and the quest context has no scan awareness at all (G37). Mastery signals from scans are lost for all non-math subjects (G35, G39).
+3. **Scan `recommendation`** — ~~the AI's skip/do/modify verdict is stored on every scan but the planner extracts only lesson position, not the recommendation (G36), and the quest context has no scan awareness at all (G37). Mastery signals from scans are lost for all non-math subjects (G35, G39).~~ FIXED — `loadRecentScansContext` now extracts recommendations + effectiveRecommendation; quest context includes `recentScans`; all scannable subjects bridge to `workingLevels`.
 
 ### 3. Where does Lincoln's data go to die (written but never read)?
 
@@ -1201,9 +1201,9 @@ Not yet. The capture layer is strong — quests, evals, scans, and daily logs al
 
 ### 4. Where does the AI operate with incomplete info the system actually has?
 
-- **Quest AI** is the worst case: ~~no `workingLevels` (G40)~~ FIXED, ~~only 1 cross-domain session history (G41)~~ FIXED, no engagement emoji or disposition signal (G42), no scan data (G37). It generates questions blind to ~~Lincoln's proven stable level, prior session patterns,~~ current energy, and workbook progress — all of which exist in Firestore.
+- **Quest AI** is the worst case: ~~no `workingLevels` (G40)~~ FIXED, ~~only 1 cross-domain session history (G41)~~ FIXED, no engagement emoji or disposition signal (G42), ~~no scan data (G37)~~ FIXED. It generates questions blind to ~~Lincoln's proven stable level, prior session patterns, workbook progress,~~ current energy — ~~all~~ most of which exist in Firestore.
 - **Disposition AI** omits the `skillSnapshot` and `recentEval` shared context slices (G32), rolling its own weaker loader that extracts only `findings[].text` from 3 sessions (G31). It cannot say "Lincoln jumped two phonics levels this week" because it never sees the numbers.
-- **Planner AI** sees scan positions but not scan recommendations (G36), so it cannot honor a skip verdict. It receives skill snapshot data including "Secure → SKIP" guidance, but the client-side skip advisor that could enforce this structurally is dead code (G5, G11).
+- **Planner AI** ~~sees scan positions but not scan recommendations (G36), so it cannot honor a skip verdict~~ FIXED — now sees recommendations + effectiveRecommendation + skip summary. It receives skill snapshot data including "Secure → SKIP" guidance, but the client-side skip advisor that could enforce this structurally is dead code (G5, G11).
 
 ### 5. Is Learning Profile the right unified view surface?
 
