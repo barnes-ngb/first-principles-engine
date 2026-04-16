@@ -1101,3 +1101,15 @@ Context slices for quest (`contextSlices.ts:51`): `["childProfile", "sightWords"
 | `dispositionCache` on `children/{childId}` | Yes — written at `src/features/progress/DispositionProfile.tsx:179`; typed `src/core/types/disposition.ts:42-45` | No — absent from `functions/src/ai/` entirely |
 | `parentOverride` on scans | Yes — `src/core/types/planning.ts:755` | No — absent from `functions/src/ai/` entirely |
 | `parentOverride` on dispositions (`dispositionOverrides` on `children/{childId}`) | Yes — `src/core/types/disposition.ts:37-39`; written at `src/features/progress/DispositionProfile.tsx:221` | No — absent from `functions/src/ai/` entirely |
+
+---
+
+## Journey 5 (Part B-ii): Missing from Quest Prompt — History and Engagement
+
+| Data source | In Firestore? | In Quest Prompt? |
+|---|---|---|
+| Recent scan recommendations (`scans` collection — `recommendation` field) | Yes — `src/core/types/planning.ts:696` (`recommendation` on scan results); loaded by `recentScans` slice at `functions/src/ai/contextSlices.ts:868-914` | No — `recentScans` is not in quest's slice list (`contextSlices.ts:51`); only used by `plan` and `scan` tasks |
+| Engagement emoji data from day logs (`days` — `engagement` field on checklist items) | Yes — `src/core/types/planning.ts:288` (`engagement` on `ChecklistItem`) | No — `engagement` slice is not in quest's slice list (`contextSlices.ts:51`); only used by `plan`, `disposition`, `shellyChat` |
+| Quest session history beyond the single most recent eval (multiple `evaluationSessions`) | Yes — `evaluationSessions` collection holds all completed sessions | No — `loadRecentEvalContext` at `functions/src/ai/chatTypes.ts:188-200` uses `.limit(1)`, returning only the single most recent session |
+| Word mastery progression over time (`wordProgress` subcollection — trend, not just current) | Yes — `children/{childId}/wordProgress` stores per-word `correctCount`, `wrongCount`, `skippedCount` | No — `functions/src/ai/tasks/quest.ts:92-131` loads current counts only; no timestamps, no deltas, no trend |
+| Hours/time data (`hours` collection — time per subject) | Yes — `hours` + `hoursAdjustments` collections; loaded by `hoursProgress` slice at `contextSlices.ts:332-333` | No — `hoursProgress` is not in quest's slice list (`contextSlices.ts:51`); only used by `plan` |
