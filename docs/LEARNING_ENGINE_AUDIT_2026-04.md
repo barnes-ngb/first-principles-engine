@@ -668,3 +668,94 @@ The Progress page has 5 tabs (`src/features/progress/ProgressPage.tsx:39-43`):
 | G23 | Portfolio has zero quest visibility | Low | Quest sessions create no artifacts; portfolio queries only artifacts collection |
 | G24 | Compliance exports exclude session-level quest data | Low | Quest hours counted in totals but session findings, scores, and level progression not included in CSV/HTML exports |
 | G25 | Learning Profile tab has no direct quest data path | Medium | The `disposition` context slices omit `recentEval`, `skillSnapshot`, `wordMastery`; quest performance enters only through the handler's own `loadRecentEvaluations()` (3-session, findings-text-only) |
+
+## Journey 3 (Part A): Guided Eval Write Paths
+
+**Trace:** Shelly completes a reading evaluation chat, then taps "Apply to Skill Snapshot".
+
+---
+
+### 1. What function handles the button? File:line.
+
+**`handleSaveAndApply`** at `src/features/evaluate/EvaluateChatPage.tsx:491`. The button is at line 1072.
+
+---
+
+### 2. What gets written to `skillSnapshots`? Which fields?
+
+**Yes.** `setDoc` at `src/features/evaluate/EvaluateChatPage.tsx:598` writes to `skillSnapshots/{childId}` with these fields:
+
+| Field | Source |
+|---|---|
+| `childId` | Active child |
+| `prioritySkills` | Merged: existing skills (not covered by new findings) + new skills from findings (emerging/not-yet → `SkillLevel.Emerging`, mastered → `SkillLevel.Secure`) + recommendations as priority skills |
+| `supports` | From `completeData.supports` (AI-generated), or existing |
+| `stopRules` | From `completeData.stopRules` (AI-generated), or existing |
+| `evidenceDefinitions` | From `completeData.evidenceDefinitions` (AI-generated), or existing |
+| `workingLevels` | Merged (see §3 below) |
+| `updatedAt` | ISO timestamp |
+| `conceptualBlocks` | From pattern analysis (see §4 below), only if non-empty |
+| `blocksUpdatedAt` | ISO timestamp, only if conceptualBlocks present |
+
+**Note:** This is a full `setDoc` (line 598), not `setDoc(..., { merge: true })`. Any fields on the existing document not listed above (e.g. `completedPrograms`) are **erased**.
+
+---
+
+### 3. `workingLevels` updated? File:line.
+
+**Yes, conditionally — reading domain only.** `src/features/evaluate/EvaluateChatPage.tsx:564-576`.
+
+- **Phonics:** `deriveWorkingLevelFromEvaluation(findings, 'phonics')` at line 567, guarded by `canOverwriteWorkingLevel` at line 568. Both helpers live in `src/features/quest/workingLevels.ts:196` and `:22`.
+- **Comprehension:** Same pattern at lines 572-575.
+- **Math:** Stubbed with a TODO at line 579 — **not implemented** (gap G26).
+
+`deriveWorkingLevelFromEvaluation` only returns a level when the findings contain `mastered` skills matching its internal skill→level map. If the eval shows only `emerging`/`not-yet`, working levels are **not updated**.
+
+---
+
+### 4. Conceptual blocks updated? File:line.
+
+**Yes, conditionally.** `src/features/evaluate/EvaluateChatPage.tsx:592-595`. If `conceptualBlocks.length > 0`, both `conceptualBlocks` and `blocksUpdatedAt` are spread into the snapshot document. Conceptual blocks are populated by `triggerPatternAnalysis` (fires the `analyzeEvaluationPatterns` Cloud Function) and stored in component state at line 186. They are **overwritten** (not merged) on each apply.
+
+---
+
+### 5. Hours logged for eval time? File:line.
+
+**Yes, but not inside `handleSaveAndApply`.** Hours are logged by `logSessionHours` at `src/features/evaluate/EvaluateChatPage.tsx:199-219`, which is called when the AI returns a `<complete>` tag (line 410 and line 478) — i.e., when the evaluation **finishes**, not when Shelly taps "Apply". The write is an `addDoc` to `hoursCollection(familyId)` at line 208 with fields: `childId`, `date`, `minutes` (rounded up to nearest 5), `subjectBucket`, `quickCapture: true`, `notes`, `source: 'evaluation-session'`.
+
+Hours logging is **decoupled from the apply action**. If Shelly never taps "Apply to Skill Snapshot", hours are still logged. Conversely, if the eval completes but `logSessionHours` fails silently, the apply still succeeds.
+
+---
+
+### 6. Additional writes (XP, diamonds, learning map)
+
+Inside `handleSaveAndApply`, after the snapshot write:
+
+- **XP:** `addXpEvent` at line 607 — writes 25 XP to `xpLedger` with dedup key `eval_{sessionDocId}`. Source: `src/core/xp/addXpEvent.ts:53`.
+- **Diamonds:** `addDiamondEvent` at line 615 — writes 5 diamonds with dedup key `eval_{sessionDocId}-diamond`. Source: `src/core/xp/addDiamondEvent.ts:27`.
+- **Learning Map:** `updateSkillMapFromFindings` at line 602 — fire-and-forget write to `childSkillMaps/{childId}` via `setDoc(..., { merge: true })`. Source: `src/core/curriculum/updateSkillMapFromFindings.ts:75-95`.
+
+All three are conditional on `sessionDocId` being truthy (XP/diamonds) or fire-and-forget with `.catch` (learning map).
+
+---
+
+### Summary of Writes
+
+| Write | Collection | Trigger | File:line |
+|---|---|---|---|
+| Skill snapshot (full overwrite) | `skillSnapshots/{childId}` | "Apply" button | `EvaluateChatPage.tsx:598` |
+| workingLevels (phonics) | merged into snapshot | "Apply" button, reading domain, mastered findings only | `EvaluateChatPage.tsx:567-569` |
+| workingLevels (comprehension) | merged into snapshot | "Apply" button, reading domain, mastered findings only | `EvaluateChatPage.tsx:572-575` |
+| conceptualBlocks | merged into snapshot | "Apply" button, if pattern analysis returned blocks | `EvaluateChatPage.tsx:592-595` |
+| Hours | `hours` | Eval completion (AI `<complete>` tag) | `EvaluateChatPage.tsx:208` |
+| XP (25) | `xpLedger` | "Apply" button, if sessionDocId | `EvaluateChatPage.tsx:607-613` |
+| Diamonds (5) | `xpLedger` | "Apply" button, if sessionDocId | `EvaluateChatPage.tsx:615-622` |
+| Learning Map | `childSkillMaps/{childId}` | "Apply" button, fire-and-forget | `EvaluateChatPage.tsx:602-603` |
+
+### Gaps Identified
+
+| # | Gap | Severity | Notes |
+|---|---|---|---|
+| G26 | Math working levels not derived from evaluation | Medium | TODO at `EvaluateChatPage.tsx:579` — math evaluations don't update `workingLevels.math` |
+| G27 | `setDoc` without `merge` erases unlisted fields | High | Line 598 uses bare `setDoc`, not `{ merge: true }`. Any fields on the existing snapshot not rebuilt by `handleSaveAndApply` (e.g. `completedPrograms`) are silently dropped |
+| G28 | Hours logged on eval complete, not on apply | Low | By design, but if Shelly never taps "Apply", hours are still counted without any snapshot update — the hours exist without a corresponding skill record |
