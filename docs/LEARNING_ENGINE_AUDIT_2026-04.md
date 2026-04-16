@@ -1204,3 +1204,49 @@ Not yet. The capture layer is strong — quests, evals, scans, and daily logs al
 ### 5. Is Learning Profile the right unified view surface?
 
 Yes — it is the only surface that attempts to synthesize across domains into a narrative, which aligns with the "disposition over content mastery" north star. But it is currently the *weakest* data consumer in the system (G25, G31, G32). It should aggregate quest performance metrics, eval findings, scan progression, parent overrides, and workingLevels into a coherent growth picture. Today it sees almost none of this structured data. The fix is not a new surface — it is wiring Learning Profile's disposition task to the same rich context the planner already receives (`skillSnapshot`, `recentEval`, `recentScans`) plus the parent signals (`dispositionOverrides`, `parentOverride`) that currently go to die.
+
+## Recommendations
+
+Ordered by impact-per-effort. Each closes the gaps most responsible for the "well-instrumented notebook, not a closed-loop engine" verdict.
+
+### R1. Feed `workingLevels` to the quest Cloud Function
+
+**Closes:** G9, G12, G19, G29, G40
+**Effort:** S
+Read `workingLevels` from the snapshot in `quest.ts` and inject the numeric level into the AI prompt alongside or replacing the curriculum-derived `suggestedStartLevel`. Format `workingLevels` in `loadSkillSnapshotContext` so every task that receives `skillSnapshot` also sees quest progression levels. This is the single change that aligns client and server on the most impactful adaptive signal.
+
+### R2. Per-domain `recentEval` with depth > 1
+
+**Closes:** G16, G30, G41
+**Effort:** S
+Change `loadRecentEvalContext` to query by the requesting task's domain (or return the most recent per domain) and increase the limit to 2–3. Prevents a math eval from eclipsing phonics data before the next phonics quest. Every AI task that consumes `recentEval` immediately benefits.
+
+### R3. Wire disposition task to shared context slices
+
+**Closes:** G25, G31, G32
+**Effort:** S
+Add `skillSnapshot` and `recentEval` to the disposition task's slice list in `contextSlices.ts:56` and remove (or supplement) the handler's bespoke `loadRecentEvaluations` loader. Learning Profile becomes the first surface to synthesize structured quest metrics, eval findings, and skill levels into a growth narrative — matching the "disposition over content mastery" north star.
+
+### R4. Fix `setDoc` data loss in eval Apply
+
+**Closes:** G27
+**Effort:** S
+Replace the bare `setDoc` at `EvaluateChatPage.tsx:598` with `setDoc(..., { merge: true })` or a read-modify-write pattern. Currently, tapping Apply silently erases any snapshot fields not rebuilt by `handleSaveAndApply` (e.g. `completedPrograms`, `workingLevels` written by a concurrent quest). This is the only High-severity data-loss bug in the audit.
+
+### R5. Surface scan recommendations to planner and bridge non-math scans to `workingLevels`
+
+**Closes:** G35, G36, G37, G39
+**Effort:** M
+Extract the `recommendation` field (skip/do/modify) in `loadRecentScansContext` so the planner can honor skip verdicts. Add a reading/phonics equivalent of `deriveMathWorkingLevelFromScan` so workbook progression for non-math subjects feeds back into quest starting levels. Completes the scan→adapt feedback loop that currently works only for math.
+
+## Open Questions
+
+1. **Single source of truth for starting level.** Should the server adopt `workingLevels` as authoritative (matching the client), or should it blend `workingLevels` with curriculum position into a composite signal? If blended, which wins on conflict?
+
+2. **How many sessions per domain in `recentEval`?** The current `limit(1)` is too few; 3 per domain enables trend detection but adds ~500 tokens per domain to the prompt. What's the right balance for cost vs. context richness?
+
+3. **Skip advisor: structural or advisory?** Should the planner structurally remove mastered activities from generated plans (wire `evaluateSkipEligibility` into plan generation), or is prompt-level "Secure → SKIP" guidance sufficient? Structural enforcement is deterministic but rigid; advisory is flexible but the AI can ignore it.
+
+4. **Should `dispositionOverrides` be visible to AI?** Parent-edited disposition narratives are currently written but never read by any CF. Feeding them into the disposition prompt gives the AI Shelly's voice — but the content is free-text, which means prompt injection risk and unpredictable prompt length. Is a structured summary safer than raw overrides?
+
+5. **Reading/phonics scan → `workingLevels` mapping.** Math scans use a lesson-to-level lookup table (`deriveMathWorkingLevelFromScan`). What's the equivalent mapping for phonics workbooks? Is it a fixed table, or should it be derived from the `activityConfigs` curriculum structure?
