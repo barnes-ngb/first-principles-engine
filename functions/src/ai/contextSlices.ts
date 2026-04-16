@@ -49,7 +49,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   chat: ["charter", "childProfile"],
   generate: ["charter", "childProfile"],
   evaluate: ["charter", "childProfile", "sightWords", "wordMastery"],
-  quest: ["childProfile", "sightWords", "recentHistoryByDomain", "wordMastery", "skillSnapshot", "workbookPaces"],
+  quest: ["childProfile", "sightWords", "recentHistoryByDomain", "wordMastery", "skillSnapshot", "workbookPaces", "recentScans"],
   generateStory: ["childProfile", "sightWords", "wordMastery"],
   analyzePatterns: ["childProfile"],
   workshop: ["charter", "childProfile", "workshopGames"],
@@ -899,7 +899,38 @@ async function loadActivityConfigsContext(
 
 // ── Recent scans loader ─────────────────────────────────────
 
-/** Load recent curriculum scans to tell the planner where the child left off in each workbook. */
+/** Scan record shape used by the context loader. */
+interface ScanDocData {
+  createdAt?: string;
+  action?: string;
+  parentOverride?: {
+    recommendation?: string;
+  } | null;
+  results?: {
+    pageType?: string;
+    subject?: string;
+    specificTopic?: string;
+    recommendation?: string;
+    recommendationReason?: string;
+    curriculumDetected?: { name?: string; lessonNumber?: number; pageNumber?: number };
+  } | null;
+}
+
+/**
+ * Compute effective recommendation: parentOverride wins over AI recommendation.
+ * Returns undefined if neither is available.
+ */
+function getEffectiveRec(scan: ScanDocData): string | undefined {
+  if (scan.parentOverride?.recommendation) return scan.parentOverride.recommendation;
+  if (scan.results?.recommendation) return scan.results.recommendation;
+  return undefined;
+}
+
+/**
+ * Load recent curriculum scans with recommendations.
+ * Includes subject, pageType, recommendation (AI + parent override),
+ * curriculum detected, and date — so planner/quest can see skip/do verdicts.
+ */
 async function loadRecentScansContext(
   db: Firestore,
   familyId: string,
@@ -914,35 +945,71 @@ async function loadRecentScansContext(
 
   if (snap.empty) return "";
 
-  // Group by workbook, keep most recent per workbook
-  const byWorkbook = new Map<string, { topics: string; lesson: string; date: string }>();
+  // Keep up to 5 most recent non-certificate scans
+  const recent: Array<{
+    workbook: string;
+    lesson: string;
+    subject: string;
+    pageType: string;
+    topics: string;
+    recommendation: string;
+    effectiveRecommendation: string;
+    hasParentOverride: boolean;
+    date: string;
+  }> = [];
+
   for (const scanDoc of snap.docs) {
-    const scan = scanDoc.data() as {
-      createdAt?: string;
-      results?: {
-        pageType?: string;
-        specificTopic?: string;
-        curriculumDetected?: { name?: string; lessonNumber?: number; pageNumber?: number };
-      } | null;
-    };
+    if (recent.length >= 5) break;
+
+    const scan = scanDoc.data() as ScanDocData;
     if (!scan.results || scan.results.pageType === "certificate") continue;
+
     const detected = scan.results.curriculumDetected;
-    const wb = detected?.name || "Unknown";
-    if (byWorkbook.has(wb)) continue; // already have a more recent one
-
-    const topics = scan.results.specificTopic || "unknown content";
+    const workbook = detected?.name || "Unknown";
     const lesson = String(detected?.lessonNumber ?? detected?.pageNumber ?? "?");
+    const subject = scan.results.subject || "unknown";
+    const pageType = scan.results.pageType || "worksheet";
+    const topics = scan.results.specificTopic || "unknown content";
+    const recommendation = scan.results.recommendation || "do";
+    const effectiveRec = getEffectiveRec(scan) || recommendation;
+    const hasParentOverride = !!scan.parentOverride?.recommendation;
     const date = scan.createdAt ? new Date(scan.createdAt).toLocaleDateString() : "unknown date";
-    byWorkbook.set(wb, { topics, lesson, date });
+
+    recent.push({ workbook, lesson, subject, pageType, topics, recommendation, effectiveRecommendation: effectiveRec, hasParentOverride, date });
   }
 
-  if (byWorkbook.size === 0) return "";
+  if (recent.length === 0) return "";
 
-  const lines = ["RECENT WORKBOOK SCANS (where the child left off):"];
-  for (const [wb, info] of byWorkbook) {
-    lines.push(`- ${wb}: Last at lesson/page ${info.lesson} (${info.topics}) on ${info.date}`);
+  const lines = ["RECENT WORKBOOK SCANS (last scanned, with AI recommendations):"];
+  for (const s of recent) {
+    let line = `- ${s.workbook}: lesson/page ${s.lesson}, ${s.subject} (${s.topics}) on ${s.date}`;
+    line += ` — recommendation: ${s.effectiveRecommendation}`;
+    if (s.hasParentOverride) {
+      line += ` (parent override; AI said: ${s.recommendation})`;
+    }
+    lines.push(line);
   }
-  lines.push("Use this to know what lesson to assign next. Cross-reference with Skill Snapshot to determine skip guidance.");
+
+  // Summarize skip patterns
+  const skipCount = recent.filter((s) => s.effectiveRecommendation === "skip").length;
+  const quickReviewCount = recent.filter((s) => s.effectiveRecommendation === "quick-review").length;
+  if (skipCount > 0 || quickReviewCount > 0) {
+    lines.push("");
+    lines.push("SCAN RECOMMENDATION SUMMARY:");
+    if (skipCount > 0) {
+      lines.push(`- ${skipCount} scan(s) recommended SKIP — child may be ahead of this material. Consider advancing.`);
+    }
+    if (quickReviewCount > 0) {
+      lines.push(`- ${quickReviewCount} scan(s) recommended QUICK-REVIEW — child mostly knows this but needs brief reinforcement.`);
+    }
+  }
+
+  lines.push("");
+  lines.push("Use scan recommendations to calibrate plans and quest difficulty:");
+  lines.push("- 'skip' = child has mastered this content, advance past it");
+  lines.push("- 'quick-review' = mostly known, brief practice only");
+  lines.push("- 'do' = appropriate level, assign normally");
+  lines.push("- 'modify' = needs adaptation (see teacher notes on scan)");
 
   return lines.join("\n");
 }
