@@ -248,10 +248,12 @@ function buildCharacterWithArmor(
   const armL = character.getObjectByName('armL')
   const armR = character.getObjectByName('armR')
   const headGroup = character.getObjectByName('headGroup')
-  const currentTier = (child.profile.currentTier ?? calculateTier(child.totalXp)).toUpperCase()
+  // Display tier is always derived from XP (canonical) — profile.currentTier
+  // can hold a stale "active forge tier" that doesn't match achieved XP.
+  const currentTier = calculateTier(child.totalXp).toUpperCase()
 
   for (const pieceMeta of VOXEL_ARMOR_PIECES) {
-    const pieceGroup = buildArmorPiece(pieceMeta.id, child.ageGroup)
+    const pieceGroup = buildArmorPiece(pieceMeta.id, child.ageGroup, undefined, currentTier)
     armorMeshes.set(pieceMeta.id, pieceGroup)
 
     const attachTo = pieceGroup.userData.attachToArm as string | undefined
