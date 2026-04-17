@@ -15,27 +15,26 @@ import type { VoxelArmorPieceId } from '../../../core/types'
 // ── Tier boundary detection (drives ceremony trigger) ───────────────
 
 describe('Tier boundary detection for ceremony', () => {
-  it('detects Iron→Gold transition at 999→1000 XP', () => {
-    expect(calculateTier(999)).toBe('IRON')
-    expect(calculateTier(1000)).toBe('GOLD')
-    // Different tiers = ceremony should fire
-    expect(calculateTier(999)).not.toBe(calculateTier(1000))
+  it('detects Iron→Gold transition at 1499→1500 XP', () => {
+    expect(calculateTier(1499)).toBe('IRON')
+    expect(calculateTier(1500)).toBe('GOLD')
+    expect(calculateTier(1499)).not.toBe(calculateTier(1500))
   })
 
-  it('detects Wood→Stone transition at 199→200 XP', () => {
-    expect(calculateTier(199)).toBe('WOOD')
-    expect(calculateTier(200)).toBe('STONE')
-    expect(calculateTier(199)).not.toBe(calculateTier(200))
+  it('detects Wood→Stone transition at 99→100 XP', () => {
+    expect(calculateTier(99)).toBe('WOOD')
+    expect(calculateTier(100)).toBe('STONE')
+    expect(calculateTier(99)).not.toBe(calculateTier(100))
   })
 
-  it('detects Stone→Iron transition at 499→500 XP', () => {
-    expect(calculateTier(499)).toBe('STONE')
-    expect(calculateTier(500)).toBe('IRON')
+  it('detects Stone→Iron transition at 749→750 XP', () => {
+    expect(calculateTier(749)).toBe('STONE')
+    expect(calculateTier(750)).toBe('IRON')
   })
 
-  it('detects Gold→Diamond transition at 1999→2000 XP', () => {
-    expect(calculateTier(1999)).toBe('GOLD')
-    expect(calculateTier(2000)).toBe('DIAMOND')
+  it('detects Gold→Diamond transition at 2499→2500 XP', () => {
+    expect(calculateTier(2499)).toBe('GOLD')
+    expect(calculateTier(2500)).toBe('DIAMOND')
   })
 
   it('detects Diamond→Netherite transition at 4999→5000 XP', () => {
@@ -45,7 +44,7 @@ describe('Tier boundary detection for ceremony', () => {
 
   it('handles large XP jumps that skip tiers', () => {
     // Wood → Gold (skip Stone and Iron)
-    const oldTier = calculateTier(100)
+    const oldTier = calculateTier(50)
     const newTier = calculateTier(1500)
     expect(oldTier).toBe('WOOD')
     expect(newTier).toBe('GOLD')
@@ -53,8 +52,8 @@ describe('Tier boundary detection for ceremony', () => {
   })
 
   it('does not trigger ceremony within same tier', () => {
-    expect(calculateTier(500)).toBe(calculateTier(999))
-    expect(calculateTier(1000)).toBe(calculateTier(1999))
+    expect(calculateTier(750)).toBe(calculateTier(1499))
+    expect(calculateTier(1500)).toBe(calculateTier(2499))
   })
 })
 

@@ -43,9 +43,9 @@ describe('armorTierProgress', () => {
     expect(getActiveForgeTierFromProgress(profile)).toBe('wood')
   })
 
-  it('unlocks stone when wood complete AND XP >= 200', () => {
+  it('unlocks stone when wood complete AND XP >= 100', () => {
     const profile = makeProfile({
-      totalXp: 200,
+      totalXp: 100,
       forgedPieces: { wood: allForged },
     })
     expect(deriveUnlockedTiersFromForged(profile)).toEqual(['wood', 'stone'])
@@ -53,9 +53,9 @@ describe('armorTierProgress', () => {
     expect(getDisplayArmorTier(profile)).toBe('wood')
   })
 
-  it('does NOT unlock stone when wood complete but XP < 200', () => {
+  it('does NOT unlock stone when wood complete but XP < 100', () => {
     const profile = makeProfile({
-      totalXp: 150,
+      totalXp: 50,
       forgedPieces: { wood: allForged },
     })
     expect(deriveUnlockedTiersFromForged(profile)).toEqual(['wood'])
@@ -77,7 +77,7 @@ describe('armorTierProgress', () => {
 
   it('uses highest completed tier for display once multiple tiers are completed', () => {
     const profile = makeProfile({
-      totalXp: 1000,
+      totalXp: 750,
       forgedPieces: {
         wood: allForged,
         stone: allForged,
@@ -89,7 +89,7 @@ describe('armorTierProgress', () => {
 
   it('chains unlock: wood→stone→iron when all prior complete + XP met', () => {
     const profile = makeProfile({
-      totalXp: 500,
+      totalXp: 750,
       forgedPieces: {
         wood: allForged,
         stone: allForged,
@@ -101,13 +101,13 @@ describe('armorTierProgress', () => {
 
   it('stops chain when XP threshold not met for next tier', () => {
     const profile = makeProfile({
-      totalXp: 400,
+      totalXp: 600,
       forgedPieces: {
         wood: allForged,
         stone: allForged,
       },
     })
-    // Iron needs 500 XP, only have 400
+    // Iron needs 750 XP, only have 600
     expect(deriveUnlockedTiersFromForged(profile)).toEqual(['wood', 'stone'])
     // Active forge tier should preview iron (locked)
     expect(getActiveForgeTierFromProgress(profile)).toBe('iron')
@@ -115,11 +115,10 @@ describe('armorTierProgress', () => {
 
   it('shows next tier when all unlocked tiers are complete', () => {
     const profile = makeProfile({
-      totalXp: 1000,
+      totalXp: 750,
       forgedPieces: { wood: allForged },
     })
-    // Only wood unlocked (stone needs 200 XP — met, so stone unlocks too)
-    // Stone is unlocked, iron needs stone complete + 500 XP
+    // Wood complete + XP >= 100 → stone unlocks. Iron needs stone complete + 750 XP.
     expect(deriveUnlockedTiersFromForged(profile)).toEqual(['wood', 'stone'])
     expect(getActiveForgeTierFromProgress(profile)).toBe('stone')
   })
@@ -127,13 +126,13 @@ describe('armorTierProgress', () => {
 
 describe('getTierLockReason', () => {
   it('returns empty for unlocked tier', () => {
-    const profile = makeProfile({ totalXp: 200, forgedPieces: { wood: allForged } })
+    const profile = makeProfile({ totalXp: 100, forgedPieces: { wood: allForged } })
     expect(getTierLockReason(profile, 'stone')).toBe('')
   })
 
   it('returns XP reason when prior tier complete but XP insufficient', () => {
-    const profile = makeProfile({ totalXp: 150, forgedPieces: { wood: allForged } })
-    expect(getTierLockReason(profile, 'stone')).toBe('Need 200 XP (have 150)')
+    const profile = makeProfile({ totalXp: 50, forgedPieces: { wood: allForged } })
+    expect(getTierLockReason(profile, 'stone')).toBe('Need 100 XP (have 50)')
   })
 
   it('returns prior tier completion reason when XP sufficient but prior incomplete', () => {
@@ -146,10 +145,10 @@ describe('getTierLockReason', () => {
 
   it('returns combined reason when both conditions unmet', () => {
     const profile = makeProfile({
-      totalXp: 100,
+      totalXp: 50,
       forgedPieces: { wood: { belt: forgedEntry } },
     })
-    expect(getTierLockReason(profile, 'stone')).toBe('Complete Wood (1/6) & earn 200 XP')
+    expect(getTierLockReason(profile, 'stone')).toBe('Complete Wood (1/6) & earn 100 XP')
   })
 
   it('returns empty for wood tier (always unlocked)', () => {
