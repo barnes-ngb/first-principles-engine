@@ -418,14 +418,14 @@ function buildShield(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   // (x/z mix) and can pull the shield inward across the chest when arm pose changes.
   const visual = new THREE.Group()
   visual.name = 'shield_visual'
-  visual.rotation.y = THREE.MathUtils.degToRad(75) // Face shield mostly toward +Z/front
+  visual.rotation.y = THREE.MathUtils.degToRad(75)
+  visual.rotation.x = -1.2 // ~70° tilt so shield face points forward/outward
   group.add(visual)
 
   // Attachment offset from arm pivot: outward (-X), down along forearm (-Y), forward (+Z)
-  // Applied on parent so it is NOT re-oriented by shield-facing yaw.
-  const anchorX = -U * 4.2
+  const anchorX = -U * 2.4
   const anchorY = -(armMid + U * 1)
-  const anchorZ = U * 2.8
+  const anchorZ = U * 4.0
   visual.position.set(anchorX, anchorY, anchorZ)
 
   // Shield-local center
@@ -502,11 +502,13 @@ function buildShield(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
 function buildSword(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   const group = new THREE.Group()
   group.userData.attachToArm = 'R'
+  group.rotation.x = 0.15  // slight forward angle (gripped)
+  group.rotation.z = 0.1   // slight outward cant
   const { U, armH } = layout
   const handY = armH - U * 1
 
-  // Sword offset
-  const sX = U * 3.5
+  // Sword offset — slightly outward from arm center, near hand, slightly forward
+  const sX = U * 2.4
 
   // Handle/grip
   const grip = box(U * 1.2, U * 4, U * 1.5, 0x5D4037)
