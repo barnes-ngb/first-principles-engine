@@ -1,6 +1,14 @@
 import * as THREE from 'three'
 import type { CharacterProportions, VoxelArmorPieceId } from '../../../core/types'
 import { getBodyLayout } from './buildCharacter'
+import {
+  buildWoodHelmet, buildWoodBreastplate, buildWoodBelt,
+  buildWoodShoes, buildWoodShield, buildWoodSword,
+} from './armorGeometryWood'
+import {
+  buildStoneHelmet, buildStoneBreastplate, buildStoneBelt,
+  buildStoneShoes, buildStoneShield, buildStoneSword,
+} from './armorGeometryStone'
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -47,12 +55,12 @@ function box(
 }
 
 /** Create a textured box and tag it with a material role for tier coloring */
-function taggedBox(
+export function taggedBox(
   w: number,
   h: number,
   d: number,
   color: THREE.Color | number,
-  role: 'primary' | 'accent' | 'detail',
+  role: 'primary' | 'secondary' | 'accent' | 'detail',
   name?: string,
 ): THREE.Mesh {
   const mesh = texturedBox(w, h, d, color)
@@ -62,12 +70,12 @@ function taggedBox(
 }
 
 /** Create a flat box and tag it with a material role */
-function taggedFlatBox(
+export function taggedFlatBox(
   w: number,
   h: number,
   d: number,
   color: THREE.Color | number,
-  role: 'primary' | 'accent' | 'detail',
+  role: 'primary' | 'secondary' | 'accent' | 'detail',
   name?: string,
 ): THREE.Mesh {
   const mesh = box(w, h, d, color)
@@ -75,6 +83,12 @@ function taggedFlatBox(
   if (name) mesh.name = name
   return mesh
 }
+
+/** White placeholder — tier materials override these. Exported for tier builders. */
+export const W = 0xffffff
+
+/** Body layout type shared across tier geometry builders. */
+export type BodyLayout = ReturnType<typeof getBodyLayout>
 
 // ── Armor piece colors (defaults before tier is applied) ─────────────
 
@@ -170,11 +184,12 @@ export const XP_THRESHOLDS: Record<VoxelArmorPieceId, number> = {
 // Armor is a second layer slightly outside the body.
 // Uses getBodyLayout() world-unit dimensions + U for detail padding.
 // All positions in character-root space (feet at Y=0) unless attached to arm.
+//
+// Iron tier is the full knight geometry. Wood and Stone variants live in
+// armorGeometryWood.ts / armorGeometryStone.ts. Gold/Diamond/Netherite fall
+// through to Iron until Phase B.
 
-// White placeholder color — tier materials override these
-const W = 0xffffff
-
-function buildHelmet(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
+function buildIronHelmet(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
   const { U, headSize } = layout
 
@@ -242,7 +257,7 @@ function buildHelmet(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   return group
 }
 
-function buildBreastplate(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
+function buildIronBreastplate(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
   const { U, torsoCenter, torsoTop, torsoH, torsoW, torsoD, legTop, armH } = layout
 
@@ -315,7 +330,7 @@ function buildBreastplate(layout: ReturnType<typeof getBodyLayout>): THREE.Group
   return group
 }
 
-function buildBelt(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
+function buildIronBelt(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
   const { U, legTop, torsoW, torsoD } = layout
 
@@ -361,7 +376,7 @@ function buildBelt(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   return group
 }
 
-function buildShoes(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
+function buildIronShoes(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
   const { U, legW, legD, legH } = layout
   const legX = legW / 2 + U * 0.15
@@ -405,7 +420,7 @@ function buildShoes(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   return group
 }
 
-function buildShield(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
+function buildIronShield(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
   group.userData.attachToArm = 'L'
   const { U, armH } = layout
@@ -499,7 +514,7 @@ function buildShield(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   return group
 }
 
-function buildSword(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
+function buildIronSword(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
   group.userData.attachToArm = 'R'
   group.rotation.x = 0.15  // slight forward angle (gripped)
@@ -618,12 +633,71 @@ function buildSword(layout: ReturnType<typeof getBodyLayout>): THREE.Group {
   return group
 }
 
+// ── Tier dispatchers ────────────────────────────────────────────────
+// Gold/Diamond/Netherite currently fall through to Iron until Phase B.
+
+function normalizeTier(tier?: string): 'WOOD' | 'STONE' | 'IRON' {
+  const t = tier?.toUpperCase() ?? 'IRON'
+  if (t === 'WOOD') return 'WOOD'
+  if (t === 'STONE') return 'STONE'
+  return 'IRON'
+}
+
+function buildHelmet(layout: BodyLayout, tier: string): THREE.Group {
+  switch (normalizeTier(tier)) {
+    case 'WOOD': return buildWoodHelmet(layout)
+    case 'STONE': return buildStoneHelmet(layout)
+    default: return buildIronHelmet(layout)
+  }
+}
+
+function buildBreastplate(layout: BodyLayout, tier: string): THREE.Group {
+  switch (normalizeTier(tier)) {
+    case 'WOOD': return buildWoodBreastplate(layout)
+    case 'STONE': return buildStoneBreastplate(layout)
+    default: return buildIronBreastplate(layout)
+  }
+}
+
+function buildBelt(layout: BodyLayout, tier: string): THREE.Group {
+  switch (normalizeTier(tier)) {
+    case 'WOOD': return buildWoodBelt(layout)
+    case 'STONE': return buildStoneBelt(layout)
+    default: return buildIronBelt(layout)
+  }
+}
+
+function buildShoes(layout: BodyLayout, tier: string): THREE.Group {
+  switch (normalizeTier(tier)) {
+    case 'WOOD': return buildWoodShoes(layout)
+    case 'STONE': return buildStoneShoes(layout)
+    default: return buildIronShoes(layout)
+  }
+}
+
+function buildShield(layout: BodyLayout, tier: string): THREE.Group {
+  switch (normalizeTier(tier)) {
+    case 'WOOD': return buildWoodShield(layout)
+    case 'STONE': return buildStoneShield(layout)
+    default: return buildIronShield(layout)
+  }
+}
+
+function buildSword(layout: BodyLayout, tier: string): THREE.Group {
+  switch (normalizeTier(tier)) {
+    case 'WOOD': return buildWoodSword(layout)
+    case 'STONE': return buildStoneSword(layout)
+    default: return buildIronSword(layout)
+  }
+}
+
 // ── Main builder ────────────────────────────────────────────────────
 
 export function buildArmorPiece(
   pieceId: VoxelArmorPieceId,
   ageGroup: 'older' | 'younger',
   customProportions?: Partial<CharacterProportions>,
+  tier: string = 'IRON',
 ): THREE.Group {
   const layout = getBodyLayout(ageGroup, customProportions)
 
@@ -631,22 +705,22 @@ export function buildArmorPiece(
 
   switch (pieceId) {
     case 'helmet':
-      group = buildHelmet(layout)
+      group = buildHelmet(layout, tier)
       break
     case 'breastplate':
-      group = buildBreastplate(layout)
+      group = buildBreastplate(layout, tier)
       break
     case 'belt':
-      group = buildBelt(layout)
+      group = buildBelt(layout, tier)
       break
     case 'shoes':
-      group = buildShoes(layout)
+      group = buildShoes(layout, tier)
       break
     case 'shield':
-      group = buildShield(layout)
+      group = buildShield(layout, tier)
       break
     case 'sword':
-      group = buildSword(layout)
+      group = buildSword(layout, tier)
       break
   }
 

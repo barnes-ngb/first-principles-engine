@@ -110,10 +110,13 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
 
     // Add equipped armor
     if (showArmor && equippedPieces.length > 0) {
+      const tierForGeometry = calculateTier(totalXp)
       for (const pieceId of equippedPieces) {
         const piece = buildArmorPiece(
           pieceId as 'belt' | 'breastplate' | 'shoes' | 'shield' | 'helmet' | 'sword',
           ageGroup,
+          undefined,
+          tierForGeometry,
         )
         piece.visible = true
 

@@ -569,7 +569,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     const headGroup = character.getObjectByName('headGroup')
 
     for (const pieceMeta of VOXEL_ARMOR_PIECES) {
-      const pieceGroup = buildArmorPiece(pieceMeta.id, ageGroup, proportions)
+      const pieceGroup = buildArmorPiece(pieceMeta.id, ageGroup, proportions, currentTier)
       armorGroupsRef.current.set(pieceMeta.id, pieceGroup)
 
       const attachTo = pieceGroup.userData.attachToArm as string | undefined
@@ -701,10 +701,13 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     // ── Edge outlines — Minecraft Legends block definition ──────────
     // Body parts get standard outlines
     addOutlinesToGroup(character, 0.25)
-    // Equipped armor pieces get slightly lighter outlines
+    // Equipped armor outlines scale with tier: wood is soft (0.15),
+    // iron is sharp (0.25), netherite stands out (0.35).
+    const armorEdgeOpacity =
+      TIER_MATERIALS[getTierTint(currentTier)]?.edgeOpacity ?? 0.2
     for (const pieceId of equippedPieces) {
       const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
-      if (group) addOutlinesToGroup(group, 0.2)
+      if (group) addOutlinesToGroup(group, armorEdgeOpacity)
     }
     // Cape gets very subtle outlines (should feel soft)
     const capeMesh = character.getObjectByName('cape') ?? scene.getObjectByName('cape')
@@ -1266,8 +1269,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         }
         applyTierToArmor(armorGroupsRef.current, currentTier, [pieceId], armorColors)
 
-        // Add edge outlines to newly equipped armor
-        if (group) addOutlinesToGroup(group, 0.2)
+        // Add edge outlines to newly equipped armor (tier-scaled opacity)
+        const tierEdge =
+          TIER_MATERIALS[getTierTint(currentTier)]?.edgeOpacity ?? 0.2
+        if (group) addOutlinesToGroup(group, tierEdge)
 
         // Add enchantment glow if tier qualifies (Iron+)
         if (tierHasGlow(currentTier) && group) {
