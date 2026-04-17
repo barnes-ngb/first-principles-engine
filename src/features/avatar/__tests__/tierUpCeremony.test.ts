@@ -72,7 +72,7 @@ describe('Tier materials for ceremony phases', () => {
     for (const [, mat] of Object.entries(TIER_MATERIALS)) {
       expect(typeof mat.primary).toBe('number')
       expect(typeof mat.accent).toBe('number')
-      expect(typeof mat.detail).toBe('number')
+      expect(typeof mat.secondary).toBe('number')
       expect(typeof mat.emissive).toBe('number')
       expect(typeof mat.emissiveIntensity).toBe('number')
     }
