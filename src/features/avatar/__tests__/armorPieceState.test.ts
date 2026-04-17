@@ -69,9 +69,9 @@ describe('getArmorPieceState', () => {
   })
 
   it('returns locked_by_tier when tier is not accessible', () => {
-    // Wood complete but XP not enough for stone (needs 200)
+    // Wood complete but XP not enough for stone (needs 100)
     const profile = makeProfile({
-      totalXp: 150,
+      totalXp: 50,
       forgedPieces: { wood: allForged },
     })
     // Active forge tier should be stone (preview)
@@ -137,8 +137,8 @@ describe('getArmorPieceState', () => {
   })
 
   it('iron pieces are locked_by_tier when stone is incomplete (5/6)', () => {
-    // Tier gate: iron requires stone complete (6/6) + 500 XP.
-    // Lincoln has 793 XP (>500) but only 5/6 stone. Iron must be locked.
+    // Tier gate: iron requires stone complete (6/6) + 750 XP.
+    // Lincoln has 793 XP (>750) but only 5/6 stone. Iron must be locked.
     const profile = makeProfile({
       totalXp: 793,
       forgedPieces: {
@@ -161,9 +161,9 @@ describe('getArmorPieceState', () => {
     })).toBe('locked_by_tier')
   })
 
-  it('iron pieces become forgeable once stone is complete AND xp >= 500', () => {
+  it('iron pieces become forgeable once stone is complete AND xp >= 750', () => {
     const profile = makeProfile({
-      totalXp: 500,
+      totalXp: 750,
       forgedPieces: {
         wood: allForged,
         stone: allForged,
@@ -251,7 +251,7 @@ describe('Lincoln sword forge scenario (975 XP, 42 diamonds, stone 5/6)', () => 
     expect(deriveUnlockedTiersFromForged(lincolnProfile)).toEqual(['wood', 'stone'])
   })
 
-  it('after forging sword, stone completes and iron unlocks (975 >= 500)', () => {
+  it('after forging sword, stone completes and iron unlocks (975 >= 750)', () => {
     const afterForge = makeProfile({
       ...lincolnProfile,
       forgedPieces: {
@@ -263,7 +263,7 @@ describe('Lincoln sword forge scenario (975 XP, 42 diamonds, stone 5/6)', () => 
     expect(deriveUnlockedTiersFromForged(afterForge)).toEqual(['wood', 'stone', 'iron'])
     expect(getActiveForgeTierFromProgress(afterForge)).toBe('iron')
 
-    // All iron pieces should be forgeable (975 >= 500 XP threshold)
+    // All iron pieces should be forgeable (975 >= 750 XP threshold)
     for (const pieceId of ALL_ARMOR_VOXEL_PIECES) {
       expect(getArmorPieceState({
         profile: afterForge,

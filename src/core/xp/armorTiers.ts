@@ -50,7 +50,7 @@ export const ARMOR_TIERS: ArmorTierInfo[] = [
     tier: ArmorTier.Stone,
     label: TIERS.STONE.label + ' Armor',
     title: 'Survivor',
-    minXp: TIERS.STONE.minXp,        // 200
+    minXp: TIERS.STONE.minXp,        // 100
     color: '#808080',                 // Stone gray
     accent: '#666666',
     pieces: 1,
@@ -59,7 +59,7 @@ export const ARMOR_TIERS: ArmorTierInfo[] = [
     tier: ArmorTier.Iron,
     label: TIERS.IRON.label + ' Armor',
     title: 'Warrior',
-    minXp: TIERS.IRON.minXp,         // 500
+    minXp: TIERS.IRON.minXp,         // 750
     color: '#C8C8C8',                 // Iron silver
     accent: '#A0A0A0',
     pieces: 2,
@@ -68,7 +68,7 @@ export const ARMOR_TIERS: ArmorTierInfo[] = [
     tier: ArmorTier.Gold,
     label: TIERS.GOLD.label + ' Armor',
     title: 'Champion',
-    minXp: TIERS.GOLD.minXp,         // 1000
+    minXp: TIERS.GOLD.minXp,         // 1500
     color: '#FCDB5B',                 // Gold yellow
     accent: '#DBA520',
     pieces: 3,
@@ -77,7 +77,7 @@ export const ARMOR_TIERS: ArmorTierInfo[] = [
     tier: ArmorTier.Diamond,
     label: TIERS.DIAMOND.label + ' Armor',
     title: 'Diamond Scholar',
-    minXp: TIERS.DIAMOND.minXp,      // 2000
+    minXp: TIERS.DIAMOND.minXp,      // 2500
     color: '#5DECF5',                 // Diamond cyan
     accent: '#2CB9C4',
     pieces: 4,
