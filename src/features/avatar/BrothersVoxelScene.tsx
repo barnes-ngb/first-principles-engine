@@ -7,6 +7,7 @@ import type { AvatarBackground, AvatarProfile, CharacterFeatures, VoxelArmorPiec
 import { buildCharacter, applyProfileOutfit } from './voxel/buildCharacter'
 import { buildArmorPiece, VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
 import { applyTierToArmor, calculateTier, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
+import { getPieceForgedTier } from './armorTierProgress'
 import { PoseAnimator, POSES, POSE_EXPRESSIONS, applyExpression, getEquipmentIdlePose } from './voxel/poseSystem'
 import type { Pose } from './voxel/poseSystem'
 import { applyPaintedFace, applyFaceWithAIFallback } from './voxel/pixelFace'
@@ -248,12 +249,16 @@ function buildCharacterWithArmor(
   const armL = character.getObjectByName('armL')
   const armR = character.getObjectByName('armR')
   const headGroup = character.getObjectByName('headGroup')
-  // Display tier is always derived from XP (canonical) — profile.currentTier
-  // can hold a stale "active forge tier" that doesn't match achieved XP.
+  // Overall progression tier (for pedestal, ghost pieces, etc.) still comes from XP.
+  // Each equipped piece's geometry + materials use its own forged tier instead,
+  // so mixed-tier loadouts show the right shape per piece.
   const currentTier = calculateTier(child.totalXp).toUpperCase()
+  const resolvePieceTier = (pieceId: string): string =>
+    getPieceForgedTier(child.profile.forgedPieces, pieceId, currentTier)
 
   for (const pieceMeta of VOXEL_ARMOR_PIECES) {
-    const pieceGroup = buildArmorPiece(pieceMeta.id, child.ageGroup, undefined, currentTier)
+    const pieceTier = resolvePieceTier(pieceMeta.id)
+    const pieceGroup = buildArmorPiece(pieceMeta.id, child.ageGroup, undefined, pieceTier)
     armorMeshes.set(pieceMeta.id, pieceGroup)
 
     const attachTo = pieceGroup.userData.attachToArm as string | undefined
@@ -321,7 +326,7 @@ function buildCharacterWithArmor(
     }
   }
 
-  applyTierToArmor(armorMeshes, currentTier, child.equippedPieces)
+  applyTierToArmor(armorMeshes, resolvePieceTier, child.equippedPieces)
   applyProfileOutfit(character, child.profile.customization)
 
   if (child.equippedPieces.includes('helmet')) {
