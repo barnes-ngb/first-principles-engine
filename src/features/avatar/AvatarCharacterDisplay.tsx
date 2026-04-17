@@ -251,7 +251,6 @@ export default function AvatarCharacterDisplay({
             ageGroup={ageGroup}
             equippedPieces={appliedVoxel}
             totalXp={profile.totalXp}
-            armorTier={profile.currentTier}
             animateEquipPiece={animateEquipId}
             animateUnequipPiece={animateUnequipId}
             onEquipAnimDone={onEquipAnimDone}

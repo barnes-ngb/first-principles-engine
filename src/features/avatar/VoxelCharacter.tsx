@@ -45,8 +45,6 @@ interface VoxelCharacterProps {
   ageGroup: 'older' | 'younger'
   equippedPieces: string[]
   totalXp?: number
-  /** Optional armor tier key override (forge-progression based). */
-  armorTier?: string
   /** Piece to animate equipping (triggers scale-in animation) */
   animateEquipPiece?: string | null
   /** Piece to animate unequipping */
@@ -381,7 +379,6 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   ageGroup,
   equippedPieces: equippedPiecesRaw,
   totalXp = 0,
-  armorTier,
   animateEquipPiece,
   animateUnequipPiece,
   onEquipAnimDone,
@@ -449,7 +446,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     [equippedPiecesRaw],
   )
   const resolvedFeatures = features ?? DEFAULT_CHARACTER_FEATURES
-  const currentTier = (armorTier?.toUpperCase() ?? calculateTier(totalXp))
+  // Display tier is derived from XP — the canonical source. profile.currentTier
+  // holds the "active forge tier" (next tier to forge), which can run ahead of
+  // XP-based achievement and must not be used for armor coloring.
+  const currentTier = calculateTier(totalXp ?? 0)
   const armorColors = customization?.armorColors
   // Stable string key for proportions to avoid unnecessary scene rebuilds on same values
   const proportionsKey = useMemo(
