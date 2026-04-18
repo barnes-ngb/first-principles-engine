@@ -4,6 +4,7 @@ import { doc, onSnapshot, updateDoc } from 'firebase/firestore'
 import {
   bookProgressCollection,
   bookProgressDocId,
+  stripUndefined,
 } from '../../core/firebase/firestore'
 import type { BookProgress, ChapterQuestionPoolItem } from '../../core/types'
 
@@ -64,7 +65,9 @@ export function useBookProgress(
       const docRef = doc(bookProgressCollection(familyId), docId)
 
       const updatedPool = bookProgress.questionPool.map((item) =>
-        item.chapter === chapter ? { ...item, ...update } : item,
+        item.chapter === chapter
+          ? (stripUndefined({ ...item, ...update } as unknown as Record<string, unknown>) as unknown as ChapterQuestionPoolItem)
+          : item,
       )
 
       // Determine lastChapterAnswered
