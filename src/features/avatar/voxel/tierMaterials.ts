@@ -154,18 +154,29 @@ export function buildTierMaterial(
 
 // ── Apply tier materials to armor meshes ─────────────────────────
 
+/**
+ * Apply tier materials to equipped armor pieces.
+ *
+ * `tier` may be either a single tier string (every equipped piece gets that
+ * tier's palette) or a resolver function that returns a tier per piece id.
+ * The resolver form is what enables mixed-tier characters — e.g. an Iron belt
+ * worn alongside a Stone breastplate.
+ */
 export function applyTierToArmor(
   armorMeshes: Map<string, THREE.Group>,
-  tier: string,
+  tier: string | ((pieceId: string) => string),
   equippedPieces: string[],
   armorColors?: ArmorColors,
 ): void {
-  const tint = getTierTint(tier)
-  const materials = TIER_MATERIALS[tint] ?? TIER_MATERIALS.wood
+  const resolveTier = typeof tier === 'function' ? tier : () => tier
 
   const safeEquipped = equippedPieces ?? []
   for (const [pieceId, mesh] of armorMeshes) {
     if (!safeEquipped.includes(pieceId)) continue
+
+    const pieceTier = resolveTier(pieceId)
+    const tint = getTierTint(pieceTier)
+    const materials = TIER_MATERIALS[tint] ?? TIER_MATERIALS.wood
 
     // Check for custom dye color for this piece
     const dyeHex = armorColors?.[pieceId as keyof ArmorColors]

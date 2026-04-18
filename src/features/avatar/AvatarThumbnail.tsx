@@ -1,19 +1,22 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 
-import type { CharacterFeatures } from '../../core/types'
+import type { AvatarProfile, CharacterFeatures } from '../../core/types'
 import { DEFAULT_CHARACTER_FEATURES } from '../../core/types'
 import { buildCharacter } from './voxel/buildCharacter'
 import { buildArmorPiece } from './voxel/buildArmorPiece'
 import { frameCameraToCharacter } from './voxel/cameraUtils'
 import { applyTierToArmor, calculateTier } from './voxel/tierMaterials'
 import { buildPaintedFace, renderColorArrayToCanvas, applyCanvasToHead } from './voxel/pixelFace'
+import { getPieceForgedTier } from './armorTierProgress'
 
 interface AvatarThumbnailProps {
   features?: CharacterFeatures
   ageGroup?: 'older' | 'younger'
   equippedPieces?: string[]
   totalXp?: number
+  /** Per-tier forge record — drives per-piece geometry when equipped pieces span tiers. */
+  forgedPieces?: AvatarProfile['forgedPieces']
   size?: number
   showArmor?: boolean
   animated?: boolean
@@ -34,6 +37,7 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
   ageGroup = 'older',
   equippedPieces = [],
   totalXp = 0,
+  forgedPieces,
   size = 48,
   showArmor = true,
   animated = false,
@@ -110,13 +114,15 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
 
     // Add equipped armor
     if (showArmor && equippedPieces.length > 0) {
-      const tierForGeometry = calculateTier(totalXp)
+      const fallbackTier = calculateTier(totalXp)
+      const resolvePieceTier = (pid: string): string =>
+        getPieceForgedTier(forgedPieces, pid, fallbackTier)
       for (const pieceId of equippedPieces) {
         const piece = buildArmorPiece(
           pieceId as 'belt' | 'breastplate' | 'shoes' | 'shield' | 'helmet' | 'sword',
           ageGroup,
           undefined,
-          tierForGeometry,
+          resolvePieceTier(pieceId),
         )
         piece.visible = true
 
@@ -169,9 +175,8 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
         armorMeshes.set(pieceId, piece)
       }
 
-      // Apply tier colors to equipped armor
-      const tier = calculateTier(totalXp)
-      applyTierToArmor(armorMeshes, tier, equippedPieces)
+      // Apply per-piece tier colors — each piece uses its own forged tier.
+      applyTierToArmor(armorMeshes, resolvePieceTier, equippedPieces)
     }
 
     // Apply pixel face texture for sizes >= 64
@@ -246,7 +251,7 @@ const AvatarThumbnail = memo(function AvatarThumbnail({
       cleanupRef.current?.()
       cleanupRef.current = null
     }
-  }, [features, ageGroup, equippedPieces, totalXp, size, showArmor, shouldAnimate, faceGrid, webglFailed])
+  }, [features, ageGroup, equippedPieces, totalXp, forgedPieces, size, showArmor, shouldAnimate, faceGrid, webglFailed])
 
   // CSS fallback when WebGL is unavailable
   if (webglFailed) {

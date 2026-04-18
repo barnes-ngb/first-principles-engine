@@ -5,6 +5,7 @@ import {
   deriveUnlockedTiersFromForged,
   getActiveForgeTierFromProgress,
   getDisplayArmorTier,
+  getPieceForgedTier,
   getTierLockReason,
 } from '../armorTierProgress'
 
@@ -154,5 +155,49 @@ describe('getTierLockReason', () => {
   it('returns empty for wood tier (always unlocked)', () => {
     const profile = makeProfile()
     expect(getTierLockReason(profile, 'wood')).toBe('')
+  })
+})
+
+describe('getPieceForgedTier', () => {
+  it('returns the highest tier at which a piece was forged', () => {
+    const forgedPieces = {
+      wood: { belt: forgedEntry, helmet: forgedEntry },
+      stone: { belt: forgedEntry },
+      iron: { belt: forgedEntry },
+    }
+    expect(getPieceForgedTier(forgedPieces, 'belt')).toBe('iron')
+  })
+
+  it('returns the tier for a piece only forged in one tier', () => {
+    const forgedPieces = {
+      stone: { breastplate: forgedEntry },
+    }
+    expect(getPieceForgedTier(forgedPieces, 'breastplate')).toBe('stone')
+  })
+
+  it('returns the fallback when the piece has no forge record', () => {
+    const forgedPieces = {
+      wood: { belt: forgedEntry },
+    }
+    expect(getPieceForgedTier(forgedPieces, 'helmet', 'iron')).toBe('iron')
+  })
+
+  it('returns the fallback when forgedPieces is undefined', () => {
+    expect(getPieceForgedTier(undefined, 'belt', 'iron')).toBe('iron')
+  })
+
+  it('defaults to wood when no forge record and no fallback', () => {
+    expect(getPieceForgedTier(undefined, 'belt')).toBe('wood')
+  })
+
+  it('supports mixed loadouts: each piece resolves independently', () => {
+    const forgedPieces = {
+      wood: { helmet: forgedEntry },
+      stone: { breastplate: forgedEntry },
+      iron: { belt: forgedEntry },
+    }
+    expect(getPieceForgedTier(forgedPieces, 'belt')).toBe('iron')
+    expect(getPieceForgedTier(forgedPieces, 'breastplate')).toBe('stone')
+    expect(getPieceForgedTier(forgedPieces, 'helmet')).toBe('wood')
   })
 })
