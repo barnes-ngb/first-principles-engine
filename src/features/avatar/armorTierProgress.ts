@@ -4,6 +4,25 @@ import { ARMOR_TIERS } from '../../core/xp/armorTiers'
 export const MINECRAFT_TIER_ORDER: ArmorTier[] = ['wood', 'stone', 'iron', 'gold', 'diamond', 'netherite']
 export const ALL_ARMOR_VOXEL_PIECES: VoxelArmorPieceId[] = ['belt', 'shoes', 'breastplate', 'shield', 'helmet', 'sword']
 
+/**
+ * The tier to render a given piece at — the highest tier it has been forged at.
+ * Falls back to `fallbackTier` (then 'wood') for pieces without a forge record,
+ * which covers legacy profiles where unlockedPieces preceded the per-tier forge map.
+ */
+export function getPieceForgedTier(
+  forgedPieces: AvatarProfile['forgedPieces'] | undefined,
+  pieceId: string,
+  fallbackTier: string = 'wood',
+): string {
+  if (forgedPieces) {
+    for (let i = MINECRAFT_TIER_ORDER.length - 1; i >= 0; i--) {
+      const tier = MINECRAFT_TIER_ORDER[i]
+      if (forgedPieces[tier]?.[pieceId]) return tier
+    }
+  }
+  return fallbackTier
+}
+
 export function getTierForgedCount(profile: AvatarProfile, tier: string): number {
   return ALL_ARMOR_VOXEL_PIECES.filter((pieceId) => Boolean(profile.forgedPieces?.[tier]?.[pieceId])).length
 }
