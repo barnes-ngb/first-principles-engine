@@ -117,6 +117,170 @@ describe('addXpEvent', () => {
     expect(eventDocData.category).toBe('forge')
   })
 
+  it('returns 0 and writes nothing when amount is 0', async () => {
+    const result = await addXpEvent('fam-1', 'child-1', 'CHECKLIST_DAY_COMPLETE', 0, 'zero-test')
+    expect(result).toBe(0)
+    expect(mockGetDoc).not.toHaveBeenCalled()
+    expect(mockSetDoc).not.toHaveBeenCalled()
+  })
+
+  it('returns 0 and writes nothing when familyId is empty', async () => {
+    const result = await addXpEvent('', 'child-1', 'CHECKLIST_DAY_COMPLETE', 10, 'empty-fam')
+    expect(result).toBe(0)
+    expect(mockGetDoc).not.toHaveBeenCalled()
+    expect(mockSetDoc).not.toHaveBeenCalled()
+  })
+
+  it('returns 0 and writes nothing when childId is empty', async () => {
+    const result = await addXpEvent('fam-1', '', 'CHECKLIST_DAY_COMPLETE', 10, 'empty-child')
+    expect(result).toBe(0)
+    expect(mockGetDoc).not.toHaveBeenCalled()
+    expect(mockSetDoc).not.toHaveBeenCalled()
+  })
+
+  it('returns 0 when event doc already exists (dedup)', async () => {
+    mockGetDoc.mockResolvedValueOnce({ exists: () => true })
+    const result = await addXpEvent('fam-1', 'child-1', 'CHECKLIST_DAY_COMPLETE', 10, 'already-exists')
+    expect(result).toBe(0)
+    expect(mockSetDoc).not.toHaveBeenCalled()
+  })
+
+  it('maps QUEST_COMPLETE to quests source bucket', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => true,
+          data: () => ({ totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }),
+        })
+      }
+      return Promise.resolve({
+        exists: () => true,
+        data: () => ({
+          childId: 'child-1', themeStyle: 'minecraft', pieces: [],
+          currentTier: 'wood', totalXp: 0, updatedAt: '2026-01-01',
+        }),
+      })
+    })
+
+    await addXpEvent('fam-1', 'child-1', 'QUEST_COMPLETE', 20, 'quest-xp-1')
+
+    const eventDocData = mockSetDoc.mock.calls[0][1]
+    expect(eventDocData.sources.quests).toBe(20)
+    expect(eventDocData.sources.routines).toBe(0)
+    expect(eventDocData.sources.books).toBe(0)
+
+    const cumulativeData = mockSetDoc.mock.calls[1][1]
+    expect(cumulativeData.sources.quests).toBe(20)
+  })
+
+  it('maps BOOK_READ to books source bucket', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => true,
+          data: () => ({ totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }),
+        })
+      }
+      return Promise.resolve({
+        exists: () => true,
+        data: () => ({
+          childId: 'child-1', themeStyle: 'minecraft', pieces: [],
+          currentTier: 'wood', totalXp: 0, updatedAt: '2026-01-01',
+        }),
+      })
+    })
+
+    await addXpEvent('fam-1', 'child-1', 'BOOK_READ', 5, 'book-xp-1')
+
+    const eventDocData = mockSetDoc.mock.calls[0][1]
+    expect(eventDocData.sources.books).toBe(5)
+    expect(eventDocData.sources.routines).toBe(0)
+  })
+
+  it('maps CHECKLIST_DAY_COMPLETE to routines source bucket', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => true,
+          data: () => ({ totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }),
+        })
+      }
+      return Promise.resolve({
+        exists: () => true,
+        data: () => ({
+          childId: 'child-1', themeStyle: 'minecraft', pieces: [],
+          currentTier: 'wood', totalXp: 0, updatedAt: '2026-01-01',
+        }),
+      })
+    })
+
+    await addXpEvent('fam-1', 'child-1', 'CHECKLIST_DAY_COMPLETE', 15, 'routine-xp-1')
+
+    const eventDocData = mockSetDoc.mock.calls[0][1]
+    expect(eventDocData.sources.routines).toBe(15)
+    expect(eventDocData.sources.quests).toBe(0)
+    expect(eventDocData.sources.books).toBe(0)
+  })
+
+  it('clamps newTotal to 0 when negative amount would go below zero', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => true,
+          data: () => ({ totalXp: 5, sources: { routines: 5, quests: 0, books: 0 } }),
+        })
+      }
+      return Promise.resolve({
+        exists: () => true,
+        data: () => ({
+          childId: 'child-1', themeStyle: 'minecraft', pieces: [],
+          currentTier: 'wood', totalXp: 5, updatedAt: '2026-01-01',
+        }),
+      })
+    })
+
+    await addXpEvent('fam-1', 'child-1', 'CHECKLIST_DAY_COMPLETE', -20, 'negative-xp')
+
+    const cumulativeData = mockSetDoc.mock.calls[1][1]
+    expect(cumulativeData.totalXp).toBe(0) // Math.max(0, 5 + (-20))
+  })
+
+  it('creates default avatar profile when none exists', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => false,
+          data: () => null,
+        })
+      }
+      return Promise.resolve({ exists: () => false, data: () => null })
+    })
+
+    await addXpEvent('fam-1', 'child-1', 'CHECKLIST_DAY_COMPLETE', 10, 'new-avatar-test')
+
+    // 3 setDoc calls: event, cumulative, avatar
+    expect(mockSetDoc).toHaveBeenCalledTimes(3)
+    const avatarData = mockSetDoc.mock.calls[2][1]
+    expect(avatarData.childId).toBe('child-1')
+    expect(avatarData.totalXp).toBe(10)
+    expect(avatarData.currentTier).toBe('wood')
+  })
+
   it('existing entries without currencyType are treated as xp (backward compat)', async () => {
     // This tests the conceptual rule: entries without currencyType field
     // are XP. Since the cumulative ledger doc has no currencyType, it
