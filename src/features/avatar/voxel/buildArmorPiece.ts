@@ -332,46 +332,67 @@ function buildIronBreastplate(layout: BodyLayout): THREE.Group {
 
 function buildIronBelt(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
-  const { U, legTop, torsoW, torsoD } = layout
+  const { U, legTop, torsoW, torsoD, scale } = layout
+  const s = scale
 
-  // Waist band — wider and thicker than body
-  const bandW = torsoW + U * 3.4
-  const bandD = torsoD + U * 3
-  const band = taggedBox(bandW, U * 3.2, bandD, W, 'primary', 'belt_band')
+  // Waist band — 0.3*s tall, wraps around the waist and sits proud of the
+  // torso surface so the steel reads cleanly against the tunic and pants.
+  const bandH = 0.3 * s
+  const bandW = torsoW + U * 1.6
+  const bandD = torsoD + U * 1.6
+  const band = taggedBox(bandW, bandH, bandD, W, 'primary', 'belt_band')
   band.position.y = legTop
   group.add(band)
 
-  // Side wrap pieces
-  const wrapL = taggedBox(U * 1.0, U * 3.2, bandD - U * 1, W, 'primary', 'belt_wrap_l')
-  wrapL.position.set(-(bandW / 2 + U * 0.2), legTop, 0)
-  group.add(wrapL)
-  const wrapR = taggedBox(U * 1.0, U * 3.2, bandD - U * 1, W, 'primary', 'belt_wrap_r')
-  wrapR.position.set(bandW / 2 + U * 0.2, legTop, 0)
-  group.add(wrapR)
-
-  // Buckle — gold square, protruding forward
-  const buckle = taggedFlatBox(U * 3.2, U * 3.0, U * 1.2, 0xC8A84E, 'accent', 'belt_buckle')
-  buckle.position.set(0, legTop, bandD / 2 + U * 0.3)
+  // Buckle — protrudes forward at the front center.
+  const buckleW = U * 3.6
+  const buckleH = U * 2.8
+  const buckleD = U * 1.6
+  const buckleFrontZ = bandD / 2 + U * 0.2
+  const buckle = taggedBox(buckleW, buckleH, buckleD, W, 'accent', 'belt_buckle')
+  buckle.position.set(0, legTop, buckleFrontZ + buckleD / 2)
   group.add(buckle)
 
-  // Buckle inner detail
-  const inner = taggedFlatBox(U * 1.6, U * 1.4, U * 0.3, 0x111111, 'detail', 'belt_inner')
-  inner.position.set(0, legTop, bandD / 2 + U * 1)
-  group.add(inner)
+  // Cross detail on the buckle face
+  const crossZ = buckleFrontZ + buckleD + U * 0.1
+  const crossV = taggedFlatBox(U * 0.5, buckleH * 0.8, U * 0.3, W, 'secondary', 'belt_buckle_cross_v')
+  crossV.position.set(0, legTop, crossZ)
+  group.add(crossV)
+  const crossH = taggedFlatBox(buckleW * 0.7, U * 0.5, U * 0.3, W, 'secondary', 'belt_buckle_cross_h')
+  crossH.position.set(0, legTop, crossZ)
+  group.add(crossH)
 
-  // Buckle prong
-  const prong = taggedFlatBox(U * 0.3, U * 2.0, U * 0.3, 0xC8A84E, 'accent', 'belt_prong')
-  prong.position.set(U * 0.4, legTop, bandD / 2 + U * 1)
-  group.add(prong)
+  // Side pouches — detail blocks suggesting hung pouches on each hip.
+  const pouchW = U * 1.6
+  const pouchH = U * 2.6
+  const pouchD = U * 1.2
+  const pouchX = torsoW / 2 + U * 1.4
+  const pouchY = legTop - bandH * 0.15
+  const pouchZ = bandD / 2 - pouchD / 2 + U * 0.1
+  const pouchL = taggedBox(pouchW, pouchH, pouchD, W, 'primary', 'belt_pouch_l')
+  pouchL.position.set(-pouchX, pouchY, pouchZ)
+  group.add(pouchL)
+  const pouchR = taggedBox(pouchW, pouchH, pouchD, W, 'primary', 'belt_pouch_r')
+  pouchR.position.set(pouchX, pouchY, pouchZ)
+  group.add(pouchR)
 
-  // Rivets along the belt
-  const rivetSpacing = (bandW - U * 2) / 6
-  for (let i = -3; i <= 3; i++) {
-    if (i === 0) continue
-    const rivet = taggedFlatBox(U * 0.5, U * 0.5, U * 0.5, W, 'accent', `belt_rivet_${i}`)
-    rivet.position.set(i * rivetSpacing, legTop, bandD / 2 + U * 0.1)
+  // Pouch flap straps (thin accent bands across the top of each pouch)
+  const strapZ = pouchZ + pouchD / 2 + U * 0.1
+  const strapL = taggedFlatBox(pouchW + U * 0.2, U * 0.35, U * 0.2, W, 'accent', 'belt_pouch_strap_l')
+  strapL.position.set(-pouchX, pouchY + pouchH * 0.25, strapZ)
+  group.add(strapL)
+  const strapR = taggedFlatBox(pouchW + U * 0.2, U * 0.35, U * 0.2, W, 'accent', 'belt_pouch_strap_r')
+  strapR.position.set(pouchX, pouchY + pouchH * 0.25, strapZ)
+  group.add(strapR)
+
+  // Rivets on the band front, flanking the buckle
+  const rivetZ = bandD / 2 + U * 0.15
+  const rivetXs = [-bandW / 2 + U * 0.8, -buckleW / 2 - U * 0.8, buckleW / 2 + U * 0.8, bandW / 2 - U * 0.8]
+  rivetXs.forEach((x, i) => {
+    const rivet = taggedFlatBox(U * 0.5, U * 0.5, U * 0.4, W, 'accent', `belt_rivet_${i}`)
+    rivet.position.set(x, legTop, rivetZ)
     group.add(rivet)
-  }
+  })
 
   return group
 }
@@ -700,10 +721,6 @@ export function buildArmorPiece(
   tier: string = 'IRON',
 ): THREE.Group {
   const layout = getBodyLayout(ageGroup, customProportions)
-
-  // DEBUG: temporary — verify which tier each piece is rendering at.
-  // eslint-disable-next-line no-console
-  console.log(`[ARMOR] Building ${pieceId} at tier ${tier}, ageGroup=${ageGroup}`)
 
   let group: THREE.Group
 
