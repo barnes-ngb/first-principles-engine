@@ -182,6 +182,14 @@ export function applyTierToArmor(
     const dyeHex = armorColors?.[pieceId as keyof ArmorColors]
     const dyeColor = dyeHex ? new THREE.Color(dyeHex) : null
 
+    // DIAGNOSTIC: report which tier palette is about to be applied for this
+    // piece. Stone breastplate should report tint=stone, primary=8a8a8a.
+    // If this says something else (e.g. iron/wood), the tier resolver is the
+    // culprit, not the material pipeline.
+    console.log(
+      `[TIER] applyTierToArmor piece=${pieceId} tier=${pieceTier} tint=${tint} primary=${materials.primary.toString(16)} secondary=${materials.secondary.toString(16)} dye=${dyeHex ?? 'none'}`,
+    )
+
     mesh.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return
 
@@ -230,6 +238,18 @@ export function applyTierToArmor(
         }))
       }
       child.material = faceMats
+    })
+
+    // DIAGNOSTIC: verify final applied colors on each child mesh. The Stone
+    // breastplate front plate should land near 0x8a8a8a (± jitter/face variation).
+    mesh.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return
+      const m0 = Array.isArray(child.material) ? child.material[0] : child.material
+      if (m0 instanceof THREE.MeshPhongMaterial || m0 instanceof THREE.MeshLambertMaterial) {
+        console.log(
+          `[TIER]   after applyTier piece=${pieceId} mesh=${child.name || '(unnamed)'} role=${(child.userData.materialRole as string) ?? 'primary'} color=${m0.color.getHexString()}`,
+        )
+      }
     })
   }
 }

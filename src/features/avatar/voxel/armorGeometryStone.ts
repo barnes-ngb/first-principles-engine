@@ -75,6 +75,17 @@ export function buildStoneBreastplate(layout: BodyLayout): THREE.Group {
   front.position.set(0, torsoCenter, plateZ)
   group.add(front)
 
+  // DIAGNOSTIC: log placeholder color at creation. The real tier color is
+  // applied later in applyTierToArmor; if the piece ever renders with this
+  // raw W=0xffffff placeholder, applyTierToArmor didn't run for it.
+  const frontMat0 = Array.isArray(front.material) ? front.material[0] : front.material
+  if (frontMat0 instanceof THREE.MeshPhongMaterial) {
+    console.log(
+      '[STONE] buildStoneBreastplate created stone_chest_front with placeholder color:',
+      frontMat0.color.getHexString(),
+    )
+  }
+
   // Side plates — narrow vertical strips flanking the torso. A clear gap sits
   // between the wide front plate and each side strip so the tunic shows.
   const sideW = U * 1.2
