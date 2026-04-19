@@ -1011,7 +1011,7 @@ The loader does **not** include the `recommendation` or `action` fields — it o
 | Planner (next `plan` generation) | **Yes** — lesson position only | **No** — `recommendation` field not extracted | `contextSlices.ts:869-914` |
 | Quest (next session) | **No** — `recentScans` not in quest context | **No** | `contextSlices.ts:51` |
 | Weekly review | **No** | **No** | — |
-| Shelly Chat | **No** — `recentScans` not in shellyChat context | **No** | `contextSlices.ts:58-61` |
+| Shelly Chat | ~~**No** — `recentScans` not in shellyChat context~~ ✅ FIXED — `recentScans` now wired | ~~**No**~~ ✅ YES — AI recommendation + `effectiveRecommendation` surfaced | `contextSlices.ts:62-66` |
 | Cloud Function triggers | **None exist** on `scans` collection | N/A | `functions/src/index.ts` |
 
 ---
@@ -1181,6 +1181,45 @@ Based on Parts A and B, these are the three missing context items with the highe
 | DispositionProfile (DispositionProfile.tsx:179) | `dispositionCache` (AI-generated disposition narratives) | `children/{childId}.dispositionCache` | DispositionProfile UI (client-side cache) | Written but never read by any CF or AI prompt |
 | DispositionProfile (DispositionProfile.tsx:221) | `dispositionOverrides` (parent inline edits/reverts per disposition) | `children/{childId}.dispositionOverrides` | DispositionProfile UI (client-side display) | Written but never read by any CF or AI prompt |
 
+## Chat Task Context Inspection (Ask AI / shellyChat) — ✅ FIXED — slices added
+
+**Problem (pre-fix):** shellyChat (the "Ask AI" sidebar) loaded 9 shared context slices (`charter`, `childProfile`, `engagement`, `gradeResults`, `recentEval`, `sightWords`, `weekFocus`, `wordMastery`, `workbookPaces`) plus per-task supplemental queries (children list, disposition profile, weekly review narrative, conundrum, completion patterns, conundrum artifacts, chapter responses). Its system prompt advertised "you DO have access to records," but the slices that R1–R5 wired into quest/planner/disposition (`skillSnapshot`, `recentHistoryByDomain`, `recentScans`) were missing. Today's checklist and Dad Lab reports were also absent. Concretely, the AI could not answer:
+
+- "What level is Lincoln at in phonics?" — no `workingLevels` on the prompt
+- "How did this week go?" — no per-domain eval history, no today's checklist progress
+- "What should we do for Dad Lab this weekend?" — no Dad Lab report history
+- "Should Lincoln skip the next GATB math lesson?" — no scan recommendations
+
+**Fix:** shellyChat's slice list in `contextSlices.ts:62-66` now ADDS (no removals):
+
+| Slice | Source | What it gives Shelly |
+|---|---|---|
+| `skillSnapshot` | `skillSnapshots/{childId}` via `loadSkillSnapshotContext` | `workingLevels` (per-domain level + source + evidence), priority skills, supports, stop rules, ADDRESS_NOW conceptual blocks, completed programs |
+| `recentHistoryByDomain` | `evaluationSessions` via `loadRecentEvalHistoryByDomain` (NO `filterDomain` so it queries ALL 4 domains — phonics, comprehension, math, fluency — at depth 3) | Session type, final level, score, date, and first session's findings for every subject |
+| `recentScans` | `scans` via `loadRecentScansContext` | Up to 5 most recent scans: subject, page type, lesson, topic, AI recommendation, `effectiveRecommendation` (parentOverride wins), skip/quick-review summary |
+| `dayToday` | `days` via new `loadTodayDayLogContext` | Today's checklist with "X of Y done" header, completed items (with engagement + mastery + rolled-over markers), remaining items, skipped items (with skip reason), teach-back status |
+| `dadLabReports` | `dadLabReports` via new `loadRecentDadLabReportsContext` | Last 3 Dad Lab reports where the active child has a `childReports[childId]` entry: title, date, status, lab type, question, kid prediction, kid explanation, observation |
+
+**Code refs:**
+- Slice enum additions: `functions/src/ai/contextSlices.ts:34-39` (added `DayToday`, `DadLabReports`)
+- TASK_CONTEXT update: `functions/src/ai/contextSlices.ts:62-66`
+- New loader `loadTodayDayLogContext`: `functions/src/ai/contextSlices.ts` (end of file)
+- New loader `loadRecentDadLabReportsContext`: `functions/src/ai/contextSlices.ts` (end of file)
+- Handler header comment updated: `functions/src/ai/tasks/shellyChat.ts:1-9`
+
+**What did NOT change:**
+- No removals from the existing 9 slices (backward-compatible additive change)
+- The shellyChat handler still runs its supplemental parallel queries (all children, disposition profile, weekly review, conundrum, completion patterns, conundrum artifacts, chapter responses) unchanged
+- System prompt text unchanged — the existing "you DO have access to records" claim is now accurate for skill snapshot, per-domain eval history, scan recommendations, today's progress, and Dad Lab reports
+
+**Tests:** New TASK_CONTEXT assertion in `contextSlices.test.ts` verifies all five added slice names are wired to shellyChat. All 161 functions tests + 1308 root tests pass. Typecheck clean.
+
+**Verification checklist (manual tablet test):**
+- [ ] "What level is Lincoln at in phonics?" → cites `workingLevels.phonics` level + source/date
+- [ ] "How did this week go?" → references per-domain eval history + today's checklist progress
+- [ ] "What should we do for Dad Lab this weekend?" → references most recent Dad Lab reports + current interests
+- [ ] "Should Lincoln skip the next GATB math lesson?" → references recent scan recommendations (skip / quick-review / do)
+
 ## Coherence Verdict
 
 ### 1. Does the system function as a coherent learning engine today?
@@ -1245,6 +1284,12 @@ Ordered by impact-per-effort. Each closes the gaps most responsible for the "wel
 **Effort:** M
 Extract the `recommendation` field (skip/do/modify) in `loadRecentScansContext` so the planner can honor skip verdicts. Add a reading/phonics equivalent of `deriveMathWorkingLevelFromScan` so workbook progression for non-math subjects feeds back into quest starting levels. Completes the scan→adapt feedback loop that currently works only for math.
 
+### R6. Wire shellyChat (Ask AI) to the same adaptive context as quest/planner/disposition — **DONE**
+
+**Closes:** "Ask AI knows nothing" gap (see *Chat Task Context Inspection* section above).
+**Effort:** S
+**Status:** Implemented 2026-04-19. Added five slices to `shellyChat` in `TASK_CONTEXT` (contextSlices.ts): `skillSnapshot`, `recentHistoryByDomain` (cross-domain, no domain filter — covers phonics/comprehension/math/fluency at depth 3), `recentScans`, plus two new loaders `dayToday` (today's checklist with engagement/mastery/skip state) and `dadLabReports` (last 3 relevant Dad Lab reports with kid prediction/explanation). No removals. Existing supplemental queries in the handler preserved. The sidebar prompt's "you DO have access to records" claim is now accurate for skill snapshot, per-domain eval history, scan recommendations, today's progress, and Dad Lab reports.
+
 ## Open Questions
 
 1. **Single source of truth for starting level.** Should the server adopt `workingLevels` as authoritative (matching the client), or should it blend `workingLevels` with curriculum position into a composite signal? If blended, which wins on conflict?
@@ -1256,3 +1301,95 @@ Extract the `recommendation` field (skip/do/modify) in `loadRecentScansContext` 
 4. **Should `dispositionOverrides` be visible to AI?** Parent-edited disposition narratives are currently written but never read by any CF. Feeding them into the disposition prompt gives the AI Shelly's voice — but the content is free-text, which means prompt injection risk and unpredictable prompt length. Is a structured summary safer than raw overrides?
 
 5. **Reading/phonics scan → `workingLevels` mapping.** Math scans use a lesson-to-level lookup table (`deriveMathWorkingLevelFromScan`). What's the equivalent mapping for phonics workbooks? Is it a fixed table, or should it be derived from the `activityConfigs` curriculum structure?
+
+## Chat Task Context Inspection
+
+Read-only inspection of the general "Ask AI" chat task context to verify why it doesn't know about Lincoln's plan, week progress, or skill levels.
+
+### 1. What task type does Ask AI use?
+
+**The premise needs correcting.** The "Ask AI" nav link at `AppShell.tsx:29` routes to `/chat`, which `router.tsx:67` maps to `ShellyChatPage`. Every outgoing AI call in `ShellyChatPage.tsx` uses **`taskType: TaskType.ShellyChat`** (= `'shellyChat'`), not `'chat'`. Call sites: `ShellyChatPage.tsx:413`, `:523`, `:532`, `:719`, `:784`, `:800`, `:854`, `:1016`.
+
+The `'chat'` taskType *does* exist but is only used by two non-Ask-AI callers:
+- `src/features/books/useComprehensionQuestions.ts:68` — generates 3 book-reading comprehension Qs
+- `src/features/books/StoryGuidePage.tsx:90` — generates a single follow-up question for London's story guide
+
+So Nathan's symptom ("Ask AI doesn't know about Lincoln's plan") is a `'shellyChat'` problem, not a `'chat'` problem. Both are documented below because the prompt asked about both.
+
+### 2. Context slices per task (from `contextSlices.ts:42-66`)
+
+**`'chat'` task:** `charter`, `childProfile` — that's it.
+
+**`'shellyChat'` task:** `charter`, `childProfile`, `engagement`, `gradeResults`, `recentEval`, `sightWords`, `weekFocus`, `wordMastery`, `workbookPaces`.
+
+### 3. Side-by-side comparison
+
+| Slice | Chat (books only) | Plan | Quest | Disposition | ShellyChat (Ask AI UI) |
+|-------|:-:|:-:|:-:|:-:|:-:|
+| `charter` | ✅ | ✅ | — | ✅ | ✅ |
+| `childProfile` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `workbookPaces` | — | ✅ | ✅ | — | ✅ |
+| `weekFocus` | — | ✅ | — | — | ✅ |
+| `hoursProgress` | — | ✅ | — | — | — |
+| `engagement` | — | ✅ | — | ✅ | ✅ |
+| `gradeResults` | — | ✅ | — | ✅ | ✅ |
+| `bookStatus` | — | ✅ | — | — | — |
+| `sightWords` | — | ✅ | ✅ | — | ✅ |
+| `recentEval` (cross-domain, limit 1) | — | ✅ | — | — | ✅ |
+| `recentHistoryByDomain` (per-domain, depth 3) | — | — | ✅ | ✅ | — |
+| `wordMastery` | — | ✅ | ✅ | ✅ | ✅ |
+| `generatedContent` | — | ✅ | — | — | — |
+| `workshopGames` | — | ✅ | — | — | — |
+| `mastery` (parent observations) | — | ✅ | — | — | — |
+| `skillSnapshot` (workingLevels + conceptualBlocks + completedPrograms) | — | ✅ | ✅ | ✅ | — |
+| `recentScans` | — | ✅ | ✅ | — | — |
+| `activityConfigs` | — | ✅ | — | — | — |
+
+Note: `childProfile` *does* surface `prioritySkills`, `supports`, and `stopRules` via the pre-loaded `snapshotData` argument (see `contextSlices.ts:319-325`), so ShellyChat sees those three fields — but **not** the richer `skillSnapshot` slice's `workingLevels`, `conceptualBlocks`, or `completedPrograms`.
+
+### 4. Specific checks for ShellyChat (the actual Ask AI UI)
+
+| Signal | In ShellyChat prompt? | Source |
+|---|---|---|
+| `workingLevels` (R1) | ❌ No | Lives in `skillSnapshot` slice, not mapped to `shellyChat` |
+| `recentHistoryByDomain` (R2) | ❌ No — only cross-domain `recentEval` limit 1 | `contextSlices.ts:62-65` lists `recentEval`, not `recentHistoryByDomain` |
+| `recentScans` (R5) | ❌ No | Not in slice list |
+| `weekFocus` / current week plan | ⚠️ Partial — theme, virtue, scripture, heart question only (`loadWeekContext` at `chat.ts:189-215`). **No daily plan / checklist details.** |
+| `dayLog` / today's checklist status | ⚠️ Partial — the handler loads 14 days of logs inline (`shellyChat.ts:60-65`) but only computes completion-rate-by-day-of-week and top-skipped activities. Today's specific checklist items, completion state, and mastery are not in the prompt |
+| Engagement data | ✅ Yes (`engagement` slice, compressed last 14 days) |
+| Dad Lab reports | ❌ No — no `dadLabReports` loader anywhere in the chat/contextSlices pipeline |
+
+### 5. Extra context added inline by the ShellyChat handler (beyond slices)
+
+From `shellyChat.ts:44-231`, the handler adds:
+- **All children list** — names, ages, descriptions (`:89-111`)
+- **Disposition profile** — per-disposition narrative on the child doc (`:114-127`)
+- **Weekly review narrative** — most recent `weeklyReviews.dispositionNarrative` (`:130-145`)
+- **Conundrum title** — this week's conundrum title only (`:148-156`)
+- **Completion-rate-by-day** — e.g. "Mon: 85%, Tue: 60%" (`:162-191`)
+- **Top 3 skipped activities** across 14 days (`:193-200`)
+- **Conundrum-response count** — just a count (`:205-209`)
+- **Chapter-response count** — count + books read, last 14 days (`:212-223`)
+
+The `'chat'` handler (`chatHandler.ts`) adds **no extra context**; it uses slice output verbatim.
+
+### 6. System prompt quality
+
+- **`'chat'` task:** prompt is `[CHARTER_PREAMBLE]\n\n[CHILD_PROFILE]`. The charter is rich (family, Lincoln/London profiles, disposition framework, content-generation rules — `contextSlices.ts:70-100`), so even the minimal chat task is not "you are a helpful assistant" generic. But without skill/eval/scan/plan data it can't answer progress questions.
+- **`'shellyChat'` task:** prompt stitches together the full shared context + supplemental block + a role section (`shellyChat.ts:239-277`) that explicitly says *"You DO have access to {childName}'s records — the data above is current. Never say 'I don't have access to records.'"* This is good instruction, but the data the prompt actually contains doesn't back it up.
+
+### What Ask AI is missing that would help answer questions about Lincoln's progress/plan/focus
+
+Ordered by likely user-visible impact:
+
+1. **Today's plan / checklist status** — no loader. Ask AI literally cannot see what's on Lincoln's plan today, what's checked off, what was skipped. "Is Lincoln on track today?" has no answer surface.
+2. **`skillSnapshot` slice** — `workingLevels` (quest-proven levels), `conceptualBlocks` (ADDRESS_NOW items), and `completedPrograms` are invisible. Ask AI sees `prioritySkills` labels but not the numeric working level or what programs are done. "What phonics level is Lincoln working at?" returns a vague answer.
+3. **`recentHistoryByDomain`** — only a single most-recent eval (cross-domain) is loaded. "How did Lincoln do in his last three phonics sessions?" is unanswerable with current context.
+4. **`recentScans`** — scan recommendations (skip/do/quick-review/modify) are not in the prompt. "Should we skip Lincoln's next math lesson?" has no data.
+5. **`activityConfigs`** — the structured curriculum coverage (currentPosition, totalUnits, frequency per subject) isn't loaded. `workbookPaces` *is* loaded and gives some of this, but activityConfigs is the newer source of truth and includes non-workbook activities.
+6. **`mastery` slice** — Shelly's own "got-it / working / stuck" taps across 28 days are invisible.
+7. **Dad Lab reports** — completely absent from every task. Lincoln's Dad Lab sessions don't feed any AI surface.
+8. **Full `weekFocus`** — only metadata (theme/virtue/scripture/heartQuestion) loads. The week's daily plans, subject blocks, or focus skills don't reach the prompt.
+9. **Hours progress, book status, workshop games, generated content** — minor; relevant only for specific questions Shelly might ask ("how close are we to 1000 hours?", "what games can we play?").
+
+Net: ShellyChat has the role prompt of a knowledgeable assistant and 9 slices of general context, but it's missing the six slices the planner uses to actually reason about what Lincoln is doing right now (`skillSnapshot`, `recentScans`, `activityConfigs`, `recentHistoryByDomain`, `mastery`) plus has no dayLog/plan loader at all. The *chat* task (books-only) is narrower still — charter + childProfile only, adequate for generating book questions but nothing more.

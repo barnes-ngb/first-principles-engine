@@ -54,8 +54,8 @@ export function buildWoodBreastplate(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
   const { U, torsoCenter, torsoTop, torsoH, torsoW, torsoD, legTop } = layout
 
-  // Thin leather vest — minimal padding beyond the torso
-  const vestW = torsoW + U * 0.6
+  // Thin leather vest — minimal padding beyond the torso (≥0.05*s proud)
+  const vestW = torsoW + U * 0.8
   const vestH = torsoH + U * 0.2
   const vestD = torsoD + U * 1.2
   const vest = taggedBox(vestW, vestH, vestD, W, 'primary', 'wood_vest_body')
