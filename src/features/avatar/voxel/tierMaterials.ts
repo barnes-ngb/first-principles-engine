@@ -154,6 +154,18 @@ export function buildTierMaterial(
 
 // ── Apply tier materials to armor meshes ─────────────────────────
 
+// DEBUG: bright override colors to verify armor geometry is actually rendering.
+// Flip to `false` to restore normal tier coloring.
+const DEBUG_ARMOR_COLORS = true
+const DEBUG_COLORS_BY_PIECE: Record<string, number> = {
+  helmet:      0xffff00, // bright yellow
+  breastplate: 0x0000ff, // bright blue
+  belt:        0x00ff00, // bright green
+  shield:      0xff8800, // bright orange
+  sword:       0x00ffff, // bright cyan
+  shoes:       0xff00ff, // bright purple (magenta)
+}
+
 /**
  * Apply tier materials to equipped armor pieces.
  *
@@ -181,6 +193,21 @@ export function applyTierToArmor(
     // Check for custom dye color for this piece
     const dyeHex = armorColors?.[pieceId as keyof ArmorColors]
     const dyeColor = dyeHex ? new THREE.Color(dyeHex) : null
+
+    // DEBUG: override every mesh in this piece with a single bright color.
+    if (DEBUG_ARMOR_COLORS) {
+      const debugHex = DEBUG_COLORS_BY_PIECE[pieceId] ?? 0xffffff
+      mesh.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) return
+        child.material = new THREE.MeshPhongMaterial({
+          color: debugHex,
+          specular: 0x333333,
+          shininess: 20,
+          flatShading: true,
+        })
+      })
+      continue
+    }
 
     mesh.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return

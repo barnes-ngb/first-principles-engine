@@ -701,6 +701,10 @@ export function buildArmorPiece(
 ): THREE.Group {
   const layout = getBodyLayout(ageGroup, customProportions)
 
+  // DEBUG: temporary — verify which tier each piece is rendering at.
+  // eslint-disable-next-line no-console
+  console.log(`[ARMOR] Building ${pieceId} at tier ${tier}, ageGroup=${ageGroup}`)
+
   let group: THREE.Group
 
   switch (pieceId) {
