@@ -54,6 +54,14 @@ describe("TASK_CONTEXT", () => {
   it("shellyChat still uses recentEval (backward compat)", () => {
     expect(TASK_CONTEXT.shellyChat).toContain("recentEval");
   });
+
+  it("shellyChat wires the added context slices (skillSnapshot, recentHistoryByDomain, recentScans, dayToday, dadLabReports)", () => {
+    expect(TASK_CONTEXT.shellyChat).toContain("skillSnapshot");
+    expect(TASK_CONTEXT.shellyChat).toContain("recentHistoryByDomain");
+    expect(TASK_CONTEXT.shellyChat).toContain("recentScans");
+    expect(TASK_CONTEXT.shellyChat).toContain("dayToday");
+    expect(TASK_CONTEXT.shellyChat).toContain("dadLabReports");
+  });
 });
 
 // ── compressEngagement ─────────────────────────────────────────
