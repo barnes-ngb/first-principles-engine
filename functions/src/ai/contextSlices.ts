@@ -34,6 +34,8 @@ export const ContextSlice = {
   RecentScans: "recentScans",
   ActivityConfigs: "activityConfigs",
   RecentHistoryByDomain: "recentHistoryByDomain",
+  DayToday: "dayToday",
+  DadLabReports: "dadLabReports",
 } as const;
 export type ContextSlice = (typeof ContextSlice)[keyof typeof ContextSlice];
 
@@ -62,6 +64,8 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   shellyChat: [
     "charter", "childProfile", "engagement", "gradeResults",
     "recentEval", "sightWords", "weekFocus", "wordMastery", "workbookPaces",
+    "skillSnapshot", "recentHistoryByDomain", "recentScans",
+    "dayToday", "dadLabReports",
   ],
 };
 
@@ -381,6 +385,12 @@ export async function buildContextForTask(
   if (slices.includes("activityConfigs")) {
     fetches.push({ slice: "activityConfigs", promise: loadActivityConfigsContext(db, familyId, childId) });
   }
+  if (slices.includes("dayToday")) {
+    fetches.push({ slice: "dayToday", promise: loadTodayDayLogContext(db, familyId, childId) });
+  }
+  if (slices.includes("dadLabReports")) {
+    fetches.push({ slice: "dadLabReports", promise: loadRecentDadLabReportsContext(db, familyId, childId) });
+  }
 
   // Await all in parallel
   const results = await Promise.allSettled(fetches.map((f) => f.promise));
@@ -583,6 +593,18 @@ export async function buildContextForTask(
   if (sliceData.has("activityConfigs")) {
     const activityConfigsText = sliceData.get("activityConfigs") as string;
     if (activityConfigsText) sections.push(activityConfigsText);
+  }
+
+  // Today's checklist (for shellyChat: "how did today go?" / "what's left?")
+  if (sliceData.has("dayToday")) {
+    const dayTodayText = sliceData.get("dayToday") as string;
+    if (dayTodayText) sections.push(dayTodayText);
+  }
+
+  // Recent Dad Lab reports
+  if (sliceData.has("dadLabReports")) {
+    const dadLabText = sliceData.get("dadLabReports") as string;
+    if (dadLabText) sections.push(dadLabText);
   }
 
   return sections;
@@ -1010,6 +1032,162 @@ async function loadRecentScansContext(
   lines.push("- 'quick-review' = mostly known, brief practice only");
   lines.push("- 'do' = appropriate level, assign normally");
   lines.push("- 'modify' = needs adaptation (see teacher notes on scan)");
+
+  return lines.join("\n");
+}
+
+// ── Today's day log loader ──────────────────────────────────
+
+interface TodayChecklistItem {
+  label?: string;
+  completed?: boolean;
+  skipped?: boolean;
+  engagement?: string;
+  mastery?: string;
+  skipReason?: string;
+  rolledOver?: boolean;
+  rolledOverFrom?: string;
+}
+
+/**
+ * Load today's day log for the active child and summarize the checklist.
+ * Keeps the summary short — counts + engagement/mastery annotations for completed
+ * items, the remaining list, and any skip reasons. Used by shellyChat so Shelly
+ * can ask "how's today going?" or "what's left?".
+ */
+async function loadTodayDayLogContext(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<string> {
+  if (!childId) return "";
+  const today = new Date().toISOString().slice(0, 10);
+
+  const snap = await db
+    .collection(`families/${familyId}/days`)
+    .where("childId", "==", childId)
+    .where("date", "==", today)
+    .limit(1)
+    .get();
+
+  if (snap.empty) {
+    return `TODAY'S CHECKLIST (${today}): no day log yet — the child hasn't started today.`;
+  }
+
+  const data = snap.docs[0].data() as {
+    date?: string;
+    checklist?: TodayChecklistItem[];
+    teachBackDone?: boolean;
+    xpTotal?: number;
+  };
+  const items = data.checklist ?? [];
+  const total = items.length;
+  const done = items.filter((i) => i.completed).length;
+  const skipped = items.filter((i) => i.skipped && !i.completed);
+  const remaining = items.filter((i) => !i.completed && !i.skipped);
+  const completed = items.filter((i) => i.completed);
+
+  const lines: string[] = [`TODAY'S CHECKLIST (${today}, ${done} of ${total} done):`];
+
+  if (completed.length) {
+    const completedStrs = completed.map((i) => {
+      const parts = [i.label || "item"];
+      if (i.engagement) parts.push(`engagement: ${i.engagement}`);
+      if (i.mastery) parts.push(`mastery: ${i.mastery}`);
+      if (i.rolledOver) parts.push(`rolled over from ${i.rolledOverFrom ?? "prior day"}`);
+      return `  ✓ ${parts.join(", ")}`;
+    });
+    lines.push("Completed:");
+    lines.push(...completedStrs);
+  }
+
+  if (remaining.length) {
+    const remainingStrs = remaining.map((i) => {
+      const parts = [i.label || "item"];
+      if (i.rolledOver) parts.push(`rolled over from ${i.rolledOverFrom ?? "prior day"}`);
+      return `  • ${parts.join(", ")}`;
+    });
+    lines.push("Remaining:");
+    lines.push(...remainingStrs);
+  }
+
+  if (skipped.length) {
+    const skippedStrs = skipped.map((i) => {
+      const reason = i.skipReason ? ` (${i.skipReason})` : "";
+      return `  ⤼ ${i.label || "item"}${reason}`;
+    });
+    lines.push("Skipped:");
+    lines.push(...skippedStrs);
+  }
+
+  if (data.teachBackDone) lines.push("Teach-back: done");
+
+  return lines.join("\n");
+}
+
+// ── Dad Lab reports loader ──────────────────────────────────
+
+interface DadLabReportDoc {
+  date?: string;
+  title?: string;
+  status?: string;
+  labType?: string;
+  question?: string;
+  subjectTags?: string[];
+  childReports?: Record<string, {
+    prediction?: string;
+    explanation?: string;
+    observation?: string;
+    creation?: string;
+    notes?: string;
+  }>;
+}
+
+/**
+ * Load the most recent Dad Lab reports that include the active child and
+ * summarize each one briefly (title, date, status, kid prediction/explanation).
+ * Used by shellyChat so Shelly can ask "what should we do for Dad Lab?" or
+ * reference how the last one went.
+ */
+async function loadRecentDadLabReportsContext(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<string> {
+  if (!childId) return "";
+
+  const snap = await db
+    .collection(`families/${familyId}/dadLabReports`)
+    .orderBy("date", "desc")
+    .limit(10)
+    .get();
+
+  if (snap.empty) return "";
+
+  const relevant: Array<{ doc: DadLabReportDoc; childReport: NonNullable<DadLabReportDoc["childReports"]>[string] }> = [];
+  for (const d of snap.docs) {
+    const data = d.data() as DadLabReportDoc;
+    const childReport = data.childReports?.[childId];
+    if (childReport) {
+      relevant.push({ doc: data, childReport });
+      if (relevant.length >= 3) break;
+    }
+  }
+
+  if (relevant.length === 0) return "";
+
+  const lines: string[] = ["RECENT DAD LAB REPORTS (most recent first):"];
+  for (const { doc: r, childReport } of relevant) {
+    const header = [r.title || "Untitled lab"];
+    if (r.date) header.push(r.date);
+    if (r.status) header.push(`status: ${r.status}`);
+    if (r.labType) header.push(r.labType);
+    lines.push(`- ${header.join(" — ")}`);
+    if (r.question) lines.push(`  Question: ${r.question}`);
+    if (childReport.prediction) lines.push(`  Kid prediction: ${childReport.prediction}`);
+    if (childReport.explanation) lines.push(`  Kid explanation: ${childReport.explanation}`);
+    if (childReport.observation) lines.push(`  Observation: ${childReport.observation}`);
+  }
 
   return lines.join("\n");
 }

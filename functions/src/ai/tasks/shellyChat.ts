@@ -1,7 +1,9 @@
 /**
  * Task: shellyChat
  * Context: charter + childProfile + engagement + gradeResults + recentEval
- *          + sightWords + weekFocus + wordMastery (via buildContextForTask)
+ *          + sightWords + weekFocus + wordMastery + workbookPaces
+ *          + skillSnapshot + recentHistoryByDomain (cross-domain)
+ *          + recentScans + dayToday + dadLabReports (via buildContextForTask)
  *          + supplemental: all children, disposition profile, weekly review, conundrum
  * Model: Sonnet
  */
