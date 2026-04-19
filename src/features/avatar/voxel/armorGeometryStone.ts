@@ -55,42 +55,71 @@ export function buildStoneHelmet(layout: BodyLayout): THREE.Group {
 }
 
 // ── Breastplate: stone chestplate (no pauldrons, small shoulders) ───
+//
+// Strapped-on front plate with visible gaps to the tunic:
+//   - neckline gap (plate stops below torsoTop)
+//   - under-arm gap (plate shorter than torso height)
+//   - side gaps between the front plate and the thin side strips
+// The carved cross is inset on the front plate face.
 export function buildStoneBreastplate(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
-  const { U, torsoCenter, torsoTop, torsoH, torsoW, torsoD, legTop } = layout
+  const { U, torsoCenter, torsoTop, torsoH, torsoW, torsoD } = layout
 
-  // Chest slab — thicker than wood, narrower than iron
-  const chestW = torsoW + U * 1.0
-  const chestH = torsoH + U * 0.2
-  const chestD = torsoD + U * 2.2
-  const chest = taggedBox(chestW, chestH, chestD, W, 'primary', 'stone_chest_body')
-  chest.position.set(0, torsoCenter, U * 0.4)
-  group.add(chest)
+  // Front plate — 1.08× torso width, slimmer height, thin depth.
+  // Sits proud of the torso front face so the magenta tunic shows to the sides.
+  const plateW = torsoW * 1.08
+  const plateH = torsoH * 0.78
+  const plateD = U * 1.4
+  const plateZ = torsoD / 2 + plateD / 2 + U * 0.4 // ≥0.05*s proud of torso front
+  const front = taggedBox(plateW, plateH, plateD, W, 'primary', 'stone_chest_front')
+  front.position.set(0, torsoCenter, plateZ)
+  group.add(front)
 
-  // Carved horizontal grooves — three of them spaced down the chest
-  const grooveSpacing = torsoH / 4
-  for (let i = 0; i < 3; i++) {
-    const groove = taggedFlatBox(chestW - U * 0.3, U * 0.4, chestD + U * 0.1, W, 'secondary', `stone_chest_groove_${i}`)
-    groove.position.set(0, torsoTop - U * 1.2 - i * grooveSpacing, U * 0.4)
-    group.add(groove)
-  }
+  // Side plates — narrow vertical strips flanking the torso. A clear gap sits
+  // between the wide front plate and each side strip so the tunic shows.
+  const sideW = U * 1.2
+  const sideH = torsoH * 0.7
+  const sideD = torsoD * 0.7
+  const sideX = torsoW / 2 + sideW / 2 + U * 0.4 // proud of torso side face
+  const sideL = taggedBox(sideW, sideH, sideD, W, 'primary', 'stone_chest_side_l')
+  sideL.position.set(-sideX, torsoCenter, 0)
+  group.add(sideL)
+  const sideR = taggedBox(sideW, sideH, sideD, W, 'primary', 'stone_chest_side_r')
+  sideR.position.set(sideX, torsoCenter, 0)
+  group.add(sideR)
 
-  // Small shoulder bumps — NOT full pauldrons
-  const shoulderL = taggedBox(U * 2.8, U * 1.6, torsoD + U * 1.4, W, 'primary', 'stone_shoulder_l')
-  shoulderL.position.set(-(torsoW / 2 + U * 1.6), torsoTop - U * 0.4, 0)
+  // Carved cross on the front plate — slightly proud of the plate face so it
+  // reads as raised relief instead of flush paint.
+  const crossZ = plateZ + plateD / 2 + U * 0.15
+  const crossV = taggedFlatBox(U * 0.9, plateH * 0.55, U * 0.3, W, 'secondary', 'stone_chest_cross_v')
+  crossV.position.set(0, torsoCenter + plateH * 0.1, crossZ)
+  group.add(crossV)
+  const crossH = taggedFlatBox(plateW * 0.45, U * 0.9, U * 0.3, W, 'secondary', 'stone_chest_cross_h')
+  crossH.position.set(0, torsoCenter + plateH * 0.22, crossZ)
+  group.add(crossH)
+
+  // Horizontal waist groove on the front plate
+  const groove = taggedFlatBox(plateW - U * 0.6, U * 0.35, U * 0.2, W, 'secondary', 'stone_chest_groove')
+  groove.position.set(0, torsoCenter - plateH * 0.35, crossZ - U * 0.05)
+  group.add(groove)
+
+  // Small shoulder bumps above the plate top — leave a gap underneath so the
+  // tunic is visible under the arms.
+  const shoulderW = U * 2.6
+  const shoulderH = U * 1.5
+  const shoulderD = torsoD + U * 1.0
+  const shoulderY = torsoTop - shoulderH / 2 + U * 0.2
+  const shoulderX = torsoW / 2 + shoulderW / 2 + U * 0.4
+  const shoulderL = taggedBox(shoulderW, shoulderH, shoulderD, W, 'primary', 'stone_shoulder_l')
+  shoulderL.position.set(-shoulderX, shoulderY, 0)
   group.add(shoulderL)
-  const shoulderR = taggedBox(U * 2.8, U * 1.6, torsoD + U * 1.4, W, 'primary', 'stone_shoulder_r')
-  shoulderR.position.set(torsoW / 2 + U * 1.6, torsoTop - U * 0.4, 0)
+  const shoulderR = taggedBox(shoulderW, shoulderH, shoulderD, W, 'primary', 'stone_shoulder_r')
+  shoulderR.position.set(shoulderX, shoulderY, 0)
   group.add(shoulderR)
 
-  // Collar — short stone ridge at the neckline
-  const collar = taggedFlatBox(torsoW - U * 0.6, U * 1.2, torsoD + U * 1.5, W, 'accent', 'stone_collar')
-  collar.position.set(0, torsoTop + U * 0.3, 0)
-  group.add(collar)
-
-  // Bottom rim
-  const rim = taggedBox(chestW + U * 0.2, U * 0.7, chestD + U * 0.2, W, 'accent', 'stone_chest_rim')
-  rim.position.set(0, legTop + U * 0.1, U * 0.4)
+  // Bottom rim across the base of the front plate
+  const rim = taggedBox(plateW + U * 0.3, U * 0.6, plateD + U * 0.2, W, 'accent', 'stone_chest_rim')
+  rim.position.set(0, torsoCenter - plateH / 2 - U * 0.1, plateZ)
   group.add(rim)
 
   return group
