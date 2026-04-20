@@ -47,6 +47,12 @@ interface AvatarCharacterDisplayProps {
   heroDebugEnabled?: boolean
   heroAnimationTuning: HeroAnimationTuningOverride
   onHeroAnimationTuningChange: (next: HeroAnimationTuningOverride) => void
+  /**
+   * Armor gallery tab preview: when set, the 3D character shows all 6 armor
+   * pieces at this tier regardless of what's forged/equipped. BrothersVoxelScene
+   * intentionally ignores this — only the solo main character previews.
+   */
+  previewTier?: string | null
 }
 
 export default function AvatarCharacterDisplay({
@@ -80,6 +86,7 @@ export default function AvatarCharacterDisplay({
   heroDebugEnabled = false,
   heroAnimationTuning,
   onHeroAnimationTuningChange,
+  previewTier,
 }: AvatarCharacterDisplayProps) {
   return (
     <>
@@ -252,6 +259,7 @@ export default function AvatarCharacterDisplay({
             equippedPieces={appliedVoxel}
             totalXp={profile.totalXp}
             forgedPieces={profile.forgedPieces}
+            previewTier={previewTier}
             animateEquipPiece={animateEquipId}
             animateUnequipPiece={animateUnequipId}
             onEquipAnimDone={onEquipAnimDone}

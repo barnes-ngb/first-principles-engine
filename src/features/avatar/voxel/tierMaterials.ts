@@ -1,5 +1,4 @@
 import * as THREE from 'three'
-import type { ArmorColors } from '../../../core/types'
 
 // ── Tier definitions ─────────────────────────────────────────────
 
@@ -162,11 +161,13 @@ export function buildTierMaterial(
  * The resolver form is what enables mixed-tier characters — e.g. an Iron belt
  * worn alongside a Stone breastplate.
  */
+// Phase A: dye/armorColors support intentionally removed. Tier palette
+// (Wood brown, Stone gray, Iron polished steel) is the visual signal.
+// Dye customization returns in Phase B once the tier visual language is set.
 export function applyTierToArmor(
   armorMeshes: Map<string, THREE.Group>,
   tier: string | ((pieceId: string) => string),
   equippedPieces: string[],
-  armorColors?: ArmorColors,
 ): void {
   const resolveTier = typeof tier === 'function' ? tier : () => tier
 
@@ -178,18 +179,6 @@ export function applyTierToArmor(
     const tint = getTierTint(pieceTier)
     const materials = TIER_MATERIALS[tint] ?? TIER_MATERIALS.wood
 
-    // Check for custom dye color for this piece
-    const dyeHex = armorColors?.[pieceId as keyof ArmorColors]
-    const dyeColor = dyeHex ? new THREE.Color(dyeHex) : null
-
-    // DIAGNOSTIC: report which tier palette is about to be applied for this
-    // piece. Stone breastplate should report tint=stone, primary=8a8a8a.
-    // If this says something else (e.g. iron/wood), the tier resolver is the
-    // culprit, not the material pipeline.
-    console.log(
-      `[TIER] applyTierToArmor piece=${pieceId} tier=${pieceTier} tint=${tint} primary=${materials.primary.toString(16)} secondary=${materials.secondary.toString(16)} dye=${dyeHex ?? 'none'}`,
-    )
-
     mesh.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return
 
@@ -199,27 +188,16 @@ export function applyTierToArmor(
       if (role === 'sword_blade') return
 
       let baseColor: number
-
-      if (dyeColor) {
-        // Custom dye: use dye color for primary, darker shade for secondary/accent
-        switch (role) {
-          case 'secondary': baseColor = dyeColor.clone().multiplyScalar(0.65).getHex(); break
-          case 'accent': baseColor = dyeColor.clone().multiplyScalar(0.85).getHex(); break
-          case 'detail': baseColor = dyeColor.clone().multiplyScalar(0.65).getHex(); break
-          default: baseColor = dyeColor.getHex()
-        }
-      } else {
-        switch (role) {
-          case 'secondary': baseColor = materials.secondary; break
-          case 'accent': baseColor = materials.accent; break
-          case 'detail': baseColor = materials.secondary; break // legacy 'detail' maps to secondary
-          default: baseColor = materials.primary
-        }
+      switch (role) {
+        case 'secondary': baseColor = materials.secondary; break
+        case 'accent': baseColor = materials.accent; break
+        case 'detail': baseColor = materials.secondary; break // legacy 'detail' maps to secondary
+        default: baseColor = materials.primary
       }
 
       // Apply per-face color jitter for tier variation (stone-like effect)
       const color = new THREE.Color(baseColor)
-      if (!dyeColor && materials.colorJitter > 0 && role === 'primary') {
+      if (materials.colorJitter > 0 && role === 'primary') {
         const jitter = (Math.random() - 0.5) * materials.colorJitter
         color.offsetHSL(0, 0, jitter)
       }
@@ -238,18 +216,6 @@ export function applyTierToArmor(
         }))
       }
       child.material = faceMats
-    })
-
-    // DIAGNOSTIC: verify final applied colors on each child mesh. The Stone
-    // breastplate front plate should land near 0x8a8a8a (± jitter/face variation).
-    mesh.traverse((child) => {
-      if (!(child instanceof THREE.Mesh)) return
-      const m0 = Array.isArray(child.material) ? child.material[0] : child.material
-      if (m0 instanceof THREE.MeshPhongMaterial || m0 instanceof THREE.MeshLambertMaterial) {
-        console.log(
-          `[TIER]   after applyTier piece=${pieceId} mesh=${child.name || '(unnamed)'} role=${(child.userData.materialRole as string) ?? 'primary'} color=${m0.color.getHexString()}`,
-        )
-      }
     })
   }
 }
