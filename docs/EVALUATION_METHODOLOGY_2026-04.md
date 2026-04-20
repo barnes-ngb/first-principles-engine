@@ -161,4 +161,27 @@ The existing skip system captures when Shelly marks something as "too-hard" or "
 
 This phase touches three distinct surfaces (planner, scan, skip) and each requires both prompt changes and non-trivial read-integration with the blocker diagnosis. It is the phase with the highest leverage — blockers only matter if they change what Lincoln does — but it's also the phase with the most surface area and the most opportunities for regressions. Should be staged: planner first (highest leverage), scan second (tightest daily loop), skip system third (refinement on an existing flow).
 
+---
+
+## 7. Methodology Gaps Backlog
+
+These are real gaps in the methodology that we are deliberately *not* addressing in Phases 1-4. They are recorded here so a future Claude chat (or a future Nathan) can pick them up without rediscovering them.
+
+| # | Gap | Description | Depends on |
+|---|-----|-------------|------------|
+| M1 | Production assessment | Voice/oral evaluation alongside multiple-choice. Lincoln *saying* the word, not just picking it. For a kid with speech challenges, the gap between "can recognize" and "can produce" is the whole ballgame. The `useSpeechRecognition` hook already exists from the Workshop feature; wiring it into quest and guided eval would turn every item into both a recognition and a production check. | Phase 2+ |
+| M2 | Cadence guidance | The system suggests *when* to evaluate based on blocker age, session history, curriculum pace. "Lincoln hasn't done a phonics quest in 5 days and has an active short-i/e blocker — suggest one today." Today the cadence is whatever Shelly remembers to run. | Phase 3 |
+| M3 | Disposition measurement depth | Richer signals for curiosity, persistence, articulation, self-awareness, ownership beyond emoji taps and checklist chips. Quest behavior is a goldmine we're not yet mining — time-per-question, skip patterns, retry willingness, whether Lincoln asks to keep going when the session "ends." All of it is disposition evidence that could feed the Charter's core pedagogical commitment. | Phase 2 |
+| M4 | Adaptive sophistication | Per-sub-skill tracking instead of one working level per domain. Lincoln might be Level 5 in CVC but Level 3 in digraphs; the current `workingLevels` stores one number per domain. `conceptualBlocks` partially addresses this (blocks are sub-skill-specific), but the adaptive level that drives quest difficulty is still coarse. | Phase 1 foundation |
+| M5 | Cross-domain connection | Reading comprehension questions that use vocabulary from the math lesson Lincoln just did. A conundrum that references the book he's reading. Requires cross-domain curriculum awareness the AI doesn't currently have access to in a single prompt. Highest pedagogical payoff; hardest to sequence. | Phase 4 |
+
+## 8. Summary
+
+**The north star.** When all four phases are complete, this system should feel to Shelly like a patient, perceptive tutor who has been watching Lincoln all week and is ready every Sunday with a clear, humble report: here are the two or three things that are actually hard for him right now, here is how long each has been hard, here is the specific five-minute drill that might help, here is the curriculum that's safe to keep pushing, and here is what I noticed this week that makes me think the short-i/e block is starting to crack. For Lincoln, the system should feel like Minecraft with an absurdly well-targeted quest generator — he should never feel tested, never feel measured, never feel ashamed. The engine does the diagnostic work underneath; the surface is play and practice. Blockers are identified, named, and unblocked. That is the whole job.
+
+**Why Phase 1 alone is worth shipping immediately.** Today blockers are fed by one writer that fires once a month at best. Phase 1 turns that into three writers firing across quest, scan, and daily checklist — and adds the lifecycle (RESOLVING, RESOLVED, persistence tracking, merge-not-overwrite) that lets the data actually mean something over time. Even without Phases 2-4, Phase 1 produces a `conceptualBlocks` array that accurately reflects what Lincoln is stuck on this week, complete with age and session count, merged across sources. That alone makes every downstream surface (Learning Profile, Ask AI, AI context injection) materially more useful. Phase 1 is the foundation; everything else is leverage on top of it.
+
+**What we explicitly chose *not* to build.** We are not building a full adaptive testing engine with item response theory, calibrated difficulty curves, and statistical confidence intervals — Lincoln is one kid and the gain from that machinery is not worth the complexity. We are not building automated curriculum selection where the AI picks tomorrow's lessons; Shelly picks curriculum, the AI informs her. We are not building evaluation that happens without parent input — every Apply, every intervention adoption, every diagnosis action is a decision Shelly makes. The Charter commitment is that AI suggests and humans decide. No phase of this plan compromises that. The engine gets sharper, the data gets richer, the suggestions get more specific — but Shelly is always the one at the wheel.
+
+
 
