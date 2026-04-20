@@ -81,10 +81,10 @@ export default function ChapterQuestionPool({
     }
   }
 
-  // Track how long the loading state has been visible
+  // Track how long the loading state has been visible (fallback retry if hook hangs)
   const [showRetry, setShowRetry] = useState(false)
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const isLoading = book && (bookProgressLoading || !bookProgress)
+  const isLoading = Boolean(book) && bookProgressLoading
 
   useEffect(() => {
     if (!isLoading) return
@@ -95,11 +95,11 @@ export default function ChapterQuestionPool({
     }
   }, [isLoading])
 
-  // No book selected — render nothing
+  // 1. No book selected — render nothing
   if (!book) return null
 
-  // Book selected but no progress doc yet (pool generation in flight)
-  if (bookProgressLoading || !bookProgress) {
+  // 2. Hook is still fetching the pool doc — show spinner
+  if (bookProgressLoading) {
     return (
       <SectionCard title={`\u{1F4D6} ${book.title}`}>
         <Stack spacing={1} alignItems="center" sx={{ py: 2 }}>
@@ -114,6 +114,28 @@ export default function ChapterQuestionPool({
               onClick={() => { setShowRetry(false); onRetryGeneration() }}
             >
               Retry generation
+            </Button>
+          )}
+        </Stack>
+      </SectionCard>
+    )
+  }
+
+  // 3. Fetch resolved but no progress doc exists — pool never generated
+  if (!bookProgress) {
+    return (
+      <SectionCard title={`\u{1F4D6} ${book.title}`}>
+        <Stack spacing={1.5} alignItems="center" sx={{ py: 2 }}>
+          <Typography variant="body2" color="text.secondary">
+            Chapter questions haven&apos;t been generated yet.
+          </Typography>
+          {onRetryGeneration && (
+            <Button
+              variant="contained"
+              size="small"
+              onClick={() => onRetryGeneration()}
+            >
+              Generate chapter questions
             </Button>
           )}
         </Stack>
