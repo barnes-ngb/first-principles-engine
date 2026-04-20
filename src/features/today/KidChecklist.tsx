@@ -20,6 +20,16 @@ function getTimeLabel(minutes?: number): string {
   return `${minutes} min`
 }
 
+/**
+ * True when a checklist item should show the book affordance (icon + "Go to My Books" button).
+ * Matches when the item has an explicit bookId OR its label references a book
+ * (e.g. "Read: Dragon Quest", "Continue Book: ...", "Make a Book").
+ */
+function isBookItem(item: ChecklistItem): boolean {
+  if (item.bookId) return true
+  return /book|read:/i.test(item.label)
+}
+
 interface KidChecklistProps {
   mustDo: ChecklistItem[]
   choose: ChecklistItem[]
@@ -178,7 +188,7 @@ export default function KidChecklist({
                       fontWeight: 500,
                     }}
                   >
-                    {/book/i.test(item.label) && <MenuBookIcon sx={{ fontSize: 18, mr: 0.5, verticalAlign: 'text-bottom' }} />}
+                    {isBookItem(item) && <MenuBookIcon sx={{ fontSize: 18, mr: 0.5, verticalAlign: 'text-bottom' }} />}
                     {item.label}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
@@ -197,7 +207,7 @@ export default function KidChecklist({
                   )}
                 </Stack>
                 {/* Book item quick link */}
-                {/book/i.test(item.label) && !item.completed && (
+                {isBookItem(item) && !item.completed && (
                   <Box sx={{ ml: 5, mt: 0.5 }}>
                     {gateUnlocked ? (
                       <Button
@@ -342,7 +352,7 @@ export default function KidChecklist({
               const absIndex = getAbsoluteIndex(item)
               const canSelect = mustDoDone && (isSelected || selectedChoices.size < maxChoices)
               const isLocked = !mustDoDone
-              const isChooseBookItem = /book/i.test(item.label)
+              const isChooseBookItem = isBookItem(item)
 
               if (isSelected) {
                 // Selected choice: render like active item but with info color when not completed

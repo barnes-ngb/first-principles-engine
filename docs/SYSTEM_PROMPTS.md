@@ -130,11 +130,11 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `hoursProgress` | loadHoursSummary() | Total hours logged since school year start vs 1000-hour MO target |
 | `engagement` | loadEngagementSummary() | Activity engagement patterns (engaged/okay/struggled/refused) compressed |
 | `gradeResults` | loadGradeResults() | Recent work review results (grades, corrections) |
-| `bookStatus` | loadDraftBookCount() | Draft book count — suggests "Continue your book" vs "Make a Book" |
+| `bookStatus` | loadDraftBooksByChild() | Child's draft books (createdBy === childId, status=draft) — title + page count + `bookId`. Prompts "Continue Book: {title}" with the matching bookId. Renders as `{NAME}'S BOOK DRAFTS:` section. |
 | `sightWords` | loadSightWordSummary() | Mastered/familiar/practicing/new word counts + weak words list |
 | `recentEval` | loadRecentEvalContext() | Most recent evaluation findings for the child |
 | `wordMastery` | loadWordMasterySummary() | Quest word progress — mastery levels, struggling patterns |
-| `generatedContent` | (from chatTypes) | Recently generated content to avoid repetition |
+| `generatedContent` | loadGeneratedContent() | Two buckets: **MOM'S BOOKS** (createdBy='parent' + createdFor=childId, last 30 days) prompts "Read: {title}" as a reading choose-item, and AVAILABLE GENERATED CONTENT (legacy / AI-generated books the child owns, de-duped) with the same pattern. Both include `bookId` inline so the AI can echo it on plan items for deep-linking. |
 | `workshopGames` | (from chatTypes) | Workshop game state for story continuation |
 
 ### Task → Slice Mapping
