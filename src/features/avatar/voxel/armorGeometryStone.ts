@@ -275,54 +275,47 @@ export function buildStoneShield(layout: BodyLayout): THREE.Group {
 }
 
 // ── Sword: short stone blade (no glow) ──────────────────────────────
+// Geometry only: grip center at origin, pommel above (+Y, in hand),
+// blade extending DOWN (-Y). Transform is applied by buildSword() in
+// buildArmorPiece.ts.
 export function buildStoneSword(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
-  group.userData.attachToArm = 'R'
-  group.rotation.x = 0.15
-  group.rotation.z = 0.1
-  const { U, armH } = layout
-  const handY = armH - U * 1
+  const { U } = layout
 
-  const sX = U * 2.4
-
-  // Wrapped grip
+  // Wrapped grip — centered at origin
   const grip = taggedFlatBox(U * 1.3, U * 3.8, U * 1.4, W, 'detail', 'stone_sword_grip')
-  grip.position.set(sX, -handY, U * 1)
+  grip.position.set(0, 0, 0)
   group.add(grip)
 
-  // Crossguard — slightly wider than wood, flatter than iron
-  const guardY = handY - U * 2.4
+  // Pommel — above grip (in the hand)
+  const pommel = taggedFlatBox(U * 1.4, U * 1.1, U * 1.4, W, 'accent', 'stone_sword_pommel')
+  pommel.userData.isAccent = true
+  pommel.position.set(0, U * 2.45, 0)
+  group.add(pommel)
+
+  // Crossguard — below grip, slightly wider than wood, flatter than iron
   const guard = taggedFlatBox(U * 1.3, U * 1.1, U * 5, W, 'accent', 'stone_sword_guard')
-  guard.position.set(sX, -guardY, U * 1)
+  guard.position.set(0, -U * 2.45, 0)
   group.add(guard)
 
   // Blade — stone-colored, thicker than wood, no glow.
-  const bladeBaseY = guardY - U * 4
   const bladeBase = taggedBox(U * 1.1, U * 6, U * 2.2, W, 'primary', 'stone_sword_blade_base')
-  bladeBase.position.set(sX, -bladeBaseY, U * 1)
+  bladeBase.position.set(0, -U * 6.0, 0)
   group.add(bladeBase)
 
-  const bladeUpperY = bladeBaseY - U * 5.5
   const bladeUpper = taggedBox(U * 1.0, U * 5, U * 1.6, W, 'primary', 'stone_sword_blade_upper')
-  bladeUpper.position.set(sX, -bladeUpperY, U * 1)
+  bladeUpper.position.set(0, -U * 11.5, 0)
   group.add(bladeUpper)
 
-  // Ridge running down the center of the blade
+  // Ridge running down the center of the blade (front face)
   const ridge = taggedFlatBox(U * 0.3, U * 10, U * 0.3, W, 'secondary', 'stone_sword_ridge')
-  ridge.position.set(sX, -((bladeBaseY + bladeUpperY) / 2), U * 1 + U * 1.2)
+  ridge.position.set(0, -U * 8.75, U * 1.2)
   group.add(ridge)
 
-  // Short pyramidal tip
-  const tipY = bladeUpperY - U * 3
+  // Short pyramidal tip — at bottom
   const tip = taggedFlatBox(U * 0.8, U * 1.6, U * 1.0, W, 'primary', 'stone_sword_tip')
-  tip.position.set(sX, -tipY, U * 1)
+  tip.position.set(0, -U * 14.8, 0)
   group.add(tip)
-
-  // Pommel — round stone
-  const pommel = taggedFlatBox(U * 1.4, U * 1.1, U * 1.4, W, 'accent', 'stone_sword_pommel')
-  pommel.userData.isAccent = true
-  pommel.position.set(sX, -(handY + U * 2.4), U * 1)
-  group.add(pommel)
 
   return group
 }

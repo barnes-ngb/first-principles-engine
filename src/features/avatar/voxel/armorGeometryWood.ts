@@ -225,48 +225,41 @@ export function buildWoodShield(layout: BodyLayout): THREE.Group {
 }
 
 // ── Sword: wooden training sword ────────────────────────────────────
+// Geometry only: grip center at origin, pommel above (+Y, in hand),
+// blade extending DOWN (-Y). Transform is applied by buildSword() in
+// buildArmorPiece.ts.
 export function buildWoodSword(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
-  group.userData.attachToArm = 'R'
-  group.rotation.x = 0.15
-  group.rotation.z = 0.1
-  const { U, armH } = layout
-  const handY = armH - U * 1
+  const { U } = layout
 
-  const sX = U * 2.4
-
-  // Simple wooden grip
+  // Simple wooden grip — centered at origin
   const grip = taggedFlatBox(U * 1.2, U * 3.5, U * 1.3, W, 'detail', 'wood_sword_grip')
-  grip.position.set(sX, -handY, U * 1)
+  grip.position.set(0, 0, 0)
   group.add(grip)
 
-  // Narrow crossguard (single bar, no flares)
-  const guardY = handY - U * 2.2
+  // Plain pommel — above grip (in the hand)
+  const pommel = taggedFlatBox(U * 1.2, U * 0.9, U * 1.2, W, 'accent', 'wood_sword_pommel')
+  pommel.position.set(0, U * 2.2, 0)
+  group.add(pommel)
+
+  // Narrow crossguard (single bar, no flares) — below grip
   const guard = taggedFlatBox(U * 1.2, U * 0.9, U * 4, W, 'accent', 'wood_sword_guard')
-  guard.position.set(sX, -guardY, U * 1)
+  guard.position.set(0, -U * 2.2, 0)
   group.add(guard)
 
   // Blade — wooden, shorter than iron, no glow. Two segments for taper.
-  const bladeBaseY = guardY - U * 4.5
   const bladeBase = taggedBox(U * 1, U * 7, U * 1.8, W, 'primary', 'wood_sword_blade_base')
-  bladeBase.position.set(sX, -bladeBaseY, U * 1)
+  bladeBase.position.set(0, -U * 6.15, 0)
   group.add(bladeBase)
 
-  const bladeUpperY = bladeBaseY - U * 6
   const bladeUpper = taggedBox(U * 0.9, U * 5.5, U * 1.3, W, 'primary', 'wood_sword_blade_upper')
-  bladeUpper.position.set(sX, -bladeUpperY, U * 1)
+  bladeUpper.position.set(0, -U * 12.4, 0)
   group.add(bladeUpper)
 
-  // Tapered tip
-  const tipY = bladeUpperY - U * 3
+  // Tapered tip — at bottom
   const tip = taggedFlatBox(U * 0.7, U * 1.5, U * 0.9, W, 'primary', 'wood_sword_tip')
-  tip.position.set(sX, -tipY, U * 1)
+  tip.position.set(0, -U * 15.9, 0)
   group.add(tip)
-
-  // Plain pommel (no flares)
-  const pommel = taggedFlatBox(U * 1.2, U * 0.9, U * 1.2, W, 'accent', 'wood_sword_pommel')
-  pommel.position.set(sX, -(handY + U * 2.2), U * 1)
-  group.add(pommel)
 
   return group
 }
