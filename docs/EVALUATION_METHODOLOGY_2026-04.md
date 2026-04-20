@@ -88,3 +88,77 @@ The point: Lincoln's quest should reflect what his actual week has looked like. 
 
 Prompt change only. No new data model. The signals it consumes already exist once Phase 1 ships. The hardest part is writing the prompt so the probes stay invisible and Lincoln still feels like he's mining diamonds.
 
+---
+
+## 5. Phase 3 — Synthesized Diagnosis with Interventions
+
+**Goal.** A synthesis pass turns the raw blocker array into a clear, actionable diagnosis Shelly can read in thirty seconds and act on in five minutes.
+
+Phases 1 and 2 produce rich signal but the `ConceptualBlock` array is still raw. It tells you *what* is stuck, but not *how long*, not *why it matters*, not *what to do about it*, and not *what's still safe to push on*. Phase 3 is the synthesis pass that answers those questions.
+
+### What it produces (per active blocker)
+
+- **What's stuck** — specific, named. Not "reading struggles." "Short vowel i/e discrimination in CVC words."
+- **How long it's persisted** — weeks since first detected, total session count, trend over the last two weeks.
+- **Evidence trail** — which sessions surfaced it, which words tripped him up, which questions he missed, which Stuck chips Shelly tapped. The receipts.
+- **Why it matters** — what this blocker gates downstream in the curriculum. "Blocks fluent CVC reading, which blocks transition to CVCe, which GATB introduces in Lesson 34."
+- **Suggested intervention** — concrete and time-bounded. "5-min daily minimal pairs, oral not written — bed/bid, pen/pin, bet/bit. Lincoln's speech challenges mean auditory discrimination practice matters more than worksheet drill."
+- **Resolution criteria** — measurable. "8/10 correct on 3 consecutive days of targeted practice, or 4+ quest sessions with 80%+ on short-i/e items."
+- **What's safe to continue** — the curriculum that doesn't depend on this blocker. Shelly shouldn't feel like a blocker halts the week; she should know exactly which adjacent work is still fair game.
+
+### When it runs
+
+- **Weekly** — alongside or as part of the weekly review, so Shelly sees a fresh diagnosis every Sunday.
+- **On-demand via Ask AI** — "what's blocking Lincoln?" returns the synthesized diagnosis, not a raw block dump.
+- **After guided evaluation Apply** — the next synthesis runs immediately rather than waiting for the weekly tick, since Apply usually adds or resolves blocks.
+
+### Where it surfaces
+
+- **Learning Profile** — dedicated "Active Blockers" section, always visible, top of the page. Blockers are the most important thing to see on Lincoln's profile; they should not be three taps deep.
+- **Weekly Review** — a blockers section with progress-since-last-week. "Short-i/e: still active, session count up 2. Digraph /oo/: now RESOLVING, 4 correct this week."
+- **Ask AI** — blocker questions get the synthesized diagnosis rather than a list. Shelly shouldn't have to interpret raw data when she asks the assistant what's going on.
+
+### Storage
+
+Synthesized diagnosis is **separate from `conceptualBlocks`**. The array stays as the raw signal stream — every detection, every reinforcement, every resolution event. The diagnosis is a derived artifact: a structured `blockerDiagnosis` field on the child profile or skill snapshot with per-blocker entries (what's stuck, persistence, evidence, why-it-matters, intervention, resolution criteria, safe-to-continue). It carries its own timestamp for staleness detection — UI should indicate when a diagnosis was last refreshed and offer a regenerate action if Shelly wants one on demand.
+
+Treating the diagnosis as derived (not primary) matters: if the synthesis prompt changes, we can regenerate every diagnosis from the raw array without losing history. If we stored only the diagnosis, we'd have lost all the underlying evidence.
+
+### Effort estimate: **Medium**
+
+New CF task (or extension of weekly review), new storage field, new Learning Profile section, integration into Ask AI's blocker-question path. The hardest part is the prompt — Phase 3's output is only as useful as the synthesis is precise and honest.
+
+## 6. Phase 4 — Blockers Drive Everything Downstream
+
+**Goal.** The planner, the scans, and the skip system all become blocker-aware. Active blockers don't just get reported — they shape what happens next.
+
+Phases 1-3 make blockers a live, named, diagnosed signal. Phase 4 wires that signal into every surface that decides what Lincoln does tomorrow.
+
+### Planner integration
+
+The weekly planner reads active blockers (and their diagnoses) before generating the plan. Concrete effects:
+
+- **Targeted practice lands as checklist items.** A short-i/e blocker with a "5-min daily minimal pairs" intervention appears as a literal checklist item three or four times in the week — not a vague "work on vowels," but the specific minimal-pair drill the diagnosis named.
+- **Downstream content gets flagged.** If GATB Lesson 34 depends on fluent CVC reading and Lincoln has an active CVC blocker, the planner flags the lesson rather than quietly scheduling it. Shelly decides whether to push, defer, or substitute.
+- **Persistent blockers trigger alternative approaches.** A block that's been active 4+ weeks without advancing toward `RESOLVING` prompts the planner to suggest a different intervention — not the same minimal-pairs drill that hasn't worked, but something structurally different (game-based, Minecraft-themed, oral-only, sibling-led, whatever fits Lincoln's motivators).
+
+### Scan integration
+
+Scans already identify what a page covers. With blocker awareness, the scan recommendation gets richer:
+
+- **Blocker-adjacent content gets flagged.** "This lesson covers short vowel review. Lincoln has an active blocker on short i vs e. Recommendation: do WITH support, focus on the i/e words, skip the a/o/u rows if time-constrained."
+- **Blocker-addressing content gets amplified.** "This lesson's word list includes bed/bid/bet/bit — excellent targeted practice for Lincoln's i/e gap. Consider making this the centerpiece of today's reading block."
+- **Blocker-independent content stays clean.** The scan doesn't clutter every recommendation with blocker context — only when the content actually intersects an active block.
+
+### Skip system integration
+
+The existing skip system captures when Shelly marks something as "too-hard" or "skip — other." Phase 4 makes it blocker-aware:
+
+- **"Too-hard" skips check against active blockers automatically.** If Lincoln skips a page that aligns with a known blocker, the system doesn't just record the skip — it surfaces the blocker and offers to swap the page for a targeted-practice alternative from the diagnosis.
+- **Repeated skips on unrelated content flag a potential new blocker.** Three "too-hard" skips in a week on the same sub-skill that isn't yet blocker-tracked becomes a signal to the pattern detector: investigate, potentially write a new block.
+
+### Effort estimate: **Medium-Large**
+
+This phase touches three distinct surfaces (planner, scan, skip) and each requires both prompt changes and non-trivial read-integration with the blocker diagnosis. It is the phase with the highest leverage — blockers only matter if they change what Lincoln does — but it's also the phase with the most surface area and the most opportunities for regressions. Should be staged: planner first (highest leverage), scan second (tightest daily loop), skip system third (refinement on an existing flow).
+
+
