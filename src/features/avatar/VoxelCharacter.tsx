@@ -516,13 +516,18 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     cancelAnimationFrame(rafRef.current)
     rafRef.current = 0
 
-    // Clean up old renderer
+    // Dispose any residual renderer.
     if (rendererRef.current) {
       rendererRef.current.dispose()
       rendererRef.current = null
-      const oldCanvas = container.querySelector('canvas')
-      if (oldCanvas) container.removeChild(oldCanvas)
     }
+    // Always remove any existing canvas. The useEffect cleanup disposes the
+    // renderer and nulls the ref, but the canvas DOM node stays attached
+    // until we explicitly remove it. Without this, rebuilds (e.g. tier
+    // preview) stack a second canvas and the stale frozen one occludes the
+    // new scene inside the overflow:hidden container.
+    const oldCanvas = container.querySelector('canvas')
+    if (oldCanvas) container.removeChild(oldCanvas)
 
     const width = container.clientWidth
     const height = container.clientHeight
