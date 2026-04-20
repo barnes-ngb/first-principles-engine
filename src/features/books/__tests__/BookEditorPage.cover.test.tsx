@@ -23,6 +23,10 @@ vi.mock('/src/core/hooks/useActiveChild', () => ({
   }),
 }))
 
+vi.mock('/src/core/profile/useProfile', () => ({
+  useProfile: () => ({ profile: 'parents', themeMode: 'family', canEdit: true }),
+}))
+
 vi.mock('/src/core/ai/useAI', () => ({
   useAI: () => ({ generateImage: vi.fn(), enhanceSketch: vi.fn(), loading: false, error: null }),
 }))
