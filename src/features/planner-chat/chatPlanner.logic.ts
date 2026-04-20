@@ -1124,6 +1124,7 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
           ...(typeof rawItem.evaluationMode === 'string' && ['phonics', 'comprehension', 'fluency', 'math'].includes(rawItem.evaluationMode)
             ? { evaluationMode: rawItem.evaluationMode as 'phonics' | 'comprehension' | 'fluency' | 'math' } : {}),
           ...(typeof rawItem.link === 'string' ? { link: rawItem.link } : {}),
+          ...(typeof rawItem.bookId === 'string' && rawItem.bookId.length > 0 ? { bookId: rawItem.bookId } : {}),
         })
       }
 

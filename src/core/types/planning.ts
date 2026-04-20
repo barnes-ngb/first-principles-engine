@@ -490,6 +490,8 @@ export interface DraftPlanItem {
   evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
   /** Route to navigate to (e.g., '/quest') for in-app activities. */
   link?: string
+  /** Linked book ID — set for "Read: {title}" (Mom's Book / AI story) or "Continue Book: {title}" (kid draft) items. */
+  bookId?: string
   /** Which schedule block this item belongs to */
   block?: ScheduleBlock
   /** Activity ID this runs simultaneously with */

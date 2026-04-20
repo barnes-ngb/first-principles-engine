@@ -1719,6 +1719,7 @@ Generate a plan for Monday through Friday.`.trim()
           ...(item.itemType ? { itemType: item.itemType } : {}),
           ...(item.evaluationMode ? { evaluationMode: item.evaluationMode } : {}),
           ...(item.link ? { link: item.link } : {}),
+          ...(item.bookId ? { bookId: item.bookId } : {}),
         }))
 
         const blocks: DayBlock[] = dayItems

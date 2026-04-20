@@ -9,6 +9,7 @@ import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary'
 import CheckIcon from '@mui/icons-material/Check'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
+import MenuBookIcon from '@mui/icons-material/MenuBook'
 import PrintIcon from '@mui/icons-material/Print'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -534,6 +535,16 @@ export default function TodayChecklist({
                   )}
                   {isDimmed && !item.completed && (
                     <Chip label="(stretch)" size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
+                  )}
+                  {!item.completed && item.bookId && (
+                    <Tooltip title="Open book">
+                      <IconButton
+                        size="small"
+                        onClick={() => navigate(`/books/${item.bookId}`)}
+                      >
+                        <MenuBookIcon fontSize="small" color="primary" />
+                      </IconButton>
+                    </Tooltip>
                   )}
                   {!item.completed && (() => {
                     const mode = getSparkleMode(item)

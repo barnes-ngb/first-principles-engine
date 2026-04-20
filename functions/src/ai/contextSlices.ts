@@ -6,10 +6,11 @@ import {
   loadHoursSummary,
   loadEngagementSummary,
   loadGradeResults,
-  loadDraftBookCount,
+  loadDraftBooksByChild,
   loadSightWordSummary,
   loadWordMasterySummary,
 } from "./chat.js";
+import type { DraftBookInfo } from "./chat.js";
 import { loadRecentEvalContext, loadRecentEvalHistoryByDomain, formatEvalHistoryByDomain } from "./chatTypes.js";
 import { getGatbProgress } from "./data/gatbCurriculum.js";
 
@@ -352,7 +353,7 @@ export async function buildContextForTask(
     fetches.push({ slice: "gradeResults", promise: loadGradeResults(db, familyId, childId) });
   }
   if (slices.includes("bookStatus")) {
-    fetches.push({ slice: "bookStatus", promise: loadDraftBookCount(db, familyId, childId) });
+    fetches.push({ slice: "bookStatus", promise: loadDraftBooksByChild(db, familyId, childId) });
   }
   if (slices.includes("sightWords")) {
     fetches.push({ slice: "sightWords", promise: loadSightWordSummary(db, familyId, childId) });
@@ -372,7 +373,10 @@ export async function buildContextForTask(
     fetches.push({ slice: "wordMastery", promise: loadWordMasterySummary(db, familyId, childId) });
   }
   if (slices.includes("generatedContent")) {
-    fetches.push({ slice: "generatedContent", promise: loadGeneratedContent(db, familyId, childId) });
+    fetches.push({
+      slice: "generatedContent",
+      promise: loadGeneratedContent(db, familyId, childId, childData.name),
+    });
   }
   if (slices.includes("workshopGames")) {
     fetches.push({ slice: "workshopGames", promise: loadWorkshopGames(db, familyId, childId) });
@@ -511,14 +515,23 @@ export async function buildContextForTask(
     }
   }
 
-  // Book status
+  // Book status — draft books authored by this child
   if (sliceData.has("bookStatus")) {
-    const draftBookCount = sliceData.get("bookStatus") as number;
-    const lines = ["BOOK STATUS:"];
-    if (draftBookCount > 0) {
-      lines.push(`Draft books in progress: ${draftBookCount}. Suggest "Continue your book" as a choose activity instead of "Make a Book".`);
+    const drafts = sliceData.get("bookStatus") as DraftBookInfo[];
+    const lines = [`${childData.name.toUpperCase()}'S BOOK DRAFTS:`];
+    if (drafts.length > 0) {
+      for (const d of drafts) {
+        const pages = d.pageCount === 1 ? "1 page" : `${d.pageCount} pages`;
+        lines.push(`- "${d.title}" (${pages}) [bookId: ${d.id}]`);
+      }
+      lines.push(
+        `If drafts exist, suggest "Continue Book: {title}" as a Language Arts / Art choose-item (15-20m). ` +
+          `Include the matching bookId so Today can link directly to the editor.`,
+      );
     } else {
-      lines.push(`No draft books. "Make a Book" is available as a choose activity.`);
+      lines.push(
+        `No draft books. "Make a New Book" is available as a choose activity on creative days (no bookId).`,
+      );
     }
     sections.push(lines.join("\n"));
   }
@@ -654,34 +667,100 @@ async function loadMasterySummary(
 
 // ── Generated content loader ──────────────────────────────────
 
-/** Load recently generated books/stories that can be included as plan activities. */
+/**
+ * Load reading material available for plan activities, split into two buckets:
+ *   1. Mom's Books — books Shelly made FOR this child (createdBy === 'parent'
+ *      AND createdFor === childId). Limited to last 30 days of creation.
+ *   2. AI / Legacy stories — generated or legacy books the child already owns
+ *      (childId === childId), for backward compatibility.
+ *
+ * The prompt instructs the planner to include matching bookIds so plan items
+ * deep-link to the reader on Today.
+ */
 async function loadGeneratedContent(
   db: Firestore,
   familyId: string,
   childId: string,
+  childName: string,
 ): Promise<string> {
-  const snap = await db
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  const cutoffIso = cutoff.toISOString();
+
+  // Parent-made books for this child (Prompt 1 set createdFor === childId).
+  const momSnap = await db
+    .collection(`families/${familyId}/books`)
+    .where("createdFor", "==", childId)
+    .where("createdBy", "==", "parent")
+    .orderBy("createdAt", "desc")
+    .limit(10)
+    .get().catch(() => null);
+
+  type BookDoc = {
+    id: string;
+    title?: string;
+    skillTags?: string[];
+    status?: string;
+    createdAt?: string;
+    coverImageUrl?: string;
+    theme?: string;
+    pages?: Array<unknown>;
+    bookType?: string;
+  };
+
+  const momsBooks: BookDoc[] = momSnap
+    ? momSnap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<BookDoc, "id">) }))
+        .filter((b) => !b.createdAt || b.createdAt >= cutoffIso)
+    : [];
+
+  // Legacy / AI-generated books under this child's profile. We exclude anything
+  // already surfaced as a Mom's Book (same id) to avoid double-listing.
+  const legacySnap = await db
     .collection(`families/${familyId}/books`)
     .where("childId", "==", childId)
     .orderBy("createdAt", "desc")
     .limit(5)
     .get();
 
-  if (snap.empty) return "";
+  const momIds = new Set(momsBooks.map((b) => b.id));
+  const legacyBooks: BookDoc[] = legacySnap.docs
+    .map((d) => ({ id: d.id, ...(d.data() as Omit<BookDoc, "id">) }))
+    .filter((b) => !momIds.has(b.id));
 
-  const lines = ["AVAILABLE GENERATED CONTENT:"];
-  for (const bookDoc of snap.docs) {
-    const book = bookDoc.data() as {
-      title?: string;
-      skillTags?: string[];
-      status?: string;
-    };
-    const tags = book.skillTags?.join(", ") || "general reading";
-    lines.push(`- Reading book: "${book.title}" (targets: ${tags}${book.status === "draft" ? ", in progress" : ""})`);
+  const sections: string[] = [];
+
+  if (momsBooks.length > 0) {
+    const lines = [`MOM'S BOOKS (reading material Shelly created for ${childName}):`];
+    for (const book of momsBooks) {
+      const pageCount = Array.isArray(book.pages) ? book.pages.length : 0;
+      const pages = pageCount > 0 ? `${pageCount} pages` : "no pages yet";
+      const theme = book.theme ? `, ${book.theme}` : "";
+      const status = book.status === "draft" ? ", in progress" : "";
+      lines.push(`- "${book.title}" (${pages}${theme}${status}) [bookId: ${book.id}]`);
+    }
+    lines.push(
+      `When scheduling reading blocks, suggest unread Mom's Books as choose-items ` +
+        `alongside workbook reading. Title format: "Read: {bookTitle}". ` +
+        `Include the matching bookId so Today can link directly to the reader.`,
+    );
+    sections.push(lines.join("\n"));
   }
-  lines.push('Include 1-2 of these as "choose" activities in the plan, like "Read: [title]".');
 
-  return lines.join("\n");
+  if (legacyBooks.length > 0) {
+    const lines = ["AVAILABLE GENERATED CONTENT:"];
+    for (const book of legacyBooks) {
+      const tags = book.skillTags?.join(", ") || "general reading";
+      const status = book.status === "draft" ? ", in progress" : "";
+      lines.push(`- Reading book: "${book.title}" (targets: ${tags}${status}) [bookId: ${book.id}]`);
+    }
+    lines.push(
+      'Include 1-2 of these as "choose" activities in the plan, like "Read: {title}", with the matching bookId.',
+    );
+    sections.push(lines.join("\n"));
+  }
+
+  return sections.join("\n\n");
 }
 
 // ── Workshop games loader ─────────────────────────────────────
