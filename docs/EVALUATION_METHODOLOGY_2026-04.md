@@ -34,3 +34,57 @@ Today the engine has the right conceptual model and almost none of the plumbing 
 **Starved for data.** The detection path gates on ≥2 prior completed sessions, which means a fresh child has zero blocks until their third evaluation. Lincoln has enough history to produce blocks, but the pipeline only runs when Shelly manually completes a guided eval session and clicks Apply. Quest sessions produce no blocks. Scans produce no blocks. Shelly's "Stuck" chips on the daily checklist produce no blocks. The model is right but it's being fed from a single narrow straw.
 
 **Honest verdict.** The shape of `ConceptualBlock` is correct. What's missing is three more writers, a real lifecycle, and a synthesis pass that turns raw signals into actionable diagnoses Shelly can act on. The next four phases add those in order.
+
+---
+
+## 3. Phase 1 — Feed Blockers from Everywhere
+
+**Goal.** Every evaluation surface identifies and writes blockers. Not just guided eval.
+
+Today, the only path that produces a `ConceptualBlock` is a completed guided evaluation session with two or more prior sessions behind it. That makes blockers a monthly artifact at best. Phase 1 turns blockers into a live signal that updates whenever Lincoln touches the system.
+
+### New writers
+
+**Quest session end.** When Lincoln gets 2+ wrong answers at the same sub-skill within a single quest session, the session-end handler writes (or reinforces) a `ConceptualBlock` for that sub-skill. The evidence payload includes the specific words he mispronounced, the questions he missed, and the session ID. A miss on "bed" vs "bid" isn't a generic reading failure — it's typed as short-vowel discrimination, and the block carries that specificity. One miss is noise; two at the same sub-skill is a signal.
+
+**Scan analysis.** The scan task already identifies what curriculum a page covers and what level it targets. Phase 1 extends it: when a scan flags content as "too-hard" or identifies a skill Lincoln hasn't mastered, it writes a `ConceptualBlock` linking the curriculum content (e.g., "GATB LA Lesson 27 — /oo/ digraph") to the underlying gap. This is the tightest possible feedback loop — the morning's worksheet becomes an afternoon blocker.
+
+**Shelly's mastery chips.** When Shelly taps "Stuck" on a checklist item during daily work, the chip creates a lightweight block tagged with the item's subject and skill area. These are lower-confidence than quest/scan blocks (they reflect Shelly's in-the-moment read, not a counted error rate) but they are invaluable as the fastest-moving signal in the system. A Stuck chip on Monday that doesn't appear again by Friday is a block that self-resolved.
+
+### Lifecycle additions
+
+- **`RESOLVING`** — triggered when Lincoln gets 3+ correct on a previously-blocked sub-skill across sessions. The block stays in the array but its status changes; it drops out of `ADDRESS_NOW` AI injection and starts appearing as "trending better" in UI.
+- **`RESOLVED`** — triggered when Lincoln passes 5+ items on the sub-skill across multiple sessions. The block remains in the record (resolved blockers are valuable history) but no longer drives prompt context or active intervention suggestions.
+- **Persistence tracking** — every block carries `firstDetectedAt`, `lastReinforcedAt`, and `sessionCount`. A block that keeps appearing month after month is a different kind of problem from one that flares once and fades. The data has to distinguish them.
+- **Merge-not-overwrite** — new detections merge with the existing array rather than replacing it. If pattern analysis surfaces "short vowel i/e" again, it increments `sessionCount` and refreshes `lastReinforcedAt`; it does not write a second duplicate entry or wipe unrelated blocks.
+
+### Data model changes
+
+Add `firstDetectedAt`, `lastReinforcedAt`, `sessionCount`, `resolvedAt` to `ConceptualBlock`. Extend the status domain to include `RESOLVING` and `RESOLVED` alongside `ADDRESS_NOW` and `DEFER`. Replace the wholesale-overwrite in `handleSaveAndApply` with a merge helper — this is a generalization of the Apply fix already identified elsewhere. Quest and scan write paths call the same merge helper via `updateDoc` with `arrayUnion` semantics (or read-modify-write where the merge needs to inspect existing entries).
+
+### Effort estimate: **Small-Medium**
+
+The biggest lift is the merge helper and the status state machine. Writers in quest and scan are mostly prompt changes and a shared utility call. No new collections, no new surfaces.
+
+## 4. Phase 2 — Gap-Targeted Quest Questions
+
+**Goal.** Two to three of every ten quest questions deliberately target known blockers.
+
+Today the quest generates questions at calibrated difficulty for broad skill areas — phonics, decoding, comprehension, number sense. Phase 1 produces a rich blocker list; Phase 2 closes the loop by letting that list steer quest content.
+
+### Prompt change
+
+The quest prompt gains a new section: **"KNOWN BLOCKERS — generate 2-3 questions from this list."** For each `ADDRESS_NOW` or `RESOLVING` block, the prompt includes the specific sub-skill, a handful of example words or question shapes, and what the question is meant to test. The generator decides how to weave them in — Lincoln should not be able to tell which questions are blocker-probes and which are general assessment.
+
+When the session ends, the result handler tracks whether the blocker-targeted questions were answered correctly. That goes back as a structured finding: "Lincoln got 2/2 on short-i-vs-e targeted questions this session." Those signals feed the lifecycle rules from Phase 1 — correct answers across sessions advance a block toward `RESOLVING` and eventually `RESOLVED`.
+
+### Connection to daily work
+
+If today's scans identified specific curriculum content — say, /oo/ digraph from GATB LA Lesson 27 — the quest prompt includes it as **"RECENT CURRICULUM — consider including 1-2 questions that reinforce this."** This is not mandatory. The AI decides the mix based on what data is available. When no scan data exists for the day, quest falls back to blocker-targeting plus general assessment. When no blockers exist yet, quest generates standard calibrated questions.
+
+The point: Lincoln's quest should reflect what his actual week has looked like. A quest in the middle of a unit on short vowels should probe short vowels. A quest on a day he scanned a page full of digraphs should touch digraphs. The generator is doing the same diagnostic job it always did — the data just tells it where to aim.
+
+### Effort estimate: **Small**
+
+Prompt change only. No new data model. The signals it consumes already exist once Phase 1 ships. The hardest part is writing the prompt so the probes stay invisible and Lincoln still feels like he's mining diamonds.
+
