@@ -88,6 +88,7 @@ export default function AvatarCharacterDisplay({
   onHeroAnimationTuningChange,
   previewTier,
 }: AvatarCharacterDisplayProps) {
+  console.log('[DISPLAY] previewTier prop:', previewTier)
   return (
     <>
       {/* ── Brothers Toggle ────── */}
