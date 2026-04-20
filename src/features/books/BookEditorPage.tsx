@@ -28,9 +28,13 @@ import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import PrintIcon from '@mui/icons-material/Print'
 
 import Divider from '@mui/material/Divider'
+import FormControl from '@mui/material/FormControl'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import ImageList from '@mui/material/ImageList'
 import ImageListItem from '@mui/material/ImageListItem'
+import InputLabel from '@mui/material/InputLabel'
+import MenuItem from '@mui/material/MenuItem'
+import Select from '@mui/material/Select'
 import Switch from '@mui/material/Switch'
 import useMediaQuery from '@mui/material/useMediaQuery'
 import { useTheme } from '@mui/material/styles'
@@ -49,7 +53,8 @@ import SaveIndicator from '../../components/SaveIndicator'
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import { SubjectBucket } from '../../core/types/enums'
+import { useProfile } from '../../core/profile/useProfile'
+import { SubjectBucket, UserProfile } from '../../core/types/enums'
 import { useAI } from '../../core/ai/useAI'
 import type { Book, BookPage, BookTheme, Sticker } from '../../core/types'
 import { BOOK_THEMES } from '../../core/types'
@@ -126,11 +131,9 @@ export default function BookEditorPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild } = useActiveChild()
-  const childName = activeChild?.name ?? ''
-  const isLincoln = childName.toLowerCase() === 'lincoln'
-
-  const { children } = useActiveChild()
+  const { activeChild, children } = useActiveChild()
+  const { profile } = useProfile()
+  const isParentProfile = profile === UserProfile.Parents
   const muiTheme = useTheme()
   const isMobile = useMediaQuery(muiTheme.breakpoints.down('sm'))
 
@@ -158,12 +161,23 @@ export default function BookEditorPage() {
 
   const { generateImage, enhanceSketch, loading: aiLoading, error: aiError } = useAI()
 
+  // ── Themed child (drives editor palette / font / world chips) ───
+  // Reads from book.createdFor so Shelly can re-theme the editor without
+  // switching profiles. Falls back to the currently active child.
+  const themedChildId = book?.createdFor ?? activeChild?.id ?? ''
+  const themedChild = useMemo(
+    () => children.find((c) => c.id === themedChildId) ?? activeChild,
+    [children, themedChildId, activeChild],
+  )
+  const childName = themedChild?.name ?? ''
+  const isLincoln = childName.toLowerCase() === 'lincoln'
+
   // ── Undo / Redo ───────────────────────────────────────────────
   const editorHistory = useEditorHistory()
 
   const bgReimagine = useBackgroundReimagine({
     familyId,
-    childId: activeChild?.id ?? '',
+    childId: themedChild?.id ?? '',
     childName,
     bookTheme: book?.theme,
     onReplaceBackground: (pageId, imageId, url, storagePath) => {
@@ -187,8 +201,17 @@ export default function BookEditorPage() {
   // AI Scene state
   const [showAiDialog, setShowAiDialog] = useState(false)
   const [aiPrompt, setAiPrompt] = useState('')
-  const [aiStyle, setAiStyle] = useState(isLincoln ? 'minecraft' : 'storybook')
+  const [aiStyle, setAiStyle] = useState<string>('storybook')
   const [aiResult, setAiResult] = useState<{ url: string; storagePath: string } | null>(null)
+
+  // Re-sync default AI scene style when themed child changes (e.g. Shelly
+  // switches "For" from Lincoln to London). User can still override by
+  // picking a different style in the AI dialog.
+  const [aiStyleTouched, setAiStyleTouched] = useState(false)
+  useEffect(() => {
+    if (aiStyleTouched) return
+    setAiStyle(isLincoln ? 'minecraft' : 'storybook')
+  }, [isLincoln, aiStyleTouched])
 
   // Sticker state
   const [showStickerPicker, setShowStickerPicker] = useState(false)
@@ -915,6 +938,51 @@ export default function BookEditorPage() {
         <Alert severity="error" onClose={() => setReimagineError(null)} sx={{ mx: 2, mt: 0.5 }}>
           {reimagineError}
         </Alert>
+      )}
+
+      {/* Attribution controls: who this book is FOR (drives theming) and BY (who created it) */}
+      {children.length > 0 && (
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 1, py: 0.5 }}>
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel id="book-for-label">For</InputLabel>
+            <Select
+              labelId="book-for-label"
+              label="For"
+              value={book.createdFor ?? themedChild?.id ?? ''}
+              onChange={(e) => {
+                const nextFor = e.target.value as string
+                updateBookMeta({ createdFor: nextFor })
+                // Also keep childId aligned to target child for bookshelf queries
+                // (child sees books where childId === their own id)
+              }}
+            >
+              {children.map((c) => (
+                <MenuItem key={c.id} value={c.id}>
+                  {c.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 140 }}>
+            <InputLabel id="book-by-label">By</InputLabel>
+            <Select
+              labelId="book-by-label"
+              label="By"
+              value={book.createdBy ?? (isParentProfile ? 'parent' : activeChild?.id ?? 'parent')}
+              onChange={(e) => {
+                const nextBy = e.target.value as string
+                updateBookMeta({ createdBy: nextBy })
+              }}
+            >
+              <MenuItem value="parent">Me (Mom/Dad)</MenuItem>
+              {children.map((c) => (
+                <MenuItem key={c.id} value={c.id}>
+                  {c.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Stack>
       )}
 
       {/* Row 2: Action chips */}
@@ -1732,7 +1800,7 @@ export default function BookEditorPage() {
                     key={s.value}
                     label={s.label}
                     variant={aiStyle === s.value ? 'filled' : 'outlined'}
-                    onClick={() => setAiStyle(s.value)}
+                    onClick={() => { setAiStyle(s.value); setAiStyleTouched(true) }}
                     disabled={aiLoading}
                   />
                 ))}

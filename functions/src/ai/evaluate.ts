@@ -102,6 +102,10 @@ interface BookActivity {
   bookType: string;
   theme?: string;
   completedThisWeek: boolean;
+  /** 'parent' if Mom/Dad made it, otherwise the childId of the kid author. Absent on legacy books. */
+  createdBy?: string;
+  /** The childId this book was themed for / intended for. */
+  createdFor?: string;
 }
 
 export interface WeekContext {
@@ -223,7 +227,8 @@ export async function assembleWeekContext(
   const bookActivity: BookActivity[] = booksSnap.docs
     .map((d) => {
       const b = d.data();
-      if (b.childId !== childId) return null;
+      // Include books owned by this child OR made FOR this child from parent profile
+      if (b.childId !== childId && b.createdFor !== childId) return null;
       const activity: BookActivity = {
         title: b.title as string,
         childId: b.childId as string,
@@ -235,6 +240,8 @@ export async function assembleWeekContext(
           (b.updatedAt as string) >= weekKey,
       };
       if (b.theme) activity.theme = b.theme as string;
+      if (b.createdBy) activity.createdBy = b.createdBy as string;
+      if (b.createdFor) activity.createdFor = b.createdFor as string;
       return activity;
     })
     .filter((b): b is BookActivity => !!b);
@@ -374,9 +381,16 @@ ${hoursSummary || "  (none)"}
 
 ## Book Activity This Week
 ${(ctx.bookActivity ?? []).length === 0 ? "No book activity this week." :
-  (ctx.bookActivity ?? []).map((b) =>
-    `- "${b.title}" (${b.bookType}, ${b.pageCount} pages, ${b.status}${b.completedThisWeek ? " — FINISHED THIS WEEK!" : ""})`
-  ).join("\n")}
+  (ctx.bookActivity ?? []).map((b) => {
+    // Attribution: 'parent' means Mom/Dad made the book (teaching material); absent = legacy (treat as parent-made)
+    const createdBy = b.createdBy ?? "parent";
+    const authorTag = createdBy === "parent"
+      ? ` [made by Mom/Dad for ${ctx.child.name}]`
+      : createdBy === ctx.child.name.toLowerCase() || createdBy === ctx.child.id
+        ? ` [made by ${ctx.child.name}]`
+        : ` [made by sibling]`;
+    return `- "${b.title}" (${b.bookType}, ${b.pageCount} pages, ${b.status}${b.completedThisWeek ? " — FINISHED THIS WEEK!" : ""})${authorTag}`;
+  }).join("\n")}
 
 Per-day breakdown:
 ${perDayBreakdown.join("\n") || "  (no day logs)"}
@@ -399,6 +413,7 @@ TONE:
 - If data is thin, say so honestly and keep recommendations light.
 - Celebrate any books created or completed — they represent significant creative effort.
 - Mention reading sessions and book creation as evidence of language arts engagement.
+- ATTRIBUTION: Only attribute book authorship to ${ctx.child.name} when the book tag reads "made by ${ctx.child.name}". If the tag reads "made by Mom/Dad" or "made by sibling", that book is NOT ${ctx.child.name}'s creative work — reference it as a reading/learning resource, not a creative win.
 
 Respond ONLY with valid JSON. No markdown, no preamble, no explanation outside the JSON structure.`;
 }
