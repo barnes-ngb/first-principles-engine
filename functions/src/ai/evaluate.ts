@@ -1,9 +1,11 @@
 import { getFirestore } from "firebase-admin/firestore";
+import type { Firestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { requireEmailAuth } from "./authGuard.js";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { claudeApiKey } from "./aiConfig.js";
-import { CHARTER_PREAMBLE } from "./contextSlices.js";
+import { buildContextForTask } from "./contextSlices.js";
+import type { SnapshotData } from "./chatTypes.js";
 import { sanitizeAndParseJson } from "./sanitizeJson.js";
 import { callClaude, logAiUsage } from "./chatTypes.js";
 import { modelForTask } from "./chat.js";
@@ -267,9 +269,22 @@ REVIEW-SPECIFIC GUIDANCE:
 - Default to "both modes count as real school" framing.
 - Warm, encouraging, practical tone. Never clinical or condescending.
 - Speak as a knowledgeable partner, not an authority figure.
-- Include disposition observations in the weekly summary alongside completion data.`;
+- Include disposition observations in the weekly summary alongside completion data.
+- Use the Skill Snapshot, Evaluation History, and Recent Scans sections to ground wins, growth areas, and pace adjustments in concrete skill progression — not just completion counts.
+- If quest or evaluation sessions happened this week, cite them by domain (phonics / comprehension / math / fluency) and reference the working level.
+- If recent scans recommend skip or quick-review, surface that as a pace adjustment rationale.
+- If activity configs show a "daily" or "3x" frequency and this week's dayLogs didn't match, call it out gently as a growth area (not a failure).`;
 
-const WEEKLY_REVIEW_SYSTEM_PROMPT = CHARTER_PREAMBLE + "\n" + WEEKLY_REVIEW_ADDENDUM;
+/** Load the child's skill snapshot (used for prioritySkills/supports/stopRules/workingLevels). */
+async function loadSnapshotData(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<SnapshotData | undefined> {
+  const snap = await db.doc(`families/${familyId}/skillSnapshots/${childId}`).get();
+  if (!snap.exists) return undefined;
+  return snap.data() as SnapshotData;
+}
 
 export function buildEvaluationPrompt(ctx: WeekContext): string {
   // Compute week totals from dayLogs
@@ -336,6 +351,12 @@ export function buildEvaluationPrompt(ctx: WeekContext): string {
     .join(", ");
 
   return `Generate a weekly review for ${ctx.child.name} for the week of ${ctx.weekKey}.
+
+The week-scoped data below shows what actually happened during the reviewed week.
+The system prompt additionally includes the child's skill snapshot, recent evaluation
+history by domain, recent curriculum scans, activity configs, word mastery, and recent
+Dad Lab reports — use those sections to ground wins, growth areas, and pace
+adjustments in concrete skill progression rather than completion counts alone.
 
 DATA PROVIDED:
 - Day logs recorded: ${ctx.dayLogs.length}
@@ -460,13 +481,30 @@ export async function generateReviewForChild(
 
   const model = modelForTask("weeklyReview");
 
+  const db = getFirestore();
+  const snapshotData = await loadSnapshotData(db, familyId, ctx.child.id);
+
+  // Shared context slices (skillSnapshot, recentHistoryByDomain, recentScans,
+  // activityConfigs, wordMastery, dadLabReports) — augments the week-scoped
+  // dayLog/hours/plans data from assembleWeekContext with the child-level
+  // skill/progression context the review previously lacked.
+  const sharedSections = await buildContextForTask("weeklyReview", {
+    db,
+    familyId,
+    childId: ctx.child.id,
+    childData: { name: ctx.child.name, grade: ctx.child.grade },
+    snapshotData,
+  });
+
+  const systemPrompt = [...sharedSections, WEEKLY_REVIEW_ADDENDUM].join("\n\n");
+
   const userPrompt = buildEvaluationPrompt(ctx);
 
   const result = await callClaude({
     apiKey,
     model,
     maxTokens: 2048,
-    systemPrompt: WEEKLY_REVIEW_SYSTEM_PROMPT,
+    systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
   });
 
@@ -478,7 +516,6 @@ export async function generateReviewForChild(
   };
 
   // Store review in Firestore
-  const db = getFirestore();
   const reviewData: WeeklyReviewDoc = {
     childId: ctx.child.id,
     weekKey: ctx.weekKey,

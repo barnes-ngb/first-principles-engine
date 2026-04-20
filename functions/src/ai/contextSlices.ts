@@ -67,6 +67,10 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
     "skillSnapshot", "recentHistoryByDomain", "recentScans",
     "dayToday", "dadLabReports",
   ],
+  weeklyReview: [
+    "charter", "childProfile", "skillSnapshot", "activityConfigs",
+    "recentHistoryByDomain", "recentScans", "wordMastery", "dadLabReports",
+  ],
 };
 
 // ── Charter preamble (shared constant) ──────────────────────────
