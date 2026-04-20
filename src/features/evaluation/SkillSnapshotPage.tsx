@@ -41,6 +41,7 @@ import {
 } from './lincolnDefaults'
 import FoundationsSection from '../evaluate/FoundationsSection'
 import QuickCheckPanel from './QuickCheckPanel'
+import WorkingLevelsSection from './WorkingLevelsSection'
 
 const emptySnapshot = (childId: string): SkillSnapshot => ({
   childId,
@@ -337,6 +338,14 @@ export default function SkillSnapshotPage() {
               />
             </SectionCard>
           )}
+
+          {/* Working Levels (per-domain quest starting level) */}
+          <WorkingLevelsSection
+            childId={activeChildId}
+            workingLevels={snapshot.workingLevels}
+            onSaved={(text) => setSnack({ text, severity: 'success' })}
+            onError={(text) => setSnack({ text, severity: 'error' })}
+          />
 
           {/* Priority Skills */}
           <SectionCard title="Priority Skills (1\u20133 targets)">
