@@ -317,18 +317,46 @@ export async function loadGradeResults(
   return results;
 }
 
-/** Load draft book count for child. */
-export async function loadDraftBookCount(
+export interface DraftBookInfo {
+  id: string;
+  title: string;
+  pageCount: number;
+  updatedAt?: string;
+}
+
+/**
+ * Load draft books authored by the child (createdBy === childId).
+ * Returns the full list so the planner can suggest "Continue Book: {title}"
+ * with a concrete bookId linking back to the editor.
+ */
+export async function loadDraftBooksByChild(
   db: Firestore,
   familyId: string,
   childId: string,
-): Promise<number> {
+): Promise<DraftBookInfo[]> {
   const snap = await db
     .collection(`families/${familyId}/books`)
-    .where("childId", "==", childId)
+    .where("createdBy", "==", childId)
     .where("status", "==", "draft")
     .get();
-  return snap.size;
+
+  const drafts: DraftBookInfo[] = snap.docs.map((d) => {
+    const data = d.data() as {
+      title?: string;
+      pages?: Array<unknown>;
+      updatedAt?: string;
+    };
+    return {
+      id: d.id,
+      title: data.title || "Untitled book",
+      pageCount: Array.isArray(data.pages) ? data.pages.length : 0,
+      updatedAt: data.updatedAt,
+    };
+  });
+
+  // Most recently edited first.
+  drafts.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+  return drafts;
 }
 
 /** Load word mastery summary from quest wordProgress collection. */
@@ -463,7 +491,8 @@ ${STONEBRIDGE_BIBLE}
           "skipGuidance": "This is Lincoln's frontier — spend full time here. Focus on two-digit addition.", // or null for non-workbook items
           "itemType": "workbook", // "routine" | "workbook" | "evaluation" | "activity" — use "evaluation" for Knowledge Mine / Fluency Practice items
           "evaluationMode": null, // "phonics" | "comprehension" | "fluency" | "math" — only set when itemType is "evaluation"
-          "link": null // route path (e.g. "/quest") — only set for in-app activities like evaluation items
+          "link": null, // route path (e.g. "/quest") — only set for in-app activities like evaluation items
+          "bookId": null // Firestore book id — only set for "Read: {title}" or "Continue Book: {title}" items linked to a Mom's Book or child draft
         }
       ],
     }
@@ -487,8 +516,9 @@ Rules:
 - "estimatedMinutes" must be a positive number. When the user provides subject time defaults, use those as the baseline. Adjust only if energy level or specific notes suggest otherwise (e.g., "lighter week" → reduce by ~30%).
 - "mvdEssential" must be a boolean. Mark the 3-4 core items per day as true (Formation, core math, core reading, speech if applicable).
 - "category" must be either "must-do" or "choose". Core academics are "must-do", elective/fun activities are "choose".
-- "Make a Book" can be included as a "choose" category item. SubjectBucket: "LanguageArts". EstimatedMinutes: 15-20. It counts as both Language Arts and Art for compliance hours.
-- If the child has a draft book in progress (see BOOK STATUS in context), suggest "Continue your book" instead of "Make a Book".
+- "Make a New Book" can be included as a "choose" category item on creative days. SubjectBucket: "LanguageArts". EstimatedMinutes: 15-20. It counts as both Language Arts and Art for compliance hours. Leave bookId null.
+- If the child has drafts in progress (see "{NAME}'S BOOK DRAFTS" in context), prefer "Continue Book: {title}" over "Make a New Book", and set bookId to the draft's id so Today can deep-link to the editor.
+- If MOM'S BOOKS are listed in context, schedule 1-2 as "Read: {bookTitle}" choose-items during reading blocks, and set bookId to the matching id so Today can deep-link to the reader. Subject: "Reading". EstimatedMinutes: 10-15.
 - If the child has sight word stories available (see SIGHT WORD PROGRESS in context), suggest reading one as a "choose" activity. Reference specific word counts and mastery progress.
 - "skipSuggestions" is an array of { "action": "skip"|"modify", "reason": "string", "replacement": "string", "evidence": "string" }.
 

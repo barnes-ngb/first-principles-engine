@@ -20,6 +20,21 @@ export const getWeekRange = (date: Date = new Date(), weekStartsOn = 0): WeekRan
   }
 }
 
+/**
+ * Return the Sunday-start key of the most recently completed Sun–Sat week.
+ * Mirrors `lastWeekKey` in `functions/src/ai/evaluate.ts` so the weekly
+ * review page and the scheduled Cloud Function agree on which week's doc
+ * to read/write. The school week runs Sunday–Saturday; this returns the
+ * Sunday that started the week ending on the most recent Saturday.
+ */
+export const lastCompletedWeekKey = (today: Date = new Date()): string => {
+  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const dayOfWeek = d.getDay()
+  const offset = dayOfWeek === 0 ? 7 : dayOfWeek + 7
+  d.setDate(d.getDate() - offset)
+  return formatDateYmd(d)
+}
+
 type SchoolYearRange = {
   start: string
   end: string

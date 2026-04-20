@@ -34,7 +34,7 @@ interface UseBookResult {
   addPage: () => void
   deletePage: (pageId: string) => void
   reorderPages: (fromIndex: number, toIndex: number) => void
-  updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme'>>) => void
+  updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme' | 'createdBy' | 'createdFor'>>) => void
   addImageToPage: (pageId: string, file: File, options?: { cleanBackground?: boolean }) => Promise<void>
   removeImageFromPage: (pageId: string, imageId: string) => void
   uploadAudio: (pageId: string, blob: Blob) => Promise<void>
@@ -56,7 +56,13 @@ interface UseBookResult {
 interface UseBookshelfResult {
   books: Book[]
   loading: boolean
-  createBook: (title: string, coverStyle: Book['coverStyle'], isTogetherBook?: boolean, contributorIds?: string[]) => Promise<string>
+  createBook: (
+    title: string,
+    coverStyle: Book['coverStyle'],
+    isTogetherBook?: boolean,
+    contributorIds?: string[],
+    attribution?: { createdBy: 'parent' | string; createdFor: string },
+  ) => Promise<string>
   deleteBook: (bookId: string) => Promise<void>
 }
 
@@ -277,7 +283,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   )
 
   const updateBookMeta = useCallback(
-    (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme'>>) => {
+    (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme' | 'createdBy' | 'createdFor'>>) => {
       applyUpdate((prev) => {
         const next = { ...prev, ...changes }
         // If status changes to 'complete', create portfolio artifact + award XP
@@ -722,10 +728,17 @@ export function useBookshelf(familyId: string, childId: string, loadAll?: boolea
   }, [familyId, childId, loadAll])
 
   const createBook = useCallback(
-    async (title: string, coverStyle: Book['coverStyle'], isTogetherBook?: boolean, contributorIds?: string[]): Promise<string> => {
+    async (
+      title: string,
+      coverStyle: Book['coverStyle'],
+      isTogetherBook?: boolean,
+      contributorIds?: string[],
+      attribution?: { createdBy: 'parent' | string; createdFor: string },
+    ): Promise<string> => {
       const now = new Date().toISOString()
+      const targetChildId = attribution?.createdFor ?? childId
       const newBook: Omit<Book, 'id'> = {
-        childId,
+        childId: targetChildId,
         title,
         coverStyle,
         pages: [createEmptyPage(1)],
@@ -733,6 +746,9 @@ export function useBookshelf(familyId: string, childId: string, loadAll?: boolea
         createdAt: now,
         updatedAt: now,
         subjectBuckets: ['LanguageArts'],
+        ...(attribution
+          ? { createdBy: attribution.createdBy, createdFor: attribution.createdFor }
+          : { createdBy: childId, createdFor: childId }),
         ...(isTogetherBook ? { isTogetherBook: true, contributorIds: contributorIds ?? [] } : {}),
       }
       const docRef = await addDoc(booksCollection(familyId), newBook as Book)

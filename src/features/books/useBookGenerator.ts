@@ -136,6 +136,7 @@ export function useBookGenerator() {
       style: string,
       pageCount: number,
       bookTheme?: BookTheme,
+      attribution?: { createdBy: 'parent' | string; createdFor: string },
     ): Promise<string | null> => {
       setGenerating(true)
 
@@ -210,7 +211,7 @@ export function useBookGenerator() {
       const inferredTheme = bookTheme ?? inferBookTheme(storyIdea, words, style)
 
       const newBook: Omit<Book, 'id'> = {
-        childId,
+        childId: attribution?.createdFor ?? childId,
         title: story.title,
         coverStyle: style as Book['coverStyle'],
         pages: textOnlyPages,
@@ -221,6 +222,8 @@ export function useBookGenerator() {
         bookType: 'generated',
         source: 'ai-generated',
         theme: inferredTheme,
+        createdBy: attribution?.createdBy ?? childId,
+        createdFor: attribution?.createdFor ?? childId,
         // Only include optional fields when they have values — Firestore rejects undefined
         ...(words.length > 0 ? { sightWords: words } : {}),
         generationConfig: {

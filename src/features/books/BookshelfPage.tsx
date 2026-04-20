@@ -52,6 +52,7 @@ import { useEvaluationBookSuggestions } from './useEvaluationBookSuggestions'
 import CreateThemeDialog from './CreateThemeDialog'
 
 type BookFilter = 'all' | 'creative' | 'generated' | 'sight-word'
+type CreatorFilter = 'all' | 'parent' | 'kids'
 
 export default function BookshelfPage() {
   const navigate = useNavigate()
@@ -73,6 +74,7 @@ export default function BookshelfPage() {
   )
 
   const [bookFilter, setBookFilter] = useState<BookFilter>('all')
+  const [creatorFilter, setCreatorFilter] = useState<CreatorFilter>('all')
   const [themeFilter, setThemeFilter] = useState<BookTheme | 'all'>('all')
   const [stickerTagFilter, setStickerTagFilter] = useState<StickerTag | 'all'>('all')
   const [showNewDialog, setShowNewDialog] = useState(false)
@@ -124,14 +126,25 @@ export default function BookshelfPage() {
     if (!newTitle.trim()) return
     setCreating(true)
     try {
-      const bookId = await createBook(newTitle.trim(), newCoverStyle)
+      const attribution = isParent && childId
+        ? { createdBy: 'parent' as const, createdFor: childId }
+        : childId
+          ? { createdBy: childId, createdFor: childId }
+          : undefined
+      const bookId = await createBook(
+        newTitle.trim(),
+        newCoverStyle,
+        undefined,
+        undefined,
+        attribution,
+      )
       setShowNewDialog(false)
       setNewTitle('')
       navigate(`/books/${bookId}`)
     } finally {
       setCreating(false)
     }
-  }, [newTitle, newCoverStyle, createBook, navigate])
+  }, [newTitle, newCoverStyle, createBook, navigate, isParent, childId])
 
   const handleGenerateBook = useCallback(async () => {
     if (!genStoryIdea.trim() && !genWords.trim()) return
@@ -142,6 +155,11 @@ export default function BookshelfPage() {
       .map((w) => w.trim().toLowerCase())
       .filter(Boolean)
 
+    const attribution = isParent && childId
+      ? { createdBy: 'parent' as const, createdFor: childId }
+      : childId
+        ? { createdBy: childId, createdFor: childId }
+        : undefined
     const bookId = await generateBook(
       familyId,
       childId,
@@ -149,6 +167,8 @@ export default function BookshelfPage() {
       words,
       genStyle,
       genPageCount,
+      undefined,
+      attribution,
     )
 
     if (bookId) {
@@ -168,6 +188,7 @@ export default function BookshelfPage() {
     generateBook,
     resetProgress,
     navigate,
+    isParent,
   ])
 
   const handleCloseNewDialog = useCallback(() => {
@@ -240,6 +261,15 @@ export default function BookshelfPage() {
     } else if (bookFilter === 'sight-word') {
       filtered = books.filter((b) => b.bookType === 'sight-word')
     }
+    if (creatorFilter === 'parent') {
+      // Absent createdBy → treated as 'parent' (legacy)
+      filtered = filtered.filter((b) => (b.createdBy ?? 'parent') === 'parent')
+    } else if (creatorFilter === 'kids') {
+      filtered = filtered.filter((b) => {
+        const by = b.createdBy ?? 'parent'
+        return by !== 'parent'
+      })
+    }
     if (themeFilter !== 'all') {
       filtered = filtered.filter((b) => b.theme === themeFilter)
     }
@@ -262,7 +292,7 @@ export default function BookshelfPage() {
       if (a.status !== 'draft' && b.status === 'draft') return 1
       return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
     })
-  }, [books, bookFilter, themeFilter, childFilter, stickerTagFilter])
+  }, [books, bookFilter, creatorFilter, themeFilter, childFilter, stickerTagFilter])
 
   if (loading) {
     return (
@@ -383,6 +413,36 @@ export default function BookshelfPage() {
           </>
         )}
       </Stack>
+
+      {/* Creator filter (parent view: all / mom's books / kids' books) */}
+      {isParent && (
+        <Stack direction="row" spacing={1} sx={{ mb: 1 }} alignItems="center">
+          <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', mr: 0.5 }}>
+            Made by:
+          </Typography>
+          <Chip
+            label={`All (${books.length})`}
+            size="small"
+            onClick={() => setCreatorFilter('all')}
+            color={creatorFilter === 'all' ? 'primary' : 'default'}
+            variant={creatorFilter === 'all' ? 'filled' : 'outlined'}
+          />
+          <Chip
+            label={`Mom's Books (${books.filter((b) => (b.createdBy ?? 'parent') === 'parent').length})`}
+            size="small"
+            onClick={() => setCreatorFilter('parent')}
+            color={creatorFilter === 'parent' ? 'primary' : 'default'}
+            variant={creatorFilter === 'parent' ? 'filled' : 'outlined'}
+          />
+          <Chip
+            label={`Kids (${books.filter((b) => (b.createdBy ?? 'parent') !== 'parent').length})`}
+            size="small"
+            onClick={() => setCreatorFilter('kids')}
+            color={creatorFilter === 'kids' ? 'primary' : 'default'}
+            variant={creatorFilter === 'kids' ? 'filled' : 'outlined'}
+          />
+        </Stack>
+      )}
 
       {/* Child filter (parent view only) */}
       {isParent && allChildren.length > 1 && (
@@ -516,6 +576,10 @@ export default function BookshelfPage() {
           {sortedBooks.map((book) => {
             const coverUrl =
               book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
+            const by = book.createdBy ?? 'parent'
+            const creatorLabel = by === 'parent'
+              ? 'By Mom'
+              : `By ${allChildren.find((c) => c.id === by)?.name ?? 'Kid'}`
 
             return (
               <Box
@@ -647,6 +711,17 @@ export default function BookshelfPage() {
                       }}
                     />
                   )}
+                  <Chip
+                    label={creatorLabel}
+                    size="small"
+                    sx={{
+                      height: 20,
+                      fontSize: '0.65rem',
+                      bgcolor: by === 'parent' ? 'warning.100' : 'success.100',
+                      color: by === 'parent' ? 'warning.800' : 'success.800',
+                      fontWeight: 600,
+                    }}
+                  />
                   {(book.sightWords?.length ?? 0) > 0 && (
                     <Chip
                       label={`${book.sightWords!.length} words`}

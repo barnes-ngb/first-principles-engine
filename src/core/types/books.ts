@@ -176,6 +176,11 @@ export function getPresetTheme(themeId: string | undefined): BookThemeConfig | n
   return PRESET_THEMES.find((t) => t.id === themeId) ?? null
 }
 
+/** Resolve book creator. Absent createdBy → 'parent' (legacy books were Shelly's in kid profiles). */
+export function resolveBookCreator(book: { createdBy?: 'parent' | string }): 'parent' | string {
+  return book.createdBy ?? 'parent'
+}
+
 export const BOOK_THEMES: { id: BookTheme; label: string; emoji: string }[] =
   PRESET_THEMES.map((t) => ({ id: t.id as BookTheme, label: t.name, emoji: t.emoji }))
     .concat([{ id: 'other', label: 'Other', emoji: '📚' }])
@@ -231,6 +236,10 @@ export interface Book {
   sightWords?: string[]
   /** Theme tag for this book */
   theme?: BookTheme
+  /** Who created this book. 'parent' = Mom/Dad, otherwise a childId. Absent → treat as 'parent' (legacy books were made by Shelly in kid profiles). */
+  createdBy?: 'parent' | string
+  /** Which child this book is themed for / intended for (a childId). */
+  createdFor?: string
   /** The prompt/parameters used to generate this story */
   generationConfig?: {
     storyIdea?: string

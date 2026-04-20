@@ -1393,3 +1393,103 @@ Ordered by likely user-visible impact:
 9. **Hours progress, book status, workshop games, generated content** — minor; relevant only for specific questions Shelly might ask ("how close are we to 1000 hours?", "what games can we play?").
 
 Net: ShellyChat has the role prompt of a knowledgeable assistant and 9 slices of general context, but it's missing the six slices the planner uses to actually reason about what Lincoln is doing right now (`skillSnapshot`, `recentScans`, `activityConfigs`, `recentHistoryByDomain`, `mastery`) plus has no dayLog/plan loader at all. The *chat* task (books-only) is narrower still — charter + childProfile only, adequate for generating book questions but nothing more.
+
+## Weekly Review Context Inspection
+
+> **Status: FIXED (Apr 20, 2026)** — Both findings from this inspection are closed.
+> - **Bug 2 (doc ID mismatch → 0% completion):** closed by PR `fix(review): align weekly review doc ID between scheduled write and page read`. `WeeklyReviewPage.tsx` now uses `lastCompletedWeekKey(today)` (mirrors `evaluate.ts:lastWeekKey`). The scheduled Sunday 7pm CT write and the page read both key on the Sunday of the just-completed Sun–Sat week, so the review is findable regardless of which day the user opens the page. "Generate Now" now reviews the same range the scheduled run would cover (no more morning-snapshot 0%).
+> - **Bug 1 (context poverty):** closed by PR `feat(review): augment weekly review with shared context slices`. Weekly review is now registered in `TASK_CONTEXT` with `charter, childProfile, skillSnapshot, activityConfigs, recentHistoryByDomain, recentScans, wordMastery, dadLabReports`. `generateReviewForChild` loads the child's skill snapshot and calls `buildContextForTask('weeklyReview', …)` so the review has the same child-level skill/progression context the planner and quest tasks use. `assembleWeekContext` is untouched — it still supplies the week-scoped dayLogs/hours/plans/books/missedDays that the shared slices don't cover. Worst-case combined system prompt ≈3.1k input tokens, well under Claude Sonnet limits; no compression needed.
+
+Read-only inspection of the weekly review task (`functions/src/ai/evaluate.ts`) to verify what context it actually receives and to diagnose the "0% completion across all days" output when completed items exist.
+
+### 1. Where the task lives
+
+- **Scheduled CF:** `weeklyReview` — `evaluate.ts:574-609`. Fires `every sunday 19:00 America/Chicago`. Calls `lastWeekKey(new Date())` (`:582`) → queries the prior Sunday-Saturday week. Iterates every family and every child. Writes to `families/{familyId}/weeklyReviews/{weekKey}_{childId}`.
+- **Manual CF:** `generateWeeklyReviewNow` — `evaluate.ts:520-570`. onCall. Takes `{ familyId, childId, weekKey }` from the client.
+- **Client trigger:** `WeeklyReviewPage.tsx:36-40` defines `generateReviewFn`; `:178` invokes it with `{ familyId, childId: activeChildId, weekKey }` where `weekKey = weekRange.start` (`:53-54`) = **current week's Sunday** via `getWeekRange(new Date()).start` (`src/core/utils/time.ts:8-21`).
+- **Registration:** `functions/src/index.ts:7` re-exports both. **Not in the task-registry system** — `chat.ts` routes `TaskType.WeeklyReview` only through `modelForTask` (`chat.ts:72`); neither task handler nor `TASK_CONTEXT` include it (`contextSlices.ts:44-70`).
+
+### 2. Context loader — shared slices or bespoke?
+
+**Bespoke.** `evaluate.ts:115-254` defines `assembleWeekContext`, a self-contained loader that does *not* call `buildContextForTask`. The only shared artifact it reuses is `CHARTER_PREAMBLE` (imported `:6`, prepended `:272`) plus a local `WEEKLY_REVIEW_ADDENDUM` (`:258-270`). The audit's prior statement ("evaluate.ts (weekly review) still separate from task system", `CLAUDE.md` Known Technical Debt) is **still true** in this file.
+
+What `assembleWeekContext` actually loads (all filtered to the 7-day window `weekKey …  weekKey+6`):
+
+| Source | Query | Evaluate.ts line |
+|---|---|---|
+| Child profile (name, grade only) | `children/{childId}` doc get | `:126-135` |
+| `days` (dayLogs) | `.where("date", ">=", weekKey).where("date", "<=", weekEnd)`, post-filtered by `d.childId === childId` in memory | `:138-177` |
+| `hours` | `.where("childId","==",childId).where("date",">=",weekKey).where("date","<=",weekEnd)` | `:180-194` |
+| `dailyPlans` | `.where("childId","==",childId).where("date",">=",weekKey).where("date","<=",weekEnd)` | `:197-212` |
+| `books` | `.where("updatedAt",">=",weekKey).where("updatedAt","<=",weekEnd+"T23:59:59")`, post-filtered by `b.childId === childId` | `:215-238` |
+| `missedDays` | Derived — iterates Sun–Thu, counts dates with no dayLog and no dailyPlan | `:241-251` |
+
+Per-dayLog summary computed at `:155-174` extracts: `totalItems`, `completedItems` (count of `item.completed === true`), per-engagement counts, `minutesBySubject` (only for completed items), `gradeResults`, `evidenceCount`. Per-block `blocks[].checklist` is **not read** — only the top-level `dayLog.checklist` (`:148`).
+
+### 3. Side-by-side comparison (same format as ShellyChat inspection)
+
+| Slice / Data | Weekly Review | ShellyChat | Quest | Plan |
+|---|:-:|:-:|:-:|:-:|
+| `charter` (CHARTER_PREAMBLE) | ✅ (`evaluate.ts:272`) | ✅ | — | ✅ |
+| `childProfile` (name+grade **only**) | ⚠️ name+grade only (`:131-135`) — no prioritySkills/supports/stopRules | ✅ full | ✅ full | ✅ full |
+| `workbookPaces` | ❌ | ✅ | ✅ | ✅ |
+| `weekFocus` (theme/virtue/scripture) | ❌ | ✅ | — | ✅ |
+| `hoursProgress` (1000 hr target %) | ⚠️ raw hours only (`:180-194`) — no yearly target framing | — | — | ✅ |
+| `engagement` (14d compressed) | ⚠️ raw per-day counts from this week only (`:155-169`) — no `compressEngagement` | ✅ | — | ✅ |
+| `gradeResults` | ⚠️ inline from this week's dayLogs (`:167`) — no 14-day `loadGradeResults` | ✅ | — | ✅ |
+| `bookStatus` (draft count) | ⚠️ this-week activity only (`:215-238`) — no draft-count prompt framing | — | — | ✅ |
+| `sightWords` | ❌ | ✅ | ✅ | ✅ |
+| `recentEval` (cross-domain) | ❌ | ✅ | — | ✅ |
+| `recentHistoryByDomain` (R2) | ❌ | — | ✅ | — |
+| `wordMastery` | ❌ | ✅ | ✅ | ✅ |
+| `generatedContent` (books library) | ❌ | — | — | ✅ |
+| `workshopGames` | ❌ | — | — | ✅ |
+| `mastery` (parent got-it/working/stuck 28d) | ❌ | — | — | ✅ |
+| `skillSnapshot` (workingLevels R1, conceptualBlocks, completedPrograms, supports, stopRules) | ❌ | — | ✅ | ✅ |
+| `recentScans` + recommendations (R5) | ❌ | — | ✅ | ✅ |
+| `activityConfigs` | ❌ | — | — | ✅ |
+| `dayToday` (today's checklist) | n/a — reads **full week** of dayLogs instead (`:138-177`) | ✅ | — | — |
+| `dadLabReports` | ❌ | ✅ | — | — |
+| `hours` this week (raw) | ✅ (`:180-194`) | — | — | — |
+| `dailyPlans` this week | ✅ (`:197-212`) | — | — | — |
+| `books` updated this week | ✅ (`:215-238`) | — | — | — |
+| `missedDays` (Sun–Thu with no log/plan) | ✅ (`:241-251`) | — | — | — |
+
+### 4. Data the review SHOULD have but doesn't (gaps)
+
+Ordered by likely impact on review usefulness:
+
+1. **`skillSnapshot`** — no `workingLevels`, `conceptualBlocks`, `completedPrograms`, `prioritySkills`, `supports`, `stopRules`. The review can say "Lincoln did reading 3x" but not "Lincoln is still at phonics working level 4, conceptual block X is ADDRESS_NOW." (`contextSlices.ts:686-788` loader exists, never called here.)
+2. **`recentHistoryByDomain`** — no per-domain evaluation depth. The review cannot cite "3 phonics sessions this week averaged level 5." (`chatTypes.ts` loader exists.)
+3. **`recentScans`** (R5) — no scan recommendations in context. The review cannot say "4 scans recommended skip, consider advancing." (`contextSlices.ts:956-1037` loader exists.)
+4. **Quest/evaluation sessions** — `evaluationSessions` collection is never queried for the week. Quest activity this week is invisible to the review even though Hours writes from quest exist.
+5. **`activityConfigs`** — the structured curriculum source of truth isn't loaded, so the review can't compare planned frequency vs actual.
+6. **`mastery` observations (28d)** — parent got-it/working/stuck taps don't inform the review, even though `buildMasterySummary` (`contextSlices.ts:117-155`) already exists and is used by plan.
+7. **Dad Lab reports** — `dadLabReports` for the week never queried. Lincoln's Dad Lab participation doesn't register.
+8. **Compressed engagement (14-day trend)** — only this-week engagement counts are aggregated. The richer compressed 14-day summary (`compressEngagement`, `contextSlices.ts:191-251`) never runs for the review.
+9. **Full child profile** — only `name` + `grade` reach the prompt. `prioritySkills`, `supports`, `stopRules` are not included, even though `skillSnapshots/{childId}` is a single doc read away.
+10. **`sightWords` / `wordMastery`** — reading mastery slices are omitted.
+11. **`weekFocus`** — theme/virtue/scripture for the reviewed week aren't loaded, so the review can't tie the narrative to the week's focus.
+
+### 5. Root cause of "0% completion across all days"
+
+The completion count in the prompt is computed at `evaluate.ts:172` as `checklist.filter((i) => i.completed).length` over the top-level `dayLog.checklist`. The per-day line is rendered at `:299-301` as `"YYYY-MM-DD: X/Y items (Z%)"`. If every day in the queried range returns `completedItems = 0` with `totalItems > 0`, Claude is handed `"0/N items (0%)"` for every day and paraphrases "0% completion across all days." `generateReviewForChild` only skips the AI call when `dayLogs.length === 0 && hours.length === 0` (`:436`) — it does **not** skip when all dayLogs have zero completions.
+
+So the question reduces to: why were `completedItems = 0` for dayLogs that the user visibly has checked items on?
+
+Most likely causes, ranked:
+
+1. **Week-key mismatch between scheduled run and page view (PRIMARY SUSPECT).**
+   - Scheduled run (`weeklyReview`, `:574-609`) writes to docId `{lastWeekKey}_{childId}` — the **prior** Sunday-Saturday week.
+   - The UI (`WeeklyReviewPage.tsx:53-54, 66`) reads docId `{currentWeekSunday}_{childId}`.
+   - Therefore the Sunday-generated review is written to a doc the page doesn't display. The page shows the current week, which has no scheduled review yet, prompting the user to click "Generate Now."
+   - "Generate Now" sends `weekKey = current Sunday`. If clicked on Monday 2026-04-20 (today) before many items were marked, the query `date ∈ [2026-04-19, 2026-04-25]` returns dayLogs with `completedItems = 0` for all days that have logs but no checks yet. The Today "4 of 12" state was captured after generation (or the review captured an earlier `0 of 12` snapshot) — the review is a point-in-time snapshot, not live.
+   - Evidence: the review is only regenerated on explicit user action; no listener rewrites it when checklists change.
+
+2. **Review generated before items were checked (SECONDARY CONTRIBUTOR).** Same mechanism — the prompt reflects Firestore at call time. If the user opened the review page first thing in the morning and clicked Generate, the day's checks hadn't happened yet. The review text persists to `weeklyReviews/{weekKey}_{childId}` and is read live (`WeeklyReviewPage.tsx:69-83`), so it looks stale even after Lincoln completed items.
+
+3. **Less likely — timezone on scheduled run.** `lastWeekKey` uses local-runtime `new Date()` inside the CF (UTC). For Sunday 19:00 CT → Monday 00:00 UTC, `getDay()` = 1, `offset` = 8, rollback → the Sunday 8 days prior. That equals "Sunday of the week that just ended" (Mon UTC - 8 days = Sun, then that Sun is the start of the completed week Sun-Sat). So the computation is correct; not the cause. Ruled out.
+
+4. **Ruled out — checklist schema mismatch.** Both `TodayChecklist.tsx` (`:241, 255, 262, 276, 289, 300, 306-347`) and `KidChecklist.tsx` (`:82, 106, 123`) persist `{ ...dayLog, checklist: updatedChecklist }` with `item.completed: boolean` at the top level. `evaluate.ts:148` reads the same top-level `checklist`. No block-level-only completion path exists.
+
+**Top verdict:** the 0% output is almost certainly the **docId mismatch** between scheduled runs and what the page reads, combined with "Generate Now" capturing a morning snapshot before items are checked. The review never refreshes after the moment it was generated, and the scheduled review is written to a different docId than the one the UI displays for the current week. A secondary issue is that `generateReviewForChild` produces a full AI review even when `completedItems = 0` across every day logged — it only no-data-skips when *zero* dayLogs/hours exist.

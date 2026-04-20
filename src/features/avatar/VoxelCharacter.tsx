@@ -407,6 +407,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   forgedPieces,
   previewTier,
 }: VoxelCharacterProps, ref) {
+  console.log('[VOXEL] previewTier prop:', previewTier)
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
@@ -426,6 +427,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   const particlesRef = useRef<FallingParticle[]>([])
   const backgroundRef = useRef(background)
   const equippedRef = useRef<string[]>([])
+  // In preview mode, all 6 pieces should stay visible every frame. This ref
+  // overrides equippedRef for visibility-only logic (enforceArmorOpacity)
+  // without disturbing pose logic, which must stay keyed on real equipped.
+  const visibleArmorRef = useRef<string[]>([])
   const runtimeTuning = useMemo(
     () => resolveHeroAnimationTuning(animationTuningOverrides),
     [animationTuningOverrides],
@@ -493,6 +498,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   // Keep refs in sync so animation loop always has current values
   backgroundRef.current = background
   equippedRef.current = equippedPieces
+  visibleArmorRef.current = previewTier
+    ? VOXEL_ARMOR_PIECES.map((p) => p.id as string)
+    : equippedPieces
   onSwipePoseRef.current = onSwipePose
   onPoseCompleteRef.current = onPoseComplete
   onTierUpStartRef.current = onTierUpStart
@@ -508,13 +516,18 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     cancelAnimationFrame(rafRef.current)
     rafRef.current = 0
 
-    // Clean up old renderer
+    // Dispose any residual renderer.
     if (rendererRef.current) {
       rendererRef.current.dispose()
       rendererRef.current = null
-      const oldCanvas = container.querySelector('canvas')
-      if (oldCanvas) container.removeChild(oldCanvas)
     }
+    // Always remove any existing canvas. The useEffect cleanup disposes the
+    // renderer and nulls the ref, but the canvas DOM node stays attached
+    // until we explicitly remove it. Without this, rebuilds (e.g. tier
+    // preview) stack a second canvas and the stale frozen one occludes the
+    // new scene inside the overflow:hidden container.
+    const oldCanvas = container.querySelector('canvas')
+    if (oldCanvas) container.removeChild(oldCanvas)
 
     const width = container.clientWidth
     const height = container.clientHeight
@@ -610,12 +623,14 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     const effectiveEquipped = isPreview
       ? VOXEL_ARMOR_PIECES.map((p) => p.id as string)
       : equippedPieces
+    console.log('[VOXEL] Building armor with previewTier:', previewTier, 'isPreview:', isPreview, 'effectiveEquipped:', effectiveEquipped)
 
     for (const pieceMeta of VOXEL_ARMOR_PIECES) {
       // Each piece is rendered at its own forged tier, not the global XP tier —
       // this is what makes mixed loadouts (e.g. Iron belt + Stone chestplate)
       // actually show different geometry per piece.
       const pieceTier = effectiveTier(pieceMeta.id)
+      console.log('[VOXEL] buildArmorPiece called:', pieceMeta.id, 'tier:', pieceTier)
       const pieceGroup = buildArmorPiece(pieceMeta.id, ageGroup, proportions, pieceTier)
       armorGroupsRef.current.set(pieceMeta.id, pieceGroup)
 
@@ -876,9 +891,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         updateRotation(characterRef.current, controlsRef.current)
       }
 
-      // Enforce solid opacity on equipped armor every frame (skip during ceremony)
+      // Enforce solid opacity on equipped armor every frame (skip during ceremony).
+      // Use visibleArmorRef so preview mode keeps all 6 pieces showing.
       if (!ceremonyActiveRef.current) {
-        enforceArmorOpacity(armorGroupsRef.current, equippedRef.current)
+        enforceArmorOpacity(armorGroupsRef.current, visibleArmorRef.current)
       }
 
       if (characterRef.current) {
