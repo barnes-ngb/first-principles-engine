@@ -59,7 +59,7 @@ MANUAL_AWARD:         0   (parent-awarded, amount varies)
 | First piece of new tier | NOT WIRED | No XP/diamond bonus for forging a tier's first piece |
 | Full tier complete | NOT WIRED | No XP/diamond bonus for completing all 6 pieces in a tier |
 | Prayer/formation complete | Covered | Handled as checklist item with higher XP (5 vs 3) |
-| Chapter response | NOT WIRED | `KidChapterResponse.tsx` has no `addXpEvent` calls |
+| Chapter response | NOT WIRED | Kid chapter response component (now replaced by `KidChapterPool`) has no `addXpEvent` calls |
 
 ---
 
@@ -241,7 +241,7 @@ There is exactly ONE place diamonds are spent: `forgeArmorPiece()`. No other spe
 
 ### Bug 7: Chapter responses award nothing
 
-- **File:** `src/features/today/KidChapterResponse.tsx`
+- **File:** legacy kid chapter response component (later replaced by `KidChapterPool`)
 - No `addXpEvent` calls found
 - Chapter responses (read-aloud discussion) have no XP or diamond reward
 - **Impact:** Missing incentive for a key learning activity
@@ -295,7 +295,7 @@ The system cleanly separates forge (costs diamonds) from equip (free). The auto-
 
 **Where:**
 - `src/features/evaluate/EvaluateChatPage.tsx:545-551` — add 10 diamonds alongside the 25 XP
-- `src/features/today/KidChapterResponse.tsx` — add 5 XP + 3 diamonds for chapter discussion responses
+- Kid chapter response save path (now `src/features/today/KidChapterPool.tsx`) — add 5 XP + 3 diamonds for chapter discussion responses
 
 **Rationale:** Evaluations are the most effortful activity (25 XP) but contribute nothing to the forge economy. Chapter responses are a key learning moment (read-aloud discussion) with zero reward. Both gaps reduce motivation to engage with high-value learning activities.
 
