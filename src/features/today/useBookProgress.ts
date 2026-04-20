@@ -25,6 +25,15 @@ export function useBookProgress(
   const [bookProgress, setBookProgress] = useState<BookProgress | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // TEMP DIAG — trace param transitions to verify re-subscription on bookId arrival
+  useEffect(() => {
+    console.log('[useBookProgress] params:', {
+      familyId: !!familyId,
+      childId,
+      bookId,
+    })
+  }, [familyId, childId, bookId])
+
   /* eslint-disable react-hooks/set-state-in-effect -- Standard Firestore subscription: guard reset + loading flag before onSnapshot */
   useEffect(() => {
     if (!familyId || !childId || !bookId) {
@@ -41,6 +50,12 @@ export function useBookProgress(
     const unsubscribe = onSnapshot(
       docRef,
       (snap) => {
+        // TEMP DIAG — verify snapshot delivery for stuck loading investigation
+        console.log('[useBookProgress] snapshot:', {
+          path: docRef.path,
+          exists: snap.exists(),
+          id: snap.id,
+        })
         if (snap.exists()) {
           setBookProgress({ ...snap.data(), id: snap.id })
         } else {
@@ -49,7 +64,8 @@ export function useBookProgress(
         setLoading(false)
       },
       (err) => {
-        console.error('Failed to load book progress:', err)
+        console.error('[useBookProgress] onSnapshot error:', err)
+        setBookProgress(null)
         setLoading(false)
       },
     )
