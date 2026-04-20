@@ -1396,6 +1396,10 @@ Net: ShellyChat has the role prompt of a knowledgeable assistant and 9 slices of
 
 ## Weekly Review Context Inspection
 
+> **Status: FIXED (Apr 20, 2026)** — Both findings from this inspection are closed.
+> - **Bug 2 (doc ID mismatch → 0% completion):** closed by PR `fix(review): align weekly review doc ID between scheduled write and page read`. `WeeklyReviewPage.tsx` now uses `lastCompletedWeekKey(today)` (mirrors `evaluate.ts:lastWeekKey`). The scheduled Sunday 7pm CT write and the page read both key on the Sunday of the just-completed Sun–Sat week, so the review is findable regardless of which day the user opens the page. "Generate Now" now reviews the same range the scheduled run would cover (no more morning-snapshot 0%).
+> - **Bug 1 (context poverty):** closed by PR `feat(review): augment weekly review with shared context slices`. Weekly review is now registered in `TASK_CONTEXT` with `charter, childProfile, skillSnapshot, activityConfigs, recentHistoryByDomain, recentScans, wordMastery, dadLabReports`. `generateReviewForChild` loads the child's skill snapshot and calls `buildContextForTask('weeklyReview', …)` so the review has the same child-level skill/progression context the planner and quest tasks use. `assembleWeekContext` is untouched — it still supplies the week-scoped dayLogs/hours/plans/books/missedDays that the shared slices don't cover. Worst-case combined system prompt ≈3.1k input tokens, well under Claude Sonnet limits; no compression needed.
+
 Read-only inspection of the weekly review task (`functions/src/ai/evaluate.ts`) to verify what context it actually receives and to diagnose the "0% completion across all days" output when completed items exist.
 
 ### 1. Where the task lives

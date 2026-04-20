@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { getSchoolYearRange, getWeekRange } from './time'
+import { getSchoolYearRange, getWeekRange, lastCompletedWeekKey } from './time'
 
 describe('getWeekRange', () => {
   it('returns Sun–Sat range for a Wednesday (default weekStartsOn=0)', () => {
@@ -57,6 +57,33 @@ describe('getWeekRange', () => {
 
     expect(range.start).toBe('2025-12-28') // Sunday in December
     expect(range.end).toBe('2026-01-03') // Saturday in January
+  })
+})
+
+describe('lastCompletedWeekKey', () => {
+  it('returns the previous Sunday when called on a Sunday', () => {
+    // Sunday Apr 19, 2026 — just-completed week started Apr 12
+    const sun = new Date(2026, 3, 19)
+    expect(lastCompletedWeekKey(sun)).toBe('2026-04-12')
+  })
+
+  it('returns the same Sunday when called on Monday the next week', () => {
+    // Monday Apr 20, 2026 — last-completed week started Apr 12
+    const mon = new Date(2026, 3, 20)
+    expect(lastCompletedWeekKey(mon)).toBe('2026-04-12')
+  })
+
+  it('returns the same Sunday when called mid-week', () => {
+    // Wed Apr 22, 2026 — last-completed week still started Apr 12
+    const wed = new Date(2026, 3, 22)
+    expect(lastCompletedWeekKey(wed)).toBe('2026-04-12')
+  })
+
+  it('returns the prior Sunday on Saturday of the current week', () => {
+    // Sat Apr 18, 2026 — the current week (Apr 12–18) is not yet complete,
+    // so the most recently completed week is Apr 5–11
+    const sat = new Date(2026, 3, 18)
+    expect(lastCompletedWeekKey(sat)).toBe('2026-04-05')
   })
 })
 
