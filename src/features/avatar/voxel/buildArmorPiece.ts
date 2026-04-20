@@ -536,47 +536,45 @@ function buildIronShield(layout: BodyLayout): THREE.Group {
 }
 
 function buildIronSword(layout: BodyLayout): THREE.Group {
+  // Geometry only: grip center at origin, pommel above (+Y, in hand),
+  // blade extending DOWN (-Y). Transform is applied by buildSword().
   const group = new THREE.Group()
-  group.userData.attachToArm = 'R'
-  group.rotation.x = 0.15  // slight forward angle (gripped)
-  group.rotation.z = 0.1   // slight outward cant
-  const { U, armH } = layout
-  const handY = armH - U * 1
+  const { U } = layout
 
-  // Sword offset — slightly outward from arm center, near hand, slightly forward
-  const sX = U * 2.4
-
-  // Handle/grip
+  // Handle/grip — centered at origin
   const grip = box(U * 1.2, U * 4, U * 1.5, 0x5D4037)
   grip.userData.materialRole = 'detail'
   grip.name = 'sword_grip'
-  grip.position.set(sX, -handY, U * 1)
+  grip.position.set(0, 0, 0)
   group.add(grip)
 
-  // Crossguard
-  const guardY = handY - U * 2.5
+  // Pommel — above grip (in the hand)
+  const pommel = taggedFlatBox(U * 1.6, U * 1.2, U * 1.6, W, 'accent', 'sword_pommel')
+  pommel.userData.isAccent = true
+  pommel.position.set(0, U * 2.6, 0)
+  group.add(pommel)
+
+  // Crossguard — below grip
   const guard = taggedFlatBox(U * 1.2, U * 1.5, U * 6, W, 'accent', 'sword_crossguard')
   guard.userData.isAccent = true
-  guard.position.set(sX, -guardY, U * 1)
+  guard.position.set(0, -U * 2.75, 0)
   group.add(guard)
 
-  // Blade — two sections
+  // Blade — two sections, extending downward from the crossguard
   const bladeBaseMat = new THREE.MeshLambertMaterial({
     color: 0x87ceeb,
     emissive: new THREE.Color(0x2196f3),
     emissiveIntensity: 0.35,
   })
-  const bladeBaseY = guardY - U * 5
   const bladeBase = new THREE.Mesh(
     new THREE.BoxGeometry(U * 1, U * 8, U * 2.4),
     bladeBaseMat,
   )
   bladeBase.name = 'sword_blade_base'
   bladeBase.userData.materialRole = 'sword_blade'
-  bladeBase.position.set(sX, -bladeBaseY, U * 1)
+  bladeBase.position.set(0, -U * 7.5, 0)
   group.add(bladeBase)
 
-  const bladeUpperY = bladeBaseY - U * 8
   const bladeTipMat = new THREE.MeshLambertMaterial({
     color: 0x87ceeb,
     emissive: new THREE.Color(0x2196f3),
@@ -588,27 +586,26 @@ function buildIronSword(layout: BodyLayout): THREE.Group {
   )
   bladeUpper.name = 'sword_blade_upper'
   bladeUpper.userData.materialRole = 'sword_blade'
-  bladeUpper.position.set(sX, -bladeUpperY, U * 1)
+  bladeUpper.position.set(0, -U * 15.5, 0)
   group.add(bladeUpper)
 
-  // Blade edge highlight
+  // Blade edge highlight — runs down the front face of the blade
   const edgeMat = new THREE.MeshLambertMaterial({
     color: 0xb0e0e6,
     emissive: new THREE.Color(0x4fc3f7),
     emissiveIntensity: 0.4,
   })
-  const edgeCenterY = (bladeBaseY + bladeUpperY) / 2
+  const edgeCenterY = -U * 11.5
   const edge = new THREE.Mesh(
     new THREE.BoxGeometry(U * 0.3, U * 14, U * 0.5),
     edgeMat,
   )
   edge.name = 'sword_edge'
   edge.userData.materialRole = 'sword_blade'
-  edge.position.set(sX, -edgeCenterY, U * 2.1)
+  edge.position.set(0, edgeCenterY, U * 1.1)
   group.add(edge)
 
-  // Blade tip
-  const tipY = bladeUpperY - U * 5
+  // Blade tip — at bottom
   const tipMat = new THREE.MeshLambertMaterial({
     color: 0xadd8e6,
     emissive: new THREE.Color(0x2196f3),
@@ -620,10 +617,10 @@ function buildIronSword(layout: BodyLayout): THREE.Group {
   )
   tip.name = 'sword_tip'
   tip.userData.materialRole = 'sword_blade'
-  tip.position.set(sX, -tipY, U * 1)
+  tip.position.set(0, -U * 20.5, 0)
   group.add(tip)
 
-  // Enchantment glow
+  // Enchantment glow — wraps the blade
   const glowMat = new THREE.MeshLambertMaterial({
     color: 0x87ceeb,
     emissive: new THREE.Color(0x2196f3),
@@ -637,18 +634,12 @@ function buildIronSword(layout: BodyLayout): THREE.Group {
   )
   glow.name = 'sword_glow'
   glow.userData.materialRole = 'sword_blade'
-  glow.position.set(sX, -edgeCenterY, U * 1)
+  glow.position.set(0, edgeCenterY, 0)
   group.add(glow)
-
-  // Pommel
-  const pommel = taggedFlatBox(U * 1.6, U * 1.2, U * 1.6, W, 'accent', 'sword_pommel')
-  pommel.userData.isAccent = true
-  pommel.position.set(sX, -(handY + U * 2.5), U * 1)
-  group.add(pommel)
 
   // Point light for glow effect
   const glowLight = new THREE.PointLight(0x87ceeb, 0.8, 3)
-  glowLight.position.set(sX, -edgeCenterY, U * 2)
+  glowLight.position.set(0, edgeCenterY, 0)
   group.add(glowLight)
 
   return group
@@ -705,11 +696,25 @@ function buildShield(layout: BodyLayout, tier: string): THREE.Group {
 }
 
 function buildSword(layout: BodyLayout, tier: string): THREE.Group {
+  // Parent group holds attachment + grip pose; tier geometry is built
+  // centered at origin with the blade pointing down, and nested inside.
+  // Position places the grip near the hand (bottom of arm), outward so
+  // the blade doesn't clip the leg, and slightly forward of the body.
+  const parent = new THREE.Group()
+  parent.userData.attachToArm = 'R'
+  const s = layout.scale
+  parent.position.set(0.3 * s, -2.8 * s, 0.3 * s)
+  parent.rotation.x = 0.15  // slight forward tilt (blade angles away from body)
+  parent.rotation.z = 0.1   // slight outward cant (natural grip angle)
+
+  let geom: THREE.Group
   switch (normalizeTier(tier)) {
-    case 'WOOD': return buildWoodSword(layout)
-    case 'STONE': return buildStoneSword(layout)
-    default: return buildIronSword(layout)
+    case 'WOOD': geom = buildWoodSword(layout); break
+    case 'STONE': geom = buildStoneSword(layout); break
+    default: geom = buildIronSword(layout); break
   }
+  parent.add(geom)
+  return parent
 }
 
 // ── Main builder ────────────────────────────────────────────────────

@@ -1493,3 +1493,57 @@ Most likely causes, ranked:
 4. **Ruled out — checklist schema mismatch.** Both `TodayChecklist.tsx` (`:241, 255, 262, 276, 289, 300, 306-347`) and `KidChecklist.tsx` (`:82, 106, 123`) persist `{ ...dayLog, checklist: updatedChecklist }` with `item.completed: boolean` at the top level. `evaluate.ts:148` reads the same top-level `checklist`. No block-level-only completion path exists.
 
 **Top verdict:** the 0% output is almost certainly the **docId mismatch** between scheduled runs and what the page reads, combined with "Generate Now" capturing a morning snapshot before items are checked. The review never refreshes after the moment it was generated, and the scheduled review is written to a different docId than the one the UI displays for the current week. A secondary issue is that `generateReviewForChild` produces a full AI review even when `completedItems = 0` across every day logged — it only no-data-skips when *zero* dayLogs/hours exist.
+
+## ConceptualBlocks Inspection
+
+### Summary table
+
+| Question | Answer |
+|---|---|
+| Type definition | `ConceptualBlock` — `src/core/types/evaluation.ts:49-58` (8 fields). Server mirror `ConceptualBlockResult` — `functions/src/ai/tasks/analyzePatterns.ts:29-38`. Client mirror — `src/core/ai/useAI.ts:117-126`. |
+| Storage | Field on `SkillSnapshot`: `conceptualBlocks?: ConceptualBlock[]` at `families/{familyId}/skillSnapshots/{childId}` (`src/core/types/evaluation.ts:93`). Companion doc-level timestamp `blocksUpdatedAt?: string` (`:94`). No separate collection, no subcollection. |
+| Writers (1 path) | `EvaluateChatPage.tsx:592-595` (`handleSaveAndApply`). Overwrites, does not merge. Only writes when `conceptualBlocks.length > 0`. Upstream state populated by `triggerPatternAnalysis` → `analyzeEvaluationPatterns` CF (`EvaluateChatPage.tsx:325-353`, set at `:342`). `handleClear` resets local state only (`:645`). |
+| Readers | **UI:** `SkillSnapshotPage.tsx:410-416` (display via `FoundationsSection`); `EvaluateChatPage.tsx:186, 1056` (local state render); `FoundationsSection.tsx:14-173` (card component). **AI context:** `functions/src/ai/contextSlices.ts:785-791, 826-834` inside `loadSkillSnapshotContext` — ADDRESS_NOW blocks only. |
+| Tasks that receive blocks | Any task whose `TASK_CONTEXT` entry includes the `skillSnapshot` slice (`contextSlices.ts:45-72`): `plan`, `quest`, `evaluate`, `scan`, `disposition`, `weeklyFocus`, `conundrum`, `generateStory`, `analyzeWorkbook`, `workshop`, `mastery`, `chat`. `weeklyReview` (scheduled CF) also composes the shared `skillSnapshot` slice separately. |
+| Fields | `name`, `affectedSkills[]`, `recommendation`, `rationale`, `strategies?[]`, `deferNote?`, `detectedAt`, `evaluationSessionId`. Plus doc-level `blocksUpdatedAt` on the snapshot (not the block). |
+| Lifecycle | **None.** No `resolved`, `resolvedAt`, `status`, `active`, or persistence tracking. No age/decay. Each apply **overwrites** the array wholesale. `detectedAt` + `evaluationSessionId` are the only timestamps; they never change once written because the array is replaced, not appended. |
+| Pattern detection trigger | Client fires `triggerPatternAnalysis` when a session reaches `complete` (`EvaluateChatPage.tsx:418` in receive flow and `:485` in send flow) → calls `analyzePatterns` callable (`useAI.ts:148`) → `analyzeEvaluationPatterns` CF (`functions/src/ai/tasks/analyzePatterns.ts:101`). Returns to state; only persisted if user clicks Save & Apply. |
+| Pattern detection inputs | `currentFindings` from this session (skill/status/evidence/notes); last 5 completed `evaluationSessions` for child (excluding current, requires ≥2 historical, else returns empty) — `analyzePatterns.ts:132-156`; child `name`/`birthdate`/`grade` for age + hardcoded Lincoln neurodivergence string (`:160-179`). |
+| Pattern detection output | Claude Sonnet (`modelForTask("analyzePatterns")`) produces 1-3 blocks max; parser caps at 3, normalizes recommendation, backfills default `strategies` ("Consult with a specialist for targeted strategies.") or `deferNote` ("Revisit when foundational skills are more stable.") when the AI omits them (`analyzePatterns.ts:256-279`). |
+| AI injection shape | Only `recommendation === "ADDRESS_NOW"` blocks appear in prompts. Each becomes one line: `- {name} (affects: {affectedSkills}): {rationale} — Strategies: {strategies}` (`contextSlices.ts:826-834`). `DEFER` blocks, `detectedAt`, `evaluationSessionId`, `deferNote` never reach the AI. |
+
+### Full type definition
+
+`src/core/types/evaluation.ts:49-58`:
+
+```ts
+export interface ConceptualBlock {
+  name: string
+  affectedSkills: string[]
+  recommendation: 'ADDRESS_NOW' | 'DEFER'
+  rationale: string
+  strategies?: string[]
+  deferNote?: string
+  detectedAt: string
+  evaluationSessionId: string
+}
+```
+
+Snapshot-level companion fields (`src/core/types/evaluation.ts:92-94`):
+
+```ts
+/** Conceptual blocks detected by pattern analysis (most recent evaluation only) */
+conceptualBlocks?: ConceptualBlock[]
+blocksUpdatedAt?: string
+```
+
+Server-side result type (`functions/src/ai/tasks/analyzePatterns.ts:29-38`) is structurally identical. Client callable type `ConceptualBlockResult` at `src/core/ai/useAI.ts:117-126` mirrors the same shape.
+
+### Notes observed during inspection
+
+- **"Most recent only" is enforced by code**, not just comment. The write at `EvaluateChatPage.tsx:592-595` always replaces the full array; there is no read-modify-merge path for blocks anywhere.
+- **No resolution UI.** `FoundationsSection.tsx` renders blocks as informational cards (expandable strategies or defer note). No dismiss, resolve, edit, or delete controls exist for individual blocks.
+- **No write path outside `handleSaveAndApply`.** Grep finds no Firestore writes touching `conceptualBlocks` in `functions/`, `scripts/`, or `features/` other than the one in `EvaluateChatPage.tsx`.
+- **Timestamp semantics:** `detectedAt` on each block equals the `new Date().toISOString()` captured at CF response parse time (`analyzePatterns.ts:254, 265`), effectively the session-complete moment. `blocksUpdatedAt` on the snapshot equals the `now` inside `handleSaveAndApply` — these can diverge slightly (analysis time vs apply time).
+- **Dependency gate:** `analyzeEvaluationPatterns` returns an empty `blocks` array with summary "Not enough evaluation history to detect patterns yet." when fewer than 2 prior completed sessions exist (`analyzePatterns.ts:152-156`). Fresh children therefore never accumulate blocks until their 3rd completed evaluation.
+- **DEFER blocks are stored but invisible to AI.** Only `SkillSnapshotPage.tsx` + `FoundationsSection.tsx` surface DEFER blocks; `loadSkillSnapshotContext` filters them out before prompt assembly (`contextSlices.ts:827`).

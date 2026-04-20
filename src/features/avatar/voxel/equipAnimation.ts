@@ -175,12 +175,13 @@ export function animateNod(head: THREE.Object3D, duration: number) {
 
 /** Sword does a quick flourish rotation (sword equip) */
 export function animateSwordFlourish(swordGroup: THREE.Object3D, duration: number) {
+  const restZ = swordGroup.rotation.z
   const start = performance.now()
   function step(now: number) {
     const t = Math.min((now - start) / duration, 1)
-    swordGroup.rotation.z = Math.sin(t * Math.PI * 2) * 0.3
+    swordGroup.rotation.z = restZ + Math.sin(t * Math.PI * 2) * 0.3
     if (t < 1) requestAnimationFrame(step)
-    else swordGroup.rotation.z = 0
+    else swordGroup.rotation.z = restZ
   }
   requestAnimationFrame(step)
 }
