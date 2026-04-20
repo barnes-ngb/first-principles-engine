@@ -38,6 +38,11 @@ interface ArmorPieceGalleryProps {
   textColor: string
   bgColor: string
   onPieceTap: (piece: ArmorPieceMeta, displayTier: string) => void
+  /**
+   * Fires when the tier tab changes. Parent uses this to drive a matching
+   * 3D character preview. `null` means "back to active/equipped view".
+   */
+  onViewingTierChange?: (tier: string | null) => void
 }
 
 export default function ArmorPieceGallery({
@@ -51,6 +56,7 @@ export default function ArmorPieceGallery({
   textColor,
   bgColor,
   onPieceTap,
+  onViewingTierChange,
 }: ArmorPieceGalleryProps) {
   const cardScrollRef = useRef<HTMLDivElement>(null)
   const [viewingTier, setViewingTier] = useState<string | null>(null)
@@ -91,7 +97,13 @@ export default function ArmorPieceGallery({
               <Box
                 key={tier}
                 component="button"
-                onClick={() => setViewingTier(tier === activeForgeTier ? null : tier)}
+                onClick={() => {
+                  setViewingTier(tier === activeForgeTier ? null : tier)
+                  // Always preview the tapped tier on the 3D character so
+                  // Lincoln can see his current look AND compare tiers by
+                  // tapping back and forth.
+                  onViewingTierChange?.(tier)
+                }}
                 sx={{
                   px: 1.5,
                   py: 0.75,

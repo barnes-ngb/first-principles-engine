@@ -199,6 +199,9 @@ export default function MyAvatarPage() {
   const [loading, setLoading] = useState(true)
   const [selectedPiece, setSelectedPiece] = useState<ArmorPieceMeta | null>(null)
   const [selectedTier, setSelectedTier] = useState<string | null>(null)
+  // Armor gallery tab preview: when set, the 3D character shows all 6 pieces
+  // at this tier. Null = default (show equipped pieces at forged tiers).
+  const [previewTier, setPreviewTier] = useState<string | null>(null)
   const [optimisticDiamondBalance, setOptimisticDiamondBalance] = useState<number | null>(null)
   const [, setUnequipPiece] = useState<VoxelArmorPieceId | null>(null)
 
@@ -1370,6 +1373,7 @@ export default function MyAvatarPage() {
           heroDebugEnabled={heroDebugEnabled}
           heroAnimationTuning={heroAnimationTuning}
           onHeroAnimationTuningChange={setHeroAnimationTuning}
+          previewTier={previewTier}
           onTierUp={async (_oldTier, newTier) => {
             setCeremonyActive(false)
             if (!familyId || !childId) return
@@ -1484,6 +1488,7 @@ export default function MyAvatarPage() {
             textColor={textColor}
             bgColor={bgColor}
             onPieceTap={handlePieceTap}
+            onViewingTierChange={setPreviewTier}
           />
         </SectionErrorBoundary>
 

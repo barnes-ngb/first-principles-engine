@@ -79,6 +79,13 @@ interface VoxelCharacterProps {
   animationTuningOverrides?: HeroAnimationTuningOverride
   /** Per-tier forge record from the profile — drives per-piece geometry/material. */
   forgedPieces?: AvatarProfile['forgedPieces']
+  /**
+   * When set, show ALL 6 armor pieces built at this tier (geometry + materials),
+   * overriding per-piece forged tiers and ignoring the equipped list. Used by
+   * the armor gallery tabs so Lincoln can preview his full Wood/Stone/Iron look
+   * regardless of what he's actually forged. `null`/`undefined` = normal mode.
+   */
+  previewTier?: string | null
 }
 
 // ── Helmet hair management ────────────────────────────────────────────
@@ -398,6 +405,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   proportions,
   animationTuningOverrides,
   forgedPieces,
+  previewTier,
 }: VoxelCharacterProps, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -593,11 +601,21 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     const armR = character.getObjectByName('armR')
     const headGroup = character.getObjectByName('headGroup')
 
+    // Preview mode: when a tier tab is selected in the gallery, show ALL 6
+    // pieces at that tier regardless of what's forged/equipped. Normal mode:
+    // show only equipped pieces at their individually forged tiers.
+    const isPreview = !!previewTier
+    const effectiveTier = (pieceId: string): string =>
+      previewTier ?? resolvePieceTier(pieceId)
+    const effectiveEquipped = isPreview
+      ? VOXEL_ARMOR_PIECES.map((p) => p.id as string)
+      : equippedPieces
+
     for (const pieceMeta of VOXEL_ARMOR_PIECES) {
       // Each piece is rendered at its own forged tier, not the global XP tier —
       // this is what makes mixed loadouts (e.g. Iron belt + Stone chestplate)
       // actually show different geometry per piece.
-      const pieceTier = resolvePieceTier(pieceMeta.id)
+      const pieceTier = effectiveTier(pieceMeta.id)
       const pieceGroup = buildArmorPiece(pieceMeta.id, ageGroup, proportions, pieceTier)
       armorGroupsRef.current.set(pieceMeta.id, pieceGroup)
 
@@ -629,9 +647,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       }
     }
 
-    // Set initial visibility — equipped solid, not equipped hidden
+    // Set initial visibility — effectiveEquipped is all 6 in preview mode.
     for (const [pieceId, group] of armorGroupsRef.current) {
-      const isEquipped = equippedPieces.includes(pieceId)
+      const isEquipped = effectiveEquipped.includes(pieceId)
 
       if (isEquipped) {
         group.visible = true
@@ -640,8 +658,8 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         group.visible = false
       }
     }
-    // Apply per-piece tier materials (each piece uses its own forged tier).
-    applyTierToArmor(armorGroupsRef.current, resolvePieceTier, equippedPieces, armorColors)
+    // Apply tier materials via the same effective resolver.
+    applyTierToArmor(armorGroupsRef.current, effectiveTier, effectiveEquipped)
     prevEquippedRef.current = new Set(equippedPieces)
     prevTierRef.current = currentTier
 
@@ -651,13 +669,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       const scale = ageGroup === 'younger' ? 0.88 : 1.0
       const U = 0.125 * scale
       const emblemType = customization?.shieldEmblem ?? 'cross'
-      // Emblem color follows the shield's own forged tier accent (or dye if set).
-      const tierTintKey = getTierTint(resolvePieceTier('shield'))
+      // Phase A: emblem follows tier accent only (dye re-enabled in Phase B).
+      const tierTintKey = getTierTint(effectiveTier('shield'))
       const tierMatRef = TIER_MATERIALS[tierTintKey] ?? TIER_MATERIALS.wood
-      const dyeHex = armorColors?.shield
-      const emblemColor = dyeHex
-        ? new THREE.Color(dyeHex).multiplyScalar(0.85).getHex()
-        : tierMatRef.accent
+      const emblemColor = tierMatRef.accent
       const emblem = buildShieldEmblem(emblemType, U, emblemColor)
       // Position at the shield's anchor point (stored in userData)
       emblem.position.set(
@@ -674,13 +689,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       const scale = ageGroup === 'younger' ? 0.88 : 1.0
       const U = 0.125 * scale
       const crestType = customization?.helmetCrest ?? 'none'
-      // Crest color follows the helmet's own forged tier accent.
-      const tierTintKey = getTierTint(resolvePieceTier('helmet'))
+      // Phase A: crest follows tier accent only (dye re-enabled in Phase B).
+      const tierTintKey = getTierTint(effectiveTier('helmet'))
       const tierMatRef = TIER_MATERIALS[tierTintKey] ?? TIER_MATERIALS.wood
-      const dyeHex = armorColors?.helmet
-      const crestColor = dyeHex
-        ? new THREE.Color(dyeHex).multiplyScalar(0.85).getHex()
-        : tierMatRef.accent
+      const crestColor = tierMatRef.accent
       const crest = buildHelmetCrest(crestType, U, crestColor)
       if (crest) helmetGroup.add(crest)
     }
@@ -709,8 +721,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
 
     // Enchantment glow (Iron tier+) — each equipped piece glows according to
     // its own forged tier, so a Stone piece stays matte next to an Iron one.
-    for (const pieceId of equippedPieces) {
-      const pieceTier = resolvePieceTier(pieceId)
+    // Preview mode glows every piece at the preview tier.
+    for (const pieceId of effectiveEquipped) {
+      const pieceTier = effectiveTier(pieceId)
       if (!tierHasGlow(pieceTier)) continue
       const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
       if (group) addEnchantGlow(group, pieceTier)
@@ -734,8 +747,8 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     addOutlinesToGroup(character, 0.25)
     // Equipped armor outlines scale with each piece's own forged tier —
     // wood is soft (0.15), iron is sharp (0.25), netherite stands out (0.35).
-    for (const pieceId of equippedPieces) {
-      const pieceTier = resolvePieceTier(pieceId)
+    for (const pieceId of effectiveEquipped) {
+      const pieceTier = effectiveTier(pieceId)
       const edgeOpacity =
         TIER_MATERIALS[getTierTint(pieceTier)]?.edgeOpacity ?? 0.2
       const group = armorGroupsRef.current.get(pieceId as VoxelArmorPieceId)
@@ -1127,7 +1140,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         applyPaintedFace(headMesh, character, resolvedFeatures, skinHex)
       }
     }
-  }, [resolvedFeatures, ageGroup, equippedPieces, currentTier, resolvePieceTier, skinTextureUrl, customization, armorColors, accessories, proportions])
+  }, [resolvedFeatures, ageGroup, equippedPieces, currentTier, resolvePieceTier, skinTextureUrl, customization, accessories, proportions, previewTier])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
@@ -1179,7 +1192,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       particlesRef.current = []
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedFeatures.skinTone, resolvedFeatures.hairColor, resolvedFeatures.hairStyle, resolvedFeatures.hairLength, resolvedFeatures.eyeColor, ageGroup, proportionsKey])
+  }, [resolvedFeatures.skinTone, resolvedFeatures.hairColor, resolvedFeatures.hairStyle, resolvedFeatures.hairLength, resolvedFeatures.eyeColor, ageGroup, proportionsKey, previewTier])
 
   // ── Handle resize ───────────────────────────────────────────────
   useEffect(() => {
@@ -1227,11 +1240,15 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   }, [customization])
 
   // ── Re-apply armor dye colors when armorColors change ──────────
+  // Phase A: dye is disabled in applyTierToArmor, but we still refresh
+  // materials here so new colorJitter variations appear on customization
+  // changes. Skipped while previewing a tier (full rebuild handles it).
   useEffect(() => {
+    if (previewTier) return
     if (!armorColors || equippedPieces.length === 0) return
-    applyTierToArmor(armorGroupsRef.current, resolvePieceTier, equippedPieces, armorColors)
+    applyTierToArmor(armorGroupsRef.current, resolvePieceTier, equippedPieces)
     enforceArmorOpacity(armorGroupsRef.current, equippedPieces)
-  }, [armorColors, resolvePieceTier, equippedPieces])
+  }, [armorColors, resolvePieceTier, equippedPieces, previewTier])
 
   // ── Update accessory visibility on armor/accessory changes ──────
   useEffect(() => {
@@ -1287,6 +1304,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   useEffect(() => {
     // Skip equipment sync during ceremony — the ceremony manages piece visibility
     if (ceremonyActiveRef.current) return
+    // Skip while previewing a tier — all 6 pieces are shown at the preview tier
+    // and the underlying equipped state should not re-hide them.
+    if (previewTier) return
 
     const prev = prevEquippedRef.current
     const current = new Set(equippedPieces)
@@ -1299,7 +1319,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           group.visible = true
           group.scale.set(1, 1, 1)
         }
-        applyTierToArmor(armorGroupsRef.current, resolvePieceTier, [pieceId], armorColors)
+        applyTierToArmor(armorGroupsRef.current, resolvePieceTier, [pieceId])
 
         // Edge outlines + enchantment glow follow this piece's own forged tier.
         const pieceTier = resolvePieceTier(pieceId)
@@ -1383,7 +1403,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
 
     // Ensure ALL currently equipped pieces have solid per-piece tier materials
     if (current.size > 0) {
-      applyTierToArmor(armorGroupsRef.current, resolvePieceTier, equippedPieces, armorColors)
+      applyTierToArmor(armorGroupsRef.current, resolvePieceTier, equippedPieces)
       enforceArmorOpacity(armorGroupsRef.current, equippedPieces)
     }
 
@@ -1391,7 +1411,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     equipPoseRef.current?.(equippedPieces)
 
     prevEquippedRef.current = current
-  }, [equippedPieces, resolvePieceTier, onPoseComplete, resolvedFeatures, armorColors])
+  }, [equippedPieces, resolvePieceTier, onPoseComplete, resolvedFeatures, previewTier])
 
   // ── Handle explicit pose trigger (from PoseButtons) ────────────
   useEffect(() => {
