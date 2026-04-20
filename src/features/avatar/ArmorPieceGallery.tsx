@@ -98,6 +98,7 @@ export default function ArmorPieceGallery({
                 key={tier}
                 component="button"
                 onClick={() => {
+                  console.log('[TAB] onViewingTierChange fired:', tier)
                   setViewingTier(tier === activeForgeTier ? null : tier)
                   // Always preview the tapped tier on the 3D character so
                   // Lincoln can see his current look AND compare tiers by
