@@ -54,68 +54,59 @@ export function buildStoneHelmet(layout: BodyLayout): THREE.Group {
   return group
 }
 
-// ── Breastplate: stone chestplate (no pauldrons, small shoulders) ───
+// ── Breastplate: stone chestplate (solid wraparound, no gorget) ─────
 //
-// Strapped-on front plate with visible gaps to the tunic:
-//   - neckline gap (plate stops below torsoTop)
-//   - under-arm gap (plate shorter than torso height)
-//   - side gaps between the front plate and the thin side strips
-// The carved cross is inset on the front plate face.
+// A substantial chestplate that wraps the torso with front, back, and side
+// plates so the armor reads as solid stone — not strapped strips. Slightly
+// less coverage than Iron (no gorget, smaller shoulder bumps, no pauldron
+// lips) but the plate itself is just as chunky.
 export function buildStoneBreastplate(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
-  const { U, torsoCenter, torsoTop, torsoH, torsoW, torsoD } = layout
+  const { U, torsoCenter, torsoTop, torsoH, torsoW, torsoD, scale } = layout
+  const s = scale
 
-  // Front plate — 1.08× torso width, slimmer height, thin depth.
-  // Sits proud of the torso front face so the magenta tunic shows to the sides.
+  // Wraparound plate geometry — front/back/side panels thick enough to carry
+  // the side silhouette, sized just below the Iron footprint.
   const plateW = torsoW * 1.08
-  const plateH = torsoH * 0.78
-  const plateD = U * 1.4
-  const plateZ = torsoD / 2 + plateD / 2 + U * 0.4 // ≥0.05*s proud of torso front
-  const front = taggedBox(plateW, plateH, plateD, W, 'primary', 'stone_chest_front')
-  front.position.set(0, torsoCenter, plateZ)
-  group.add(front)
+  const plateH = torsoH * 0.82
+  const plateThickness = 0.2 * s
 
-  // DIAGNOSTIC: log placeholder color at creation. The real tier color is
-  // applied later in applyTierToArmor; if the piece ever renders with this
-  // raw W=0xffffff placeholder, applyTierToArmor didn't run for it.
-  const frontMat0 = Array.isArray(front.material) ? front.material[0] : front.material
-  if (frontMat0 instanceof THREE.MeshPhongMaterial) {
-    console.log(
-      '[STONE] buildStoneBreastplate created stone_chest_front with placeholder color:',
-      frontMat0.color.getHexString(),
-    )
-  }
+  // Front plate — solid block covering the torso front
+  const frontPlate = taggedBox(plateW, plateH, plateThickness, W, 'primary', 'stone_chest_front')
+  frontPlate.position.set(0, torsoCenter, torsoD / 2 + plateThickness / 2)
+  group.add(frontPlate)
 
-  // Side plates — narrow vertical strips flanking the torso. A clear gap sits
-  // between the wide front plate and each side strip so the tunic shows.
-  const sideW = U * 1.2
-  const sideH = torsoH * 0.7
-  const sideD = torsoD * 0.7
-  const sideX = torsoW / 2 + sideW / 2 + U * 0.4 // proud of torso side face
-  const sideL = taggedBox(sideW, sideH, sideD, W, 'primary', 'stone_chest_side_l')
-  sideL.position.set(-sideX, torsoCenter, 0)
-  group.add(sideL)
-  const sideR = taggedBox(sideW, sideH, sideD, W, 'primary', 'stone_chest_side_r')
-  sideR.position.set(sideX, torsoCenter, 0)
-  group.add(sideR)
+  // Back plate — same footprint
+  const backPlate = taggedBox(plateW, plateH, plateThickness, W, 'primary', 'stone_chest_back')
+  backPlate.position.set(0, torsoCenter, -(torsoD / 2 + plateThickness / 2))
+  group.add(backPlate)
 
-  // Carved cross on the front plate — slightly proud of the plate face so it
-  // reads as raised relief instead of flush paint.
-  const crossZ = plateZ + plateD / 2 + U * 0.15
-  const crossV = taggedFlatBox(U * 0.9, plateH * 0.55, U * 0.3, W, 'secondary', 'stone_chest_cross_v')
+  // Side plates — connect front to back so the armor wraps the torso
+  const sidePlateW = plateThickness
+  const sidePlateD = torsoD + plateThickness * 2
+  const sidePlateL = taggedBox(sidePlateW, plateH, sidePlateD, W, 'primary', 'stone_chest_side_l')
+  sidePlateL.position.set(-(torsoW / 2 + sidePlateW / 2), torsoCenter, 0)
+  group.add(sidePlateL)
+  const sidePlateR = taggedBox(sidePlateW, plateH, sidePlateD, W, 'primary', 'stone_chest_side_r')
+  sidePlateR.position.set(torsoW / 2 + sidePlateW / 2, torsoCenter, 0)
+  group.add(sidePlateR)
+
+  // Carved cross on the front plate — raised relief in secondary color
+  const crossProtrusion = 0.08 * s
+  const crossZ = torsoD / 2 + plateThickness + crossProtrusion / 2
+  const crossV = taggedBox(U * 0.9, plateH * 0.55, crossProtrusion, W, 'secondary', 'stone_chest_cross_v')
   crossV.position.set(0, torsoCenter + plateH * 0.1, crossZ)
   group.add(crossV)
-  const crossH = taggedFlatBox(plateW * 0.45, U * 0.9, U * 0.3, W, 'secondary', 'stone_chest_cross_h')
+  const crossH = taggedBox(plateW * 0.45, U * 0.9, crossProtrusion, W, 'secondary', 'stone_chest_cross_h')
   crossH.position.set(0, torsoCenter + plateH * 0.22, crossZ)
   group.add(crossH)
 
-  // Horizontal waist groove on the front plate
+  // Horizontal waist groove across the front plate
   const groove = taggedFlatBox(plateW - U * 0.6, U * 0.35, U * 0.2, W, 'secondary', 'stone_chest_groove')
   groove.position.set(0, torsoCenter - plateH * 0.35, crossZ - U * 0.05)
   group.add(groove)
 
-  // Small shoulder bumps above the plate top — leave a gap underneath so the
-  // tunic is visible under the arms.
+  // Shoulder bumps — smaller than Iron pauldrons, no lips
   const shoulderW = U * 2.6
   const shoulderH = U * 1.5
   const shoulderD = torsoD + U * 1.0
@@ -128,9 +119,11 @@ export function buildStoneBreastplate(layout: BodyLayout): THREE.Group {
   shoulderR.position.set(shoulderX, shoulderY, 0)
   group.add(shoulderR)
 
-  // Bottom rim across the base of the front plate
-  const rim = taggedBox(plateW + U * 0.3, U * 0.6, plateD + U * 0.2, W, 'accent', 'stone_chest_rim')
-  rim.position.set(0, torsoCenter - plateH / 2 - U * 0.1, plateZ)
+  // Bottom rim wrapping the plate base
+  const rimW = plateW + U * 0.3
+  const rimD = torsoD + plateThickness * 2 + U * 0.3
+  const rim = taggedBox(rimW, U * 0.6, rimD, W, 'accent', 'stone_chest_rim')
+  rim.position.set(0, torsoCenter - plateH / 2 - U * 0.1, 0)
   group.add(rim)
 
   return group

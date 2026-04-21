@@ -26,6 +26,7 @@ import { buildRoom } from './voxel/buildRoom'
 import { addOutlinesToGroup, removeOutlinesFromGroup } from './voxel/blockOutline'
 import { buildAccessory, getAccessoryAttachPoint, animateAccessories, getHiddenAccessories } from './voxel/buildAccessory'
 import { HERO_ANIMATION_TUNING, resolveHeroAnimationTuning, type HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
+import type { ArmorDebugOverrides } from './ArmorDebugPanel'
 import {
   getCurrentSeason,
   getSeasonalStarColor,
@@ -77,6 +78,8 @@ interface VoxelCharacterProps {
   proportions?: Partial<CharacterProportions>
   /** Optional runtime animation tuning overrides (debug only) */
   animationTuningOverrides?: HeroAnimationTuningOverride
+  /** Optional runtime armor-piece position/rotation/scale overrides (debug only) */
+  armorDebugOverrides?: ArmorDebugOverrides
   /** Per-tier forge record from the profile — drives per-piece geometry/material. */
   forgedPieces?: AvatarProfile['forgedPieces']
   /**
@@ -404,6 +407,7 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   accessories = [],
   proportions,
   animationTuningOverrides,
+  armorDebugOverrides,
   forgedPieces,
   previewTier,
 }: VoxelCharacterProps, ref) {
@@ -437,6 +441,8 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   )
   const tuningRef = useRef(runtimeTuning)
   tuningRef.current = runtimeTuning
+  const armorDebugRef = useRef<ArmorDebugOverrides | undefined>(armorDebugOverrides)
+  armorDebugRef.current = armorDebugOverrides
   const poseAnimatorRef = useRef<PoseAnimator>(new PoseAnimator(() => tuningRef.current))
   const swipePoseIndexRef = useRef(0)
   const onSwipePoseRef = useRef(onSwipePose)
@@ -783,7 +789,9 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     const tierMat = TIER_MATERIALS[tierTint] ?? TIER_MATERIALS.wood
     const platformColor = tintPlatformColor(tierMat.primary, season)
     const platform = buildPlatform(ageGroup, platformColor)
-    platform.position.y = character.position.y
+    // buildPlatform() sets platform.position.y = -(topSurfaceY + bootClearance)
+    // so the top surface sits just below the feet at Y=0. Do not override it —
+    // doing so puts the platform surface above foot level and buries the boots.
 
     // Seasonal platform decorations
     const seasonTheme = getSeasonalTheme(season)
@@ -895,6 +903,26 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       // Use visibleArmorRef so preview mode keeps all 6 pieces showing.
       if (!ceremonyActiveRef.current) {
         enforceArmorOpacity(armorGroupsRef.current, visibleArmorRef.current)
+      }
+
+      // Debug: apply live helmet/shoes transforms from sliders. We tune on-device
+      // with these, then hardcode the resulting values in the armor builders.
+      const debug = armorDebugRef.current
+      if (debug) {
+        const scaleUnit = ageGroup === 'younger' ? 0.85 : 1.0
+        const helmetGroup = armorGroupsRef.current.get('helmet')
+        if (helmetGroup) {
+          const h = debug.helmet
+          helmetGroup.position.set(h.posX * scaleUnit, h.posY * scaleUnit, h.posZ * scaleUnit)
+          helmetGroup.rotation.set(h.rotX, h.rotY, h.rotZ)
+          helmetGroup.scale.set(h.scale, h.scale, h.scale)
+        }
+        const shoesGroup = armorGroupsRef.current.get('shoes')
+        if (shoesGroup) {
+          const sh = debug.shoes
+          shoesGroup.position.set(sh.posX * scaleUnit, sh.posY * scaleUnit, sh.posZ * scaleUnit)
+          shoesGroup.rotation.set(sh.rotX, sh.rotY, sh.rotZ)
+        }
       }
 
       if (characterRef.current) {
