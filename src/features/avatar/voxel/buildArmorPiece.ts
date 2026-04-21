@@ -447,14 +447,12 @@ function buildIronShield(layout: BodyLayout): THREE.Group {
   const { U, armH, scale: s } = layout
 
   // Attachment lives on parent-local "visual" group: translation positions it
-  // against the forearm; rotation presents the face outward/forward.
+  // at the hand; rotation presents the face toward the viewer.
   const visual = new THREE.Group()
   visual.name = 'shield_visual'
-  visual.rotation.x = -1.0 // tilt forward ~57° so shield face presents outward
-  visual.rotation.y = 0.2  // slight yaw so it isn't perfectly perpendicular
-
-  // Strap position on the left forearm: barely outward, mid-forearm, slightly forward
-  visual.position.set(-0.1 * s, -1.5 * s, 0.4 * s)
+  visual.rotation.set(0, 0, 0)
+  visual.rotation.x = -0.3 // slight tilt back so top of shield leans toward body
+  visual.position.set(-0.2 * s, -2.5 * s, 0.5 * s)
   group.add(visual)
 
   // Shield-local center
