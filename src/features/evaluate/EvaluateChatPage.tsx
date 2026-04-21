@@ -22,7 +22,7 @@ import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
+import { addDoc, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -49,6 +49,7 @@ import type {
   SkillSnapshot,
 } from '../../core/types'
 import { DIAMOND_EVENTS } from '../../core/types'
+import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import FoundationsSection from './FoundationsSection'
 import { ChatMessageRole, EvaluationDomain, MasteryGate, SkillLevel } from '../../core/types/enums'
 import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
@@ -580,6 +581,17 @@ export default function EvaluateChatPage() {
       }
 
       const now = new Date().toISOString()
+
+      // Merge evaluation-derived blocks with existing blocks rather than overwriting.
+      // This preserves blocks from quest/scan/parent writers that this evaluation didn't touch.
+      let mergedBlocks: ConceptualBlock[] = existing.conceptualBlocks ?? []
+      for (const block of conceptualBlocks) {
+        const b = block as Partial<ConceptualBlock>
+        if (!b.id) continue
+        mergedBlocks = mergeBlock(mergedBlocks, b as Parameters<typeof mergeBlock>[1])
+      }
+      const blocksChanged = conceptualBlocks.length > 0
+
       const updated: Omit<SkillSnapshot, 'id'> = {
         childId: activeChildId,
         prioritySkills: [...existingSkills, ...newPrioritySkills],
@@ -588,14 +600,16 @@ export default function EvaluateChatPage() {
         evidenceDefinitions: newEvidenceDefs.length > 0 ? newEvidenceDefs : existing.evidenceDefinitions || [],
         workingLevels: mergedWorkingLevels,
         updatedAt: now,
-        // Overwrite conceptual blocks with most recent evaluation's findings
-        ...(conceptualBlocks.length > 0 ? {
-          conceptualBlocks,
-          blocksUpdatedAt: now,
-        } : {}),
       }
 
       await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)), { merge: true })
+
+      if (blocksChanged) {
+        await updateDoc(snapshotRef, {
+          conceptualBlocks: JSON.parse(JSON.stringify(mergedBlocks)),
+          blocksUpdatedAt: now,
+        })
+      }
       setSnackText('Skill snapshot updated! Priority skills, supports, stop rules, and evidence all set.')
 
       // Update Learning Map from findings (fire-and-forget)

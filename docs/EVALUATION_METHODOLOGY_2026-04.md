@@ -37,7 +37,7 @@ Today the engine has the right conceptual model and almost none of the plumbing 
 
 ---
 
-## 3. Phase 1 — Feed Blockers from Everywhere
+## 3. Phase 1 — Feed Blockers from Everywhere ✅ Landed 2026-04-21
 
 **Goal.** Every evaluation surface identifies and writes blockers. Not just guided eval.
 
@@ -65,6 +65,17 @@ Add `firstDetectedAt`, `lastReinforcedAt`, `sessionCount`, `resolvedAt` to `Conc
 ### Effort estimate: **Small-Medium**
 
 The biggest lift is the merge helper and the status state machine. Writers in quest and scan are mostly prompt changes and a shared utility call. No new collections, no new surfaces.
+
+### Landed 2026-04-21
+
+Shipped across four chunks on `claude/add-feed-blockers-lifecycle-G9coR`:
+
+- **Data model.** `ConceptualBlock` extended with optional `id`, `status` (`ADDRESS_NOW` | `DEFER` | `RESOLVING` | `RESOLVED`), `evidence`, `firstDetectedAt`, `lastReinforcedAt`, `sessionCount`, `resolvedAt`, `source` (`evaluation` | `quest` | `scan` | `parent`), `lastSource`, `specificWords`, `specificQuestions`, `correctAttempts`, `totalAttempts`. All existing fields (`name`, `affectedSkills`, `recommendation`, `rationale`, `strategies?`, `deferNote?`, `detectedAt`, `evaluationSessionId`) preserved for backward compat.
+- **Helpers.** `src/core/utils/blockerLifecycle.ts` exports `generateBlockId` (slugifies skill → stable id), `mergeBlock` (merge-by-id with regression handling for RESOLVING → ADDRESS_NOW), `updateBlockerLifecycle` (ADDRESS_NOW → RESOLVING at 3 correct, RESOLVING → RESOLVED at 5 correct across ≥2 sessions, regression on any wrong), and `sessionEvidenceFromQuestions`.
+- **Writers.** Four now: (1) guided eval pattern analysis — already existed, now merges; (2) quest `endSession` via `detectBlockersFromSession` (2+ wrong at same skill in ≥5-question session); (3) scan via `detectBlockersFromScan` (too-hard/skip/modify, behind-aligned skills); (4) Shelly's "Stuck" / "Got it" mastery chips via `buildStuckBlock` / `buildGotItReinforcement`.
+- **Lifecycle wiring.** Quest `endSession` runs `updateBlockerLifecycle` across all blocks after merge, so correct answers on existing blocks advance them toward RESOLVING/RESOLVED without any new writer-specific logic.
+- **Eval Apply fix.** `EvaluateChatPage.handleSaveAndApply` now merges pattern-analysis blocks via `mergeBlock` and writes via `updateDoc` instead of overwriting the whole array. Blocks from quest/scan/parent writers survive every Apply.
+- **AI context fix.** `formatConceptualBlocks` in `contextSlices.ts` now emits three sections: ADDRESS_NOW, RESOLVING (with "keep probing gently" framing), and DEFER (with "do NOT push" framing). RESOLVED blocks are omitted from context but kept in the array for history.
 
 ## 4. Phase 2 — Gap-Targeted Quest Questions
 

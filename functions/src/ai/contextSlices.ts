@@ -765,6 +765,58 @@ async function loadGeneratedContent(
 
 // ── Workshop games loader ─────────────────────────────────────
 
+/**
+ * Format the conceptualBlocks array into AI-context lines. Exported for testing.
+ *
+ * Surfaces ADDRESS_NOW, RESOLVING, and DEFER separately so the model can
+ * reason about lifecycle state:
+ *   - ADDRESS_NOW: "target these"
+ *   - RESOLVING: "trending better — probe gently"
+ *   - DEFER: "don't push — here's why"
+ *
+ * RESOLVED blocks are historical and are omitted from context.
+ */
+export function formatConceptualBlocks(
+  blocks: Array<{
+    name: string;
+    affectedSkills: string[];
+    recommendation?: string;
+    status?: string;
+    rationale: string;
+    strategies?: string[];
+    deferNote?: string;
+  }>,
+): string[] {
+  const statusOf = (b: { status?: string; recommendation?: string }): string =>
+    b.status || b.recommendation || "ADDRESS_NOW";
+  const addressNow = blocks.filter((b) => statusOf(b) === "ADDRESS_NOW");
+  const resolving = blocks.filter((b) => statusOf(b) === "RESOLVING");
+  const defer = blocks.filter((b) => statusOf(b) === "DEFER");
+
+  const out: string[] = [];
+  if (addressNow.length > 0) {
+    out.push("Conceptual Blocks (ADDRESS NOW):");
+    for (const b of addressNow) {
+      const strategies = b.strategies?.length ? ` — Strategies: ${b.strategies.join("; ")}` : "";
+      out.push(`- ${b.name} (affects: ${b.affectedSkills.join(", ")}): ${b.rationale}${strategies}`);
+    }
+  }
+  if (resolving.length > 0) {
+    out.push("Conceptual Blocks (RESOLVING — trending better, keep probing gently):");
+    for (const b of resolving) {
+      out.push(`- ${b.name} (affects: ${b.affectedSkills.join(", ")}): ${b.rationale}`);
+    }
+  }
+  if (defer.length > 0) {
+    out.push("Conceptual Blocks (DEFERRED — do NOT push on these right now):");
+    for (const b of defer) {
+      const note = b.deferNote ? ` — ${b.deferNote}` : "";
+      out.push(`- ${b.name} (affects: ${b.affectedSkills.join(", ")}): ${b.rationale}${note}`);
+    }
+  }
+  return out;
+}
+
 /** Load skill snapshot (evaluation-derived priorities, supports, stop rules, conceptual blocks). */
 async function loadSkillSnapshotContext(
   db: Firestore,
@@ -788,6 +840,8 @@ async function loadSkillSnapshotContext(
       recommendation: string;
       rationale: string;
       strategies?: string[];
+      deferNote?: string;
+      status?: string;
     }>;
     completedPrograms?: string[];
     workingLevels?: Record<string, { level: number; updatedAt: string; source: string; evidence?: string }>;
@@ -822,16 +876,9 @@ async function loadSkillSnapshotContext(
     }
   }
 
-  // Conceptual blocks
-  const blocks = data.conceptualBlocks || [];
-  const addressNow = blocks.filter((b) => b.recommendation === "ADDRESS_NOW");
-  if (addressNow.length > 0) {
-    lines.push("Conceptual Blocks (ADDRESS NOW):");
-    for (const b of addressNow) {
-      const strategies = b.strategies?.length ? ` — Strategies: ${b.strategies.join("; ")}` : "";
-      lines.push(`- ${b.name} (affects: ${b.affectedSkills.join(", ")}): ${b.rationale}${strategies}`);
-    }
-  }
+  // Conceptual blocks — surface ADDRESS_NOW, RESOLVING, and DEFER to the AI.
+  const blockLines = formatConceptualBlocks(data.conceptualBlocks || []);
+  for (const l of blockLines) lines.push(l);
 
   // Working levels (quest progression)
   const wl = data.workingLevels;
@@ -857,7 +904,7 @@ async function loadSkillSnapshotContext(
   }
 
   // Planning guidance
-  if (skills.length > 0 || stops.length > 0 || addressNow.length > 0) {
+  if (skills.length > 0 || stops.length > 0 || blockLines.length > 0) {
     lines.push("");
     lines.push("Use the Skill Snapshot to calibrate plans and questions:");
     lines.push("- Skills at 'Secure' level → SKIP. Do not create activities for these.");
