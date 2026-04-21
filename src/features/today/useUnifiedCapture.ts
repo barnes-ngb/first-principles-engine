@@ -1,16 +1,18 @@
 import { useCallback, useState } from 'react'
-import { addDoc, doc, updateDoc } from 'firebase/firestore'
+import { addDoc, doc, getDoc, updateDoc } from 'firebase/firestore'
 
-import { artifactsCollection } from '../../core/firebase/firestore'
+import { artifactsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useScan } from '../../core/hooks/useScan'
 import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
-import type { Artifact, DayLog, ScanRecord, WorksheetScanResult } from '../../core/types'
+import type { Artifact, ConceptualBlock, DayLog, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
 import { isWorksheetScan } from '../../core/types/planning'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type { ScanConfigResult } from '../../core/hooks/useScanToActivityConfig'
 import { autoCompleteBypassedItems } from './scanAdvance'
+import { mergeBlock } from '../../core/utils/blockerLifecycle'
+import { detectBlockersFromScan } from './scanBlocker'
 
 export interface UseUnifiedCaptureOptions {
   familyId: string
@@ -117,6 +119,29 @@ export function useUnifiedCapture({
             } catch (err) {
               console.warn('[UnifiedCapture] Failed to update skill map (non-blocking):', err)
             }
+          }
+
+          // Phase 1: write blockers for challenging / too-hard scans (non-blocking).
+          try {
+            const detected = detectBlockersFromScan(record.results as WorksheetScanResult, {
+              scanId: record.id,
+            })
+            if (detected.length > 0) {
+              const snapshotRef = doc(skillSnapshotsCollection(familyId), childId)
+              const snapshotSnap = await getDoc(snapshotRef)
+              const existing: Partial<SkillSnapshot> = snapshotSnap.exists() ? snapshotSnap.data() : {}
+              let merged: ConceptualBlock[] = existing.conceptualBlocks ?? []
+              for (const b of detected) {
+                if (!b.id) continue
+                merged = mergeBlock(merged, b as Parameters<typeof mergeBlock>[1])
+              }
+              await updateDoc(snapshotRef, {
+                conceptualBlocks: JSON.parse(JSON.stringify(merged)),
+                blocksUpdatedAt: new Date().toISOString(),
+              })
+            }
+          } catch (err) {
+            console.warn('[UnifiedCapture] Failed to merge scan blockers (non-blocking):', err)
           }
 
           // Link scan doc to checklist item

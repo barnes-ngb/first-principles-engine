@@ -46,6 +46,24 @@ export interface EvidenceDefinition {
   description: string
 }
 
+export const ConceptualBlockStatus = {
+  AddressNow: 'ADDRESS_NOW',
+  Defer: 'DEFER',
+  Resolving: 'RESOLVING',
+  Resolved: 'RESOLVED',
+} as const
+export type ConceptualBlockStatus =
+  (typeof ConceptualBlockStatus)[keyof typeof ConceptualBlockStatus]
+
+export const ConceptualBlockSource = {
+  Evaluation: 'evaluation',
+  Quest: 'quest',
+  Scan: 'scan',
+  Parent: 'parent',
+} as const
+export type ConceptualBlockSource =
+  (typeof ConceptualBlockSource)[keyof typeof ConceptualBlockSource]
+
 export interface ConceptualBlock {
   name: string
   affectedSkills: string[]
@@ -54,7 +72,33 @@ export interface ConceptualBlock {
   strategies?: string[]
   deferNote?: string
   detectedAt: string
+  /** Evaluation session ID that created this block. Empty string for non-eval sources. */
   evaluationSessionId: string
+
+  // ── Phase 1: lifecycle + multi-writer fields (all optional for backward compat) ──
+
+  /** Stable unique ID (slugified skill name). Enables merge-by-ID writes. */
+  id?: string
+  /** Extended lifecycle status. Takes precedence over `recommendation` when present. */
+  status?: ConceptualBlockStatus
+  /** Short single-source evidence string for this block. */
+  evidence?: string
+  /** ISO — when this block was first created. May differ from detectedAt if reinforced. */
+  firstDetectedAt?: string
+  /** ISO — most recent time new evidence was added. */
+  lastReinforcedAt?: string
+  /** How many sessions (quest, eval, scan, parent tap) have seen this block. */
+  sessionCount?: number
+  /** ISO — when this block was marked RESOLVED. */
+  resolvedAt?: string
+  /** What first detected this block. */
+  source?: ConceptualBlockSource
+  /** Most recent reinforcement source. */
+  lastSource?: ConceptualBlockSource
+  /** Concrete words the child struggles with (e.g. ['bed','bid','ten','tin']). */
+  specificWords?: string[]
+  /** Question IDs or short descriptions that triggered detection. */
+  specificQuestions?: string[]
 }
 
 // ── Working Levels (per-domain quest progression) ──────────────
@@ -89,7 +133,7 @@ export interface SkillSnapshot {
   supports: SupportDefault[]
   stopRules: StopRule[]
   evidenceDefinitions: EvidenceDefinition[]
-  /** Conceptual blocks detected by pattern analysis (most recent evaluation only) */
+  /** Conceptual blocks detected across evaluation, quest, scan, and parent observation. Blocks have a lifecycle (ADDRESS_NOW → RESOLVING → RESOLVED) and are merged by stable ID rather than overwritten. */
   conceptualBlocks?: ConceptualBlock[]
   blocksUpdatedAt?: string
   /** Completed curriculum programs (e.g., ['reading-eggs']) */
