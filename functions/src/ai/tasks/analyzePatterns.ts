@@ -35,6 +35,19 @@ interface ConceptualBlockResult {
   deferNote?: string;
   detectedAt: string;
   evaluationSessionId: string;
+
+  // Phase 1: lifecycle + multi-writer fields (all optional for backward compat)
+  id?: string;
+  status?: "ADDRESS_NOW" | "DEFER" | "RESOLVING" | "RESOLVED";
+  evidence?: string;
+  firstDetectedAt?: string;
+  lastReinforcedAt?: string;
+  sessionCount?: number;
+  resolvedAt?: string;
+  source?: "evaluation" | "quest" | "scan" | "parent";
+  lastSource?: "evaluation" | "quest" | "scan" | "parent";
+  specificWords?: string[];
+  specificQuestions?: string[];
 }
 
 interface AnalyzePatternsResponse {
@@ -253,17 +266,33 @@ Please identify any conceptual blocks in the pattern above.`;
       };
       const now = new Date().toISOString();
 
+      const slugify = (s: string): string =>
+        s
+          .toLowerCase()
+          .trim()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 80) || "unknown-block";
+
       const blocks: ConceptualBlockResult[] = (raw.blocks || [])
         .slice(0, 3)
         .map((b) => {
           const rec = b.recommendation === "ADDRESS_NOW" ? "ADDRESS_NOW" : "DEFER";
+          const name = b.name || "Unknown block";
           const result: ConceptualBlockResult = {
-            name: b.name || "Unknown block",
+            name,
             affectedSkills: b.affectedSkills || [],
             recommendation: rec,
             rationale: b.rationale || "",
             detectedAt: now,
             evaluationSessionId,
+            id: slugify(name),
+            status: rec,
+            firstDetectedAt: now,
+            lastReinforcedAt: now,
+            sessionCount: 1,
+            source: "evaluation",
+            lastSource: "evaluation",
           };
           if (rec === "ADDRESS_NOW" && b.strategies?.length) {
             result.strategies = b.strategies;

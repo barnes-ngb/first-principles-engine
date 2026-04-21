@@ -123,6 +123,19 @@ export interface ConceptualBlockResult {
   deferNote?: string
   detectedAt: string
   evaluationSessionId: string
+
+  // Phase 1: lifecycle + multi-writer fields (all optional for backward compat)
+  id?: string
+  status?: 'ADDRESS_NOW' | 'DEFER' | 'RESOLVING' | 'RESOLVED'
+  evidence?: string
+  firstDetectedAt?: string
+  lastReinforcedAt?: string
+  sessionCount?: number
+  resolvedAt?: string
+  source?: 'evaluation' | 'quest' | 'scan' | 'parent'
+  lastSource?: 'evaluation' | 'quest' | 'scan' | 'parent'
+  specificWords?: string[]
+  specificQuestions?: string[]
 }
 
 export interface AnalyzePatternsResponse {
