@@ -15,7 +15,7 @@ import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDoc, getDocs, limit as fsLimit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
+import { addDoc, deleteField, doc, getDoc, getDocs, limit as fsLimit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { useNavigate } from 'react-router-dom'
 import ChildSelector from '../../components/ChildSelector'
@@ -386,6 +386,16 @@ export default function PlannerChatPage() {
       setReadAloudBook('')
       setReadAloudChapters('')
     }
+  }, [])
+
+  // When a new book is added via ChapterBookPicker, include it in the local library list
+  const handleBookAdded = useCallback((book: ChapterBook) => {
+    setChapterBooks((prev) => {
+      if (prev.some((b) => b.id === book.id)) return prev
+      const next = [...prev, book]
+      next.sort((a, b) => a.title.localeCompare(b.title))
+      return next
+    })
   }, [])
 
   // dailyRoutine is now derived from activity configs (already filtered for completed)
@@ -1685,12 +1695,23 @@ Generate a plan for Monday through Friday.`.trim()
         } else {
           updatedGoals.push({ childId: activeChildId, goals: planGoals })
         }
+        const { readAloudBookId: _existingReadAloudBookId, ...existingWithoutBook } = existing
+        void _existingReadAloudBookId
         await setDoc(weekRef, {
-          ...existing,
+          ...existingWithoutBook,
           childGoals: updatedGoals,
           ...(selectedBook ? { readAloudBookId: selectedBook.id } : {}),
         })
       }
+
+      // Persist readAloudBookId to plannerDefaults so it carries to the next week
+      void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
+        readAloudBook: selectedBook?.title ?? '',
+        ...(selectedBook
+          ? { readAloudBookId: selectedBook.id }
+          : { readAloudBookId: deleteField() }),
+        updatedAt: new Date().toISOString(),
+      }, { merge: true })
 
       // Write DayLog checklist items for each day
       for (const dayPlan of currentDraft.days) {
@@ -2219,13 +2240,10 @@ ${dayPrompts}`
               weekEnergy={weekEnergy}
               onWeekEnergyChange={setWeekEnergy}
               hoursPerDay={hoursPerDay}
-              readAloudBook={readAloudBook}
-              onReadAloudBookChange={setReadAloudBook}
-              readAloudChapters={readAloudChapters}
-              onReadAloudChaptersChange={setReadAloudChapters}
               chapterBooks={chapterBooks}
               selectedBook={selectedBook}
               onSelectedBookChange={handleSelectedBookChange}
+              onBookAdded={handleBookAdded}
               bookProgress={bookProgress}
               weekNotes={weekNotes}
               onWeekNotesChange={setWeekNotes}
@@ -2260,11 +2278,8 @@ ${dayPrompts}`
                 chapterBooks={chapterBooks}
                 selectedBook={selectedBook}
                 onSelectedBookChange={handleBookChangeAndPersist}
+                onBookAdded={handleBookAdded}
                 bookProgress={bookProgress}
-                readAloudBook={readAloudBook}
-                onReadAloudBookChange={setReadAloudBook}
-                readAloudChapters={readAloudChapters}
-                onReadAloudChaptersChange={setReadAloudChapters}
                 variant="card"
               />
             </Box>
@@ -2311,11 +2326,8 @@ ${dayPrompts}`
                   chapterBooks={chapterBooks}
                   selectedBook={selectedBook}
                   onSelectedBookChange={handleBookChangeAndPersist}
+                  onBookAdded={handleBookAdded}
                   bookProgress={bookProgress}
-                  readAloudBook={readAloudBook}
-                  onReadAloudBookChange={setReadAloudBook}
-                  readAloudChapters={readAloudChapters}
-                  onReadAloudChaptersChange={setReadAloudChapters}
                   variant="card"
                 />
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>

@@ -36,13 +36,10 @@ interface PlannerSetupWizardProps {
   weekEnergy: 'full' | 'lighter' | 'mvd'
   onWeekEnergyChange: (v: 'full' | 'lighter' | 'mvd') => void
   hoursPerDay: number
-  readAloudBook: string
-  onReadAloudBookChange: (v: string) => void
-  readAloudChapters: string
-  onReadAloudChaptersChange: (v: string) => void
   chapterBooks: ChapterBook[]
   selectedBook: ChapterBook | null
   onSelectedBookChange: (book: ChapterBook | null) => void
+  onBookAdded?: (book: ChapterBook) => void
   bookProgress: BookProgress | null
   weekNotes: string
   onWeekNotesChange: (v: string) => void
@@ -74,13 +71,10 @@ export default function PlannerSetupWizard({
   weekEnergy,
   onWeekEnergyChange,
   hoursPerDay,
-  readAloudBook,
-  onReadAloudBookChange,
-  readAloudChapters,
-  onReadAloudChaptersChange,
   chapterBooks,
   selectedBook,
   onSelectedBookChange,
+  onBookAdded,
   bookProgress,
   weekNotes,
   onWeekNotesChange,
@@ -122,11 +116,8 @@ export default function PlannerSetupWizard({
         chapterBooks={chapterBooks}
         selectedBook={selectedBook}
         onSelectedBookChange={onSelectedBookChange}
+        onBookAdded={onBookAdded}
         bookProgress={bookProgress}
-        readAloudBook={readAloudBook}
-        onReadAloudBookChange={onReadAloudBookChange}
-        readAloudChapters={readAloudChapters}
-        onReadAloudChaptersChange={onReadAloudChaptersChange}
         variant="wizard"
       />
 
