@@ -67,6 +67,7 @@ import { deriveUnlockedTiersFromForged, getDisplayArmorTier, getTierLockReason }
 import { calculateTier } from './voxel/tierMaterials'
 import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
+import { ARMOR_DEBUG_DEFAULTS, type ArmorDebugOverrides } from './voxel/armorDebugTuning'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
 import { getDailyArmorStatusFromSession, getBestOfSlotForgedPieces } from './armorStatus'
@@ -264,6 +265,9 @@ export default function MyAvatarPage() {
   const heroDebugEnabled = typeof window !== 'undefined'
     && new URLSearchParams(window.location.search).get('heroDebug') === '1'
   const [heroAnimationTuning, setHeroAnimationTuning] = useState<HeroAnimationTuningOverride>({})
+  const armorDebugEnabled = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('armorDebug') === '1'
+  const [armorDebugValues, setArmorDebugValues] = useState<ArmorDebugOverrides>(ARMOR_DEBUG_DEFAULTS)
   const siblingChild = children.find((c) => c.id !== childId)
   const siblingId = brothersMode ? siblingChild?.id : undefined
   const siblingProfile = useAvatarProfile(familyId, siblingId)
@@ -1376,6 +1380,9 @@ export default function MyAvatarPage() {
           heroDebugEnabled={heroDebugEnabled}
           heroAnimationTuning={heroAnimationTuning}
           onHeroAnimationTuningChange={setHeroAnimationTuning}
+          armorDebugEnabled={armorDebugEnabled}
+          armorDebugValues={armorDebugValues}
+          onArmorDebugChange={setArmorDebugValues}
           previewTier={previewTier}
           onTierUp={async (_oldTier, newTier) => {
             setCeremonyActive(false)
