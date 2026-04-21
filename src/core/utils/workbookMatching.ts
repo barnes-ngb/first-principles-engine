@@ -37,7 +37,7 @@ export function normalizeWorkbookName(label: string): string {
   )
   s = s.replace(/~?\s*\d+\s*(?:m|min|mins|minutes|hr|hrs|hours)\b/gi, '')
   s = s.replace(/\bbook\s*set\b/gi, '')
-  s = s.replace(/[—–:|\-]+/g, ' ')
+  s = s.replace(/[—–:|-]+/g, ' ')
   s = s.replace(/\s+/g, ' ').trim()
   return s
 }
