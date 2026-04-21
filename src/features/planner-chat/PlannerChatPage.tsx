@@ -1734,6 +1734,9 @@ Generate a plan for Monday through Friday.`.trim()
             source: 'planner' as const,
           }))
 
+        // Persist the day's time budget so rollover/budget enforcement can trim overflow.
+        const dailyBudgetMinutes = Math.round(dayPlan.timeBudgetMinutes)
+
         if (dayLogSnap.exists()) {
           const existing = dayLogSnap.data()
           // Replace planner-generated items, keep manually-added ones
@@ -1747,6 +1750,7 @@ Generate a plan for Monday through Friday.`.trim()
             ...existing,
             checklist: [...existingChecklist, ...checklist],
             blocks: [...existingBlocks, ...blocks],
+            dailyBudgetMinutes,
             updatedAt: new Date().toISOString(),
           })
         } else {
@@ -1755,6 +1759,7 @@ Generate a plan for Monday through Friday.`.trim()
             date: dateKey,
             blocks,
             checklist,
+            dailyBudgetMinutes,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }

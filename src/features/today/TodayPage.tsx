@@ -205,14 +205,7 @@ export default function TodayPage() {
     activeRoutineItems,
   })
 
-  // --- Rollover: carry forward unchecked items from previous school day ---
-  useRolloverUnchecked({
-    familyId,
-    childId: selectedChildId,
-    today,
-    dayLog,
-    persistDayLogImmediate,
-  })
+  // (Rollover is wired below, after dailyPlan is loaded so MVD/low-energy can halve the budget.)
 
   // --- Chapter book progress (pool-based read-aloud tracking) ---
   const [selectedBook, setSelectedBook] = useState<ChapterBook | null>(null)
@@ -256,6 +249,16 @@ export default function TodayPage() {
       setPlanType(dailyPlan.planType)
     }
   }, [dailyPlan])
+
+  // --- Rollover: carry forward unchecked items from previous school day + enforce daily budget ---
+  useRolloverUnchecked({
+    familyId,
+    childId: selectedChildId,
+    today,
+    dayLog,
+    dailyPlan,
+    persistDayLogImmediate,
+  })
 
   // --- Unified capture hook (shared with kid views) ---
   const {

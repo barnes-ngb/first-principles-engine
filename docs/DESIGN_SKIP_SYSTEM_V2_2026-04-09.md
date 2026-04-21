@@ -140,9 +140,9 @@ If Shelly then generates a new AI plan for today, the planner should merge with 
 
 **Multiple days of rollover:** If Monday rolls to Tuesday, and Tuesday also goes unfinished, Wednesday picks up Tuesday's remaining items (which may include Monday's originals). Items don't accumulate duplicates because step 4 marks the source as `rolledOver: true`.
 
-**MVD days:** If today is an MVD day, rolled-over items from a Normal day still appear. Shelly can skip them if they don't fit, but the system doesn't auto-filter. MVD reduces what the *planner generates*, not what rolls over.
+**MVD days:** If today is an MVD day, rolled-over items from a Normal day still appear — but post-merge budget enforcement (Apr 21, 2026) halves the budget for `planType: 'mvd'` / energy `low` / `overwhelmed`, so overflow items get deferred behind the "N items deferred — tap to show" row instead of filling an MVD checklist.
 
-**Plan already exists:** If Shelly already generated a plan for today before rollover fires, rolled-over items append to the existing checklist. Deduplication is by `activityConfigId` — if a rolled-over item shares a config ID with a planned item, the planned item wins (it has fresh `contentGuide`).
+**Plan already exists:** If Shelly already generated a plan for today before rollover fires, rolled-over items merge into the existing checklist. Same-workbook items are **deduped by `isSameWorkbook` (Apr 21, 2026 update)** — not by exact label match. When a rolled item and a planned item reference the same workbook (via `activityConfigId`, normalized name, substring, or shared-word+same-subject fuzzy match), the **rolled item replaces the planned item** because the rolled item carries a specific lesson number and represents actual unfinished work. The planned item's skip guidance, block, and other planner metadata are copied onto the surviving rolled item. When both have lesson numbers, the higher lesson wins (the planner already advanced past yesterday's unfinished lesson).
 
 ### State: `rolledOver` flag
 

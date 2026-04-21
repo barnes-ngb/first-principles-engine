@@ -194,6 +194,7 @@ export default function TodayChecklist({
   const [gradeNote, setGradeNote] = useState<{ index: number; text: string } | null>(null)
   const [expandedCaptureIndex, setExpandedCaptureIndex] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [showDeferred, setShowDeferred] = useState(false)
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000)
     return () => clearInterval(id)
@@ -250,25 +251,29 @@ export default function TodayChecklist({
   const checklist = essentialCount > 0
     ? rawChecklist
     : rawChecklist.map((item, i) => ({ ...item, mvdEssential: i < 3 }))
-  const completedCount = checklist.filter((item) => item.completed).length
+  const deferredCount = checklist.filter((item) => item.deferredByBudget).length
+  const isItemVisible = (item: ChecklistItemType) => showDeferred || !item.deferredByBudget
+  const completedCount = checklist.filter((item) => item.completed && isItemVisible(item)).length
+  const visibleCount = checklist.filter(isItemVisible).length
   const parseMinutesFromLabel = (label: string): number => {
     const match = label.match(/\((\d+)m\)/)
     return match ? parseInt(match[1]) : 0
   }
   const totalPlannedMinutes = checklist.reduce((sum, item) => {
+    if (!isItemVisible(item)) return sum
     return sum + (item.plannedMinutes ?? item.estimatedMinutes ?? parseMinutesFromLabel(item.label))
   }, 0)
   const completedMinutes = checklist
-    .filter((ci) => ci.completed)
+    .filter((ci) => ci.completed && isItemVisible(ci))
     .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
   const xp = calculateXp(dayLog, activeRoutineItems)
   const isLincoln = selectedChild?.name?.toLowerCase() === 'lincoln'
 
   const estimatedFinishLabel = (() => {
     const remainingMinutes = checklist
-      .filter((ci) => !ci.completed)
+      .filter((ci) => !ci.completed && isItemVisible(ci))
       .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
-    if (remainingMinutes > 0 && completedCount < checklist.length) {
+    if (remainingMinutes > 0 && completedCount < visibleCount) {
       const est = new Date(now + remainingMinutes * 60_000)
       return ` \u00B7 Est. finish: ${formatTime12h(est)}`
     }
@@ -433,7 +438,7 @@ export default function TodayChecklist({
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 0.5 }}>
             <Typography variant="body2" color="text.secondary">
               {formatMinutes(totalPlannedMinutes)} planned{' \u00B7 '}
-              {completedCount} of {checklist.length} done
+              {completedCount} of {visibleCount} done
               {completedMinutes > 0 && ` \u00B7 ${formatMinutes(completedMinutes)} logged`}
               {estimatedFinishLabel}
             </Typography>
@@ -455,6 +460,8 @@ export default function TodayChecklist({
 
           {/* Checklist items — with block headers when block data exists */}
           {checklist.map((item, index) => {
+            // Hide budget-deferred items unless the user expands them
+            if (item.deferredByBudget && !showDeferred) return null
             // Show block header when block changes
             const prevBlock = index > 0 ? (checklist[index - 1] as ChecklistItemType).block : undefined
             const showBlockHeader = item.block && item.block !== prevBlock
@@ -947,6 +954,27 @@ export default function TodayChecklist({
               </Box>
             )
           })}
+
+          {/* Budget-deferred note — hidden items tuck behind a tap-to-expand row */}
+          {deferredCount > 0 && (
+            <Box
+              onClick={() => setShowDeferred((v) => !v)}
+              role="button"
+              tabIndex={0}
+              sx={{
+                px: 1,
+                py: 0.75,
+                cursor: 'pointer',
+                color: 'text.secondary',
+                fontSize: '0.8rem',
+                '&:hover': { color: 'text.primary' },
+              }}
+            >
+              {showDeferred
+                ? `Hide ${deferredCount} deferred ${deferredCount === 1 ? 'item' : 'items'}`
+                : `${deferredCount} ${deferredCount === 1 ? 'item' : 'items'} deferred to fit today’s schedule — tap to show`}
+            </Box>
+          )}
 
           {/* Engagement pattern insights */}
           {itemsWithEngagement.length >= 2 && (
