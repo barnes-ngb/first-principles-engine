@@ -13,6 +13,8 @@ import VoxelCharacter from './VoxelCharacter'
 import BrothersVoxelScene from './BrothersVoxelScene'
 import PoseButtons from './PoseButtons'
 import HeroAnimationDebugPanel from './HeroAnimationDebugPanel'
+import ArmorDebugPanel from './ArmorDebugPanel'
+import type { ArmorDebugOverrides } from './voxel/armorDebugTuning'
 
 interface AvatarCharacterDisplayProps {
   profile: AvatarProfile
@@ -47,6 +49,9 @@ interface AvatarCharacterDisplayProps {
   heroDebugEnabled?: boolean
   heroAnimationTuning: HeroAnimationTuningOverride
   onHeroAnimationTuningChange: (next: HeroAnimationTuningOverride) => void
+  armorDebugEnabled?: boolean
+  armorDebugValues: ArmorDebugOverrides
+  onArmorDebugChange: (next: ArmorDebugOverrides) => void
   /**
    * Armor gallery tab preview: when set, the 3D character shows all 6 armor
    * pieces at this tier regardless of what's forged/equipped. BrothersVoxelScene
@@ -86,6 +91,9 @@ export default function AvatarCharacterDisplay({
   heroDebugEnabled = false,
   heroAnimationTuning,
   onHeroAnimationTuningChange,
+  armorDebugEnabled = false,
+  armorDebugValues,
+  onArmorDebugChange,
   previewTier,
 }: AvatarCharacterDisplayProps) {
   console.log('[DISPLAY] previewTier prop:', previewTier)
@@ -276,6 +284,7 @@ export default function AvatarCharacterDisplay({
             onTierUp={onTierUp}
             proportions={proportions}
             animationTuningOverrides={heroAnimationTuning}
+            armorDebugOverrides={armorDebugEnabled ? armorDebugValues : undefined}
           />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
             <Box sx={{ flex: 1 }}>
@@ -354,6 +363,10 @@ export default function AvatarCharacterDisplay({
             </Box>
           </Box>
         </Box>
+      )}
+
+      {armorDebugEnabled && !brothersMode && (
+        <ArmorDebugPanel values={armorDebugValues} onChange={onArmorDebugChange} />
       )}
     </>
   )

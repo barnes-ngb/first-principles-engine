@@ -259,27 +259,50 @@ function buildIronHelmet(layout: BodyLayout): THREE.Group {
 
 function buildIronBreastplate(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
-  const { U, torsoCenter, torsoTop, torsoH, torsoW, torsoD, legTop, armH } = layout
+  const { U, torsoCenter, torsoTop, torsoH, torsoW, torsoD, legTop, armH, scale } = layout
+  const s = scale
 
-  // Main chest plate — sits ON TOP of body, slightly wider and thicker
-  const chestW = torsoW + U * 1.6
-  const chestH = torsoH + U * 0.4
-  const chestD = torsoD + U * 3
-  const chest = taggedBox(chestW, chestH, chestD, W, 'primary', 'breastplate_body')
-  chest.position.set(0, torsoCenter, U * 0.5)
-  group.add(chest)
+  // Solid plate armor — front, back, and side plates that together read as
+  // substantial steel, not stacked bands. Front/back plates are thick enough
+  // to cast a clear silhouette from the side; side plates bridge the gap.
+  const plateW = torsoW * 1.12
+  const plateH = torsoH * 0.9
+  const plateThickness = 0.22 * s
 
-  // Neck guard/collar
+  // Front plate — single solid block covering the torso front
+  const frontPlate = taggedBox(plateW, plateH, plateThickness, W, 'primary', 'breastplate_front')
+  frontPlate.position.set(0, torsoCenter, torsoD / 2 + plateThickness / 2)
+  group.add(frontPlate)
+
+  // Back plate — same footprint as the front
+  const backPlate = taggedBox(plateW, plateH, plateThickness, W, 'primary', 'breastplate_back')
+  backPlate.position.set(0, torsoCenter, -(torsoD / 2 + plateThickness / 2))
+  group.add(backPlate)
+
+  // Side plates — connect front to back so the armor wraps the torso
+  const sidePlateW = plateThickness
+  const sidePlateD = torsoD + plateThickness * 2
+  const sidePlateL = taggedBox(sidePlateW, plateH, sidePlateD, W, 'primary', 'breastplate_side_l')
+  sidePlateL.position.set(-(torsoW / 2 + sidePlateW / 2), torsoCenter, 0)
+  group.add(sidePlateL)
+  const sidePlateR = taggedBox(sidePlateW, plateH, sidePlateD, W, 'primary', 'breastplate_side_r')
+  sidePlateR.position.set(torsoW / 2 + sidePlateW / 2, torsoCenter, 0)
+  group.add(sidePlateR)
+
+  // Neck guard / gorget — sits above the chest plate
   const collar = taggedBox(torsoW - U * 1, U * 2.0, torsoD + U * 1.5, W, 'accent', 'breastplate_collar')
   collar.position.set(0, torsoTop + U * 1, 0)
   group.add(collar)
 
-  // Cross emblem on front
-  const crossV = taggedFlatBox(U * 1, torsoH * 0.5, U * 0.5, W, 'detail', 'cross_v')
-  crossV.position.set(0, torsoCenter + U * 1, chestD / 2 + U * 0.8)
+  // Cross emblem — protrudes from the front plate in a contrasting secondary
+  // color so it reads as raised relief, not flush paint.
+  const crossProtrusion = 0.09 * s
+  const crossZ = torsoD / 2 + plateThickness + crossProtrusion / 2
+  const crossV = taggedBox(U * 1.2, plateH * 0.55, crossProtrusion, W, 'secondary', 'cross_v')
+  crossV.position.set(0, torsoCenter + U * 1, crossZ)
   group.add(crossV)
-  const crossH = taggedFlatBox(torsoW * 0.75, U * 1, U * 0.5, W, 'detail', 'cross_h')
-  crossH.position.set(0, torsoCenter + torsoH * 0.2, chestD / 2 + U * 0.8)
+  const crossH = taggedBox(torsoW * 0.7, U * 1.2, crossProtrusion, W, 'secondary', 'cross_h')
+  crossH.position.set(0, torsoCenter + torsoH * 0.2, crossZ)
   group.add(crossH)
 
   // Pauldrons (shoulder guards)
@@ -314,18 +337,12 @@ function buildIronBreastplate(layout: BodyLayout): THREE.Group {
   armArmorR.userData.attachToArm = 'R'
   group.add(armArmorR)
 
-  // Bottom trim
-  const trim = taggedBox(chestW + U * 0.2, U * 1, chestD + U * 0.2, W, 'accent', 'breastplate_rim')
-  trim.position.set(0, legTop + U * 0.2, U * 0.5)
+  // Bottom rim wrapping the plate base
+  const trimW = plateW + U * 0.3
+  const trimD = torsoD + plateThickness * 2 + U * 0.3
+  const trim = taggedBox(trimW, U * 1, trimD, W, 'accent', 'breastplate_rim')
+  trim.position.set(0, legTop + U * 0.2, 0)
   group.add(trim)
-
-  // Horizontal plate lines
-  const plateSpacing = torsoH / 4
-  for (let i = 0; i < 3; i++) {
-    const plateLine = taggedFlatBox(chestW - U * 0.4, U * 0.3, chestD + U * 0.1, W, 'accent', `plate_line_${i}`)
-    plateLine.position.set(0, torsoTop - U * 1 - i * plateSpacing, U * 0.5)
-    group.add(plateLine)
-  }
 
   return group
 }
