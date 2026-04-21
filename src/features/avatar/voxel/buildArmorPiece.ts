@@ -444,25 +444,18 @@ function buildIronShoes(layout: BodyLayout): THREE.Group {
 function buildIronShield(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
   group.userData.attachToArm = 'L'
-  const { U, armH } = layout
-  const armMid = armH / 2
+  const { U, armH, scale: s } = layout
 
-  // IMPORTANT:
-  // Keep attachment translation (outward from arm + forward from torso) in parent-local space,
-  // and apply facing yaw only to a child "visual" group.
-  // Rotating the same node that also carries the attachment offset couples axes
-  // (x/z mix) and can pull the shield inward across the chest when arm pose changes.
+  // Attachment lives on parent-local "visual" group: translation positions it
+  // against the forearm; rotation presents the face outward/forward.
   const visual = new THREE.Group()
   visual.name = 'shield_visual'
-  visual.rotation.y = THREE.MathUtils.degToRad(75)
-  visual.rotation.x = -1.2 // ~70° tilt so shield face points forward/outward
-  group.add(visual)
+  visual.rotation.x = -1.0 // tilt forward ~57° so shield face presents outward
+  visual.rotation.y = 0.2  // slight yaw so it isn't perfectly perpendicular
 
-  // Attachment offset from arm pivot: outward (-X), down along forearm (-Y), forward (+Z)
-  const anchorX = -U * 2.4
-  const anchorY = -(armMid + U * 1)
-  const anchorZ = U * 4.0
-  visual.position.set(anchorX, anchorY, anchorZ)
+  // Strap position on the left forearm: barely outward, mid-forearm, slightly forward
+  visual.position.set(-0.1 * s, -1.5 * s, 0.4 * s)
+  group.add(visual)
 
   // Shield-local center
   const shX = 0

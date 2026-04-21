@@ -218,14 +218,13 @@ export function buildStoneShoes(layout: BodyLayout): THREE.Group {
 export function buildStoneShield(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
   group.userData.attachToArm = 'L'
-  const { U, armH } = layout
-  const armMid = armH / 2
+  const { U, armH, scale: s } = layout
 
   const visual = new THREE.Group()
   visual.name = 'shield_visual'
-  visual.rotation.y = THREE.MathUtils.degToRad(75)
-  visual.rotation.x = -1.2
-  visual.position.set(-U * 2.4, -(armMid + U * 1), U * 4.0)
+  visual.rotation.x = -1.0
+  visual.rotation.y = 0.2
+  visual.position.set(-0.1 * s, -1.5 * s, 0.4 * s)
   group.add(visual)
 
   const shieldH = armH * 1.15  // taller than iron
