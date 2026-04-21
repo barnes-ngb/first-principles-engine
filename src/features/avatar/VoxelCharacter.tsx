@@ -26,7 +26,6 @@ import { buildRoom } from './voxel/buildRoom'
 import { addOutlinesToGroup, removeOutlinesFromGroup } from './voxel/blockOutline'
 import { buildAccessory, getAccessoryAttachPoint, animateAccessories, getHiddenAccessories } from './voxel/buildAccessory'
 import { HERO_ANIMATION_TUNING, resolveHeroAnimationTuning, type HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
-import type { WeaponDebugValues } from './weaponDebug'
 import {
   getCurrentSeason,
   getSeasonalStarColor,
@@ -78,12 +77,6 @@ interface VoxelCharacterProps {
   proportions?: Partial<CharacterProportions>
   /** Optional runtime animation tuning overrides (debug only) */
   animationTuningOverrides?: HeroAnimationTuningOverride
-  /**
-   * TEMPORARY: when set, overrides the shield/sword group transforms each
-   * frame so we can tune position/rotation on-device. Remove once values are
-   * hardcoded into the builders.
-   */
-  weaponDebug?: WeaponDebugValues
   /** Per-tier forge record from the profile — drives per-piece geometry/material. */
   forgedPieces?: AvatarProfile['forgedPieces']
   /**
@@ -413,7 +406,6 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   animationTuningOverrides,
   forgedPieces,
   previewTier,
-  weaponDebug,
 }: VoxelCharacterProps, ref) {
   console.log('[VOXEL] previewTier prop:', previewTier)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -453,9 +445,6 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   const onTierUpRef = useRef(onTierUp)
   const ceremonyActiveRef = useRef(false)
   const sceneActiveRef = useRef(false)
-  // TEMPORARY: latest weapon debug values for the animate loop to read.
-  const weaponDebugRef = useRef<WeaponDebugValues | undefined>(weaponDebug)
-  weaponDebugRef.current = weaponDebug
 
   // Expose capture method to parent via ref
   useImperativeHandle(ref, () => ({
@@ -1097,24 +1086,6 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
               part.position.y = basePartY + tuning.footPlantY + swayLift
             }
           }
-        }
-      }
-
-      // TEMPORARY: apply weapon debug overrides each frame so on-device sliders
-      // mutate shield/sword transforms in real time. Remove with the rest of
-      // the weapon debug scaffolding once final values are baked in.
-      const debug = weaponDebugRef.current
-      if (debug) {
-        const s = ageGroup === 'younger' ? 0.85 : 1.0
-        const shieldDbg = armorGroupsRef.current.get('shield')
-        if (shieldDbg) {
-          shieldDbg.position.set(debug.shield.posX * s, debug.shield.posY * s, debug.shield.posZ * s)
-          shieldDbg.rotation.set(debug.shield.rotX, debug.shield.rotY, debug.shield.rotZ)
-        }
-        const swordDbg = armorGroupsRef.current.get('sword')
-        if (swordDbg) {
-          swordDbg.position.set(debug.sword.posX * s, debug.sword.posY * s, debug.sword.posZ * s)
-          swordDbg.rotation.set(debug.sword.rotX, debug.sword.rotY, debug.sword.rotZ)
         }
       }
 

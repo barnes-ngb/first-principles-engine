@@ -445,21 +445,13 @@ function buildIronShield(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
   group.userData.attachToArm = 'L'
   const { U, armH, scale: s } = layout
+  group.position.set(-1.80 * s, -1.70 * s, 0.80 * s)
+  group.rotation.set(-0.20, -3.04, -0.89)
 
-  // Attachment lives on parent-local "visual" group: translation positions it
-  // at the hand; rotation presents the face toward the viewer.
   const visual = new THREE.Group()
   visual.name = 'shield_visual'
-  // Position: forearm level, slightly forward
-  visual.position.set(
-    0,             // centered on arm (don't offset sideways)
-    -1.8 * s,      // forearm — between elbow (-1.5) and hand (-2.5)
-    0.6 * s,       // well forward of the arm so it doesn't clip the body
-  )
-  // Rotation: reset everything, then just point the face forward
-  visual.rotation.set(0, 0, 0)
-  visual.rotation.y = Math.PI  // 180° — flip face toward the viewer
-  visual.rotation.x = -0.2     // very slight backward lean (natural hold angle)
+  visual.position.set(0, -1.8 * s, 0.6 * s)
+  visual.rotation.set(-0.2, Math.PI, 0)
   group.add(visual)
 
   // Shield-local center
@@ -696,14 +688,11 @@ function buildShield(layout: BodyLayout, tier: string): THREE.Group {
 function buildSword(layout: BodyLayout, tier: string): THREE.Group {
   // Parent group holds attachment + grip pose; tier geometry is built
   // centered at origin with the blade pointing down, and nested inside.
-  // Position places the grip near the hand (bottom of arm), outward so
-  // the blade doesn't clip the leg, and slightly forward of the body.
   const parent = new THREE.Group()
   parent.userData.attachToArm = 'R'
   const s = layout.scale
-  parent.position.set(0.3 * s, -2.8 * s, 0.3 * s)
-  parent.rotation.x = -Math.PI / 2 + 0.15  // blade horizontal, slight forward tilt
-  parent.rotation.z = 0.1                  // slight outward cant (natural grip angle)
+  parent.position.set(0.30 * s, -2.80 * s, 0.30 * s)
+  parent.rotation.set(-1.42, 0.00, 0.10)
 
   let geom: THREE.Group
   switch (normalizeTier(tier)) {
