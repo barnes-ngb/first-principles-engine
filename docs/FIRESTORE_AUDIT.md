@@ -270,6 +270,34 @@ These queries filter/sort on multiple fields and likely need composite indexes. 
 
 **Observation:** Both are keyed by `{childId}` (one doc per child). They represent per-child metadata. `avatarProfiles` has XP/level data; `skillSnapshots` has evaluation data.
 
+**Extended `ConceptualBlock` shape (2026-04 Phase 1):** `SkillSnapshot.conceptualBlocks` remains the canonical array of raw blocker signals, now fed by four writers (evaluation, quest, scan, parent) with a lifecycle.
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | Human label. |
+| `affectedSkills` | string[] | Tags this block gates. |
+| `recommendation` | `'ADDRESS_NOW' \| 'DEFER'` | Legacy, preserved for old blocks. |
+| `rationale` | string | Why this is a block. |
+| `strategies?` | string[] | Interventions (ADDRESS_NOW). |
+| `deferNote?` | string | When to revisit (DEFER). |
+| `detectedAt` | string (ISO) | First write timestamp. |
+| `evaluationSessionId` | string | Linking session; empty for non-eval sources. |
+| `id?` | string | Stable slug ID (e.g. `short-vowel-i-vs-e`). Enables merge-by-ID. |
+| `status?` | `'ADDRESS_NOW' \| 'DEFER' \| 'RESOLVING' \| 'RESOLVED'` | Lifecycle state. Preferred over `recommendation` when present. |
+| `evidence?` | string | Per-block evidence string; `mergeBlock` appends on reinforcement. |
+| `firstDetectedAt?` | string (ISO) | First creation time. |
+| `lastReinforcedAt?` | string (ISO) | Most recent reinforcement. |
+| `sessionCount?` | number | How many sessions have seen this block. |
+| `resolvedAt?` | string (ISO) | Set when status transitions to RESOLVED. |
+| `source?` | `'evaluation' \| 'quest' \| 'scan' \| 'parent'` | First detector. |
+| `lastSource?` | same | Most recent reinforcement source. |
+| `specificWords?` | string[] | Words the child struggles with (e.g. `['bed','bid']`). |
+| `specificQuestions?` | string[] | Question IDs that triggered detection. |
+| `correctAttempts?` | number | Cumulative correct answers observed on this skill. |
+| `totalAttempts?` | number | Cumulative total attempts observed on this skill. |
+
+Writes are always via `updateDoc` so unrelated snapshot fields are preserved. `blocksUpdatedAt` is refreshed on every write. All new fields are optional — legacy blocks without them continue to work and surface as ADDRESS_NOW (via `recommendation` fallback) in AI context.
+
 **New field (2026-04):** `workingLevels?: WorkingLevels` — per-domain working levels for Knowledge Mine progression.
 
 ```

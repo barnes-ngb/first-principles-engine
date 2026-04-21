@@ -1,5 +1,16 @@
 # Learning Engine Audit — April 2026
 
+> **2026-04-21 addendum — Phase 1 "Feed Blockers from Everywhere" landed.**
+> `conceptualBlocks` now has four writers and a lifecycle.
+>
+> Writers: (1) guided eval pattern analysis — now **merges** via `mergeBlock` rather than overwriting; (2) quest `endSession` via `detectBlockersFromSession` (2+ wrong at same skill); (3) worksheet scan via `detectBlockersFromScan` (too-hard / skip / modify / behind-aligned skills); (4) Shelly's "Stuck" / "Got it" mastery chip via `buildStuckBlock` / `buildGotItReinforcement`.
+>
+> Lifecycle: ADDRESS_NOW → RESOLVING (≥3 correct) → RESOLVED (≥5 correct across ≥2 sessions with no new wrongs). RESOLVING → ADDRESS_NOW on regression. RESOLVED blocks stay in the array for history. DEFER is static unless new evidence forces a change.
+>
+> AI context: `formatConceptualBlocks` in `contextSlices.ts` now emits ADDRESS_NOW, RESOLVING, and DEFER sections separately. RESOLVED blocks are omitted from prompts.
+>
+> Helpers live in `src/core/utils/blockerLifecycle.ts`. See `docs/EVALUATION_METHODOLOGY_2026-04.md` §3.
+
 ## Journey 1: Shelly Marks Mastery on Skill Snapshot
 
 **Trace:** Shelly opens Progress > Skill Snapshot, changes a skill's level to "secure" (the closest UI action to "marks mastery").

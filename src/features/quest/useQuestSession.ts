@@ -11,7 +11,11 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { activityConfigsCollection, db, evaluationSessionsCollection, hoursCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { ConceptualBlock, EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'
-import { mergeBlock } from '../../core/utils/blockerLifecycle'
+import {
+  mergeBlock,
+  sessionEvidenceFromQuestions,
+  updateBlockerLifecycle,
+} from '../../core/utils/blockerLifecycle'
 import { detectBlockersFromSession } from './detectBlockers'
 import type { EvaluationDomain } from '../../core/types/enums'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
@@ -922,18 +926,26 @@ export function useQuestSession() {
 
         await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)), { merge: true })
 
-        // ── Phase 1: detect + merge blockers from this quest session ──
+        // ── Phase 1: detect + merge blockers, then advance lifecycle on all blocks ──
         try {
           const detected = detectBlockersFromSession(questions, questMode, { sessionId: docId })
-          if (detected.length > 0) {
-            let merged: ConceptualBlock[] = existing.conceptualBlocks ?? []
-            for (const b of detected) {
-              // Every detected block has an id (generated inside detectBlockersFromSession).
-              if (!b.id) continue
-              merged = mergeBlock(merged, b as Parameters<typeof mergeBlock>[1])
-            }
+          let merged: ConceptualBlock[] = existing.conceptualBlocks ?? []
+          for (const b of detected) {
+            if (!b.id) continue
+            merged = mergeBlock(merged, b as Parameters<typeof mergeBlock>[1])
+          }
+
+          // Advance lifecycle using this session's correct/total counts per skill.
+          const evidence = sessionEvidenceFromQuestions(questions)
+          const next = updateBlockerLifecycle(merged, evidence)
+          const changed =
+            detected.length > 0 ||
+            next.length !== (existing.conceptualBlocks ?? []).length ||
+            next.some((b, i) => b.status !== (existing.conceptualBlocks ?? [])[i]?.status)
+
+          if (changed) {
             await updateDoc(snapshotRef, {
-              conceptualBlocks: JSON.parse(JSON.stringify(merged)),
+              conceptualBlocks: JSON.parse(JSON.stringify(next)),
               blocksUpdatedAt: new Date().toISOString(),
             })
           }
