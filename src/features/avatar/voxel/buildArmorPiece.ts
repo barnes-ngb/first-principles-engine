@@ -704,8 +704,8 @@ function buildSword(layout: BodyLayout, tier: string): THREE.Group {
   parent.userData.attachToArm = 'R'
   const s = layout.scale
   parent.position.set(0.3 * s, -2.8 * s, 0.3 * s)
-  parent.rotation.x = 0.15  // slight forward tilt (blade angles away from body)
-  parent.rotation.z = 0.1   // slight outward cant (natural grip angle)
+  parent.rotation.x = -Math.PI / 2 + 0.15  // blade horizontal, slight forward tilt
+  parent.rotation.z = 0.1                  // slight outward cant (natural grip angle)
 
   let geom: THREE.Group
   switch (normalizeTier(tier)) {
