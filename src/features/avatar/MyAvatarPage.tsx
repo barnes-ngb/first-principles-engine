@@ -67,8 +67,6 @@ import { deriveUnlockedTiersFromForged, getDisplayArmorTier, getTierLockReason }
 import { calculateTier } from './voxel/tierMaterials'
 import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
-import type { WeaponDebugValues } from './weaponDebug'
-import { WEAPON_DEBUG_DEFAULTS } from './weaponDebug'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
 import { getDailyArmorStatusFromSession, getBestOfSlotForgedPieces } from './armorStatus'
@@ -266,11 +264,6 @@ export default function MyAvatarPage() {
   const heroDebugEnabled = typeof window !== 'undefined'
     && new URLSearchParams(window.location.search).get('heroDebug') === '1'
   const [heroAnimationTuning, setHeroAnimationTuning] = useState<HeroAnimationTuningOverride>({})
-  // TEMPORARY weapon-tuning sliders. Flip DEBUG_WEAPONS to false (or delete the
-  // related panel/props) once final shield/sword transforms are hardcoded into
-  // the builders in `voxel/buildArmorPiece.ts`.
-  const DEBUG_WEAPONS = true
-  const [weaponDebug, setWeaponDebug] = useState<WeaponDebugValues>(WEAPON_DEBUG_DEFAULTS)
   const siblingChild = children.find((c) => c.id !== childId)
   const siblingId = brothersMode ? siblingChild?.id : undefined
   const siblingProfile = useAvatarProfile(familyId, siblingId)
@@ -1383,9 +1376,6 @@ export default function MyAvatarPage() {
           heroDebugEnabled={heroDebugEnabled}
           heroAnimationTuning={heroAnimationTuning}
           onHeroAnimationTuningChange={setHeroAnimationTuning}
-          weaponDebugEnabled={DEBUG_WEAPONS}
-          weaponDebug={weaponDebug}
-          onWeaponDebugChange={setWeaponDebug}
           previewTier={previewTier}
           onTierUp={async (_oldTier, newTier) => {
             setCeremonyActive(false)
