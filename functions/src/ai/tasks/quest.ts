@@ -12,6 +12,7 @@ import { buildContextForTask } from "../contextSlices.js";
 
 // Import quest-specific prompt builder from chat.ts
 import { buildQuestPrompt } from "../chat.js";
+import type { QuestBlockerContext } from "../chat.js";
 
 export const handleQuest = async (
   ctx: ChatTaskContext,
@@ -175,8 +176,46 @@ export const handleQuest = async (
     console.warn("Failed to load word progress for quest context", err);
   }
 
+  // Extract ADDRESS_NOW + RESOLVING blockers from skill snapshot for targeted probing.
+  // Phase 2 of evaluation methodology (§4): 2-3 quest questions deliberately
+  // test these blockers, and the AI tags them with a stable `targetedBlockerId`
+  // so the lifecycle can weight targeted-question performance.
+  const activeBlockers: QuestBlockerContext[] = [];
+  const rawBlocks = snapshotData?.conceptualBlocks ?? [];
+  for (const b of rawBlocks) {
+    if (!b.id) continue;
+    const status = (b.status || b.recommendation || "ADDRESS_NOW").toUpperCase();
+    if (status !== "ADDRESS_NOW" && status !== "RESOLVING") continue;
+    activeBlockers.push({
+      id: b.id,
+      name: b.name,
+      status: status as "ADDRESS_NOW" | "RESOLVING",
+      affectedSkills: b.affectedSkills ?? [],
+      rationale: b.rationale,
+      specificWords: b.specificWords,
+    });
+  }
+
+  // Whether the child has any recent scan context in the prompt. The
+  // recentScans slice (loaded above via buildContextForTask) starts with
+  // "RECENT WORKBOOK SCANS" when non-empty.
+  const hasRecentScans = sections.some((s) =>
+    s.includes("RECENT WORKBOOK SCANS"),
+  );
+
   // Append quest-specific interactive prompt
-  sections.push(buildQuestPrompt(domain || "reading", suggestedStartLevel, questMode));
+  sections.push(
+    buildQuestPrompt(domain || "reading", suggestedStartLevel, questMode, {
+      activeBlockers,
+      hasRecentScans,
+    }),
+  );
+
+  console.log(
+    `[quest] targeted blockers: ${activeBlockers.length} (${activeBlockers
+      .map((b) => `${b.id}:${b.status}`)
+      .join(", ")}), hasRecentScans=${hasRecentScans}`,
+  );
 
   const systemPrompt = sections.join("\n\n");
   const model = modelForTask("quest");

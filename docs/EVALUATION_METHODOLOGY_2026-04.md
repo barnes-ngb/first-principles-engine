@@ -77,7 +77,7 @@ Shipped across four chunks on `claude/add-feed-blockers-lifecycle-G9coR`:
 - **Eval Apply fix.** `EvaluateChatPage.handleSaveAndApply` now merges pattern-analysis blocks via `mergeBlock` and writes via `updateDoc` instead of overwriting the whole array. Blocks from quest/scan/parent writers survive every Apply.
 - **AI context fix.** `formatConceptualBlocks` in `contextSlices.ts` now emits three sections: ADDRESS_NOW, RESOLVING (with "keep probing gently" framing), and DEFER (with "do NOT push" framing). RESOLVED blocks are omitted from context but kept in the array for history.
 
-## 4. Phase 2 — Gap-Targeted Quest Questions
+## 4. Phase 2 — Gap-Targeted Quest Questions ✅ Landed 2026-04-21
 
 **Goal.** Two to three of every ten quest questions deliberately target known blockers.
 
@@ -98,6 +98,13 @@ The point: Lincoln's quest should reflect what his actual week has looked like. 
 ### Effort estimate: **Small**
 
 Prompt change only. No new data model. The signals it consumes already exist once Phase 1 ships. The hardest part is writing the prompt so the probes stay invisible and Lincoln still feels like he's mining diamonds.
+
+### Landed 2026-04-21
+
+- **Prompt additions (`functions/src/ai/chat.ts`).** `buildQuestPrompt` gained an optional `extras` arg and two section builders: `buildKnownBlockersSection` (ADDRESS_NOW + RESOLVING blocks with stable ids, affected skills, example words, rationale, and a 0 / 1 / 2+ distribution rule) and `buildRecentCurriculumSection` (references the `recentScans` context slice and suggests 1-2 optional reinforcement questions). Both sections are injected just before RESPONSE FORMAT in the reading-phonics, math, and comprehension quest prompts. RESPONSE FORMAT schemas now include `"targetedBlockerId": null` with a "use the exact id from KNOWN BLOCKERS" note.
+- **Context wiring (`functions/src/ai/tasks/quest.ts`).** Filters `snapshotData.conceptualBlocks` to ADDRESS_NOW + RESOLVING, maps to `QuestBlockerContext`, and checks whether the already-loaded `recentScans` slice produced a RECENT WORKBOOK SCANS section. Passes both into `buildQuestPrompt`. Shared `SnapshotData` type (`chatTypes.ts`) extended with `conceptualBlocks`, and `chat.ts` loads them from the skill snapshot doc.
+- **Targeted-evidence signal (`src/features/quest/*`, `src/core/utils/blockerLifecycle.ts`).** `QuestQuestion` and `SessionQuestion` gained optional `targetedBlockerId`. `parseQuestBlock` reads the field from the AI response and both answer + skip flows pass it through. `sessionEvidenceFromQuestions` now produces `targetedCorrect` / `targetedTotal` subcounts alongside `correctCount` / `totalCount`, attributing targeted attempts to the AI-specified block id (and still crediting the skill-derived block for off-target hits). `updateBlockerLifecycle` weights targeted correct/total by `TARGETED_EVIDENCE_WEIGHT = 2` when advancing toward RESOLVING / RESOLVED — a deliberately-probed correct answer counts as 2 toward the threshold, reflecting that it's a stronger signal than an incidental hit. DEFER and RESOLVED branches still follow their existing rules.
+- **Tests.** New tests in `src/core/utils/blockerLifecycle.test.ts` cover targeted-correct weighting (ADDRESS_NOW → RESOLVING from 2 targeted correct, RESOLVING → RESOLVED from 1 targeted correct when cumulative reaches 5, no advance when the targeted answer was wrong, skill/targeted-id mismatch splits attribution). New tests in `functions/src/ai/chat.test.ts` cover `buildKnownBlockersSection`, `buildRecentCurriculumSection`, and `buildQuestPrompt` extras for reading, math, and empty-blocker cases.
 
 ---
 

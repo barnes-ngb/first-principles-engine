@@ -14,12 +14,25 @@ export interface WorkingLevelEntry {
   evidence?: string;
 }
 
+export interface SnapshotConceptualBlock {
+  id?: string;
+  name: string;
+  affectedSkills: string[];
+  recommendation?: string;
+  status?: string;
+  rationale: string;
+  strategies?: string[];
+  deferNote?: string;
+  specificWords?: string[];
+}
+
 export interface SnapshotData {
   prioritySkills?: Array<{ tag: string; label: string; level: string }>;
   supports?: Array<{ label: string; description: string }>;
   stopRules?: Array<{ label: string; trigger: string; action: string }>;
   completedPrograms?: string[];
   workingLevels?: Record<string, WorkingLevelEntry>;
+  conceptualBlocks?: SnapshotConceptualBlock[];
 }
 
 /** Context passed to every chat task handler. */

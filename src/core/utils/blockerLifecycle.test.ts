@@ -347,6 +347,8 @@ describe('sessionEvidenceFromQuestions', () => {
       blockId: 'phonics-short-i-vs-e',
       correctCount: 2,
       totalCount: 3,
+      targetedCorrect: undefined,
+      targetedTotal: undefined,
     })
   })
 
@@ -363,6 +365,140 @@ describe('sessionEvidenceFromQuestions', () => {
   it('returns empty array when no questions have skills', () => {
     const ev = sessionEvidenceFromQuestions([{ correct: true }])
     expect(ev).toHaveLength(0)
+  })
+
+  it('tags targeted counts when targetedBlockerId matches the skill-derived id', () => {
+    const ev = sessionEvidenceFromQuestions([
+      {
+        skill: 'phonics.short-i-vs-e',
+        correct: true,
+        targetedBlockerId: 'phonics-short-i-vs-e',
+      },
+      { skill: 'phonics.short-i-vs-e', correct: false },
+      {
+        skill: 'phonics.short-i-vs-e',
+        correct: true,
+        targetedBlockerId: 'phonics-short-i-vs-e',
+      },
+    ])
+    expect(ev).toHaveLength(1)
+    expect(ev[0]).toEqual({
+      blockId: 'phonics-short-i-vs-e',
+      correctCount: 2,
+      totalCount: 3,
+      targetedCorrect: 2,
+      targetedTotal: 2,
+    })
+  })
+
+  it('attributes targeted evidence to the targeted block and incidental evidence to the skill block when they differ', () => {
+    const ev = sessionEvidenceFromQuestions([
+      {
+        skill: 'phonics.digraph-oo',
+        correct: true,
+        targetedBlockerId: 'short-vowel-i-vs-e',
+      },
+    ])
+    const targeted = ev.find((e) => e.blockId === 'short-vowel-i-vs-e')
+    const incidental = ev.find((e) => e.blockId === 'phonics-digraph-oo')
+    expect(targeted).toMatchObject({
+      blockId: 'short-vowel-i-vs-e',
+      correctCount: 1,
+      totalCount: 1,
+      targetedCorrect: 1,
+      targetedTotal: 1,
+    })
+    expect(incidental).toMatchObject({
+      blockId: 'phonics-digraph-oo',
+      correctCount: 1,
+      totalCount: 1,
+      targetedCorrect: undefined,
+      targetedTotal: undefined,
+    })
+  })
+
+  it('records targeted evidence when skill is missing but targetedBlockerId is set', () => {
+    const ev = sessionEvidenceFromQuestions([
+      { correct: true, targetedBlockerId: 'my-block' },
+      { correct: false, targetedBlockerId: 'my-block' },
+    ])
+    expect(ev).toHaveLength(1)
+    expect(ev[0]).toEqual({
+      blockId: 'my-block',
+      correctCount: 1,
+      totalCount: 2,
+      targetedCorrect: 1,
+      targetedTotal: 2,
+    })
+  })
+})
+
+describe('updateBlockerLifecycle — targeted evidence weighting', () => {
+  const addressNow: ConceptualBlock = {
+    id: 'short-i-vs-e',
+    name: 'Short vowel i vs e',
+    affectedSkills: ['phonics.short-i-vs-e'],
+    recommendation: 'ADDRESS_NOW',
+    status: 'ADDRESS_NOW',
+    rationale: 'Base',
+    detectedAt: '2026-04-01T12:00:00Z',
+    firstDetectedAt: '2026-04-01T12:00:00Z',
+    lastReinforcedAt: '2026-04-01T12:00:00Z',
+    sessionCount: 1,
+    source: 'quest',
+    lastSource: 'quest',
+    evaluationSessionId: '',
+  }
+
+  it('advances ADDRESS_NOW → RESOLVING on 2 targeted-correct (weighted = 4) even though incidental would fall short', () => {
+    const result = updateBlockerLifecycle([addressNow], [
+      {
+        blockId: 'short-i-vs-e',
+        correctCount: 2,
+        totalCount: 2,
+        targetedCorrect: 2,
+        targetedTotal: 2,
+      },
+    ])
+    expect(result[0].status).toBe('RESOLVING')
+    // Weighted delta = 2 * TARGETED_EVIDENCE_WEIGHT(2) = 4
+    expect(result[0].correctAttempts).toBe(4)
+    expect(result[0].totalAttempts).toBe(4)
+  })
+
+  it('still blocks advancement if the targeted question was wrong (session has any wrong)', () => {
+    const result = updateBlockerLifecycle([addressNow], [
+      {
+        blockId: 'short-i-vs-e',
+        correctCount: 1,
+        totalCount: 2,
+        targetedCorrect: 1,
+        targetedTotal: 2,
+      },
+    ])
+    expect(result[0].status).toBe('ADDRESS_NOW')
+  })
+
+  it('targeted correct accelerates RESOLVING → RESOLVED when sessions and no wrong allow it', () => {
+    const resolving: ConceptualBlock = {
+      ...addressNow,
+      status: 'RESOLVING',
+      sessionCount: 2,
+      correctAttempts: 3,
+      totalAttempts: 3,
+    }
+    const result = updateBlockerLifecycle([resolving], [
+      {
+        blockId: 'short-i-vs-e',
+        correctCount: 1,
+        totalCount: 1,
+        targetedCorrect: 1,
+        targetedTotal: 1,
+      },
+    ])
+    expect(result[0].status).toBe('RESOLVED')
+    // 3 + (1 * 2 weight) = 5, meets RESOLVED_THRESHOLD
+    expect(result[0].correctAttempts).toBe(5)
   })
 })
 
