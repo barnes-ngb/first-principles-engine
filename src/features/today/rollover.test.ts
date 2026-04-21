@@ -84,7 +84,7 @@ describe('mergeRolledItems', () => {
     ...overrides,
   })
 
-  it('appends rolled items to end of today checklist', () => {
+  it('appends rolled items to end of today checklist when no workbook match', () => {
     const today = [make({ label: 'Today Item' })]
     const rolled = [make({ label: 'Yesterday Item' })]
     const result = mergeRolledItems(today, rolled, '2026-04-10')
@@ -96,21 +96,105 @@ describe('mergeRolledItems', () => {
     expect(result[1].rolledOverFrom).toBe('2026-04-10')
   })
 
-  it('deduplicates by activityConfigId', () => {
+  it('rolled item with matching activityConfigId REPLACES planned item', () => {
     const today = [make({ label: 'GATB Math', activityConfigId: 'cfg-1' })]
     const rolled = [make({ label: 'GATB Math L5', activityConfigId: 'cfg-1' })]
     const result = mergeRolledItems(today, rolled, '2026-04-10')
 
     expect(result).toHaveLength(1)
-    expect(result[0].label).toBe('GATB Math')
+    expect(result[0].label).toBe('GATB Math L5')
+    expect(result[0].rolledOver).toBe(true)
+    expect(result[0].rolledOverFrom).toBe('2026-04-10')
   })
 
-  it('deduplicates by label (case-insensitive)', () => {
-    const today = [make({ label: 'Read Aloud' })]
-    const rolled = [make({ label: 'read aloud' })]
+  it('rolled "GATB Reading Booster Lesson 17" replaces planned "GATB Reading Booster B Book Set"', () => {
+    const today = [
+      make({ label: 'GATB Reading Booster B Book Set', subjectBucket: 'Reading' }),
+    ]
+    const rolled = [
+      make({ label: 'GATB Reading Booster — Lesson 17', subjectBucket: 'Reading' }),
+    ]
     const result = mergeRolledItems(today, rolled, '2026-04-10')
 
     expect(result).toHaveLength(1)
+    expect(result[0].label).toBe('GATB Reading Booster — Lesson 17')
+    expect(result[0].rolledOver).toBe(true)
+  })
+
+  it('rolled "Mathseeds Lesson 3" replaces planned "Mathseeds Mental Minute"', () => {
+    const today = [make({ label: 'Mathseeds Mental Minute', subjectBucket: 'Math' })]
+    const rolled = [make({ label: 'Mathseeds Lesson 3', subjectBucket: 'Math' })]
+    const result = mergeRolledItems(today, rolled, '2026-04-10')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].label).toBe('Mathseeds Lesson 3')
+    expect(result[0].rolledOver).toBe(true)
+  })
+
+  it('rolled item with no workbook match is appended normally', () => {
+    const today = [make({ label: 'Math Warm Up', subjectBucket: 'Math' })]
+    const rolled = [make({ label: 'Art Project', subjectBucket: 'Art' })]
+    const result = mergeRolledItems(today, rolled, '2026-04-10')
+
+    expect(result).toHaveLength(2)
+    expect(result[1].label).toBe('Art Project')
+    expect(result[1].rolledOver).toBe(true)
+  })
+
+  it('two rolled items for different workbooks both get kept', () => {
+    const rolled = [
+      make({ label: 'GATB Math Lesson 5', subjectBucket: 'Math' }),
+      make({ label: 'GATB Reading Lesson 12', subjectBucket: 'Reading' }),
+    ]
+    const result = mergeRolledItems([], rolled, '2026-04-10')
+
+    expect(result).toHaveLength(2)
+    expect(result[0].label).toBe('GATB Math Lesson 5')
+    expect(result[1].label).toBe('GATB Reading Lesson 12')
+  })
+
+  it('when both have lesson numbers, higher number wins (planned higher ⇒ planned kept)', () => {
+    const today = [make({ label: 'GATB Math — Lesson 18', subjectBucket: 'Math' })]
+    const rolled = [make({ label: 'GATB Math — Lesson 17', subjectBucket: 'Math' })]
+    const result = mergeRolledItems(today, rolled, '2026-04-10')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].label).toBe('GATB Math — Lesson 18')
+    // Planned item kept as-is — not rolled
+    expect(result[0].rolledOver).toBeUndefined()
+  })
+
+  it('when both have lesson numbers, higher number wins (rolled higher ⇒ rolled kept)', () => {
+    const today = [make({ label: 'GATB Math — Lesson 10', subjectBucket: 'Math' })]
+    const rolled = [make({ label: 'GATB Math — Lesson 17', subjectBucket: 'Math' })]
+    const result = mergeRolledItems(today, rolled, '2026-04-10')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].label).toBe('GATB Math — Lesson 17')
+    expect(result[0].rolledOver).toBe(true)
+  })
+
+  it('skip guidance copied from planned to rolled when rolled lacks it', () => {
+    const today = [
+      make({
+        label: 'GATB Reading Booster B Book Set',
+        subjectBucket: 'Reading',
+        skipGuidance: 'If stuck, re-read the example aloud together.',
+        block: 'core-reading',
+        plannedMinutes: 30,
+      }),
+    ]
+    const rolled = [
+      make({ label: 'GATB Reading Booster — Lesson 17', subjectBucket: 'Reading' }),
+    ]
+    const result = mergeRolledItems(today, rolled, '2026-04-10')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].label).toBe('GATB Reading Booster — Lesson 17')
+    expect(result[0].skipGuidance).toBe('If stuck, re-read the example aloud together.')
+    expect(result[0].block).toBe('core-reading')
+    expect(result[0].plannedMinutes).toBe(30)
+    expect(result[0].rolledOver).toBe(true)
   })
 
   it('resets completion-related fields on rolled items', () => {
@@ -217,26 +301,21 @@ describe('computeRollover', () => {
     expect(computeRollover('2026-04-13', [], null)).toBeNull()
   })
 
-  it('merges with existing today checklist without duplicating', () => {
+  it('merges with existing today checklist, replacing same-workbook items', () => {
     const prevLog = makeDayLog([
-      make({ label: 'Reading', activityConfigId: 'cfg-1' }),
-      make({ label: 'Math', activityConfigId: 'cfg-2' }),
+      make({ label: 'Reading Lesson 5', activityConfigId: 'cfg-1' }),
+      make({ label: 'Math Lesson 3', activityConfigId: 'cfg-2' }),
     ])
     const today = [make({ label: 'Reading', activityConfigId: 'cfg-1' })]
     const result = computeRollover('2026-04-13', today, prevLog)
 
     expect(result).not.toBeNull()
     expect(result).toHaveLength(2)
-    expect(result![0].label).toBe('Reading')
-    expect(result![0].rolledOver).toBeUndefined() // existing item, not touched
-    expect(result![1].label).toBe('Math')
+    // Planned "Reading" replaced by rolled "Reading Lesson 5"
+    expect(result![0].label).toBe('Reading Lesson 5')
+    expect(result![0].rolledOver).toBe(true)
+    expect(result![1].label).toBe('Math Lesson 3')
     expect(result![1].rolledOver).toBe(true)
-  })
-
-  it('returns null when all would-be-rolled items are duplicates', () => {
-    const prevLog = makeDayLog([make({ label: 'Same Item' })])
-    const today = [make({ label: 'Same Item' })]
-    expect(computeRollover('2026-04-13', today, prevLog)).toBeNull()
   })
 
   it('chain rollover works — previously rolled items roll again', () => {
