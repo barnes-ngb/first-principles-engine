@@ -668,13 +668,20 @@ export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
 
   lines.push(`Generate a weekly school plan (Monday–Friday) with ${timeBudgetMinutes} minutes/day budget.`)
   lines.push('')
+  lines.push('HARD BUDGET RULE:')
+  lines.push(`- The daily time budget is ${timeBudgetMinutes} minutes. The SUM of estimatedMinutes per day MUST be ≤ ${timeBudgetMinutes}.`)
+  lines.push('- If routine + app blocks alone exceed the budget, reduce routine items — do NOT generate a plan that exceeds the budget and then warn about it. The plan MUST fit the day.')
+  lines.push('- A fewer-item plan that fits is ALWAYS better than a longer plan that overflows. A 3-item day is acceptable. A 21-item day is not.')
+  lines.push('- Recent weekly reviews show 0% completion on 13-item days; aim for 8–10 items/day (fewer on MVD/low-energy days).')
+  lines.push('')
 
   if (subjectTimeDefaults && Object.keys(subjectTimeDefaults).length > 0) {
-    lines.push('Subject time defaults (use these as the baseline for estimatedMinutes per item):')
+    lines.push('Subject time defaults (use these as the TOTAL minutes per subject per day, not per item):')
     for (const [subject, minutes] of Object.entries(subjectTimeDefaults)) {
       const label = subject === 'Other' ? 'Formation/Prayer' : subject === 'LanguageArts' ? 'Language Arts' : subject === 'SocialStudies' ? 'Social Studies' : subject
       lines.push(`- ${label}: ${minutes} min/day`)
     }
+    lines.push('- Do NOT add multiple items in the same subject that collectively exceed its daily minutes.')
     lines.push('')
   }
 

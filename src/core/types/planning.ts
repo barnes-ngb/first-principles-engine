@@ -235,6 +235,12 @@ export interface DayLog {
   }
   createdAt?: string
   updatedAt?: string
+  /**
+   * Daily time budget (minutes) set by the planner when the plan was applied.
+   * Used by rollover/budget enforcement to trim overflow into deferredByBudget items.
+   * Optional — legacy day logs won't have it, and enforcement short-circuits in that case.
+   */
+  dailyBudgetMinutes?: number
 }
 
 export interface DayBlock {
@@ -330,6 +336,12 @@ export interface ChecklistItem {
   droppableOnLightDay?: boolean
   /** Building toward this — don't nag if unchecked */
   aspirational?: boolean
+  /**
+   * True when this item was deferred from today's view by post-rollover budget
+   * enforcement. The item stays on the checklist but is hidden behind a
+   * "N items deferred" expand in the UI.
+   */
+  deferredByBudget?: boolean
 }
 
 export interface ChapterResponse {
