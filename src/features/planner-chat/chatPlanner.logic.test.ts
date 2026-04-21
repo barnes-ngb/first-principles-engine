@@ -938,6 +938,25 @@ describe('buildPlannerPrompt size constraints', () => {
   })
 })
 
+describe('buildPlannerPrompt hard budget rule', () => {
+  it('emits a hard budget rule that forbids overflow plans', () => {
+    const prompt = buildPlannerPrompt(baseInputs)
+    expect(prompt).toContain('HARD BUDGET RULE')
+    expect(prompt).toMatch(/SUM of estimatedMinutes per day MUST be/)
+    expect(prompt).toContain('fewer-item plan that fits is ALWAYS better')
+  })
+
+  it('treats subject time defaults as totals per subject, not per item', () => {
+    const inputs: PlanGeneratorInputs = {
+      ...baseInputs,
+      subjectTimeDefaults: { Reading: 30 },
+    }
+    const prompt = buildPlannerPrompt(inputs)
+    expect(prompt).toContain('TOTAL minutes per subject per day')
+    expect(prompt).toContain('Do NOT add multiple items in the same subject')
+  })
+})
+
 describe('parseAIResponse — severely truncated JSON', () => {
   const makeResponse = (message: string): ChatResponse => ({
     message,
