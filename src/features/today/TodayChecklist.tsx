@@ -29,6 +29,7 @@ import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
 import type {
   ChecklistItem as ChecklistItemType,
+  ConceptualBlock,
   CurriculumDetected,
   DayLog,
   SkillSnapshot,
@@ -43,6 +44,10 @@ import { autoFillBlockMinutes } from './daylog.model'
 import { syncChecklistToRoutine } from './checklistRoutineSync'
 import { formatRolloverSource } from './rollover'
 import { calculateXp } from './xp'
+import { doc, getDoc, updateDoc } from 'firebase/firestore'
+import { skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { mergeBlock } from '../../core/utils/blockerLifecycle'
+import { buildGotItReinforcement, buildStuckBlock } from './masteryBlocker'
 
 const subjectBucketColor: Record<string, string> = {
   Reading: '#3b82f6',
@@ -157,6 +162,8 @@ interface TodayChecklistProps {
 export default function TodayChecklist({
   dayLog,
   selectedChild,
+  selectedChildId,
+  familyId,
   planType,
   activeRoutineItems,
   persistDayLogImmediate,
@@ -191,6 +198,49 @@ export default function TodayChecklist({
     const id = setInterval(() => setNow(Date.now()), 60_000)
     return () => clearInterval(id)
   }, [])
+
+  const handleMasteryChip = (index: number, value: 'got-it' | 'working' | 'stuck') => {
+    const current = (dayLog.checklist ?? [])[index]
+    const updated = [...(dayLog.checklist ?? [])]
+    updated[index] = { ...current, mastery: value }
+    persistDayLogImmediate({ ...dayLog, checklist: updated })
+
+    if (!familyId || !selectedChildId || !current) return
+
+    // Fire-and-forget blocker write for Stuck / Got it taps.
+    void (async () => {
+      try {
+        const snapshotRef = doc(skillSnapshotsCollection(familyId), selectedChildId)
+        const snap = await getDoc(snapshotRef)
+        const existing: Partial<SkillSnapshot> = snap.exists() ? snap.data() : {}
+        const existingBlocks: ConceptualBlock[] = existing.conceptualBlocks ?? []
+
+        const nowIso = new Date().toISOString()
+        let nextBlocks: ConceptualBlock[] | null = null
+
+        if (value === 'stuck') {
+          const partial = buildStuckBlock(current, nowIso)
+          if (partial?.id) {
+            nextBlocks = mergeBlock(existingBlocks, partial as Parameters<typeof mergeBlock>[1])
+          }
+        } else if (value === 'got-it') {
+          const partial = buildGotItReinforcement(current, existingBlocks, nowIso)
+          if (partial?.id) {
+            nextBlocks = mergeBlock(existingBlocks, partial as Parameters<typeof mergeBlock>[1])
+          }
+        }
+
+        if (nextBlocks) {
+          await updateDoc(snapshotRef, {
+            conceptualBlocks: JSON.parse(JSON.stringify(nextBlocks)),
+            blocksUpdatedAt: nowIso,
+          })
+        }
+      } catch (err) {
+        console.warn('[TodayChecklist] Mastery chip blocker write failed:', err)
+      }
+    })()
+  }
 
   const rawChecklist = dayLog.checklist ?? []
   const hasPlanItems = rawChecklist.length > 0
@@ -759,11 +809,7 @@ export default function TodayChecklist({
                         size="small"
                         color={item.mastery === opt.value ? opt.color : 'default'}
                         variant={item.mastery === opt.value ? 'filled' : 'outlined'}
-                        onClick={() => {
-                          const updated = [...(dayLog.checklist ?? [])]
-                          updated[index] = { ...item, mastery: opt.value }
-                          persistDayLogImmediate({ ...dayLog, checklist: updated })
-                        }}
+                        onClick={() => handleMasteryChip(index, opt.value)}
                         sx={{ cursor: 'pointer' }}
                       />
                     ))}
