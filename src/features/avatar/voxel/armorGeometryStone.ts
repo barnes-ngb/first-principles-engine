@@ -222,9 +222,16 @@ export function buildStoneShield(layout: BodyLayout): THREE.Group {
 
   const visual = new THREE.Group()
   visual.name = 'shield_visual'
+  // Position: forearm level, slightly forward
+  visual.position.set(
+    0,             // centered on arm (don't offset sideways)
+    -1.8 * s,      // forearm — between elbow (-1.5) and hand (-2.5)
+    0.6 * s,       // well forward of the arm so it doesn't clip the body
+  )
+  // Rotation: reset everything, then just point the face forward
   visual.rotation.set(0, 0, 0)
-  visual.rotation.x = -0.3
-  visual.position.set(-0.2 * s, -2.5 * s, 0.5 * s)
+  visual.rotation.y = Math.PI  // 180° — flip face toward the viewer
+  visual.rotation.x = -0.2     // very slight backward lean (natural hold angle)
   group.add(visual)
 
   const shieldH = armH * 1.15  // taller than iron
