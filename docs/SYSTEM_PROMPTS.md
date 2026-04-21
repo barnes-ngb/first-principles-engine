@@ -192,9 +192,10 @@ src/core/ai/useAI.ts              functions/src/ai/
 ### `quest` (tasks/quest.ts)
 
 **System prompt assembly:**
-1. Context slices for "quest"
-2. `buildQuestPrompt(domain)` — Minecraft-themed interactive assessment
+1. Context slices for "quest" (includes `skillSnapshot` with ADDRESS_NOW / RESOLVING / DEFER conceptual blocks + `recentScans`)
+2. `buildQuestPrompt(domain, startingLevel?, questMode?, extras?)` — Minecraft-themed interactive assessment
 3. Recent evaluation findings injected for adaptive starting level
+4. **Phase 2 (Apr 21, 2026):** `extras.activeBlockers` (ADDRESS_NOW + RESOLVING blocks from the snapshot) and `extras.hasRecentScans` (derived from the `recentScans` slice) pulled in by `tasks/quest.ts` before assembly. `buildKnownBlockersSection` and `buildRecentCurriculumSection` inject just before RESPONSE FORMAT in the reading-phonics, math, and comprehension branches.
 
 **Key behaviors:**
 - Generates ONE multiple-choice question at a time as `<quest>` JSON block
@@ -204,6 +205,8 @@ src/core/ai/useAI.ts              functions/src/ai/
 - Bonus rounds for confidence building
 - `<quest-summary>` block for session summaries
 - Findings generated after 2+ data points on a skill
+- **KNOWN BLOCKERS (Phase 2):** when the snapshot has ADDRESS_NOW or RESOLVING blocks, 2-3 of the 10 session questions deliberately probe them. Each probe carries `"targetedBlockerId"` matching the block's stable id so `updateBlockerLifecycle` can weight targeted evidence 2× when advancing lifecycle state. Omit or null for non-targeted questions.
+- **RECENT CURRICULUM (Phase 2):** when `recentScans` provides a "RECENT WORKBOOK SCANS" section, the AI may (optionally) include 1-2 reinforcement questions tied to the scanned topic. Connection is framed as practice, not a test of today's lesson.
 
 ### `generateStory` (tasks/generateStory.ts)
 
@@ -402,9 +405,12 @@ src/core/ai/useAI.ts              functions/src/ai/
   "correctAnswer": "dog",
   "encouragement": "The middle sound is /o/ like in 'hot'!",
   "bonusRound": false,
+  "targetedBlockerId": null,
   "finding": null
 }
 ```
+
+`targetedBlockerId` (Phase 2) is optional and set to the exact stable id of a KNOWN BLOCKERS entry when the AI deliberately targets it; omitted or null otherwise.
 
 ### Quest Summary (`<quest-summary>` block)
 

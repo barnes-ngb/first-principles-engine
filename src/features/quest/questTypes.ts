@@ -100,6 +100,13 @@ export interface QuestQuestion {
   isBonusRound?: boolean // true for end-on-a-win bonus question
   /** Whether this question should also show voice/type input alongside MC options */
   allowOpenResponse?: boolean
+  /**
+   * Phase 2 — when the AI deliberately targets a known blocker from the
+   * skill snapshot, it sets this to the block's stable id. Absent on
+   * general-pool questions. The client passes this through to SessionQuestion
+   * so `updateBlockerLifecycle` can weight targeted evidence.
+   */
+  targetedBlockerId?: string
 }
 
 // ── Answered question ─────────────────────────────────────────
@@ -121,6 +128,13 @@ export interface SessionQuestion {
   timestamp: string
   /** How the child answered: tapped an MC option, spoke via voice, or typed */
   inputMethod?: AnswerInputMethod
+  /**
+   * Phase 2 — set when the AI deliberately targeted a known blocker for this
+   * question (see QuestQuestion.targetedBlockerId). Used by
+   * updateBlockerLifecycle to weight targeted evidence more heavily than
+   * incidental evidence when advancing ADDRESS_NOW → RESOLVING → RESOLVED.
+   */
+  targetedBlockerId?: string
 }
 
 // ── Extra fields on EvaluationSession for interactive sessions ─

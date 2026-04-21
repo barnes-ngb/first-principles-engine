@@ -1006,9 +1006,13 @@ RESPONSE FORMAT — respond with ONLY this:
   "correctAnswer": "It started to rain",
   "encouragement": "The story tells us right away — the rain sent Steve home!",
   "bonusRound": false,
+  "targetedBlockerId": null,
   "finding": null
 }
 </quest>
+
+TARGETED BLOCKER FIELD:
+- "targetedBlockerId" is OPTIONAL — include it as a string id ONLY when the question deliberately targets a listed blocker from the KNOWN BLOCKERS section (if present below). Use the exact "id" shown. For non-targeted questions, omit it or set it to null.
 
 SESSION SUMMARY:
 When you receive action: "summarize_session", respond with a <quest-summary> block instead of a <quest> block. The message will include the full question/answer history, findings, final level, and score. Analyze everything and respond with ONLY:
@@ -1088,10 +1092,130 @@ CRITICAL:
 
 // ── Quest interactive prompt ──────────────────────────────────
 
-export function buildQuestPrompt(domain: string, startingLevel?: number, questMode?: string): string {
+export interface QuestBlockerContext {
+  id: string;
+  name: string;
+  status: "ADDRESS_NOW" | "RESOLVING";
+  affectedSkills: string[];
+  rationale?: string;
+  specificWords?: string[];
+}
+
+export interface QuestPromptExtras {
+  activeBlockers?: QuestBlockerContext[];
+  hasRecentScans?: boolean;
+}
+
+/**
+ * Build the KNOWN BLOCKERS prompt section for targeted blocker probing.
+ * Exported for tests. Returns empty string when no active blockers.
+ */
+export function buildKnownBlockersSection(
+  blockers: QuestBlockerContext[] | undefined,
+): string {
+  if (!blockers || blockers.length === 0) return "";
+
+  const addressNow = blockers.filter((b) => b.status === "ADDRESS_NOW");
+  const resolving = blockers.filter((b) => b.status === "RESOLVING");
+
+  const fmt = (b: QuestBlockerContext): string => {
+    const skills = b.affectedSkills?.length
+      ? ` | skills: ${b.affectedSkills.join(", ")}`
+      : "";
+    const words = b.specificWords?.length
+      ? ` | example words: ${b.specificWords.slice(0, 8).join(", ")}`
+      : "";
+    const rationale = b.rationale ? ` — ${b.rationale}` : "";
+    return `- id="${b.id}" | ${b.name}${skills}${words}${rationale}`;
+  };
+
+  const lines: string[] = [];
+  lines.push("## KNOWN BLOCKERS — TARGETED QUESTIONS");
+  lines.push("");
+  lines.push(
+    "The child has these active learning blockers. Generate 2-3 of your 10 questions to SPECIFICALLY test these skills. These targeted questions should:",
+  );
+  lines.push(
+    "- Use the specific words listed (if any) or closely related words",
+  );
+  lines.push("- Test the exact skill described in the blocker");
+  lines.push(
+    "- Be at the child's current level (don't make blocker questions easier or harder than the session level)",
+  );
+  lines.push(
+    "- Be distributed across the session (not all at the start or end)",
+  );
+  lines.push("");
+  lines.push(
+    'For each targeted question, include a `"targetedBlockerId"` field in your <quest> JSON matching the block\'s `id` exactly — this lets the system track whether the child is improving on that specific skill. Non-targeted questions should omit `targetedBlockerId` (or set it to null). The child should NOT be able to tell which questions are blocker-probes and which are general assessment.',
+  );
+  lines.push("");
+
+  if (addressNow.length > 0) {
+    lines.push("ADDRESS_NOW blockers (prioritize these):");
+    for (const b of addressNow) lines.push(fmt(b));
+  }
+  if (resolving.length > 0) {
+    if (addressNow.length > 0) lines.push("");
+    lines.push(
+      "RESOLVING blockers (include 1 if room — these are improving, test to confirm):",
+    );
+    for (const b of resolving) lines.push(fmt(b));
+  }
+
+  lines.push("");
+  lines.push(
+    "Distribution rules:",
+  );
+  lines.push(
+    "- 0 blockers → omit targetedBlockerId on every question, generate from the standard level-appropriate pool.",
+  );
+  lines.push(
+    "- 1 blocker → generate 2 targeted questions for it across the session.",
+  );
+  lines.push(
+    "- 2+ blockers → distribute 2-3 targeted questions across them (prioritize ADDRESS_NOW).",
+  );
+
+  return lines.join("\n");
+}
+
+/**
+ * Build the RECENT CURRICULUM prompt section tying quest questions to today's work.
+ * Exported for tests. Returns empty string when no recent scans context exists.
+ */
+export function buildRecentCurriculumSection(hasRecentScans: boolean): string {
+  if (!hasRecentScans) return "";
+
+  return [
+    "## RECENT CURRICULUM",
+    "",
+    "The child recently worked on topics listed in the RECENT WORKBOOK SCANS context above (last 1-2 days only).",
+    "",
+    "Consider including 1-2 questions that REINFORCE that recent work. This is NOT mandatory — only include if the topic naturally fits the current quest level and questMode. The goal is practice, not testing today's lesson.",
+    "",
+    "If a reinforcement question also happens to align with a known blocker, it can double as a targeted question — set `targetedBlockerId` accordingly.",
+  ].join("\n");
+}
+
+export function buildQuestPrompt(
+  domain: string,
+  startingLevel?: number,
+  questMode?: string,
+  extras?: QuestPromptExtras,
+): string {
+  const blockersSection = buildKnownBlockersSection(extras?.activeBlockers);
+  const recentCurriculumSection = buildRecentCurriculumSection(
+    extras?.hasRecentScans ?? false,
+  );
+  const questExtras = [blockersSection, recentCurriculumSection]
+    .filter((s) => s.length > 0)
+    .join("\n\n");
+  const questExtrasBlock = questExtras ? `\n\n${questExtras}\n` : "";
+
   // ── Comprehension quest ──────────────────────────────────
   if (domain === "reading" && questMode === "comprehension") {
-    return buildComprehensionQuestPrompt(startingLevel);
+    return buildComprehensionQuestPrompt(startingLevel) + questExtrasBlock;
   }
 
   // ── Fluency passage generation ───────────────────────────
@@ -1290,7 +1414,7 @@ ADAPTIVE BEHAVIOR:
 
 BONUS ROUND:
 If you receive "bonusRound": true, generate a question at the LOWEST difficulty for the child's demonstrated level. This should be a confident win — something the child has already shown mastery of. Set "bonusRound": true in your response so the UI shows the special banner. Frame the prompt as something exciting like "Bonus gem!" or "Final treasure!". The question should still be a valid assessment — it just targets a skill the child is strong in.
-
+${questExtrasBlock}
 FINDING GENERATION:
 - Include a "finding" field in the quest JSON (null when insufficient data)
 - When you have enough evidence (2+ questions on related skills), set finding to:
@@ -1308,9 +1432,15 @@ RESPONSE FORMAT — respond with ONLY this:
   "correctAnswer": "dog",
   "encouragement": "The middle sound is /o/ like in 'hot'!",
   "bonusRound": false,
+  "targetedBlockerId": null,
   "finding": null
 }
 </quest>
+
+TARGETED BLOCKER FIELD:
+- "targetedBlockerId" is OPTIONAL — include it as a string id ONLY when the question deliberately targets a listed blocker from KNOWN BLOCKERS above.
+- Use the exact "id" shown in KNOWN BLOCKERS (e.g. "short-vowel-i-vs-e-discrimination"). Do not invent ids.
+- For questions that don't target a listed blocker, either omit the field or set it to null.
 
 SESSION SUMMARY:
 When you receive action: "summarize_session", respond with a <quest-summary> block instead of a <quest> block. The message will include the full question/answer history, findings, final level, and score. Analyze everything and respond with ONLY:
@@ -1448,7 +1578,7 @@ ADAPTIVE BEHAVIOR:
 
 BONUS ROUND:
 If you receive "bonusRound": true, generate a question at the LOWEST difficulty for the child's demonstrated level. This should be a confident win. Set "bonusRound": true in your response. Frame it as exciting: "Bonus gem!" or "Final treasure!".
-
+${questExtrasBlock}
 FINDING GENERATION:
 - Include a "finding" field in the quest JSON (null when insufficient data)
 - When you have enough evidence (2+ questions on related skills), set finding to:
@@ -1465,9 +1595,15 @@ RESPONSE FORMAT — respond with ONLY this:
   "correctAnswer": "12",
   "encouragement": "7 + 5 = 12. You can count up from 7: 8, 9, 10, 11, 12!",
   "bonusRound": false,
+  "targetedBlockerId": null,
   "finding": null
 }
 </quest>
+
+TARGETED BLOCKER FIELD:
+- "targetedBlockerId" is OPTIONAL — include it as a string id ONLY when the question deliberately targets a listed blocker from KNOWN BLOCKERS above.
+- Use the exact "id" shown in KNOWN BLOCKERS. Do not invent ids.
+- For questions that don't target a listed blocker, either omit the field or set it to null.
 
 SESSION SUMMARY:
 When you receive action: "summarize_session", respond with a <quest-summary> block instead of a <quest> block. Analyze everything and respond with ONLY:
@@ -1707,6 +1843,17 @@ export const chat = onCall(
           stopRules?: ChildContext["stopRules"];
           completedPrograms?: string[];
           workingLevels?: Record<string, { level: number; updatedAt: string; source: string; evidence?: string }>;
+          conceptualBlocks?: Array<{
+            id?: string;
+            name: string;
+            affectedSkills: string[];
+            recommendation?: string;
+            status?: string;
+            rationale: string;
+            strategies?: string[];
+            deferNote?: string;
+            specificWords?: string[];
+          }>;
         }
       | undefined;
 
@@ -1733,6 +1880,17 @@ export const chat = onCall(
             stopRules?: ChildContext["stopRules"];
             completedPrograms?: string[];
             workingLevels?: Record<string, { level: number; updatedAt: string; source: string; evidence?: string }>;
+            conceptualBlocks?: Array<{
+              id?: string;
+              name: string;
+              affectedSkills: string[];
+              recommendation?: string;
+              status?: string;
+              rationale: string;
+              strategies?: string[];
+              deferNote?: string;
+              specificWords?: string[];
+            }>;
           })
         : undefined;
       // Guaranteed server-side workbook backfill (Phase 2B hardening).
