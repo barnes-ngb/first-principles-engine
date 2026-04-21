@@ -139,3 +139,123 @@ export function mergeBlock(
   next[idx] = merged
   return next
 }
+
+export interface SessionBlockEvidence {
+  /** Stable block ID (from generateBlockId). */
+  blockId: string
+  /** Number of questions answered correctly for this block's skill in the session. */
+  correctCount: number
+  /** Total questions posed on this block's skill in the session. */
+  totalCount: number
+}
+
+/** Minimum cumulative correct count to transition ADDRESS_NOW → RESOLVING. */
+export const RESOLVING_THRESHOLD = 3
+/** Minimum cumulative correct count to transition RESOLVING → RESOLVED. */
+export const RESOLVED_THRESHOLD = 5
+/** Minimum sessions observed before RESOLVED can fire. */
+export const RESOLVED_MIN_SESSIONS = 2
+
+/**
+ * Advance the lifecycle of each block given fresh session evidence.
+ *
+ * Rules:
+ *  - ADDRESS_NOW → RESOLVING when cumulative correctAttempts ≥ RESOLVING_THRESHOLD.
+ *  - RESOLVING → RESOLVED when cumulative correctAttempts ≥ RESOLVED_THRESHOLD,
+ *    sessionCount ≥ RESOLVED_MIN_SESSIONS, AND no wrong answers in this session.
+ *  - RESOLVING → ADDRESS_NOW if any wrong answers hit the skill this session.
+ *  - RESOLVED blocks are immutable (stays RESOLVED, keeps resolvedAt).
+ *  - DEFER is not auto-transitioned by this helper.
+ *
+ * Never removes blocks. Accumulates `correctAttempts` / `totalAttempts`
+ * on each block as evidence lands.
+ *
+ * Input blocks are not mutated; returns a new array.
+ */
+export function updateBlockerLifecycle(
+  blocks: ConceptualBlock[],
+  sessionEvidence: SessionBlockEvidence[],
+  now: string = new Date().toISOString(),
+): ConceptualBlock[] {
+  if (!blocks.length) return blocks
+  const evByBlockId = new Map<string, SessionBlockEvidence>()
+  for (const ev of sessionEvidence) {
+    if (!ev.blockId) continue
+    evByBlockId.set(ev.blockId, ev)
+  }
+
+  return blocks.map((block) => {
+    if (!block.id) return block
+    const ev = evByBlockId.get(block.id)
+    if (!ev) return block
+
+    const prevStatus = effectiveStatus(block)
+    if (prevStatus === 'RESOLVED') return block
+    if (prevStatus === 'DEFER') {
+      // DEFER is left alone — it can transition only through explicit re-evaluation.
+      const nextCorrect = (block.correctAttempts ?? 0) + ev.correctCount
+      const nextTotal = (block.totalAttempts ?? 0) + ev.totalCount
+      if (nextCorrect === (block.correctAttempts ?? 0) && nextTotal === (block.totalAttempts ?? 0)) {
+        return block
+      }
+      return { ...block, correctAttempts: nextCorrect, totalAttempts: nextTotal }
+    }
+
+    const cumCorrect = (block.correctAttempts ?? 0) + ev.correctCount
+    const cumTotal = (block.totalAttempts ?? 0) + ev.totalCount
+    const hadWrong = ev.totalCount > ev.correctCount
+    const sessionCount = block.sessionCount ?? 1
+
+    let nextStatus: ConceptualBlockStatus = prevStatus
+    let resolvedAt = block.resolvedAt
+
+    if (prevStatus === 'RESOLVING' && hadWrong) {
+      // Regression — reopen.
+      nextStatus = 'ADDRESS_NOW'
+    } else if (prevStatus === 'RESOLVING'
+      && cumCorrect >= RESOLVED_THRESHOLD
+      && sessionCount >= RESOLVED_MIN_SESSIONS
+      && !hadWrong) {
+      nextStatus = 'RESOLVED'
+      resolvedAt = resolvedAt ?? now
+    } else if (prevStatus === 'ADDRESS_NOW' && cumCorrect >= RESOLVING_THRESHOLD && !hadWrong) {
+      nextStatus = 'RESOLVING'
+    }
+
+    return {
+      ...block,
+      status: nextStatus,
+      // DEFER is handled earlier; nextStatus here is only ADDRESS_NOW/RESOLVING/RESOLVED.
+      recommendation: 'ADDRESS_NOW',
+      correctAttempts: cumCorrect,
+      totalAttempts: cumTotal,
+      resolvedAt,
+      lastReinforcedAt: now,
+    }
+  })
+}
+
+/**
+ * Group a list of quest session questions into per-block evidence for lifecycle.
+ * Maps each question's `skill` → blockId (via generateBlockId) and aggregates counts.
+ */
+export function sessionEvidenceFromQuestions(
+  questions: Array<{ skill?: string; correct?: boolean; skipped?: boolean; flaggedAsError?: boolean }>,
+): SessionBlockEvidence[] {
+  const counts = new Map<string, { correct: number; total: number }>()
+  for (const q of questions) {
+    if (q.flaggedAsError) continue
+    if (q.skipped) continue
+    if (!q.skill) continue
+    const id = generateBlockId(q.skill)
+    const entry = counts.get(id) ?? { correct: 0, total: 0 }
+    entry.total += 1
+    if (q.correct) entry.correct += 1
+    counts.set(id, entry)
+  }
+  const out: SessionBlockEvidence[] = []
+  for (const [blockId, { correct, total }] of counts.entries()) {
+    out.push({ blockId, correctCount: correct, totalCount: total })
+  }
+  return out
+}

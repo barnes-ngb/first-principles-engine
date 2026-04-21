@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import type { ConceptualBlock } from '../types/evaluation'
-import { generateBlockId, mergeBlock, effectiveStatus } from './blockerLifecycle'
+import {
+  generateBlockId,
+  mergeBlock,
+  effectiveStatus,
+  updateBlockerLifecycle,
+  sessionEvidenceFromQuestions,
+} from './blockerLifecycle'
 
 describe('generateBlockId', () => {
   it('slugifies a multi-word skill name', () => {
@@ -191,6 +197,172 @@ describe('mergeBlock — reinforcement', () => {
       source: 'quest',
     })
     expect(result.find((b) => b.id === 'digraph-oo')).toBeTruthy()
+  })
+})
+
+describe('updateBlockerLifecycle', () => {
+  const addressNow: ConceptualBlock = {
+    id: 'short-i-vs-e',
+    name: 'Short vowel i vs e',
+    affectedSkills: ['phonics.short-i-vs-e'],
+    recommendation: 'ADDRESS_NOW',
+    status: 'ADDRESS_NOW',
+    rationale: 'Base',
+    detectedAt: '2026-04-01T12:00:00Z',
+    firstDetectedAt: '2026-04-01T12:00:00Z',
+    lastReinforcedAt: '2026-04-01T12:00:00Z',
+    sessionCount: 1,
+    source: 'quest',
+    lastSource: 'quest',
+    evaluationSessionId: '',
+  }
+
+  it('ADDRESS_NOW → RESOLVING after 3 cumulative correct with no wrong in the session', () => {
+    const result = updateBlockerLifecycle([addressNow], [
+      { blockId: 'short-i-vs-e', correctCount: 3, totalCount: 3 },
+    ])
+    expect(result[0].status).toBe('RESOLVING')
+    expect(result[0].correctAttempts).toBe(3)
+    expect(result[0].totalAttempts).toBe(3)
+  })
+
+  it('ADDRESS_NOW stays ADDRESS_NOW below the threshold', () => {
+    const result = updateBlockerLifecycle([addressNow], [
+      { blockId: 'short-i-vs-e', correctCount: 2, totalCount: 2 },
+    ])
+    expect(result[0].status).toBe('ADDRESS_NOW')
+    expect(result[0].correctAttempts).toBe(2)
+  })
+
+  it('ADDRESS_NOW does not advance to RESOLVING if the session contained any wrong answers', () => {
+    const result = updateBlockerLifecycle([addressNow], [
+      { blockId: 'short-i-vs-e', correctCount: 3, totalCount: 4 },
+    ])
+    expect(result[0].status).toBe('ADDRESS_NOW')
+    expect(result[0].correctAttempts).toBe(3)
+    expect(result[0].totalAttempts).toBe(4)
+  })
+
+  it('RESOLVING → RESOLVED after 5+ cumulative correct across multiple sessions', () => {
+    const resolving: ConceptualBlock = {
+      ...addressNow,
+      status: 'RESOLVING',
+      sessionCount: 2,
+      correctAttempts: 3,
+      totalAttempts: 3,
+    }
+    const result = updateBlockerLifecycle([resolving], [
+      { blockId: 'short-i-vs-e', correctCount: 2, totalCount: 2 },
+    ])
+    expect(result[0].status).toBe('RESOLVED')
+    expect(result[0].resolvedAt).toBeTruthy()
+    expect(result[0].correctAttempts).toBe(5)
+  })
+
+  it('RESOLVING stays RESOLVING when sessionCount is too low', () => {
+    const resolving: ConceptualBlock = {
+      ...addressNow,
+      status: 'RESOLVING',
+      sessionCount: 1,
+      correctAttempts: 4,
+      totalAttempts: 4,
+    }
+    const result = updateBlockerLifecycle([resolving], [
+      { blockId: 'short-i-vs-e', correctCount: 2, totalCount: 2 },
+    ])
+    expect(result[0].status).toBe('RESOLVING')
+  })
+
+  it('RESOLVING → ADDRESS_NOW on regression (new wrong answer)', () => {
+    const resolving: ConceptualBlock = {
+      ...addressNow,
+      status: 'RESOLVING',
+      sessionCount: 3,
+      correctAttempts: 4,
+      totalAttempts: 4,
+    }
+    const result = updateBlockerLifecycle([resolving], [
+      { blockId: 'short-i-vs-e', correctCount: 1, totalCount: 2 },
+    ])
+    expect(result[0].status).toBe('ADDRESS_NOW')
+  })
+
+  it('RESOLVED is immutable — stays RESOLVED even with more evidence', () => {
+    const resolved: ConceptualBlock = {
+      ...addressNow,
+      status: 'RESOLVED',
+      resolvedAt: '2026-04-10T10:00:00Z',
+      correctAttempts: 6,
+      totalAttempts: 6,
+    }
+    const result = updateBlockerLifecycle([resolved], [
+      { blockId: 'short-i-vs-e', correctCount: 0, totalCount: 3 },
+    ])
+    expect(result[0].status).toBe('RESOLVED')
+    expect(result[0].resolvedAt).toBe('2026-04-10T10:00:00Z')
+  })
+
+  it('DEFER is not auto-transitioned, but attempt counters still accumulate', () => {
+    const defer: ConceptualBlock = {
+      ...addressNow,
+      status: 'DEFER',
+      recommendation: 'DEFER',
+    }
+    const result = updateBlockerLifecycle([defer], [
+      { blockId: 'short-i-vs-e', correctCount: 5, totalCount: 5 },
+    ])
+    expect(result[0].status).toBe('DEFER')
+    expect(result[0].correctAttempts).toBe(5)
+  })
+
+  it('passes through blocks that have no session evidence', () => {
+    const other: ConceptualBlock = { ...addressNow, id: 'digraph-oo', name: 'Digraph oo' }
+    const result = updateBlockerLifecycle([addressNow, other], [
+      { blockId: 'short-i-vs-e', correctCount: 3, totalCount: 3 },
+    ])
+    expect(result[0].status).toBe('RESOLVING')
+    expect(result[1].status).toBe('ADDRESS_NOW')
+    expect(result[1].correctAttempts).toBeUndefined()
+  })
+
+  it('never removes blocks', () => {
+    const result = updateBlockerLifecycle([addressNow], [
+      { blockId: 'short-i-vs-e', correctCount: 5, totalCount: 5 },
+    ])
+    expect(result).toHaveLength(1)
+  })
+})
+
+describe('sessionEvidenceFromQuestions', () => {
+  it('groups questions by skill → blockId and counts correct vs total', () => {
+    const ev = sessionEvidenceFromQuestions([
+      { skill: 'phonics.short-i-vs-e', correct: true },
+      { skill: 'phonics.short-i-vs-e', correct: false },
+      { skill: 'phonics.short-i-vs-e', correct: true },
+      { skill: 'phonics.digraph-oo', correct: true },
+    ])
+    expect(ev).toHaveLength(2)
+    const shortI = ev.find((e) => e.blockId === 'phonics-short-i-vs-e')
+    expect(shortI).toEqual({
+      blockId: 'phonics-short-i-vs-e',
+      correctCount: 2,
+      totalCount: 3,
+    })
+  })
+
+  it('ignores skipped and flaggedAsError questions', () => {
+    const ev = sessionEvidenceFromQuestions([
+      { skill: 'phonics.short-i-vs-e', correct: true },
+      { skill: 'phonics.short-i-vs-e', correct: false, skipped: true },
+      { skill: 'phonics.short-i-vs-e', correct: false, flaggedAsError: true },
+    ])
+    expect(ev[0].totalCount).toBe(1)
+    expect(ev[0].correctCount).toBe(1)
+  })
+
+  it('returns empty array when no questions have skills', () => {
+    const ev = sessionEvidenceFromQuestions([{ correct: true }])
+    expect(ev).toHaveLength(0)
   })
 })
 

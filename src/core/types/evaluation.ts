@@ -99,6 +99,10 @@ export interface ConceptualBlock {
   specificWords?: string[]
   /** Question IDs or short descriptions that triggered detection. */
   specificQuestions?: string[]
+  /** Cumulative correct answers observed on this blocked skill across sessions. */
+  correctAttempts?: number
+  /** Cumulative total attempts observed on this blocked skill across sessions. */
+  totalAttempts?: number
 }
 
 // ── Working Levels (per-domain quest progression) ──────────────

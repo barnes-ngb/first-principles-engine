@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   compressEngagement,
   formatChildProfile,
+  formatConceptualBlocks,
   TASK_CONTEXT,
   CHARTER_PREAMBLE,
 } from "./contextSlices.js";
@@ -148,5 +149,93 @@ describe("CHARTER_PREAMBLE", () => {
     expect(CHARTER_PREAMBLE).toContain("Formation first");
     expect(CHARTER_PREAMBLE).toContain("Lincoln teaches London");
     expect(CHARTER_PREAMBLE).toContain("First Principles Engine");
+  });
+});
+
+// ── formatConceptualBlocks ────────────────────────────────────
+
+describe("formatConceptualBlocks", () => {
+  it("returns an empty array when there are no blocks", () => {
+    expect(formatConceptualBlocks([])).toEqual([]);
+  });
+
+  it("emits ADDRESS_NOW blocks with strategies", () => {
+    const lines = formatConceptualBlocks([
+      {
+        name: "Short i/e",
+        affectedSkills: ["phonics.short-i-e"],
+        status: "ADDRESS_NOW",
+        rationale: "Confuses bid and bed.",
+        strategies: ["Minimal pairs drill"],
+      },
+    ]);
+    expect(lines[0]).toContain("ADDRESS NOW");
+    expect(lines[1]).toContain("Short i/e");
+    expect(lines[1]).toContain("Minimal pairs drill");
+  });
+
+  it("emits RESOLVING blocks in their own section", () => {
+    const lines = formatConceptualBlocks([
+      {
+        name: "Digraph /oo/",
+        affectedSkills: ["phonics.digraph-oo"],
+        status: "RESOLVING",
+        rationale: "4 correct this week.",
+      },
+    ]);
+    expect(lines.some((l) => l.includes("RESOLVING"))).toBe(true);
+    expect(lines.some((l) => l.includes("Digraph /oo/"))).toBe(true);
+  });
+
+  it("emits DEFER blocks so the AI knows what NOT to push on", () => {
+    const lines = formatConceptualBlocks([
+      {
+        name: "Working memory load",
+        affectedSkills: ["math.multi-step"],
+        status: "DEFER",
+        rationale: "Developmental — expected to resolve.",
+        deferNote: "Revisit at age 8.",
+      },
+    ]);
+    expect(lines.some((l) => l.includes("DEFERRED"))).toBe(true);
+    expect(lines.some((l) => l.includes("Working memory load"))).toBe(true);
+    expect(lines.some((l) => l.includes("Revisit at age 8."))).toBe(true);
+  });
+
+  it("falls back to legacy recommendation when status is absent", () => {
+    const lines = formatConceptualBlocks([
+      {
+        name: "Legacy",
+        affectedSkills: ["x"],
+        recommendation: "DEFER",
+        rationale: "Old block.",
+        deferNote: "Revisit later.",
+      },
+    ]);
+    expect(lines.some((l) => l.includes("DEFERRED"))).toBe(true);
+  });
+
+  it("omits RESOLVED blocks from AI context", () => {
+    const lines = formatConceptualBlocks([
+      {
+        name: "Should not appear",
+        affectedSkills: ["x"],
+        status: "RESOLVED",
+        rationale: "Already fixed.",
+      },
+    ]);
+    expect(lines).toEqual([]);
+  });
+
+  it("groups multiple blocks into the correct sections", () => {
+    const lines = formatConceptualBlocks([
+      { name: "A", affectedSkills: [], status: "ADDRESS_NOW", rationale: "r1" },
+      { name: "B", affectedSkills: [], status: "RESOLVING", rationale: "r2" },
+      { name: "C", affectedSkills: [], status: "DEFER", rationale: "r3" },
+    ]);
+    const joined = lines.join("\n");
+    expect(joined).toContain("ADDRESS NOW");
+    expect(joined).toContain("RESOLVING");
+    expect(joined).toContain("DEFERRED");
   });
 });
