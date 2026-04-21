@@ -93,6 +93,9 @@ function parseQuestBlock(text: string): QuestQuestion | null {
       return null
     }
 
+    const rawTargeted = typeof parsed.targetedBlockerId === 'string'
+      ? parsed.targetedBlockerId.trim()
+      : ''
     return {
       id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       type: 'multiple-choice',
@@ -106,6 +109,7 @@ function parseQuestBlock(text: string): QuestQuestion | null {
       encouragement: parsed.encouragement,
       isBonusRound: parsed.bonusRound ?? undefined,
       allowOpenResponse: parsed.allowOpenResponse ?? undefined,
+      targetedBlockerId: rawTargeted ? rawTargeted : undefined,
     }
   } catch (err) {
     console.error('[parseQuestBlock] JSON parse failed:', (err as Error).message)
@@ -1112,6 +1116,7 @@ export function useQuestSession() {
         responseTimeMs,
         timestamp: new Date().toISOString(),
         inputMethod: inputMethod || 'multiple-choice',
+        targetedBlockerId: currentQuestion.targetedBlockerId,
       }
 
       const updatedQuestions = [...answeredQuestions, sessionQ]
@@ -1317,6 +1322,7 @@ export function useQuestSession() {
         flaggedAsError: flagged || undefined,
         responseTimeMs,
         timestamp: new Date().toISOString(),
+        targetedBlockerId: currentQuestion.targetedBlockerId,
       }
 
       const updatedQuestions = [...answeredQuestions, sessionQ]

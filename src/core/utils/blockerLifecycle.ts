@@ -147,6 +147,17 @@ export interface SessionBlockEvidence {
   correctCount: number
   /** Total questions posed on this block's skill in the session. */
   totalCount: number
+  /**
+   * Subset of `correctCount` that came from AI-targeted blocker questions
+   * (SessionQuestion.targetedBlockerId === blockId). Targeted evidence is
+   * stronger than incidental evidence because the AI deliberately probed the
+   * blocked skill.
+   */
+  targetedCorrect?: number
+  /**
+   * Subset of `totalCount` that came from AI-targeted blocker questions.
+   */
+  targetedTotal?: number
 }
 
 /** Minimum cumulative correct count to transition ADDRESS_NOW → RESOLVING. */
@@ -155,6 +166,13 @@ export const RESOLVING_THRESHOLD = 3
 export const RESOLVED_THRESHOLD = 5
 /** Minimum sessions observed before RESOLVED can fire. */
 export const RESOLVED_MIN_SESSIONS = 2
+/**
+ * Multiplier applied to targeted-question correct/total counts when advancing
+ * the lifecycle. A targeted correct answer counts as this many "effective"
+ * correct answers toward RESOLVING / RESOLVED thresholds, because the AI
+ * deliberately probed the blocked skill rather than hitting it by chance.
+ */
+export const TARGETED_EVIDENCE_WEIGHT = 2
 
 /**
  * Advance the lifecycle of each block given fresh session evidence.
@@ -189,20 +207,33 @@ export function updateBlockerLifecycle(
     const ev = evByBlockId.get(block.id)
     if (!ev) return block
 
+    // Weighted correct/total for lifecycle thresholds.
+    // Targeted evidence counts (TARGETED_EVIDENCE_WEIGHT)×, so N targeted
+    // correct answers contribute (TARGETED_EVIDENCE_WEIGHT × N) to the
+    // ADDRESS_NOW → RESOLVING → RESOLVED threshold progression.
+    const targetedCorrect = ev.targetedCorrect ?? 0
+    const targetedTotal = ev.targetedTotal ?? 0
+    const incidentalCorrect = Math.max(0, ev.correctCount - targetedCorrect)
+    const incidentalTotal = Math.max(0, ev.totalCount - targetedTotal)
+    const weightedCorrectDelta =
+      incidentalCorrect + targetedCorrect * TARGETED_EVIDENCE_WEIGHT
+    const weightedTotalDelta =
+      incidentalTotal + targetedTotal * TARGETED_EVIDENCE_WEIGHT
+
     const prevStatus = effectiveStatus(block)
     if (prevStatus === 'RESOLVED') return block
     if (prevStatus === 'DEFER') {
       // DEFER is left alone — it can transition only through explicit re-evaluation.
-      const nextCorrect = (block.correctAttempts ?? 0) + ev.correctCount
-      const nextTotal = (block.totalAttempts ?? 0) + ev.totalCount
+      const nextCorrect = (block.correctAttempts ?? 0) + weightedCorrectDelta
+      const nextTotal = (block.totalAttempts ?? 0) + weightedTotalDelta
       if (nextCorrect === (block.correctAttempts ?? 0) && nextTotal === (block.totalAttempts ?? 0)) {
         return block
       }
       return { ...block, correctAttempts: nextCorrect, totalAttempts: nextTotal }
     }
 
-    const cumCorrect = (block.correctAttempts ?? 0) + ev.correctCount
-    const cumTotal = (block.totalAttempts ?? 0) + ev.totalCount
+    const cumCorrect = (block.correctAttempts ?? 0) + weightedCorrectDelta
+    const cumTotal = (block.totalAttempts ?? 0) + weightedTotalDelta
     const hadWrong = ev.totalCount > ev.correctCount
     const sessionCount = block.sessionCount ?? 1
 
@@ -237,25 +268,83 @@ export function updateBlockerLifecycle(
 
 /**
  * Group a list of quest session questions into per-block evidence for lifecycle.
- * Maps each question's `skill` → blockId (via generateBlockId) and aggregates counts.
+ *
+ * Two routes to attribute a question to a block:
+ *   1. `targetedBlockerId` — the AI deliberately targeted a known blocker.
+ *      Counts as targeted evidence (weighted by TARGETED_EVIDENCE_WEIGHT in
+ *      updateBlockerLifecycle).
+ *   2. `skill` — maps via generateBlockId. Counts as incidental evidence.
+ *
+ * When both are present and map to the same id, the attempt is recorded once
+ * with targeted flags set. When they map to different ids, the attempt
+ * contributes targeted evidence to the targeted block AND incidental evidence
+ * to the skill-derived block (so an off-target hit still nudges the skill's
+ * matching block).
  */
 export function sessionEvidenceFromQuestions(
-  questions: Array<{ skill?: string; correct?: boolean; skipped?: boolean; flaggedAsError?: boolean }>,
+  questions: Array<{
+    skill?: string
+    correct?: boolean
+    skipped?: boolean
+    flaggedAsError?: boolean
+    targetedBlockerId?: string
+  }>,
 ): SessionBlockEvidence[] {
-  const counts = new Map<string, { correct: number; total: number }>()
+  interface Counts {
+    correct: number
+    total: number
+    targetedCorrect: number
+    targetedTotal: number
+  }
+  const counts = new Map<string, Counts>()
+  const bump = (
+    id: string,
+    correct: boolean,
+    targeted: boolean,
+  ): void => {
+    const entry = counts.get(id) ?? {
+      correct: 0,
+      total: 0,
+      targetedCorrect: 0,
+      targetedTotal: 0,
+    }
+    entry.total += 1
+    if (correct) entry.correct += 1
+    if (targeted) {
+      entry.targetedTotal += 1
+      if (correct) entry.targetedCorrect += 1
+    }
+    counts.set(id, entry)
+  }
+
   for (const q of questions) {
     if (q.flaggedAsError) continue
     if (q.skipped) continue
-    if (!q.skill) continue
-    const id = generateBlockId(q.skill)
-    const entry = counts.get(id) ?? { correct: 0, total: 0 }
-    entry.total += 1
-    if (q.correct) entry.correct += 1
-    counts.set(id, entry)
+    const correct = !!q.correct
+    const targetedId = q.targetedBlockerId?.trim()
+    const skillId = q.skill ? generateBlockId(q.skill) : undefined
+
+    if (targetedId && skillId && targetedId === skillId) {
+      bump(targetedId, correct, true)
+    } else if (targetedId && skillId) {
+      bump(targetedId, correct, true)
+      bump(skillId, correct, false)
+    } else if (targetedId) {
+      bump(targetedId, correct, true)
+    } else if (skillId) {
+      bump(skillId, correct, false)
+    }
   }
+
   const out: SessionBlockEvidence[] = []
-  for (const [blockId, { correct, total }] of counts.entries()) {
-    out.push({ blockId, correctCount: correct, totalCount: total })
+  for (const [blockId, c] of counts.entries()) {
+    out.push({
+      blockId,
+      correctCount: c.correct,
+      totalCount: c.total,
+      targetedCorrect: c.targetedCorrect > 0 ? c.targetedCorrect : undefined,
+      targetedTotal: c.targetedTotal > 0 ? c.targetedTotal : undefined,
+    })
   }
   return out
 }
