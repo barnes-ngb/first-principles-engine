@@ -2,27 +2,7 @@ import type { ChangeEvent } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
-// ── Armor debug tuning types ────────────────────────────────────────
-
-export interface ArmorDebugPieceValues {
-  posX: number
-  posY: number
-  posZ: number
-  rotX: number
-  rotY: number
-  rotZ: number
-  scale: number
-}
-
-export interface ArmorDebugOverrides {
-  helmet: ArmorDebugPieceValues
-  shoes: ArmorDebugPieceValues
-}
-
-export const ARMOR_DEBUG_DEFAULTS: ArmorDebugOverrides = {
-  helmet: { posX: 0, posY: 0, posZ: 0, rotX: 0, rotY: 0, rotZ: 0, scale: 1 },
-  shoes: { posX: 0, posY: 0, posZ: 0, rotX: 0, rotY: 0, rotZ: 0, scale: 1 },
-}
+import { ARMOR_DEBUG_DEFAULTS, type ArmorDebugOverrides, type ArmorDebugPieceValues } from './voxel/armorDebugTuning'
 
 // ── Slider definitions ──────────────────────────────────────────────
 

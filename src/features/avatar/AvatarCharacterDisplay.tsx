@@ -13,7 +13,8 @@ import VoxelCharacter from './VoxelCharacter'
 import BrothersVoxelScene from './BrothersVoxelScene'
 import PoseButtons from './PoseButtons'
 import HeroAnimationDebugPanel from './HeroAnimationDebugPanel'
-import ArmorDebugPanel, { type ArmorDebugOverrides } from './ArmorDebugPanel'
+import ArmorDebugPanel from './ArmorDebugPanel'
+import type { ArmorDebugOverrides } from './voxel/armorDebugTuning'
 
 interface AvatarCharacterDisplayProps {
   profile: AvatarProfile

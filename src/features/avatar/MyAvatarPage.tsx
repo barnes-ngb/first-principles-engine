@@ -67,7 +67,7 @@ import { deriveUnlockedTiersFromForged, getDisplayArmorTier, getTierLockReason }
 import { calculateTier } from './voxel/tierMaterials'
 import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
-import { ARMOR_DEBUG_DEFAULTS, type ArmorDebugOverrides } from './ArmorDebugPanel'
+import { ARMOR_DEBUG_DEFAULTS, type ArmorDebugOverrides } from './voxel/armorDebugTuning'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
 import { getDailyArmorStatusFromSession, getBestOfSlotForgedPieces } from './armorStatus'

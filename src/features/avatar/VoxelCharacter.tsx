@@ -26,7 +26,7 @@ import { buildRoom } from './voxel/buildRoom'
 import { addOutlinesToGroup, removeOutlinesFromGroup } from './voxel/blockOutline'
 import { buildAccessory, getAccessoryAttachPoint, animateAccessories, getHiddenAccessories } from './voxel/buildAccessory'
 import { HERO_ANIMATION_TUNING, resolveHeroAnimationTuning, type HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
-import type { ArmorDebugOverrides } from './ArmorDebugPanel'
+import type { ArmorDebugOverrides } from './voxel/armorDebugTuning'
 import {
   getCurrentSeason,
   getSeasonalStarColor,
