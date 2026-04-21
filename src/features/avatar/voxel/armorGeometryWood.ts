@@ -171,9 +171,9 @@ export function buildWoodShield(layout: BodyLayout): THREE.Group {
 
   const visual = new THREE.Group()
   visual.name = 'shield_visual'
-  visual.rotation.x = -1.0
-  visual.rotation.y = 0.2
-  visual.position.set(-0.1 * s, -1.5 * s, 0.4 * s)
+  visual.rotation.set(0, 0, 0)
+  visual.rotation.x = -0.3
+  visual.position.set(-0.2 * s, -2.5 * s, 0.5 * s)
   group.add(visual)
 
   const shieldH = armH * 0.85
