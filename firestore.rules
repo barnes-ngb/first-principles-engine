@@ -14,10 +14,11 @@ service cloud.firestore {
     }
 
     // Chapter book library — global, shared across families.
-    // Readable by any authenticated user; writable by admin UID for seeding.
+    // Readable and writable by any authenticated user. Single-family app today;
+    // scope writes to admins if multi-family support is ever added.
     match /chapterBooks/{bookId} {
       allow read: if request.auth != null;
-      allow write: if request.auth.uid == 'rqQMDnF3ltTlUzdj6oNTcYlL1br2';
+      allow write: if request.auth != null;
     }
 
     // Shelly Chat threads + messages (explicit for subcollection clarity)
