@@ -29,6 +29,8 @@ import {
 
 import type { BackfillResult } from './backfillWorkingLevels'
 import { backfillWorkingLevels } from './backfillWorkingLevels'
+import type { BackfillBlockIdsResult } from './backfillBlockIds'
+import { backfillBlockIds } from './backfillBlockIds'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
@@ -416,6 +418,33 @@ export default function DevAdminTab() {
     }
   }
 
+  // ── Section F: Backfill Block IDs ────────────────────────────
+  const [blockIdsRunning, setBlockIdsRunning] = useState(false)
+  const [blockIdsResults, setBlockIdsResults] = useState<BackfillBlockIdsResult[] | null>(null)
+  const [blockIdsStatus, setBlockIdsStatus] = useState<StatusMsg | null>(null)
+
+  const handleBackfillBlockIds = async () => {
+    setBlockIdsRunning(true)
+    setBlockIdsStatus(null)
+    setBlockIdsResults(null)
+    try {
+      const results = await backfillBlockIds(familyId)
+      setBlockIdsResults(results)
+      const totalUpdated = results.reduce((sum, r) => sum + r.blocksUpdated, 0)
+      setBlockIdsStatus({
+        severity: totalUpdated > 0 ? 'success' : 'info',
+        text: totalUpdated > 0
+          ? `Backfill complete. ${totalUpdated} block(s) updated with IDs.`
+          : 'Backfill complete. All blocks already have IDs — nothing to do.',
+      })
+    } catch (err) {
+      console.error('Block ID backfill failed', err)
+      setBlockIdsStatus({ severity: 'error', text: `Backfill failed: ${err}` })
+    } finally {
+      setBlockIdsRunning(false)
+    }
+  }
+
   const showGenButton = poolInfo?.loaded && weekInfo?.readAloudBookId &&
     (poolInfo.poolCount === 0 || poolInfo.poolCount < poolInfo.totalChapters)
 
@@ -707,6 +736,55 @@ export default function DevAdminTab() {
                   </Stack>
                 )}
               </Box>
+            ))}
+          </Stack>
+        )}
+      </Box>
+
+      <Divider />
+
+      {/* ── Section F: Backfill Block IDs ─────────────────────── */}
+      <Box>
+        <Typography variant="h6" gutterBottom>
+          Backfill Block IDs
+        </Typography>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          Add stable IDs + lifecycle defaults to legacy conceptualBlocks from
+          guided eval. Without IDs, merge can't match them to new evidence from
+          quest/scan/parent writers. Idempotent — safe to run multiple times.
+        </Typography>
+        <Button
+          variant="contained"
+          onClick={() => void handleBackfillBlockIds()}
+          disabled={blockIdsRunning}
+          sx={{ mt: 1, minHeight: 48 }}
+        >
+          {blockIdsRunning ? (
+            <CircularProgress size={20} />
+          ) : (
+            'Backfill Block IDs'
+          )}
+        </Button>
+
+        {blockIdsStatus && (
+          <Alert severity={blockIdsStatus.severity} sx={{ mt: 1 }}>
+            {blockIdsStatus.text}
+          </Alert>
+        )}
+
+        {blockIdsResults && (
+          <Stack spacing={1} sx={{ mt: 2 }}>
+            {blockIdsResults.map((r) => (
+              <Typography key={r.childId} variant="body2">
+                <strong>{r.childName}:</strong>{' '}
+                {!r.hadSnapshot
+                  ? 'no skill snapshot found.'
+                  : r.blocksTotal === 0
+                    ? 'no blocks found.'
+                    : r.blocksUpdated === 0
+                      ? `${r.blocksTotal} block(s), all already have IDs.`
+                      : `${r.blocksUpdated} of ${r.blocksTotal} block(s) updated with IDs.`}
+              </Typography>
             ))}
           </Stack>
         )}
