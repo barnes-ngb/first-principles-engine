@@ -10,7 +10,9 @@ import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { activityConfigsCollection, db, evaluationSessionsCollection, hoursCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'
+import type { ConceptualBlock, EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'
+import { mergeBlock } from '../../core/utils/blockerLifecycle'
+import { detectBlockersFromSession } from './detectBlockers'
 import type { EvaluationDomain } from '../../core/types/enums'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
 import { domainToSubjectBucket } from '../../core/utils/domainMapping'
@@ -919,6 +921,25 @@ export function useQuestSession() {
         }
 
         await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)), { merge: true })
+
+        // ── Phase 1: detect + merge blockers from this quest session ──
+        try {
+          const detected = detectBlockersFromSession(questions, questMode, { sessionId: docId })
+          if (detected.length > 0) {
+            let merged: ConceptualBlock[] = existing.conceptualBlocks ?? []
+            for (const b of detected) {
+              // Every detected block has an id (generated inside detectBlockersFromSession).
+              if (!b.id) continue
+              merged = mergeBlock(merged, b as Parameters<typeof mergeBlock>[1])
+            }
+            await updateDoc(snapshotRef, {
+              conceptualBlocks: JSON.parse(JSON.stringify(merged)),
+              blocksUpdatedAt: new Date().toISOString(),
+            })
+          }
+        } catch (err) {
+          console.warn('Failed to merge quest blockers into skill snapshot', err)
+        }
       } catch (err) {
         // Don't block session save if snapshot update fails
         console.warn('Failed to auto-apply quest findings/working level to skill snapshot', err)
