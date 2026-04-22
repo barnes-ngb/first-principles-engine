@@ -194,12 +194,11 @@ function buildIronHelmet(layout: BodyLayout): THREE.Group {
   const { headSize } = layout
 
   // Helmet uses HEAD-LOCAL coordinates (headGroup center = 0,0,0).
-  // Full knight helm: chunky forged-iron dome with real thickness, a
-  // dark brow ridge casting shadow over the face, outward-angled cheek
-  // guards, a front-to-back crown crest, a rear neck guard, side/back
-  // chainmail aventail, and rivets at structural joints. The face
-  // opening between the cheek guards stays OPEN so the full face
-  // (sunglasses, eyes, nose, mouth) remains visible.
+  // Full knight helm: chunky forged-iron dome, a tall centurion-style fin
+  // running front-to-back, a thick brow ridge, outward-angled cheek
+  // guards, a rear neck guard, pronounced side/back chainmail aventail,
+  // and rivets at structural joints. The face opening between the cheek
+  // guards stays OPEN so the full face remains visible.
   const hw = headSize
 
   // DOME — polished steel cap with visible thickness, extending slightly
@@ -209,18 +208,23 @@ function buildIronHelmet(layout: BodyLayout): THREE.Group {
   dome.position.set(0, hw * 0.35, 0)
   group.add(dome)
 
-  // CROWN CREST — centurion-style ridge running front-to-back on top of
-  // the dome. Taller than Stone's subtle seam — this is the silhouette's
-  // vertical signature.
-  const crest = taggedBox(hw * 0.14, hw * 0.3, hw * 1.15, W, 'secondary', 'iron_helm_crest')
-  crest.position.set(0, hw * 0.72, 0)
-  group.add(crest)
+  // FIN — tall dark-iron blade running front-to-back along the crown.
+  // Rises well above the dome; this is the helm's vertical signature and
+  // the single biggest visual cue that separates Iron from Stone.
+  const fin = taggedBox(hw * 0.08, hw * 0.45, hw * 1.2, W, 'secondary', 'iron_helm_fin')
+  fin.position.set(0, hw * 0.7, 0)
+  group.add(fin)
+
+  // FIN BASE — slightly wider plate where the fin meets the dome, so the
+  // blade doesn't look like a paper-thin line from the front.
+  const finBase = taggedBox(hw * 0.14, hw * 0.15, hw * 1.1, W, 'secondary', 'iron_helm_fin_base')
+  finBase.position.set(0, hw * 0.5, 0)
+  group.add(finBase)
 
   // BROW RIDGE — thick dark-iron visor brim above the face opening,
-  // protruding forward so it casts a shadow over the upper face. Iron's
-  // signature knight feature replaces Stone's nose guard.
-  const brow = taggedBox(hw * 1.4, hw * 0.18, hw * 0.28, W, 'secondary', 'iron_helm_brow')
-  brow.position.set(0, hw * 0.15, hw * 0.55)
+  // pushed forward enough to cast a shadow over the upper face.
+  const brow = taggedBox(hw * 1.4, hw * 0.15, hw * 0.3, W, 'secondary', 'iron_helm_brow')
+  brow.position.set(0, hw * 0.15, hw * 0.6)
   group.add(brow)
 
   // CHEEK GUARDS — angled plates framing the face opening, widening the
@@ -251,66 +255,78 @@ function buildIronHelmet(layout: BodyLayout): THREE.Group {
   neckGuard.position.set(0, -hw * 0.1, -hw * 0.55)
   group.add(neckGuard)
 
-  // CHAINMAIL AVENTAIL (back) — three rows of alternating primary/secondary
-  // blocks hanging below the neck guard. The checkerboard pattern reads
-  // as woven mail links without needing real chainmail geometry.
-  for (let row = 0; row < 3; row++) {
-    for (let col = -2; col <= 2; col++) {
+  // CHAINMAIL AVENTAIL (back) — four rows × seven columns of alternating
+  // primary/secondary blocks hanging below the neck guard. The
+  // checkerboard pattern reads as woven mail links, and the larger grid
+  // makes the drape clearly visible from behind.
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 7; col++) {
       const role: 'primary' | 'secondary' =
         ((row + col) & 1) === 0 ? 'primary' : 'secondary'
       const link = taggedBox(
-        hw * 0.15,
-        hw * 0.12,
+        hw * 0.14,
+        hw * 0.11,
         hw * 0.08,
         W,
         role,
-        `iron_helm_mail_back_${row}_${col + 2}`,
+        `iron_helm_mail_back_${row}_${col}`,
       )
       link.position.set(
-        col * hw * 0.18,
-        -hw * 0.25 - row * hw * 0.13,
+        (col - 3) * hw * 0.16,
+        -hw * 0.3 - row * hw * 0.12,
         -hw * 0.55,
       )
       group.add(link)
     }
   }
 
-  // CHAINMAIL AVENTAIL (sides) — two links hanging below each cheek guard,
-  // continuing the aventail around the jawline.
-  for (let row = 0; row < 2; row++) {
+  // CHAINMAIL AVENTAIL (sides) — three links hanging below each cheek
+  // guard so the mail reads from the FRONT too, not just from behind.
+  for (let row = 0; row < 3; row++) {
     for (const side of [-1, 1] as const) {
       const role: 'primary' | 'secondary' =
         ((row + (side > 0 ? 1 : 0)) & 1) === 0 ? 'primary' : 'secondary'
       const link = taggedBox(
-        hw * 0.15,
         hw * 0.12,
+        hw * 0.1,
         hw * 0.08,
         W,
         role,
         `iron_helm_mail_side_${side > 0 ? 'r' : 'l'}_${row}`,
       )
       link.position.set(
-        side * hw * 0.6,
-        -hw * 0.4 - row * hw * 0.13,
-        hw * 0.3,
+        side * hw * 0.55,
+        -hw * 0.4 - row * hw * 0.12,
+        hw * 0.15,
       )
       group.add(link)
     }
   }
 
-  // RIVETS — dark-iron cubes at structural joints (brow ends,
-  // cheek/dome joints, back plate corners).
+  // RIVETS — dark-iron cubes at brow ends and back plate corners.
   const rivetSize = hw * 0.06
   const rivetPositions: [number, number, number][] = [
     [-hw * 0.55, hw * 0.15, hw * 0.55],    // brow left
     [hw * 0.55, hw * 0.15, hw * 0.55],     // brow right
-    [-hw * 0.5, hw * 0.1, hw * 0.15],      // cheek-dome left
-    [hw * 0.5, hw * 0.1, hw * 0.15],       // cheek-dome right
     [-hw * 0.35, -hw * 0.1, -hw * 0.55],   // back left
     [hw * 0.35, -hw * 0.1, -hw * 0.55],    // back right
   ]
   rivetPositions.forEach(([x, y, z], i) => {
     const rivet = taggedBox(rivetSize, rivetSize, rivetSize, W, 'secondary', `iron_helm_rivet_${i}`)
+    rivet.position.set(x, y, z)
+    group.add(rivet)
+  })
+
+  // CHEEK-GUARD RIVETS — two per cheek guard, in the accent tone so
+  // they pop against the primary plate and read as bolts.
+  const cheekRivetPositions: [number, number, number][] = [
+    [-hw * 0.62, hw * 0.05, hw * 0.35],    // left upper
+    [-hw * 0.62, -hw * 0.15, hw * 0.35],   // left lower
+    [hw * 0.62, hw * 0.05, hw * 0.35],     // right upper
+    [hw * 0.62, -hw * 0.15, hw * 0.35],    // right lower
+  ]
+  cheekRivetPositions.forEach(([x, y, z], i) => {
+    const rivet = taggedBox(rivetSize, rivetSize, rivetSize, W, 'accent', `iron_helm_cheek_rivet_${i}`)
     rivet.position.set(x, y, z)
     group.add(rivet)
   })
