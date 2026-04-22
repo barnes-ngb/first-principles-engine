@@ -10,45 +10,46 @@ import { taggedBox, taggedFlatBox, W } from './buildArmorPiece'
 // Dimensions are first-pass estimates and will need tuning.
 
 // ── Helmet: stone skullcap ──────────────────────────────────────────
+//
+// Helmet is a child of headGroup, so local (0,0,0) is the head center.
+// Head top = +h/2, face = +Z. Stone is a carved skullcap that sits ON
+// TOP of the head — more coverage than Wood (a band), less than Iron
+// (a full helm). Hair is partially hidden (top cap covers crown).
 export function buildStoneHelmet(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
-  const { U, headSize } = layout
+  const { headSize, scale: s } = layout
   const h = headSize
-  const pad = U * 1.2
+  const headTop = h / 2
+  const headCenterY = 0
 
-  // Domed cap covering the top third of the head
-  const capW = h + pad
-  const capH = h * 0.45
-  const capD = h + pad
-  const cap = taggedBox(capW, capH, capD, W, 'primary', 'stone_cap_dome')
-  cap.position.set(0, h * 0.25 + capH / 2, 0)
+  // Top cap — main shell covering the top of the skull
+  const cap = taggedBox(h + 0.2 * s, 0.35 * s, h + 0.2 * s, W, 'primary', 'stone_cap_top')
+  cap.position.set(0, headTop + 0.1 * s, 0)
   group.add(cap)
 
-  // Inset layer to suggest a carved rim around the cap
-  const capInner = taggedFlatBox(capW - U * 0.4, U * 0.6, capD - U * 0.4, W, 'accent', 'stone_cap_rim')
-  capInner.position.set(0, h * 0.25, 0)
-  group.add(capInner)
-
-  // Headband base — a low stone strap around the forehead
-  const bandH = U * 1.1
-  const bandW = h + U * 0.4
-  const bandD = h + U * 0.4
-  const front = taggedBox(bandW, bandH, U * 0.7, W, 'primary', 'stone_band_front')
-  front.position.set(0, h * 0.08, bandD / 2 - U * 0.25)
-  group.add(front)
-  const back = taggedBox(bandW, bandH, U * 0.7, W, 'primary', 'stone_band_back')
-  back.position.set(0, h * 0.08, -(bandD / 2 - U * 0.25))
-  group.add(back)
-  const sideL = taggedBox(U * 0.7, bandH, bandD - U * 1.2, W, 'primary', 'stone_band_l')
-  sideL.position.set(-(bandW / 2 - U * 0.25), h * 0.08, 0)
+  // Left side flare — drops from cap along the upper side of the head
+  const sideL = taggedBox(0.18 * s, 0.5 * s, h * 0.7, W, 'primary', 'stone_cap_side_l')
+  sideL.position.set(-(h / 2 + 0.08 * s), headTop - 0.15 * s, -0.1 * s)
   group.add(sideL)
-  const sideR = taggedBox(U * 0.7, bandH, bandD - U * 1.2, W, 'primary', 'stone_band_r')
-  sideR.position.set(bandW / 2 - U * 0.25, h * 0.08, 0)
+
+  // Right side flare
+  const sideR = taggedBox(0.18 * s, 0.5 * s, h * 0.7, W, 'primary', 'stone_cap_side_r')
+  sideR.position.set(h / 2 + 0.08 * s, headTop - 0.15 * s, -0.1 * s)
   group.add(sideR)
 
-  // Small nose-guard dropping from the band (not a full visor)
-  const nose = taggedFlatBox(U * 0.8, U * 1.2, U * 0.4, W, 'accent', 'stone_nose_guard')
-  nose.position.set(0, h * 0.08 - U * 1.0, bandD / 2 + U * 0.2)
+  // Back panel — drops from cap along the back of the skull
+  const back = taggedBox(h * 0.8, 0.5 * s, 0.18 * s, W, 'primary', 'stone_cap_back')
+  back.position.set(0, headTop - 0.15 * s, -(h / 2 + 0.08 * s))
+  group.add(back)
+
+  // Carved rim line running around the base of the cap at the front
+  const carvedLine = taggedBox(h + 0.25 * s, 0.06 * s, 0.06 * s, W, 'secondary', 'stone_cap_line')
+  carvedLine.position.set(0, headTop - 0.3 * s, h / 2 + 0.1 * s)
+  group.add(carvedLine)
+
+  // Nose guard — Norman-style strip dropping from the front edge of the cap
+  const nose = taggedBox(0.12 * s, 0.3 * s, 0.08 * s, W, 'secondary', 'stone_nose_guard')
+  nose.position.set(0, headCenterY + 0.3 * s, h / 2 + 0.1 * s)
   group.add(nose)
 
   return group
