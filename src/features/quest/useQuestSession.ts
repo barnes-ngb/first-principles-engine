@@ -812,7 +812,7 @@ export function useQuestSession() {
             subjectBucket: domainToSubjectBucket(domain),
             quickCapture: true,
             notes: `${questMode || domain} quest session`,
-            source: 'quest-session',
+            source: 'knowledge-mine',
           }).catch((err) => console.error('[SessionTimer] Failed to log quest hours:', err))
         }
       }
@@ -1595,7 +1595,7 @@ export function useQuestSession() {
             subjectBucket: domainToSubjectBucket('reading'),
             quickCapture: true,
             notes: 'fluency quest session',
-            source: 'quest-session',
+            source: 'knowledge-mine',
           }).catch((err) => console.error('[SessionTimer] Failed to log fluency hours:', err))
         }
       }

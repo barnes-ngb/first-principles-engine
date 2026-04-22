@@ -95,7 +95,7 @@ export default function KidExtraLogger({
     <SectionCard title="⛏️ I Did More Mining!">
       <Stack spacing={2} sx={{ py: 1 }}>
         <Typography variant="body2" sx={{ textAlign: 'center' }}>
-          Did extra work on your tablet or on your own? Log it here!
+          Did extra work on your tablet? (Reading Eggs, Math App, Typing) Log it here!
         </Typography>
         {saveError && (
           <Alert
