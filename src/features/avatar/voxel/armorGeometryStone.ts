@@ -9,48 +9,102 @@ import { taggedBox, taggedFlatBox, W } from './buildArmorPiece'
 // no pauldrons, gorget, or kite shield — that's the Iron silhouette.
 // Dimensions are first-pass estimates and will need tuning.
 
-// ── Helmet: stone skullcap ──────────────────────────────────────────
+// ── Helmet: dwarf-forged stone war helm ─────────────────────────────
 //
 // Helmet is a child of headGroup, so local (0,0,0) is the head center.
-// Head top = +h/2, face = +Z. Stone is a carved skullcap that sits ON
-// TOP of the head — more coverage than Wood (a band), less than Iron
-// (a full helm). Hair is partially hidden (top cap covers crown).
+// Head top = +hw/2, face = +Z. Stone is a heavy, carved Norman-style
+// war helm — full coverage of the top and sides with a nose guard
+// splitting the face opening, hanging ear flaps, and a carved cross on
+// the front. Dramatically different silhouette from the Wood headband.
+// Per-block jitter (role='primary') gives hand-carved stone texture via
+// applyTierToArmor.
 export function buildStoneHelmet(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
-  const { headSize, scale: s } = layout
-  const h = headSize
-  const headTop = h / 2
-  const headCenterY = 0
+  const { headSize } = layout
+  const hw = headSize
 
-  // Top cap — main shell covering the top of the skull
-  const cap = taggedBox(h + 0.2 * s, 0.35 * s, h + 0.2 * s, W, 'primary', 'stone_cap_top')
-  cap.position.set(0, headTop + 0.1 * s, 0)
-  group.add(cap)
+  // DOME — thick, heavy stone shell covering the top and sides of the
+  // skull. Substantially wider than the head so the helm reads as real
+  // armor with visible thickness, not a cap.
+  const dome = taggedBox(hw * 1.3, hw * 0.55, hw * 1.3, W, 'primary', 'stone_helm_dome')
+  dome.position.set(0, hw * 0.3, 0)
+  group.add(dome)
 
-  // Left side flare — drops from cap along the upper side of the head
-  const sideL = taggedBox(0.18 * s, 0.5 * s, h * 0.7, W, 'primary', 'stone_cap_side_l')
-  sideL.position.set(-(h / 2 + 0.08 * s), headTop - 0.15 * s, -0.1 * s)
+  // SIDE PLATES — hang down from the dome past the ears, widening the
+  // silhouette from the front and framing the face opening.
+  const sideL = taggedBox(hw * 0.22, hw * 0.7, hw * 0.9, W, 'primary', 'stone_helm_side_l')
+  sideL.position.set(-hw * 0.55, -hw * 0.05, -hw * 0.05)
   group.add(sideL)
 
-  // Right side flare
-  const sideR = taggedBox(0.18 * s, 0.5 * s, h * 0.7, W, 'primary', 'stone_cap_side_r')
-  sideR.position.set(h / 2 + 0.08 * s, headTop - 0.15 * s, -0.1 * s)
+  const sideR = taggedBox(hw * 0.22, hw * 0.7, hw * 0.9, W, 'primary', 'stone_helm_side_r')
+  sideR.position.set(hw * 0.55, -hw * 0.05, -hw * 0.05)
   group.add(sideR)
 
-  // Back panel — drops from cap along the back of the skull
-  const back = taggedBox(h * 0.8, 0.5 * s, 0.18 * s, W, 'primary', 'stone_cap_back')
-  back.position.set(0, headTop - 0.15 * s, -(h / 2 + 0.08 * s))
-  group.add(back)
+  // BACK PLATE — extends down the back for neck protection.
+  const backPlate = taggedBox(hw * 1.0, hw * 0.65, hw * 0.22, W, 'primary', 'stone_helm_back')
+  backPlate.position.set(0, -hw * 0.05, -hw * 0.55)
+  group.add(backPlate)
 
-  // Carved rim line running around the base of the cap at the front
-  const carvedLine = taggedBox(h + 0.25 * s, 0.06 * s, 0.06 * s, W, 'secondary', 'stone_cap_line')
-  carvedLine.position.set(0, headTop - 0.3 * s, h / 2 + 0.1 * s)
-  group.add(carvedLine)
+  // NOSE GUARD — Norman-style vertical bar dropping from the front of
+  // the dome between the eyes. Signature element: splits the face
+  // opening and says "warrior" while keeping identity visible.
+  const noseGuard = taggedBox(hw * 0.12, hw * 0.55, hw * 0.1, W, 'secondary', 'stone_helm_nose_guard')
+  noseGuard.position.set(0, 0, hw * 0.6)
+  group.add(noseGuard)
 
-  // Nose guard — Norman-style strip dropping from the front edge of the cap
-  const nose = taggedBox(0.12 * s, 0.3 * s, 0.08 * s, W, 'secondary', 'stone_nose_guard')
-  nose.position.set(0, headCenterY + 0.3 * s, h / 2 + 0.1 * s)
-  group.add(nose)
+  // BROW BAND — thick decorative band across the base of the dome,
+  // sitting just above the face opening.
+  const browBand = taggedBox(hw * 1.35, hw * 0.12, hw * 0.15, W, 'secondary', 'stone_helm_brow_band')
+  browBand.position.set(0, hw * 0.05, hw * 0.55)
+  group.add(browBand)
+
+  // CARVED CROSS — recessed cross on the front of the dome above the
+  // brow band. Secondary (darker) material reads as chiseled relief.
+  const crossV = taggedBox(hw * 0.08, hw * 0.3, hw * 0.05, W, 'secondary', 'stone_helm_cross_v')
+  crossV.position.set(0, hw * 0.35, hw * 0.63)
+  group.add(crossV)
+
+  const crossH = taggedBox(hw * 0.25, hw * 0.08, hw * 0.05, W, 'secondary', 'stone_helm_cross_h')
+  crossH.position.set(0, hw * 0.35, hw * 0.63)
+  group.add(crossH)
+
+  // CARVED CHEVRONS — diagonal V-lines carved into each side plate.
+  // Visual texture that reads as "made by a craftsman".
+  const chevronL1 = taggedBox(hw * 0.04, hw * 0.25, hw * 0.04, W, 'secondary', 'stone_helm_chevron_l1')
+  chevronL1.position.set(-hw * 0.57, 0, hw * 0.1)
+  chevronL1.rotation.z = 0.3
+  group.add(chevronL1)
+
+  const chevronL2 = taggedBox(hw * 0.04, hw * 0.25, hw * 0.04, W, 'secondary', 'stone_helm_chevron_l2')
+  chevronL2.position.set(-hw * 0.57, 0, -hw * 0.1)
+  chevronL2.rotation.z = -0.3
+  group.add(chevronL2)
+
+  const chevronR1 = taggedBox(hw * 0.04, hw * 0.25, hw * 0.04, W, 'secondary', 'stone_helm_chevron_r1')
+  chevronR1.position.set(hw * 0.57, 0, hw * 0.1)
+  chevronR1.rotation.z = -0.3
+  group.add(chevronR1)
+
+  const chevronR2 = taggedBox(hw * 0.04, hw * 0.25, hw * 0.04, W, 'secondary', 'stone_helm_chevron_r2')
+  chevronR2.position.set(hw * 0.57, 0, -hw * 0.1)
+  chevronR2.rotation.z = 0.3
+  group.add(chevronR2)
+
+  // EAR FLAPS — small plates hanging from the bottom of the side
+  // plates to protect the ears and add hanging visual weight.
+  const earL = taggedBox(hw * 0.18, hw * 0.25, hw * 0.3, W, 'primary', 'stone_helm_ear_l')
+  earL.position.set(-hw * 0.5, -hw * 0.45, hw * 0.15)
+  group.add(earL)
+
+  const earR = taggedBox(hw * 0.18, hw * 0.25, hw * 0.3, W, 'primary', 'stone_helm_ear_r')
+  earR.position.set(hw * 0.5, -hw * 0.45, hw * 0.15)
+  group.add(earR)
+
+  // TOP RIDGE — subtle structural line running front-to-back on the
+  // dome top. Less dramatic than Iron's crown crest; just a raised seam.
+  const ridge = taggedBox(hw * 0.1, hw * 0.1, hw * 1.0, W, 'secondary', 'stone_helm_ridge')
+  ridge.position.set(0, hw * 0.55, 0)
+  group.add(ridge)
 
   return group
 }
