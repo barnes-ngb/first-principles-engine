@@ -1271,35 +1271,21 @@ function parseRoutineText(dailyRoutine: string): DraftPlanItem[] {
 }
 
 /**
- * Post-generation validator: ensure the plan includes evaluation items
- * (Knowledge Mine + Fluency Practice). If the AI omitted them, inject defaults.
+ * Post-generation validator: ensure the plan includes Fluency Practice.
+ * Knowledge Mine is intentionally excluded — it's an always-available tool on
+ * Kid Today (not a checklist task) and auto-tracks its own time.
  */
 export function ensureEvaluationItems(plan: DraftWeeklyPlan): DraftWeeklyPlan {
   const allItems = plan.days.flatMap((d) => d.items)
-  const hasEval = allItems.some(
+  const hasFluency = allItems.some(
     (item) =>
-      item.itemType === 'evaluation' ||
-      item.title?.toLowerCase().includes('knowledge mine') ||
+      item.evaluationMode === 'fluency' ||
       item.title?.toLowerCase().includes('fluency'),
   )
 
-  if (hasEval || plan.days.length === 0) return plan
+  if (hasFluency || plan.days.length === 0) return plan
 
-  console.warn('[Planner] No evaluation items in generated plan — injecting defaults')
-
-  const knowledgeMine: DraftPlanItem = {
-    id: generateItemId(),
-    title: 'Knowledge Mine — Comprehension',
-    estimatedMinutes: 15,
-    subjectBucket: SubjectBucket.Reading,
-    skillTags: [],
-    accepted: true,
-    category: 'choose',
-    mvdEssential: false,
-    itemType: 'evaluation',
-    evaluationMode: 'comprehension',
-    link: '/quest',
-  }
+  console.warn('[Planner] No fluency items in generated plan — injecting defaults')
 
   const fluency: DraftPlanItem = {
     id: generateItemId(),
@@ -1317,9 +1303,7 @@ export function ensureEvaluationItems(plan: DraftWeeklyPlan): DraftWeeklyPlan {
 
   const days = plan.days.map((day) => ({ ...day, items: [...day.items] }))
 
-  // Spread evaluations across the week: Knowledge Mine on Tue/Thu, Fluency on Mon/Wed
-  if (days.length >= 2) days[1].items.push({ ...knowledgeMine, id: generateItemId() })
-  if (days.length >= 4) days[3].items.push({ ...knowledgeMine, id: generateItemId() })
+  // Spread fluency across the week: Monday + Wednesday
   if (days.length >= 1) days[0].items.push({ ...fluency, id: generateItemId() })
   if (days.length >= 3) days[2].items.push({ ...fluency, id: generateItemId() })
 
