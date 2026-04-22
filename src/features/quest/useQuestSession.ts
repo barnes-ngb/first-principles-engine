@@ -357,6 +357,10 @@ export function useQuestSession() {
   const questionStartRef = useRef<number>(0)
   const bonusRoundUsedRef = useRef(false)
   const sessionIdRef = useRef<string | null>(null)
+  // Synchronous mirror of sessionSaved — set at the start of endSession so a fast
+  // Done tap (e.g. on PHONICS MASTER before AI summary returns) can't slip past
+  // the !sessionSaved guard in resetToIntro and write a ghost in-progress doc.
+  const sessionSavedRef = useRef(false)
   const sessionTimer = useSessionTimer()
   const hoursLoggedRef = useRef(false)
 
@@ -509,6 +513,7 @@ export function useQuestSession() {
       setCurrentQuestion(null)
       setLastAnswer(null)
       setSessionSaved(false)
+      sessionSavedRef.current = false
       setFluencyPassages([])
       setFluencyDiamonds(0)
       setCurrentPassageText('')
@@ -682,6 +687,11 @@ export function useQuestSession() {
       finalState: QuestState,
       timedOut: boolean,
     ) => {
+      // Lock out resetToIntro's partial-save path immediately — the Done button
+      // is visible as soon as Summary renders, but setSessionSaved(true) doesn't
+      // fire until after the AI summary awaits complete.
+      sessionSavedRef.current = true
+
       // Stop timer
       if (timerRef.current) {
         clearInterval(timerRef.current)
@@ -1712,6 +1722,7 @@ export function useQuestSession() {
       // Reset other state
       setLastAnswer(null)
       setSessionSaved(false)
+      sessionSavedRef.current = false
       setSummarizing(false)
       setStartQuestError(null)
       setFluencyPassages([])
@@ -1752,9 +1763,17 @@ export function useQuestSession() {
   // ── Reset to intro ────────────────────────────────────────────
 
   const resetToIntro = useCallback(() => {
-    // Auto-save partial session if quest is in progress with answered questions
-    // Skip if session was already saved as complete (prevents ghost in-progress docs)
-    if (questState && questState.totalQuestions > 0 && !sessionSaved && activeChildId && familyId) {
+    // Auto-save partial session if quest is in progress with answered questions.
+    // Skip if session was saved or is currently being saved as complete — the
+    // ref is set synchronously at endSession start, so this blocks ghost docs
+    // even if Done is tapped before setSessionSaved(true) propagates.
+    if (
+      questState &&
+      questState.totalQuestions > 0 &&
+      !sessionSavedRef.current &&
+      activeChildId &&
+      familyId
+    ) {
       // Reuse existing sessionId if resuming, otherwise generate new one
       const docId = sessionIdRef.current ?? `interactive_${activeChildId}_${Date.now()}`
       const domain = activeDomainRef.current
@@ -1805,6 +1824,7 @@ export function useQuestSession() {
     setFindings([])
     setLastAnswer(null)
     setSessionSaved(false)
+    sessionSavedRef.current = false
     setSummarizing(false)
     setStartQuestError(null)
     setHitLevelCap(false)
@@ -1815,7 +1835,7 @@ export function useQuestSession() {
     bonusRoundUsedRef.current = false
     activeQuestModeRef.current = undefined
     sessionIdRef.current = null
-  }, [questState, currentQuestion, activeChildId, familyId, answeredQuestions, findings, streak.currentStreak, sessionSaved, sessionTimer])
+  }, [questState, currentQuestion, activeChildId, familyId, answeredQuestions, findings, streak.currentStreak, sessionTimer])
 
   return {
     screen,
