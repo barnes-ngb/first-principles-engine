@@ -191,72 +191,125 @@ export const XP_THRESHOLDS: Record<VoxelArmorPieceId, number> = {
 
 function buildIronHelmet(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
-  const { headSize, scale: s } = layout
+  const { headSize } = layout
 
   // Helmet uses HEAD-LOCAL coordinates (headGroup center = 0,0,0).
-  // The full knight helm: dome on top, side/back plates wrapping the skull,
-  // cheek guards framing the face (front is OPEN between them so the full
-  // face — sunglasses, eyes, nose, mouth — stays visible), brow ridge over
-  // the face opening, and a crown crest running front-to-back.
-  const h = headSize
-  const headTop = h / 2
-  const headCenterY = 0
+  // Full knight helm: chunky forged-iron dome with real thickness, a
+  // dark brow ridge casting shadow over the face, outward-angled cheek
+  // guards, a front-to-back crown crest, a rear neck guard, side/back
+  // chainmail aventail, and rivets at structural joints. The face
+  // opening between the cheek guards stays OPEN so the full face
+  // (sunglasses, eyes, nose, mouth) remains visible.
+  const hw = headSize
 
-  // DOME — polished steel cap sitting on the crown of the head
-  const dome = taggedBox(h + 0.3 * s, 0.4 * s, h + 0.3 * s, W, 'primary', 'iron_helm_dome')
-  dome.position.set(0, headTop + 0.15 * s, 0)
+  // DOME — polished steel cap with visible thickness, extending slightly
+  // past the skull on all sides.
+  const dome = taggedBox(hw * 1.25, hw * 0.5, hw * 1.25, W, 'primary', 'iron_helm_dome')
+  dome.position.set(0, hw * 0.35, 0)
   group.add(dome)
 
-  // LEFT PLATE — wraps the left side of the skull
-  const sideL = taggedBox(0.22 * s, h * 0.75, h + 0.1 * s, W, 'primary', 'iron_helm_side_l')
-  sideL.position.set(-(h / 2 + 0.1 * s), headCenterY + 0.1 * s, 0)
-  group.add(sideL)
+  // CROWN CREST — centurion-style ridge running front-to-back on top of
+  // the dome. Secondary dark-iron accent adds height and signals "helm",
+  // not "hat".
+  const crest = taggedBox(hw * 0.12, hw * 0.2, hw * 1.1, W, 'secondary', 'iron_helm_crest')
+  crest.position.set(0, hw * 0.6, 0)
+  group.add(crest)
 
-  // RIGHT PLATE
-  const sideR = taggedBox(0.22 * s, h * 0.75, h + 0.1 * s, W, 'primary', 'iron_helm_side_r')
-  sideR.position.set(h / 2 + 0.1 * s, headCenterY + 0.1 * s, 0)
-  group.add(sideR)
-
-  // BACK PLATE — wraps the back of the skull
-  const backPlate = taggedBox(h + 0.1 * s, h * 0.75, 0.22 * s, W, 'primary', 'iron_helm_back')
-  backPlate.position.set(0, headCenterY + 0.1 * s, -(h / 2 + 0.1 * s))
-  group.add(backPlate)
-
-  // CROWN RIDGE — centerline crest running front-to-back along the dome top
-  const crown = taggedBox(0.12 * s, 0.18 * s, h + 0.15 * s, W, 'primary', 'iron_helm_crown')
-  crown.userData.isAccent = true
-  crown.position.set(0, headTop + 0.35 * s, 0)
-  group.add(crown)
-
-  // CHEEK GUARD LEFT — frames the face opening, angled slightly outward
-  const cheekL = taggedBox(0.18 * s, 0.35 * s, 0.25 * s, W, 'primary', 'iron_helm_cheek_l')
-  cheekL.position.set(-(h / 2 + 0.05 * s), headCenterY - 0.2 * s, h / 4)
-  cheekL.rotation.y = 0.15
-  group.add(cheekL)
-
-  // CHEEK GUARD RIGHT — mirrored
-  const cheekR = taggedBox(0.18 * s, 0.35 * s, 0.25 * s, W, 'primary', 'iron_helm_cheek_r')
-  cheekR.position.set(h / 2 + 0.05 * s, headCenterY - 0.2 * s, h / 4)
-  cheekR.rotation.y = -0.15
-  group.add(cheekR)
-
-  // BROW RIDGE — visor-brim over the face opening
-  const brow = taggedBox(h + 0.2 * s, 0.1 * s, 0.15 * s, W, 'secondary', 'iron_helm_brow')
-  brow.position.set(0, headCenterY + 0.35 * s, h / 2 + 0.08 * s)
+  // BROW RIDGE — thick dark-iron visor brim above the face opening,
+  // protruding forward so it casts a shadow over the upper face.
+  const brow = taggedBox(hw * 1.35, hw * 0.12, hw * 0.25, W, 'secondary', 'iron_helm_brow')
+  brow.position.set(0, hw * 0.15, hw * 0.55)
   group.add(brow)
 
-  // RIVETS — four dark-iron bumps where the dome meets the side/back plates
-  const rivetSize = 0.06 * s
-  const rivetY = headTop + 0.02 * s
-  const rivetXs: [number, number][] = [
-    [-(h / 2 + 0.05 * s), h / 2 - 0.08 * s],
-    [h / 2 + 0.05 * s, h / 2 - 0.08 * s],
-    [-(h / 2 + 0.05 * s), -(h / 2 - 0.08 * s)],
-    [h / 2 + 0.05 * s, -(h / 2 - 0.08 * s)],
+  // CHEEK GUARDS — angled plates framing the face opening, widening the
+  // silhouette and reading as forged plate.
+  const cheekL = taggedBox(hw * 0.2, hw * 0.45, hw * 0.4, W, 'primary', 'iron_helm_cheek_l')
+  cheekL.position.set(-hw * 0.6, -hw * 0.1, hw * 0.3)
+  cheekL.rotation.y = 0.2
+  group.add(cheekL)
+
+  const cheekR = taggedBox(hw * 0.2, hw * 0.45, hw * 0.4, W, 'primary', 'iron_helm_cheek_r')
+  cheekR.position.set(hw * 0.6, -hw * 0.1, hw * 0.3)
+  cheekR.rotation.y = -0.2
+  group.add(cheekR)
+
+  // SIDE PLATES — bridge the dome to the cheek guards on each side,
+  // wrapping the skull with no visible gap.
+  const sideL = taggedBox(hw * 0.2, hw * 0.6, hw * 0.8, W, 'primary', 'iron_helm_side_l')
+  sideL.position.set(-hw * 0.55, hw * 0.05, -hw * 0.05)
+  group.add(sideL)
+
+  const sideR = taggedBox(hw * 0.2, hw * 0.6, hw * 0.8, W, 'primary', 'iron_helm_side_r')
+  sideR.position.set(hw * 0.55, hw * 0.05, -hw * 0.05)
+  group.add(sideR)
+
+  // NECK GUARD — rear plate extending down the back to protect the neck
+  // and anchor the chainmail drape.
+  const neckGuard = taggedBox(hw * 1.1, hw * 0.5, hw * 0.2, W, 'primary', 'iron_helm_neck_guard')
+  neckGuard.position.set(0, -hw * 0.1, -hw * 0.55)
+  group.add(neckGuard)
+
+  // CHAINMAIL AVENTAIL (back) — three rows of alternating primary/secondary
+  // blocks hanging below the neck guard. The checkerboard pattern reads
+  // as woven mail links without needing real chainmail geometry.
+  for (let row = 0; row < 3; row++) {
+    for (let col = -2; col <= 2; col++) {
+      const role: 'primary' | 'secondary' =
+        ((row + col) & 1) === 0 ? 'primary' : 'secondary'
+      const link = taggedBox(
+        hw * 0.15,
+        hw * 0.12,
+        hw * 0.08,
+        W,
+        role,
+        `iron_helm_mail_back_${row}_${col + 2}`,
+      )
+      link.position.set(
+        col * hw * 0.18,
+        -hw * 0.25 - row * hw * 0.13,
+        -hw * 0.55,
+      )
+      group.add(link)
+    }
+  }
+
+  // CHAINMAIL AVENTAIL (sides) — two links hanging below each cheek guard,
+  // continuing the aventail around the jawline.
+  for (let row = 0; row < 2; row++) {
+    for (const side of [-1, 1] as const) {
+      const role: 'primary' | 'secondary' =
+        ((row + (side > 0 ? 1 : 0)) & 1) === 0 ? 'primary' : 'secondary'
+      const link = taggedBox(
+        hw * 0.15,
+        hw * 0.12,
+        hw * 0.08,
+        W,
+        role,
+        `iron_helm_mail_side_${side > 0 ? 'r' : 'l'}_${row}`,
+      )
+      link.position.set(
+        side * hw * 0.6,
+        -hw * 0.4 - row * hw * 0.13,
+        hw * 0.3,
+      )
+      group.add(link)
+    }
+  }
+
+  // RIVETS — dark-iron cubes at structural joints (brow ends,
+  // cheek/dome joints, back plate corners).
+  const rivetSize = hw * 0.06
+  const rivetPositions: [number, number, number][] = [
+    [-hw * 0.55, hw * 0.15, hw * 0.55],    // brow left
+    [hw * 0.55, hw * 0.15, hw * 0.55],     // brow right
+    [-hw * 0.5, hw * 0.1, hw * 0.15],      // cheek-dome left
+    [hw * 0.5, hw * 0.1, hw * 0.15],       // cheek-dome right
+    [-hw * 0.35, -hw * 0.1, -hw * 0.55],   // back left
+    [hw * 0.35, -hw * 0.1, -hw * 0.55],    // back right
   ]
-  rivetXs.forEach(([x, z], i) => {
+  rivetPositions.forEach(([x, y, z], i) => {
     const rivet = taggedBox(rivetSize, rivetSize, rivetSize, W, 'secondary', `iron_helm_rivet_${i}`)
-    rivet.position.set(x, rivetY, z)
+    rivet.position.set(x, y, z)
     group.add(rivet)
   })
 
