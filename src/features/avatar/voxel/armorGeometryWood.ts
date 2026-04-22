@@ -9,42 +9,42 @@ import { taggedBox, taggedFlatBox, W } from './buildArmorPiece'
 // polished or ornate. Dimensions are first-pass estimates and will
 // need tuning after first render.
 
-// ── Helmet: leather headband + small topknot ────────────────────────
+// ── Helmet: simple headband around the forehead ─────────────────────
+//
+// Helmet is a child of headGroup, so local (0,0,0) is the head center.
+// Head block is headSize × headSize × headSize; head top = +h/2, face = +Z.
+// Wood is the "I showed up" starting piece: a thin band at brow level,
+// nothing covering the top of the skull. ALL hair stays visible.
 export function buildWoodHelmet(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
-  const { U, headSize } = layout
+  const { headSize, scale: s } = layout
   const h = headSize
+  const bandY = 0.15 * s // just above eye level, on the forehead
 
-  // Forehead band — four thin segments forming a ring at brow level
-  const bandH = U * 1.6
-  const bandW = h + U * 0.6
-  const bandD = h + U * 0.6
-  const front = taggedBox(bandW, bandH, U * 0.8, W, 'primary', 'wood_headband_front')
-  front.position.set(0, h * 0.1, bandD / 2 - U * 0.3)
+  // Front band
+  const front = taggedBox(h + 0.3 * s, 0.25 * s, 0.12 * s, W, 'primary', 'wood_band_front')
+  front.position.set(0, bandY, h / 2 + 0.06 * s)
   group.add(front)
 
-  const back = taggedBox(bandW, bandH, U * 0.8, W, 'primary', 'wood_headband_back')
-  back.position.set(0, h * 0.1, -(bandD / 2 - U * 0.3))
+  // Back band
+  const back = taggedBox(h + 0.3 * s, 0.25 * s, 0.12 * s, W, 'primary', 'wood_band_back')
+  back.position.set(0, bandY, -(h / 2 + 0.06 * s))
   group.add(back)
 
-  const sideL = taggedBox(U * 0.8, bandH, bandD - U * 1.4, W, 'primary', 'wood_headband_l')
-  sideL.position.set(-(bandW / 2 - U * 0.3), h * 0.1, 0)
+  // Left side band
+  const sideL = taggedBox(0.12 * s, 0.25 * s, h + 0.1 * s, W, 'primary', 'wood_band_l')
+  sideL.position.set(-(h / 2 + 0.06 * s), bandY, 0)
   group.add(sideL)
 
-  const sideR = taggedBox(U * 0.8, bandH, bandD - U * 1.4, W, 'primary', 'wood_headband_r')
-  sideR.position.set(bandW / 2 - U * 0.3, h * 0.1, 0)
+  // Right side band
+  const sideR = taggedBox(0.12 * s, 0.25 * s, h + 0.1 * s, W, 'primary', 'wood_band_r')
+  sideR.position.set(h / 2 + 0.06 * s, bandY, 0)
   group.add(sideR)
 
-  // Knot at back — small bump with two tails
-  const knot = taggedFlatBox(U * 1.4, U * 1.2, U * 1.0, W, 'accent', 'wood_headband_knot')
-  knot.position.set(0, h * 0.1, -(bandD / 2 + U * 0.5))
-  group.add(knot)
-  const tailL = taggedFlatBox(U * 0.4, U * 2.0, U * 0.4, W, 'accent', 'wood_headband_tail_l')
-  tailL.position.set(-U * 0.6, h * 0.1 - U * 1.2, -(bandD / 2 + U * 0.8))
-  group.add(tailL)
-  const tailR = taggedFlatBox(U * 0.4, U * 2.0, U * 0.4, W, 'accent', 'wood_headband_tail_r')
-  tailR.position.set(U * 0.6, h * 0.1 - U * 1.2, -(bandD / 2 + U * 0.8))
-  group.add(tailR)
+  // Decorative center notch on the front — small darker block
+  const notch = taggedBox(0.15 * s, 0.12 * s, 0.06 * s, W, 'secondary', 'wood_band_notch')
+  notch.position.set(0, bandY, h / 2 + 0.12 * s)
+  group.add(notch)
 
   return group
 }

@@ -97,6 +97,7 @@ function applyHelmHairStyle(
   character: THREE.Group,
   isHelmetEquipped: boolean,
   features: CharacterFeatures,
+  helmetTier?: string,
 ) {
   const headGroup = character.getObjectByName('headGroup') as THREE.Group | undefined
   if (!headGroup) return
@@ -105,24 +106,24 @@ function applyHelmHairStyle(
   let helmHair = headGroup.getObjectByName('helmHairGroup')
   const headMesh = headGroup.getObjectByName('head') as THREE.Mesh | undefined
 
-  if (isHelmetEquipped) {
-    // Hide full hair
+  // Wood helmet is a forehead band that sits below the hairline — full hair
+  // stays visible. Stone/Iron cover the crown, so swap to the trimmed tufts.
+  const tier = helmetTier?.toUpperCase()
+  const coversHair = isHelmetEquipped && tier !== 'WOOD'
+
+  if (coversHair) {
     if (fullHair) fullHair.visible = false
 
-    // Show helmet-compatible hair — only parts that peek from under helmet
-    // Hair is child of headGroup so it moves with head rotations
     if (!helmHair && headMesh) {
       const headGeo = headMesh.geometry as THREE.BoxGeometry
       const headWidth = headGeo.parameters.width
       const U = headWidth / 8
       const hairMat = new THREE.MeshLambertMaterial({ color: features.hairColor ?? '#6B4C32' })
-      // headY = 0 in headGroup local space
       helmHair = buildHelmHair(hairMat, 0, U)
       headGroup.add(helmHair)
     }
     if (helmHair) helmHair.visible = true
   } else {
-    // Show full hair, hide helm hair
     if (fullHair) fullHair.visible = true
     if (helmHair) helmHair.visible = false
   }
@@ -779,9 +780,11 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     const capeMesh = character.getObjectByName('cape') ?? scene.getObjectByName('cape')
     if (capeMesh instanceof THREE.Group) addOutlinesToGroup(capeMesh, 0.15)
 
-    // Apply helmet hair if helmet is initially equipped
-    if (equippedPieces.includes('helmet')) {
-      applyHelmHairStyle(character, true, resolvedFeatures)
+    // Apply helmet hair if helmet is initially equipped (or shown in preview)
+    if (effectiveEquipped.includes('helmet')) {
+      applyHelmHairStyle(character, true, resolvedFeatures, effectiveTier('helmet'))
+    } else {
+      applyHelmHairStyle(character, false, resolvedFeatures)
     }
 
     // Platform — tinted to match tier + seasonal color
@@ -1389,8 +1392,8 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
             case 'helmet': {
               const headGrp = character.getObjectByName('headGroup')
               if (headGrp) animateNod(headGrp, 300)
-              // Swap to helmet-compatible hair
-              applyHelmHairStyle(character, true, resolvedFeatures)
+              // Swap to helmet-compatible hair (Wood keeps full hair)
+              applyHelmHairStyle(character, true, resolvedFeatures, resolvePieceTier('helmet'))
               break
             }
             case 'breastplate': {

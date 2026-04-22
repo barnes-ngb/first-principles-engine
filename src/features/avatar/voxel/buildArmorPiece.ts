@@ -191,68 +191,74 @@ export const XP_THRESHOLDS: Record<VoxelArmorPieceId, number> = {
 
 function buildIronHelmet(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
-  const { U, headSize } = layout
+  const { headSize, scale: s } = layout
 
   // Helmet uses HEAD-LOCAL coordinates (headGroup center = 0,0,0).
-  // Open-face helmet: covers top, sides, and back of head.
-  // Front is open — face (eyes, nose, mouth) fully visible.
+  // The full knight helm: dome on top, side/back plates wrapping the skull,
+  // cheek guards framing the face (front is OPEN between them so the full
+  // face — sunglasses, eyes, nose, mouth — stays visible), brow ridge over
+  // the face opening, and a crown crest running front-to-back.
   const h = headSize
-  const pad = U * 1.6
+  const headTop = h / 2
+  const headCenterY = 0
 
-  // TOP DOME — wide cap covering upper portion of head only
-  const domeW = h + pad
-  const domeH = h * 0.45
-  const domeD = h + pad
-  const dome = taggedBox(domeW, domeH, domeD, W, 'primary', 'helmet_dome')
-  // Bottom edge sits just above eye level
-  dome.position.set(0, h * 0.08 + domeH / 2, 0)
+  // DOME — polished steel cap sitting on the crown of the head
+  const dome = taggedBox(h + 0.3 * s, 0.4 * s, h + 0.3 * s, W, 'primary', 'iron_helm_dome')
+  dome.position.set(0, headTop + 0.15 * s, 0)
   group.add(dome)
 
-  // BACK PANEL — extends from dome down to cover back of head
-  const backH = h * 0.75
-  const back = taggedBox(domeW - U * 2, backH, U * 1.4, W, 'primary', 'helmet_back')
-  back.position.set(0, h * 0.08 - backH / 2 + U * 0.5, -(domeD / 2 - U * 0.3))
-  group.add(back)
-
-  // SIDE CHEEK GUARDS — cover sides of head, pulled back from face
-  const sideH = h * 0.55
-  const sideD = h * 0.45
-  const sideL = taggedBox(U * 1.4, sideH, sideD, W, 'accent', 'helmet_side_l')
-  sideL.position.set(-(domeW / 2 - U * 0.2), -h * 0.05, -h * 0.12)
+  // LEFT PLATE — wraps the left side of the skull
+  const sideL = taggedBox(0.22 * s, h * 0.75, h + 0.1 * s, W, 'primary', 'iron_helm_side_l')
+  sideL.position.set(-(h / 2 + 0.1 * s), headCenterY + 0.1 * s, 0)
   group.add(sideL)
-  const sideR = taggedBox(U * 1.4, sideH, sideD, W, 'accent', 'helmet_side_r')
-  sideR.position.set(domeW / 2 - U * 0.2, -h * 0.05, -h * 0.12)
+
+  // RIGHT PLATE
+  const sideR = taggedBox(0.22 * s, h * 0.75, h + 0.1 * s, W, 'primary', 'iron_helm_side_r')
+  sideR.position.set(h / 2 + 0.1 * s, headCenterY + 0.1 * s, 0)
   group.add(sideR)
 
-  // BROW BAND — accent strip at top of face opening (like a visor flipped up)
-  const browW = domeW + U * 0.4
-  const brow = taggedBox(browW, U * 1.4, U * 1.0, W, 'accent', 'helmet_brow')
-  brow.position.set(0, h * 0.08, domeD / 2 + U * 0.2)
+  // BACK PLATE — wraps the back of the skull
+  const backPlate = taggedBox(h + 0.1 * s, h * 0.75, 0.22 * s, W, 'primary', 'iron_helm_back')
+  backPlate.position.set(0, headCenterY + 0.1 * s, -(h / 2 + 0.1 * s))
+  group.add(backPlate)
+
+  // CROWN RIDGE — centerline crest running front-to-back along the dome top
+  const crown = taggedBox(0.12 * s, 0.18 * s, h + 0.15 * s, W, 'primary', 'iron_helm_crown')
+  crown.userData.isAccent = true
+  crown.position.set(0, headTop + 0.35 * s, 0)
+  group.add(crown)
+
+  // CHEEK GUARD LEFT — frames the face opening, angled slightly outward
+  const cheekL = taggedBox(0.18 * s, 0.35 * s, 0.25 * s, W, 'primary', 'iron_helm_cheek_l')
+  cheekL.position.set(-(h / 2 + 0.05 * s), headCenterY - 0.2 * s, h / 4)
+  cheekL.rotation.y = 0.15
+  group.add(cheekL)
+
+  // CHEEK GUARD RIGHT — mirrored
+  const cheekR = taggedBox(0.18 * s, 0.35 * s, 0.25 * s, W, 'primary', 'iron_helm_cheek_r')
+  cheekR.position.set(h / 2 + 0.05 * s, headCenterY - 0.2 * s, h / 4)
+  cheekR.rotation.y = -0.15
+  group.add(cheekR)
+
+  // BROW RIDGE — visor-brim over the face opening
+  const brow = taggedBox(h + 0.2 * s, 0.1 * s, 0.15 * s, W, 'secondary', 'iron_helm_brow')
+  brow.position.set(0, headCenterY + 0.35 * s, h / 2 + 0.08 * s)
   group.add(brow)
 
-  // BOTTOM BRIM — back and sides only (front is open)
-  const brimY = -h / 2
-  const brimBack = taggedBox(domeW + U * 0.4, U * 0.8, U * 1.0, W, 'accent', 'helmet_brim_back')
-  brimBack.position.set(0, brimY, -(domeD / 2 + U * 0.1))
-  group.add(brimBack)
-  const brimL = taggedBox(U * 1.0, U * 0.8, domeD * 0.6, W, 'accent', 'helmet_brim_l')
-  brimL.position.set(-(domeW / 2 + U * 0.4), brimY, -h * 0.15)
-  group.add(brimL)
-  const brimR = taggedBox(U * 1.0, U * 0.8, domeD * 0.6, W, 'accent', 'helmet_brim_r')
-  brimR.position.set(domeW / 2 + U * 0.4, brimY, -h * 0.15)
-  group.add(brimR)
-
-  // TOP CREST — accent ridge front to back
-  const domeTopY = h * 0.08 + domeH
-  const crest = taggedBox(U * 1.0, U * 1.4, h, W, 'accent', 'helmet_crest')
-  crest.userData.isAccent = true
-  crest.position.set(0, domeTopY + U * 0.5, 0)
-  group.add(crest)
-
-  // NECK GUARD — extends below head at the back
-  const neckGuard = taggedBox(h, U * 2.4, U * 1.4, W, 'primary', 'helmet_neckguard')
-  neckGuard.position.set(0, -h * 0.6, -h * 0.55)
-  group.add(neckGuard)
+  // RIVETS — four dark-iron bumps where the dome meets the side/back plates
+  const rivetSize = 0.06 * s
+  const rivetY = headTop + 0.02 * s
+  const rivetXs: [number, number][] = [
+    [-(h / 2 + 0.05 * s), h / 2 - 0.08 * s],
+    [h / 2 + 0.05 * s, h / 2 - 0.08 * s],
+    [-(h / 2 + 0.05 * s), -(h / 2 - 0.08 * s)],
+    [h / 2 + 0.05 * s, -(h / 2 - 0.08 * s)],
+  ]
+  rivetXs.forEach(([x, z], i) => {
+    const rivet = taggedBox(rivetSize, rivetSize, rivetSize, W, 'secondary', `iron_helm_rivet_${i}`)
+    rivet.position.set(x, rivetY, z)
+    group.add(rivet)
+  })
 
   return group
 }
