@@ -121,9 +121,10 @@ export function buildStoneBreastplate(layout: BodyLayout): THREE.Group {
   const s = scale
 
   // Wraparound plate geometry — front/back/side panels thick enough to carry
-  // the side silhouette, sized just below the Iron footprint.
+  // the side silhouette, sized just below the Iron footprint. Single solid
+  // slabs on front and back (not stacked bands).
   const plateW = torsoW * 1.08
-  const plateH = torsoH * 0.82
+  const plateH = torsoH * 0.85
   const plateThickness = 0.2 * s
 
   // Front plate — solid block covering the torso front
@@ -195,13 +196,14 @@ export function buildStoneBelt(layout: BodyLayout): THREE.Group {
   band.position.y = legTop
   group.add(band)
 
-  // Square stone buckle protruding forward — no prong
-  const buckle = taggedFlatBox(U * 2.8, U * 2.6, U * 1.0, W, 'accent', 'stone_belt_buckle')
+  // Rectangular buckle protruding forward in dark charcoal secondary —
+  // reads as forged iron fitting against the gray stone belt.
+  const buckle = taggedFlatBox(U * 2.8, U * 2.6, U * 1.0, W, 'secondary', 'stone_belt_buckle')
   buckle.position.set(0, legTop, bandD / 2 + U * 0.3)
   group.add(buckle)
 
-  // Chiseled inset on the buckle face
-  const inset = taggedFlatBox(U * 1.6, U * 1.4, U * 0.25, W, 'detail', 'stone_belt_inset')
+  // Carved mark on the buckle — tiny accent block raised from the face.
+  const inset = taggedFlatBox(U * 1.0, U * 1.0, U * 0.25, W, 'accent', 'stone_belt_inset')
   inset.position.set(0, legTop, bandD / 2 + U * 0.9)
   group.add(inset)
 
@@ -241,16 +243,30 @@ export function buildStoneShoes(layout: BodyLayout): THREE.Group {
   soleR.position.set(legX, U * 0.2, U * 0.4)
   group.add(soleR)
 
-  // Front-only shin plates above the boot
-  const shinH = legH * 0.4
+  // Front-only shin greaves rising from the boot cuff to just below the
+  // knee — taller than the earlier thin bands so the stone reads as real
+  // armor covering the shin.
+  const shinH = legH * 0.55
+  const shinY = bootShaftH + shinH / 2 + U * 0.2
+  const shinFrontZ = bootD / 2 + U * 0.2
   const shinL = taggedFlatBox(legW - U * 0.1, shinH, U * 1.0, W, 'primary', 'stone_shin_l')
-  shinL.position.set(-legX, bootShaftH + shinH / 2 + U * 0.2, bootD / 2 + U * 0.2)
+  shinL.position.set(-legX, shinY, shinFrontZ)
   group.add(shinL)
   const shinR = taggedFlatBox(legW - U * 0.1, shinH, U * 1.0, W, 'primary', 'stone_shin_r')
-  shinR.position.set(legX, bootShaftH + shinH / 2 + U * 0.2, bootD / 2 + U * 0.2)
+  shinR.position.set(legX, shinY, shinFrontZ)
   group.add(shinR)
 
-  // Knee bumper (round, centered)
+  // Carved horizontal line across the middle of each greave — a single
+  // darker groove that reads as a chiseled seam.
+  const grooveZ = shinFrontZ + U * 0.4
+  const grooveL = taggedFlatBox(legW + U * 0.1, U * 0.25, U * 0.2, W, 'secondary', 'stone_shin_groove_l')
+  grooveL.position.set(-legX, shinY, grooveZ)
+  group.add(grooveL)
+  const grooveR = taggedFlatBox(legW + U * 0.1, U * 0.25, U * 0.2, W, 'secondary', 'stone_shin_groove_r')
+  grooveR.position.set(legX, shinY, grooveZ)
+  group.add(grooveR)
+
+  // Knee bumper (round, centered) — sits just above the greave
   const kneeY = bootShaftH + shinH + U * 0.3
   const kneeL = taggedFlatBox(legW + U * 0.2, U * 1.2, U * 1.4, W, 'accent', 'stone_knee_l')
   kneeL.position.set(-legX, kneeY, bootD / 2 + U * 0.3)
