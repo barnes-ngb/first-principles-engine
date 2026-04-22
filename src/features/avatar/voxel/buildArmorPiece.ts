@@ -203,21 +203,23 @@ function buildIronHelmet(layout: BodyLayout): THREE.Group {
   const hw = headSize
 
   // DOME — polished steel cap with visible thickness, extending slightly
-  // past the skull on all sides.
-  const dome = taggedBox(hw * 1.25, hw * 0.5, hw * 1.25, W, 'primary', 'iron_helm_dome')
+  // past the skull on all sides. Matches Stone's hw * 1.3 footprint so the
+  // helm reads as "full war helm" rather than skullcap.
+  const dome = taggedBox(hw * 1.3, hw * 0.55, hw * 1.3, W, 'primary', 'iron_helm_dome')
   dome.position.set(0, hw * 0.35, 0)
   group.add(dome)
 
   // CROWN CREST — centurion-style ridge running front-to-back on top of
-  // the dome. Secondary dark-iron accent adds height and signals "helm",
-  // not "hat".
-  const crest = taggedBox(hw * 0.12, hw * 0.2, hw * 1.1, W, 'secondary', 'iron_helm_crest')
-  crest.position.set(0, hw * 0.6, 0)
+  // the dome. Taller than Stone's subtle seam — this is the silhouette's
+  // vertical signature.
+  const crest = taggedBox(hw * 0.14, hw * 0.3, hw * 1.15, W, 'secondary', 'iron_helm_crest')
+  crest.position.set(0, hw * 0.72, 0)
   group.add(crest)
 
   // BROW RIDGE — thick dark-iron visor brim above the face opening,
-  // protruding forward so it casts a shadow over the upper face.
-  const brow = taggedBox(hw * 1.35, hw * 0.12, hw * 0.25, W, 'secondary', 'iron_helm_brow')
+  // protruding forward so it casts a shadow over the upper face. Iron's
+  // signature knight feature replaces Stone's nose guard.
+  const brow = taggedBox(hw * 1.4, hw * 0.18, hw * 0.28, W, 'secondary', 'iron_helm_brow')
   brow.position.set(0, hw * 0.15, hw * 0.55)
   group.add(brow)
 
@@ -353,16 +355,45 @@ function buildIronBreastplate(layout: BodyLayout): THREE.Group {
   collar.position.set(0, torsoTop + U * 1, 0)
   group.add(collar)
 
-  // Cross emblem — protrudes from the front plate in a contrasting secondary
-  // color so it reads as raised relief, not flush paint.
-  const crossProtrusion = 0.09 * s
+  // Cross emblem — raised in primary steel so the relief reads as forged
+  // into the plate itself. The flat-shading + specular on primary gives a
+  // bright highlight edge that pops against the plate around it.
+  const crossProtrusion = 0.08 * s
   const crossZ = torsoD / 2 + plateThickness + crossProtrusion / 2
-  const crossV = taggedBox(U * 1.2, plateH * 0.55, crossProtrusion, W, 'secondary', 'cross_v')
+  const crossV = taggedBox(U * 1.2, plateH * 0.55, crossProtrusion, W, 'primary', 'cross_v')
   crossV.position.set(0, torsoCenter + U * 1, crossZ)
   group.add(crossV)
-  const crossH = taggedBox(torsoW * 0.7, U * 1.2, crossProtrusion, W, 'secondary', 'cross_h')
+  const crossH = taggedBox(torsoW * 0.7, U * 1.2, crossProtrusion, W, 'primary', 'cross_h')
   crossH.position.set(0, torsoCenter + torsoH * 0.2, crossZ)
   group.add(crossH)
+
+  // Panel seam lines — dark secondary strips suggesting plate divisions.
+  // A central vertical seam and two horizontal waist/chest lines turn the
+  // monolithic front plate into forged-panel sections.
+  const seamZ = torsoD / 2 + plateThickness + 0.01 * s
+  const seamTopY = torsoCenter + plateH * 0.28
+  const seamBotY = torsoCenter - plateH * 0.28
+  const seamTop = taggedFlatBox(plateW * 0.85, U * 0.25, 0.04 * s, W, 'secondary', 'breastplate_seam_top')
+  seamTop.position.set(0, seamTopY, seamZ)
+  group.add(seamTop)
+  const seamBot = taggedFlatBox(plateW * 0.85, U * 0.25, 0.04 * s, W, 'secondary', 'breastplate_seam_bot')
+  seamBot.position.set(0, seamBotY, seamZ)
+  group.add(seamBot)
+
+  // Rivets at seam intersections — four on front plate + four on back.
+  const rivetSize = U * 0.35
+  const rivetXs = [-plateW * 0.38, plateW * 0.38]
+  const rivetYs = [seamTopY, seamBotY]
+  rivetYs.forEach((y, yi) => {
+    rivetXs.forEach((x, xi) => {
+      const rF = taggedFlatBox(rivetSize, rivetSize, 0.05 * s, W, 'secondary', `breastplate_rivet_f_${yi}_${xi}`)
+      rF.position.set(x, y, seamZ + 0.01 * s)
+      group.add(rF)
+      const rB = taggedFlatBox(rivetSize, rivetSize, 0.05 * s, W, 'secondary', `breastplate_rivet_b_${yi}_${xi}`)
+      rB.position.set(x, y, -(seamZ + 0.01 * s))
+      group.add(rB)
+    })
+  })
 
   // Pauldrons (shoulder guards)
   const pauldronL = taggedBox(U * 4.5, U * 2.4, torsoD + U * 2, W, 'primary', 'pauldron_l')
@@ -429,12 +460,13 @@ function buildIronBelt(layout: BodyLayout): THREE.Group {
   buckle.position.set(0, legTop, buckleFrontZ + buckleD / 2)
   group.add(buckle)
 
-  // Cross detail on the buckle face
+  // Cross detail on the buckle face — raised in primary steel so the cross
+  // reads as the lightest element on the darker accent buckle.
   const crossZ = buckleFrontZ + buckleD + U * 0.1
-  const crossV = taggedFlatBox(U * 0.5, buckleH * 0.8, U * 0.3, W, 'secondary', 'belt_buckle_cross_v')
+  const crossV = taggedFlatBox(U * 0.5, buckleH * 0.8, U * 0.3, W, 'primary', 'belt_buckle_cross_v')
   crossV.position.set(0, legTop, crossZ)
   group.add(crossV)
-  const crossH = taggedFlatBox(buckleW * 0.7, U * 0.5, U * 0.3, W, 'secondary', 'belt_buckle_cross_h')
+  const crossH = taggedFlatBox(buckleW * 0.7, U * 0.5, U * 0.3, W, 'primary', 'belt_buckle_cross_h')
   crossH.position.set(0, legTop, crossZ)
   group.add(crossH)
 
@@ -478,41 +510,86 @@ function buildIronShoes(layout: BodyLayout): THREE.Group {
   const { U, legW, legD, legH } = layout
   const legX = legW / 2 + U * 0.15
 
-  // Boot shaft — covers lower ~45% of each leg (armor boots are taller than base boots)
-  const bootShaftH = legH * 0.45
-  const bootW = legW + U * 2.2
-  const bootD = legD + U * 2.2
-  const bootL = taggedBox(bootW, bootShaftH, bootD, W, 'primary', 'boot_l')
-  bootL.position.set(-legX, bootShaftH / 2, 0)
-  group.add(bootL)
-  const bootR = taggedBox(bootW, bootShaftH, bootD, W, 'primary', 'boot_r')
-  bootR.position.set(legX, bootShaftH / 2, 0)
-  group.add(bootR)
+  // Sabaton — iron shell covering the foot and ankle, slightly wider than
+  // the base boot so the foot reads as armored rather than soft leather.
+  const sabatonH = legH * 0.22
+  const sabatonW = legW + U * 2.6
+  const sabatonD = legD + U * 2.6
+  const sabatonL = taggedBox(sabatonW, sabatonH, sabatonD, W, 'primary', 'iron_sabaton_l')
+  sabatonL.position.set(-legX, sabatonH / 2, U * 0.3)
+  group.add(sabatonL)
+  const sabatonR = taggedBox(sabatonW, sabatonH, sabatonD, W, 'primary', 'iron_sabaton_r')
+  sabatonR.position.set(legX, sabatonH / 2, U * 0.3)
+  group.add(sabatonR)
 
-  // Boot soles
-  const soleL = taggedBox(bootW + U * 0.4, U * 1.2, bootD + U * 1.2, W, 'accent', 'boot_sole_l')
+  // Sabaton sole — accent band at the base
+  const soleL = taggedBox(sabatonW + U * 0.3, U * 1.0, sabatonD + U * 0.8, W, 'accent', 'iron_sole_l')
   soleL.position.set(-legX, U * 0.2, U * 0.5)
   group.add(soleL)
-  const soleR = taggedBox(bootW + U * 0.4, U * 1.2, bootD + U * 1.2, W, 'accent', 'boot_sole_r')
+  const soleR = taggedBox(sabatonW + U * 0.3, U * 1.0, sabatonD + U * 0.8, W, 'accent', 'iron_sole_r')
   soleR.position.set(legX, U * 0.2, U * 0.5)
   group.add(soleR)
 
-  // Top cuff band
-  const cuffL = taggedFlatBox(bootW + U * 0.4, U * 1.0, bootD + U * 0.4, W, 'accent', 'boot_cuff_l')
-  cuffL.position.set(-legX, bootShaftH + U * 0.2, 0)
-  group.add(cuffL)
-  const cuffR = taggedFlatBox(bootW + U * 0.4, U * 1.0, bootD + U * 0.4, W, 'accent', 'boot_cuff_r')
-  cuffR.position.set(legX, bootShaftH + U * 0.2, 0)
-  group.add(cuffR)
+  // Articulation line — thin secondary strip across the sabaton at ankle
+  // height, suggesting a jointed foot plate.
+  const artY = sabatonH + U * 0.1
+  const artL = taggedFlatBox(sabatonW + U * 0.2, U * 0.3, sabatonD + U * 0.2, W, 'secondary', 'iron_sabaton_art_l')
+  artL.position.set(-legX, artY, U * 0.3)
+  group.add(artL)
+  const artR = taggedFlatBox(sabatonW + U * 0.2, U * 0.3, sabatonD + U * 0.2, W, 'secondary', 'iron_sabaton_art_r')
+  artR.position.set(legX, artY, U * 0.3)
+  group.add(artR)
 
-  // Knee guards
-  const kneeY = bootShaftH - U * 1.5
-  const kneeL = taggedFlatBox(legW - U * 0.2, U * 2.4, U * 1.2, W, 'accent', 'knee_l')
-  kneeL.position.set(-legX, kneeY, bootD / 2 + U * 0.3)
+  // Shin greave (front) — rises from the sabaton articulation to just
+  // below the knee. Protrudes forward beyond the leg silhouette.
+  const greaveH = legH * 0.55
+  const greaveY = artY + greaveH / 2 + U * 0.1
+  const greaveFrontZ = legD / 2 + U * 0.9
+  const shinL = taggedFlatBox(legW + U * 0.4, greaveH, U * 1.0, W, 'primary', 'iron_shin_l')
+  shinL.position.set(-legX, greaveY, greaveFrontZ)
+  group.add(shinL)
+  const shinR = taggedFlatBox(legW + U * 0.4, greaveH, U * 1.0, W, 'primary', 'iron_shin_r')
+  shinR.position.set(legX, greaveY, greaveFrontZ)
+  group.add(shinR)
+
+  // Shin center ridge — raised secondary strip running down each greave
+  const shinRidgeZ = greaveFrontZ + U * 0.4
+  const shinRidgeL = taggedFlatBox(U * 0.3, greaveH - U * 0.4, U * 0.3, W, 'secondary', 'iron_shin_ridge_l')
+  shinRidgeL.position.set(-legX, greaveY, shinRidgeZ)
+  group.add(shinRidgeL)
+  const shinRidgeR = taggedFlatBox(U * 0.3, greaveH - U * 0.4, U * 0.3, W, 'secondary', 'iron_shin_ridge_r')
+  shinRidgeR.position.set(legX, greaveY, shinRidgeZ)
+  group.add(shinRidgeR)
+
+  // Calf guard (back) — thinner plate behind the leg, slightly shorter
+  // than the shin greave so the knee can articulate.
+  const calfH = legH * 0.45
+  const calfY = artY + calfH / 2 + U * 0.1
+  const calfBackZ = -(legD / 2 + U * 0.8)
+  const calfL = taggedFlatBox(legW + U * 0.2, calfH, U * 0.8, W, 'primary', 'iron_calf_l')
+  calfL.position.set(-legX, calfY, calfBackZ)
+  group.add(calfL)
+  const calfR = taggedFlatBox(legW + U * 0.2, calfH, U * 0.8, W, 'primary', 'iron_calf_r')
+  calfR.position.set(legX, calfY, calfBackZ)
+  group.add(calfR)
+
+  // Knee guards — protruding secondary cubes at knee height that fuse the
+  // greave to the thigh silhouette.
+  const kneeY = greaveY + greaveH / 2 + U * 0.3
+  const kneeL = taggedFlatBox(legW + U * 0.2, U * 1.8, U * 1.4, W, 'secondary', 'iron_knee_l')
+  kneeL.position.set(-legX, kneeY, greaveFrontZ)
   group.add(kneeL)
-  const kneeR = taggedFlatBox(legW - U * 0.2, U * 2.4, U * 1.2, W, 'accent', 'knee_r')
-  kneeR.position.set(legX, kneeY, bootD / 2 + U * 0.3)
+  const kneeR = taggedFlatBox(legW + U * 0.2, U * 1.8, U * 1.4, W, 'secondary', 'iron_knee_r')
+  kneeR.position.set(legX, kneeY, greaveFrontZ)
   group.add(kneeR)
+
+  // Knee bosses — small accent cubes centered on each knee guard
+  const kneeBossL = taggedFlatBox(U * 0.6, U * 0.6, U * 0.4, W, 'accent', 'iron_knee_boss_l')
+  kneeBossL.position.set(-legX, kneeY, greaveFrontZ + U * 0.6)
+  group.add(kneeBossL)
+  const kneeBossR = taggedFlatBox(U * 0.6, U * 0.6, U * 0.4, W, 'accent', 'iron_knee_boss_r')
+  kneeBossR.position.set(legX, kneeY, greaveFrontZ + U * 0.6)
+  group.add(kneeBossR)
 
   return group
 }

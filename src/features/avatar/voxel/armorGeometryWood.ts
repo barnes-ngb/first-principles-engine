@@ -20,56 +20,74 @@ export function buildWoodHelmet(layout: BodyLayout): THREE.Group {
   const { headSize, scale: s } = layout
   const h = headSize
   const bandY = 0.15 * s // just above eye level, on the forehead
+  const bandH = 0.3 * s  // tall enough to read clearly against skin/hair
+  const bandT = 0.12 * s // band thickness
 
-  // Front band
-  const front = taggedBox(h + 0.3 * s, 0.25 * s, 0.12 * s, W, 'primary', 'wood_band_front')
-  front.position.set(0, bandY, h / 2 + 0.06 * s)
+  // Front band — slightly wider than the sides so the corners overlap
+  const front = taggedBox(h + 0.3 * s, bandH, bandT, W, 'primary', 'wood_band_front')
+  front.position.set(0, bandY, h / 2 + bandT / 2)
   group.add(front)
 
   // Back band
-  const back = taggedBox(h + 0.3 * s, 0.25 * s, 0.12 * s, W, 'primary', 'wood_band_back')
-  back.position.set(0, bandY, -(h / 2 + 0.06 * s))
+  const back = taggedBox(h + 0.3 * s, bandH, bandT, W, 'primary', 'wood_band_back')
+  back.position.set(0, bandY, -(h / 2 + bandT / 2))
   group.add(back)
 
-  // Left side band
-  const sideL = taggedBox(0.12 * s, 0.25 * s, h + 0.1 * s, W, 'primary', 'wood_band_l')
-  sideL.position.set(-(h / 2 + 0.06 * s), bandY, 0)
+  // Left side band — extended so it joins flush with front/back
+  const sideL = taggedBox(bandT, bandH, h + 0.2 * s, W, 'primary', 'wood_band_l')
+  sideL.position.set(-(h / 2 + bandT / 2), bandY, 0)
   group.add(sideL)
 
   // Right side band
-  const sideR = taggedBox(0.12 * s, 0.25 * s, h + 0.1 * s, W, 'primary', 'wood_band_r')
-  sideR.position.set(h / 2 + 0.06 * s, bandY, 0)
+  const sideR = taggedBox(bandT, bandH, h + 0.2 * s, W, 'primary', 'wood_band_r')
+  sideR.position.set(h / 2 + bandT / 2, bandY, 0)
   group.add(sideR)
 
-  // Decorative center notch on the front — small darker block
-  const notch = taggedBox(0.15 * s, 0.12 * s, 0.06 * s, W, 'secondary', 'wood_band_notch')
-  notch.position.set(0, bandY, h / 2 + 0.12 * s)
+  // Decorative center notch on the front — chunkier and darker so it
+  // reads clearly from straight-on.
+  const notch = taggedBox(0.22 * s, 0.2 * s, 0.08 * s, W, 'secondary', 'wood_band_notch')
+  notch.position.set(0, bandY, h / 2 + bandT + 0.04 * s)
   group.add(notch)
 
   return group
 }
 
-// ── Breastplate: leather vest with laces ────────────────────────────
+// ── Breastplate: leather vest — front + back panels with side laces ─
+//
+// Two flat leather panels rather than a single wraparound vest. Visible
+// gaps at the sides show the magenta tunic underneath, and rope-tan
+// laces span the gap connecting front and back — this is the humble
+// "I showed up" piece, so we keep it clearly ad-hoc and hand-laced.
 export function buildWoodBreastplate(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
-  const { U, torsoCenter, torsoTop, torsoH, torsoW, torsoD, legTop } = layout
+  const { U, torsoCenter, torsoTop, torsoH, torsoW, torsoD, legTop, scale } = layout
+  const s = scale
 
-  // Thin leather vest — minimal padding beyond the torso (≥0.05*s proud)
-  const vestW = torsoW + U * 0.8
-  const vestH = torsoH + U * 0.2
-  const vestD = torsoD + U * 1.2
-  const vest = taggedBox(vestW, vestH, vestD, W, 'primary', 'wood_vest_body')
-  vest.position.set(0, torsoCenter, U * 0.2)
-  group.add(vest)
+  // Narrower than the torso so the tunic peeks out at the armpits
+  const panelW = torsoW * 0.85
+  const panelH = torsoH * 0.95
+  const panelThickness = 0.12 * s
+  const frontZ = torsoD / 2 + panelThickness / 2 + U * 0.1
+  const backZ = -(torsoD / 2 + panelThickness / 2 + U * 0.1)
+
+  // Front panel — flat leather slab covering only the chest center
+  const front = taggedBox(panelW, panelH, panelThickness, W, 'primary', 'wood_vest_front')
+  front.position.set(0, torsoCenter, frontZ)
+  group.add(front)
+
+  // Back panel — same shape mirrored to the back
+  const back = taggedBox(panelW, panelH, panelThickness, W, 'primary', 'wood_vest_back')
+  back.position.set(0, torsoCenter, backZ)
+  group.add(back)
 
   // Small collar — thin strip at the top
   const collar = taggedFlatBox(torsoW * 0.6, U * 1.2, torsoD + U * 1.4, W, 'accent', 'wood_vest_collar')
   collar.position.set(0, torsoTop + U * 0.2, 0)
   group.add(collar)
 
-  // Two vertical leather laces down the front
-  const laceH = torsoH * 0.7
-  const laceZ = vestD / 2 + U * 0.2
+  // Two vertical leather laces down the front panel
+  const laceH = panelH * 0.75
+  const laceZ = frontZ + panelThickness / 2 + U * 0.15
   const laceL = taggedFlatBox(U * 0.4, laceH, U * 0.2, W, 'accent', 'wood_vest_lace_l')
   laceL.position.set(-U * 1.2, torsoCenter, laceZ)
   group.add(laceL)
@@ -77,7 +95,7 @@ export function buildWoodBreastplate(layout: BodyLayout): THREE.Group {
   laceR.position.set(U * 1.2, torsoCenter, laceZ)
   group.add(laceR)
 
-  // Cross-stitches connecting the laces
+  // Cross-stitches connecting the front laces
   const stitchCount = 4
   const stitchSpacing = laceH / (stitchCount + 1)
   for (let i = 1; i <= stitchCount; i++) {
@@ -87,10 +105,43 @@ export function buildWoodBreastplate(layout: BodyLayout): THREE.Group {
     group.add(stitch)
   }
 
-  // Bottom hem
-  const hem = taggedFlatBox(vestW + U * 0.1, U * 0.6, vestD + U * 0.1, W, 'accent', 'wood_vest_hem')
-  hem.position.set(0, legTop + U * 0.2, U * 0.2)
-  group.add(hem)
+  // Stitching along the front panel edges — three short darker blocks on
+  // each vertical edge so the seams read clearly against the leather.
+  const edgeStitchX = panelW / 2 - U * 0.3
+  const edgeStitchZ = frontZ + panelThickness / 2 + U * 0.05
+  for (let i = -1; i <= 1; i++) {
+    const y = torsoCenter + i * (panelH * 0.3)
+    const eL = taggedFlatBox(U * 0.25, U * 0.4, U * 0.15, W, 'secondary', `wood_vest_edge_stitch_l_${i}`)
+    eL.position.set(-edgeStitchX, y, edgeStitchZ)
+    group.add(eL)
+    const eR = taggedFlatBox(U * 0.25, U * 0.4, U * 0.15, W, 'secondary', `wood_vest_edge_stitch_r_${i}`)
+    eR.position.set(edgeStitchX, y, edgeStitchZ)
+    group.add(eR)
+  }
+
+  // Side rope ties — thin tan blocks spanning the exposed tunic gap on
+  // each side, "lacing" the front and back panels together. Three ties
+  // per side at shoulder / mid / hip height.
+  const sideX = torsoW / 2 + U * 0.4
+  const tieD = torsoD + U * 1.2
+  for (let i = -1; i <= 1; i++) {
+    const y = torsoCenter + i * (panelH * 0.3)
+    const tieL = taggedFlatBox(U * 0.3, U * 0.3, tieD, W, 'accent', `wood_vest_tie_l_${i}`)
+    tieL.position.set(-sideX, y, 0)
+    group.add(tieL)
+    const tieR = taggedFlatBox(U * 0.3, U * 0.3, tieD, W, 'accent', `wood_vest_tie_r_${i}`)
+    tieR.position.set(sideX, y, 0)
+    group.add(tieR)
+  }
+
+  // Bottom hem — only wraps the front/back panels, not the exposed sides
+  const hemW = panelW + U * 0.2
+  const hemFront = taggedFlatBox(hemW, U * 0.5, panelThickness + U * 0.2, W, 'accent', 'wood_vest_hem_front')
+  hemFront.position.set(0, legTop + U * 0.2, frontZ)
+  group.add(hemFront)
+  const hemBack = taggedFlatBox(hemW, U * 0.5, panelThickness + U * 0.2, W, 'accent', 'wood_vest_hem_back')
+  hemBack.position.set(0, legTop + U * 0.2, backZ)
+  group.add(hemBack)
 
   return group
 }
