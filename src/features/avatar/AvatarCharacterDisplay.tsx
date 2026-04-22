@@ -96,7 +96,6 @@ export default function AvatarCharacterDisplay({
   onArmorDebugChange,
   previewTier,
 }: AvatarCharacterDisplayProps) {
-  console.log('[DISPLAY] previewTier prop:', previewTier)
   return (
     <>
       {/* ── Brothers Toggle ────── */}

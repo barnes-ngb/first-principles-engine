@@ -6,7 +6,7 @@ import type { AccessoryId, AvatarBackground, AvatarProfile, CharacterFeatures, C
 import { DEFAULT_CHARACTER_FEATURES } from '../../core/types'
 import { buildCharacter, applyProfileOutfit } from './voxel/buildCharacter'
 import { buildArmorPiece, VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
-import { getPieceForgedTier } from './armorTierProgress'
+import { getPieceForgedTier, getPreviewTierForPiece } from './armorTierProgress'
 import { animateEquip, animateUnequip, animateJump, animateNod, animateSwordFlourish, animateHipTurn, animateTorsoPuff } from './voxel/equipAnimation'
 import { createTouchControls, updateRotation, destroyTouchControls } from './voxel/touchControls'
 import type { TouchControlState } from './voxel/touchControls'
@@ -199,6 +199,12 @@ function enforceArmorOpacity(
   for (const [pieceId, mesh] of armorMeshes) {
     const isEquipped = equipped.includes(pieceId)
     mesh.visible = isEquipped
+    // Breastplate detaches its arm-cover children onto armL/armR so they move
+    // with the arms. Those children are no longer under `mesh`, so toggling
+    // `mesh.visible` alone leaves them on-screen after unequip. Track them via
+    // userData.detachedChildren and mirror the visibility here.
+    const detached = (mesh.userData.detachedChildren as THREE.Object3D[] | undefined) ?? []
+    for (const child of detached) child.visible = isEquipped
     if (isEquipped) {
       mesh.traverse((child) => {
         if (child instanceof THREE.Mesh && child.material) {
@@ -412,7 +418,6 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
   forgedPieces,
   previewTier,
 }: VoxelCharacterProps, ref) {
-  console.log('[VOXEL] previewTier prop:', previewTier)
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
@@ -621,23 +626,26 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     const armR = character.getObjectByName('armR')
     const headGroup = character.getObjectByName('headGroup')
 
-    // Preview mode: when a tier tab is selected in the gallery, show ALL 6
-    // pieces at that tier regardless of what's forged/equipped. Normal mode:
-    // show only equipped pieces at their individually forged tiers.
+    // Preview mode: when a tier tab is selected in the gallery, show all 6
+    // pieces but cap each one at its highest forged tier ≤ the selected tab.
+    // So on the Iron tab, a piece forged at Iron shows Iron; a piece only
+    // forged at Stone stays Stone. This is the aspirational "here's what Iron
+    // tier looks like once you finish forging it" preview. Normal mode shows
+    // only equipped pieces at their individually forged tiers.
     const isPreview = !!previewTier
     const effectiveTier = (pieceId: string): string =>
-      previewTier ?? resolvePieceTier(pieceId)
+      isPreview
+        ? getPreviewTierForPiece(forgedPieces, pieceId, previewTier as string)
+        : resolvePieceTier(pieceId)
     const effectiveEquipped = isPreview
       ? VOXEL_ARMOR_PIECES.map((p) => p.id as string)
       : equippedPieces
-    console.log('[VOXEL] Building armor with previewTier:', previewTier, 'isPreview:', isPreview, 'effectiveEquipped:', effectiveEquipped)
 
     for (const pieceMeta of VOXEL_ARMOR_PIECES) {
       // Each piece is rendered at its own forged tier, not the global XP tier —
       // this is what makes mixed loadouts (e.g. Iron belt + Stone chestplate)
       // actually show different geometry per piece.
       const pieceTier = effectiveTier(pieceMeta.id)
-      console.log('[VOXEL] buildArmorPiece called:', pieceMeta.id, 'tier:', pieceTier)
       const pieceGroup = buildArmorPiece(pieceMeta.id, ageGroup, proportions, pieceTier)
       armorGroupsRef.current.set(pieceMeta.id, pieceGroup)
 
@@ -665,6 +673,12 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           if (targetArm) targetArm.add(child)
           else character.add(child)
         }
+        // Track detached children so equip/unequip can toggle their visibility.
+        // Without this, unequipping the breastplate leaves the arm covers on
+        // the character because they're no longer inside pieceGroup.
+        if (armChildren.length > 0) {
+          pieceGroup.userData.detachedChildren = armChildren
+        }
         character.add(pieceGroup)
       }
     }
@@ -673,12 +687,13 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     for (const [pieceId, group] of armorGroupsRef.current) {
       const isEquipped = effectiveEquipped.includes(pieceId)
 
-      if (isEquipped) {
-        group.visible = true
-        group.scale.set(1, 1, 1)
-      } else {
-        group.visible = false
-      }
+      group.visible = isEquipped
+      if (isEquipped) group.scale.set(1, 1, 1)
+
+      // Mirror visibility onto breastplate arm-cover children that were moved
+      // out to armL/armR (see the detach loop above).
+      const detached = (group.userData.detachedChildren as THREE.Object3D[] | undefined) ?? []
+      for (const child of detached) child.visible = isEquipped
     }
     // Apply tier materials via the same effective resolver.
     applyTierToArmor(armorGroupsRef.current, effectiveTier, effectiveEquipped)
@@ -1187,7 +1202,11 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         applyPaintedFace(headMesh, character, resolvedFeatures, skinHex)
       }
     }
-  }, [resolvedFeatures, ageGroup, equippedPieces, currentTier, resolvePieceTier, skinTextureUrl, customization, accessories, proportions, previewTier])
+    // forgedPieces is captured by value inside initScene, but its reference
+    // changes every Firestore snapshot. Key on forgedPiecesKey instead so we
+    // rebuild only when the forge map's CONTENT changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedFeatures, ageGroup, equippedPieces, currentTier, resolvePieceTier, forgedPiecesKey, skinTextureUrl, customization, accessories, proportions, previewTier])
 
   // ── Mount / rebuild on feature or age change ────────────────────
   useEffect(() => {
@@ -1365,6 +1384,8 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
         if (group) {
           group.visible = true
           group.scale.set(1, 1, 1)
+          const detached = (group.userData.detachedChildren as THREE.Object3D[] | undefined) ?? []
+          for (const child of detached) child.visible = true
         }
         applyTierToArmor(armorGroupsRef.current, resolvePieceTier, [pieceId])
 
@@ -1444,6 +1465,10 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
           removeEnchantGlow(group)
           removeOutlinesFromGroup(group)
           group.visible = false
+          // Also hide any detached children (breastplate arm covers live on
+          // armL/armR, so they don't follow group.visible).
+          const detached = (group.userData.detachedChildren as THREE.Object3D[] | undefined) ?? []
+          for (const child of detached) child.visible = false
         }
       }
     }
