@@ -23,6 +23,29 @@ export function getPieceForgedTier(
   return fallbackTier
 }
 
+/**
+ * Preview tier for a piece when a gallery tab is selected: the highest forged
+ * tier at or below the selected tab. Pieces not yet forged at the selected
+ * tier fall back to their current best (or wood). This is what drives the
+ * "Iron belt + Stone everything else" aspirational preview on the Iron tab.
+ */
+export function getPreviewTierForPiece(
+  forgedPieces: AvatarProfile['forgedPieces'] | undefined,
+  pieceId: string,
+  selectedTab: string,
+): string {
+  const tabKey = selectedTab.toLowerCase() as ArmorTier
+  const maxIndex = MINECRAFT_TIER_ORDER.indexOf(tabKey)
+  const startIndex = maxIndex >= 0 ? maxIndex : MINECRAFT_TIER_ORDER.length - 1
+  if (forgedPieces) {
+    for (let i = startIndex; i >= 0; i--) {
+      const tier = MINECRAFT_TIER_ORDER[i]
+      if (forgedPieces[tier]?.[pieceId]) return tier
+    }
+  }
+  return 'wood'
+}
+
 export function getTierForgedCount(profile: AvatarProfile, tier: string): number {
   return ALL_ARMOR_VOXEL_PIECES.filter((pieceId) => Boolean(profile.forgedPieces?.[tier]?.[pieceId])).length
 }

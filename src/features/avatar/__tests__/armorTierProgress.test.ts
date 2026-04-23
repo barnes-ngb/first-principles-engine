@@ -6,6 +6,7 @@ import {
   getActiveForgeTierFromProgress,
   getDisplayArmorTier,
   getPieceForgedTier,
+  getPreviewTierForPiece,
   getTierLockReason,
 } from '../armorTierProgress'
 
@@ -199,5 +200,73 @@ describe('getPieceForgedTier', () => {
     expect(getPieceForgedTier(forgedPieces, 'belt')).toBe('iron')
     expect(getPieceForgedTier(forgedPieces, 'breastplate')).toBe('stone')
     expect(getPieceForgedTier(forgedPieces, 'helmet')).toBe('wood')
+  })
+})
+
+describe('getPreviewTierForPiece', () => {
+  // Lincoln's forge state from the fix: belt forged through Iron, every other
+  // piece only through Stone. Iron tab should show the Iron belt alongside
+  // Stone everything else — that's the "forge more Iron to match the belt"
+  // motivation.
+  const lincolnForged = {
+    wood: {
+      belt: forgedEntry,
+      breastplate: forgedEntry,
+      helmet: forgedEntry,
+      shield: forgedEntry,
+      sword: forgedEntry,
+      shoes: forgedEntry,
+    },
+    stone: {
+      belt: forgedEntry,
+      breastplate: forgedEntry,
+      helmet: forgedEntry,
+      shield: forgedEntry,
+      sword: forgedEntry,
+      shoes: forgedEntry,
+    },
+    iron: {
+      belt: forgedEntry,
+    },
+  }
+
+  it('returns the selected tier when a piece is forged there', () => {
+    expect(getPreviewTierForPiece(lincolnForged, 'belt', 'iron')).toBe('iron')
+  })
+
+  it('falls back to the highest forged tier below the selection', () => {
+    expect(getPreviewTierForPiece(lincolnForged, 'breastplate', 'iron')).toBe('stone')
+    expect(getPreviewTierForPiece(lincolnForged, 'helmet', 'iron')).toBe('stone')
+    expect(getPreviewTierForPiece(lincolnForged, 'shield', 'iron')).toBe('stone')
+    expect(getPreviewTierForPiece(lincolnForged, 'sword', 'iron')).toBe('stone')
+    expect(getPreviewTierForPiece(lincolnForged, 'shoes', 'iron')).toBe('stone')
+  })
+
+  it('caps preview at the selected tab: stone tab shows stone for all', () => {
+    for (const piece of ['belt', 'breastplate', 'helmet', 'shield', 'sword', 'shoes']) {
+      expect(getPreviewTierForPiece(lincolnForged, piece, 'stone')).toBe('stone')
+    }
+  })
+
+  it('wood tab shows wood for all pieces', () => {
+    for (const piece of ['belt', 'breastplate', 'helmet', 'shield', 'sword', 'shoes']) {
+      expect(getPreviewTierForPiece(lincolnForged, piece, 'wood')).toBe('wood')
+    }
+  })
+
+  it('accepts uppercase tab labels', () => {
+    expect(getPreviewTierForPiece(lincolnForged, 'belt', 'IRON')).toBe('iron')
+    expect(getPreviewTierForPiece(lincolnForged, 'helmet', 'IRON')).toBe('stone')
+  })
+
+  it('falls back to wood when nothing has been forged', () => {
+    expect(getPreviewTierForPiece({}, 'belt', 'iron')).toBe('wood')
+    expect(getPreviewTierForPiece(undefined, 'belt', 'iron')).toBe('wood')
+  })
+
+  it('falls back to wood when the piece has no forge record at or below the tab', () => {
+    const forged = { iron: { belt: forgedEntry } }
+    // Helmet has no forge record at all -> wood (the safe default).
+    expect(getPreviewTierForPiece(forged, 'helmet', 'iron')).toBe('wood')
   })
 })

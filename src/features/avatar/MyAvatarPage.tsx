@@ -203,9 +203,6 @@ export default function MyAvatarPage() {
   // Armor gallery tab preview: when set, the 3D character shows all 6 pieces
   // at this tier. Null = default (show equipped pieces at forged tiers).
   const [previewTier, setPreviewTier] = useState<string | null>(null)
-  useEffect(() => {
-    console.log('[PAGE] previewTier state changed to:', previewTier)
-  }, [previewTier])
   const [optimisticDiamondBalance, setOptimisticDiamondBalance] = useState<number | null>(null)
   const [, setUnequipPiece] = useState<VoxelArmorPieceId | null>(null)
 
