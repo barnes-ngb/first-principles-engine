@@ -132,7 +132,7 @@ export const generateImage = onCall(
     }
 
     // ── Rate limiting ─────────────────────────────────────────
-    await checkRateLimit(uid, "image-generation", 20, 60);
+    await checkRateLimit(uid, "image-generation", 200, 60);
 
     // ── Rewrite prompt for DALL-E safety via Claude ─────────────
     const rewriteMode = style === "book-sticker" ? "sticker" as const : "scene" as const;
