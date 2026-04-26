@@ -63,6 +63,74 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.shellyChat).toContain("dayToday");
     expect(TASK_CONTEXT.shellyChat).toContain("dadLabReports");
   });
+
+  it("disposition includes engagement, gradeResults, and recentHistoryByDomain", () => {
+    expect(TASK_CONTEXT.disposition).toContain("charter");
+    expect(TASK_CONTEXT.disposition).toContain("childProfile");
+    expect(TASK_CONTEXT.disposition).toContain("engagement");
+    expect(TASK_CONTEXT.disposition).toContain("gradeResults");
+    expect(TASK_CONTEXT.disposition).toContain("recentHistoryByDomain");
+    expect(TASK_CONTEXT.disposition).toContain("skillSnapshot");
+    expect(TASK_CONTEXT.disposition).toContain("wordMastery");
+    expect(TASK_CONTEXT.disposition).not.toContain("sightWords");
+    expect(TASK_CONTEXT.disposition).not.toContain("workbookPaces");
+  });
+
+  it("scan includes skillSnapshot and activityConfigs but not charter", () => {
+    expect(TASK_CONTEXT.scan).toContain("childProfile");
+    expect(TASK_CONTEXT.scan).toContain("recentEval");
+    expect(TASK_CONTEXT.scan).toContain("skillSnapshot");
+    expect(TASK_CONTEXT.scan).toContain("activityConfigs");
+    expect(TASK_CONTEXT.scan).not.toContain("charter");
+    expect(TASK_CONTEXT.scan).not.toContain("engagement");
+  });
+
+  it("weeklyReview includes dadLabReports and recentScans", () => {
+    expect(TASK_CONTEXT.weeklyReview).toContain("charter");
+    expect(TASK_CONTEXT.weeklyReview).toContain("childProfile");
+    expect(TASK_CONTEXT.weeklyReview).toContain("skillSnapshot");
+    expect(TASK_CONTEXT.weeklyReview).toContain("activityConfigs");
+    expect(TASK_CONTEXT.weeklyReview).toContain("recentHistoryByDomain");
+    expect(TASK_CONTEXT.weeklyReview).toContain("recentScans");
+    expect(TASK_CONTEXT.weeklyReview).toContain("wordMastery");
+    expect(TASK_CONTEXT.weeklyReview).toContain("dadLabReports");
+    expect(TASK_CONTEXT.weeklyReview).not.toContain("engagement");
+    expect(TASK_CONTEXT.weeklyReview).not.toContain("sightWords");
+  });
+
+  it("workshop includes charter and workshopGames", () => {
+    expect(TASK_CONTEXT.workshop).toContain("charter");
+    expect(TASK_CONTEXT.workshop).toContain("childProfile");
+    expect(TASK_CONTEXT.workshop).toContain("workshopGames");
+    expect(TASK_CONTEXT.workshop).not.toContain("engagement");
+    expect(TASK_CONTEXT.workshop).not.toContain("sightWords");
+  });
+
+  it("generate matches chat (charter + childProfile only)", () => {
+    expect(TASK_CONTEXT.generate).toEqual(["charter", "childProfile"]);
+  });
+
+  it("generateStory includes sightWords and wordMastery", () => {
+    expect(TASK_CONTEXT.generateStory).toContain("childProfile");
+    expect(TASK_CONTEXT.generateStory).toContain("sightWords");
+    expect(TASK_CONTEXT.generateStory).toContain("wordMastery");
+    expect(TASK_CONTEXT.generateStory).not.toContain("charter");
+    expect(TASK_CONTEXT.generateStory).not.toContain("engagement");
+  });
+
+  it("analyzeWorkbook includes charter but minimal context", () => {
+    expect(TASK_CONTEXT.analyzeWorkbook).toEqual(["charter", "childProfile"]);
+  });
+
+  it("analyzePatterns only includes childProfile", () => {
+    expect(TASK_CONTEXT.analyzePatterns).toEqual(["childProfile"]);
+  });
+
+  it("all registered task types have at least childProfile", () => {
+    for (const [taskType, slices] of Object.entries(TASK_CONTEXT)) {
+      expect(slices, `${taskType} should include childProfile`).toContain("childProfile");
+    }
+  });
 });
 
 // ── compressEngagement ─────────────────────────────────────────
