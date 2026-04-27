@@ -93,6 +93,8 @@ export interface EnhanceSketchRequest {
   caption?: string
   /** Optional book theme ID — influences the reimagine style to match the book's visual identity. */
   theme?: string
+  /** When true, render the result with a transparent background so it can be used as a sticker. */
+  transparent?: boolean
 }
 
 export interface EnhanceSketchResponse {

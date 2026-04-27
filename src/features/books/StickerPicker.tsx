@@ -21,6 +21,7 @@ import { storage } from '../../core/firebase/storage'
 import { useAI } from '../../core/ai/useAI'
 import type { Sticker, StickerTag } from '../../core/types'
 import { StickerCategory } from '../../core/types/enums'
+import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 
 interface StickerPickerProps {
   open: boolean
@@ -321,7 +322,10 @@ export default function StickerPicker({
                 component="img"
                 src={pendingSticker.url}
                 alt={pendingSticker.label}
-                sx={{ width: 120, height: 120, objectFit: 'contain', borderRadius: 2 }}
+                sx={{
+                  width: 120, height: 120, objectFit: 'contain', borderRadius: 2,
+                  background: CHECKERBOARD_BG,
+                }}
               />
             </Box>
 
@@ -466,6 +470,7 @@ export default function StickerPicker({
                     borderColor: 'divider',
                     overflow: 'hidden',
                     cursor: 'pointer',
+                    background: CHECKERBOARD_BG,
                     '&:hover': { borderColor: 'primary.main', boxShadow: 2 },
                   }}
                 >
@@ -473,7 +478,7 @@ export default function StickerPicker({
                     component="img"
                     src={sticker.url}
                     alt={sticker.label}
-                    sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    sx={{ width: '100%', height: '100%', objectFit: 'contain' }}
                   />
                 </Box>
               ))}
@@ -521,7 +526,11 @@ export default function StickerPicker({
                 component="img"
                 src={generationPreview.url}
                 alt="Generated sticker"
-                sx={{ width: 160, height: 160, objectFit: 'contain', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}
+                sx={{
+                  width: 160, height: 160, objectFit: 'contain', borderRadius: 2,
+                  border: '1px solid', borderColor: 'divider',
+                  background: CHECKERBOARD_BG,
+                }}
               />
               <Stack direction="row" spacing={1.5}>
                 <Button

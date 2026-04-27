@@ -485,7 +485,11 @@ export default function BookEditorPage() {
     setPendingDrawingChoice(null)
   }, [])
 
-  const handleDrawingChoice = useCallback(async (choice: DrawingChoice, reimagineIntensity?: number) => {
+  const handleDrawingChoice = useCallback(async (
+    choice: DrawingChoice,
+    reimagineIntensity?: number,
+    transparent?: boolean,
+  ) => {
     if (!activePage || !drawingFile) return
 
     if (choice === 'as-is') {
@@ -546,6 +550,7 @@ export default function BookEditorPage() {
           imageUrl,
           reimagineIntensity ?? 50,
           caption,
+          transparent ?? false,
         )
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
@@ -614,6 +619,7 @@ export default function BookEditorPage() {
   const handlePostCleanupChoice = useCallback(async (
     choice: PostCleanupChoice,
     reimagineIntensity?: number,
+    transparent?: boolean,
   ) => {
     if (!activePage || !drawingResultFile) return
 
@@ -652,9 +658,13 @@ export default function BookEditorPage() {
       return
     }
 
-    if (choice === 'reimagine') {
+    if (choice === 'reimagine-sticker' || choice === 'reimagine-scene') {
       // Feed the CLEANED (transparent) PNG into the reimagine pipeline so the
       // AI focuses on the drawing instead of the table/paper.
+      // The `transparent` flag from the dialog controls whether the AI returns
+      // a transparent cutout (sticker) or a full illustrated scene. The dialog
+      // defaults: sticker path → transparent ON, scene path → transparent OFF.
+      const wantTransparent = transparent ?? (choice === 'reimagine-sticker')
       setReimagineError(null)
       try {
         const sketchResult = await addSketchToPage(activePage.id, drawingResultFile)
@@ -679,6 +689,7 @@ export default function BookEditorPage() {
           cleanedUrl,
           intensity,
           caption,
+          wantTransparent,
         )
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
@@ -686,15 +697,6 @@ export default function BookEditorPage() {
         setReimagineError(`Reimagine failed: ${errMsg}`)
         resetDrawingFlow()
       }
-      return
-    }
-
-    if (choice === 'scene') {
-      resetDrawingFlow()
-      const prefill = 'Create a full illustrated scene inspired by this child\'s drawing'
-      setAiPrompt(prefill)
-      setAiResult(null)
-      setShowAiDialog(true)
       return
     }
   }, [activePage, drawingResultFile, drawingResultUrl, drawingFile, addStickerFileToPage, addSketchToPage, bgReimagine, familyId, themedChild?.id, childName, resetDrawingFlow])
@@ -1328,14 +1330,14 @@ export default function BookEditorPage() {
         capturedFile={drawingFile}
         capturedPreviewUrl={drawingPreviewUrl}
         onClose={resetDrawingFlow}
-        onChoose={(choice, intensity) => { void handleDrawingChoice(choice, intensity) }}
+        onChoose={(choice, intensity, transparent) => { void handleDrawingChoice(choice, intensity, transparent) }}
         processing={drawingProcessing}
         processingLabel={drawingProcessingLabel}
         elapsedSeconds={drawingElapsed}
         resultPreviewUrl={drawingResultUrl}
         resultIsCleaned={drawingResultIsCleaned}
         onAcceptResult={handleAcceptDrawingResult}
-        onPickPostCleanup={(choice, intensity) => { void handlePostCleanupChoice(choice, intensity) }}
+        onPickPostCleanup={(choice, intensity, transparent) => { void handlePostCleanupChoice(choice, intensity, transparent) }}
         onRetryResult={handleRetryDrawingResult}
       />
 
@@ -1825,13 +1827,17 @@ export default function BookEditorPage() {
                   <ImageListItem
                     key={sticker.id}
                     onClick={() => handleSelectGalleryBackground(sticker.url)}
-                    sx={{ cursor: 'pointer', borderRadius: 1, overflow: 'hidden' }}
+                    sx={{
+                      cursor: 'pointer', borderRadius: 1, overflow: 'hidden',
+                      // Checkerboard so transparent stickers read as transparent.
+                      background: 'repeating-conic-gradient(#e0e0e0 0% 25%, #fff 0% 50%) 50% / 16px 16px',
+                    }}
                   >
                     <img
                       src={sticker.url}
                       alt={sticker.label ?? 'Sticker'}
                       loading="lazy"
-                      style={{ borderRadius: 8, objectFit: 'cover', height: 100, width: '100%' }}
+                      style={{ borderRadius: 8, objectFit: 'contain', height: 100, width: '100%' }}
                     />
                   </ImageListItem>
                 ))}
