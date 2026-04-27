@@ -40,6 +40,9 @@ interface UseBookResult {
   uploadAudio: (pageId: string, blob: Blob) => Promise<void>
   addAiImageToPage: (pageId: string, url: string, storagePath: string, prompt: string) => void
   addStickerToPage: (pageId: string, stickerUrl: string, storagePath: string, label: string, tags?: StickerTag[]) => void
+  /** Upload a cleaned drawing (transparent PNG) and add it to a page as a sticker.
+   *  Returns the storage URL + path so callers can also save it to the library. */
+  addStickerFileToPage: (pageId: string, file: File, label: string) => Promise<{ url: string; storagePath: string } | undefined>
   updateImagePosition: (pageId: string, imageId: string, position: PageImage['position']) => void
   /** Add a hand-drawn sketch photo to a page. Returns the image ID and storage path for later enhancement. */
   addSketchToPage: (pageId: string, file: File) => Promise<{ imageId: string; storagePath: string } | undefined>
@@ -648,6 +651,47 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     [applyUpdate],
   )
 
+  const addStickerFileToPage = useCallback(
+    async (pageId: string, file: File, label: string) => {
+      if (!familyId || !bookId) return undefined
+      const ts = new Date().toISOString().replace(/[:.]/g, '-')
+      const ext = (file.name.split('.').pop() ?? 'png').toLowerCase()
+      const filename = `sticker_${ts}.${ext}`
+      const storagePath = `families/${familyId}/books/${bookId}/${filename}`
+      const storageRef = ref(storage, storagePath)
+      setSaveState('saving')
+      try {
+        await uploadBytes(storageRef, file)
+        const url = await getDownloadURL(storageRef)
+        const image: PageImage = {
+          id: generateImageId(),
+          url,
+          storagePath,
+          type: 'sticker',
+          label,
+          // Sticker default position: small + centered so it's clearly a movable sticker
+          position: { x: 30, y: 30, width: 40, height: 40 },
+        }
+        applyUpdate((prev) => ({
+          ...prev,
+          pages: prev.pages.map((p) =>
+            p.id === pageId
+              ? { ...p, images: [...p.images, image], updatedAt: new Date().toISOString() }
+              : p,
+          ),
+        }))
+        return { url, storagePath }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
+        console.error('Sticker upload failed:', err)
+        setSaveState('error')
+        setSaveErrorMessage(`Sticker upload failed: ${errMsg}`)
+        return undefined
+      }
+    },
+    [familyId, bookId, applyUpdate],
+  )
+
   return {
     book,
     loading,
@@ -663,6 +707,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     uploadAudio,
     addAiImageToPage,
     addStickerToPage,
+    addStickerFileToPage,
     updateImagePosition,
     addSketchToPage,
     applySketchEnhancement,
