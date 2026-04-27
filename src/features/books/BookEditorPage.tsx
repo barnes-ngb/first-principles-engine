@@ -44,7 +44,7 @@ import CloseIcon from '@mui/icons-material/Close'
 import CollectionsIcon from '@mui/icons-material/Collections'
 import Paper from '@mui/material/Paper'
 import Snackbar from '@mui/material/Snackbar'
-import { getDocs, orderBy, query } from 'firebase/firestore'
+import { addDoc, getDocs, orderBy, query } from 'firebase/firestore'
 import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
 import AudioRecorder from '../../components/AudioRecorder'
@@ -62,7 +62,7 @@ import type { EnhanceSketchRequest, ImageGenRequest } from '../../core/ai/useAI'
 import PageEditor from './PageEditor'
 import StickerPicker from './StickerPicker'
 import DrawingChoiceDialog from './DrawingChoiceDialog'
-import type { DrawingChoice } from './DrawingChoiceDialog'
+import type { DrawingChoice, PostCleanupChoice } from './DrawingChoiceDialog'
 import { cleanSketchBackground } from './cleanSketch'
 import type { ImagePosition } from './DraggableImage'
 import { useBook } from './useBook'
@@ -151,6 +151,7 @@ export default function BookEditorPage() {
     uploadAudio,
     addAiImageToPage,
     addStickerToPage,
+    addStickerFileToPage,
     updateImagePosition,
     reorderPages,
     addSketchToPage,
@@ -232,6 +233,7 @@ export default function BookEditorPage() {
   const [drawingProcessingLabel, setDrawingProcessingLabel] = useState<string>('')
   const [drawingResultUrl, setDrawingResultUrl] = useState<string | null>(null)
   const [drawingResultFile, setDrawingResultFile] = useState<File | null>(null)
+  const [drawingResultIsCleaned, setDrawingResultIsCleaned] = useState(false)
   const [pendingDrawingChoice, setPendingDrawingChoice] = useState<DrawingChoice | null>(null)
 
   // Sketch background cleanup toggle (default ON when page has existing images)
@@ -468,6 +470,7 @@ export default function BookEditorPage() {
     setShowDrawingChoice(true)
     setDrawingResultUrl(null)
     setDrawingResultFile(null)
+    setDrawingResultIsCleaned(false)
     setPendingDrawingChoice(null)
   }, [])
 
@@ -478,6 +481,7 @@ export default function BookEditorPage() {
     setDrawingProcessing(false)
     setDrawingResultUrl(null)
     setDrawingResultFile(null)
+    setDrawingResultIsCleaned(false)
     setPendingDrawingChoice(null)
   }, [])
 
@@ -494,12 +498,13 @@ export default function BookEditorPage() {
 
     if (choice === 'cleanup') {
       setDrawingProcessing(true)
-      setDrawingProcessingLabel('Removing paper background...')
+      setDrawingProcessingLabel('Removing background...')
       try {
         const cleaned = await cleanSketchBackground(drawingFile)
         const url = URL.createObjectURL(cleaned)
         setDrawingResultUrl(url)
         setDrawingResultFile(cleaned)
+        setDrawingResultIsCleaned(true)
       } catch {
         // Fallback: add as-is
         await addImageToPage(activePage.id, drawingFile, { cleanBackground: false })
@@ -559,10 +564,12 @@ export default function BookEditorPage() {
         const url = URL.createObjectURL(cleaned)
         setDrawingResultUrl(url)
         setDrawingResultFile(cleaned)
+        setDrawingResultIsCleaned(true)
       } catch {
         // Fallback: use original as sticker
         setDrawingResultUrl(drawingPreviewUrl)
         setDrawingResultFile(drawingFile)
+        setDrawingResultIsCleaned(false)
       }
       setDrawingProcessing(false)
       return
@@ -581,23 +588,116 @@ export default function BookEditorPage() {
 
   const handleAcceptDrawingResult = useCallback(() => {
     if (!activePage || !drawingResultFile) return
-    if (pendingDrawingChoice === 'sticker') {
-      // Add as sticker — upload and add to sticker library implicitly via addStickerToPage
-      const url = drawingResultUrl ?? ''
-      addStickerToPage(activePage.id, url, '', drawingFile?.name ?? 'Drawing sticker')
+    // Cleaned drawings always default to STICKER (positionable, transparent overlay).
+    // Drawings are stickers; scenes are backgrounds.
+    if (pendingDrawingChoice === 'sticker' || drawingResultIsCleaned) {
+      void addStickerFileToPage(
+        activePage.id,
+        drawingResultFile,
+        drawingFile?.name?.replace(/\.[^.]+$/, '') || 'Drawing sticker',
+      )
     } else {
-      // cleanup result — add as image
       void addImageToPage(activePage.id, drawingResultFile, { cleanBackground: false })
     }
     resetDrawingFlow()
-  }, [activePage, drawingResultFile, drawingResultUrl, drawingFile, pendingDrawingChoice, addImageToPage, addStickerToPage, resetDrawingFlow])
+  }, [activePage, drawingResultFile, drawingResultIsCleaned, drawingFile, pendingDrawingChoice, addImageToPage, addStickerFileToPage, resetDrawingFlow])
 
   const handleRetryDrawingResult = useCallback(() => {
     setDrawingResultUrl(null)
     setDrawingResultFile(null)
+    setDrawingResultIsCleaned(false)
     // Re-show choice dialog
     setPendingDrawingChoice(null)
   }, [])
+
+  // Post-cleanup pipeline: user picks what to do with the cleaned (transparent) drawing.
+  const handlePostCleanupChoice = useCallback(async (
+    choice: PostCleanupChoice,
+    reimagineIntensity?: number,
+  ) => {
+    if (!activePage || !drawingResultFile) return
+
+    if (choice === 'add-sticker') {
+      const label = drawingFile?.name?.replace(/\.[^.]+$/, '') || 'Drawing sticker'
+      void addStickerFileToPage(activePage.id, drawingResultFile, label)
+      resetDrawingFlow()
+      return
+    }
+
+    if (choice === 'save-sticker') {
+      // Upload cleaned PNG, add to current page AND save to sticker library.
+      const label = drawingFile?.name?.replace(/\.[^.]+$/, '') || `${childName || 'Kid'}'s drawing`
+      const result = await addStickerFileToPage(activePage.id, drawingResultFile, label)
+      if (result && familyId) {
+        const tag: 'lincoln' | 'london' | 'both' =
+          childName.toLowerCase() === 'lincoln' ? 'lincoln'
+            : childName.toLowerCase() === 'london' ? 'london'
+              : 'both'
+        try {
+          await addDoc(stickerLibraryCollection(familyId), {
+            url: result.url,
+            storagePath: result.storagePath,
+            label,
+            category: 'custom',
+            childId: themedChild?.id ?? null,
+            createdAt: new Date().toISOString(),
+            tags: ['object'],
+            childProfile: tag,
+          })
+        } catch {
+          // Best effort — sticker is already on the page.
+        }
+      }
+      resetDrawingFlow()
+      return
+    }
+
+    if (choice === 'reimagine') {
+      // Feed the CLEANED (transparent) PNG into the reimagine pipeline so the
+      // AI focuses on the drawing instead of the table/paper.
+      setReimagineError(null)
+      try {
+        const sketchResult = await addSketchToPage(activePage.id, drawingResultFile)
+        if (!sketchResult) {
+          setReimagineError('Sketch upload failed — check your connection and try again.')
+          resetDrawingFlow()
+          return
+        }
+        const { imageId, storagePath } = sketchResult
+        const cleanedUrl = drawingResultUrl ?? URL.createObjectURL(drawingResultFile)
+        const intensity = reimagineIntensity ?? 50
+        const caption = intensity <= 25
+          ? 'Lightly clean up this child\'s drawing, keeping their art style and line work. Just smooth edges and brighten colors.'
+          : intensity >= 75
+            ? 'Reimagine this child\'s drawing as a professional illustration. Keep the subject matter but create it in a polished cartoon style.'
+            : 'Enhance this child\'s drawing into a polished illustration while keeping the original composition and character design.'
+        resetDrawingFlow()
+        void bgReimagine.startReimagine(
+          imageId,
+          activePage.id,
+          storagePath,
+          cleanedUrl,
+          intensity,
+          caption,
+        )
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
+        console.error('Reimagine of cleaned drawing failed:', err)
+        setReimagineError(`Reimagine failed: ${errMsg}`)
+        resetDrawingFlow()
+      }
+      return
+    }
+
+    if (choice === 'scene') {
+      resetDrawingFlow()
+      const prefill = 'Create a full illustrated scene inspired by this child\'s drawing'
+      setAiPrompt(prefill)
+      setAiResult(null)
+      setShowAiDialog(true)
+      return
+    }
+  }, [activePage, drawingResultFile, drawingResultUrl, drawingFile, addStickerFileToPage, addSketchToPage, bgReimagine, familyId, themedChild?.id, childName, resetDrawingFlow])
 
   // ── Voice: Audio recording ──────────────────────────────────────
   const handleAudioCapture = useCallback(
@@ -1233,7 +1333,9 @@ export default function BookEditorPage() {
         processingLabel={drawingProcessingLabel}
         elapsedSeconds={drawingElapsed}
         resultPreviewUrl={drawingResultUrl}
+        resultIsCleaned={drawingResultIsCleaned}
         onAcceptResult={handleAcceptDrawingResult}
+        onPickPostCleanup={(choice, intensity) => { void handlePostCleanupChoice(choice, intensity) }}
         onRetryResult={handleRetryDrawingResult}
       />
 
