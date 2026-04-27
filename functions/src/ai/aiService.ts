@@ -66,6 +66,8 @@ export interface ImageEditOptions {
   size?: string;
   /** Output format: 'png' (default), 'jpeg', 'webp' */
   outputFormat?: "png" | "jpeg" | "webp";
+  /** For gpt-image-1: 'transparent', 'opaque', or 'auto' */
+  background?: "transparent" | "opaque" | "auto";
 }
 
 /** Response from image generation. */

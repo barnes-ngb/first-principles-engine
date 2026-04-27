@@ -85,4 +85,35 @@ describe("buildEnhancePrompt", () => {
       expect(result).toContain("Visual theme:");
     }
   });
+
+  // ── Transparent (sticker) reimagine tests ──────────────────────
+
+  it("omits transparent clause when transparent flag is undefined or false", () => {
+    const noFlag = buildEnhancePrompt("storybook");
+    expect(noFlag).not.toContain("TRANSPARENT");
+    expect(noFlag).not.toContain("clean cutout");
+
+    const explicitFalse = buildEnhancePrompt("storybook", undefined, undefined, false);
+    expect(explicitFalse).not.toContain("TRANSPARENT");
+    expect(explicitFalse).not.toContain("clean cutout");
+  });
+
+  it("adds transparent-background instruction when transparent=true", () => {
+    const result = buildEnhancePrompt("storybook", undefined, undefined, true);
+    expect(result).toContain("TRANSPARENT background");
+    expect(result).toContain("No background scene");
+    expect(result).toContain("no shadows on the ground");
+    expect(result).toContain("clean cutout");
+    expect(result).toContain("sticker");
+  });
+
+  it("combines transparent flag with caption and theme", () => {
+    const result = buildEnhancePrompt("storybook", "a dragon", "fantasy", true);
+    expect(result).toContain('The child described this as: "a dragon"');
+    expect(result).toContain("Visual theme:");
+    expect(result).toContain("fairy-tale");
+    expect(result).toContain("TRANSPARENT background");
+    // Safety postfix still present
+    expect(result).toContain("Safe for children, family-friendly");
+  });
 });

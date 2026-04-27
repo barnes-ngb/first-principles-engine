@@ -68,11 +68,15 @@ export function createOpenAiProvider(apiKey: string): OpenAiProvider {
         type: "image/png",
       });
 
+      // Note: gpt-image-1 `images.edit` always returns PNG (no output_format
+      // parameter on the edit endpoint), so transparency from `background:
+      // 'transparent'` is preserved end-to-end.
       const response = await client.images.edit({
         model: "gpt-image-1",
         image: imageFile,
         prompt,
         size: (options?.size as "1024x1024") ?? "1024x1024",
+        background: options?.background ?? "auto",
       });
 
       const result = response.data?.[0];
