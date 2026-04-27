@@ -6,8 +6,10 @@ import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import FormControlLabel from '@mui/material/FormControlLabel'
 import Slider from '@mui/material/Slider'
 import Stack from '@mui/material/Stack'
+import Switch from '@mui/material/Switch'
 import Typography from '@mui/material/Typography'
 import DescriptionIcon from '@mui/icons-material/Description'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
@@ -15,17 +17,29 @@ import BrushIcon from '@mui/icons-material/Brush'
 import StarIcon from '@mui/icons-material/Star'
 import WallpaperIcon from '@mui/icons-material/Wallpaper'
 
+/** Checkerboard background to make transparent regions visible in previews. */
+export const CHECKERBOARD_BG =
+  'repeating-conic-gradient(#e0e0e0 0% 25%, #fff 0% 50%) 50% / 16px 16px'
+
 export type DrawingChoice = 'as-is' | 'cleanup' | 'reimagine' | 'sticker' | 'scene'
 
-/** Post-cleanup actions on the cleaned (transparent) drawing. */
-export type PostCleanupChoice = 'add-sticker' | 'reimagine' | 'save-sticker' | 'scene'
+/**
+ * Post-cleanup actions on the cleaned (transparent) drawing.
+ * - 'reimagine-sticker': AI enhance with transparent background → sticker
+ * - 'reimagine-scene':   AI enhance with full illustrated background
+ */
+export type PostCleanupChoice =
+  | 'add-sticker'
+  | 'reimagine-sticker'
+  | 'reimagine-scene'
+  | 'save-sticker'
 
 interface DrawingChoiceDialogProps {
   open: boolean
   capturedFile: File | null
   capturedPreviewUrl: string | null
   onClose: () => void
-  onChoose: (choice: DrawingChoice, reimagineIntensity?: number) => void
+  onChoose: (choice: DrawingChoice, reimagineIntensity?: number, transparent?: boolean) => void
   processing: boolean
   processingLabel?: string
   /** Elapsed seconds while processing (for progress feedback) */
@@ -38,7 +52,11 @@ interface DrawingChoiceDialogProps {
   /** Default accept handler — used when not in cleaned-grid mode. */
   onAcceptResult?: () => void
   /** Pick a follow-up action for a cleaned drawing. */
-  onPickPostCleanup?: (choice: PostCleanupChoice, reimagineIntensity?: number) => void
+  onPickPostCleanup?: (
+    choice: PostCleanupChoice,
+    reimagineIntensity?: number,
+    transparent?: boolean,
+  ) => void
   onRetryResult?: () => void
 }
 
@@ -51,10 +69,10 @@ const CHOICES: { value: DrawingChoice; icon: React.ReactNode; label: string; des
 ]
 
 const POST_CLEANUP_CHOICES: { value: PostCleanupChoice; icon: React.ReactNode; label: string; description: string }[] = [
-  { value: 'add-sticker', icon: <StarIcon />, label: 'Add to page', description: 'Place as a movable sticker' },
-  { value: 'reimagine', icon: <BrushIcon />, label: 'Reimagine this', description: 'AI enhances the cleaned drawing' },
-  { value: 'save-sticker', icon: <DescriptionIcon />, label: 'Save as sticker', description: 'Add to your sticker library' },
-  { value: 'scene', icon: <WallpaperIcon />, label: 'Make a scene', description: 'Use as inspiration for a background' },
+  { value: 'reimagine-sticker', icon: <BrushIcon />, label: 'Reimagine as sticker', description: 'AI enhances, keeps transparent' },
+  { value: 'add-sticker', icon: <StarIcon />, label: 'Add as sticker', description: 'Use cleaned version as-is' },
+  { value: 'reimagine-scene', icon: <WallpaperIcon />, label: 'Reimagine as scene', description: 'AI creates full background' },
+  { value: 'save-sticker', icon: <DescriptionIcon />, label: 'Save to gallery', description: 'Save to your sticker library' },
 ]
 
 const REIMAGINE_MARKS = [
@@ -80,7 +98,16 @@ export default function DrawingChoiceDialog({
 }: DrawingChoiceDialogProps) {
   const [selectedChoice, setSelectedChoice] = useState<DrawingChoice | null>(null)
   const [reimagineIntensity, setReimagineIntensity] = useState(50)
-  const [postCleanupReimagine, setPostCleanupReimagine] = useState(false)
+  /**
+   * Tracks which post-cleanup reimagine path is open:
+   * - 'sticker' → transparent toggle defaults ON
+   * - 'scene'   → transparent toggle defaults OFF
+   * - null      → not in the post-cleanup reimagine intensity step
+   */
+  const [postCleanupReimagineMode, setPostCleanupReimagineMode] =
+    useState<'sticker' | 'scene' | null>(null)
+  /** Transparent-background toggle for the reimagine call. */
+  const [transparent, setTransparent] = useState(false)
 
   const handleChoiceClick = useCallback((choice: DrawingChoice) => {
     if (choice === 'as-is') {
@@ -88,6 +115,8 @@ export default function DrawingChoiceDialog({
       return
     }
     if (choice === 'reimagine') {
+      // Raw-photo reimagine → default the transparent toggle OFF (full scene look).
+      setTransparent(false)
       setSelectedChoice('reimagine')
       return
     }
@@ -96,13 +125,21 @@ export default function DrawingChoiceDialog({
   }, [onChoose])
 
   const handleReimaginGo = useCallback(() => {
-    onChoose('reimagine', reimagineIntensity)
-  }, [onChoose, reimagineIntensity])
+    onChoose('reimagine', reimagineIntensity, transparent)
+  }, [onChoose, reimagineIntensity, transparent])
 
   const handlePostCleanupClick = useCallback((choice: PostCleanupChoice) => {
     if (!onPickPostCleanup) return
-    if (choice === 'reimagine') {
-      setPostCleanupReimagine(true)
+    if (choice === 'reimagine-sticker') {
+      // Sticker path → default transparent toggle ON.
+      setTransparent(true)
+      setPostCleanupReimagineMode('sticker')
+      return
+    }
+    if (choice === 'reimagine-scene') {
+      // Scene path → default transparent toggle OFF.
+      setTransparent(false)
+      setPostCleanupReimagineMode('scene')
       return
     }
     onPickPostCleanup(choice)
@@ -110,23 +147,31 @@ export default function DrawingChoiceDialog({
 
   const handlePostCleanupReimagineGo = useCallback(() => {
     if (!onPickPostCleanup) return
-    onPickPostCleanup('reimagine', reimagineIntensity)
-  }, [onPickPostCleanup, reimagineIntensity])
+    // Both sticker + scene paths route through the same `reimagine-sticker`
+    // server-side handler — the `transparent` flag controls the output.
+    const choice: PostCleanupChoice =
+      postCleanupReimagineMode === 'scene' ? 'reimagine-scene' : 'reimagine-sticker'
+    onPickPostCleanup(choice, reimagineIntensity, transparent)
+  }, [onPickPostCleanup, reimagineIntensity, transparent, postCleanupReimagineMode])
 
   const handleClose = useCallback(() => {
     setSelectedChoice(null)
     setReimagineIntensity(50)
-    setPostCleanupReimagine(false)
+    setPostCleanupReimagineMode(null)
+    setTransparent(false)
     onClose()
   }, [onClose])
 
   if (!capturedFile || !capturedPreviewUrl) return null
 
-  // Post-cleanup reimagine intensity slider
-  if (resultPreviewUrl && resultIsCleaned && postCleanupReimagine) {
+  // Post-cleanup reimagine intensity slider (sticker or scene path)
+  if (resultPreviewUrl && resultIsCleaned && postCleanupReimagineMode) {
+    const isSticker = postCleanupReimagineMode === 'sticker'
     return (
       <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
-        <DialogTitle>Reimagine intensity</DialogTitle>
+        <DialogTitle>
+          {isSticker ? 'Reimagine as sticker' : 'Reimagine as scene'}
+        </DialogTitle>
         <DialogContent>
           <Box sx={{ mt: 1, mb: 2 }}>
             <Box
@@ -135,7 +180,7 @@ export default function DrawingChoiceDialog({
               alt="Cleaned drawing"
               sx={{
                 width: '100%', maxHeight: 200, objectFit: 'contain', borderRadius: 1, mb: 2,
-                background: 'repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 16px 16px',
+                background: CHECKERBOARD_BG,
               }}
             />
             <Stack direction="row" alignItems="center" spacing={2} sx={{ px: 1 }}>
@@ -155,10 +200,25 @@ export default function DrawingChoiceDialog({
                 Full reimagine
               </Typography>
             </Stack>
+            <FormControlLabel
+              sx={{ mt: 2, ml: 0.5 }}
+              control={
+                <Switch
+                  checked={transparent}
+                  onChange={(_, v) => setTransparent(v)}
+                  size="small"
+                />
+              }
+              label={
+                <Typography variant="body2">
+                  Keep transparent background (for stickers)
+                </Typography>
+              }
+            />
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setPostCleanupReimagine(false)}>Back</Button>
+          <Button onClick={() => setPostCleanupReimagineMode(null)}>Back</Button>
           <Button variant="contained" onClick={handlePostCleanupReimagineGo}>
             Reimagine!
           </Button>
@@ -188,7 +248,7 @@ export default function DrawingChoiceDialog({
               borderRadius: 1,
               mb: 2,
               // Checkerboard so transparent regions are visible
-              background: 'repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 16px 16px',
+              background: CHECKERBOARD_BG,
             }}
           />
           <Box
@@ -297,7 +357,10 @@ export default function DrawingChoiceDialog({
               component="img"
               src={capturedPreviewUrl}
               alt="Your drawing"
-              sx={{ width: '100%', maxHeight: 200, objectFit: 'contain', borderRadius: 1, mb: 2 }}
+              sx={{
+                width: '100%', maxHeight: 200, objectFit: 'contain', borderRadius: 1, mb: 2,
+                ...(transparent ? { background: CHECKERBOARD_BG } : {}),
+              }}
             />
             <Stack direction="row" alignItems="center" spacing={2} sx={{ px: 1 }}>
               <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
@@ -316,6 +379,21 @@ export default function DrawingChoiceDialog({
                 Full reimagine
               </Typography>
             </Stack>
+            <FormControlLabel
+              sx={{ mt: 2, ml: 0.5 }}
+              control={
+                <Switch
+                  checked={transparent}
+                  onChange={(_, v) => setTransparent(v)}
+                  size="small"
+                />
+              }
+              label={
+                <Typography variant="body2">
+                  Keep transparent background (for stickers)
+                </Typography>
+              }
+            />
           </Box>
         </DialogContent>
         <DialogActions>

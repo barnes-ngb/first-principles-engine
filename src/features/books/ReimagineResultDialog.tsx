@@ -12,6 +12,7 @@ import SaveAltIcon from '@mui/icons-material/SaveAlt'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 
 import type { ReimagineJob } from './useBackgroundReimagine'
+import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 
 interface ReimagineResultDialogProps {
   open: boolean
@@ -74,6 +75,8 @@ export default function ReimagineResultDialog({
                   borderRadius: 1,
                   border: '2px solid',
                   borderColor: 'secondary.main',
+                  // Show checkerboard so transparent stickers read as transparent.
+                  ...(job.transparent ? { background: CHECKERBOARD_BG } : {}),
                 }}
               />
             </Box>

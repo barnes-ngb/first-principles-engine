@@ -18,6 +18,12 @@ export interface EnhanceSketchRequest {
   caption?: string;
   /** Optional book theme ID — influences the reimagine style to match the book's visual identity. */
   theme?: string;
+  /**
+   * When true, the reimagined image is rendered with a transparent background
+   * (no environment, no shadows on ground) so it can be used as a positionable
+   * sticker. Default false → produces a full-scene illustration.
+   */
+  transparent?: boolean;
 }
 
 export interface EnhanceSketchResponse {
@@ -84,6 +90,7 @@ export function buildEnhancePrompt(
   style?: string,
   caption?: string,
   theme?: string,
+  transparent?: boolean,
 ): string {
   const styleHint =
     STYLE_HINTS[style ?? "storybook"] ?? STYLE_HINTS["storybook"];
@@ -92,11 +99,17 @@ export function buildEnhancePrompt(
     : "";
   const themeStyle = getThemeImageStyle(theme);
   const themeClause = themeStyle ? `Visual theme: ${themeStyle} ` : "";
+  const transparentClause = transparent
+    ? "IMPORTANT: Render only the character/object on a fully TRANSPARENT background. " +
+      "No background scene, no ground, no shadows on the ground, no environment, no border. " +
+      "The result must be a clean cutout suitable for use as a sticker. "
+    : "";
   return (
     `Create a polished children's book illustration ${styleHint}, ` +
     `inspired by this child's hand-drawn sketch. ` +
     `${captionClause}` +
     `${themeClause}` +
+    `${transparentClause}` +
     `Keep the same composition, characters, and scene layout from the original drawing. ` +
     `Make it colorful, detailed, and full of charm. ` +
     `Maintain the creativity and spirit of the original sketch. ` +
@@ -112,7 +125,7 @@ export const enhanceSketch = onCall(
     // ── Auth gate ──────────────────────────────────────────────
     const { uid } = requireApprovedUser(request);
 
-    const { familyId, sketchStoragePath, style, caption, theme } =
+    const { familyId, sketchStoragePath, style, caption, theme, transparent } =
       request.data as EnhanceSketchRequest;
 
     // ── Input validation ───────────────────────────────────────
@@ -168,11 +181,12 @@ export const enhanceSketch = onCall(
 
     // ── Enhance via gpt-image-1 edit endpoint ──────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
-    const prompt = buildEnhancePrompt(style, safeCaption, theme);
+    const prompt = buildEnhancePrompt(style, safeCaption, theme, transparent);
 
     console.log("enhanceSketch: starting API call", {
       sketchStoragePath,
       style: style ?? "storybook",
+      transparent: transparent ?? false,
       sketchBufferLength: sketchBuffer.length,
       promptLength: prompt.length,
     });
@@ -182,7 +196,13 @@ export const enhanceSketch = onCall(
       imageResponse = await provider.editImage(
         Buffer.from(sketchBuffer),
         prompt,
-        { size: "1024x1024", outputFormat: "png" },
+        {
+          size: "1024x1024",
+          // gpt-image-1 edit always returns PNG; only background controls
+          // whether the cutout is transparent.
+          outputFormat: "png",
+          background: transparent ? "transparent" : "auto",
+        },
       );
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -260,6 +280,7 @@ export const enhanceSketch = onCall(
       outputTokens: 0,
       prompt: prompt.slice(0, 200),
       style: style ?? "storybook",
+      transparent: transparent ?? false,
       sourceSketch: sketchStoragePath,
       storagePath,
       createdAt: new Date().toISOString(),

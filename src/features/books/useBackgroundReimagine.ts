@@ -15,6 +15,8 @@ export interface ReimagineJob {
   error?: string
   startedAt: number
   intensity: 'light' | 'medium' | 'full'
+  /** True when the reimagine was rendered with a transparent background (sticker mode). */
+  transparent: boolean
 }
 
 interface UseBackgroundReimagineOptions {
@@ -106,6 +108,7 @@ export function useBackgroundReimagine({
       imageUrl: string,
       intensity: number,
       caption?: string,
+      transparent?: boolean,
     ) => {
       const jobId = `reimagine_${Date.now()}`
       const intensityLabel: ReimagineJob['intensity'] =
@@ -119,6 +122,7 @@ export function useBackgroundReimagine({
         status: 'processing',
         startedAt: Date.now(),
         intensity: intensityLabel,
+        transparent: transparent ?? false,
       })
 
       try {
@@ -131,6 +135,7 @@ export function useBackgroundReimagine({
           style,
           caption,
           theme: bookTheme,
+          transparent,
         })
 
         if (result?.url) {
