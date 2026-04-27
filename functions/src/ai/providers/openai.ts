@@ -1,10 +1,15 @@
-import type { ImageOptions, ImageResponse } from "../aiService.js";
+import type { ImageEditOptions, ImageOptions, ImageResponse } from "../aiService.js";
 
 /** OpenAI-specific image generation provider. */
 export interface OpenAiProvider {
   generateImage(
     prompt: string,
     options?: ImageOptions,
+  ): Promise<ImageResponse>;
+  editImage(
+    imageBuffer: Buffer,
+    prompt: string,
+    options?: ImageEditOptions,
   ): Promise<ImageResponse>;
 }
 
@@ -50,6 +55,35 @@ export function createOpenAiProvider(apiKey: string): OpenAiProvider {
       return {
         url: image?.url ?? "",
         revisedPrompt: image?.revised_prompt,
+      };
+    },
+
+    async editImage(imageBuffer, prompt, options) {
+      const { default: OpenAI, toFile } = await import("openai");
+      const client = new OpenAI({ apiKey });
+
+      // Use gpt-image-1 for edit — it accepts image input with a prompt
+      // Use the SDK's toFile utility for reliable buffer → uploadable conversion
+      const imageFile = await toFile(imageBuffer, "sketch.png", {
+        type: "image/png",
+      });
+
+      // Note: gpt-image-1 `images.edit` always returns PNG (no output_format
+      // parameter on the edit endpoint), so transparency from `background:
+      // 'transparent'` is preserved end-to-end.
+      const response = await client.images.edit({
+        model: "gpt-image-1",
+        image: imageFile,
+        prompt,
+        size: (options?.size as "1024x1024") ?? "1024x1024",
+        background: options?.background ?? "auto",
+      });
+
+      const result = response.data?.[0];
+      return {
+        url: "",
+        b64Data: result?.b64_json ?? undefined,
+        revisedPrompt: undefined,
       };
     },
   };

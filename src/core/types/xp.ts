@@ -1,3 +1,21 @@
+// ── Currency types ────────────────────────────────────────────
+
+/** Two-currency system: XP (progression, never decreases) and Diamonds (inventory, earned & spent) */
+export const CurrencyType = {
+  Xp: 'xp',
+  Diamond: 'diamond',
+} as const
+export type CurrencyType = (typeof CurrencyType)[keyof typeof CurrencyType]
+
+/** Category for diamond transactions */
+export const DiamondCategory = {
+  Earn: 'earn',
+  Forge: 'forge',
+  Cosmetic: 'cosmetic',
+  Decoration: 'decoration',
+} as const
+export type DiamondCategory = (typeof DiamondCategory)[keyof typeof DiamondCategory]
+
 // ── XP Ledger (cumulative XP tracking) ────────────────────────
 
 export interface XpLedgerSources {
@@ -21,6 +39,12 @@ export interface XpLedger {
   meta?: Record<string, string>
   /** ISO timestamp of when XP was awarded (per-event docs only). */
   awardedAt?: string
+  /** Currency type: 'xp' (default/legacy) or 'diamond'. Missing = 'xp' for backward compat. */
+  currencyType?: CurrencyType
+  /** Diamond transaction category (only for diamond entries). */
+  category?: DiamondCategory
+  /** Reference to what was purchased (e.g., armor piece ID). */
+  itemId?: string
 }
 
 // ── Avatar + Armor of God ─────────────────────────────────────────
@@ -36,14 +60,14 @@ export type ArmorPiece =
 /** Simplified armor piece ID used by the 3D voxel system */
 export type VoxelArmorPieceId = 'belt' | 'breastplate' | 'shoes' | 'shield' | 'helmet' | 'sword'
 
-export type ArmorTier = 'stone' | 'diamond' | 'netherite'       // Lincoln
+export type ArmorTier = 'wood' | 'stone' | 'iron' | 'gold' | 'diamond' | 'netherite'  // Lincoln (voxel tiers)
 export type PlatformerTier = 'basic' | 'powerup' | 'champion'  // London
 
 /** Character features extracted from a photo by AI vision */
 export interface CharacterFeatures {
   skinTone: string       // Hex color extracted from photo
   hairColor: string      // Hex color extracted from photo
-  hairStyle: 'short' | 'medium' | 'long' | 'curly'
+  hairStyle: 'short' | 'medium' | 'long' | 'curly' | 'long_wavy'
   hairLength: 'above_ear' | 'ear_length' | 'shoulder' | 'below_shoulder'
   eyeColor?: string
   distinguishingFeatures?: string
@@ -66,13 +90,13 @@ export const LINCOLN_FEATURES: CharacterFeatures = {
   eyeColor: '#4A6B7A',    // Blue-gray
 }
 
-/** London-specific features */
+/** London-specific features (sandy blonde, brown eyes, fair skin, longer wavy hair) */
 export const LONDON_FEATURES: CharacterFeatures = {
-  skinTone: '#F0D0B0',
-  hairColor: '#8B6914',
-  hairStyle: 'short',
-  hairLength: 'above_ear',
-  eyeColor: '#5B7B8A',
+  skinTone: '#FDDCB5',       // Fair, slightly lighter than Lincoln
+  hairColor: '#D4B86A',      // Sandy blonde
+  hairStyle: 'long_wavy',    // Longer, past ears, wavy
+  hairLength: 'ear_length',  // Past ears
+  eyeColor: '#8B6914',       // Brown/hazel
 }
 
 /** Maps full ArmorPiece IDs to simplified voxel piece IDs */
@@ -203,13 +227,51 @@ export const ARMOR_PIECES: {
 ]
 
 export const XP_EVENTS = {
-  QUEST_DIAMOND: 2,             // already wired in quest system
+  QUEST_DIAMOND: 2,             // per diamond mined in a quest
+  QUEST_COMPLETE: 15,           // quest session finished
+  CHECKLIST_ITEM: 3,            // per completed checklist item
+  CHECKLIST_PRAYER: 5,          // formation/prayer item (worth more)
   CHECKLIST_DAY_COMPLETE: 10,   // all must-do items checked off
-  BOOK_READ: 15,                // reading session logged on book close
+  DAILY_ALL_COMPLETE: 15,       // bonus: ALL items for the day finished
+  WEEKLY_ALL_COMPLETE: 50,      // bonus: all 5 days completed
+  BOOK_COMPLETE: 25,             // finished creating a book (lifetime dedup per book)
+  BOOK_READ: 15,                // finished reading a book
+  BOOK_PAGE_READ: 1,            // per page read (partial progress)
   EVALUATION_COMPLETE: 25,      // full evaluation chat completed
+  DAD_LAB_COMPLETE: 20,         // finished a Dad Lab
   ARMOR_DAILY_COMPLETE: 5,      // all earned pieces applied today
   MANUAL_AWARD: 0,              // parent-awarded XP (amount varies)
+  MANUAL_DEDUCT: 0,             // parent-deducted XP (amount varies, stored as negative)
 } as const
+
+// ── Diamond Event Types ──────────────────────────────────────────
+
+export const DIAMOND_EVENTS = {
+  // Auto-earning
+  QUEST_COMPLETE: 'diamond_quest_complete',
+  BOOK_COMPLETE: 'diamond_book_complete',
+  BOOK_READ: 'diamond_book_read',
+  DAD_LAB_COMPLETE: 'diamond_dad_lab_complete',
+  EVALUATION_COMPLETE: 'diamond_evaluation_complete',
+  TEACH_BACK: 'diamond_teach_back',
+  EXTRA_ACTIVITY: 'diamond_extra_activity',
+  CONUNDRUM_RESPONSE: 'diamond_conundrum_response',
+  CONUNDRUM_DRAWING: 'diamond_conundrum_drawing',
+  WORKSHOP_GAME: 'diamond_workshop_game',
+  FLUENCY_BONUS: 'diamond_fluency_bonus',
+
+  // Manual (parent)
+  MANUAL_AWARD: 'diamond_manual_award',
+  MANUAL_DEDUCT: 'diamond_manual_deduct',
+
+  // Spending
+  FORGE_PIECE: 'diamond_forge_piece',
+
+  // Milestone
+  FULL_TIER_COMPLETE: 'diamond_full_tier_complete',
+} as const
+
+export type DiamondEventType = (typeof DIAMOND_EVENTS)[keyof typeof DIAMOND_EVENTS]
 
 export interface ArmorPieceProgress {
   pieceId: ArmorPiece
@@ -225,6 +287,154 @@ export interface ArmorPieceProgress {
     powerup?: string
     champion?: string
   }
+}
+
+/** Per-piece armor dye colors (Stone tier+) */
+export interface ArmorColors {
+  belt?: string
+  breastplate?: string
+  shoes?: string
+  shield?: string
+  helmet?: string
+  sword?: string
+}
+
+/** Shield emblem options (Iron tier+) */
+export const ShieldEmblem = {
+  Cross: 'cross',
+  Star: 'star',
+  Heart: 'heart',
+  Sword: 'sword',
+  Crown: 'crown',
+  Fish: 'fish',
+  Lion: 'lion',
+  Flame: 'flame',
+} as const
+export type ShieldEmblem = (typeof ShieldEmblem)[keyof typeof ShieldEmblem]
+
+/** Helmet crest options (Iron tier+) */
+export const HelmetCrest = {
+  None: 'none',
+  Fin: 'fin',
+  Plume: 'plume',
+  Horns: 'horns',
+  Crown: 'crown',
+} as const
+export type HelmetCrest = (typeof HelmetCrest)[keyof typeof HelmetCrest]
+
+export const AvatarBackground = {
+  Night: 'night',
+  Room: 'room',
+} as const
+export type AvatarBackground = (typeof AvatarBackground)[keyof typeof AvatarBackground]
+
+// ── Accessories (cosmetic items separate from armor) ──────────────
+
+export type AccessoryId =
+  | 'glasses'
+  | 'sunglasses'
+  | 'headband'
+  | 'crown'
+  | 'backpack'
+  | 'wings'
+  | 'book'
+  | 'scarf'
+  | 'bandana'
+  | 'parrot'
+
+export type AccessorySlot = 'eyes' | 'head' | 'back' | 'hand' | 'shoulder' | 'neck'
+
+export interface AccessoryMeta {
+  id: AccessoryId
+  name: string
+  slot: AccessorySlot
+  xpRequired: number
+  icon: string  // Emoji icon for UI
+}
+
+export const ACCESSORY_SLOTS: Record<AccessorySlot, AccessoryId[]> = {
+  eyes: ['glasses', 'sunglasses'],
+  head: ['headband', 'crown', 'bandana'],
+  back: ['backpack', 'wings'],
+  hand: ['book'],
+  shoulder: ['parrot'],
+  neck: ['scarf'],
+} as const
+
+export const ACCESSORIES: AccessoryMeta[] = [
+  { id: 'glasses',    name: 'Glasses',      slot: 'eyes',     xpRequired: 50,   icon: '\uD83D\uDC53' },
+  { id: 'headband',   name: 'Headband',     slot: 'head',     xpRequired: 50,   icon: '\uD83E\uDD4B' },
+  { id: 'sunglasses', name: 'Sunglasses',   slot: 'eyes',     xpRequired: 100,  icon: '\uD83D\uDD76\uFE0F' },
+  { id: 'scarf',      name: 'Scarf',        slot: 'neck',     xpRequired: 100,  icon: '\uD83E\uDDE3' },
+  { id: 'backpack',   name: 'Backpack',     slot: 'back',     xpRequired: 200,  icon: '\uD83C\uDF92' },
+  { id: 'book',       name: 'Book',         slot: 'hand',     xpRequired: 200,  icon: '\uD83D\uDCD6' },
+  { id: 'crown',      name: 'Crown',        slot: 'head',     xpRequired: 400,  icon: '\uD83D\uDC51' },
+  { id: 'bandana',    name: 'Bandana',      slot: 'head',     xpRequired: 400,  icon: '\uD83E\uDD78' },
+  { id: 'wings',      name: 'Wings',        slot: 'back',     xpRequired: 600,  icon: '\uD83D\uDC7C' },
+  { id: 'parrot',     name: 'Pet Parrot',   slot: 'shoulder', xpRequired: 1000, icon: '\uD83E\uDD9C' },
+] as const
+
+export const ACCESSORY_XP_THRESHOLDS: Record<AccessoryId, number> = {
+  glasses: 50,
+  headband: 50,
+  sunglasses: 100,
+  scarf: 100,
+  backpack: 200,
+  book: 200,
+  crown: 400,
+  bandana: 400,
+  wings: 600,
+  parrot: 1000,
+} as const
+
+/** Custom character body proportions (adjustable via Character Tuner) */
+export interface CharacterProportions {
+  headSize: number
+  torsoW: number
+  torsoH: number
+  torsoD: number
+  armW: number
+  armH: number
+  legW: number
+  legH: number
+  sleeveRatio: number
+  bootRatio: number
+  cape: boolean
+}
+
+/** Family-tuned default proportions (from visual tuning tool) */
+export const DEFAULT_PROPORTIONS: CharacterProportions = {
+  headSize: 1.8,
+  torsoW: 1.7,
+  torsoH: 2.6,
+  torsoD: 1.1,
+  armW: 1.0,
+  armH: 2.6,
+  legW: 0.8,
+  legH: 2.8,
+  sleeveRatio: 0.7,
+  bootRatio: 0.3,
+  cape: true,
+}
+
+export interface OutfitCustomization {
+  shirtColor?: string   // Hex
+  pantsColor?: string   // Hex
+  shoeColor?: string    // Hex
+  capeColor?: string    // Hex — base cape color (default: dark red / blue by age)
+  armorColors?: ArmorColors  // Per-piece dye colors (Stone tier+)
+  shieldEmblem?: ShieldEmblem  // Shield emblem design (Iron tier+)
+  helmetCrest?: HelmetCrest    // Helmet crest style (Iron tier+)
+  background?: AvatarBackground  // Scene background: night sky or indoor room
+  accessories?: AccessoryId[]  // Equipped accessory IDs
+  proportions?: CharacterProportions  // Custom character body proportions
+}
+
+/** Record of a single forged armor piece */
+export interface ForgedPieceEntry {
+  forgedAt: string  // ISO timestamp
+  verseResponse?: string  // Text response to verse prompt
+  verseResponseAudio?: string  // Audio URL of verse response
 }
 
 export interface AvatarProfile {
@@ -245,6 +455,14 @@ export interface AvatarProfile {
   equippedPieces?: string[]
   /** Last piece animated (to not re-animate on page load) */
   lastEquipAnimation?: string
+  /** Outfit color customization (shirt, pants, shoes) */
+  customization?: OutfitCustomization
+  /** AI-generated Minecraft skin face URL (cached to avoid regenerating) */
+  skinTextureUrl?: string
+  /** Timestamp when skin texture was last generated */
+  skinTextureGeneratedAt?: string
+  /** Cached 64-color hex array for pixel face (avoids regenerating each load) */
+  faceGrid?: string[]
 
   // ── Legacy 2D fields (kept for migration, may be undefined) ───
   /** @deprecated Use characterFeatures + 3D voxel renderer instead */
@@ -258,24 +476,35 @@ export interface AvatarProfile {
   /** @deprecated No longer used — armor is 3D geometry */
   croppedRegionUrls?: Partial<Record<ArmorPiece, string>>
 
-  /** Armor pieces unlocked by XP (voxel piece IDs) */
+  /** Armor pieces unlocked by XP (voxel piece IDs) — legacy, superseded by forgedPieces */
   unlockedPieces?: string[]
 
-  totalXp: number   // cached from xpLedger for quick reads
-  updatedAt: string
-}
+  /**
+   * Tiers unlocked by XP threshold (e.g., ['wood', 'stone']).
+   * Unlocking a tier grants ACCESS to forge pieces in that material.
+   */
+  unlockedTiers?: string[]
 
-/**
- * Maps each armor piece to its 0-indexed position in the 3×2 sheet image.
- * Order (left-to-right, top-to-bottom): belt, breastplate, shoes, shield, helmet, sword.
- */
-export const ARMOR_PIECE_SHEET_INDEX: Record<ArmorPiece, number> = {
-  belt_of_truth: 0,
-  breastplate_of_righteousness: 1,
-  shoes_of_peace: 2,
-  shield_of_faith: 3,
-  helmet_of_salvation: 4,
-  sword_of_the_spirit: 5,
+  /**
+   * Individually forged armor pieces. Outer key = tier, inner key = voxel piece ID.
+   * Each entry records when forged and optional verse response.
+   */
+  forgedPieces?: Record<string, Record<string, ForgedPieceEntry>>
+
+  /** Tier key where portal transition last played — prevents re-trigger on reload */
+  lastPortalTier?: string
+
+  /** Date string (YYYY-MM-DD) when armor was last equipped — for daily reset */
+  lastArmorEquipDate?: string
+  /** Consecutive days with all earned pieces equipped */
+  armorStreak?: number
+  /** Date string (YYYY-MM-DD) of last day all pieces were equipped */
+  lastFullArmorDate?: string
+
+  totalXp: number   // cached from xpLedger for quick reads
+  /** Cached diamond balance — maintained by addXpEvent (earn) and spendDiamonds (spend). */
+  diamondBalance?: number
+  updatedAt: string
 }
 
 export interface DailyArmorSession {
@@ -298,17 +527,4 @@ export const PIECE_POSITIONS: Record<
   shoes_of_peace:                { topPct: 78, leftPct: 8,  widthPct: 84, heightPct: 20 },
   shield_of_faith:               { topPct: 28, leftPct: 2,  widthPct: 34, heightPct: 38 },
   sword_of_the_spirit:           { topPct: 28, leftPct: 64, widthPct: 34, heightPct: 42 },
-}
-
-/**
- * @deprecated Use XpLedger with dedupKey instead. Kept for migration compatibility.
- * Append-only log for XP dedup. Doc ID: {childId}_{dedupKey}
- */
-export interface XpEventLogEntry {
-  childId: string
-  type: string
-  amount: number
-  dedupKey: string
-  meta?: Record<string, string>
-  awardedAt: string
 }

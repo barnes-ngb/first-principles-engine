@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildSystemPrompt, getWeekMonday } from "./chat.js";
+import {
+  buildKnownBlockersSection,
+  buildQuestPrompt,
+  buildRecentCurriculumSection,
+  getWeekMonday,
+} from "./chat.js";
 
 // ── getWeekMonday ──────────────────────────────────────────────
 
@@ -35,149 +40,123 @@ describe("getWeekMonday", () => {
   });
 });
 
-// ── buildSystemPrompt ──────────────────────────────────────────
+// ── Phase 2: KNOWN BLOCKERS prompt section ─────────────────────
 
-describe("buildSystemPrompt", () => {
-  const baseChild = {
-    name: "Lincoln",
-    grade: "3rd",
-    prioritySkills: [
-      { tag: "reading.phonics", label: "Phonics", level: "Developing" },
-    ],
-    supports: [{ label: "Visual checklist", description: "Step-by-step list" }],
-    stopRules: [
+describe("buildKnownBlockersSection", () => {
+  it("returns empty string when no blockers are provided", () => {
+    expect(buildKnownBlockersSection(undefined)).toBe("");
+    expect(buildKnownBlockersSection([])).toBe("");
+  });
+
+  it("emits ADDRESS_NOW and RESOLVING sections with ids and example words", () => {
+    const section = buildKnownBlockersSection([
       {
-        label: "Frustration",
-        trigger: "3 misses in a row",
-        action: "Switch activity",
+        id: "short-i-vs-e",
+        name: "Short vowel i vs e",
+        status: "ADDRESS_NOW",
+        affectedSkills: ["phonics.short-i-vs-e"],
+        rationale: "2 wrong on bed/bid in last session",
+        specificWords: ["bed", "bid", "ten", "tin"],
       },
-    ],
-  };
+      {
+        id: "digraph-oo",
+        name: "Digraph /oo/",
+        status: "RESOLVING",
+        affectedSkills: ["phonics.digraphs"],
+        rationale: "Trending up after practice",
+        specificWords: ["moon", "zoo"],
+      },
+    ]);
 
-  it("includes charter preamble", () => {
-    const prompt = buildSystemPrompt(baseChild, "chat");
-    expect(prompt).toContain("First Principles Engine");
-    expect(prompt).toContain("Formation first");
+    expect(section).toContain("## KNOWN BLOCKERS");
+    expect(section).toContain("ADDRESS_NOW blockers");
+    expect(section).toContain("RESOLVING blockers");
+    expect(section).toContain('id="short-i-vs-e"');
+    expect(section).toContain('id="digraph-oo"');
+    expect(section).toContain("bed, bid");
+    expect(section).toContain("targetedBlockerId");
+    // Distribution rules must be present so the AI scales with count
+    expect(section).toContain("2 targeted questions");
   });
 
-  it("includes child profile section with name and grade", () => {
-    const prompt = buildSystemPrompt(baseChild, "chat");
-    expect(prompt).toContain("CHILD PROFILE:");
-    expect(prompt).toContain("Name: Lincoln");
-    expect(prompt).toContain("Grade: 3rd");
+  it("handles ADDRESS_NOW-only lists (no RESOLVING header)", () => {
+    const section = buildKnownBlockersSection([
+      {
+        id: "cvc-blending",
+        name: "CVC blending",
+        status: "ADDRESS_NOW",
+        affectedSkills: ["phonics.cvc"],
+      },
+    ]);
+    expect(section).toContain("ADDRESS_NOW blockers");
+    expect(section).not.toContain("RESOLVING blockers");
+  });
+});
+
+describe("buildRecentCurriculumSection", () => {
+  it("returns empty string when there are no recent scans", () => {
+    expect(buildRecentCurriculumSection(false)).toBe("");
   });
 
-  it("includes priority skills", () => {
-    const prompt = buildSystemPrompt(baseChild, "chat");
-    expect(prompt).toContain("Phonics (reading.phonics): Developing");
+  it("emits the RECENT CURRICULUM framing when scans are present", () => {
+    const section = buildRecentCurriculumSection(true);
+    expect(section).toContain("## RECENT CURRICULUM");
+    expect(section).toContain("RECENT WORKBOOK SCANS");
+    expect(section).toContain("NOT mandatory");
+    expect(section).toContain("targetedBlockerId");
   });
+});
 
-  it("includes supports", () => {
-    const prompt = buildSystemPrompt(baseChild, "chat");
-    expect(prompt).toContain("Visual checklist: Step-by-step list");
-  });
-
-  it("includes stop rules", () => {
-    const prompt = buildSystemPrompt(baseChild, "chat");
-    expect(prompt).toContain(
-      'Frustration: when "3 misses in a row" → Switch activity',
-    );
-  });
-
-  it("does NOT include enriched sections for chat taskType", () => {
-    const prompt = buildSystemPrompt(baseChild, "chat");
-    expect(prompt).not.toContain("RECENT PERFORMANCE");
-    expect(prompt).not.toContain("WORKBOOK PACE");
-    expect(prompt).not.toContain("THIS WEEK");
-    expect(prompt).not.toContain("HOURS PROGRESS");
-  });
-
-  it("does NOT include plan output instructions for chat taskType", () => {
-    const prompt = buildSystemPrompt(baseChild, "chat");
-    expect(prompt).not.toContain("OUTPUT FORMAT INSTRUCTIONS");
-  });
-
-  it("includes plan output instructions for plan taskType", () => {
-    const prompt = buildSystemPrompt(baseChild, "plan");
-    expect(prompt).toContain("OUTPUT FORMAT INSTRUCTIONS");
-  });
-
-  it("includes enriched context when provided", () => {
-    const prompt = buildSystemPrompt(baseChild, "plan", {
-      sessions: [
-        { streamId: "reading", hits: 3, nears: 1, misses: 0 },
-        { streamId: "math", hits: 2, nears: 0, misses: 1 },
-      ],
-      workbookPaces: [
+describe("buildQuestPrompt — phase 2 extras", () => {
+  it("appends KNOWN BLOCKERS and RECENT CURRICULUM for reading phonics quests", () => {
+    const prompt = buildQuestPrompt("reading", 4, "phonics", {
+      activeBlockers: [
         {
-          name: "Explode the Code",
-          unitLabel: "lesson",
-          currentPosition: 15,
-          totalUnits: 40,
-          unitsPerDayNeeded: 1.1,
-          targetFinishDate: "2026-05-15",
-          status: "on-track",
+          id: "short-i-vs-e",
+          name: "Short vowel i vs e",
+          status: "ADDRESS_NOW",
+          affectedSkills: ["phonics.short-i-vs-e"],
+          specificWords: ["bed", "bid"],
         },
       ],
-      week: {
-        theme: "Courage",
-        virtue: "Fortitude",
-        scriptureRef: "Joshua 1:9",
-        heartQuestion: "What does it mean to be brave?",
-      },
-      hoursTotalMinutes: 18000, // 300 hours
-      hoursTarget: 1000,
-      engagementSummaries: [],
-      gradeResults: [],
-      draftBookCount: 0,
+      hasRecentScans: true,
     });
-
-    // RECENT PERFORMANCE
-    expect(prompt).toContain("RECENT PERFORMANCE (last 14 days):");
-    expect(prompt).toContain("reading: 3 hits, 1 nears, 0 misses");
-    expect(prompt).toContain("math: 2 hits, 0 nears, 1 misses");
-
-    // WORKBOOK PACE
-    expect(prompt).toContain("WORKBOOK PACE:");
-    expect(prompt).toContain("Explode the Code");
-    expect(prompt).toContain("lesson 15 of 40");
-    expect(prompt).toContain("1.1 lessons/day needed to finish by 2026-05-15");
-    expect(prompt).toContain("Status: on-track");
-
-    // THIS WEEK
-    expect(prompt).toContain("THIS WEEK:");
-    expect(prompt).toContain("Theme: Courage");
-    expect(prompt).toContain("Virtue: Fortitude");
-    expect(prompt).toContain("Scripture: Joshua 1:9");
-    expect(prompt).toContain("Heart question: What does it mean to be brave?");
-
-    // HOURS PROGRESS
-    expect(prompt).toContain("HOURS PROGRESS:");
-    expect(prompt).toContain("300 hours of 1000 target (30% complete)");
+    expect(prompt).toContain("## KNOWN BLOCKERS");
+    expect(prompt).toContain("## RECENT CURRICULUM");
+    expect(prompt).toContain('"targetedBlockerId": null');
+    expect(prompt).toContain("TARGETED BLOCKER FIELD");
+    // KNOWN BLOCKERS should appear before the RESPONSE FORMAT section.
+    const blockersIdx = prompt.indexOf("## KNOWN BLOCKERS");
+    const responseIdx = prompt.indexOf("RESPONSE FORMAT");
+    expect(blockersIdx).toBeGreaterThan(0);
+    expect(blockersIdx).toBeLessThan(responseIdx);
   });
 
-  it("handles empty enriched context gracefully", () => {
-    const prompt = buildSystemPrompt(baseChild, "evaluate", {
-      sessions: [],
-      workbookPaces: [],
-      week: null,
-      hoursTotalMinutes: 0,
-      hoursTarget: 1000,
-      engagementSummaries: [],
-      gradeResults: [],
-      draftBookCount: 0,
+  it("appends KNOWN BLOCKERS and RECENT CURRICULUM for math quests", () => {
+    const prompt = buildQuestPrompt("math", 3, "math", {
+      activeBlockers: [
+        {
+          id: "multiplication-2s",
+          name: "Times tables — 2s",
+          status: "ADDRESS_NOW",
+          affectedSkills: ["math.multiplication.2s"],
+        },
+      ],
+      hasRecentScans: false,
     });
-
-    expect(prompt).toContain("No recent session data available.");
-    expect(prompt).toContain("No workbook data available.");
-    expect(prompt).toContain("No weekly plan set yet.");
-    expect(prompt).toContain("0 hours of 1000 target (0% complete)");
+    expect(prompt).toContain("## KNOWN BLOCKERS");
+    expect(prompt).not.toContain("## RECENT CURRICULUM");
+    expect(prompt).toContain("TARGETED BLOCKER FIELD");
+    expect(prompt).toContain('"targetedBlockerId": null');
   });
 
-  it("handles child with no grade or skills", () => {
-    const prompt = buildSystemPrompt({ name: "London" }, "chat");
-    expect(prompt).toContain("Name: London");
-    expect(prompt).not.toContain("Grade:");
-    expect(prompt).not.toContain("Priority skills:");
+  it("omits KNOWN BLOCKERS when no blockers are provided", () => {
+    const prompt = buildQuestPrompt("reading", 2, "phonics", {
+      activeBlockers: [],
+      hasRecentScans: false,
+    });
+    expect(prompt).not.toContain("## KNOWN BLOCKERS");
+    // targetedBlockerId field still appears in RESPONSE FORMAT so the AI knows the schema.
+    expect(prompt).toContain("targetedBlockerId");
   });
 });

@@ -1,60 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link as RouterLink, useSearchParams } from 'react-router-dom'
-import AccessTimeIcon from '@mui/icons-material/AccessTime'
-import AddIcon from '@mui/icons-material/Add'
-import CameraAltIcon from '@mui/icons-material/CameraAlt'
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
-import CheckIcon from '@mui/icons-material/Check'
-import ChecklistIcon from '@mui/icons-material/Checklist'
-import DeleteIcon from '@mui/icons-material/Delete'
-import EditIcon from '@mui/icons-material/Edit'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import PrintIcon from '@mui/icons-material/Print'
-import SchoolIcon from '@mui/icons-material/School'
 import Accordion from '@mui/material/Accordion'
-import Dialog from '@mui/material/Dialog'
-import DialogContent from '@mui/material/DialogContent'
-import DialogTitle from '@mui/material/DialogTitle'
 import AccordionDetails from '@mui/material/AccordionDetails'
 import AccordionSummary from '@mui/material/AccordionSummary'
 import Alert from '@mui/material/Alert'
-import Avatar from '@mui/material/Avatar'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
-import FormControlLabel from '@mui/material/FormControlLabel'
+import Fab from '@mui/material/Fab'
 import IconButton from '@mui/material/IconButton'
-import List from '@mui/material/List'
-import ListItem from '@mui/material/ListItem'
-import MenuItem from '@mui/material/MenuItem'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
-import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
-import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import {
-  addDoc,
   doc,
   getDoc,
   getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
   query,
+  setDoc,
   updateDoc,
   where,
 } from 'firebase/firestore'
 
-import AudioRecorder from '../../components/AudioRecorder'
 import ChildSelector from '../../components/ChildSelector'
 import ContextBar from '../../components/ContextBar'
 import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
-import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
@@ -63,92 +44,51 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   artifactsCollection,
+  bookProgressCollection,
+  bookProgressDocId,
+  chapterBooksCollection,
+  scansCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
-import {
-  generateFilename,
-  uploadArtifactFile,
-} from '../../core/firebase/upload'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, ChecklistItem as ChecklistItemType, DayLog, DraftDayPlan, DraftPlanItem, LadderCardDefinition, SkillSnapshot } from '../../core/types'
+import type { Artifact, BookProgress, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, LadderCardDefinition, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
+import { effectiveRecommendation, isWorksheetScan } from '../../core/types'
 import { getLaddersForChild } from '../ladders/laddersCatalog'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
-  DayBlockType,
   EnergyLevel,
   EnergyLevelLabel,
-  EngineStage,
-  EvidenceType,
-  LearningLocation,
   PlanType,
   PlanTypeLabel,
+  SkipReason,
   SubjectBucket,
   UserProfile,
 } from '../../core/types/enums'
+import { todayKey } from '../../core/utils/dateKey'
 import { getWeekRange } from '../../core/utils/time'
-import { blockMeta } from './blockMeta'
 import { getTemplateForChild } from './dailyPlanTemplates'
-import { autoFillBlockMinutes } from './daylog.model'
+import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
+import ChapterQuestionPool from './ChapterQuestionPool'
+import { useBookProgress } from './useBookProgress'
+import CreativeTimeLog from './CreativeTimeLog'
 import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
-import LadderQuickLog from './LadderQuickLog'
-import RoutineSection from './RoutineSection'
-import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
+import QuickCaptureSection from './QuickCaptureSection'
+import TeachBackSection from './TeachBackSection'
+import TodayChecklist from './TodayChecklist'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
+import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
+import { ensureDefaultActivityConfigs } from '../../core/firebase/migrateActivityConfigs'
+import { useRolloverUnchecked } from './useRolloverUnchecked'
+import { useUnifiedCapture } from './useUnifiedCapture'
+import QuickAddHours from '../records/QuickAddHours'
+import SectionErrorBoundary from '../../components/SectionErrorBoundary'
+import WeekFocusCard from './WeekFocusCard'
 import WorkshopGameCards from './WorkshopGameCards'
-import { syncChecklistToRoutine } from './checklistRoutineSync'
-import { calculateXp } from './xp'
-
-const subjectBucketColor: Record<string, string> = {
-  Reading: '#3b82f6',
-  LanguageArts: '#8b5cf6',
-  Math: '#10b981',
-  Science: '#06b6d4',
-  History: '#f59e0b',
-  Art: '#ec4899',
-  Music: '#a855f7',
-  PE: '#f97316',
-  Other: '#6b7280',
-}
-
-/** Infer a subject bucket from the item label when subjectBucket is not set. */
-function inferSubjectBucket(label: string): string | undefined {
-  const lower = label.toLowerCase()
-  if (/\bread|reading eggs|phonics|book\b/.test(lower)) return 'Reading'
-  if (/\bmath|addition|subtraction|multiply|division|arithmetic\b/.test(lower)) return 'Math'
-  if (/\blanguage|grammar|writing|spelling|handwriting\b/.test(lower)) return 'LanguageArts'
-  if (/\bscience|experiment|nature|biology\b/.test(lower)) return 'Science'
-  if (/\bhistory|social studies|geography\b/.test(lower)) return 'History'
-  if (/\bart|draw|paint|craft\b/.test(lower)) return 'Art'
-  if (/\bmusic|piano|sing\b/.test(lower)) return 'Music'
-  if (/\bpe|exercise|movement|run\b/.test(lower)) return 'PE'
-  return undefined
-}
-
-/** Get color for a checklist item, using subjectBucket or inferring from label. */
-function getItemColor(item: ChecklistItemType): string | undefined {
-  const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
-  return bucket ? (subjectBucketColor[bucket] ?? '#6b7280') : undefined
-}
-
-function formatMinutes(mins: number): string {
-  const h = Math.floor(mins / 60)
-  const m = mins % 60
-  if (h === 0) return `${m}m`
-  if (m === 0) return `${h}h`
-  return `${h}h ${m}m`
-}
-
-function formatTime12h(date: Date): string {
-  const h = date.getHours()
-  const m = date.getMinutes()
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  const h12 = h % 12 || 12
-  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`
-}
 
 export default function TodayPage() {
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const dateParam = searchParams.get('date')
   const initialDate = useMemo(() => {
@@ -194,7 +134,7 @@ export default function TodayPage() {
   // Compute Mon-Fri dates for the week containing selectedDate
   const weekDayDates = useMemo(() => {
     const parsed = new Date(selectedDate + 'T00:00:00')
-    const range = getWeekRange(parsed)
+    const range = getWeekRange(parsed, 1)
     const monday = new Date(range.start + 'T00:00:00')
     const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] as const
     return labels.map((label, i) => {
@@ -219,49 +159,17 @@ export default function TodayPage() {
   const artifactSectionRef = useRef<HTMLDivElement>(null)
 
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
-  const [linkingArtifactId, setLinkingArtifactId] = useState<string | null>(null)
-  const [linkingLadderId, setLinkingLadderId] = useState('')
-  const [linkingRungId, setLinkingRungId] = useState('')
-  const [mediaUploading, setMediaUploading] = useState(false)
   const [energy, setEnergy] = useState<EnergyLevel>(EnergyLevel.Normal)
   const [planType, setPlanType] = useState<PlanType>(PlanType.Normal)
-  const [showAllBlocks, setShowAllBlocks] = useState(false)
   const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
   const [teachHelperOpen, setTeachHelperOpen] = useState(false)
-  const [editingPlan, setEditingPlan] = useState(false)
   const [printingMaterials, setPrintingMaterials] = useState(false)
   const [todaySnapshot, setTodaySnapshot] = useState<SkillSnapshot | null>(null)
-  const [addingItem, setAddingItem] = useState(false)
-  const [newItemTitle, setNewItemTitle] = useState('')
-  const [newItemMinutes, setNewItemMinutes] = useState(15)
-  const [newItemSubject, setNewItemSubject] = useState<SubjectBucket>(SubjectBucket.Other)
-  // Per-item capture state
-  const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
-  const [captureNote, setCaptureNote] = useState('')
-  // Grade/review state (Approach A — manual input)
-  const [gradeNote, setGradeNote] = useState<{ index: number; text: string } | null>(null)
-
-  const [artifactForm, setArtifactForm] = useState({
-    childId: selectedChildId,
-    evidenceType: EvidenceType.Note as EvidenceType,
-    engineStage: EngineStage.Wonder,
-    subjectBucket: SubjectBucket.Reading,
-    location: LearningLocation.Home,
-    domain: '',
-    content: '',
-    ladderId: '',
-    rungId: '',
-  })
-
-  // Keep artifact form childId in sync with active child
-  useEffect(() => {
-    setArtifactForm((prev) => ({ ...prev, childId: selectedChildId }))
-  }, [selectedChildId])
 
   const selectableChildren = children
   const selectedChild = activeChild
 
-  // Resolve card-based ladders from the catalog for the active child
+  // TODO: Remove ladder references after disposition system is fully live
   const cardLadders: LadderCardDefinition[] = useMemo(
     () => (selectedChild ? getLaddersForChild(selectedChild.name) ?? [] : []),
     [selectedChild],
@@ -284,9 +192,9 @@ export default function TodayPage() {
     lastSavedAt,
     weekPlanId,
     weekFocus,
+    readAloudBookId,
     snackMessage,
     setSnackMessage,
-    persistDayLog,
     persistDayLogImmediate,
   } = useDayLog({
     familyId,
@@ -296,6 +204,36 @@ export default function TodayPage() {
     activeTemplate,
     activeRoutineItems,
   })
+
+  // (Rollover is wired below, after dailyPlan is loaded so MVD/low-energy can halve the budget.)
+
+  // --- Chapter book progress (pool-based read-aloud tracking) ---
+  const [selectedBook, setSelectedBook] = useState<ChapterBook | null>(null)
+
+  useEffect(() => {
+    if (!readAloudBookId) {
+      setSelectedBook(null)
+      return
+    }
+    // One-shot fetch — books don't change mid-session
+    const bookRef = doc(chapterBooksCollection(), readAloudBookId)
+    getDoc(bookRef).then((snap) => {
+      if (snap.exists()) {
+        setSelectedBook({ ...snap.data(), id: snap.id })
+      } else {
+        setSelectedBook(null)
+      }
+    }).catch((err) => {
+      console.error('Failed to fetch chapter book:', err)
+      setSelectedBook(null)
+    })
+  }, [readAloudBookId])
+
+  const { bookProgress, loading: bookProgressLoading, updateChapter } = useBookProgress(
+    familyId,
+    selectedChildId,
+    readAloudBookId,
+  )
 
   // Load/persist daily plan (energy + planType) to Firestore
   const { dailyPlan, saveDailyPlan } = useDailyPlan({
@@ -312,7 +250,133 @@ export default function TodayPage() {
     }
   }, [dailyPlan])
 
+  // --- Rollover: carry forward unchecked items from previous school day + enforce daily budget ---
+  useRolloverUnchecked({
+    familyId,
+    childId: selectedChildId,
+    today,
+    dayLog,
+    dailyPlan,
+    persistDayLogImmediate,
+  })
+
+  // --- Unified capture hook (shared with kid views) ---
+  const {
+    handleUnifiedCapture,
+    scanItemIndex,
+    setScanItemIndex,
+    scanResult,
+    scanLoading,
+    scanError,
+    clearScan,
+    recordScanAction,
+    syncScanToConfig,
+    runScan,
+  } = useUnifiedCapture({
+    familyId,
+    childId: selectedChildId,
+    childName: activeChild?.name ?? 'Student',
+    today,
+    dayLog,
+    persistDayLogImmediate,
+    onMessage: setSnackMessage,
+    onArtifactCreated: (artifact) => setTodayArtifacts((prev) => [artifact, ...prev]),
+  })
+
   const { chat: aiChat } = useAI()
+
+  const handleRetryChapterGen = useCallback(async () => {
+    if (!selectedBook || !selectedChildId || !familyId) return
+    try {
+      setSnackMessage({ text: 'Generating chapter questions...', severity: 'success' })
+      const progressId = bookProgressDocId(selectedChildId, selectedBook.id)
+      const progressRef = doc(bookProgressCollection(familyId), progressId)
+      const progressSnap = await getDoc(progressRef)
+      const existing = progressSnap.exists() ? (progressSnap.data() as BookProgress) : null
+
+      const existingChapters = existing?.questionPool?.map((q) => q.chapter) ?? []
+      const missingChapters = selectedBook.chapters?.filter(
+        (c) => !existingChapters.includes(c.number),
+      ) ?? []
+
+      if (missingChapters.length === 0) {
+        setSnackMessage({ text: 'Chapter questions already generated.', severity: 'success' })
+        return
+      }
+
+      const result = await aiChat({
+        familyId,
+        childId: selectedChildId,
+        taskType: TaskType.ChapterQuestions,
+        messages: [{
+          role: 'user',
+          content: JSON.stringify({
+            bookTitle: selectedBook.title,
+            author: selectedBook.author,
+            chapters: missingChapters,
+            childName: activeChild?.name,
+            weekTheme: weekFocus?.theme,
+            weekVirtue: weekFocus?.virtue,
+          }),
+        }],
+      })
+
+      if (!result?.message) {
+        setSnackMessage({ text: "Couldn't generate chapter questions.", severity: 'error' })
+        return
+      }
+
+      let questions: Array<{ chapter: number; questionType: string; question: string }> = []
+      try {
+        const parsed = JSON.parse(result.message) as unknown
+        questions = Array.isArray(parsed) ? parsed as typeof questions : []
+      } catch {
+        setSnackMessage({ text: "Couldn't parse chapter questions.", severity: 'error' })
+        return
+      }
+
+      const newPoolItems: ChapterQuestionPoolItem[] = questions.map((q) => ({
+        chapter: q.chapter,
+        chapterTitle: selectedBook.chapters?.find((c) => c.number === q.chapter)?.title,
+        questionType: q.questionType as ChapterQuestionPoolItem['questionType'],
+        question: q.question,
+        answered: false,
+      }))
+
+      if (existing) {
+        await updateDoc(progressRef, {
+          questionPool: [...existing.questionPool, ...newPoolItems],
+          updatedAt: new Date().toISOString(),
+        })
+      } else {
+        const newProgress: BookProgress = {
+          bookId: selectedBook.id,
+          childId: selectedChildId,
+          bookTitle: selectedBook.title,
+          author: selectedBook.author,
+          totalChapters: selectedBook.totalChapters,
+          questionPool: newPoolItems,
+          startedAt: todayKey(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+        await setDoc(progressRef, newProgress)
+      }
+
+      setSnackMessage({ text: `Chapter questions ready for ${selectedBook.title}!`, severity: 'success' })
+    } catch (err) {
+      console.error('Failed to retry chapter question generation', err)
+      setSnackMessage({ text: "Couldn't generate chapter questions.", severity: 'error' })
+    }
+  }, [selectedBook, selectedChildId, familyId, activeChild, weekFocus, aiChat, setSnackMessage])
+
+  // Ensure default activity configs exist (routine, formation, workbooks)
+  // so the planner generates full-length plans even if the user hasn't visited Settings.
+  useEffect(() => {
+    if (familyId && selectedChildId) {
+      void ensureDefaultActivityConfigs(familyId, selectedChildId)
+    }
+  }, [familyId, selectedChildId])
 
   // Load skill snapshot for print materials
   useEffect(() => {
@@ -321,6 +385,66 @@ export default function TodayPage() {
     getDoc(ref).then((snap) => {
       if (snap.exists()) setTodaySnapshot(snap.data() as SkillSnapshot)
     }).catch(() => { /* ignore */ })
+  }, [familyId, selectedChildId])
+
+  // Load recent scan feedback for today's checklist items
+  const [scanFeedbackBySubject, setScanFeedbackBySubject] = useState<
+    Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
+  >({})
+  useEffect(() => {
+    if (!familyId || !selectedChildId) return
+    const q = query(
+      scansCollection(familyId),
+      where('childId', '==', selectedChildId),
+      orderBy('createdAt', 'desc'),
+      limit(20),
+    )
+    getDocs(q).then((snap) => {
+      const feedback: typeof scanFeedbackBySubject = {}
+      for (const d of snap.docs) {
+        const scan = { ...d.data(), id: d.id } as ScanRecord
+        if (!scan.results || !isWorksheetScan(scan.results)) continue
+        const r = scan.results as WorksheetScanResult
+        const rec = effectiveRecommendation(scan) ?? r.recommendation
+        const subject = (r.subject || '').toLowerCase()
+        const key = subject.includes('math') ? 'Math'
+          : subject.includes('reading') || subject.includes('phonics') ? 'Reading'
+          : subject.includes('language') ? 'LanguageArts'
+          : subject.includes('science') ? 'Science'
+          : subject.includes('history') ? 'History'
+          : subject.includes('art') ? 'Art'
+          : subject.includes('music') ? 'Music'
+          : subject
+        if (!feedback[key]) {
+          feedback[key] = {
+            topic: r.specificTopic || '',
+            recommendation: rec,
+            estimatedMinutes: r.estimatedMinutes,
+          }
+        }
+      }
+      setScanFeedbackBySubject(feedback)
+    }).catch(() => { /* ignore */ })
+  }, [familyId, selectedChildId])
+
+  // Real-time recent scans for inline analysis panels
+  const [todayRecentScans, setTodayRecentScans] = useState<ScanRecord[]>([])
+  useEffect(() => {
+    if (!familyId || !selectedChildId) return
+    const q = query(
+      scansCollection(familyId),
+      where('childId', '==', selectedChildId),
+      orderBy('createdAt', 'desc'),
+      limit(20),
+    )
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setTodayRecentScans(snap.docs.map((d) => ({ ...(d.data() as ScanRecord), id: d.id })))
+      },
+      (err) => console.error('[TodayPage] Failed to load scans', err),
+    )
+    return unsub
   }, [familyId, selectedChildId])
 
   /** Map energy level to plan type: normal → Normal Day, low/overwhelmed → MVD. */
@@ -373,69 +497,6 @@ export default function TodayPage() {
     }
   }, [familyId, today, selectedChildId, setSnackMessage])
 
-  const selectedLadder = useMemo(
-    () => cardLadders.find((l) => l.ladderKey === artifactForm.ladderId),
-    [artifactForm.ladderId, cardLadders],
-  )
-
-  const linkingLadder = useMemo(
-    () => cardLadders.find((l) => l.ladderKey === linkingLadderId),
-    [cardLadders, linkingLadderId],
-  )
-
-  // --- Block field handlers ---
-
-  const handleBlockFieldChange = useCallback(
-    (index: number, field: keyof DayLog['blocks'][number], value: unknown) => {
-      if (!dayLog) return
-      const updatedBlocks = dayLog.blocks.map((block, blockIndex) =>
-        blockIndex === index ? { ...block, [field]: value } : block,
-      )
-      const updated = { ...dayLog, blocks: updatedBlocks }
-      // Debounce text fields; persist selects/numbers immediately
-      if (field === 'notes') {
-        persistDayLog(updated)
-      } else {
-        persistDayLogImmediate(updated)
-      }
-    },
-    [dayLog, persistDayLog, persistDayLogImmediate],
-  )
-
-  const handleChecklistToggle = useCallback(
-    (blockIndex: number, itemIndex: number) => {
-      if (!dayLog) return
-      const updatedBlocks = dayLog.blocks.map((block, currentIndex) => {
-        if (currentIndex !== blockIndex || !block.checklist) {
-          return block
-        }
-        const updatedChecklist = block.checklist.map((item, checklistIndex) =>
-          checklistIndex === itemIndex
-            ? { ...item, completed: !item.completed }
-            : item,
-        )
-        const allCompleted = updatedChecklist.every((item) => item.completed)
-        // Auto-populate actualMinutes from plannedMinutes when all items are
-        // checked, but only if the user hasn't manually set a different value.
-        let { actualMinutes } = block
-        if (allCompleted && block.plannedMinutes != null) {
-          if (actualMinutes == null || actualMinutes === 0) {
-            actualMinutes = block.plannedMinutes
-          }
-        } else if (!allCompleted) {
-          // Clear auto-populated value when unchecking — only if it still
-          // matches plannedMinutes (meaning the user didn't manually edit it).
-          if (actualMinutes != null && actualMinutes === block.plannedMinutes) {
-            actualMinutes = undefined
-          }
-        }
-        return { ...block, checklist: updatedChecklist, actualMinutes }
-      })
-      persistDayLogImmediate({ ...dayLog, blocks: updatedBlocks })
-    },
-    [dayLog, persistDayLogImmediate],
-  )
-
   // --- Print materials handler ---
 
   const handlePrintTodayMaterials = useCallback(async () => {
@@ -451,7 +512,7 @@ export default function TodayPage() {
       const todayPlan: DraftDayPlan = {
         day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
         timeBudgetMinutes: 150,
-        items: dayLog.checklist
+        items: (dayLog.checklist ?? [])
           .filter((i) => !i.completed)
           .map((i) => ({
             id: i.id ?? '',
@@ -489,243 +550,182 @@ export default function TodayPage() {
     }
   }, [dayLog, selectedChildId, activeChild, todaySnapshot, weekFocus, aiChat, familyId, setSnackMessage])
 
-  // --- Artifact handlers ---
+  // --- Pre-completion scan handler (for "should I skip?" advice) ---
+  const handlePreCompletionScan = useCallback(async (file: File, index: number) => {
+    setScanItemIndex(index)
+    const record = await runScan(file, familyId, selectedChildId)
 
-  const handleArtifactChange = useCallback(
-    (
-      field: keyof typeof artifactForm,
-      value: (typeof artifactForm)[keyof typeof artifactForm],
-    ) => {
-      setArtifactForm((prev) => ({ ...prev, [field]: value }))
-    },
-    [],
-  )
-
-  const buildArtifactBase = useCallback(
-    (title: string, evidenceType: EvidenceType) => {
-      const createdAt = new Date().toISOString()
-      const ladderRef =
-        artifactForm.ladderId && artifactForm.rungId
-          ? { ladderId: artifactForm.ladderId, rungId: artifactForm.rungId }
-          : undefined
-      return {
-        title,
-        type: evidenceType,
-        createdAt,
-        childId: artifactForm.childId,
-        dayLogId: today,
-        weekPlanId,
-        tags: {
-          engineStage: artifactForm.engineStage,
-          domain: artifactForm.domain,
-          subjectBucket: artifactForm.subjectBucket,
-          location: artifactForm.location,
-          ...(ladderRef ? { ladderRef } : {}),
-        },
-        notes: '',
-      }
-    },
-    [artifactForm, today, weekPlanId],
-  )
-
-  const handleArtifactSave = useCallback(async () => {
-    const content = artifactForm.content.trim()
-    const domain = artifactForm.domain.trim()
-    const title =
-      content.slice(0, 60) || domain || `Artifact for ${today}`
-
-    const artifact = {
-      ...buildArtifactBase(title, EvidenceType.Note),
-      content: artifactForm.content,
-    }
-
-    try {
-      const docRef = await addDoc(artifactsCollection(familyId), artifact)
-      setTodayArtifacts((prev) => [{ ...artifact, id: docRef.id }, ...prev])
-      setArtifactForm((prev) => ({ ...prev, domain: '', content: '' }))
-      setSnackMessage({ text: 'Note saved.', severity: 'success' })
-    } catch (err) {
-      console.error('Failed to save artifact', err)
-      setSnackMessage({ text: 'Failed to save note.', severity: 'error' })
-    }
-  }, [artifactForm, buildArtifactBase, familyId, today, setSnackMessage])
-
-  const handlePhotoCapture = useCallback(
-    async (file: File) => {
-      setMediaUploading(true)
+    if (record?.results && record.results.pageType !== 'certificate') {
       try {
-        const domain = artifactForm.domain.trim()
-        const title = domain || `Photo ${today}`
-        const artifact = buildArtifactBase(title, EvidenceType.Photo)
-        const docRef = await addDoc(artifactsCollection(familyId), artifact)
-        const ext = file.name.split('.').pop() ?? 'jpg'
-        const filename = generateFilename(ext)
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
-        setTodayArtifacts((prev) => [
-          { ...artifact, id: docRef.id, uri: downloadUrl },
-          ...prev,
-        ])
-        setArtifactForm((prev) => ({ ...prev, domain: '' }))
-        setSnackMessage({ text: 'Photo uploaded.', severity: 'success' })
-      } catch (err) {
-        console.error('Photo upload failed', err)
-        setSnackMessage({ text: 'Photo upload failed.', severity: 'error' })
-      } finally {
-        setMediaUploading(false)
-      }
-    },
-    [artifactForm, buildArtifactBase, familyId, today, setSnackMessage],
-  )
-
-  const handleAudioCapture = useCallback(
-    async (blob: Blob) => {
-      setMediaUploading(true)
-      try {
-        const domain = artifactForm.domain.trim()
-        const title = domain || `Audio ${today}`
-        const artifact = buildArtifactBase(title, EvidenceType.Audio)
-        const docRef = await addDoc(artifactsCollection(familyId), artifact)
-        const filename = generateFilename('webm')
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, blob, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
-        setTodayArtifacts((prev) => [
-          { ...artifact, id: docRef.id, uri: downloadUrl },
-          ...prev,
-        ])
-        setArtifactForm((prev) => ({ ...prev, domain: '' }))
-        setSnackMessage({ text: 'Audio uploaded.', severity: 'success' })
-      } catch (err) {
-        console.error('Audio upload failed', err)
-        setSnackMessage({ text: 'Audio upload failed.', severity: 'error' })
-      } finally {
-        setMediaUploading(false)
-      }
-    },
-    [artifactForm, buildArtifactBase, familyId, today, setSnackMessage],
-  )
-
-  const handleStartLinking = useCallback((artifact: Artifact) => {
-    setLinkingArtifactId(artifact.id ?? null)
-    setLinkingLadderId(artifact.tags.ladderRef?.ladderId ?? '')
-    setLinkingRungId(artifact.tags.ladderRef?.rungId ?? '')
-  }, [])
-
-  const handleLinkingLadderChange = useCallback((value: string) => {
-    setLinkingLadderId(value)
-    setLinkingRungId('')
-  }, [])
-
-  const handleLinkingRungChange = useCallback(
-    async (value: string) => {
-      setLinkingRungId(value)
-      if (!linkingArtifactId || !linkingLadderId || !value) return
-      try {
-        await updateDoc(doc(artifactsCollection(familyId), linkingArtifactId), {
-          'tags.ladderRef': { ladderId: linkingLadderId, rungId: value },
-        })
-        setTodayArtifacts((prev) =>
-          prev.map((artifact) =>
-            artifact.id === linkingArtifactId
-              ? {
-                  ...artifact,
-                  tags: {
-                    ...artifact.tags,
-                    ladderRef: { ladderId: linkingLadderId, rungId: value },
-                  },
-                }
-              : artifact,
-          ),
-        )
-        setLinkingArtifactId(null)
-        setLinkingLadderId('')
-        setLinkingRungId('')
-      } catch (err) {
-        console.error('Failed to link artifact', err)
-        setSnackMessage({ text: 'Failed to link artifact.', severity: 'error' })
-      }
-    },
-    [familyId, linkingArtifactId, linkingLadderId, setSnackMessage],
-  )
-
-  const getArtifactLinkLabel = useCallback(
-    (artifact: Artifact) => {
-      const ladderRef = artifact.tags?.ladderRef
-      if (!ladderRef) return 'Unlinked'
-      const ladder = cardLadders.find((item) => item.ladderKey === ladderRef.ladderId)
-      const rung = ladder?.rungs.find((item) => item.rungId === ladderRef.rungId)
-      return `${ladder?.title ?? 'Ladder'} \u00b7 ${rung?.name ?? 'Rung'}`
-    },
-    [cardLadders],
-  )
-
-  // --- Per-item capture handler (component-level for dialog access) ---
-
-  const handleItemPhotoCapture = useCallback(
-    async (file: File) => {
-      if (captureItemIndex === null || !dayLog?.checklist) return
-      const item = dayLog.checklist[captureItemIndex]
-      try {
-        const artifact = {
-          childId: selectedChildId,
-          title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${activeChild?.name ?? 'Student'}'s work`,
-          type: EvidenceType.Photo,
-          dayLogId: today,
-          createdAt: new Date().toISOString(),
-          tags: {
-            engineStage: EngineStage.Build,
-            domain: '',
-            subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
-            location: 'Home',
-            planItem: item.label,
-            ...(captureNote ? { note: captureNote } : {}),
-          },
+        const result = await syncScanToConfig(selectedChildId, record.results)
+        if (result.action === 'created') {
+          setSnackMessage({ text: `New workbook added: ${result.configName}`, severity: 'success' })
+        } else if (result.action === 'updated' && result.position) {
+          setSnackMessage({ text: `Updated ${result.configName} to lesson ${result.position}`, severity: 'success' })
         }
-        const docRef = await addDoc(artifactsCollection(familyId), artifact)
-        const ext = file.name.split('.').pop() ?? 'jpg'
-        const filename = generateFilename(ext)
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
-
-        // Link artifact to checklist item
-        const updatedChecklist = dayLog.checklist.map((ci, i) =>
-          i === captureItemIndex ? { ...ci, evidenceArtifactId: docRef.id } : ci
-        )
-        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-        setTodayArtifacts((prev) => [
-          { ...artifact, id: docRef.id, uri: downloadUrl } as Artifact,
-          ...prev,
-        ])
-        setCaptureItemIndex(null)
-        setCaptureNote('')
-        setSnackMessage({ text: 'Work captured!', severity: 'success' })
       } catch (err) {
-        console.error('Item photo capture failed:', err)
-        setSnackMessage({ text: 'Photo upload failed. Try again.', severity: 'error' })
+        console.error('[TodayPage] Failed to sync scan to config:', err)
+      }
+
+      const skills = record.results.skillsTargeted
+      if (skills.length > 0) {
+        try {
+          const findings = skills.map((s) => ({
+            skill: s.skill,
+            status: (s.alignsWithSnapshot === 'ahead' ? 'mastered' : 'emerging') as 'mastered' | 'emerging',
+            evidence: `Workbook scan: ${s.skill} (${s.level})`,
+            testedAt: new Date().toISOString(),
+          }))
+          await updateSkillMapFromFindings(familyId, selectedChildId, findings)
+        } catch (err) {
+          console.warn('[TodayPage] Failed to update skill map from scan (non-blocking):', err)
+        }
+      }
+    }
+
+    if (record?.results && dayLog?.checklist) {
+      const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
+        i === index ? { ...ci, scanned: true } : ci,
+      )
+      persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+    }
+  }, [runScan, familyId, selectedChildId, syncScanToConfig, setSnackMessage, dayLog, persistDayLogImmediate, setScanItemIndex])
+
+  const handleScanAddToPlan = useCallback(() => {
+    if (!scanResult?.results || scanItemIndex == null || !dayLog?.checklist) return
+    const r = scanResult.results
+    // Only worksheet/workbook scans can be added to plan — skip certificates
+    if (r.pageType === 'certificate') return
+    const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
+      i === scanItemIndex
+        ? {
+            ...ci,
+            subjectBucket: (r.subject.charAt(0).toUpperCase() + r.subject.slice(1)) as SubjectBucket,
+            estimatedMinutes: r.estimatedMinutes,
+            plannedMinutes: r.estimatedMinutes,
+            skillTags: r.skillsTargeted.map((s: { skill: string }) => s.skill),
+            skipGuidance: r.recommendation === 'skip' || r.recommendation === 'quick-review'
+              ? `${r.recommendation}: ${r.recommendationReason}`
+              : undefined,
+          }
+        : ci,
+    )
+    persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+    if (scanResult) void recordScanAction(familyId, scanResult, 'added')
+    clearScan()
+    setScanItemIndex(null)
+  }, [scanResult, scanItemIndex, dayLog, familyId, persistDayLogImmediate, recordScanAction, clearScan, setScanItemIndex])
+
+  const handleScanSkip = useCallback(() => {
+    if (scanResult) void recordScanAction(familyId, scanResult, 'skipped')
+    clearScan()
+    setScanItemIndex(null)
+  }, [scanResult, familyId, recordScanAction, clearScan, setScanItemIndex])
+
+  const handleClearScan = useCallback(() => {
+    clearScan()
+    setScanItemIndex(null)
+  }, [clearScan, setScanItemIndex])
+
+  const handleScanUpdatePosition = useCallback(
+    async (curriculum: CurriculumDetected) => {
+      if (!familyId || !selectedChildId || !curriculum.lessonNumber) return
+
+      try {
+        const result = await syncScanToConfig(selectedChildId, {
+          pageType: 'worksheet',
+          subject: curriculum.name || 'unknown',
+          specificTopic: '',
+          skillsTargeted: [],
+          estimatedDifficulty: 'appropriate',
+          recommendation: 'do',
+          recommendationReason: '',
+          estimatedMinutes: 30,
+          teacherNotes: '',
+          curriculumDetected: curriculum,
+        })
+
+        if (result.action === 'created') {
+          setSnackMessage({ text: `New workbook "${result.configName}" created at Lesson ${curriculum.lessonNumber}!`, severity: 'success' })
+        } else {
+          setSnackMessage({ text: `Position updated to Lesson ${curriculum.lessonNumber}!`, severity: 'success' })
+        }
+      } catch (err) {
+        console.error('[TodayPage] Failed to update position', err)
+        setSnackMessage({ text: 'Failed to update position', severity: 'error' })
       }
     },
-    [captureItemIndex, captureNote, dayLog, selectedChildId, activeChild, today, familyId, persistDayLogImmediate, setSnackMessage],
+    [familyId, selectedChildId, syncScanToConfig, setSnackMessage],
+  )
+
+  const handleSkipToNext = useCallback(
+    async (nextLesson: number) => {
+      if (!familyId || !selectedChildId || !scanResult?.results) return
+      const results = scanResult.results
+      if (results.pageType === 'certificate') return
+
+      const curriculum = results.curriculumDetected
+      if (!curriculum) return
+
+      try {
+        await syncScanToConfig(selectedChildId, {
+          ...results,
+          curriculumDetected: { ...curriculum, lessonNumber: nextLesson },
+        })
+        setSnackMessage({ text: `Skipping ahead — next lesson: ${nextLesson}`, severity: 'success' })
+      } catch (err) {
+        console.error('[TodayPage] Failed to skip to next lesson', err)
+        setSnackMessage({ text: 'Failed to update position', severity: 'error' })
+      }
+    },
+    [familyId, selectedChildId, scanResult, syncScanToConfig, setSnackMessage],
+  )
+
+  const handleAcceptSkip = useCallback(
+    async () => {
+      if (!familyId || !selectedChildId || !dayLog || !scanResult?.results || scanItemIndex == null) return
+      const results = scanResult.results
+      if (results.pageType === 'certificate') return
+
+      const curriculum = results.curriculumDetected
+      if (!curriculum?.lessonNumber) return
+
+      try {
+        // 1. Mark checklist item as skipped with ai-recommended reason
+        const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
+          i === scanItemIndex
+            ? { ...ci, skipped: true, skipReason: SkipReason.AiRecommended }
+            : ci,
+        )
+
+        // 2. Advance currentPosition by +1
+        await syncScanToConfig(selectedChildId, {
+          ...results,
+          curriculumDetected: { ...curriculum, lessonNumber: curriculum.lessonNumber + 1 },
+        })
+
+        // 3. Record parentOverride on the scan record
+        if (scanResult.id) {
+          const override = {
+            recommendation: 'skip' as const,
+            overriddenBy: familyId,
+            overriddenAt: new Date().toISOString(),
+            note: 'Accepted AI skip recommendation',
+          }
+          await updateDoc(doc(scansCollection(familyId), scanResult.id), { parentOverride: override })
+        }
+
+        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+        setSnackMessage({ text: 'Skipped. Moving forward.', severity: 'success' })
+      } catch (err) {
+        console.error('[TodayPage] Failed to accept skip recommendation', err)
+        setSnackMessage({ text: 'Failed to accept skip', severity: 'error' })
+      }
+    },
+    [familyId, selectedChildId, dayLog, scanResult, scanItemIndex, syncScanToConfig, persistDayLogImmediate, setSnackMessage],
   )
 
   // --- Loading state ---
-
-  const handleRoutineUpdate = useCallback(
-    (updated: DayLog) => {
-      const withMinutes = autoFillBlockMinutes(updated, activeRoutineItems)
-      const withXp = { ...withMinutes, xpTotal: calculateXp(withMinutes, activeRoutineItems) }
-      persistDayLog(withXp)
-    },
-    [persistDayLog, activeRoutineItems],
-  )
-
-  const handleRoutineUpdateImmediate = useCallback(
-    (updated: DayLog) => {
-      const withMinutes = autoFillBlockMinutes(updated, activeRoutineItems)
-      const withXp = { ...withMinutes, xpTotal: calculateXp(withMinutes, activeRoutineItems) }
-      persistDayLogImmediate(withXp)
-    },
-    [persistDayLogImmediate, activeRoutineItems],
-  )
 
   const scrollToArtifacts = useCallback(() => {
     artifactSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -753,9 +753,14 @@ export default function TodayPage() {
     return 'Not saved yet'
   }, [dayLog, lastSavedAt])
 
+  const handleSnackMessage = useCallback(
+    (msg: { text: string; severity: 'success' | 'error' }) => setSnackMessage(msg),
+    [setSnackMessage],
+  )
+
   // Kid profile early return — render dedicated kid view
   if (isKidProfile && dayLog && activeChild) {
-    const weekRange = getWeekRange(parseDateYmd(today) ?? new Date())
+    const weekRange = getWeekRange(parseDateYmd(today) ?? new Date(), 1)
     return (
       <KidTodayView
         dayLog={dayLog}
@@ -766,6 +771,7 @@ export default function TodayPage() {
         weekStart={weekRange.start}
         isMvd={planType === PlanType.Mvd}
         weekFocus={weekFocus}
+        readAloudBookId={readAloudBookId}
       />
     )
   }
@@ -943,1103 +949,131 @@ export default function TodayPage() {
         </Stack>
       </SectionCard>
 
-      {/* --- Week Focus --- */}
-      {weekFocus && (weekFocus.theme || weekFocus.scriptureRef) && (
-        <Box sx={{
-          p: 2, borderRadius: 2,
-          bgcolor: 'primary.50',
-          border: '1px solid',
-          borderColor: 'primary.100',
-        }}>
-          {weekFocus.theme && (
-            <Typography variant="subtitle2" color="primary.main">
-              Theme: {weekFocus.theme}
-            </Typography>
-          )}
-          {weekFocus.virtue && (
-            <Typography variant="body2" color="text.secondary">
-              Virtue: {weekFocus.virtue}
-            </Typography>
-          )}
-          {weekFocus.scriptureRef && (
-            <Typography variant="body2" sx={{ fontStyle: 'italic', mt: 0.5 }}>
-              📖 {weekFocus.scriptureRef}
-            </Typography>
-          )}
-          {weekFocus.heartQuestion && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              ❤️ {weekFocus.heartQuestion}
-            </Typography>
-          )}
-        </Box>
+      {/* --- Week Focus + Conundrum --- */}
+      {weekFocus && (
+        <SectionErrorBoundary section="week focus">
+          <WeekFocusCard
+            weekFocus={weekFocus}
+            familyId={familyId}
+            selectedChildId={selectedChildId}
+            onSnackMessage={handleSnackMessage}
+          />
+        </SectionErrorBoundary>
       )}
 
-      {/* --- Workshop Game Cards --- */}
+      {/* --- Chapter Question Pool (read-aloud discussion) --- */}
+      <SectionErrorBoundary section="chapter question">
+        <ChapterQuestionPool
+          book={selectedBook}
+          bookProgress={bookProgress}
+          bookProgressLoading={bookProgressLoading}
+          onChapterAnswered={updateChapter}
+          dayLog={dayLog}
+          persistDayLogImmediate={persistDayLogImmediate}
+          onRetryGeneration={() => void handleRetryChapterGen()}
+        />
+      </SectionErrorBoundary>
+
+      {/* --- Today's Plan checklist (PRIMARY) --- */}
+      {selectedChild && (
+        <SectionErrorBoundary section="checklist">
+        <TodayChecklist
+          dayLog={dayLog}
+          selectedChild={selectedChild}
+          selectedChildId={selectedChildId}
+          familyId={familyId}
+          today={today}
+          planType={planType}
+          todaySnapshot={todaySnapshot}
+          activeRoutineItems={activeRoutineItems}
+          persistDayLogImmediate={persistDayLogImmediate}
+          onTeachHelperOpen={(item) => {
+            setTeachHelperItem(item)
+            setTeachHelperOpen(true)
+          }}
+          onUnifiedCapture={handleUnifiedCapture}
+          onPreCompletionScan={handlePreCompletionScan}
+          captureLoading={scanLoading}
+          captureItemIndex={scanItemIndex}
+          scanResult={scanResult}
+          scanError={scanError}
+          onScanAddToPlan={handleScanAddToPlan}
+          onScanSkip={handleScanSkip}
+          onClearScan={handleClearScan}
+          onUpdatePosition={handleScanUpdatePosition}
+          onSkipToNext={handleSkipToNext}
+          onAcceptSkip={handleAcceptSkip}
+          onPrintMaterials={handlePrintTodayMaterials}
+          printingMaterials={printingMaterials}
+          scanFeedbackBySubject={scanFeedbackBySubject}
+          recentScans={todayRecentScans}
+        />
+        </SectionErrorBoundary>
+      )}
+
+      {/* --- Teach-Back (Lincoln only, after 50%+ must-do completion) --- */}
+      {selectedChild && (
+        <SectionErrorBoundary section="teach-back">
+          <TeachBackSection
+            dayLog={dayLog}
+            selectedChild={selectedChild}
+            familyId={familyId}
+            selectedChildId={selectedChildId}
+            today={today}
+            persistDayLogImmediate={persistDayLogImmediate}
+            onSnackMessage={handleSnackMessage}
+          />
+        </SectionErrorBoundary>
+      )}
+
+      {/* --- Workshop Game Cards (fun extras, below daily plan) --- */}
       {familyId && children.length > 0 && (
         <WorkshopGameCards familyId={familyId} children={children} />
       )}
 
-      {/* --- Today's Plan checklist (PRIMARY) --- */}
-      {(() => {
-        const rawChecklist = dayLog.checklist ?? []
-        const hasPlanItems = rawChecklist.length > 0
-        const isMvd = planType === PlanType.Mvd
-        // When no items are marked mvdEssential, default first 3 as essential
-        const essentialCount = rawChecklist.filter(i => i.mvdEssential).length
-        const checklist = essentialCount > 0
-          ? rawChecklist
-          : rawChecklist.map((item, i) => ({ ...item, mvdEssential: i < 3 }))
-        const completedCount = checklist.filter((item) => item.completed).length
-        const parseMinutesFromLabel = (label: string): number => {
-          const match = label.match(/\((\d+)m\)/)
-          return match ? parseInt(match[1]) : 0
-        }
-        const totalPlannedMinutes = checklist.reduce((sum, item) => {
-          return sum + (item.plannedMinutes ?? item.estimatedMinutes ?? parseMinutesFromLabel(item.label))
-        }, 0)
-        const xp = calculateXp(dayLog, activeRoutineItems)
-        const isLincoln = selectedChild?.name?.toLowerCase() === 'lincoln'
+      {/* --- Creative Time Log --- */}
+      {familyId && selectedChild && (
+        <CreativeTimeLog
+          familyId={familyId}
+          childId={selectedChild.id ?? ''}
+          childName={selectedChild.name}
+        />
+      )}
 
-        // Engagement pattern insights
-        const itemsWithEngagement = checklist.filter((ci) => ci.engagement)
-        const engagementCounts = itemsWithEngagement.reduce((acc, ci) => {
-          if (ci.engagement) acc[ci.engagement] = (acc[ci.engagement] ?? 0) + 1
-          return acc
-        }, {} as Record<string, number>)
-
-        const handleReorder = (fromIndex: number, direction: 'up' | 'down') => {
-          const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1
-          if (toIndex < 0 || toIndex >= rawChecklist.length) return
-          const updated = [...rawChecklist]
-          const temp = updated[fromIndex]
-          updated[fromIndex] = updated[toIndex]
-          updated[toIndex] = temp
-          persistDayLogImmediate({ ...dayLog, checklist: updated })
-        }
-
-        const handleDeleteItem = (index: number) => {
-          const item = rawChecklist[index]
-          const updatedChecklist = rawChecklist.filter((_, i) => i !== index)
-          // If planner-sourced, also remove matching block
-          let updatedBlocks = dayLog.blocks
-          if (item.source === 'planner') {
-            updatedBlocks = dayLog.blocks.filter((block) => {
-              const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
-              return !matchesLabel
-            })
-          }
-          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist, blocks: updatedBlocks })
-        }
-
-        const handleEditLabel = (index: number, newLabel: string) => {
-          const updatedChecklist = rawChecklist.map((ci, i) =>
-            i === index ? { ...ci, label: newLabel } : ci
-          )
-          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-        }
-
-        const handleEditMinutes = (index: number, minutes: number) => {
-          const item = rawChecklist[index]
-          const updatedChecklist = rawChecklist.map((ci, i) =>
-            i === index ? { ...ci, plannedMinutes: minutes } : ci
-          )
-          // Also update the corresponding block's plannedMinutes
-          const updatedBlocks = dayLog.blocks.map((block) => {
-            const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
-            if (matchesLabel) return { ...block, plannedMinutes: minutes }
-            return block
-          })
-          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist, blocks: updatedBlocks })
-        }
-
-        const handleAddItem = () => {
-          if (!newItemTitle.trim()) return
-          const newItem: ChecklistItemType = {
-            label: newItemTitle.trim(),
-            completed: false,
-            plannedMinutes: newItemMinutes,
-            subjectBucket: newItemSubject,
-            source: 'manual',
-          }
-          const updatedChecklist = [...rawChecklist, newItem]
-          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-          setNewItemTitle('')
-          setNewItemMinutes(15)
-          setNewItemSubject(SubjectBucket.Other)
-          setAddingItem(false)
-        }
-
-        const handleEngagement = (index: number, engagement: ChecklistItemType['engagement']) => {
-          const updatedChecklist = rawChecklist.map((ci, i) =>
-            i === index ? { ...ci, engagement } : ci
-          )
-          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-        }
-
-        const handleItemCapture = (index: number) => {
-          setCaptureItemIndex(index)
-          setCaptureNote('')
-        }
-
-        const handleSaveGradeNote = (index: number, text: string) => {
-          if (!dayLog?.checklist || !text.trim()) return
-          const updatedChecklist = dayLog.checklist.map((ci, i) =>
-            i === index ? { ...ci, gradeResult: text.trim() } : ci
-          )
-          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-          setGradeNote(null)
-        }
-
-        return (
-          <SectionCard title="Today's Plan" action={
-            hasPlanItems ? (
-              <Stack direction="row" spacing={0.5} alignItems="center">
-                <Button
-                  size="small"
-                  variant="text"
-                  startIcon={printingMaterials ? <CircularProgress size={14} /> : <PrintIcon />}
-                  onClick={handlePrintTodayMaterials}
-                  disabled={printingMaterials}
-                  sx={{ minWidth: 0, px: 1 }}
-                >
-                  {printingMaterials ? 'Generating...' : 'Print'}
-                </Button>
-                <IconButton size="small" onClick={() => { setEditingPlan(!editingPlan); setAddingItem(false) }}>
-                  {editingPlan ? <CheckIcon /> : <EditIcon />}
-                </IconButton>
-              </Stack>
-            ) : undefined
-          }>
-            {hasPlanItems ? (
-              <Stack spacing={1.5}>
-                {/* Summary line with XP */}
-                <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 0.5 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    {formatMinutes(totalPlannedMinutes)} planned{' \u00B7 '}
-                    {completedCount} of {checklist.length} done
-                    {(() => {
-                      const remainingMinutes = checklist
-                        .filter((ci) => !ci.completed)
-                        .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
-                      if (remainingMinutes > 0 && completedCount < checklist.length) {
-                        const est = new Date(Date.now() + remainingMinutes * 60_000)
-                        return ` \u00B7 Est. finish: ${formatTime12h(est)}`
-                      }
-                      return ''
-                    })()}
-                  </Typography>
-                  <Chip
-                    label={`${xp} XP`}
-                    size="small"
-                    color={xp > 0 ? 'success' : 'default'}
-                    variant={xp > 0 ? 'filled' : 'outlined'}
-                    sx={isLincoln ? {
-                      fontFamily: '"Press Start 2P", monospace',
-                      fontSize: '0.45rem',
-                      bgcolor: xp > 0 ? '#1A1A1A' : undefined,
-                      color: xp > 0 ? '#7EFC20' : undefined,
-                      border: xp > 0 ? '2px solid #3A3A3A' : undefined,
-                      borderRadius: 0,
-                    } : {}}
-                  />
-                </Stack>
-
-                {/* Checklist items */}
-                {checklist.map((item, index) => {
-                  const isDimmed = isMvd && item.mvdEssential !== true
-                  const dotColor = getItemColor(item)
-
-                  if (editingPlan) {
-                    return (
-                      <Stack key={index} direction="row" spacing={0.5} alignItems="center">
-                        {/* Reorder buttons */}
-                        <Stack>
-                          <IconButton
-                            size="small"
-                            disabled={index === 0}
-                            onClick={() => handleReorder(index, 'up')}
-                            sx={{ p: 0.25 }}
-                          >
-                            <ArrowUpwardIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            disabled={index === checklist.length - 1}
-                            onClick={() => handleReorder(index, 'down')}
-                            sx={{ p: 0.25 }}
-                          >
-                            <ArrowDownwardIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
-                        </Stack>
-                        {/* Editable title */}
-                        <TextField
-                          size="small"
-                          variant="standard"
-                          value={item.label}
-                          onChange={(e) => handleEditLabel(index, e.target.value)}
-                          sx={{ flex: 1 }}
-                          inputProps={{ style: { fontSize: '0.875rem' } }}
-                        />
-                        {/* Editable minutes */}
-                        <TextField
-                          size="small"
-                          variant="standard"
-                          type="number"
-                          value={item.plannedMinutes ?? 0}
-                          onChange={(e) => handleEditMinutes(index, Math.max(0, parseInt(e.target.value) || 0))}
-                          sx={{ width: 48 }}
-                          inputProps={{ min: 0, style: { fontSize: '0.875rem', textAlign: 'right' } }}
-                        />
-                        <Typography variant="caption" color="text.secondary">m</Typography>
-                        {/* Delete button */}
-                        <IconButton size="small" onClick={() => handleDeleteItem(index)} color="error">
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Stack>
-                    )
-                  }
-
-                  return (
-                    <Box key={index}>
-                      <Stack
-                        direction="row"
-                        spacing={0.5}
-                        alignItems="center"
-                        sx={{
-                          ...(item.completed ? { textDecoration: 'line-through', opacity: 0.6 } : {}),
-                          ...(isDimmed && !item.completed ? { opacity: 0.5 } : {}),
-                        }}
-                      >
-                        {dotColor && (
-                          <Box
-                            sx={{
-                              width: 10,
-                              height: 10,
-                              borderRadius: '50%',
-                              bgcolor: dotColor,
-                              flexShrink: 0,
-                            }}
-                          />
-                        )}
-                        <Checkbox
-                          checked={item.completed}
-                          onChange={() => {
-                            const newCompleted = !item.completed
-                            const updatedChecklist = dayLog.checklist!.map((ci, i) =>
-                              i === index ? { ...ci, completed: newCompleted } : ci
-                            )
-                            // Auto-set actualMinutes on corresponding block when checking
-                            const minutes = item.estimatedMinutes ?? item.plannedMinutes ?? 0
-                            let updatedBlocks = dayLog.blocks
-                            if (newCompleted && minutes > 0) {
-                              updatedBlocks = dayLog.blocks.map((block) => {
-                                const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
-                                const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
-                                const matchesTitle = block.title != null && (
-                                  block.title === titleClean ||
-                                  titleClean.toLowerCase().includes(block.title.toLowerCase())
-                                )
-                                if ((matchesLabel || matchesTitle) && (block.actualMinutes == null || block.actualMinutes === 0)) {
-                                  return { ...block, actualMinutes: minutes }
-                                }
-                                return block
-                              })
-                            } else if (!newCompleted) {
-                              // Clear auto-populated actualMinutes when unchecking
-                              updatedBlocks = dayLog.blocks.map((block) => {
-                                const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
-                                const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
-                                const matchesTitle = block.title != null && (
-                                  block.title === titleClean ||
-                                  titleClean.toLowerCase().includes(block.title.toLowerCase())
-                                )
-                                if ((matchesLabel || matchesTitle) && block.actualMinutes === minutes) {
-                                  return { ...block, actualMinutes: undefined }
-                                }
-                                return block
-                              })
-                            }
-                            // Sync checklist → routine fields → XP
-                            const synced = syncChecklistToRoutine(
-                              { ...dayLog, checklist: updatedChecklist, blocks: updatedBlocks },
-                              item, newCompleted, activeRoutineItems,
-                            )
-                            const withMinutes = autoFillBlockMinutes(synced, activeRoutineItems)
-                            const withXp = { ...withMinutes, xpTotal: calculateXp(withMinutes, activeRoutineItems) }
-                            persistDayLogImmediate(withXp)
-                          }}
-                        />
-                        <Typography variant="body2" sx={{ flex: 1 }}>
-                          {item.label}
-                        </Typography>
-                        {item.plannedMinutes != null && item.plannedMinutes > 0 && (
-                          <Typography variant="caption" color="text.secondary">
-                            {item.plannedMinutes}m
-                          </Typography>
-                        )}
-                        {isDimmed && !item.completed && (
-                          <Chip label="(stretch)" size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
-                        )}
-                        {!item.completed && (
-                          <Tooltip title={item.lessonCardId ? 'View lesson plan' : 'Help me teach this'}>
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                setTeachHelperItem(item)
-                                setTeachHelperOpen(true)
-                              }}
-                            >
-                              <SchoolIcon
-                                fontSize="small"
-                                color={item.lessonCardId ? 'primary' : 'action'}
-                                sx={item.lessonCardId ? undefined : { opacity: 0.5 }}
-                              />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                      </Stack>
-                      {/* Engagement feedback: emoji row after completion */}
-                      {item.completed && !item.engagement && (
-                        <Stack direction="row" spacing={0.5} sx={{ ml: 5, mt: 0.5 }}>
-                          <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5, lineHeight: '24px' }}>
-                            How&apos;d it go?
-                          </Typography>
-                          {([
-                            { value: 'engaged' as const, emoji: '\u{1F60A}', label: 'Engaged' },
-                            { value: 'okay' as const, emoji: '\u{1F610}', label: 'Okay' },
-                            { value: 'struggled' as const, emoji: '\u{1F62B}', label: 'Struggled' },
-                            { value: 'refused' as const, emoji: '\u{274C}', label: 'Refused' },
-                          ]).map(opt => (
-                            <IconButton
-                              key={opt.value}
-                              size="small"
-                              onClick={() => handleEngagement(index, opt.value)}
-                              title={opt.label}
-                              sx={{ fontSize: '1.2rem', p: 0.5 }}
-                            >
-                              {opt.emoji}
-                            </IconButton>
-                          ))}
-                        </Stack>
-                      )}
-                      {/* Show saved engagement as a small chip */}
-                      {item.engagement && (
-                        <Chip
-                          size="small"
-                          label={{
-                            engaged: '\u{1F60A} Engaged',
-                            okay: '\u{1F610} Okay',
-                            struggled: '\u{1F62B} Struggled',
-                            refused: '\u{274C} Refused',
-                          }[item.engagement]}
-                          sx={{ ml: 5, mt: 0.5, height: 22 }}
-                          onDelete={() => handleEngagement(index, undefined)}
-                          variant="outlined"
-                        />
-                      )}
-
-                      {/* Per-item capture — appears after checking off */}
-                      {item.completed && (
-                        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 5, mt: 0.5 }}>
-                          {/* Capture button */}
-                          {!item.evidenceArtifactId && (
-                            <IconButton
-                              size="small"
-                              onClick={() => handleItemCapture(index)}
-                              title="Capture work"
-                            >
-                              <CameraAltIcon fontSize="small" />
-                            </IconButton>
-                          )}
-                          {/* Show if evidence already captured */}
-                          {item.evidenceArtifactId && (
-                            <Chip size="small" label="Captured" variant="outlined" color="success" sx={{ height: 22 }} />
-                          )}
-                        </Stack>
-                      )}
-
-                      {/* Scan & Review: manual quick-check after capture */}
-                      {item.evidenceArtifactId && !item.gradeResult && gradeNote?.index !== index && (
-                        <Button
-                          size="small"
-                          variant="text"
-                          onClick={() => setGradeNote({ index, text: '' })}
-                          sx={{ ml: 5, mt: 0.5, textTransform: 'none' }}
-                        >
-                          Quick Review
-                        </Button>
-                      )}
-
-                      {/* Grade note input (Approach A — manual) */}
-                      {gradeNote?.index === index && (
-                        <Stack spacing={1} sx={{ ml: 5, mt: 0.5 }}>
-                          <Typography variant="body2">Quick check: how did it go?</Typography>
-                          <TextField
-                            size="small"
-                            placeholder="e.g., 5/6 correct, missed regrouping on #4"
-                            value={gradeNote.text}
-                            onChange={(e) => setGradeNote({ index, text: e.target.value })}
-                            multiline
-                            rows={2}
-                            autoFocus
-                          />
-                          <Stack direction="row" spacing={1}>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              onClick={() => handleSaveGradeNote(index, gradeNote.text)}
-                              disabled={!gradeNote.text.trim()}
-                            >
-                              Save
-                            </Button>
-                            <Button size="small" onClick={() => setGradeNote(null)}>
-                              Cancel
-                            </Button>
-                          </Stack>
-                        </Stack>
-                      )}
-
-                      {/* Display saved grade result */}
-                      {item.gradeResult && (
-                        <Box sx={{ ml: 5, mt: 0.5, p: 1, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-                          <Typography variant="caption" color="text.secondary">Review:</Typography>
-                          <Typography variant="body2">{item.gradeResult}</Typography>
-                        </Box>
-                      )}
-                    </Box>
-                  )
-                })}
-
-                {/* Engagement pattern insights */}
-                {itemsWithEngagement.length >= 2 && (
-                  <Box sx={{ px: 1, py: 1.5, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: 'block', mb: 0.5 }}>
-                      Today&apos;s Engagement
-                    </Typography>
-                    <Stack direction="row" spacing={1} flexWrap="wrap">
-                      {engagementCounts.engaged != null && engagementCounts.engaged > 0 && (
-                        <Chip size="small" label={`\u{1F60A} ${engagementCounts.engaged} engaged`} color="success" variant="outlined" sx={{ height: 24 }} />
-                      )}
-                      {engagementCounts.okay != null && engagementCounts.okay > 0 && (
-                        <Chip size="small" label={`\u{1F610} ${engagementCounts.okay} okay`} variant="outlined" sx={{ height: 24 }} />
-                      )}
-                      {engagementCounts.struggled != null && engagementCounts.struggled > 0 && (
-                        <Chip size="small" label={`\u{1F62B} ${engagementCounts.struggled} struggled`} color="warning" variant="outlined" sx={{ height: 24 }} />
-                      )}
-                      {engagementCounts.refused != null && engagementCounts.refused > 0 && (
-                        <Chip size="small" label={`\u{274C} ${engagementCounts.refused} refused`} color="error" variant="outlined" sx={{ height: 24 }} />
-                      )}
-                    </Stack>
-                  </Box>
-                )}
-
-                {/* Add Item (edit mode only) */}
-                {editingPlan && !addingItem && (
-                  <Button
-                    size="small"
-                    startIcon={<AddIcon />}
-                    onClick={() => setAddingItem(true)}
-                    sx={{ alignSelf: 'flex-start' }}
-                  >
-                    Add Item
-                  </Button>
-                )}
-                {editingPlan && addingItem && (
-                  <Stack spacing={1} sx={{ p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                    <TextField
-                      size="small"
-                      label="Title"
-                      value={newItemTitle}
-                      onChange={(e) => setNewItemTitle(e.target.value)}
-                      autoFocus
-                    />
-                    <Stack direction="row" spacing={1}>
-                      <TextField
-                        size="small"
-                        label="Minutes"
-                        type="number"
-                        value={newItemMinutes}
-                        onChange={(e) => setNewItemMinutes(Math.max(0, parseInt(e.target.value) || 0))}
-                        sx={{ width: 100 }}
-                        inputProps={{ min: 0 }}
-                      />
-                      <TextField
-                        size="small"
-                        label="Subject"
-                        select
-                        value={newItemSubject}
-                        onChange={(e) => setNewItemSubject(e.target.value as SubjectBucket)}
-                        sx={{ flex: 1 }}
-                      >
-                        {Object.values(SubjectBucket).map((sb) => (
-                          <MenuItem key={sb} value={sb}>{sb}</MenuItem>
-                        ))}
-                      </TextField>
-                    </Stack>
-                    <Stack direction="row" spacing={1}>
-                      <Button size="small" variant="contained" onClick={handleAddItem} disabled={!newItemTitle.trim()}>
-                        Add
-                      </Button>
-                      <Button size="small" onClick={() => setAddingItem(false)}>
-                        Cancel
-                      </Button>
-                    </Stack>
-                  </Stack>
-                )}
-              </Stack>
-            ) : (
-              <Stack spacing={1} sx={{ py: 1 }}>
-                <Typography color="text.secondary">
-                  No plan for today yet.{' '}
-                  <RouterLink to="/planner" style={{ color: 'inherit' }}>
-                    Go to Plan My Week
-                  </RouterLink>{' '}
-                  to create one, or use the routine below.
-                </Typography>
-              </Stack>
-            )}
-          </SectionCard>
-        )
-      })()}
-
-      {/* --- Per-item capture dialog --- */}
-      <Dialog open={captureItemIndex !== null} onClose={() => setCaptureItemIndex(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          Capture: {captureItemIndex !== null ? dayLog.checklist?.[captureItemIndex]?.label?.replace(/\s*\(\d+m\)/, '') : ''}
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <PhotoCapture onCapture={(file: File) => { void handleItemPhotoCapture(file) }} />
-            <TextField
-              label="Quick note (optional)"
-              placeholder="What went well, what to work on..."
-              value={captureNote}
-              onChange={(e) => setCaptureNote(e.target.value)}
-              size="small"
-              multiline
-              rows={2}
-            />
-          </Stack>
-        </DialogContent>
-      </Dialog>
-
-      {/* --- Quick Capture --- */}
-      <div ref={artifactSectionRef} />
-      <SectionCard title="Quick Capture">
-        <Stack spacing={2}>
-          <ToggleButtonGroup
-            value={artifactForm.evidenceType}
-            exclusive
-            onChange={(_event, value) => {
-              if (value) handleArtifactChange('evidenceType', value)
-            }}
-            fullWidth
-            size="large"
-          >
-            <ToggleButton value={EvidenceType.Note}>Note</ToggleButton>
-            <ToggleButton value={EvidenceType.Photo}>Photo</ToggleButton>
-            <ToggleButton value={EvidenceType.Audio}>Audio</ToggleButton>
-          </ToggleButtonGroup>
-          <TextField
-            label="Child"
-            select
-            value={artifactForm.childId}
-            onChange={(event) => handleArtifactChange('childId', event.target.value)}
-          >
-            <MenuItem value="" disabled>
-              Select child
-            </MenuItem>
-            {selectableChildren.map((child) => (
-              <MenuItem key={child.id} value={child.id}>
-                {child.name}
-              </MenuItem>
-            ))}
-          </TextField>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-            <TextField
-              label="Engine stage"
-              select
-              fullWidth
-              value={artifactForm.engineStage}
-              onChange={(event) =>
-                handleArtifactChange('engineStage', event.target.value as EngineStage)
-              }
-            >
-              {Object.values(EngineStage).map((stage) => (
-                <MenuItem key={stage} value={stage}>
-                  {stage}
-                </MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              label="Subject bucket"
-              select
-              fullWidth
-              value={artifactForm.subjectBucket}
-              onChange={(event) =>
-                handleArtifactChange(
-                  'subjectBucket',
-                  event.target.value as SubjectBucket,
-                )
-              }
-            >
-              {Object.values(SubjectBucket).map((bucket) => (
-                <MenuItem key={bucket} value={bucket}>
-                  {bucket}
-                </MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              label="Location"
-              select
-              fullWidth
-              value={artifactForm.location}
-              onChange={(event) =>
-                handleArtifactChange(
-                  'location',
-                  event.target.value as LearningLocation,
-                )
-              }
-            >
-              {Object.values(LearningLocation).map((location) => (
-                <MenuItem key={location} value={location}>
-                  {location}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Stack>
-          <TextField
-            label="Domain"
-            value={artifactForm.domain}
-            onChange={(event) => handleArtifactChange('domain', event.target.value)}
-          />
-          <TextField
-            label="Ladder"
-            select
-            value={artifactForm.ladderId}
-            onChange={(event) => {
-              const ladderId = event.target.value
-              setArtifactForm((prev) => ({
-                ...prev,
-                ladderId,
-                rungId: '',
-              }))
-            }}
-          >
-            <MenuItem value="">No ladder</MenuItem>
-            {cardLadders.map((ladder) => (
-              <MenuItem key={ladder.ladderKey} value={ladder.ladderKey}>
-                {ladder.title}
-              </MenuItem>
-            ))}
-          </TextField>
-          {selectedLadder && selectedLadder.rungs.length > 0 && (
-            <TextField
-              label="Rung (optional)"
-              select
-              value={artifactForm.rungId}
-              onChange={(event) =>
-                handleArtifactChange('rungId', event.target.value)
-              }
-            >
-              <MenuItem value="">Select rung</MenuItem>
-              {selectedLadder.rungs.map((rung) => (
-                <MenuItem key={rung.rungId} value={rung.rungId}>
-                  {rung.rungId}: {rung.name}
-                </MenuItem>
-              ))}
-            </TextField>
-          )}
-          {artifactForm.evidenceType === EvidenceType.Note && (
-            <>
-              <TextField
-                label="Content"
-                multiline
-                minRows={3}
-                value={artifactForm.content}
-                onChange={(event) => handleArtifactChange('content', event.target.value)}
-              />
-              <Button variant="contained" onClick={handleArtifactSave}>
-                Save Note
-              </Button>
-            </>
-          )}
-          {artifactForm.evidenceType === EvidenceType.Photo && (
-            <PhotoCapture onCapture={handlePhotoCapture} uploading={mediaUploading} />
-          )}
-          {artifactForm.evidenceType === EvidenceType.Audio && (
-            <AudioRecorder onCapture={handleAudioCapture} uploading={mediaUploading} />
-          )}
-        </Stack>
-      </SectionCard>
-      <SectionCard title="Artifacts">
-        <Stack spacing={2}>
-          {todayArtifacts.length === 0 ? (
-            <Typography color="text.secondary">
-              No artifacts logged yet today.
+      {/* Quick non-core hours — collapsed by default */}
+      {selectedChildId && (
+        <Accordion>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Typography variant="subtitle1" color="text.secondary">
+              ⚡ Log Extra Activity (PE, art, cooking...)
             </Typography>
-          ) : (
-            <List dense>
-              {todayArtifacts.map((artifact) => (
-                <ListItem key={artifact.id ?? artifact.title} disableGutters>
-                  <Stack spacing={1} sx={{ width: '100%' }}>
-                    <Stack
-                      direction="row"
-                      spacing={1}
-                      alignItems="center"
-                      justifyContent="space-between"
-                    >
-                      <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: 1 }}>
-                        <Typography variant="body2">
-                          {artifact.title}
-                        </Typography>
-                        <Chip size="small" label={artifact.type} />
-                      </Stack>
-                      <Typography variant="caption" color="text.secondary">
-                        {getArtifactLinkLabel(artifact)}
-                      </Typography>
-                    </Stack>
-                    {artifact.type === EvidenceType.Photo && artifact.uri && (
-                      <Box
-                        component="img"
-                        src={artifact.uri}
-                        alt={artifact.title}
-                        sx={{
-                          width: '100%',
-                          maxHeight: 180,
-                          objectFit: 'contain',
-                          borderRadius: 1,
-                          border: '1px solid',
-                          borderColor: 'divider',
-                        }}
-                      />
-                    )}
-                    {artifact.type === EvidenceType.Audio && artifact.uri && (
-                      <Box component="audio" controls src={artifact.uri} sx={{ width: '100%' }} />
-                    )}
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={() => handleStartLinking(artifact)}
-                      disabled={!artifact.id}
-                      sx={{ alignSelf: 'flex-start' }}
-                    >
-                      Link to rung
-                    </Button>
-                    {linkingArtifactId === artifact.id && (
-                      <Stack spacing={1}>
-                        <TextField
-                          label="Ladder"
-                          select
-                          size="small"
-                          value={linkingLadderId}
-                          onChange={(event) =>
-                            handleLinkingLadderChange(event.target.value)
-                          }
-                        >
-                          <MenuItem value="">Select ladder</MenuItem>
-                          {cardLadders.map((ladder) => (
-                            <MenuItem key={ladder.ladderKey} value={ladder.ladderKey}>
-                              {ladder.title}
-                            </MenuItem>
-                          ))}
-                        </TextField>
-                        <TextField
-                          label="Rung"
-                          select
-                          size="small"
-                          disabled={!linkingLadder || linkingLadder.rungs.length === 0}
-                          value={linkingRungId}
-                          onChange={(event) =>
-                            void handleLinkingRungChange(event.target.value)
-                          }
-                        >
-                          <MenuItem value="">Select rung</MenuItem>
-                          {linkingLadder?.rungs.map((rung) => (
-                            <MenuItem key={rung.rungId} value={rung.rungId}>
-                              {rung.rungId}: {rung.name}
-                            </MenuItem>
-                          ))}
-                        </TextField>
-                      </Stack>
-                    )}
-                  </Stack>
-                </ListItem>
-              ))}
-            </List>
-          )}
-        </Stack>
-      </SectionCard>
-
-      {/* --- Detailed Tracking (collapsed legacy sections) --- */}
-      <Accordion defaultExpanded={(dayLog.checklist?.length ?? 0) === 0}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography variant="subtitle1" color="text.secondary">
-            Detailed Tracking (Routine, Ladders, Blocks)
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Stack spacing={2}>
-            <RoutineSection
-              key={`${selectedChildId}_${today}`}
-              dayLog={dayLog}
-              onUpdate={handleRoutineUpdate}
-              onUpdateImmediate={handleRoutineUpdateImmediate}
-              routineItems={activeRoutineItems}
-              childName={selectedChild?.name}
+          </AccordionSummary>
+          <AccordionDetails>
+            <QuickAddHours
+              familyId={familyId}
+              childId={selectedChildId}
+              childName={activeChild?.name ?? 'child'}
+              date={today}
+              onSaved={(msg) => setSnackMessage({ text: msg, severity: 'success' })}
             />
+          </AccordionDetails>
+        </Accordion>
+      )}
 
-            {cardLadders.length > 0 && selectedChildId && (
-              <LadderQuickLog
-                familyId={familyId}
-                childId={selectedChildId}
-                ladders={cardLadders}
-              />
-            )}
-
-            {/* DayLog Blocks */}
-            <SectionCard title="Day Blocks">
-              <Stack spacing={1}>
-                {dayLog.blocks
-                .map((block, originalIndex) => ({ block, originalIndex }))
-                .filter(({ block }) =>
-                  planType === PlanType.Mvd
-                    ? block.type === DayBlockType.Reading || block.type === DayBlockType.Math
-                    : true,
-                )
-                .filter((_entry, filteredIndex) =>
-                  planType === PlanType.Normal ? showAllBlocks || filteredIndex < 4 : true,
-                )
-                .map(({ block, originalIndex: index }) => {
-                  const meta = blockMeta[block.type]
-                  const checklistDone = block.checklist?.filter((i) => i.completed).length ?? 0
-                  const checklistTotal = block.checklist?.length ?? 0
-                  const hasTime = block.actualMinutes != null || block.plannedMinutes != null
-                  return (
-                    <Accordion
-                      key={`${block.type}-${index}`}
-                      disableGutters
-                      sx={{
-                        '&::before': { display: 'none' },
-                        borderLeft: `4px solid ${meta.color}`,
-                        borderRadius: 1,
-                      }}
-                    >
-                      <AccordionSummary
-                        expandIcon={<ExpandMoreIcon />}
-                        sx={{ px: 2, py: 0.5 }}
-                      >
-                        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ width: '100%' }}>
-                          <Avatar
-                            sx={{
-                              bgcolor: `${meta.color}20`,
-                              color: meta.color,
-                              width: 40,
-                              height: 40,
-                            }}
-                          >
-                            {meta.icon}
-                          </Avatar>
-                          <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1 }}>
-                            {meta.label}
-                          </Typography>
-                          {hasTime && (
-                            <Chip
-                              icon={<AccessTimeIcon />}
-                              size="small"
-                              label={
-                                block.actualMinutes != null
-                                  ? `${block.actualMinutes}m`
-                                  : `${block.plannedMinutes ?? 0}m planned`
-                              }
-                              variant="outlined"
-                              sx={{ borderColor: meta.color, color: meta.color }}
-                            />
-                          )}
-                          {checklistTotal > 0 && (
-                            <Chip
-                              icon={<ChecklistIcon />}
-                              size="small"
-                              label={`${checklistDone}/${checklistTotal}`}
-                              variant="outlined"
-                              color={checklistDone === checklistTotal ? 'success' : 'default'}
-                            />
-                          )}
-                        </Stack>
-                      </AccordionSummary>
-                      <AccordionDetails sx={{ px: 2, pb: 2 }}>
-                        <Stack spacing={2}>
-                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                            <TextField
-                              label="Subject bucket"
-                              select
-                              fullWidth
-                              size="small"
-                              value={block.subjectBucket ?? ''}
-                              onChange={(event) =>
-                                handleBlockFieldChange(
-                                  index,
-                                  'subjectBucket',
-                                  event.target.value || undefined,
-                                )
-                              }
-                            >
-                              <MenuItem value="">Unassigned</MenuItem>
-                              {Object.values(SubjectBucket).map((bucket) => (
-                                <MenuItem key={bucket} value={bucket}>
-                                  {bucket}
-                                </MenuItem>
-                              ))}
-                            </TextField>
-                            <TextField
-                              label="Location"
-                              select
-                              fullWidth
-                              size="small"
-                              value={block.location ?? ''}
-                              onChange={(event) =>
-                                handleBlockFieldChange(
-                                  index,
-                                  'location',
-                                  event.target.value || undefined,
-                                )
-                              }
-                            >
-                              <MenuItem value="">Unassigned</MenuItem>
-                              {Object.values(LearningLocation).map((location) => (
-                                <MenuItem key={location} value={location}>
-                                  {location}
-                                </MenuItem>
-                              ))}
-                            </TextField>
-                          </Stack>
-                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                            <TextField
-                              label="Planned minutes"
-                              type="number"
-                              size="small"
-                              value={block.plannedMinutes ?? ''}
-                              onChange={(event) =>
-                                handleBlockFieldChange(
-                                  index,
-                                  'plannedMinutes',
-                                  event.target.value === ''
-                                    ? undefined
-                                    : Number(event.target.value),
-                                )
-                              }
-                            />
-                            <TextField
-                              label="Actual minutes"
-                              type="number"
-                              size="small"
-                              value={block.actualMinutes ?? ''}
-                              onChange={(event) =>
-                                handleBlockFieldChange(
-                                  index,
-                                  'actualMinutes',
-                                  event.target.value === ''
-                                    ? undefined
-                                    : Number(event.target.value),
-                                )
-                              }
-                            />
-                          </Stack>
-                          <TextField
-                            label="Quick note"
-                            multiline
-                            minRows={2}
-                            size="small"
-                            value={block.notes ?? ''}
-                            onChange={(event) =>
-                              handleBlockFieldChange(index, 'notes', event.target.value)
-                            }
-                          />
-                          {block.checklist && block.checklist.length > 0 ? (
-                            <Stack spacing={0.5}>
-                              {block.checklist.map((item, itemIndex) => (
-                                <Stack key={`${item.label}-${itemIndex}`} direction="row" spacing={0.5} alignItems="center">
-                                  <FormControlLabel
-                                    sx={{ flex: 1 }}
-                                    control={
-                                      <Checkbox
-                                        checked={item.completed}
-                                        size="small"
-                                        onChange={() =>
-                                          handleChecklistToggle(index, itemIndex)
-                                        }
-                                      />
-                                    }
-                                    label={
-                                      <Typography variant="body2">{item.label}</Typography>
-                                    }
-                                  />
-                                  <Button
-                                    size="small"
-                                    variant="text"
-                                    color={item.lessonCardId ? 'primary' : 'inherit'}
-                                    onClick={() => {
-                                      setTeachHelperItem(item)
-                                      setTeachHelperOpen(true)
-                                    }}
-                                    sx={{ fontSize: '0.7rem', minWidth: 'auto', px: 0.5, opacity: item.lessonCardId ? 1 : 0.6 }}
-                                  >
-                                    {item.lessonCardId ? 'Lesson' : 'Help'}
-                                  </Button>
-                                </Stack>
-                              ))}
-                            </Stack>
-                          ) : (
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={block.actualMinutes != null && block.actualMinutes > 0}
-                                  size="small"
-                                  onChange={(_e, checked) => {
-                                    const planned = block.plannedMinutes ?? 0
-                                    handleBlockFieldChange(
-                                      index,
-                                      'actualMinutes',
-                                      checked ? (planned > 0 ? planned : undefined) : undefined,
-                                    )
-                                  }}
-                                />
-                              }
-                              label={
-                                <Typography variant="body2" color="text.secondary">
-                                  Mark complete ({block.plannedMinutes ?? 0}m)
-                                </Typography>
-                              }
-                            />
-                          )}
-                        </Stack>
-                      </AccordionDetails>
-                    </Accordion>
-                  )
-                })}
-                {planType === PlanType.Normal && !showAllBlocks && dayLog.blocks.length > 4 && (
-                  <Button
-                    size="small"
-                    onClick={() => setShowAllBlocks(true)}
-                    sx={{ alignSelf: 'flex-start' }}
-                  >
-                    Show more ({dayLog.blocks.length - 4} more)
-                  </Button>
-                )}
-                {planType === PlanType.Normal && showAllBlocks && dayLog.blocks.length > 4 && (
-                  <Button
-                    size="small"
-                    onClick={() => setShowAllBlocks(false)}
-                    sx={{ alignSelf: 'flex-start' }}
-                  >
-                    Show less
-                  </Button>
-                )}
-              </Stack>
-            </SectionCard>
-          </Stack>
-        </AccordionDetails>
-      </Accordion>
+      {/* --- Quick Capture + Artifacts --- */}
+      <div ref={artifactSectionRef} />
+      <SectionErrorBoundary section="quick capture">
+        <QuickCaptureSection
+          familyId={familyId}
+          selectedChildId={selectedChildId}
+          today={today}
+          weekPlanId={weekPlanId}
+          selectableChildren={selectableChildren}
+          todayArtifacts={todayArtifacts}
+          setTodayArtifacts={setTodayArtifacts}
+          onSnackMessage={handleSnackMessage}
+        />
+      </SectionErrorBoundary>
 
       {selectedChildId && (
         <TeachHelperDialog
@@ -2050,8 +1084,19 @@ export default function TodayPage() {
           childName={selectedChild?.name ?? ''}
           item={teachHelperItem}
           ladders={cardLadders}
+          weekTheme={weekFocus?.theme}
         />
       )}
+
+      <Fab
+        color="primary"
+        size="medium"
+        sx={{ position: 'fixed', bottom: 80, right: 16, zIndex: 10 }}
+        onClick={() => navigate('/chat')}
+        aria-label="Ask AI"
+      >
+        <AutoAwesomeIcon />
+      </Fab>
 
       <Snackbar
         open={snackMessage !== null}

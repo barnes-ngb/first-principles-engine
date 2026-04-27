@@ -4,9 +4,9 @@ import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import type { EvaluationFinding } from '../../core/types'
-import type { ArmorTierInfo } from '../minecraft/armorTiers'
-import { getArmorTier, getNextTierProgress } from '../minecraft/armorTiers'
-import MinecraftAvatar from '../minecraft/MinecraftAvatar'
+import type { ArmorTierInfo } from '../../core/xp/armorTiers'
+import { getArmorTier, getNextTierProgress } from '../../core/xp/armorTiers'
+import MinecraftAvatar from '../avatar/MinecraftAvatar'
 import type { QuestStreak } from './questTypes'
 
 const MC = {
@@ -47,7 +47,6 @@ const XP_PER_DIAMOND = 2
 
 interface QuestSummaryProps {
   totalCorrect: number
-  totalQuestions: number
   finalLevel: number
   streak: QuestStreak
   findings: EvaluationFinding[]
@@ -57,19 +56,24 @@ interface QuestSummaryProps {
   flaggedErrorCount?: number
   /** Words the child got wrong or skipped during this quest */
   strugglingWords?: string[]
+  /** True when the child hit the quest-mode level cap */
+  hitLevelCap?: boolean
+  /** Current quest mode (for handoff messaging) */
+  questMode?: string
   onDone: () => void
   onTryAgain: () => void
 }
 
 export default function QuestSummary({
   totalCorrect,
-  totalQuestions,
   finalLevel,
   streak,
   findings,
   previousTotalXp = 0,
   flaggedErrorCount = 0,
   strugglingWords = [],
+  hitLevelCap = false,
+  questMode,
   onDone,
   onTryAgain,
 }: QuestSummaryProps) {
@@ -142,7 +146,7 @@ export default function QuestSummary({
             color: MC.stone,
           }}
         >
-          {totalCorrect}/{totalQuestions} correct · Level {finalLevel}
+          Level {finalLevel} reached
         </Typography>
       </Box>
 
@@ -160,6 +164,43 @@ export default function QuestSummary({
         >
           ⚠️ {flaggedErrorCount} question{flaggedErrorCount !== 1 ? 's' : ''} skipped (possible question errors)
         </Typography>
+      )}
+
+      {/* Phonics level-cap handoff card */}
+      {hitLevelCap && questMode === 'phonics' && (
+        <Box
+          sx={{
+            bgcolor: MC.darkStone,
+            borderRadius: 2,
+            p: 2,
+            textAlign: 'center',
+            mb: 2,
+            border: `1px solid ${MC.diamond}`,
+          }}
+        >
+          <Typography sx={{ fontSize: '1.5rem', mb: 0.5 }}>🧠</Typography>
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.5rem',
+              color: MC.diamond,
+              mb: 1,
+              lineHeight: 1.8,
+            }}
+          >
+            PHONICS MASTER!
+          </Typography>
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.4rem',
+              color: MC.stone,
+              lineHeight: 1.8,
+            }}
+          >
+            You crushed every phonics level! Ready to try Comprehension Quest?
+          </Typography>
+        </Box>
       )}
 
       {/* Tier-up celebration */}

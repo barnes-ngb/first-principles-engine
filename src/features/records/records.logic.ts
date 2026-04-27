@@ -81,24 +81,25 @@ export const computeHoursSummary = (
     byDate[entry.date] = (byDate[entry.date] ?? 0) + minutes
   }
 
-  // ── SOURCE 2: Day logs (blocks + checklist items) ──
+  // ── SOURCE 2: Day logs (completed checklist items — primary for planner-generated days) ──
   for (const log of filteredLogs) {
-    let blockMinutes = 0
+    // Check if any block has actual tracked minutes
+    const hasActualBlockMinutes = log.blocks.some(b => (b.actualMinutes ?? 0) > 0)
 
-    for (const block of log.blocks) {
-      const minutes = block.actualMinutes ?? 0
-      if (minutes <= 0) continue
-      blockMinutes += minutes
-      const bucket = block.subjectBucket ?? 'Other'
-      const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
-      existing.total += minutes
-      if (block.location === LearningLocation.Home) existing.home += minutes
-      bySubjectMap.set(bucket, existing)
-      byDate[log.date] = (byDate[log.date] ?? 0) + minutes
-    }
-
-    // If blocks yielded zero, count from completed checklist items
-    if (blockMinutes === 0 && log.checklist) {
+    if (hasActualBlockMinutes) {
+      // Use block-level actual minutes (manually tracked sessions)
+      for (const block of log.blocks) {
+        const minutes = block.actualMinutes ?? 0
+        if (minutes <= 0) continue
+        const bucket = block.subjectBucket ?? 'Other'
+        const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
+        existing.total += minutes
+        if (block.location === LearningLocation.Home) existing.home += minutes
+        bySubjectMap.set(bucket, existing)
+        byDate[log.date] = (byDate[log.date] ?? 0) + minutes
+      }
+    } else if (log.checklist) {
+      // Use checklist completion (planner-generated days)
       for (const item of log.checklist) {
         if (!item.completed) continue
         const minutes = item.estimatedMinutes ?? item.plannedMinutes ?? parseMinutesFromChecklist(item.label)

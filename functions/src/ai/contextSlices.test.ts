@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   compressEngagement,
   formatChildProfile,
+  formatConceptualBlocks,
   TASK_CONTEXT,
   CHARTER_PREAMBLE,
 } from "./contextSlices.js";
@@ -12,7 +13,6 @@ describe("TASK_CONTEXT", () => {
   it("plan includes all context slices", () => {
     expect(TASK_CONTEXT.plan).toContain("charter");
     expect(TASK_CONTEXT.plan).toContain("childProfile");
-    expect(TASK_CONTEXT.plan).toContain("recentSessions");
     expect(TASK_CONTEXT.plan).toContain("workbookPaces");
     expect(TASK_CONTEXT.plan).toContain("weekFocus");
     expect(TASK_CONTEXT.plan).toContain("hoursProgress");
@@ -21,6 +21,7 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.plan).toContain("bookStatus");
     expect(TASK_CONTEXT.plan).toContain("sightWords");
     expect(TASK_CONTEXT.plan).toContain("recentEval");
+    expect(TASK_CONTEXT.plan).toContain("activityConfigs");
   });
 
   it("chat only includes charter and childProfile", () => {
@@ -31,19 +32,36 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.evaluate).toContain("charter");
     expect(TASK_CONTEXT.evaluate).toContain("childProfile");
     expect(TASK_CONTEXT.evaluate).toContain("sightWords");
-    expect(TASK_CONTEXT.evaluate).not.toContain("recentSessions");
     expect(TASK_CONTEXT.evaluate).not.toContain("workbookPaces");
     expect(TASK_CONTEXT.evaluate).not.toContain("engagement");
     expect(TASK_CONTEXT.evaluate).not.toContain("hoursProgress");
   });
 
-  it("quest does not include charter or enriched context", () => {
+  it("quest includes recentHistoryByDomain instead of recentEval", () => {
     expect(TASK_CONTEXT.quest).toContain("childProfile");
     expect(TASK_CONTEXT.quest).toContain("sightWords");
-    expect(TASK_CONTEXT.quest).toContain("recentEval");
+    expect(TASK_CONTEXT.quest).toContain("recentHistoryByDomain");
+    expect(TASK_CONTEXT.quest).toContain("workbookPaces");
+    expect(TASK_CONTEXT.quest).not.toContain("recentEval");
     expect(TASK_CONTEXT.quest).not.toContain("charter");
-    expect(TASK_CONTEXT.quest).not.toContain("workbookPaces");
     expect(TASK_CONTEXT.quest).not.toContain("engagement");
+  });
+
+  it("plan still uses recentEval (backward compat)", () => {
+    expect(TASK_CONTEXT.plan).toContain("recentEval");
+    expect(TASK_CONTEXT.plan).not.toContain("recentHistoryByDomain");
+  });
+
+  it("shellyChat still uses recentEval (backward compat)", () => {
+    expect(TASK_CONTEXT.shellyChat).toContain("recentEval");
+  });
+
+  it("shellyChat wires the added context slices (skillSnapshot, recentHistoryByDomain, recentScans, dayToday, dadLabReports)", () => {
+    expect(TASK_CONTEXT.shellyChat).toContain("skillSnapshot");
+    expect(TASK_CONTEXT.shellyChat).toContain("recentHistoryByDomain");
+    expect(TASK_CONTEXT.shellyChat).toContain("recentScans");
+    expect(TASK_CONTEXT.shellyChat).toContain("dayToday");
+    expect(TASK_CONTEXT.shellyChat).toContain("dadLabReports");
   });
 });
 
@@ -129,7 +147,95 @@ describe("formatChildProfile", () => {
 describe("CHARTER_PREAMBLE", () => {
   it("contains core values", () => {
     expect(CHARTER_PREAMBLE).toContain("Formation first");
-    expect(CHARTER_PREAMBLE).toContain("Both kids count");
+    expect(CHARTER_PREAMBLE).toContain("Lincoln teaches London");
     expect(CHARTER_PREAMBLE).toContain("First Principles Engine");
+  });
+});
+
+// ── formatConceptualBlocks ────────────────────────────────────
+
+describe("formatConceptualBlocks", () => {
+  it("returns an empty array when there are no blocks", () => {
+    expect(formatConceptualBlocks([])).toEqual([]);
+  });
+
+  it("emits ADDRESS_NOW blocks with strategies", () => {
+    const lines = formatConceptualBlocks([
+      {
+        name: "Short i/e",
+        affectedSkills: ["phonics.short-i-e"],
+        status: "ADDRESS_NOW",
+        rationale: "Confuses bid and bed.",
+        strategies: ["Minimal pairs drill"],
+      },
+    ]);
+    expect(lines[0]).toContain("ADDRESS NOW");
+    expect(lines[1]).toContain("Short i/e");
+    expect(lines[1]).toContain("Minimal pairs drill");
+  });
+
+  it("emits RESOLVING blocks in their own section", () => {
+    const lines = formatConceptualBlocks([
+      {
+        name: "Digraph /oo/",
+        affectedSkills: ["phonics.digraph-oo"],
+        status: "RESOLVING",
+        rationale: "4 correct this week.",
+      },
+    ]);
+    expect(lines.some((l) => l.includes("RESOLVING"))).toBe(true);
+    expect(lines.some((l) => l.includes("Digraph /oo/"))).toBe(true);
+  });
+
+  it("emits DEFER blocks so the AI knows what NOT to push on", () => {
+    const lines = formatConceptualBlocks([
+      {
+        name: "Working memory load",
+        affectedSkills: ["math.multi-step"],
+        status: "DEFER",
+        rationale: "Developmental — expected to resolve.",
+        deferNote: "Revisit at age 8.",
+      },
+    ]);
+    expect(lines.some((l) => l.includes("DEFERRED"))).toBe(true);
+    expect(lines.some((l) => l.includes("Working memory load"))).toBe(true);
+    expect(lines.some((l) => l.includes("Revisit at age 8."))).toBe(true);
+  });
+
+  it("falls back to legacy recommendation when status is absent", () => {
+    const lines = formatConceptualBlocks([
+      {
+        name: "Legacy",
+        affectedSkills: ["x"],
+        recommendation: "DEFER",
+        rationale: "Old block.",
+        deferNote: "Revisit later.",
+      },
+    ]);
+    expect(lines.some((l) => l.includes("DEFERRED"))).toBe(true);
+  });
+
+  it("omits RESOLVED blocks from AI context", () => {
+    const lines = formatConceptualBlocks([
+      {
+        name: "Should not appear",
+        affectedSkills: ["x"],
+        status: "RESOLVED",
+        rationale: "Already fixed.",
+      },
+    ]);
+    expect(lines).toEqual([]);
+  });
+
+  it("groups multiple blocks into the correct sections", () => {
+    const lines = formatConceptualBlocks([
+      { name: "A", affectedSkills: [], status: "ADDRESS_NOW", rationale: "r1" },
+      { name: "B", affectedSkills: [], status: "RESOLVING", rationale: "r2" },
+      { name: "C", affectedSkills: [], status: "DEFER", rationale: "r3" },
+    ]);
+    const joined = lines.join("\n");
+    expect(joined).toContain("ADDRESS NOW");
+    expect(joined).toContain("RESOLVING");
+    expect(joined).toContain("DEFERRED");
   });
 });

@@ -1,4 +1,6 @@
 import type {
+  ActivityFrequency,
+  ActivityType,
   AdjustmentDecision,
   AssignmentAction,
   ChatMessageRole,
@@ -8,16 +10,63 @@ import type {
   MasteryGate,
   PaceStatus,
   PlannerConversationStatus,
-  PlannerSessionStatus,
   PlanType,
+  QuestionType,
   ReviewStatus,
+  ScheduleBlock,
   SessionResult,
+  SkipReason,
   StreamId,
   SubjectBucket,
   SupportTag,
   TrackType,
 } from './enums'
 import type { SkillTag } from './common'
+
+export interface ChapterBookChapter {
+  number: number
+  title?: string
+  summary?: string
+}
+
+export interface ChapterBook {
+  id: string
+  title: string
+  author: string
+  totalChapters: number
+  chapters?: ChapterBookChapter[]
+  coverImageUrl?: string
+  ageRange?: string
+  createdAt: string
+}
+
+export interface ChapterQuestionPoolItem {
+  chapter: number
+  chapterTitle?: string
+  questionType: QuestionType
+  question: string
+  answered: boolean
+  answeredDate?: string
+  audioUrl?: string
+  responseNote?: string
+  artifactId?: string
+  skipped?: boolean
+}
+
+export interface BookProgress {
+  id?: string
+  bookId: string
+  childId: string
+  bookTitle: string
+  author: string
+  totalChapters: number
+  questionPool: ChapterQuestionPoolItem[]
+  lastChapterAnswered?: number
+  startedAt: string
+  completedAt?: string
+  createdAt: string
+  updatedAt: string
+}
 
 export interface WeekPlan {
   id?: string
@@ -26,7 +75,11 @@ export interface WeekPlan {
   theme: string
   virtue: string
   scriptureRef: string
+  scriptureText?: string
   heartQuestion: string
+  formationPrompt?: string
+  focusGeneratedAt?: string
+  readAloudBookId?: string
   tracks: TrackType[]
   flywheelPlan: string
   buildLab: {
@@ -38,6 +91,23 @@ export interface WeekPlan {
     childId: string
     goals: string[]
   }>
+  conundrum?: {
+    title: string
+    scenario: string          // Short punchy narrative (80-120 words)
+    question: string
+    /** 2-3 tappable quick-pick response options for kids */
+    quickPicks?: string[]
+    lincolnPrompt: string
+    londonPrompt: string
+    virtueConnection: string
+    readingTieIn?: string
+    mathContext?: string
+    londonDrawingPrompt?: string
+    dadLabSuggestion?: string
+    // Evidence fields (set when family discusses)
+    discussed?: boolean
+    discussedAt?: string
+  }
 }
 
 export interface RoutineItem {
@@ -147,8 +217,30 @@ export interface DayLog {
   xpTotal?: number
   retro?: string
   checklist?: ChecklistItem[]
+  teachBackDone?: boolean
+  /** Chapters Shelly selected for today's read-aloud discussion (persisted from parent chip picker). */
+  todaysSelectedChapters?: number[]
+  /**
+   * @deprecated Replaced by BookProgress pool (Chapter Pool P1-P3, Apr 2026).
+   * Field retained for backwards-compat reads of old DayLogs. No new writes.
+   */
+  chapterQuestion?: {
+    book: string
+    chapter: string
+    questionType: string
+    question: string
+    responseUrl?: string
+    responseNote?: string
+    responded?: boolean
+  }
   createdAt?: string
   updatedAt?: string
+  /**
+   * Daily time budget (minutes) set by the planner when the plan was applied.
+   * Used by rollover/budget enforcement to trim overflow into deferredByBudget items.
+   * Optional — legacy day logs won't have it, and enforcement short-circuits in that case.
+   */
+  dailyBudgetMinutes?: number
 }
 
 export interface DayBlock {
@@ -200,12 +292,74 @@ export interface ChecklistItem {
   bookId?: string
   /** Engagement feedback: how the activity went */
   engagement?: 'engaged' | 'okay' | 'struggled' | 'refused'
-  /** Linked evidence artifact document ID (from per-item capture). */
+  /** Linked evidence document ID (from unified capture — may point to scans or artifacts). */
   evidenceArtifactId?: string
+  /** Which Firestore collection the evidence doc lives in. Absent on legacy items means 'artifacts'. */
+  evidenceCollection?: 'scans' | 'artifacts'
   /** Manual or AI-generated review result for the captured work. */
   gradeResult?: string
+  /** Mastery level observed by parent after completion */
+  mastery?: 'got-it' | 'working' | 'stuck'
   /** Guidance note when an item is skipped. */
   skipGuidance?: string
+  /** Whether this item was explicitly skipped by the child. */
+  skipped?: boolean
+  /** Why this item was skipped (only set when skipped: true). */
+  skipReason?: SkipReason
+  /** Links this checklist item to its originating ActivityConfig doc ID. */
+  activityConfigId?: string
+  /** True on items that were rolled over from a previous school day. */
+  rolledOver?: boolean
+  /** ISO date string (YYYY-MM-DD) of the original day this item was rolled from. */
+  rolledOverFrom?: string
+  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), or activity. */
+  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity'
+  /** Evaluation mode when itemType is 'evaluation'. */
+  evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
+  /** Route to navigate to (e.g., '/quest') for in-app activities. */
+  link?: string
+  /** Actual minutes spent (set on auto-complete from quest/fluency). */
+  actualMinutes?: number
+  /** ISO timestamp when item was completed. */
+  completedAt?: string
+  /** Brief content guide for workbook items (what to cover today). */
+  contentGuide?: string
+  /** Whether this workbook item has been scanned after completion. */
+  scanned?: boolean
+  /** Which schedule block this item belongs to */
+  block?: ScheduleBlock
+  /** Activity ID this runs simultaneously with */
+  pairedWith?: string
+  /** Group ID for "pick your order" items */
+  choiceGroup?: string
+  /** Can be dropped on light days */
+  droppableOnLightDay?: boolean
+  /** Building toward this — don't nag if unchecked */
+  aspirational?: boolean
+  /**
+   * True when this item was deferred from today's view by post-rollover budget
+   * enforcement. The item stays on the checklist but is hidden behind a
+   * "N items deferred" expand in the UI.
+   */
+  deferredByBudget?: boolean
+}
+
+export interface ChapterResponse {
+  id?: string
+  childId: string
+  date: string
+  bookId?: string
+  bookTitle: string
+  chapter: string
+  questionType: string
+  question: string
+  audioUrl: string | null
+  textResponse?: string
+  weekTheme: string
+  virtue: string
+  scripture: string
+  createdAt: string
+  artifactId?: string
 }
 
 export interface Session {
@@ -240,50 +394,12 @@ export interface DailyPlan {
   completedSessionIds?: string[]
 }
 
-export interface GoalResult {
-  goal: string
-  result: SessionResult | 'na'
-}
-
-export interface WeeklyScore {
-  id?: string
-  childId: string
-  weekStart: string
-  metrics: ScoreMetric[]
-  goalResults?: GoalResult[]
-  reflectionWorked?: string
-  reflectionFriction?: string
-  reflectionTweak?: string
-  createdAt?: string
-}
-
-export interface ScoreMetric {
-  label: string
-  result: SessionResult | 'na'
-}
-
 // ── Shelly Planner ─────────────────────────────────────────────
 
 export interface AppBlock {
   label: string
   defaultMinutes: number
   notes?: string
-}
-
-export interface PlannerSession {
-  id?: string
-  childId: string
-  weekKey: string
-  status: PlannerSessionStatus
-  availableHoursPerDay: number
-  appBlocks: AppBlock[]
-  /** Photo artifact IDs uploaded for extraction */
-  photoIds: string[]
-  assignments: AssignmentCandidate[]
-  /** The generated draft weekly plan items */
-  draftPlan: WeeklyPlanItem[]
-  createdAt?: string
-  updatedAt?: string
 }
 
 export interface AssignmentCandidate {
@@ -307,22 +423,6 @@ export interface SkipSuggestion {
   reason: string
   replacement: string
   evidence: string
-}
-
-export interface WeeklyPlanItem {
-  id: string
-  day: string
-  title: string
-  subjectBucket: SubjectBucket
-  estimatedMinutes: number
-  /** Source assignment candidate ID */
-  assignmentId?: string
-  /** Whether this is an app block */
-  isAppBlock?: boolean
-  skillTags: SkillTag[]
-  ladderRef?: { ladderId: string; rungId: string }
-  skipSuggestion?: SkipSuggestion
-  accepted: boolean
 }
 
 // ── Planner Chat (Conversational Planner) ─────────────────────
@@ -396,6 +496,26 @@ export interface DraftPlanItem {
   category?: 'must-do' | 'choose'
   /** Guidance note when an item is skipped (from AI). */
   skipGuidance?: string
+  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), or activity. */
+  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity'
+  /** Evaluation mode when itemType is 'evaluation'. */
+  evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
+  /** Route to navigate to (e.g., '/quest') for in-app activities. */
+  link?: string
+  /** Linked book ID — set for "Read: {title}" (Mom's Book / AI story) or "Continue Book: {title}" (kid draft) items. */
+  bookId?: string
+  /** Which schedule block this item belongs to */
+  block?: ScheduleBlock
+  /** Activity ID this runs simultaneously with */
+  pairedWith?: string
+  /** Group ID for "pick your order" items */
+  choiceGroup?: string
+  /** Can be dropped on light days */
+  droppableOnLightDay?: boolean
+  /** Building toward this — don't nag if unchecked */
+  aspirational?: boolean
+  /** Brief content guide for workbook items (what to cover today). */
+  contentGuide?: string
 }
 
 export interface PlannerConversation {
@@ -434,6 +554,24 @@ export interface LessonCard {
 
 // ── Workbook Config (Pace Gauge) ──────────────────────────────
 
+/** Curriculum-specific metadata for a workbook */
+export interface CurriculumMeta {
+  /** Curriculum provider: 'gatb' | 'reading-eggs' | 'other' */
+  provider: string
+  /** Provider's level designation (e.g., 'Level 1', 'Level 4') */
+  level?: string
+  /** Most recent milestone achieved (e.g., 'Map 13 complete', 'Lesson 47') */
+  lastMilestone?: string
+  /** Date of last milestone (YYYY-MM-DD) */
+  milestoneDate?: string
+  /** Whether the program is fully completed */
+  completed?: boolean
+  /** Skills confirmed mastered by this curriculum */
+  masteredSkills?: string[]
+  /** Skills currently being worked on */
+  activeSkills?: string[]
+}
+
 export interface WorkbookConfig {
   id?: string
   childId: string
@@ -452,6 +590,12 @@ export interface WorkbookConfig {
   schoolDaysPerWeek: number
   /** Default minutes per day for this workbook/subject (used by AI planner as baseline) */
   defaultMinutes?: number
+  /** Curriculum-specific metadata */
+  curriculum?: CurriculumMeta
+  /** Whether this workbook has been marked as complete (preserves record unlike delete) */
+  completed?: boolean
+  /** ISO date when workbook was marked complete */
+  completedDate?: string
   createdAt?: string
   updatedAt?: string
 }
@@ -473,19 +617,15 @@ export const DEFAULT_SUBJECT_MINUTES: Record<string, number> = {
 
 export interface PaceGaugeResult {
   workbookName: string
-  /** Units required per week to stay on target */
-  requiredPerWeek: number
-  /** Units currently planned per week */
-  plannedPerWeek: number
-  /** Positive = ahead, negative = behind */
-  delta: number
+  /** Current position in the workbook */
+  currentPosition: number
+  /** Total units in the workbook */
+  totalUnits: number
+  /** Unit label (lesson, page, chapter) */
+  unitLabel: string
   status: PaceStatus
-  /** Human-readable suggestion */
-  suggestion: string
-  /** Projected completion date at current pace */
-  projectedFinishDate: string
-  /** Number of buffer days available */
-  bufferDays: number
+  /** Human-readable coverage summary */
+  coverageText: string
 }
 
 // ── Light Day Template (Appointment Resilience) ───────────────
@@ -544,6 +684,102 @@ export interface PlanModification {
   reason: string
 }
 
+// ── Curriculum Scan ──────────────────────────────────────────
+
+/** Detected curriculum info from a scanned workbook page */
+export interface CurriculumDetected {
+  provider: 'gatb' | 'reading-eggs' | 'other' | null
+  name: string | null
+  lessonNumber: number | null
+  pageNumber: number | null
+  levelDesignation: string | null
+}
+
+export interface ScanSkillResult {
+  skill: string
+  level: 'introductory' | 'practice' | 'mastery' | 'review'
+  alignsWithSnapshot: 'ahead' | 'at-level' | 'behind' | 'unknown'
+}
+
+export interface WorksheetScanResult {
+  pageType: 'worksheet' | 'textbook' | 'test' | 'activity' | 'other'
+  subject: string
+  specificTopic: string
+  skillsTargeted: ScanSkillResult[]
+  estimatedDifficulty: 'easy' | 'appropriate' | 'challenging' | 'too-hard'
+  recommendation: Recommendation
+  recommendationReason: string
+  estimatedMinutes: number
+  teacherNotes: string
+  curriculumDetected?: CurriculumDetected
+}
+
+export interface CertificateScanResult {
+  pageType: 'certificate'
+  curriculum: 'reading-eggs' | 'gatb' | 'other'
+  curriculumName: string
+  level: string
+  milestone: string
+  lessonRange: string
+  skillsCovered: string[]
+  wordsRead: string[]
+  date: string
+  childName: string
+  suggestedSnapshotUpdate: {
+    masteredSkills: string[]
+    recommendedStartLevel: number | null
+    notes: string
+  }
+  curriculumDetected?: CurriculumDetected
+}
+
+export type ScanResult = WorksheetScanResult | CertificateScanResult
+
+/** Type guard for certificate scan results */
+export function isCertificateScan(result: ScanResult): result is CertificateScanResult {
+  return result.pageType === 'certificate'
+}
+
+/** Type guard for worksheet scan results */
+export function isWorksheetScan(result: ScanResult): result is WorksheetScanResult {
+  return result.pageType !== 'certificate'
+}
+
+/** The four possible scan recommendations. */
+export type Recommendation = 'do' | 'skip' | 'quick-review' | 'modify'
+
+/** Parent override on an AI scan recommendation. Stored alongside the original. */
+export interface ParentOverride {
+  recommendation: Recommendation
+  overriddenBy: string
+  overriddenAt: string
+  note?: string
+}
+
+export interface ScanRecord {
+  id?: string
+  childId: string
+  imageUrl: string
+  storagePath: string
+  results: ScanResult | null
+  action: 'added' | 'skipped' | 'pending'
+  error?: string
+  createdAt?: string
+  /** Parent override — if present, takes precedence over AI recommendation. */
+  parentOverride?: ParentOverride
+}
+
+/**
+ * Returns the effective recommendation for a scan, preferring parentOverride
+ * over the AI's original recommendation. Returns undefined if the scan has
+ * no worksheet results.
+ */
+export function effectiveRecommendation(scan: ScanRecord): Recommendation | undefined {
+  if (scan.parentOverride) return scan.parentOverride.recommendation
+  if (scan.results && isWorksheetScan(scan.results)) return scan.results.recommendation
+  return undefined
+}
+
 // ── Skip Advisor Result ───────────────────────────────────────
 
 export interface SkipAdvisorResult {
@@ -591,4 +827,66 @@ export interface WeeklyReview {
   reviewedAt?: string
   createdAt?: string
   updatedAt?: string
+}
+
+// ── Activity Configs (structured routine + workbook replacement) ──
+
+export interface ActivityConfig {
+  id: string
+  /** Activity display name (e.g., "Good and the Beautiful Reading") */
+  name: string
+  /** Activity category */
+  type: ActivityType
+  /** Subject for color-coding and grouping */
+  subjectBucket: SubjectBucket
+  /** Default duration in minutes */
+  defaultMinutes: number
+  /** How often this activity appears in a weekly plan */
+  frequency: ActivityFrequency
+  /** Which child, or 'both' for shared activities */
+  childId: string | 'both'
+  /** Explicit ordering (lower = earlier in day) */
+  sortOrder: number
+
+  // Workbook-specific fields (optional)
+  /** Curriculum provider (e.g., "GATB", "Explode the Code") */
+  curriculum?: string
+  /** Total lessons/chapters/units */
+  totalUnits?: number
+  /** Current position (lesson/page number) */
+  currentPosition?: number
+  /** Unit label: "lesson", "chapter", "unit" */
+  unitLabel?: string
+  /** Certificate-derived curriculum metadata (migration bridge from WorkbookConfig.curriculum). */
+  curriculumMeta?: CurriculumMeta
+
+  // Completion tracking
+  /** Whether this program is finished */
+  completed: boolean
+  /** ISO date when marked complete */
+  completedDate?: string
+
+  // Scan/map connection
+  /** Whether Shelly can scan pages from this activity */
+  scannable: boolean
+  /** Curriculum map node IDs this feeds */
+  linkedCurriculumNodes?: string[]
+
+  // Block-based schedule grouping
+  /** Which schedule block this activity belongs to */
+  block?: ScheduleBlock
+  /** Activity ID this runs simultaneously with (e.g., handwriting during read-aloud) */
+  pairedWith?: string
+  /** Group ID for "pick your order" items (e.g., Lincoln's choice block) */
+  choiceGroup?: string
+  /** Can be dropped when energy is low / light day */
+  droppableOnLightDay?: boolean
+  /** Building toward this — don't count as missed if unchecked */
+  aspirational?: boolean
+
+  // Metadata
+  /** Shelly's notes */
+  notes?: string
+  createdAt: string
+  updatedAt: string
 }

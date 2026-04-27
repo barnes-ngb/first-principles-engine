@@ -32,6 +32,7 @@ import {
   writeBatch,
 } from 'firebase/firestore'
 
+import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -56,6 +57,9 @@ import { formatDateForInput } from '../../core/utils/format'
 import { getSchoolYearRange } from '../../core/utils/time'
 import { parseDateFromDocId } from '../today/daylog.model'
 import ComplianceDashboard from './ComplianceDashboard'
+import MonthlyTrend from './MonthlyTrend'
+import QuickAddHours from './QuickAddHours'
+import ChapterResponsesTab from './ChapterResponsesTab'
 import EvaluationHistoryTab from './EvaluationHistoryTab'
 import PortfolioPage from './PortfolioPage'
 import {
@@ -95,17 +99,24 @@ export default function RecordsPage() {
   return (
     <>
       <Container maxWidth="lg" sx={{ pt: { xs: 2, md: 3 } }}>
+        <HelpStrip
+          pageKey="records"
+          text="Hours come from three sources: checklist items you complete on Today, manual entries (Dad Lab, extra activities), and backfill adjustments. Everything adds up for MO compliance."
+          maxShowCount={3}
+        />
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs value={activeTab} onChange={handleTabChange}>
             <Tab label="Hours & Compliance" />
             <Tab label="Evaluations" />
             <Tab label="Portfolio" />
+            <Tab label="Book Responses" />
           </Tabs>
         </Box>
       </Container>
       {activeTab === 0 && <HoursComplianceTab />}
       {activeTab === 1 && <EvaluationHistoryTab />}
       {activeTab === 2 && <PortfolioPage />}
+      {activeTab === 3 && <ChapterResponsesTab />}
     </>
   )
 }
@@ -166,6 +177,8 @@ function HoursComplianceTab() {
     { subject: SubjectBucket.Science, hours: 0 },
     { subject: SubjectBucket.SocialStudies, hours: 0 },
   ])
+
+  const [isClearing, setIsClearing] = useState(false)
 
   // Quick estimate state
   const [quickEstimateMode, setQuickEstimateMode] = useState(false)
@@ -535,31 +548,46 @@ function HoursComplianceTab() {
   }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, activeChild, startDate, endDate])
 
   const handleClearHoursData = useCallback(async () => {
-    if (!window.confirm('This will delete manual hours entries and adjustments. Auto-generated hours (Dad Lab, etc.) will be kept. Continue?')) return
+    if (!window.confirm(
+      'This will delete ALL manual hours entries and backfill adjustments for ALL children. ' +
+      'Auto-generated hours (Dad Lab completions, checklist day logs) will be kept. Continue?'
+    )) return
 
+    setIsClearing(true)
     try {
       // Delete ONLY manual hours entries (no source tag or source === 'manual')
       const hoursSnap = await getDocs(hoursCollection(familyId))
-      for (const docSnap of hoursSnap.docs) {
-        const data = docSnap.data()
-        const source = (data as unknown as Record<string, unknown>).source as string | undefined
-        if (!source || source === 'manual') {
-          await deleteDoc(doc(hoursCollection(familyId), docSnap.id))
-        }
-      }
+      const hoursDeletes = hoursSnap.docs
+        .filter(docSnap => {
+          const data = docSnap.data() as unknown as Record<string, unknown>
+          const source = data.source as string | undefined
+          return !source || source === 'manual'
+        })
+        .map(docSnap => deleteDoc(doc(hoursCollection(familyId), docSnap.id)))
 
-      // Delete all adjustments (these are always manual)
+      // Delete ALL adjustments (backfills + manual adjustments)
       const adjSnap = await getDocs(hoursAdjustmentsCollection(familyId))
-      for (const docSnap of adjSnap.docs) {
-        await deleteDoc(doc(hoursAdjustmentsCollection(familyId), docSnap.id))
-      }
+      const adjDeletes = adjSnap.docs
+        .map(docSnap => deleteDoc(doc(hoursAdjustmentsCollection(familyId), docSnap.id)))
 
-      window.location.reload()
+      // Wait for ALL deletes to complete before refreshing
+      await Promise.all([...hoursDeletes, ...adjDeletes])
+
+      const totalDeleted = hoursDeletes.length + adjDeletes.length
+      setSnackMessage({
+        text: `Cleared ${totalDeleted} records (${hoursDeletes.length} hours entries, ${adjDeletes.length} adjustments)`,
+        severity: 'success',
+      })
+
+      // Refresh data instead of full page reload
+      const data = await fetchRecords()
+      applyRecords(data)
     } catch (err) {
       console.error('Failed to clear hours data:', err)
-      setSnackMessage({ text: `Failed to clear hours data: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+      setSnackMessage({ text: `Failed to clear: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
     }
-  }, [familyId])
+    setIsClearing(false)
+  }, [familyId, fetchRecords, applyRecords])
 
   const hasData = hasHoursEntries || dayLogs.length > 0
 
@@ -646,6 +674,11 @@ function HoursComplianceTab() {
                 Hours entries: {hoursEntries.length} | Day logs: {dayLogs.length}{' '}
                 | Adjustments: {adjustments.length}
               </Typography>
+              {hoursEntries.some((e) => e.source === 'creative-timer') && (
+                <Typography color="text.secondary" variant="body2">
+                  Includes {hoursEntries.filter((e) => e.source === 'creative-timer').length} auto-tracked creative session{hoursEntries.filter((e) => e.source === 'creative-timer').length === 1 ? '' : 's'} ({(hoursEntries.filter((e) => e.source === 'creative-timer').reduce((sum, e) => sum + e.minutes, 0) / 60).toFixed(1)}h)
+                </Typography>
+              )}
               {showGenerate && (
                 <Button
                   variant="contained"
@@ -667,6 +700,32 @@ function HoursComplianceTab() {
           summary={summary}
           startDate={startDate}
           endDate={endDate}
+        />
+      )}
+
+      {/* Quick Add Non-Core Hours */}
+      {activeChildId && !isLoading && (
+        <QuickAddHours
+          familyId={familyId}
+          childId={activeChildId}
+          childName={activeChild?.name ?? 'child'}
+          date={new Date().toISOString().slice(0, 10)}
+          onSaved={(msg) => {
+            setSnackMessage({ text: msg, severity: 'success' })
+            fetchRecords().then(applyRecords)
+          }}
+        />
+      )}
+
+      {/* Monthly Trend */}
+      {activeChildId && !isLoading && hasData && (
+        <MonthlyTrend
+          dayLogs={dayLogs}
+          hoursEntries={hoursEntries}
+          adjustments={adjustments}
+          startDate={startDate}
+          endDate={endDate}
+          childId={activeChildId}
         />
       )}
 
@@ -898,8 +957,9 @@ function HoursComplianceTab() {
               color="warning"
               size="small"
               onClick={handleClearHoursData}
+              disabled={isClearing}
             >
-              Clear All Hours Data
+              {isClearing ? 'Clearing...' : 'Clear All Hours Data'}
             </Button>
           </Box>
         </Box>

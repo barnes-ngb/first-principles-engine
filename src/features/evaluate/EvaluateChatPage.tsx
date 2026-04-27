@@ -22,7 +22,7 @@ import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { doc, getDoc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore'
+import { addDoc, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
@@ -31,8 +31,13 @@ import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   evaluationSessionsCollection,
+  hoursCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
+import { domainToSubjectBucket } from '../../core/utils/domainMapping'
+import { useSessionTimer } from '../../core/utils/sessionTimer'
+import { todayKey } from '../../core/utils/dateKey'
+import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type {
@@ -43,8 +48,12 @@ import type {
   EvaluationSession,
   SkillSnapshot,
 } from '../../core/types'
+import { DIAMOND_EVENTS } from '../../core/types'
+import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import FoundationsSection from './FoundationsSection'
 import { ChatMessageRole, EvaluationDomain, MasteryGate, SkillLevel } from '../../core/types/enums'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { deriveWorkingLevelFromEvaluation, canOverwriteWorkingLevel } from '../quest/workingLevels'
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -178,11 +187,38 @@ export default function EvaluateChatPage() {
   const [conceptualBlocks, setConceptualBlocks] = useState<ConceptualBlock[]>([])
   const [blocksSummary, setBlocksSummary] = useState<string | undefined>(undefined)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const sessionTimer = useSessionTimer()
+  const hoursLoggedRef = useRef(false)
 
   // Auto-scroll on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // ── Log session hours when evaluation completes ────────────
+
+  const logSessionHours = useCallback(async () => {
+    if (hoursLoggedRef.current || !activeChildId) return
+    hoursLoggedRef.current = true
+
+    const activeSeconds = sessionTimer.stop()
+    const minutes = Math.ceil(activeSeconds / 60 / 5) * 5 // round up to nearest 5
+    if (minutes < 5) return // too short to log
+
+    try {
+      await addDoc(hoursCollection(familyId), {
+        childId: activeChildId,
+        date: todayKey(),
+        minutes,
+        subjectBucket: domainToSubjectBucket(domain),
+        quickCapture: true,
+        notes: `${domain.charAt(0).toUpperCase() + domain.slice(1)} evaluation session`,
+        source: 'evaluation-session',
+      })
+    } catch (err) {
+      console.error('[SessionTimer] Failed to log evaluation hours:', err)
+    }
+  }, [activeChildId, familyId, domain, sessionTimer])
 
   // ── Load or create session ──────────────────────────────────
 
@@ -216,9 +252,12 @@ export default function EvaluateChatPage() {
           setMessages(inProgress.messages || [])
           setFindings(inProgress.findings || [])
           setRecommendations(inProgress.recommendations || [])
-          setSessionStatus(inProgress.status)
+          setSessionStatus('in-progress')
           setCompleteSummary(inProgress.summary || null)
           setNextEvalDate(inProgress.nextEvalDate)
+          // Resume timer for continued in-progress session
+          hoursLoggedRef.current = false
+          sessionTimer.startTimer()
         } else {
           // Fresh session
           setSessionDocId(null)
@@ -319,6 +358,9 @@ export default function EvaluateChatPage() {
   const startEvaluation = useCallback(async () => {
     if (!activeChildId || !activeChild) return
 
+    hoursLoggedRef.current = false
+    sessionTimer.startTimer()
+
     const aiMessages: AIChatMessage[] = [
       {
         role: 'user',
@@ -366,6 +408,7 @@ export default function EvaluateChatPage() {
       setCompleteSummary(complete.summary)
       setNextEvalDate(complete.nextEvalDate)
       setSessionStatus('complete')
+      void logSessionHours()
     }
 
     await persistSession(newMessages, allFindings, complete)
@@ -375,7 +418,7 @@ export default function EvaluateChatPage() {
       const sid = sessionDocId ?? `${activeChildId}_${domain}_${new Date().toISOString().slice(0, 10)}`
       void triggerPatternAnalysis(sid, allFindings)
     }
-  }, [activeChildId, activeChild, familyId, domain, chat, persistSession, sessionDocId, triggerPatternAnalysis])
+  }, [activeChildId, activeChild, familyId, domain, chat, persistSession, sessionDocId, triggerPatternAnalysis, sessionTimer, logSessionHours])
 
   // ── Send message ────────────────────────────────────────────
 
@@ -433,6 +476,7 @@ export default function EvaluateChatPage() {
       setCompleteSummary(complete.summary)
       setNextEvalDate(complete.nextEvalDate)
       setSessionStatus('complete')
+      void logSessionHours()
     }
 
     await persistSession(finalMessages, allFindings, complete)
@@ -441,7 +485,7 @@ export default function EvaluateChatPage() {
       const sid = sessionDocId ?? `${activeChildId}_${domain}_${new Date().toISOString().slice(0, 10)}`
       void triggerPatternAnalysis(sid, allFindings)
     }
-  }, [inputText, activeChildId, aiLoading, messages, findings, familyId, domain, chat, persistSession, sessionDocId, triggerPatternAnalysis])
+  }, [inputText, activeChildId, aiLoading, messages, findings, familyId, domain, chat, persistSession, sessionDocId, triggerPatternAnalysis, logSessionHours])
 
   // ── Save & Apply (update skill snapshot) ────────────────────
 
@@ -517,23 +561,60 @@ export default function EvaluateChatPage() {
         (s) => !newPrioritySkills.some((n) => n.tag === s.tag),
       )
 
+      // Derive working levels from evaluation findings
+      let mergedWorkingLevels = existing.workingLevels ?? {}
+      if (domain === 'reading') {
+        // Phonics working level
+        const phonicsLevel = deriveWorkingLevelFromEvaluation(findings, 'phonics')
+        if (phonicsLevel && canOverwriteWorkingLevel(mergedWorkingLevels.phonics)) {
+          mergedWorkingLevels = { ...mergedWorkingLevels, phonics: phonicsLevel }
+        }
+        // Comprehension working level
+        const compLevel = deriveWorkingLevelFromEvaluation(findings, 'comprehension')
+        if (compLevel && canOverwriteWorkingLevel(mergedWorkingLevels.comprehension)) {
+          mergedWorkingLevels = { ...mergedWorkingLevels, comprehension: compLevel }
+        }
+      }
+      // Math evaluations: derive math working level if domain is math
+      if (domain === 'math') {
+        // TODO: Add math skill→level mapping when math evaluations produce findings
+      }
+
       const now = new Date().toISOString()
+
+      // Merge evaluation-derived blocks with existing blocks rather than overwriting.
+      // This preserves blocks from quest/scan/parent writers that this evaluation didn't touch.
+      let mergedBlocks: ConceptualBlock[] = existing.conceptualBlocks ?? []
+      for (const block of conceptualBlocks) {
+        const b = block as Partial<ConceptualBlock>
+        if (!b.id) continue
+        mergedBlocks = mergeBlock(mergedBlocks, b as Parameters<typeof mergeBlock>[1])
+      }
+      const blocksChanged = conceptualBlocks.length > 0
+
       const updated: Omit<SkillSnapshot, 'id'> = {
         childId: activeChildId,
         prioritySkills: [...existingSkills, ...newPrioritySkills],
         supports: newSupports.length > 0 ? newSupports : existing.supports || [],
         stopRules: newStopRules.length > 0 ? newStopRules : existing.stopRules || [],
         evidenceDefinitions: newEvidenceDefs.length > 0 ? newEvidenceDefs : existing.evidenceDefinitions || [],
+        workingLevels: mergedWorkingLevels,
         updatedAt: now,
-        // Overwrite conceptual blocks with most recent evaluation's findings
-        ...(conceptualBlocks.length > 0 ? {
-          conceptualBlocks,
-          blocksUpdatedAt: now,
-        } : {}),
       }
 
-      await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)))
+      await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)), { merge: true })
+
+      if (blocksChanged) {
+        await updateDoc(snapshotRef, {
+          conceptualBlocks: JSON.parse(JSON.stringify(mergedBlocks)),
+          blocksUpdatedAt: now,
+        })
+      }
       setSnackText('Skill snapshot updated! Priority skills, supports, stop rules, and evidence all set.')
+
+      // Update Learning Map from findings (fire-and-forget)
+      updateSkillMapFromFindings(familyId, activeChildId, findings)
+        .catch((err) => console.warn('[LearningMap] Failed to update from evaluation findings', err))
 
       // Award XP for completing an evaluation (once per evaluation session)
       if (sessionDocId) {
@@ -543,16 +624,27 @@ export default function EvaluateChatPage() {
           'EVALUATION_COMPLETE',
           25,
           `eval_${sessionDocId}`,
-        )
+        ).catch((err) => console.error('[XP] Award failed:', err))
+
+        void addDiamondEvent({
+          familyId,
+          childId: activeChildId,
+          amount: 5,
+          type: DIAMOND_EVENTS.EVALUATION_COMPLETE,
+          reason: `Evaluation completed (${domain})`,
+          dedupKey: `eval_${sessionDocId}-diamond`,
+        }).catch((err) => console.error('[Diamond] Evaluation award failed:', err))
       }
     } catch (err) {
       console.error('Failed to apply findings to skill snapshot', err)
     }
-  }, [activeChildId, familyId, findings, recommendations, completeData, sessionDocId, conceptualBlocks])
+  }, [activeChildId, familyId, findings, recommendations, completeData, sessionDocId, conceptualBlocks, domain])
 
   // ── Clear & Restart ───────────────────────────────────────
 
   const handleClear = useCallback(() => {
+    sessionTimer.stop() // discard timer without logging
+    hoursLoggedRef.current = false
     setMessages([])
     setFindings([])
     setRecommendations([])
@@ -566,7 +658,7 @@ export default function EvaluateChatPage() {
     setPatternAnalysisState('idle')
     setConceptualBlocks([])
     setBlocksSummary(undefined)
-  }, [])
+  }, [sessionTimer])
 
   // ── Download Report ─────────────────────────────────────────
 
@@ -644,7 +736,7 @@ export default function EvaluateChatPage() {
 
   // ── Render ──────────────────────────────────────────────────
 
-  const isDomainReady = domain === EvaluationDomain.Reading
+  const isDomainReady = domain === EvaluationDomain.Reading || domain === EvaluationDomain.Speech
   const hasMessages = messages.length > 0
 
   return (
@@ -674,8 +766,8 @@ export default function EvaluateChatPage() {
             <Tab
               key={tab.value}
               value={tab.value}
-              label={tab.value === EvaluationDomain.Reading ? tab.label : `${tab.label} (coming soon)`}
-              disabled={tab.value !== EvaluationDomain.Reading}
+              label={tab.value === EvaluationDomain.Reading || tab.value === EvaluationDomain.Speech ? tab.label : `${tab.label} (coming soon)`}
+              disabled={tab.value !== EvaluationDomain.Reading && tab.value !== EvaluationDomain.Speech}
             />
           ))}
         </Tabs>

@@ -1,4 +1,5 @@
 import type * as THREE from 'three'
+import { HERO_ANIMATION_TUNING, type HeroAnimationTuning } from './heroAnimationTuning'
 
 // ── Pose Keyframes ──────────────────────────────────────────────────
 
@@ -39,7 +40,7 @@ export const POSES: Pose[] = [
     icon: '\u{1F9CD}',
     duration: 0,
     armL: { rotZ: [0.05], rotX: [0] },      // Very slight outward at rest
-    armR: { rotZ: [-0.05], rotX: [0] },
+    armR: { rotZ: [0.05], rotX: [0] },
     head: { rotX: [0], rotY: [0] },
     body: { posY: [0] },
   },
@@ -58,8 +59,8 @@ export const POSES: Pose[] = [
       times: [0, 0.3, 0.7, 1],
     },
     armR: {
-      // Go OUT first (rotZ -0.8 ~45°), THEN up (rotZ -3.0 overhead)
-      rotZ: [-0.05, -0.8, -2.8, -2.8, -0.55],
+      // Go OUT first (rotZ 0.8 ~45°), THEN up (rotZ 2.8 overhead)
+      rotZ: [0.05, 0.8, 2.8, 2.8, 0.55],
       rotX: [0, -0.1, -0.2, -0.2, -0.1],    // Slight forward through the arc
       times: [0, 0.15, 0.4, 0.7, 1],
     },
@@ -87,7 +88,7 @@ export const POSES: Pose[] = [
       times: [0, 0.3, 0.7, 1],
     },
     armR: {
-      rotZ: [-0.05, -0.3, -0.3, -0.55],     // Sword arm slightly out
+      rotZ: [0.05, 0.3, 0.3, 0.55],         // Sword arm slightly out
       rotX: [0, -0.2, -0.2, -0.1],
       times: [0, 0.3, 0.7, 1],
     },
@@ -114,7 +115,7 @@ export const POSES: Pose[] = [
       times: [0, 0.3, 0.85, 1],
     },
     armR: {
-      rotZ: [-0.05, -0.05, -0.05, -0.05],
+      rotZ: [0.05, 0.05, 0.05, 0.05],
       rotX: [0, -1.3, -1.3, 0],
       times: [0, 0.3, 0.85, 1],
     },
@@ -126,46 +127,42 @@ export const POSES: Pose[] = [
     body: { posY: [0] },
   },
 
-  // WAVE — arm extends OUT to the side, then waves forward/back via rotX
-  // Previous approach raised arm overhead (rotZ -2.5) and tried rotX to clear head,
-  // but local axes rotate with the arm — rotX no longer means "forward" when arm is vertical.
-  // Fix: keep arm at SIDE LEVEL (rotZ -1.3 ≈ 75° from body) and oscillate rotX for the wave.
-  // Hand stays far from head because it's extended to the RIGHT, not above.
+  // WAVE — arm extends OUT to the character's right side (~80°), then waves forward/back via rotX
+  // rotZ = -1.4 puts arm sideways (80° from body), hand ~well clear of head
+  // Wave motion is entirely on rotX (toward/away from viewer) — no overhead movement
   {
     id: 'wave',
     name: 'Wave',
     icon: '\u{1F44B}',
-    duration: 2500,
+    duration: 2200,
     armL: { rotZ: [0.05], rotX: [0] },
     armR: {
-      // Phase 1 (0-0.12): arm extends OUT to side
-      // Phase 2 (0.12-0.77): hold at side, wave via rotX oscillation
-      // Phase 3 (0.77-1): return to rest
+      // Arm extends sideways (rotZ=1.4 ≈ 80°) and stays there; wave is rotX only
       rotZ: [
-        -0.05,  // rest
-        -1.3,   // extend OUT to side (~75° from body)
-        -1.3,   // hold at side — this is the wave position
-        -1.3,
-        -1.3,
-        -1.3,
-        -1.3,
-        -0.05,  // return to rest
+        0.05,   // rest
+        1.4,    // extend OUT to side (80°, fully clear of body)
+        1.4,    // hold
+        1.4,    // hold (waving happens on rotX)
+        1.4,    // hold
+        1.4,    // hold
+        1.4,    // hold
+        0.05,   // return to rest
       ],
       rotX: [
         0,      // rest
-        -0.2,   // slight forward as arm extends
-        -0.5,   // wave forward (hand toward viewer)
-        0.0,    // wave back
+        0,      // arm goes out (no rotX yet)
+        -0.5,   // wave: hand forward (toward viewer)
+        0.3,    // wave: hand back (away from viewer)
         -0.5,   // forward
-        0.0,    // back
+        0.3,    // back
         -0.5,   // forward
         0,      // return to rest
       ],
-      times: [0, 0.12, 0.25, 0.38, 0.51, 0.64, 0.77, 1],
+      times: [0, 0.12, 0.24, 0.40, 0.56, 0.72, 0.84, 1],
     },
     head: {
-      rotY: [0, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0],
-      times: [0, 0.12, 0.25, 0.38, 0.51, 0.64, 0.77, 1],
+      rotY: [0, 0, 0.2, 0.2, 0.2, 0.2, 0.2, 0], // Look toward waving hand (starts after arm extends)
+      times: [0, 0.12, 0.24, 0.40, 0.56, 0.72, 0.84, 1],
     },
     body: { posY: [0] },
   },
@@ -183,7 +180,7 @@ export const POSES: Pose[] = [
       times: [0, 0.3, 0.7, 1],
     },
     armR: {
-      rotZ: [-0.05, -0.5, -0.5, -0.55],     // Sword arm out to side
+      rotZ: [0.05, 0.5, 0.5, 0.55],         // Sword arm out to side
       rotX: [0, -0.7, -0.7, -0.15],          // Forward thrust, then relax
       times: [0, 0.3, 0.7, 1],
     },
@@ -210,7 +207,7 @@ export const POSES: Pose[] = [
       times: [0, 0.2, 0.7, 1],
     },
     armR: {
-      rotZ: [-0.05, -1.8, -1.8, -0.05],     // Up and slightly across
+      rotZ: [0.05, 1.8, 1.8, 0.05],         // Up and out to side
       rotX: [0, -0.6, -0.6, 0],              // Forward — arm in front of face, not through it
       times: [0, 0.2, 0.7, 1],
     },
@@ -236,13 +233,31 @@ export const POSE_EXPRESSIONS: Record<string, FacialExpression> = {
   dab:         { eyeScale: 1.3, mouthWidth: 1.4, mouthHeight: 1.3, eyebrowAngle: 0.15 },
 }
 
+
+export function getScaledExpression(poseId: string, tuning: HeroAnimationTuning): FacialExpression {
+  const base = POSE_EXPRESSIONS[poseId] ?? POSE_EXPRESSIONS.idle ?? {}
+  const intensity = tuning.emoteIntensity
+  const neutral = { eyeScale: 1, mouthWidth: 1, mouthHeight: 1, eyebrowAngle: 0 }
+  return {
+    eyeScale: neutral.eyeScale + ((base.eyeScale ?? neutral.eyeScale) - neutral.eyeScale) * intensity,
+    mouthWidth: neutral.mouthWidth + ((base.mouthWidth ?? neutral.mouthWidth) - neutral.mouthWidth) * intensity,
+    mouthHeight: neutral.mouthHeight + ((base.mouthHeight ?? neutral.mouthHeight) - neutral.mouthHeight) * intensity,
+    eyebrowAngle: neutral.eyebrowAngle + ((base.eyebrowAngle ?? neutral.eyebrowAngle) - neutral.eyebrowAngle) * intensity,
+  }
+}
+
 // ── Pose Animator ───────────────────────────────────────────────────
 
 export class PoseAnimator {
   private currentPose: Pose | null = null
+  private readonly getTuning: () => HeroAnimationTuning
   private startTime = 0
   private isPlaying = false
   private onComplete?: () => void
+
+  constructor(getTuning?: () => HeroAnimationTuning) {
+    this.getTuning = getTuning ?? (() => HERO_ANIMATION_TUNING)
+  }
 
   play(pose: Pose, onComplete?: () => void) {
     this.currentPose = pose
@@ -277,17 +292,42 @@ export class PoseAnimator {
   }
 
   private applyKeyframes(obj: THREE.Object3D, kf: PoseKeyframes, t: number) {
-    const isArm = obj.name === 'armL' || obj.name === 'armR'
+    const armSide = obj.name === 'armL' ? 'L' : obj.name === 'armR' ? 'R' : null
+    const isArm = armSide !== null
+    const tuning = this.getTuning()
+    const sideConfig = armSide ? tuning.guardrails.armBySide[armSide] : null
     if (kf.rotX) {
       let val = this.interpolate(kf.rotX, kf.times, t)
-      if (isArm) val = Math.max(-1.3, Math.min(1.3, val))
+      if (sideConfig) {
+        val = Math.max(sideConfig.rotXMin, Math.min(sideConfig.rotXMax, val))
+      }
       obj.rotation.x = val
     }
     if (kf.rotY) obj.rotation.y = this.interpolate(kf.rotY, kf.times, t)
     if (kf.rotZ) {
       let val = this.interpolate(kf.rotZ, kf.times, t)
-      if (isArm) val = Math.max(-2.8, Math.min(2.8, val))
-      obj.rotation.z = val
+      if (sideConfig && isArm) {
+        const armX = obj.rotation.x
+        const softTorso = tuning.guardrails.torsoSoftCollision
+        const torsoT = Math.max(
+          0,
+          Math.min(1, (armX - softTorso.rotXStart) / (softTorso.rotXEnd - softTorso.rotXStart)),
+        )
+        const torsoPush = torsoT * (softTorso.forearmClearance + softTorso.handClearance)
+        const minOutward = Math.max(
+          sideConfig.rotZMin,
+          tuning.torsoClearance + tuning.elbowOutBias + torsoPush,
+          tuning.guardrails.elbowInwardCollapseLimit,
+        )
+        val = Math.max(
+          minOutward,
+          Math.min(sideConfig.rotZMax, val),
+        )
+      }
+      // Left arm is at -X; positive rotation.z swings it inward (toward
+      // the torso).  Negate so the same positive "outward" values used by
+      // poses and guardrails produce outward motion on both sides.
+      obj.rotation.z = armSide === 'L' ? -val : val
     }
   }
 
@@ -393,7 +433,7 @@ export function getEquipmentIdlePose(equipped: string[]): Pose {
       rotX: [hasShield ? -0.3 : 0],       // And slightly forward
     },
     armR: {
-      rotZ: [hasSword ? -0.35 : -0.05],   // Sword arm slightly out
+      rotZ: [hasSword ? 0.35 : 0.05],     // Sword arm slightly out
       rotX: [hasSword ? -0.1 : 0],        // Barely forward
     },
     head: { rotX: [0], rotY: [0] },

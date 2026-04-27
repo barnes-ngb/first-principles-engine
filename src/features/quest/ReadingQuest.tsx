@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
+import IconButton from '@mui/material/IconButton'
 import LinearProgress from '@mui/material/LinearProgress'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import VolumeUpIcon from '@mui/icons-material/VolumeUp'
+import VolumeOffIcon from '@mui/icons-material/VolumeOff'
 import { useSpeechRecognition } from '../../core/hooks/useSpeechRecognition'
+import { useTTS } from '../../core/hooks/useTTS'
 import { sanitizeStimulus } from './questHelpers'
-import type { AnswerInputMethod, QuestQuestion, QuestState } from './questTypes'
+import TappableText from './TappableText'
+import type { AnswerInputMethod, QuestMode, QuestQuestion, QuestState } from './questTypes'
 import { MAX_QUESTIONS } from './questTypes'
 
 // ── Minecraft color palette ────────────────────────────────────
@@ -65,7 +71,6 @@ interface QuestFeedbackProps {
   correctAnswer: string
   encouragement?: string
   childAnswer: string
-  totalCorrect: number
 }
 
 export function QuestFeedback({
@@ -73,7 +78,6 @@ export function QuestFeedback({
   correctAnswer,
   encouragement,
   childAnswer,
-  totalCorrect,
 }: QuestFeedbackProps) {
   return (
     <Box
@@ -156,7 +160,7 @@ export function QuestFeedback({
           mt: 2,
         }}
       >
-        {totalCorrect} diamond{totalCorrect !== 1 ? 's' : ''} mined so far
+        Keep mining! ⛏️
       </Typography>
     </Box>
   )
@@ -367,6 +371,49 @@ function OpenResponseInput({ onSubmit, disabled, questionId }: OpenResponseInput
   )
 }
 
+// ── Blend pronunciation guide for TTS ─────────────────────────
+// Short letter combos like "ch" or "th" get spelled out by Web Speech API.
+// Append a guide word so the TTS says the sound, not individual letters.
+
+const BLEND_GUIDES: Record<string, string> = {
+  ch: 'ch, as in cheese',
+  sh: 'sh, as in shoe',
+  th: 'th, as in this',
+  wh: 'wh, as in when',
+  fl: 'fl, as in flat',
+  bl: 'bl, as in blue',
+  cr: 'cr, as in crab',
+  tr: 'tr, as in tree',
+  st: 'st, as in stop',
+  sn: 'sn, as in snake',
+  gr: 'gr, as in green',
+  br: 'br, as in bring',
+  cl: 'cl, as in clap',
+  dr: 'dr, as in drum',
+  fr: 'fr, as in frog',
+  gl: 'gl, as in glad',
+  pl: 'pl, as in play',
+  pr: 'pr, as in prize',
+  sk: 'sk, as in skip',
+  sl: 'sl, as in slide',
+  sm: 'sm, as in smile',
+  sp: 'sp, as in spin',
+  sw: 'sw, as in swim',
+  tw: 'tw, as in twin',
+  nd: 'nd, as in and',
+  nk: 'nk, as in think',
+}
+
+/** Get a TTS-friendly pronunciation for short blend/digraph options. */
+function blendForTTS(text: string): string {
+  // Only apply to short options (1-3 chars) that are blends, not full words
+  if (text.length <= 3) {
+    const guide = BLEND_GUIDES[text.toLowerCase()]
+    if (guide) return guide
+  }
+  return text
+}
+
 // ── QuestQuestionScreen ───────────────────────────────────────
 
 interface QuestQuestionScreenProps {
@@ -379,6 +426,10 @@ interface QuestQuestionScreenProps {
   onSkip: () => void
   /** Domain label for the header (defaults to "Reading Quest") */
   domainLabel?: string
+  /** Quest domain — enables TTS for math questions */
+  domain?: string
+  /** Quest mode — enables voice-first auto-speak for phonics/comprehension */
+  questMode?: QuestMode
 }
 
 export default function QuestQuestionScreen({
@@ -389,8 +440,14 @@ export default function QuestQuestionScreen({
   onAnswerWithMethod,
   onSkip,
   domainLabel = 'Reading Quest',
+  domain = 'reading',
+  questMode,
 }: QuestQuestionScreenProps) {
   const progress = (questState.totalQuestions / MAX_QUESTIONS) * 100
+  const isMathQuest = domain === 'math'
+  const isVoiceFirst = questMode === 'phonics' || questMode === 'comprehension'
+  const tts = useTTS({ rate: 0.85 })
+  const [muted, setMuted] = useState(false)
 
   const [timerElapsed, setTimerElapsed] = useState(false)
   const [revealingAnswer, setRevealingAnswer] = useState(false)
@@ -402,6 +459,53 @@ export default function QuestQuestionScreen({
     setTimerElapsed(false)
     setRevealingAnswer(false)
   }
+
+  // Detect passage-based comprehension questions (passage separated by double newline)
+  const passageParts = useMemo(() => {
+    const prompt = question.prompt
+    // Comprehension questions have format: "Read this...\n\nPassage text\n\nQuestion?"
+    const parts = prompt.split(/\n\n+/)
+    if (parts.length >= 3) {
+      // First part is instruction, middle part(s) are passage, last is question
+      return {
+        instruction: parts[0],
+        passage: parts.slice(1, -1).join('\n\n'),
+        question: parts[parts.length - 1],
+      }
+    }
+    return null
+  }, [question.prompt])
+
+  // Build speech text for auto-speak (prompt only — stimulus is visual, not spoken)
+  const questionSpeechText = useMemo(() => {
+    if (passageParts) return passageParts.question
+    return question.prompt
+  }, [question.prompt, passageParts])
+
+  // Auto-read questions when they appear (math, phonics, comprehension)
+  useEffect(() => {
+    if (muted) return
+    if (!isMathQuest && !isVoiceFirst) return
+    const text = isMathQuest ? question.prompt : questionSpeechText
+    const timer = setTimeout(() => tts.speak(text), 500)
+    return () => clearTimeout(timer)
+  }, [question.id, isMathQuest, isVoiceFirst, muted]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Replay the question prompt via TTS
+  const replayQuestion = useCallback(() => {
+    if (!muted) {
+      const text = isMathQuest ? question.prompt : questionSpeechText
+      tts.speak(text)
+    }
+  }, [muted, tts, isMathQuest, question.prompt, questionSpeechText])
+
+  // Speak a word via TTS (cancels any in-progress speech first)
+  const speakWord = useCallback(
+    (word: string) => {
+      if (!muted) tts.speak(blendForTTS(word))
+    },
+    [muted, tts],
+  )
 
   // Show skip button after 8 seconds on current question
   useEffect(() => {
@@ -448,15 +552,17 @@ export default function QuestQuestionScreen({
         >
           ⛏️ {domainLabel} — Level {questState.currentLevel}
         </Typography>
-        <Typography
-          sx={{
-            fontFamily: MC.font,
-            fontSize: '0.45rem',
-            color: MC.stone,
-          }}
-        >
-          {questState.totalQuestions + 1}/{MAX_QUESTIONS}
-        </Typography>
+        {question.isBonusRound && (
+          <Typography
+            sx={{
+              fontFamily: MC.font,
+              fontSize: '0.45rem',
+              color: MC.gold,
+            }}
+          >
+            BONUS
+          </Typography>
+        )}
       </Stack>
 
       {/* Progress bar */}
@@ -475,18 +581,81 @@ export default function QuestQuestionScreen({
         }}
       />
 
-      {/* Diamond counter */}
-      <Typography
-        sx={{
-          fontFamily: MC.font,
-          fontSize: '0.5rem',
-          color: MC.diamond,
-          textAlign: 'right',
-          mb: 2,
-        }}
-      >
-        💎 {questState.totalCorrect}
-      </Typography>
+      {/* Diamond counter + speaker controls */}
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+        {isVoiceFirst ? (
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            {/* Prominent replay button */}
+            <IconButton
+              onClick={replayQuestion}
+              disabled={muted}
+              sx={{
+                color: muted ? MC.stone : MC.diamond,
+                p: 1,
+                minWidth: 40,
+                minHeight: 40,
+                ...(tts.isSpeaking && !muted && {
+                  animation: 'speaker-pulse 1s ease-in-out infinite',
+                  '@keyframes speaker-pulse': {
+                    '0%, 100%': { transform: 'scale(1)', boxShadow: `0 0 0px ${MC.diamond}00` },
+                    '50%': { transform: 'scale(1.15)', boxShadow: `0 0 12px ${MC.diamond}60` },
+                  },
+                }),
+              }}
+              aria-label="Hear question again"
+            >
+              <VolumeUpIcon sx={{ fontSize: 28 }} />
+            </IconButton>
+            <Typography
+              component="span"
+              onClick={replayQuestion}
+              sx={{
+                fontFamily: MC.font,
+                fontSize: '0.35rem',
+                color: muted ? MC.stone : MC.diamond,
+                cursor: muted ? 'default' : 'pointer',
+                userSelect: 'none',
+                '&:hover': muted ? {} : { color: MC.gold },
+              }}
+            >
+              Tap to hear again
+            </Typography>
+            {/* Small mute toggle */}
+            <IconButton
+              onClick={() => {
+                setMuted((m) => !m)
+                tts.cancel()
+              }}
+              size="small"
+              sx={{ color: muted ? MC.red : MC.stone, p: 0.5, ml: 0.5 }}
+              aria-label={muted ? 'Unmute' : 'Mute'}
+            >
+              {muted ? <VolumeOffIcon sx={{ fontSize: 16 }} /> : <VolumeOffIcon sx={{ fontSize: 16, opacity: 0.4 }} />}
+            </IconButton>
+          </Stack>
+        ) : (
+          <IconButton
+            onClick={() => {
+              setMuted((m) => !m)
+              tts.cancel()
+            }}
+            size="small"
+            sx={{ color: muted ? MC.stone : MC.diamond, p: 0.5 }}
+            aria-label={muted ? 'Unmute' : 'Mute'}
+          >
+            {muted ? <VolumeOffIcon fontSize="small" /> : <VolumeUpIcon fontSize="small" />}
+          </IconButton>
+        )}
+        <Typography
+          sx={{
+            fontFamily: MC.font,
+            fontSize: '0.5rem',
+            color: MC.diamond,
+          }}
+        >
+          💎
+        </Typography>
+      </Stack>
 
       {/* Bonus round banner */}
       {question.isBonusRound && (
@@ -517,21 +686,99 @@ export default function QuestQuestionScreen({
         </Box>
       )}
 
-      {/* Prompt */}
-      <Typography
-        sx={{
-          fontFamily: MC.font,
-          fontSize: '0.7rem',
-          color: MC.white,
-          textAlign: 'center',
-          mb: 2,
-          lineHeight: 1.8,
-        }}
-      >
-        🧱 {question.prompt}
-      </Typography>
+      {/* Prompt — every word is tappable for TTS */}
+      {passageParts ? (
+        /* Comprehension question: instruction + passage + question, with read-aloud button */
+        <Box sx={{ mb: 2 }}>
+          {/* Instruction line */}
+          <Box sx={{ textAlign: 'center', mb: 1 }}>
+            <Typography
+              component="span"
+              sx={{ fontFamily: MC.font, fontSize: '0.6rem', color: MC.stone, lineHeight: 1.8 }}
+            >
+              {'🧱 '}
+            </Typography>
+            <TappableText
+              text={passageParts.instruction}
+              onTapWord={speakWord}
+              fontFamily={MC.font}
+              fontSize="0.6rem"
+              color={MC.stone}
+            />
+          </Box>
 
-      {/* Stimulus word — large, centered, Minecraft-style */}
+          {/* Read passage aloud button */}
+          {!muted && (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<VolumeUpIcon />}
+              onClick={() => tts.speak(passageParts.passage)}
+              sx={{
+                mb: 1.5,
+                color: MC.diamond,
+                borderColor: MC.diamond,
+                fontFamily: MC.font,
+                fontSize: '0.45rem',
+                textTransform: 'none',
+                '&:hover': { borderColor: MC.gold, color: MC.gold },
+              }}
+            >
+              Read passage aloud
+            </Button>
+          )}
+
+          {/* Passage text — tappable words */}
+          <Box
+            sx={{
+              bgcolor: MC.darkStone,
+              border: `1px solid ${MC.stone}`,
+              borderRadius: 2,
+              p: 2,
+              mb: 2,
+            }}
+          >
+            <TappableText
+              text={passageParts.passage}
+              onTapWord={speakWord}
+              fontFamily="Georgia, serif"
+              fontSize="0.85rem"
+              color={MC.white}
+              lineHeight={2}
+            />
+          </Box>
+
+          {/* Question text — tappable words */}
+          <Box sx={{ textAlign: 'center' }}>
+            <TappableText
+              text={passageParts.question}
+              onTapWord={speakWord}
+              fontFamily={MC.font}
+              fontSize="0.7rem"
+              color={MC.white}
+            />
+          </Box>
+        </Box>
+      ) : (
+        /* Non-passage question: single prompt line, all words tappable */
+        <Box sx={{ textAlign: 'center', mb: 2 }}>
+          <Typography
+            component="span"
+            sx={{ fontFamily: MC.font, fontSize: '0.7rem', color: MC.white, lineHeight: 1.8 }}
+          >
+            {'🧱 '}
+          </Typography>
+          <TappableText
+            text={question.prompt}
+            onTapWord={speakWord}
+            fontFamily={MC.font}
+            fontSize="0.7rem"
+            color={MC.white}
+          />
+        </Box>
+      )}
+
+      {/* Stimulus word — large, centered, Minecraft-style, tappable for TTS */}
       {displayStimulus && (
         <Box
           sx={{
@@ -543,17 +790,14 @@ export default function QuestQuestionScreen({
             mb: 3,
           }}
         >
-          <Typography
-            sx={{
-              fontFamily: MC.font,
-              fontSize: '1.4rem',
-              color: MC.diamond,
-              letterSpacing: 6,
-              textTransform: 'lowercase',
-            }}
-          >
-            {displayStimulus}
-          </Typography>
+          <TappableText
+            text={displayStimulus}
+            onTapWord={speakWord}
+            fontFamily={MC.font}
+            fontSize="1.4rem"
+            color={MC.diamond}
+            sx={{ letterSpacing: 6, textTransform: 'lowercase' }}
+          />
         </Box>
       )}
 
@@ -615,16 +859,54 @@ export default function QuestQuestionScreen({
                 },
               }}
             >
-              <Typography
-                sx={{
-                  fontFamily: MC.font,
-                  fontSize: '0.7rem',
-                  color: revealCorrect ? MC.green : MC.white,
-                  textAlign: 'center',
-                }}
-              >
-                {revealCorrect ? `✅ ${option}` : option}
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                {/* Voice-first: speaker icon to hear option without committing */}
+                {isVoiceFirst && !revealingAnswer && !muted && (
+                  <Box
+                    component="span"
+                    role="button"
+                    aria-label={`Hear option: ${option}`}
+                    onClick={(e: React.MouseEvent) => {
+                      e.stopPropagation()
+                      speakWord(option)
+                    }}
+                    sx={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: MC.stone,
+                      mr: 1.5,
+                      p: 0.5,
+                      borderRadius: 1,
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                      minWidth: 32,
+                      minHeight: 32,
+                      '&:hover': { color: MC.diamond, bgcolor: 'rgba(91,252,238,0.1)' },
+                      '&:active': { color: MC.gold },
+                    }}
+                  >
+                    <VolumeUpIcon sx={{ fontSize: 20 }} />
+                  </Box>
+                )}
+                <Box sx={{ textAlign: 'center' }}>
+                  {revealCorrect && (
+                    <Typography
+                      component="span"
+                      sx={{ fontFamily: MC.font, fontSize: '0.7rem', color: MC.green }}
+                    >
+                      {'✅ '}
+                    </Typography>
+                  )}
+                  <TappableText
+                    text={option}
+                    onTapWord={speakWord}
+                    fontFamily={MC.font}
+                    fontSize="0.7rem"
+                    color={revealCorrect ? MC.green : MC.white}
+                  />
+                </Box>
+              </Box>
             </Box>
           )
         })}

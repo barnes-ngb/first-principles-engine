@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkAnswer, extractPattern, extractTargetWord, sanitizeStimulus, shouldFlagAsError } from './questHelpers'
+import { checkAnswer, extractPattern, extractTargetWord, generateFallbackQuestion, sanitizeStimulus, shouldFlagAsError, validateQuestion } from './questHelpers'
 import type { QuestQuestion, SessionQuestion } from './questTypes'
 
 function makeQuestion(overrides: Partial<QuestQuestion> = {}): QuestQuestion {
@@ -240,5 +240,90 @@ describe('extractPattern', () => {
 
   it('falls back to question type', () => {
     expect(extractPattern(makeSessionQ(''))).toBe('multiple-choice')
+  })
+})
+
+// ── generateFallbackQuestion ──────────────────────────────────
+
+describe('generateFallbackQuestion', () => {
+  it('generates a valid math question', () => {
+    const q = generateFallbackQuestion(2, 'math')
+    expect(q.skill).toBe('math.addition')
+    expect(q.options.length).toBe(3)
+    expect(q.options).toContain(q.correctAnswer)
+    expect(validateQuestion(q)).not.toBeNull()
+  })
+
+  it('generates a valid reading question', () => {
+    const q = generateFallbackQuestion(3, 'reading')
+    expect(q.skill).toBe('phonics.word-reading')
+    expect(q.stimulus).toBeTruthy()
+    expect(q.options.length).toBe(3)
+    expect(q.options).toContain(q.correctAnswer)
+    expect(validateQuestion(q)).not.toBeNull()
+  })
+
+  it('always passes validateQuestion', () => {
+    for (let i = 0; i < 20; i++) {
+      const level = Math.floor(Math.random() * 6) + 1
+      const domain = Math.random() > 0.5 ? 'math' : 'reading'
+      const q = generateFallbackQuestion(level, domain)
+      expect(validateQuestion(q)).not.toBeNull()
+    }
+  })
+})
+
+// ── validateQuestion ──────────────────────────────────────────
+
+describe('validateQuestion', () => {
+  function makeQ(overrides: Partial<QuestQuestion>) {
+    return {
+      id: 'q1',
+      type: 'multiple-choice' as const,
+      level: 3,
+      skill: 'phonics.blends.st',
+      prompt: 'Complete the word:',
+      stimulus: 's__op',
+      options: ['tr', 'cr', 'st'],
+      correctAnswer: 'st',
+      ...overrides,
+    }
+  }
+
+  it('passes valid fill-in-blank question', () => {
+    const q = makeQ({})
+    expect(validateQuestion(q)).not.toBeNull()
+  })
+
+  it('rejects when blank count does not match answer length', () => {
+    // 3 blanks but answer is 2 chars
+    const q = makeQ({ stimulus: 's___op', correctAnswer: 'st' })
+    expect(validateQuestion(q)).toBeNull()
+  })
+
+  it('rejects when correct answer is not in options', () => {
+    const q = makeQ({ correctAnswer: 'xx' })
+    expect(validateQuestion(q)).toBeNull()
+  })
+
+  it('rejects when options have wrong length for blanks', () => {
+    // 2 blanks but one option is 1 char
+    const q = makeQ({ options: ['t', 'cr', 'st'] })
+    expect(validateQuestion(q)).toBeNull()
+  })
+
+  it('passes non-fill-in-blank question without stimulus underscores', () => {
+    const q = makeQ({
+      prompt: 'What word is this?',
+      stimulus: 'stop',
+      options: ['stop', 'step', 'shop'],
+      correctAnswer: 'stop',
+    })
+    expect(validateQuestion(q)).not.toBeNull()
+  })
+
+  it('rejects question with empty options', () => {
+    const q = makeQ({ options: [] })
+    expect(validateQuestion(q)).toBeNull()
   })
 })

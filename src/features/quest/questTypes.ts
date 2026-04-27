@@ -1,5 +1,22 @@
 import type { EvaluationDomain } from '../../core/types/enums'
 
+// ── Quest domain and mode ────────────────────────────────────
+
+export const QuestDomain = {
+  Reading: 'reading',
+  Math: 'math',
+  Speech: 'speech',
+} as const
+export type QuestDomain = (typeof QuestDomain)[keyof typeof QuestDomain]
+
+export const QuestMode = {
+  Phonics: 'phonics',
+  Comprehension: 'comprehension',
+  Fluency: 'fluency',
+  Math: 'math',
+} as const
+export type QuestMode = (typeof QuestMode)[keyof typeof QuestMode]
+
 // ── Quest screen state machine ────────────────────────────────
 
 export const QuestScreen = {
@@ -8,27 +25,52 @@ export const QuestScreen = {
   Question: 'question',
   Feedback: 'feedback',
   Summary: 'summary',
+  // Fluency-specific screens
+  FluencyPassage: 'fluency-passage',
+  FluencyRecording: 'fluency-recording',
+  FluencySelfCheck: 'fluency-self-check',
+  FluencySummary: 'fluency-summary',
 } as const
 export type QuestScreen = (typeof QuestScreen)[keyof typeof QuestScreen]
 
 // ── Constants ─────────────────────────────────────────────────
 
 export const MAX_QUESTIONS = 10
+export const MIN_QUESTIONS = 5 // never end before 5 questions unless child manually exits
 export const MAX_SECONDS = 480 // 8 minutes
 export const LEVEL_UP_STREAK = 3 // 3 correct → harder
 export const LEVEL_DOWN_STREAK = 2 // 2 wrong → easier
 export const FRUSTRATION_LIMIT = 2 // 2 level-downs in a row → end
+// 4 wrong at Level 1 → end (frustration escape).
+// At floor, level-downs can't fire (already at 1), so FRUSTRATION_LIMIT (2 level-downs)
+// never triggers. 4 wrong at floor ≈ 2 would-be level-down events (every 2 wrong = 1
+// level-down attempt), matching the FRUSTRATION_LIMIT = 2 design intent.
+// Bonus round still fires because levelDownsInARow stays 0 at floor.
+export const FLOOR_WRONG_LIMIT = 4
+export const VALIDATION_RETRIES = 2 // retry AI calls when question validation fails
+
+// Per-quest-mode level ceilings.
+// Phonics: L9-10 test comprehension, not phonics — cap at 8.
+// Comprehension & Math: prompts only define L1-6 — cap at 6.
+// Fluency has no levels (N/A).
+export const QUEST_MODE_LEVEL_CAP: Record<string, number> = {
+  phonics: 8,
+  comprehension: 6,
+  math: 6,
+} as const
+export const DEFAULT_LEVEL_CAP = 10
 
 // ── Quest adaptive state ──────────────────────────────────────
 
 export interface QuestState {
-  currentLevel: number // difficulty tier (1-6 for reading)
+  currentLevel: number // difficulty tier (1-10 for reading)
   consecutiveCorrect: number
   consecutiveWrong: number
   levelDownsInARow: number // 2 in a row = frustration → end session
   totalQuestions: number
   totalCorrect: number
   questionsThisLevel: number
+  wrongAtFloor: number // wrong answers while at Level 1 (floor escape)
   startedAt: string
   elapsedSeconds: number // updated by client-side timer
 }
@@ -58,6 +100,13 @@ export interface QuestQuestion {
   isBonusRound?: boolean // true for end-on-a-win bonus question
   /** Whether this question should also show voice/type input alongside MC options */
   allowOpenResponse?: boolean
+  /**
+   * Phase 2 — when the AI deliberately targets a known blocker from the
+   * skill snapshot, it sets this to the block's stable id. Absent on
+   * general-pool questions. The client passes this through to SessionQuestion
+   * so `updateBlockerLifecycle` can weight targeted evidence.
+   */
+  targetedBlockerId?: string
 }
 
 // ── Answered question ─────────────────────────────────────────
@@ -79,6 +128,13 @@ export interface SessionQuestion {
   timestamp: string
   /** How the child answered: tapped an MC option, spoke via voice, or typed */
   inputMethod?: AnswerInputMethod
+  /**
+   * Phase 2 — set when the AI deliberately targeted a known blocker for this
+   * question (see QuestQuestion.targetedBlockerId). Used by
+   * updateBlockerLifecycle to weight targeted evidence more heavily than
+   * incidental evidence when advancing ADDRESS_NOW → RESOLVING → RESOLVED.
+   */
+  targetedBlockerId?: string
 }
 
 // ── Extra fields on EvaluationSession for interactive sessions ─
@@ -94,6 +150,48 @@ export interface InteractiveSessionData {
   timedOut?: boolean
   skippedCount?: number
   flaggedErrorCount?: number
+  /** Distinguishes phonics quests from comprehension quests */
+  questMode?: QuestMode
+  // ── Resume support fields (saved on partial sessions) ──────
+  /** Full adaptive state — needed to restore quest on resume */
+  savedQuestState?: QuestState
+  /** The exact question the child was looking at when they exited */
+  savedCurrentQuestion?: QuestQuestion
+  /** Whether bonus round was already used this session */
+  bonusRoundUsed?: boolean
+}
+
+// ── Fluency practice types ───────────────────────────────────
+
+export const FluencySelfRating = {
+  Easy: 'easy',
+  Medium: 'medium',
+  Hard: 'hard',
+} as const
+export type FluencySelfRating = (typeof FluencySelfRating)[keyof typeof FluencySelfRating]
+
+export interface FluencyPassage {
+  text: string
+  targetWords: string[]
+  speechWords: string[]
+  wordCount: number
+  readingLevel: string
+  attempts: FluencyAttempt[]
+}
+
+export interface FluencyAttempt {
+  recordingUrl: string | null // Firebase Storage path
+  selfRating: FluencySelfRating
+  durationSeconds: number
+  timestamp: string
+}
+
+export interface FluencySessionData {
+  sessionType: 'fluency'
+  questMode: 'fluency'
+  passages: FluencyPassage[]
+  totalReadingTimeSeconds: number
+  diamondsEarned: number
 }
 
 // ── Quest streak ──────────────────────────────────────────────
@@ -109,6 +207,10 @@ export interface QuestDomainConfig {
   domain: EvaluationDomain
   label: string
   icon: string
-  enabled: boolean // only 'reading' for Phase 1
+  enabled: boolean
   description?: string
+  /** Quest mode within a domain (e.g., phonics vs comprehension within reading) */
+  questMode?: QuestMode
+  /** Whether to show a "Recommended" badge based on skill snapshot */
+  recommended?: boolean
 }

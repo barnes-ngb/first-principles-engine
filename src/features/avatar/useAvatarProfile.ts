@@ -3,6 +3,7 @@ import { doc, onSnapshot } from 'firebase/firestore'
 
 import { avatarProfilesCollection } from '../../core/firebase/firestore'
 import type { AvatarProfile } from '../../core/types'
+import { normalizeAvatarProfile } from './normalizeProfile'
 
 /**
  * Subscribe to a child's avatar profile from Firestore.
@@ -22,12 +23,12 @@ export function useAvatarProfile(
       profileRef,
       (snap) => {
         if (snap.exists()) {
-          setProfile(snap.data() as AvatarProfile)
+          setProfile(normalizeAvatarProfile(snap.data()))
         } else {
-          setProfile(null)
+          setProfile(normalizeAvatarProfile(null))
         }
       },
-      () => setProfile(null),
+      () => setProfile(normalizeAvatarProfile(null)),
     )
 
     return unsub

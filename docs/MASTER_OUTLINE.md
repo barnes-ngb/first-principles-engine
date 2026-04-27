@@ -1,353 +1,274 @@
-Barnes Family Homeschool — Master Project Outline v9 **Version:** v9 — March 23, 2026 **Status:** Living document — updated after Plan My Week UX rewrite Project Summary Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builds the system), Lincoln (10, neurodivergent, speech challenges), London (6, loves drawing/stories). Both boys. **Tech:** React + TypeScript + Vite, Firebase (Auth, Firestore, Storage, Cloud Functions, Hosting), MUI, Anthropic Claude API, OpenAI DALL-E 3 (scenes + armor sheets) + gpt-image-1 (transparent stickers + photo transform). Repo: github.com/barnes-ngb/first-principles-engine Live: first-principles-engine.web.app Scale: 52k+ lines TypeScript, 30+ test files, 600+ tests, 32+ Firestore collections, 0 TS errors What's Built and Working Navigation Parent: Today, Plan My Week, Weekly Review, Progress, Records, Dad Lab, Settings Kid: Today, Knowledge Mine, Game Workshop, My Books, My Armor, Dad Lab Today Page
-* Plan-first layout with daily checklist
-* Energy selector (Normal/Low/Overwhelmed → MVD mode)
-* Week Focus card (theme, virtue, scripture, heart question)
-* Teach Helper sparkle button per item → lesson card + print worksheet
-* Engagement emoji feedback per completed item (😊😐😫❌)
-* Per-item work capture (camera → photo → link to activity)
-* Quick review/grading (manual note: "5/6 correct, missed #4")
-* Quick Capture section (note, photo, audio)
-* MVD mode (shows only essential items)
-* XP awarded on all Must-Do completion (10 XP, once/day) Plan My Week
-* Page title "Plan My Week" with subtitle "Set up your week, review the plan, and you're done."
-* **Auto-suggested Week Focus** — AI pre-fills theme, virtue, scripture, heart question on page load (editable)
-* **Compact setup for returning users** — energy selector, routine shown read-only with Edit option, workbooks as chips, special notes field. Full wizard only on first visit.
-* **Per-subject default times** — configurable minutes per subject (Reading: 30m, Math: 30m, etc.), saved per child, used as AI baseline
-* AI-powered plan generation (Sonnet) with full enriched context (snapshot, workbooks, evaluation findings, engagement data, subject defaults)
-* **Full-width plan preview** — renders outside chat area, day cards with Must-Do / Choose sections clearly labeled
-* Single set of quick adjustment chips (tap to apply immediately) + chat-based free-form adjustments
-* Skip guidance per item from evaluation data + week skip summary
-* Plan generation intent detection — typing "generate a plan" in chat redirects to proper generation path
-* Robust JSON parsing — handles code-fenced responses, truncated JSON, fallback recovery
-* "Lock In This Plan" button → daily checklists with subjectBucket tagging + auto-generate lesson cards
-* "Go to Today →" shortcut after applying
-* Print Materials — per-day or all-week Minecraft-themed worksheet generation
-* "Repeat Last Week" shortcut for low-energy weeks
-* AI feature flag defaults to ON (no manual Settings toggle needed) Evaluation Chat
-* Shelly-guided reading diagnostic, AI walks through structured assessment levels
-* Live findings panel, <finding> and <complete> block extraction
-* Report view: skill map, frontier, recommendations, what to skip
-* Apply to Skill Snapshot → updates priority skills + supports + stop rules
-* Plan Week from Evaluation → carries findings into planner
-* Download report as markdown, learning roadmap visualization
-* Previous evaluations list
-* XP awarded on Apply to Skill Snapshot (25 XP, once/session)
-* Pattern Detection — after <complete>, second Sonnet pass analyzes last 5 sessions, identifies conceptual blocks (ADDRESS_NOW vs DEFER), surfaces in "Foundations" section of report and Skill Snapshot Knowledge Mine (Interactive Evaluation)
-* Minecraft-themed reading quest, AI-generated adaptive MC questions
-* 6 difficulty levels, adaptive pacing (3 correct → up, 2 wrong → down)
-* Session limits: 10 questions, 8 minutes, frustration detection
-* Word stimulus display — target word renders large and clear above answer options
-* Text-only questions — no image-based question types (Phase 1)
-* Question type variety — rotates through multiple formats per level (word ID, rhyming, sentence completion, sound matching, etc.)
-* Auto-apply findings to skill snapshot on quest end
-* AI-generated session summary + recommendations
-* Quest → Planner pipeline — recommendations generated from findings, planner reads interactive sessions alongside guided evals
-* Parent visibility in Evaluation History tab
-* Phoneme display — simple /s/ /t/ /o/ /p/ notation at Levels 1-3 only, no IPA symbols
-* End-on-a-win — bonus round question if last question is wrong, framed as "BONUS ROUND"
-* 24 unit tests for adaptive logic
-* Quest diamonds → 2 XP each → avatar progression
-* Math Quest + Speech Quest shown as "coming soon"
+# Barnes Family Homeschool — Master Project Outline v15
 
-### Story Game Workshop
-- Kid nav item → `/workshop` route (London's creative space)
-- **Three game types:** 🎲 Board Games, 📖 Choose-Your-Adventure, 🃏 Card Games
-- **Voice-first guided wizard** with read-aloud tiles (tap to hear, tap again to select)
-  - Game Type → Theme → Players → type-specific steps
-  - TTS prompts at every step (SpeechSynthesis API)
-  - Keyboard dictation for text input (native device mic)
-  - Draft auto-save — resume wizard at last completed step
-- **Player selection** pulls real family members:
-  - Lincoln/London use Minecraft avatars from `avatarProfiles`
-  - Mom/Dad get DALL-E generated themed tokens
-  - London auto-selected as Story Keeper (always plays)
-- **Board Games:** CSS Grid snaking path, 15/25/35 spaces, challenge cards (Reading/Math/Story/Action), boss challenges, bonus/setback/shortcut spaces
-- **Choose-Your-Adventure:** AI-generated branching story tree, 2-3 choices per node, no dead ends (retry endings), embedded challenges at nodes, scene illustrations via DALL-E
-- **Card Games (3 mechanics):** Matching (Memory), Collecting (Go Fish), Battle (War+). 20-30% of cards have embedded learning elements.
-- **DALL-E art generation** in parallel during wizard completion:
-  - Board backgrounds, title screens, per-type challenge card art, parent tokens, adventure scene illustrations, card game faces/backs
-  - `Promise.allSettled` — partial failures graceful, CSS/emoji fallbacks
-  - "Regenerate Art" retry for failed generations
-- **Polished play experience:**
-  - Animated dice roll, space-by-space token movement, 3D card flip reveals
-  - Boss challenge dramatic reveal (screen shake, glow border)
-  - Sound effects throughout (dice, cards, success, bonus, setback, game over fanfare)
-  - Confetti celebration on game completion
-  - Mute toggle for sound effects (TTS stays on)
-- **London voice recording** — optional post-creation step:
-  - Records his voice for any card/node via MediaRecorder API
-  - Plays back during game INSTEAD of TTS
-  - 🎤 badge on games with recordings
-  - Reusable `useAudioRecorder` hook
-- **Lincoln Playtester:**
-  - Dedicated Playtest mode — goes through ALL cards/nodes
-  - Per-item feedback: 👍🤔😬😴🔄 with text/audio comments
-  - London reviews flagged items, "Fix It" or "Keep It"
-  - AI-assisted card fixes
-  - Version tracking + revision history
-- **Cross-device visibility** — all family members see all games
-- **Save/resume** — in-progress game state persists, "Pick up where you left off?" prompt
-- **Today page integration:**
-  - "London made a new game!" card for unplayed games
-  - "Continue [Title]?" card for in-progress games
-- **Hours logging** split proportionally by challenge card types
-- Completed games saved as portfolio artifacts
-- My Games gallery with type icons (🎲📖🃏), title art thumbnails, play count
-- Cloud Function: `chat` with `taskType: 'workshop'` (board/adventure/card gen + card fixes)
-- Saves to `families/{familyId}/storyGames/{gameId}`
+**Version:** v15 — April 12, 2026  
+**Status:** Updated since v14 — Hero Hub reframe, two-currency economy hardening, Stonebridge narrative foundation, armor progression gating, capture pipeline unification, working levels, chapter book pool.
 
-My Books (Book Builder + AI Story Generator)
-* Bookshelf — filter tabs (All/My Stories/Generated/Sight Words), theme filter row (9 themes: Adventure, Animals, Family, Fantasy, Minecraft, Science, Sight Words, Faith, Other), 3-dot menu (Read/Edit/Print/Delete), auto-cover, sort drafts first
-* Book Editor — page editor with text, photos, voice recording, speech-to-text dictation, AI scene generation ("Make a Scene"), sticker picker, drag-to-position images, text sizing (Big/Medium/Small), font family (Handwriting/Print/Pixel), page reorder, Together Book toggle, "Finish My Book" with cover picker
-* AI Scene Generation — Claude Haiku rewrites prompts for copyright safety, DALL-E 3 generates scenes, 6 world styles (4 base + Garden Battle + Platformer World), world-type quick-pick chips
-* Sticker Generation — gpt-image-1 transparent backgrounds, post-generation tagging (tags + Lincoln/London/Both profile), Sticker Library in Settings
-* AI Book Generator — paste/guided story idea → Claude generates full story → DALL-E illustrates every page → progressive save → progress UI
-* Story Guide — 5-question guided conversation replaces raw text input; questions read aloud via TTS; voice input with read-back confirmation; Lincoln's questions are action-oriented (Minecraft-themed), London's are imaginative; sight words auto-injected from skill snapshot; optional AI shaping step; hands off to generator
-* Book Reader — full-screen swipeable page flipper, cover/content/back cover, audio playback, dot indicator, Edit + Print buttons
-* Reading Session Tracking — timer starts on open, pages-viewed counter, reading session logged to hours on close, portfolio artifact created, 15 XP awarded once/book/day
-* Sight Word System — all words tappable for TTS, tap for pronunciation + "I know this!", per-word mastery tracking (new → practicing → familiar → mastered), sound-it-out mode, Shelly override, SightWordDashboard
-* Print — PDF via html2canvas + jsPDF, settings dialog (Letter/Half-letter/A4/Booklet, background options, sight word style), images via Firebase SDK getBlob, fixed 3:2 aspect ratio
-* Book Organization — theme tags auto-inferred on generation, manual assignment in editor, additive filtering (type + theme)
-* Sticker controls — move/rotate/z-index toolbar, edge boundary clamping, percentage-based position storage (stable on print/resize)
-* Child-specific — Lincoln: Minecraft/dark theme, adventure worlds, 10 pages. London: storybook/cream/Fredoka, fairy/animal worlds, 6 pages
-* Content violation handling — blocked prompts show upload/import guidance
-* Sketch cleanup — client-side background removal for uploaded drawings
-* Pinch-to-zoom — two-finger resize on tablet My Armor (Avatar + Armor of God Daily Ritual) — NEW
-* Daily ritual — character starts bare each morning; child applies each earned piece; ghost outlines show what's waiting; visual tension → release
-* 6-piece Armor of God progression (Ephesians 6): Belt of Truth (50 XP), Breastplate of Righteousness (150 XP), Shoes of Peace (300 XP), Shield of Faith (500 XP), Helmet of Salvation (750 XP), Sword of the Spirit (1000 XP)
-* Tier system — Lincoln: Stone → Diamond → Netherite (all 6 stone → full set upgrades). London: Basic → Powerup → Champion
-* Cohesive set generation — DALL-E 3 generates all 6 pieces as a single 3×2 reference sheet; client-side cropping (cropArmorSheet) gives each piece its individual image; matching art style, lighting, proportions guaranteed
-* SVG icons — 6 hand-crafted vector icons (belt/buckle, breastplate/cross, boots/wing, shield/rays, helmet/visor, sword/crossguard); tier-colored variants (stone=brown/iron, diamond=blue/gold, netherite=dark/purple); locked state (30% opacity + padlock badge); applied state (green checkmark badge)
-* Base character — DALL-E 3 generates bare character (no gear) once on first visit, saved to Firebase; Lincoln: blocky pixel warrior; London: cute platformer girl
-* Verse card — full-screen card on piece tap; TTS auto-reads verse on open; word-by-word highlight synced to TTS via onboundary event; tap any word to hear/replay it; "Put it on!" button applies piece
-* Attachment animation — piece icon flies from card to character body via portal-rendered arc animation; landing bounce (scale 1.2 → 0.9 → 1.0); particle burst at landing (squares for Lincoln, stars for London); character white flash; pose shift nudge; progressive glow via drop-shadow filter on character silhouette
-* Full armor on! state — all earned pieces applied → maximum glow, idle sway animation, shimmer sweep, gold card borders, Web Audio fanfare (4-note chord, no audio files)
-* Photo transform — upload photo → gpt-image-1 transforms into themed character style → saves as base character layer; armor overlays apply on top
-* XP system — xpLedger collection, cumulative event log; dedup guards per source; 5 XP for completing daily armor ritual (once/day)
-* Tier upgrade — all 6 pieces collected → full-set celebration, new tier sheet generates in parallel, before/after reveal
-* Parent controls — Settings → Avatar & XP tab: add/subtract XP, delete pieces, reset avatar, force tier upgrade (testing), activity log
-* Daily session — DailyArmorSession per child per date; resets at midnight; tracks applied pieces
+## Project Summary
+Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builder), Lincoln (10, neurodivergent, speech challenges), London (6, drawing/story-first).
+
+---
+
+**Tech:** React + TypeScript + Vite, Firebase (Auth/Firestore/Storage/Functions/Hosting), MUI, Claude + OpenAI image stack.
+
+**Scale (current):**
+- TypeScript lines: **126,034** total
+- Commits: **112**
+- Tests: **69 test files**
+- Firestore collections/doc helpers: **33** in `firestore.ts`
+- Cloud Functions: **18**
+- Chat task types: **14**
+- Routes: **27**
+
+## Navigation
+**Parent:** Today, Plan My Week, Weekly Review, Progress, Records, Books, Ask AI, Game Workshop, Dad Lab, Settings  
+**Kid:** Today, Knowledge Mine, Game Workshop, My Books, **Hero Hub**, Dad Lab
+
+---
+
+## What's Built and Working
+
+### Hero Hub (formerly My Armor)
+- Reframed from a settings-style page into a **place** with identity + mission focus.
+- Above-the-fold order: hero render → mission card → Stonebridge preview → stat row.
+- Mission state progression implemented for hub card logic: **Suit Up → Conundrum → Chapter → Hero Ready**.
+- Stonebridge preview surfaces current chapter/conundrum context.
+- Existing customization controls are preserved below the fold.
 
 ### 3D Avatar — Armor of God System
+- Family-tuned voxel proportions: `headSize 1.8`, `torsoW 1.7`, `armW 1.0`, `legH 2.8`, `sleeveRatio 0.7`, `bootRatio 0.3`.
+- Sleeves + forearm split with wrist wraps.
+- Boots include lower-leg band (lower ~30%).
+- Cape defaults on all characters with gentle sway.
+- Tunic details: collar, trim band, cloth belt + buckle, skirt, shoulder pads.
+- Thin dark edge outlines on character + armor blocks (Legends readability pass).
+- Open-face helmet design keeps face visible.
+- Shield position fixed in front of arm (no torso clip).
+- Ghost armor visuals removed (binary equipped/hidden model).
+- Lighting overhaul: warm key, cool fill, gold rim, bounce fill.
+- `MeshPhongMaterial` baseline with tier-specific specular/emissive tuning.
+- Scene polish: gradient sky, floating gold particles, stone pedestal with edge glow.
+- Idle loop includes breathing, arm sway, head micro-movement, and cape sway.
 
-**Route:** `/armor` (kid nav: "My Armor")
+### Accessories System
+- 10 cosmetic accessories unlocked at XP milestones.
+- Slot model: eyes, head, back, hand, shoulder, neck.
+- Conflict rules applied (e.g., helmet hides crown, shield hides book).
+- Persisted on profile at `customization.accessories`.
 
-**3D Voxel Character (Three.js r128):**
-* Minecraft-proportioned character (2:3:3 head:torso:legs ratio)
-* Photo-based feature extraction → skin tone, hair color, hair style applied to character
-* Programmatic 8×8 pixel face texture from extracted features (painted face)
-* Lincoln: fair skin, medium brown tousled hair past ears, gray creeper shirt, navy shorts
-* London: younger proportions (0.85 scale, larger head ratio)
-* Idle animations: gentle bob, arm sway, blinking every 3-6 seconds
-* Edge outlines on all blocks (Minecraft aesthetic)
-* Dynamic lighting: warm key, cool fill, rim, bounce
+### Brothers View
+- Toggle to render Lincoln + London side-by-side.
+- Shared 3D scene with synchronized pose actions.
+- Each child keeps independent armor/customization state.
 
-**Armor Pieces (Ephesians 6):**
-* 6 pieces: Belt of Truth, Breastplate of Righteousness, Shoes of Peace, Shield of Faith, Helmet of Salvation, Sword of the Spirit
-* Each piece is 3D geometry sitting ON TOP of body parts
-* Equip/unequip toggle via card tap
-* Three visual states: equipped (solid), unlocked (ghost 15%), locked (ghost 6%)
-* Equip animation: scale-in with glow + particle burst
-* Open-face helmet design with helmet-compatible hair variant
-* Sword blade always blue (Word of God) with emissive glow
-* Shield with cross emblem and rim detail
-* Arms pivot from shoulder — sword/shield are children of arm groups
+### Night / Room Background Toggle
+- **Night (default):** dark sky + moon/stars.
+- **Room:** Minecraft-style interior (stone walls, wood floor, torch glow, crafting table, chest).
+- Persisted at `customization.background`.
 
-**Tier Progression:**
-* 7 tiers: Wood → Stone → Leather → Iron → Gold → Diamond → Netherite
-* Each tier resets piece collection (recollect all 6 in new material)
-* Tier thresholds: 0 / 100 / 250 / 500 / 1000 / 2500 / 5000 XP
-* Weathering system with color variation per tier
-* Platform color matches current tier
+### Two-Currency Economy (XP + Diamonds)
+(Reference docs: `docs/ECONOMY_AUDIT_PART1.md`, `docs/ECONOMY_AUDIT_PART2.md`.)
 
-**6 Interactive Poses:**
-* Victory, Shield Wall, Prayer, Wave, Battle Ready, Dab
-* Keyframe animation engine with smooth interpolation
-* Pose buttons + swipe to cycle + auto-pose on equip
-* Smooth return to idle after pose completes
+- XP = passive progression (tier unlock axis); Diamonds = active spend currency.
+- Current voxel tier thresholds: Wood 0, Stone 200, Iron 500, Gold 1000, Diamond 2000, Netherite 5000.
+- Forge model: spend diamonds once to forge piece, then equip toggle is free.
+- `addXpEvent()` and `addDiamondEvent()` are the intended award gateways (dedup + transactional-safe patterns).
+- Parent admin UI supports manual awards/deductions across both currencies.
+- `xpLedger` stores both currencies via `currencyType`.
+- `diamondBalance` cache/read-path work added for responsive UI.
+- Lincoln backfill applied to restore fair early-progress economics.
 
-**TTS Scripture:** Web Speech API reads verse aloud on piece tap (0.85 rate)
+### Armor Progression Gating
+- **Loose gate** — next-tier pieces visible but locked with clear reason text (aspirational, not hidden).
+- **Dual requirement** — both XP threshold AND prior tier fully forged needed to unlock next tier.
+- **`forgedPieces[]`** field on AvatarProfile (distinct from `equippedPieces`).
+- **Migration backfill** — infers forged pieces from current equipped state + ledger history.
+- **`armorGate.ts`** with `isTierComplete()`, `canForgePiece()`, `getHighestCompletedTier()`.
+- **Milestone rewards** — diamond bonuses on tier completion: Wood 20, Stone 30, Iron 50, Gold 75, Diamond 120, Netherite 200.
+- **Daily Suit Up** — based on OWNED pieces, not all 6 total (can't equip what you haven't forged).
+- **Phantom piece fix** — gate counts from active forge tier down, ignoring stale data in higher tiers.
 
-**Touch Controls:** Single-finger drag rotation with momentum + friction, auto-rotate after 4s
+### Stonebridge Narrative Foundation
+- Canonical narrative bible documented at `docs/STONEBRIDGE_BIBLE.md`.
+- Shared world model with recurring places/characters (designed for continuity over novelty).
+- Imported into Cloud Functions prompt context (`functions/src/ai/stonebridgeBible.ts`).
+- Chapter question and conundrum generation now use Stonebridge context.
+- Sets continuity foundation for Banner Rally mission layer.
 
-**XP System:** xpLedger collection, separate tracks per child, checkAndUnlockArmor on XP change
+### Chapter Book Progress Tracking (Chapter Pool P1-P3)
+- **Role split:** Parent (Shelly) stages chapters via chip picker + text notes; Kid (Lincoln) performs via audio recording. Single shared `answered` state — kid recording marks `answered: true` globally, removing from both views.
+- **Parent view (`ChapterQuestionPool`)** — horizontal scrollable chip row of unanswered chapters with multi-select. Stacked question cards show text note field only (no audio). "Save Note" persists `responseNote` without marking `answered`. Skip action marks `answered: true, skipped: true`. Chip selections persisted to `DayLog.todaysSelectedChapters`.
+- **Kid view (`KidChapterPool`)** — reads `dayLog.todaysSelectedChapters` (falls back to lowest unanswered). Each chapter shows question + audio record button. Save uploads audio → creates artifact + ChapterResponse docs → marks `answered: true` on bookProgress. Positioned below verse card. No skip, no text note.
+- `useBookProgress` hook — live `onSnapshot` subscription on `bookProgress/{childId}_{bookId}` doc. Provides `updateChapter` callback for atomic pool entry updates.
+- Records "Book Responses" tab groups chapter responses by book in expandable accordions. Shows all chapters: answered (with inline audio), skipped, and unanswered. Legacy responses without `bookId` fall back to title match; unmatched entries bucket to "Other Books".
+- Legacy `ChapterQuestionCard` deleted. `DayLog.chapterQuestion` deprecated (reads only, no new writes). `DraftDayPlan.chapterQuestion` removed.
+- **Storage rule fix:** `chapterResponses/` path added to `storage.rules` (was missing — caused 403 on audio upload). Chapter response audio capture now fully working end-to-end.
+- **Save error surfacing:** All kid recording/save components (`KidChapterPool`, `KidTeachBack`, `KidConundrumResponse`, `KidExtraLogger`) now show a visible MUI Alert on save failure instead of silently swallowing errors. Dismissible with retry guidance.
 
-Progress
-* Ladders tab (skill progression), Engine tab, Milestones tab
-* Skill Snapshot — priority skills, supports, stop rules, evidence definitions, workbook configs
-* Conceptual Blocks — conceptualBlocks[] on Skill Snapshot from pattern detection; ADDRESS_NOW vs DEFER; plain language rationale + strategies
-* "Evaluate Skills" button → evaluation chat Records
-* Hours & Compliance — additive computation (day logs + hours entries + adjustments)
-* Add Historical Hours backfill tool
-* MO compliance dashboard (1000h total / 600h core), hours by subject
-* Evaluations tab — AI evaluation history
-* Portfolio tab — artifact gallery with photo thumbnails + audio playback Dad Lab
-* Full lifecycle: Plan → Start → Lincoln Contributes → Nathan Completes
-* "Suggest a Lab" AI, "I Have an Idea", "Plan a Lab" manual
-* Kid view: prediction, explanation, photo + audio capture
-* Artifact gallery, compliance hours auto-logged on completion Settings
-* General family profile, AI usage dashboard
-* Avatar & XP tab — parent XP controls, piece management, force tier upgrade
-* Sticker Library tab — all generated stickers, tag editing, child profile assignment Cloud Functions (6 deployed, task registry pattern)
-1. `chat` — Task registry routing to: plan, chat, evaluate, quest, generateStory, workshop
-2. `analyzePatterns` — Standalone evaluation pattern analysis (extracted from chat)
-3. `generateActivity` — Lesson card generation
-4. `generateImage` — Task registry routing to: scene, armorSheet, sticker, photoTransform, avatarPiece, baseCharacter, starterAvatar
-5. `weeklyReview` — Scheduled Sunday 7pm CT
-6. `healthCheck` — Diagnostic AI Context Pipeline (task-specific slicing)
-- Each task type receives only the context slices it needs (defined in contextSlices.ts)
-- Plan/chat: full context (charter, child profile, skill snapshot, workbook configs, eval findings, compressed engagement, week focus)
-- Evaluate: charter + child profile + sight words only
-- Quest: child profile + skill snapshot + recent eval + quest recommendations from findings
-- Planner reads both guided and interactive evaluation sessions
-- Story generation: child profile + skill snapshot + week focus only
-- Workshop: story inputs + skill snapshot for challenge calibration + game structure constraints + adventure tree generation + card game generation + card fix suggestions
-- Pattern analysis: child profile + skill snapshot + eval findings + conceptual blocks
-- Engagement data compressed to summary format (reduces tokens ~60%)
-- Token usage logged per task type to aiUsage collection Firestore Collections (32) families/{familyId}/ + children, weeks, days, artifacts, hours, hoursAdjustments, skillSnapshots, workbookConfigs, plannerConversations, lessonCards, avatarProfiles, dailyPlans, weeklyReviews, aiUsage, evaluationSessions, ladders, ladderProgress, milestoneProgress, sessions, projects, labSessions, weeklyScores, dadLabReports, books, bookPages, sightWordProgress, xpLedger, readingSessions, dailyArmorSessions, stickerLibrary, weeklyScores, storyGames
+---
 
-* `avatarProfiles` — per-child avatar data (features, XP, tier, equipped pieces, customization)
-* `xpLedger` — append-only XP event history per child
+## What's Built but Untested with Real Users
+- Full Hero Hub mission-state cycle end-to-end across multiple weeks.
+- Brothers View sustained usage (especially London-led sessions).
+- Stonebridge continuity quality over 2–3 week narrative runs.
+- Diamond economy pacing over sustained real usage (earn/spend cadence).
+- Edge-outline render performance on lower-end mobile tablets.
 
-**Note:** xpEventLog merged into xpLedger (dedup via dedupKey field on ledger entries). Interactive quest sessions stored in `evaluationSessions` with `sessionType: 'interactive'` field. Story games stored in `storyGames` with `gameType` field ('board' | 'adventure' | 'cards'). What's Built but Untested with Real Users
-* Weekly Review (needs full week of data)
-* Print materials (quality varies — book PDFs and worksheets)
-* Skip guidance (depends on evaluation data quality)
-* Lincoln's kid Today view (Must-Do/Choose flow — needs real week)
-* Knowledge Mine reading quest — core bugs fixed Mar 22, needs Lincoln to verify question quality + adaptive pacing + XP accumulation
-* Story Game Workshop — needs London to test: voice recognition via keyboard dictation, wizard flow, all three game types, art generation quality, playtester flow with Lincoln
-* My Books full flow (needs Shelly + kids — AI story gen, sight word tracking, reading sessions)
-* Story Guide handoff to generator (questions work, generator handoff unverified)
-* Book theme filter row on bookshelf (auto-tagging unverified)
-* Evaluation pattern detection — Foundations section (needs 2+ prior evals, not yet tested)
-* Armor piece overlays on character (in flight — overlay prompt just run)
-* Avatar XP adjustment (Firestore undefined error — fix prompt run, needs verification)
-* Armor attachment animation + verse TTS sync (prompt written, not yet run)
-* Tier-up animation (crossing tier boundaries)
-* London's avatar (younger proportions, separate XP)
-* Customization UI (dye colors, emblems, crests)
-* AvatarThumbnail on other pages
-* Parent XP management UI
-* Auto-XP from checklist/quest/book completion What's Not Built Yet Priority Queue (ready to prompt)
-* Lincoln Development Chat — dedicated AI chat mode reviewing evaluations, skill snapshot, recent progress → recommends what to work on this week
-* Planning improvements — activity ideas mode, engagement-based suggestions (PARTIALLY DONE: per-subject defaults and must-do/choose now built; engagement-based suggestions and activity ideas still TODO)
-* Docs update — this outline (v6) needs to go into the repo as docs/MASTER_OUTLINE.md Story Game Workshop — Future
-* Print & Draw (printable board PDF, cut-out cards, London's hand-drawn art)
-* Open Creator (freeform + AI chat helper + game remix)
-* Quiz show game type
-* Multi-device play (Firestore real-time sync across tablets)
-* Week Focus integration (virtue → game theme suggestions)
-* Together Time block (London's games as paired activities)
-* Avatar integration (game creation → crafting materials, "Story Keeper" armor)
-* Evaluation tie-in (challenge card performance → skill snapshot feedback)
+## What's Not Built Yet — Priority Queue
+1. **Banner Rally missions (Hero Hub Phase 2)** — adaptive reading missions in Stonebridge.
+2. **Restoration Map (Phase 2)** — village repair nodes and progress map.
+3. **In-app character tuner** — slider playground directly in production UX.
+4. **Curriculum scanning expansion** — workbook photo → AI skill mapping refinement.
+5. **Eval close-the-loop automation** — re-eval triggers from engagement patterns.
+6. **Math evaluation parity** — reading-style evaluation flow for math.
+7. **London-specific evaluation flow** — age-adjusted assessment UX.
+8. **Tier-up ceremony** — armor shatter / reveal celebration on tier transitions.
+9. **Screenshot & share** — export avatar to PNG.
+10. **Minecraft skin export** — 64x64 skin output from avatar config.
+11. **Seasonal themes** — date-aware winter/fall/Christmas/Easter theming.
 
-Knowledge Mine Phase 2-4
-* Phase 2: Voice input (Web Speech API) + type-to-answer questions — **NOTE: `useSpeechRecognition`, `useTTS`, and `useAudioRecorder` hooks now exist from Workshop build, reuse them**
-* Phase 3: Pre-generated question bank (zero latency)
-* Phase 4: Full avatar integration (quest → mine → armor XP)
-* Parent review view for interactive sessions in Records
-* Math Quest + Speech Quest domains Avatar System — Remaining
-* **Parent XP Management** — Quick award buttons, XP history, tier-up notifications (HIGH)
-* **Tier-Up Animation** — Old armor shatters, new tier announced, ghost pieces appear (HIGH)
-* **London's Avatar** — Younger proportions, separate profile, own photo/features (HIGH)
-* **AvatarThumbnail** — Compact 3D preview for Today page header, nav sidebar, Knowledge Mine (MEDIUM)
-* **Customization UI** — Dye colors (Stone+), shield emblems (Iron+), helmet crests (Iron+), enchantment glow (Gold+), cape (Gold+), particle effects (Diamond+) (MEDIUM)
-* **Auto-XP Wiring** — Checklist items, quests, books auto-award XP (MEDIUM)
-* **Daily Armor Session** — Track which pieces equipped today, streak tracking (LOW)
-* **Avatar in Knowledge Mine** — Character celebrates correct answers (LOW)
-* **Pet companion** — Minecraft-style wolf/cat/parrot follows character (LOW) Avatar Phase 2
-* Memorization mode on verse card (hide words, speak from memory, major XP reward)
-* Daily streak counter
-* Piece order guidance (canonical Ephesians 6 order hints)
-* Kid-friendly verse explanation (1-sentence plain language, Shelly-editable)
-* Nathan notification on tier upgrade
-* Verse progress tracking (reads → memorized gold star) My Books Backlog
-* Evaluation → Sight Words pipeline (findings auto-populate word list, already partially built via Story Guide injection)
-* Collaborative "Read to London" mode (Lincoln reads aloud, London follows highlighted words)
-* Improved AI story quality (longer, more varied sentences) Planned Features
-* Math evaluation chat
-* Speech evaluation chat
-* London's learner profile and evaluation
-* Adaptive loop closing (evaluate → plan → teach → re-evaluate automatically)
-* Heart Journey tracker (quarterly rites)
-* YouTube integration in Teach Helper
-* Google Calendar integration for field trips Brainstorm Backlog (March 16, 2026)
-* London's Game Builder (Mario Maker-style level designer)
-* Field trip / activity research (Kansas City area homeschool finder)
-* Custom Lincoln/London Minecraft avatars (pixel art, child-specific face/features)
-* Photo transform improvements (better pose matching) Deferred
-* Multi-family support
-* Mobile app (web-only for now)
-* Co-op integration, full curriculum database
-* Automated worksheet grading (AI vision) Sprint History Sprint Date What A Mar 3-4 Core pipeline fixes (Firebase, AI planner, date bugs, MVD) B Mar 4 Data richness (workbook configs, energy selector, enriched chat) C Mar 4-5 UX cleanup (nav consolidation, plan quality, Today layout) Planning Mar 5 Lesson card fixes, guided setup wizard, auto-generate on Apply P0 Bugs Mar 5 Generate failures, 0m planned, stale items, week theme display Evaluation Mar 5-6 Reading diagnostic chat, findings extraction, Apply to Snapshot Dad Lab Mar 6-7 Charter, capture page, lifecycle, kid view, artifact gallery Hours Mar 7-9 Additive computation, backfill tool, clear test data D1-D4 Mar 9 Engagement emoji, print materials, skip guidance, per-item capture Worksheets Mar 14 Improved worksheet generation, per-item print from Teach Helper Knowledge Mine Mar 15 Interactive quest Phase 1: MC reading quest, adaptive leveling E1 Mar 15 Quest loop fixes, adaptive logic, 24 unit tests E2 Mar 15 Diamonds → XP → Avatar (XP ledger, armor tiers, KidTodayView bar) E3-E5 Mar 15-16 My Books core: editor, AI scene gen, finish flow, reader, reorder Infra Mar 16 Storage rules, deploy pipeline, Firestore indexes, signed URL fix Sticker Mar 16 gpt-image-1 transparent stickers SightWord Mar 16 Sight word reader, mastery tracking, dashboard, AI story generator Print Mar 16 PDF fix, settings dialog, NaN fix London Mar 16 London theming, child-aware generation, content violation helpers Fixes Mar 16 Progressive save, reading tracking, tappable words, sketch cleanup, pinch-to-zoom (#353-357) F1 Mar 21 Armor of God daily ritual system (full rewrite): verse card, daily reset, tier progression, DALL-E sheet generation, client-side crop, parent controls F2 Mar 21 Armor fixes: XP undefined error, duplicate children selector, base character regen prompt F3 Mar 21 Armor overlays: CharacterDisplay layering, percentage positions, fly animation scaffolding F4 Mar 21 Book editor polish: sticker toolbar, edge clamping, London card max-width, percentage-based sticker positions F5 Mar 21 Story Guide: 5-question TTS-driven wizard, sight word injection, AI shaping, generator handoff F6 Mar 21 Book organization: 9 themes, filter row, sticker tagging, Sticker Library in Settings F7 Mar 21 Evaluation pattern detection: Foundations section, conceptual blocks, Skill Snapshot integration F8 Mar 21 Cohesive armor set: DALL-E 3×2 sheet, cropArmorSheet utility, bigger cards, readable text F9 Mar 21 Armor animation UX: SVG icons (6 pieces), fly-to-body animation, landing impact + particles, pose shift, progressive glow, full armor on! state, word-by-word TTS verse sync
-Avatar v1 Mar 15 2D crop-based armor overlay (REPLACED)
-Avatar System Mar 15-20 My Armor ritual, XP system, armor generation, verse cards, animations, photo transform, parent controls
-Books + Stories Mar 16-19 Story guide wizard, book editor polish, book organization, sticker library, evaluation pattern detection
-Avatar v2 Mar 21 3D voxel character, basic armor equip
-Avatar v3 Mar 21 Minecraft proportions, edge outlines, platform, tier colors
-Avatar v4 Mar 21 Iron tier weathering, Lincoln likeness, ghost armor
-Architecture Cleanup Mar 21 Split domain.ts (1336→8 files), merge xpEventLog into xpLedger, task registry pattern for Cloud Functions, AI context slicing (task-specific), perf instrumentation, Firestore audit
-Avatar v5 Mar 22 Poses (6), pixel face, helmet redesign, arm clipping fixes
-Avatar Audit Mar 22 Memory leak fix, event listener cleanup, camera auto-frame, XP bar fix
-Mine/Eval Engine Mar 22 Quest display fixes (word stimulus, text-only, question variety), XP pipeline (quest→ledger→avatar), eval pipeline (findings→snapshot→planner recommendations), phoneme simplification, end-on-a-win
-Workshop P1 Mar 22 Voice-first story game wizard, board game play, reusable TTS/speech hooks, read-aloud tiles
-Workshop P1.5 Mar 22 Player selection with avatars, DALL-E art generation (boards, titles, cards, tokens), saving/cross-device/resume, Today page cards, draft auto-save
-Workshop P2 Mar 22 Play polish (animations, sound effects, confetti), London voice recording for cards, Lincoln playtester feedback loop with AI card fixes, version tracking
-Workshop P3 Mar 22 Choose-your-adventure game type (branching story tree, scene art, retry endings), Card game type (Matching/Collecting/Battle mechanics)
-Plan My Week Fix Mar 23 Critical bug fixes (handleSetupComplete routing, JSON parsing, feature flag default), UX rewrite (auto-suggest focus, compact setup, full-width plan preview, must-do/choose sections, per-subject default times, renamed UI, combined adjustment chips) Key Design Decisions
-1. Portfolio over grades — no scores, no rankings, evidence-based assessment
-2. No shame rule — MVD is real school, bad days count, app never makes Shelly feel like failing
-3. Formation first — prayer/scripture before academics every day
-4. Lincoln teaches London — Feynman technique, builds confidence + speech practice
-5. Evaluate before plan — know the frontier, then every minute counts
-6. Print the stack — Shelly needs physical materials, not just a digital checklist
-7. Engagement > completion — tracking HOW it went, not just IF it got done
-8. Additive hours — all sources counted (day logs + hours entries + adjustments)
-9. Dad Lab is separate — different rhythm, different goals, Nathan's domain
-10. Minecraft framing — Lincoln's language, not school language
-11. Interactive eval = learning — quest sessions are BOTH assessment AND practice
-12. Diamonds, not scores — "You mined 8 diamonds" not "You got 80%"
-13. Scene-first workflow — AI generates illustrated worlds, kids provide their own characters via upload
-14. Reading = building — every book read logs hours and creates a portfolio artifact automatically
-15. Words are learnable anywhere — tap any word in any book for pronunciation; mastery tracked passively
-16. Armor is devotional, not decorative — daily ritual of putting on each piece teaches scripture through repetition and embodiment
-17. Cohesive generation — when multiple visual assets share a theme, generate together for visual consistency (armor sheets, not individual pieces)
-18. Quest variety over repetition — AI rotates question types within a session, never same format twice in a row
-19. End on a win — quest always finishes with success, bonus round if needed
-20. 3D over 2D — 2D image cropping for armor overlay failed (alignment impossible between two AI-generated images). 3D voxel geometry solves alignment permanently.
-21. Tier reset = always earning — each tier resets piece collection so there's always 6 pieces to earn. Prevents "I have everything" at 1000 XP.
-22. Open-face helmet — Lincoln's face must be visible through the helmet. Identity > armor coverage.
-23. Arms pivot from shoulder — sword/shield are children of arm groups, not the character root. Poses animate arms and weapons move naturally.
-24. Painted face > photo pixelation — client-side photo-to-8×8 pixelation creates zombie/camo artifacts. Programmatic face painting from extracted features is reliable.
-25. Poses are formation moments — Prayer pose (arms together, head bowed, eyes closed) is intentionally included. The armor is spiritual, not violent.
-26. Voice-first for London — he talks, the app listens; he listens, the app talks. Reading/typing are fallbacks, not primary input
-27. London creates, Lincoln refines — Story Keeper / Playtester roles give both boys meaningful work from one feature
-28. Players ARE the family — game tokens are real people with real avatars, not fictional characters
-29. **Setup once, confirm weekly** — Shelly configures routine and subject times once. Weekly planning is: pick energy, note exceptions, generate, lock in. Under 2 minutes. Key Files Reference src/app/AppShell.tsx — nav structure (parent + kid) src/app/router.tsx — all routes src/core/types/domain.ts — ALL data types src/core/firebase/firestore.ts — ALL collection references src/core/ai/useAI.ts — chat + generateImage hooks src/core/xp/addXpEvent.ts — XP writer with dedup guards src/core/xp/checkAndUnlockArmor.ts — tier unlock + sheet generation trigger src/core/avatar/getDailyArmorSession.ts — daily reset logic src/core/avatar/cropArmorSheet.ts — client-side 3x2 sheet cropper functions/src/ai/chat.ts — AI pipeline (plan/evaluate/quest/generateStory/analyzePatterns) functions/src/ai/imageGen.ts — DALL-E 3 + gpt-image-1 + Haiku rewriter src/features/avatar/ — My Armor (MyAvatarPage, VerseCard, ArmorIcons, AttachAnimation, CharacterDisplay, Particles) src/features/books/ — My Books (22+ files, 6500+ lines) src/features/quest/ — Knowledge Mine (7 files) src/features/today/ — Today page src/features/records/ — Records + compliance src/features/settings/ — Settings (AvatarAdminTab, StickerLibraryTab) src/core/types/                         — split type files (common, family, planning, evaluation, xp, books, compliance, dadlab)
-src/core/types/index.ts                 — barrel re-export (replaces old domain.ts)
-src/core/utils/perf.ts                  — performance measurement helpers
-functions/src/ai/tasks/                 — chat task registry (plan, chat, evaluate, quest, generateStory, analyzePatterns)
-functions/src/ai/imageTasks/            — image task registry (7 handlers)
-functions/src/ai/contextSlices.ts       — task-specific context assembly + engagement compression
-docs/FIRESTORE_AUDIT.md                — Firestore collection + index audit (March 21, 2026)
-docs/MASTER_OUTLINE.md — this file (update after each session) .github/workflows/deploy.yml — CI/CD pipeline
+---
 
-### Architecture Notes
+## Sprint History (Since v14)
 
-#### Avatar / Three.js Architecture
-- Three.js scene lifecycle managed in a single React component with `useEffect` cleanup
-- `initScene` callback decoupled from re-render cycle (intentional `eslint-disable`)
-- `enforceArmorOpacity` runs every frame — could optimize to on-change only
-- Character and armor meshes stored in `useRef` (not React state)
-- `equippedPieces` React state → `useEffect` syncs to Three.js mesh materials
-- Consider extracting Three.js lifecycle into custom `useThreeScene` hook
-- `DailyArmorSession` and `AvatarProfile` both track equipped pieces — potential drift
+| Sprint | Date | Outcome |
+|---|---|---|
+| Phase 2-3 Polish | Apr 2026 | XP toasts, tier-up ceremony, armor detail, scene polish, London avatar with younger proportions |
+| Parent XP Mgmt | Apr 2026 | XP dashboard, award/adjust UI with presets |
+| Legends Overhaul | Apr 2026 | Lighting, materials, gradient sky, particles, pedestal, dye/enchant glow/cape/emblem |
+| Proportions Playground | Apr 2026 | In-chat slider tuner, Lincoln designed his own character, family-approved values applied |
+| Edge Outlines + Mobile Fix | Apr 2026 | EdgesGeometry on all blocks, accessories grid overflow fixes, pose button truncation |
+| Ghost Armor Removed | Apr 2026 | Binary on/off visibility only |
+| Shield/Helmet Fix | Apr 2026 | Open-face helmet (5 pieces), shield positioned in front of body |
+| Dream Features | Apr 2026 | Accessories (10 items), screenshot/share, Minecraft skin export, seasonal themes |
+| Economy Audit | Apr 2026 | 2-part read-only audit, 7 bugs identified, pacing math, fix plan |
+| Economy P0 Fixes | Apr 2026 | Consolidated voxel tier system, addXpEvent for admin, valid XP_EVENTS keys, transactional spendDiamonds, WOOD default tier |
+| Economy P1 Fixes | Apr 2026 | WEEKLY_ALL_COMPLETE wired, BOOK_PAGE_READ wired, diamonds on evals, chapter response earning, conundrum dedup split |
+| Economy P2 Cleanup | Apr 2026 | Cached balance used everywhere, forge helpers extracted to shared util |
+| Diamond Gateway | Apr 2026 | addDiamondEvent(), DIAMOND_EVENTS constants, parent admin UI, spendDiamonds uses gateway |
+| Phase 1A Stonebridge | Apr 2026 | Story bible, AI prompt injection for conundrum + chapter questions |
+| Phase 1B Hero Hub | Apr 2026 | Nav rename, mission card, Stonebridge preview, above/below-fold layout |
+| Armor Progression Gate | Apr 2026 | forgedPieces tracking, isTierComplete, canForgePiece, milestone bonuses, loose gate UI |
+| Suit Up Bug Hunt | Apr 2026 | Tier display fixed (compute from XP), suit up counts owned pieces, phantom tier data bug fixed |
+| Crash Cascade Stabilization | Apr 7, 2026 | Quest graceful error paths, `/quest` error boundary, AvatarThumbnail WebGL safety |
+| Unified Capture Pipeline | Apr 8, 2026 | Merged 3 Today capture entry points into 1 AI-routed handler. Worksheets/textbooks/tests → scans + curriculum update; everything else → artifacts. Fixes "Last updated" staleness on Progress. |
+| Scan Analysis + Parent Override | Apr 9, 2026 | Post-capture scan analysis visible inline on Today (expandable panel on "Captured ✓"). Progress Recent scans now tap-to-expand. New "This Week's Scans" section on Progress — 7-day rolling list. Parent override on AI recommendations — Shelly can correct classifications, originals preserved for audit. Shared ScanAnalysisPanel component. |
+| Kid Unified Capture | Apr 9, 2026 | Extended unified capture pipeline to kid views. KidTodayView now uses shared `useUnifiedCapture` hook — Lincoln's captures route through AI scan, update curriculum, and appear in Shelly's Progress view identically to parent captures. Kid-friendly feedback (snackbar, no analysis panel). |
+| Working Levels Data Model | Apr 9, 2026 | Per-domain working level tracking for Knowledge Mine progression (phonics/comprehension/math). Starting levels persist across sessions via `workingLevels` field on skill snapshot. Updated by quest completion, guided evaluation, and curriculum scans. Manual overrides protected for 48 hours. Fixes "starts at Level 2 every session" regression. (Part 1 — plumbing only; parent UI in Part 2.) |
+| Bugfix Apr 10 | Apr 10, 2026 | Planner lock-in off-by-one: Friday plans were written to Thursday's date key because WEEK_DAYS (Monday=0) was added to a Sunday-based weekRange.start. Extracted `dateKeyForDayPlan` pure helper + unit tests. |
+| Chapter Pool P1 | Apr 10, 2026 | Chapter book question pool foundation: ChapterBook + BookProgress types, Narnia seed data (17 chapters with summaries), chapterQuestions Cloud Function task handler, Firestore collection helpers. |
+| Chapter Pool P2 | Apr 12, 2026 | Planner book picker (Autocomplete from library), readAloudBookId persistence on WeekPlan + plannerDefaults, handleApplyPlan triggers chapter question pool generation via chapterQuestions task, removed inline chapterQuestion prompt injection. (Apr 12 fix: picker now visible in review and active phases, not just setup wizard). (Apr 12 diagnostic: temp raw-response logging added for Monday plan fragment investigation). |
+| Hotfix: chapterBooks path | Apr 12, 2026 | Moved chapterBooks from invalid `curriculum/chapterBooks` path (even segment count = document ref, not collection) to top-level `chapterBooks` collection. Updated Firestore rules, seed, and all references. |
+| Chapter Pool P3 | Apr 12, 2026 | Today ChapterQuestionPool component (parent view): chapter picker + stacked question cards + per-chapter audio recording + live bookProgress updates. Deleted legacy ChapterQuestionCard. Deprecated DayLog.chapterQuestion field (reads only, no new writes). Removed P2 Monday diagnostic logging. Cleaned chapterQuestion from DraftDayPlan and AI plan schema. (Apr 13 fix: preserve readAloudBookId across plan applies, harden title prompt to prevent phonics context bleeding, parser safety net for long titles, re-added diagnostic logging). (Apr 13 fix: parent-only chip picker with multi-select + text notes (audio removed from parent); kid view gets KidChapterPool with audio recording positioned below verse card; single shared answered state; todaysSelectedChapters persisted on DayLog). (Apr 13 cleanup: ExplorerMap weekStart → Monday-based; removed temp diagnostic writes). (cleanup: hide chapter range field when library book selected — pool handles chapter selection) |
+| Dev Admin Tab | Apr 13, 2026 | Mobile-friendly dev admin tab in Settings for one-off data ops: seed Narnia to chapterBooks, scan/delete stale Sunday DayLogs, set readAloudBookId on current week. Gated to Nathan's UID; delete or re-scope if the project has other developers. Firestore rules updated to allow admin UID writes to chapterBooks. |
+| Plan + Pool Reliability | Apr 13, 2026 | Increased plan AI max_tokens to 16000, surface truncation as user error instead of silent routine fallback, added pool generation success/failure toasts with retry, manual pool gen trigger in Dev admin tab and on Today chapter card after 60s loading. (Apr 13 fix: useBookProgress loading state never-resolves bug — ensured all exit paths set loading: false, added bookId to useEffect deps for async re-subscription, split ChapterQuestionPool render into distinct loading vs "no pool doc yet" states so the generate-questions button appears immediately instead of waiting 60s for the fallback retry). |
+| Charter: Remove Quest Scores | Apr 14, 2026 | Removed all numeric score displays from kid-facing quest UI per charter principle "No grades, no scores, no rankings on kid UI." Removed: X/10 question counter, running totalCorrect tally, totalQuestions on summary, X/5 fluency ratio, X/Y correct on resume card. Kept: progress bar (no numbers), diamond achievement framing, level indicator. Parent analytics unchanged. |
+| Editable Disposition Narrative | Apr 14, 2026 | Per-disposition inline edit on Learning Profile tab. Parent overrides stored separately (`dispositionOverrides` on child doc) so AI regeneration cannot blow away edits. `effectiveDispositionText()` helper centralizes override-vs-AI resolution. "Edited by Shelly" indicator, revert to AI, optional reason note. "Newer AI available" notice when AI regenerates after an override. Types extracted to shared `src/core/types/disposition.ts`. Charter principle #5 now Aligned. |
+| Working Levels Backfill | Apr 14, 2026 | One-time backfill action in Dev tab: derives workingLevels from evaluation findings + quest history for children missing them. Pure logic extracted for testing. Closes Fix #1 from workingLevels inspection. |
+| Skip System Phase 1 | Apr 14, 2026 | Data model (`activityConfigId`, `skipReason`, `rolledOver`, `rolledOverFrom` on ChecklistItem) + `SkipReason` const enum. Auto-rollover of unchecked items to next school day (Mon←Fri, dedup by configId/label, chain-rollover, weekend skip). Scan-advance auto-completes bypassed checklist items when `syncScanToConfig` advances position. "Accept & advance" button on ScanResultsPanel for AI skip recommendations (marks skipped + advances position + records parentOverride). 38 new tests across 3 test files. Design: `DESIGN_SKIP_SYSTEM_V2_2026-04-09.md`. |
+| Chapter Response Save Fix | Apr 14, 2026 | Added missing `chapterResponses/` storage rule (caused 403 on kid audio upload). Surfaced save errors in all kid recording components (KidChapterPool, KidTeachBack, KidConundrumResponse, KidExtraLogger) — failures now show dismissible MUI Alert instead of silently swallowing. |
+| Skill Snapshot Data-Loss Fix | Apr 16, 2026 | Fixed G27/R4 from Learning Engine Audit: bare `setDoc` on skillSnapshots silently erased unlisted fields (e.g. `completedPrograms`, `createdAt`). Added `{ merge: true }` to all three write sites: eval Apply (`EvaluateChatPage.tsx`), quest endSession (`useQuestSession.ts`), and admin backfill (`backfillWorkingLevels.ts`). |
+| Ask AI Context Wiring (R6) | Apr 19, 2026 | Closed "Ask AI knows nothing" gap from Learning Engine Audit. Wired shellyChat task to the same adaptive context the quest/planner/disposition tasks already use: added `skillSnapshot`, `recentHistoryByDomain` (cross-domain, depth 3), `recentScans`, plus new `dayToday` (today's checklist with engagement/mastery/skip state) and `dadLabReports` (last 3 relevant reports with kid prediction/explanation) slices. No removals. Ask AI can now answer "what level is Lincoln at in phonics?", "how did this week go?", "what should we do for Dad Lab?", and "should Lincoln skip the next GATB math lesson?" from live Firestore data. |
+| Working Levels UI (B.2 / G20) | Apr 20, 2026 | Closed G20 from Learning Engine Audit. Progress → Skill Snapshot tab now shows a Working Levels section with current level, source badge (quest / evaluation / curriculum / manual), last-updated timestamp, and evidence note for phonics / comprehension / math. Parents can adjust with ± controls and an optional note (suggestions: "further along", "struggling", "fresh start") — writes use `setDoc … { merge: true }` with `source: 'manual'`, respects `QUEST_MODE_LEVEL_CAP` ceilings (phonics 8, comp/math 6), and triggers the 48-hour manual-override guard. "Revert to last auto level" link clears the manual slot via `deleteField()` so the next quest/eval/scan writes through. London sees "Not set — will default to Level 2" until her first quest or manual set. |
+| Comprehension Quest Prompt Rewrite (P1-3) | Apr 20, 2026 | Closed P1-3 from Knowledge Mine Audit. `buildComprehensionQuestPrompt` rewritten to match phonics structure: 6 concrete question types per 2-level band (18 total across L1-2 explicit / L3-4 simple inference / L5-6 deeper inference), Minecraft-themed passages required (Steve / Alex / Lincoln as protagonist, standard mobs and biomes), passage-length rules per level (15-30 / 30-60 / 60-100 words), auto-read TTS note (passages auto-read before answer — tests listening + reading, not decoding), kid-friendly language ban list (no "comprehension" / "inference" / "main idea" / "author's purpose" / "context clues" / "summarize" / "point of view" in question text), type rotation rule, expanded skill-tag vocabulary covering all 17 sub-skills. Level 6 is the comprehension ceiling. No engine or UI changes. |
+| Weekly Review Bug Fixes | Apr 20, 2026 | Closed both findings from Learning Engine Audit "Weekly Review Context Inspection." **Bug 2 (doc ID mismatch → 0% completion):** added `lastCompletedWeekKey` util to `src/core/utils/time.ts` (mirrors CF `lastWeekKey`). `WeeklyReviewPage` now keys on the just-completed Sun–Sat week instead of the current-week Sunday, so the scheduled Sunday 7pm CT write and the page read agree on the doc ID. "Generate Now" covers the same range as the scheduled run (no more morning-snapshot 0%). Display label changed from raw Sunday key to `Week of Apr 12 – Apr 18`. **Bug 1 (context poverty):** weekly review now uses shared context slices alongside week-specific dayLog/hours data. Registered `weeklyReview` in `TASK_CONTEXT` with `charter, childProfile, skillSnapshot, activityConfigs, recentHistoryByDomain, recentScans, wordMastery, dadLabReports`. `generateReviewForChild` loads the child's skill snapshot and calls `buildContextForTask('weeklyReview', …)`. `assembleWeekContext` is untouched — it still supplies the week-scoped dayLogs/hours/plans/books/missedDays that the shared slices don't cover. Prompt addendum updated to push the reviewer to ground wins, growth areas, and pace adjustments in concrete skill progression (working levels, domain eval history, scan recommendations, activity-config frequency vs actual) rather than completion counts alone. Worst-case combined system prompt ≈3.1k input tokens, well under Claude Sonnet limits. |
+| Book Attribution | Apr 20, 2026 | Added `createdBy` ('parent' or childId) and `createdFor` (childId) fields to Book type so Shelly can create books from parent profile without the Weekly Review mis-attributing them to the kid. Editor shows compact "For/By" controls at the top — "For" drives editor theming (Minecraft palette for Lincoln, storybook palette for London) via a new `themedChild` derivation that reads from `book.createdFor` instead of the active profile, so parent-profile creation gets WYSIWYG child palette preview. Theme tweaks (font/background/style) still stick after child-based defaults apply — an `aiStyleTouched` flag prevents the default-sync effect from clobbering user picks. Blank and generated books created from parent profile default to `createdBy: 'parent'`, `createdFor: selectedChildId`; kid-profile creation defaults to `createdBy: childId, createdFor: childId`. Weekly Review `bookActivity` context now includes `createdBy`/`createdFor`, includes books owned OR made-for the child, and tags each line as "made by Mom/Dad for Lincoln" / "made by Lincoln" / "made by sibling"; prompt TONE explicitly tells the reviewer not to credit parent-made books as the kid's creative work. Bookshelf gained a parent-only "Made by: All / Mom's Books / Kids" filter row and each book card shows a compact "By Mom" / "By Lincoln" badge. Existing books (no fields) default to `createdBy: 'parent'` (safer default — legacy books were made by Shelly in kid profiles); Shelly re-tags them one at a time via the editor dropdown. No batch migration. |
+| Book Planner Integration | Apr 20, 2026 | Prompt 2 of book authorship: hooked Mom's Books and kid drafts into Plan My Week so planner-generated weeks surface "Read: {title}" and "Continue Book: {title}" choose-items with a `bookId` link. Replaced the count-only `loadDraftBookCount` with `loadDraftBooksByChild` (filters on `createdBy === childId`, returns title + page count + id per draft). Rewrote `loadGeneratedContent` into two buckets: **MOM'S BOOKS** (createdBy='parent' + createdFor=childId, last 30 days) and legacy AVAILABLE GENERATED CONTENT (childId-owned, de-duped). Both sections include the bookId inline so the AI can echo it on plan items. Added `bookId` to `DraftPlanItem`, parsed it in `chatPlanner.logic.ts`, and propagated it to `ChecklistItem` on plan apply. Added book-guidance rules to `PLAN_OUTPUT_INSTRUCTIONS` ("Read:" = Reading 10-15m with bookId, "Continue Book:" = LA/Art 15-20m with draft bookId, "Make a New Book" = null bookId). Today parent checklist gained a `MenuBookIcon` affordance next to the sparkle whenever `item.bookId` is set; KidChecklist's book-item heuristic now matches on `bookId \|\| /book\|read:/i` so AI-generated "Read: {title}" labels (no literal "book" word) still trigger the "Go to My Books" button. Hours tracking works naturally — checklist-item completion already credits `subjectBucket` minutes in `records.logic.ts`, so Reading and LanguageArts hours accrue on tick. |
+| Kid Chapter + Cleanup | Apr 20, 2026 | Closed out the chapter pool feature. `KidChapterPool` component (audio recording per chapter, positioned directly below the verse card on Kid Today, above diamonds/workshop/checklist) reads `DayLog.todaysSelectedChapters` with fallback to the lowest unanswered chapter, uploads audio to `families/{familyId}/chapterResponses/{childId}/{bookId}/ch{n}_{ts}.webm`, creates matching artifact + `ChapterResponse` docs, and calls `updateChapter` to mark `answered: true` on `bookProgress` — so a kid recording disappears the chapter from the parent chip picker via the single shared state. Delete-and-redo flow cleans storage, artifact, and the response doc before un-answering. Legacy kid chapter response component removed (no more `dayLog.chapterQuestion` reads in kid view). Stripped the remaining Apr-13 diagnostic console logs from `useBookProgress.ts` now that the loading fix is confirmed stable. |
+| Rollover Dedup + Planner Budget Enforcement | Apr 21, 2026 | Fixed the 21-item / 6h45m Monday checklist regression. **Rollover dedup (`src/features/today/rollover.ts` + new `src/core/utils/workbookMatching.ts`):** `mergeRolledItems` now **replaces** planned workbook items with rolled same-workbook items instead of appending/dropping them. `isSameWorkbook(a, b)` matches on `activityConfigId` → normalized label → substring (≥5 chars) → shared-word + same-subject fuzzy fallback; `normalizeWorkbookName` strips "Lesson N" / "Ch N" / time estimates / "book set" / separators. When a match wins, the rolled item keeps `rolledOver: true` + `rolledOverFrom`, inherits the planner's `skipGuidance` / `block` / `category` / `plannedMinutes` / `subjectBucket` / `skillTags` / `contentGuide` / etc. If both have lesson numbers the higher lesson wins (planner already advanced past yesterday's unfinished lesson). Chain-rollover still works. **Post-merge budget enforcement (new `src/features/today/budgetEnforcement.ts`):** `enforceDailyBudget(checklist, budget)` trims overflow by deferring lowest-priority items first (Must-Do always protected → rolled items → Choose → Focus/aspirational, longest-within-tier first) with a ~10% grace window (186m budget allows ~205m). Items are flagged `deferredByBudget: true` — not deleted. `resolveDailyBudget` halves the budget on `planType: 'mvd'` / energy `low` / `overwhelmed`. **Data:** `dailyBudgetMinutes` added to `DayLog`; `handleApplyPlan` in `PlannerChatPage` now persists each day's `timeBudgetMinutes` onto its DayLog so rollover can enforce. `deferredByBudget` added to `ChecklistItem`. **Hook wiring:** `useRolloverUnchecked` now takes `dailyPlan`, runs enforcement after rollover merge (and on weekends / already-rolled days too, so planner-overfull plans without a rollover still get trimmed). `TodayPage` moved the rollover call below `useDailyPlan` so MVD/low-energy can halve the budget. **UI:** `TodayChecklist` hides deferred items and shows a subtle "N items deferred to fit today's schedule — tap to show" row at the bottom. Tap toggles them back. Summary line and "Est. finish" now count only visible items. **Planner prompt:** `buildPlannerPrompt` emits a HARD BUDGET RULE ("sum of estimatedMinutes per day MUST be ≤ budget; a shorter plan that fits beats a longer plan that overflows; aim 8–10 items/day"). Subject time defaults reframed as TOTAL minutes per subject per day (not per item). `PLANNER_TASK_INSTRUCTIONS` gained matching language + explicit MVD-halves-budget rule. **Tests:** +13 `workbookMatching` tests, +6 new `rollover` cases (same-workbook replace, lesson-number winner, metadata inheritance), +11 `budgetEnforcement` tests (grace, priority, MustDo protection, MVD halving, idempotent clear), +2 planner prompt tests; snapshots refreshed. 1435 pass. |
+| Knowledge Mine UX | Apr 22, 2026 | Ungated Knowledge Mine: dedicated `KidMiningCard` (src/features/today/KidMiningCard.tsx) rendered above the checklist, auto-tracks session time to Reading hours via `useQuestSession` (source renamed `quest-session` → `knowledge-mine`, rounded to 5 min). Card sums today's auto-tracked minutes with `useTodayMiningMinutes` (queries `hours` collection for `source === 'knowledge-mine'`) and displays "⛏️ Mined X min today" / "No mining yet today" with an always-available "Start Mining" button. Removed the inline `DiamondsMined` / "Ready to mine?" card from `KidTodayView` and the now-unused `useTodayQuests` hook. Removed Knowledge Mine injection from the plan AI (`functions/src/ai/tasks/plan.ts` EVALUATION SCHEDULING section + Block 7) and from the fallback `ensureEvaluationItems` in `chatPlanner.logic.ts` (fluency-only; Knowledge Mine is no longer a checklist item). `KidExtraLogger` copy clarified to "Did extra work on your tablet? (Reading Eggs, Math App, Typing)" so it's clearly for tablet apps, not Knowledge Mine. Nav item unchanged (`/quest` route), Game Workshop gate unchanged (different design decision). |
+| Blockers Phase 2 | Apr 21, 2026 | Shipped Phase 2 of the evaluation methodology (`docs/EVALUATION_METHODOLOGY_2026-04.md` §4): the quest prompt now deliberately targets known blockers. **Prompt change (`functions/src/ai/chat.ts`):** `buildQuestPrompt` gained an `extras` arg + two new section builders — `buildKnownBlockersSection` surfaces ADDRESS_NOW + RESOLVING blocks with stable ids, affected skills, example words, rationale, and a 0/1/2+ distribution rule; `buildRecentCurriculumSection` points the AI at the existing `recentScans` slice and suggests 1-2 optional reinforcement questions. Both sections inject before RESPONSE FORMAT in the reading-phonics, math, and comprehension branches. Quest response schemas now include `"targetedBlockerId": null` so the AI can tag deliberate probes with the exact block id. **Context wiring (`functions/src/ai/tasks/quest.ts`):** filters `snapshotData.conceptualBlocks` to ADDRESS_NOW + RESOLVING, detects whether `recentScans` produced a RECENT WORKBOOK SCANS section, and passes both into `buildQuestPrompt`. `SnapshotData` (`chatTypes.ts`) extended with `conceptualBlocks` and the skill-snapshot load in `chat.ts` now carries them through. **Targeted-evidence signal (`src/features/quest/questTypes.ts`, `useQuestSession.ts`, `src/core/utils/blockerLifecycle.ts`):** `QuestQuestion` + `SessionQuestion` gained optional `targetedBlockerId`; `parseQuestBlock` reads it from the AI's `<quest>` JSON; answer + skip flows pass it through to `SessionQuestion`. `sessionEvidenceFromQuestions` now emits `targetedCorrect` / `targetedTotal` subcounts and routes attempts by `targetedBlockerId` when set (falling back to skill-derived id, or crediting both when they differ). `updateBlockerLifecycle` weights targeted evidence by `TARGETED_EVIDENCE_WEIGHT = 2` so a deliberately-probed correct answer counts twice toward RESOLVING / RESOLVED thresholds — reflecting that targeted hits are stronger signal than incidental ones. DEFER and RESOLVED transitions unchanged. No adaptive-engine changes, no UI changes, no new data model. New tests cover both the prompt builders and the weighted lifecycle. |
+| Book Picker UX | Apr 21, 2026 | Replaced free-text book input with clear library selector + "Add a Book" inline form. Removed `freeSolo` Autocomplete and the "Chapters this week" range field from setup wizard, review phase, and active phase. New MUI `Select`-based `ChapterBookPicker` with explicit "None — no read-aloud this week" sentinel and an "+ Add a new book" option at the bottom that expands an inline form (title/author/chapter count + optional chapter titles) and writes directly to the global `chapterBooks/{id}` collection. `readAloudBookId` now auto-populates from `plannerDefaults` on new weeks, is written unconditionally to the week doc on plan apply when `selectedBook` is set, and is persisted back to `plannerDefaults` on apply so the sticky default carries forward. Firestore rules widened to allow any authenticated user to write `chapterBooks` (was admin UID only). Fixes the silent root cause behind every "chapter card disappeared" report — Shelly typed a series name into free-text instead of selecting a library book, so `readAloudBookId` never got written and Today never rendered the chapter card. |
+| Blockers Phase 1 | Apr 21, 2026 | Shipped Phase 1 of the evaluation methodology (`docs/EVALUATION_METHODOLOGY_2026-04.md` §3): `conceptualBlocks` on Skill Snapshot now has **four writers** and a real **lifecycle**. Data model extended with optional `id` (slugified skill), `status` (`ADDRESS_NOW` / `DEFER` / `RESOLVING` / `RESOLVED`), `evidence`, `firstDetectedAt`, `lastReinforcedAt`, `sessionCount`, `resolvedAt`, `source` / `lastSource` (`evaluation` / `quest` / `scan` / `parent`), `specificWords`, `specificQuestions`, `correctAttempts`, `totalAttempts`. All existing fields preserved — legacy blocks load untouched and render as ADDRESS_NOW via `recommendation` fallback. Helpers live in `src/core/utils/blockerLifecycle.ts`: `generateBlockId`, `mergeBlock` (merge-by-ID with regression handling for RESOLVING → ADDRESS_NOW), `updateBlockerLifecycle` (ADDRESS_NOW → RESOLVING at ≥3 cumulative correct, RESOLVING → RESOLVED at ≥5 correct across ≥2 sessions with no new wrong answers, DEFER and RESOLVED are static), `sessionEvidenceFromQuestions`. **Writer 1 (existing, fixed):** `EvaluateChatPage.handleSaveAndApply` now **merges** pattern-analysis blocks into the existing array via `updateDoc` (closes R4 blockers-specific — the eval used to wholesale-overwrite the array and wipe quest/scan/parent blocks). **Writer 2 (new):** `detectBlockersFromSession` in `src/features/quest/detectBlockers.ts` emits a block when Lincoln gets 2+ wrong at the same sub-skill in a ≥5-question session (DEFER if 2 wrong + 1 skipped, ADDRESS_NOW otherwise). Fluency mode is skipped. Wired into `useQuestSession.endSession` after the snapshot write; `updateBlockerLifecycle` also runs there using `sessionEvidenceFromQuestions(questions)` so correct answers advance existing blocks. **Writer 3 (new):** `detectBlockersFromScan` in `src/features/today/scanBlocker.ts` emits one block per `alignsWithSnapshot: 'behind'` skill on any `skip`/`modify`/`too-hard`/`challenging` scan (falls back to a topic-level block if no specific skills surface). Wired into `useUnifiedCapture` after the skill map update. **Writer 4 (new):** `buildStuckBlock` + `buildGotItReinforcement` in `src/features/today/masteryBlocker.ts`. `TodayChecklist` mastery chips now call a shared `handleMasteryChip` that writes an ADDRESS_NOW block on "Stuck" and a RESOLVING nudge on "Got it" (only if an existing block with the same id already exists — prevents empty reinforcement writes). **AI context fix:** `formatConceptualBlocks` extracted from `contextSlices.ts` and now emits three sections to the model — ADDRESS_NOW, RESOLVING ("trending better, keep probing gently"), and DEFER ("do NOT push on these"). RESOLVED blocks are omitted from prompts (kept in the array for history). All writes use `updateDoc` so unrelated snapshot fields are preserved. 64 new tests (`blockerLifecycle.test.ts`, `detectBlockers.test.ts`, `scanBlocker.test.ts`, `masteryBlocker.test.ts`, `applyMerge.test.ts`, plus `formatConceptualBlocks` tests in `functions/src/ai/contextSlices.test.ts`). |
 
-Architecture Review Notes (March 21, 2026) The following areas are flagged for architecture review in the next chat session:
-* XP system — xpLedger + xpEventLog as separate collections; dedup guard pattern; whether totalXp should be cached on avatarProfile or always summed from ledger
-* Avatar generation costs — DALL-E 3 sheet generation per tier per child; when to generate vs cache; cost implications at scale
-* Cloud Function sprawl — chat function handles 6+ task types; generateImage handles 4+; whether these should be split into separate functions
-* Firestore collection count — 32+ collections; some may be better as subcollections; composite index requirements growing
-* Client-side image processing — cropArmorSheet, sketch cleanup, and print PDF all do heavy canvas work client-side; perf on low-end devices
-* AI context pipeline size — system prompt includes many data sources; token cost and latency implications
-* Type safety — domain.ts is the single source of truth; growing large; worth splitting by feature domain? Last updated: March 22, 2026
+### Sprint Cleanup — April 2026
+- Deleted Sprint 1 UFLI scaffolding (9 files, dormant since creation, seed never ran)
+- Kept: scripts/setLincolnPhonicsLevel.ts (sets workingLevels, not UFLI-specific)
+- Kept: voice-first Knowledge Mine changes (tap-to-hear, speaker icons)
+- Decision: rely on existing Knowledge Mine + findings pipeline for Lincoln acceleration
+
+### Findings Pipeline Doc + UFLI Cleanup Polish — Apr 13, 2026
+
+- Added `docs/FINDINGS_PIPELINE.md` — end-to-end trace of EvaluationFinding data flow from Knowledge Mine → skillSnapshot → AI context windows
+- Updated CLAUDE.md accuracy: CF count, collections, imageTasks, ladder TODOs, terminology
+- Fixed ExplorerMap weekStart to Monday-based, removed temp diagnostic writes
+- Decision documented: rely on existing Knowledge Mine + findings pipeline rather than separate UFLI tracking layer
+
+## Removed Features / Concepts
+- Ghost armor visual state (moved to binary on/off only).
+- Legacy tier model (consolidated around voxel tier thresholds).
+- “Forge” as separate currency (re-merged into Diamonds economy).
+- `parent_adjustment` event type (replaced by `MANUAL_AWARD` / `MANUAL_DEDUCT`).
+- Hardcoded `/6` denominators in suit up UI (now uses actual forgedCount).
+
+## Key Design Decisions
+1. **Two currencies, distinct roles** — XP = progression, Diamonds = choice.
+2. **Forge then equip** — spend once to forge, free equip toggles forever.
+3. **Stonebridge is one shared world** — all narrative systems build continuity in the same canon.
+4. **Hero Hub is a place, not a settings page** — mission context above customization.
+5. **Knowledge Mine vs Banner Rally split** — measure vs adventure (both needed).
+6. **Family-tuned proportions** — design with the child in a live playground, not by guesswork.
+7. **Edge outlines for readability** — biggest visual clarity gain per implementation cost.
+8. **Open-face helmet** — identity and recognition beat full visual coverage.
+9. **Loose tier gate** — next tier visible but locked with clear requirement, aspirational not hidden.
+10. **Daily Suit Up = equip all OWNED pieces** — not all 6 total. Can't equip what you haven't forged.
+11. **Gateway functions for currency** — `addXpEvent()` and `addDiamondEvent()` are the ONLY paths. All direct Firestore writes to balances are bugs.
+12. **Nothing is ever lost** — Reimagined drawings always auto-save to gallery, even when placed on page or discarded. Image replacements preserve previous URLs in `previousVersions[]` (max 5).
+13. **Drawings are stickers, scenes are backgrounds** — A photographed kid drawing is treated as a movable, transparent overlay (sticker). Full-page art is generated by AI as a scene/background. The Clean up flow always promotes the cleaned drawing to a sticker by default.
+14. **Cleaned drawings reimagine as transparent stickers by default** — When the AI reimagines a cleaned (background-removed) drawing, the result keeps the transparent background so it stays usable as a positionable sticker. The dialog still exposes a "Reimagine as scene" path for the cases where the kid wants a full illustrated background.
+
+---
+
+## Architecture Notes
+
+### Top 5 Largest Files (Current)
+| File | Lines | Status |
+|---|---:|---|
+| `src/features/planner-chat/PlannerChatPage.tsx` | 2,439 | Still primary planner shell/state center |
+| `src/features/books/BookEditorPage.tsx` | 2,087 | Grew with undo/redo + contextual action bar |
+| `src/features/quest/useQuestSession.ts` | 1,763 | Largest hook; future split candidate |
+| `src/features/avatar/MyAvatarPage.tsx` | 1,749 | Grew with Hero Hub layout + mission surfaces |
+| `src/features/shelly-chat/ShellyChatPage.tsx` | 1,653 | Stable, still large |
+
+### Decomposition Status
+- Today page, Kid Today view, Planner render layers, and Avatar subpanels have all been partially decomposed.
+- Remaining risk concentration is state-heavy files (`PlannerChatPage`, `useQuestSession`, `MyAvatarPage`).
+
+### Book Editor Features
+- **Undo/Redo**: 20-entry history stack (`useEditorHistory`). Keyboard shortcuts: Ctrl+Z / Ctrl+Shift+Z. Tracks page-level changes (image add/remove, layout changes).
+- **Image version history**: `PageImage.previousVersions[]` preserves up to 5 previous URLs when images are replaced (reimagine, sketch enhance). Accessible via "Previous versions" in background menu.
+- **Contextual action bar**: Top chip row shows "Delete sticker" / "Remove background" / "Change" based on which image is selected in PageEditor.
+- **Reimagine placement clarity**: Dialog splits "Add to page" into "Replace background" (full-page) vs "Add as sticker" (movable/resizable).
+- **Auto-save to gallery**: Every reimagine result auto-saves to sticker gallery on completion, regardless of placement choice.
+- **Sketch cleanup auto-detects background color**: `cleanSketchBackground` (in `src/features/books/cleanSketch.ts`) samples the image's outer ring and takes the per-channel median to find the dominant background color, then makes pixels close to it transparent (with feathered edges). Works on white paper, brown tables, lined notebooks, colored construction paper — anything roughly uniform around the drawing. Falls back to a conservative HSL paper-detect when border samples are too varied (busy tablecloths, hand in frame).
+- **Cleaned drawings default to sticker**: After "Clean up", the user picks Reimagine as sticker / Add as sticker / Reimagine as scene / Save to gallery. "Add as sticker" creates a `type: 'sticker'` PageImage with a centered 40%-width default position. The legacy "promote cleanup result to background photo" path is gone — cleaned drawings are always positionable overlays.
+- **Cleanup → Reimagine pipeline (transparent by default)**: When the user picks "Reimagine as sticker" on a cleaned drawing, the transparent PNG is uploaded as the sketch source for `enhanceSketch` with `transparent: true`. The Cloud Function passes `background: 'transparent'` to `gpt-image-1` and adds a "no background, no shadows on ground, clean cutout" instruction to the prompt — producing a sticker-ready PNG instead of an illustration with a fresh AI-generated background. The reimagine intensity dialog also exposes a "Keep transparent background (for stickers)" toggle so the user can override (default ON for cleaned sources, OFF for raw photos). "Reimagine as scene" routes through the same pipeline with the toggle off, producing a full illustrated background.
+- **Transparency-aware previews**: The reimagine result dialog, sticker library thumbnails, sticker generation preview, and gallery picker all render transparent PNGs over a checkerboard pattern (`CHECKERBOARD_BG` exported from `DrawingChoiceDialog.tsx`) so the user can SEE that the background is transparent before placing it.
+- **Attribution ("For" / "By")**: `Book.createdBy` ('parent' | childId) and `Book.createdFor` (childId) fields let Shelly create from parent profile without mis-attribution. Editor shows compact "For" / "By" dropdowns at the top; "For" drives editor theming so Shelly gets WYSIWYG child palette preview (Minecraft for Lincoln, storybook for London) without switching profiles. Bookshelf has a parent-only "Made by" filter (All / Mom's Books / Kids) and each card shows a "By Mom" / "By Lincoln" badge. Weekly Review attribution respects `createdBy` — parent-made books are reading/learning resources, not credited to the kid as creative wins. Legacy books default to `createdBy: 'parent'` (Shelly's historical workflow); re-tag one at a time via the editor dropdown.
+
+### Known Technical Debt
+- **AvatarThumbnail WebGL instances** — Console warns "many active instances — consider static mode." The `forceContextLoss()` fix from the Crash Cascade sprint resolved the hard crash, but multiple active `WebGLRenderer` instances still get created when several thumbnails mount (N thumbnails = N renderers). Consider: single shared renderer with static snapshots, or CSS/canvas 2D fallback for thumbnails where 3D isn't needed. Not blocking but worth addressing before avatar features expand.
+- **Hardcoded admin UID** — Admin access is hardcoded to a single UID in `SettingsPage.tsx` (`ADMIN_UID` constant). Works for current single-admin use case but blocks multi-admin, role management, or admin handoff scenarios. Consider moving to a role flag on family/user document if admin access needs to change.
+
+---
+
+## Key Files Reference
+| File | Purpose |
+|---|---|
+| `docs/MASTER_OUTLINE.md` | Master state snapshot (this file) |
+| `docs/ECONOMY_AUDIT_PART1.md` | Economy model + data inventory |
+| `docs/ECONOMY_AUDIT_PART2.md` | Economy earning/spending path audit |
+| `docs/STONEBRIDGE_BIBLE.md` | Canonical narrative world bible |
+| `functions/src/ai/stonebridgeBible.ts` | Stonebridge prompt import for CF context |
+| `src/core/xp/addXpEvent.ts` | XP event gateway |
+| `src/core/xp/addDiamondEvent.ts` | Diamond event gateway |
+| `src/features/avatar/MyAvatarPage.tsx` | Hero Hub shell + avatar systems |
+| `src/features/avatar/HeroMissionCard.tsx` | Hero Hub mission card logic + rendering |
+| `src/features/avatar/StonebridgePreviewCard.tsx` | Stonebridge narrative preview surface |
+| `src/features/avatar/BrothersVoxelScene.tsx` | Side-by-side brothers scene |
+| `src/features/avatar/AccessoriesPanel.tsx` | Accessories system UI + slot conflicts |
+| `src/features/avatar/armorGate.ts` | Forge tier gate logic + phantom piece fix |
+| `functions/src/ai/tasks/index.ts` | Chat task registry (14 task types) |
+
+---
+
+Last updated: April 13, 2026

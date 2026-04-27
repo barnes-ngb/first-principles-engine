@@ -1,40 +1,63 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import Checkbox from '@mui/material/Checkbox'
+import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
-import LockIcon from '@mui/icons-material/Lock'
 import NoteIcon from '@mui/icons-material/Note'
 import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import TextField from '@mui/material/TextField'
-import { addDoc, doc, getDocs, query, updateDoc, where } from 'firebase/firestore'
+import { doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore'
 
 import { useNavigate } from 'react-router-dom'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 
+import Alert from '@mui/material/Alert'
+import Snackbar from '@mui/material/Snackbar'
 import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
-import { artifactsCollection } from '../../core/firebase/firestore'
-import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
-import type { Artifact, ChecklistItem, Child, DayLog } from '../../core/types'
-import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import SectionErrorBoundary from '../../components/SectionErrorBoundary'
+import {
+  artifactsCollection,
+  chapterBooksCollection,
+  dailyArmorSessionDocId,
+  dailyArmorSessionsCollection,
+} from '../../core/firebase/firestore'
+import { getDailyArmorSession } from '../../core/avatar/getDailyArmorSession'
+import type { Artifact, ChapterBook, ChecklistItem, Child, DailyArmorSession, DayLog } from '../../core/types'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
 import { useAvatarProfile } from '../avatar/useAvatarProfile'
-import MinecraftXpBar from '../minecraft/MinecraftXpBar'
-import { useXpLedger } from '../minecraft/useXpLedger'
-import { useDraftBook } from '../books/useBook'
+import { getDailyArmorStatusFromSession } from '../avatar/armorStatus'
+import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../avatar/voxel/buildArmorPiece'
+import { calculateTier } from '../avatar/voxel/tierMaterials'
+import ArmorGateScreen from '../avatar/ArmorGateScreen'
+import MinecraftXpBar from '../avatar/MinecraftXpBar'
+import { getAppliedVoxelPieces } from '../avatar/armorPieceState'
+import XpDiamondBar from '../../components/XpDiamondBar'
+import { useXpLedger } from '../../core/xp/useXpLedger'
+import { useDraftBook, useCompletedBook } from '../books/useBook'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import ExplorerMap from './ExplorerMap'
+import KidExtraLogger from './KidExtraLogger'
+import KidMiningCard from './KidMiningCard'
+import { useTodayMiningMinutes } from './useTodayMiningMinutes'
 import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
+import KidChecklist from './KidChecklist'
+import KidCelebration from './KidCelebration'
+import KidChapterPool from './KidChapterPool'
+import { useBookProgress } from './useBookProgress'
+import KidConundrumResponse from './KidConundrumResponse'
+import KidTeachBack from './KidTeachBack'
+import { useUnifiedCapture } from './useUnifiedCapture'
 import { calculateXp } from './xp'
-
 interface KidTodayViewProps {
   dayLog: DayLog
   child: Child
@@ -43,11 +66,19 @@ interface KidTodayViewProps {
   today: string
   weekStart: string
   isMvd?: boolean
+  readAloudBookId?: string
   weekFocus?: {
     theme?: string
     virtue?: string
     scriptureRef?: string
     heartQuestion?: string
+    conundrum?: {
+      title: string
+      question: string
+      lincolnPrompt: string
+      londonPrompt: string
+      londonDrawingPrompt?: string
+    }
   } | null
 }
 
@@ -79,9 +110,16 @@ function getGreeting(name: string, isLincoln: boolean): string {
   return `Nice work today, ${name}!`
 }
 
-function getTimeLabel(minutes?: number): string {
-  if (!minutes) return ''
-  return `${minutes} min`
+function getMotivation(profile: import('../../core/types').AvatarProfile): string {
+  const xp = profile.totalXp
+  const unlocked = new Set(VOXEL_ARMOR_PIECES.filter((p) => xp >= XP_THRESHOLDS[p.id]).map((p) => p.id))
+  const next = VOXEL_ARMOR_PIECES.find((p) => !unlocked.has(p.id))
+  if (next) {
+    const xpAway = XP_THRESHOLDS[next.id] - xp
+    return `${xpAway} XP to ${next.name}!`
+  }
+  const tier = calculateTier(xp)
+  return `Full ${tier.charAt(0) + tier.slice(1).toLowerCase()} armor! Keep earning.`
 }
 
 /** Get a celebration message consistent within a day. */
@@ -129,6 +167,7 @@ export default function KidTodayView({
   today,
   weekStart,
   isMvd,
+  readAloudBookId,
   weekFocus,
 }: KidTodayViewProps) {
   const navigate = useNavigate()
@@ -137,16 +176,66 @@ export default function KidTodayView({
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
   const [captureReflection, setCaptureReflection] = useState('')
+  const [captureMessage, setCaptureMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
 
-  // Draft book for "Continue your book" card
+  // Unified capture hook — same pipeline as parent view (AI scan → curriculum/artifact routing)
+  const {
+    handleUnifiedCapture,
+    scanLoading: captureLoading,
+  } = useUnifiedCapture({
+    familyId,
+    childId: child.id,
+    childName: child.name,
+    today,
+    dayLog,
+    persistDayLogImmediate,
+    onMessage: setCaptureMessage,
+    onArtifactCreated: (artifact) => setArtifacts((prev) => [artifact, ...prev]),
+  })
+
+  // XP toast state
+  const [xpToast, setXpToast] = useState<{ amount: number; reason: string } | null>(null)
+
+  // Draft book for "Continue your book" card + completed book for "Read your books" card
   const { draftBook } = useDraftBook(familyId, child.id)
+  const { completedBook } = useCompletedBook(familyId, child.id)
   const { children: allChildren } = useActiveChild()
+
+  // --- Chapter book progress for KidChapterPool ---
+  const [selectedBook, setSelectedBook] = useState<ChapterBook | null>(null)
+  // Clear book selection during render when no book ID (avoids setState in effect)
+  if (!readAloudBookId && selectedBook !== null) {
+    setSelectedBook(null)
+  }
+  useEffect(() => {
+    if (!readAloudBookId) return
+    const bookRef = doc(chapterBooksCollection(), readAloudBookId)
+    getDoc(bookRef).then((snap) => {
+      if (snap.exists()) {
+        setSelectedBook({ ...(snap.data() as ChapterBook), id: snap.id })
+      } else {
+        setSelectedBook(null)
+      }
+    }).catch(() => setSelectedBook(null))
+  }, [readAloudBookId])
+
+  const { bookProgress, updateChapter } = useBookProgress(
+    familyId,
+    child.id,
+    readAloudBookId,
+  )
 
   const checklist = useMemo(() => dayLog.checklist ?? [], [dayLog.checklist])
   const { mustDo, choose } = useMemo(() => categorizeItems(checklist), [checklist])
 
   const mustDoDone = mustDo.length > 0 && mustDo.every((item) => item.completed)
-  const mustDoRemaining = mustDo.filter((item) => !item.completed).length
+  const mustDoRemaining = mustDo.filter((item) => !item.completed && !item.skipped).length
+
+  // Gate: 3+ must-do items completed unlocks Workshop and Books
+  const mustDoCompleted = mustDo.filter((i) => i.completed).length
+  const mustDoSkipped = mustDo.filter((i) => i.skipped).length
+  const gateThreshold = Math.min(3, mustDo.length)
+  const gateUnlocked = mustDoCompleted >= gateThreshold
 
   // Track which choose items have been selected (by their index in the choose array)
   const maxChoices = 2
@@ -164,9 +253,47 @@ export default function KidTodayView({
   const todayXp = useMemo(() => calculateXp(dayLog), [dayLog])
   const xpLedger = useXpLedger(familyId, child.id)
   const avatarProfile = useAvatarProfile(familyId, child.id)
+  const [dailyArmorSession, setDailyArmorSession] = useState<DailyArmorSession | null>(null)
+
+  const todayMinedMinutes = useTodayMiningMinutes(familyId, child.id, today)
 
   const greeting = useMemo(() => getGreeting(child.name, isLincoln), [child.name, isLincoln])
   const celebrationMessage = useMemo(() => getCelebration(today, isLincoln), [today, isLincoln])
+
+  useEffect(() => {
+    if (!familyId || !child.id || !today) return
+    const docId = dailyArmorSessionDocId(child.id, today)
+    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+    const unsub = onSnapshot(sessionRef, async (snap) => {
+      if (snap.exists()) {
+        const raw = snap.data()
+        setDailyArmorSession({
+          ...raw,
+          appliedPieces: Array.isArray(raw.appliedPieces) ? raw.appliedPieces : [],
+          manuallyUnequipped: Array.isArray(raw.manuallyUnequipped) ? raw.manuallyUnequipped : [],
+        })
+        return
+      }
+
+      // New day — getDailyArmorSession atomically creates session
+      // AND clears equippedPieces on the avatar profile
+      await getDailyArmorSession(familyId, child.id)
+      // onSnapshot will fire again with the new doc
+    })
+    return unsub
+  }, [familyId, child.id, today])
+
+  // ── Armor Gate: use unified status (not stale profile state) ──
+  const armorStatus = avatarProfile
+    ? getDailyArmorStatusFromSession(avatarProfile, dailyArmorSession)
+    : null
+  const armorReady = armorStatus?.isSuitedUp ?? false
+  const showArmorGateBlocker = Boolean(armorStatus?.hasForgedPieces && !armorReady)
+  const showArmorPrompt = Boolean(armorStatus && !armorStatus.hasForgedPieces)
+  const equippedTodayVoxel = useMemo(
+    () => getAppliedVoxelPieces(dailyArmorSession?.appliedPieces ?? []),
+    [dailyArmorSession?.appliedPieces],
+  )
 
   // Award XP when all must-do items are completed (once per day per child)
   const prevMustDoDoneRef = useRef(false)
@@ -178,10 +305,55 @@ export default function KidTodayView({
         'CHECKLIST_DAY_COMPLETE',
         10,
         `checklist_${today}`,
-      )
+      ).then((awarded) => {
+        if (awarded > 0) setXpToast({ amount: awarded, reason: 'All must-do items complete!' })
+      }).catch((err) => console.error('[XP] Award failed:', err))
     }
     prevMustDoDoneRef.current = mustDoDone
   }, [mustDoDone, child.id, familyId, today])
+
+  // Bonus XP when ALL items (must-do + choose) are completed
+  const prevAllDoneRef = useRef(false)
+  useEffect(() => {
+    const totalItems = checklist.length
+    if (allDone && !prevAllDoneRef.current && child.id && familyId && totalItems >= 3) {
+      void addXpEvent(
+        familyId,
+        child.id,
+        'DAILY_ALL_COMPLETE',
+        XP_AWARDS.dailyAllComplete,
+        `daily-bonus-${today}`,
+        { reason: `All ${totalItems} items completed today!` },
+      ).then((awarded) => {
+        if (awarded > 0) setXpToast({ amount: awarded, reason: `All ${totalItems} items done — bonus!` })
+      }).catch((err) => console.error('[XP] Award failed:', err))
+    }
+    prevAllDoneRef.current = allDone
+  }, [allDone, child.id, familyId, today, checklist.length])
+
+  // Track gate unlock for celebration display (state-during-render pattern)
+  const [justUnlockedGate, setJustUnlockedGate] = useState(false)
+  const [prevGateUnlocked, setPrevGateUnlocked] = useState(gateUnlocked)
+  if (gateUnlocked !== prevGateUnlocked) {
+    setPrevGateUnlocked(gateUnlocked)
+    if (gateUnlocked) {
+      setJustUnlockedGate(true)
+    }
+  }
+
+  // Daily XP from checklist items
+  const dailyXp = useMemo(
+    () =>
+      checklist
+        .filter((i) => i.completed)
+        .reduce((sum, item) => {
+          const label = (item.label ?? '').toLowerCase()
+          const isPrayer =
+            label.includes('prayer') || label.includes('formation') || label.includes('scripture')
+          return sum + (isPrayer ? XP_AWARDS.checklistPrayer : XP_AWARDS.checklistItem)
+        }, 0),
+    [checklist],
+  )
 
   // Load artifacts for today
   const loadArtifacts = useCallback(() => {
@@ -201,20 +373,6 @@ export default function KidTodayView({
     loadArtifacts()
   }, [loadArtifacts])
 
-  const handleToggleItem = useCallback(
-    (itemIndex: number) => {
-      const updated = { ...dayLog }
-      const updatedChecklist = [...(updated.checklist ?? [])]
-      if (itemIndex < 0 || itemIndex >= updatedChecklist.length) return
-      updatedChecklist[itemIndex] = {
-        ...updatedChecklist[itemIndex],
-        completed: !updatedChecklist[itemIndex].completed,
-      }
-      persistDayLogImmediate({ ...updated, checklist: updatedChecklist })
-    },
-    [dayLog, persistDayLogImmediate],
-  )
-
   const handleToggleChoice = useCallback(
     (choiceIndex: number) => {
       setSelectedChoices((prev) => {
@@ -230,58 +388,48 @@ export default function KidTodayView({
     [maxChoices],
   )
 
-  /** Find the absolute index in the full checklist for a choose item. */
-  const getAbsoluteIndex = useCallback(
-    (chooseItem: ChecklistItem) => {
-      return checklist.indexOf(chooseItem)
-    },
-    [checklist],
-  )
-
   const handleKidCapture = useCallback((index: number) => {
     setCaptureItemIndex(index)
     setCaptureReflection('')
   }, [])
 
+  /** Wrapper around unified capture that closes the dialog on completion. */
   const handleKidPhotoCapture = useCallback(
     async (file: File) => {
-      if (captureItemIndex === null || !dayLog.checklist) return
-      const item = dayLog.checklist[captureItemIndex]
-      try {
-        const artifact: Omit<Artifact, 'id'> = {
-          childId: child.id,
-          title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${child.name}'s work`,
-          type: EvidenceType.Photo,
-          dayLogId: today,
-          createdAt: new Date().toISOString(),
-          tags: {
-            engineStage: EngineStage.Build,
-            domain: '',
-            subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
-            location: 'Home',
-          },
-          ...(captureReflection ? { notes: captureReflection } : {}),
-        }
-        const docRef = await addDoc(artifactsCollection(familyId), artifact)
-        const ext = file.name.split('.').pop() ?? 'jpg'
-        const filename = generateFilename(ext)
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
-
-        // Link artifact to checklist item
-        const updatedChecklist = dayLog.checklist.map((ci, i) =>
-          i === captureItemIndex ? { ...ci, evidenceArtifactId: docRef.id } : ci
-        )
-        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-        setArtifacts((prev) => [{ ...artifact, id: docRef.id, uri: downloadUrl } as Artifact, ...prev])
-        setCaptureItemIndex(null)
-        setCaptureReflection('')
-      } catch (err) {
-        console.error('Kid capture failed:', err)
-      }
+      if (captureItemIndex === null) return
+      await handleUnifiedCapture(file, captureItemIndex)
+      setCaptureItemIndex(null)
+      setCaptureReflection('')
     },
-    [captureItemIndex, captureReflection, dayLog, child, today, familyId, persistDayLogImmediate],
+    [captureItemIndex, handleUnifiedCapture],
   )
+
+  // --- Teach-back helpers (Lincoln audio capture) ---
+  const totalCompleted = useMemo(() => checklist.filter((i) => i.completed).length, [checklist])
+  const hasEngagementFeedback = useMemo(
+    () => checklist.some((i) => i.completed && i.engagement),
+    [checklist],
+  )
+  const showTeachBackSection =
+    isLincoln && !dayLog.teachBackDone && (totalCompleted >= 3 || hasEngagementFeedback)
+
+  // ── Armor Gate early return (after all hooks) ──
+  if (avatarProfile && showArmorGateBlocker && armorStatus) {
+    return (
+      <ArmorGateScreen
+        gateStatus={{
+          complete: armorStatus.isSuitedUp,
+          equipped: armorStatus.equippedCount,
+          total: armorStatus.gateTotal,
+          missing: armorStatus.missing,
+          hasForgedPieces: armorStatus.hasForgedPieces,
+        }}
+        avatarProfile={avatarProfile}
+        childName={child.name}
+        equippedToday={equippedTodayVoxel}
+      />
+    )
+  }
 
   // No plan state
   if (checklist.length === 0) {
@@ -315,8 +463,9 @@ export default function KidTodayView({
             <AvatarThumbnail
               features={avatarProfile.characterFeatures}
               ageGroup={avatarProfile.ageGroup}
-              equippedPieces={avatarProfile.equippedPieces}
+              equippedPieces={equippedTodayVoxel}
               totalXp={avatarProfile.totalXp}
+              faceGrid={avatarProfile.faceGrid}
               size={64}
               animated
             />
@@ -324,8 +473,43 @@ export default function KidTodayView({
         )}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
-            {greeting}
+            {armorReady ? `Ready for battle, ${child.name}!` : greeting}
           </Typography>
+          {armorReady && (
+            <Typography
+              sx={{
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
+                fontSize: isLincoln ? '0.4rem' : '12px',
+                color: 'text.secondary',
+              }}
+            >
+              Full armor on. Let's go!
+            </Typography>
+          )}
+          {!armorReady && avatarProfile && (
+            <Typography
+              sx={{
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
+                fontSize: isLincoln ? '0.4rem' : '12px',
+                color: 'text.secondary',
+                mt: 0.25,
+              }}
+            >
+              {getMotivation(avatarProfile)}
+            </Typography>
+          )}
+          {showArmorPrompt && (
+            <Typography
+              sx={{
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
+                fontSize: isLincoln ? '0.4rem' : '12px',
+                color: 'text.secondary',
+                mt: 0.25,
+              }}
+            >
+              No armor forged yet—want to visit Avatar and craft your first piece?
+            </Typography>
+          )}
           {todayXp > 0 && (
             <Typography
               sx={{
@@ -342,9 +526,44 @@ export default function KidTodayView({
         </Box>
       </Stack>
 
-      {/* XP bar (Lincoln only) */}
+      {/* XP bar + Diamond count (Lincoln only) */}
       {isLincoln && !xpLedger.loading && (
-        <MinecraftXpBar totalXp={xpLedger.totalXp} todayXp={todayXp} compact />
+        <>
+          <XpDiamondBar familyId={familyId} childId={child.id} compact />
+          <MinecraftXpBar totalXp={xpLedger.totalXp} todayXp={todayXp} compact />
+        </>
+      )}
+
+      {/* Gate banner */}
+      {!gateUnlocked && checklist.length > 0 && (
+        <Stack
+          direction="row"
+          spacing={1}
+          alignItems="center"
+          justifyContent="center"
+          sx={{
+            py: 1,
+            px: 2,
+            bgcolor: 'warning.light',
+            borderRadius: 1,
+            opacity: 0.9,
+          }}
+        >
+          <Typography variant="body2" fontWeight={600}>
+            ⛏️ {mustDoCompleted}/{gateThreshold} quests done
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            — complete {gateThreshold - mustDoCompleted} more to unlock Workshop + Books!
+          </Typography>
+        </Stack>
+      )}
+
+      {justUnlockedGate && (
+        <Stack alignItems="center" sx={{ py: 1 }}>
+          <Typography variant="body1" fontWeight={700} color="success.main">
+            🔓 Workshop + Books unlocked! Great work!
+          </Typography>
+        </Stack>
       )}
 
       {/* Morning verse */}
@@ -356,9 +575,54 @@ export default function KidTodayView({
         </Box>
       )}
 
-      {/* Workshop game cards */}
+      {/* ── KID CHAPTER POOL (read-aloud discussion) ── */}
+      {selectedBook && bookProgress && bookProgress.questionPool.some((item) => !item.answered) && (
+        <SectionErrorBoundary section="chapter pool">
+          <KidChapterPool
+            book={selectedBook}
+            bookProgress={bookProgress}
+            familyId={familyId}
+            childId={child.id}
+            dayLog={dayLog}
+            weekFocus={weekFocus}
+            onChapterAnswered={updateChapter}
+          />
+        </SectionErrorBoundary>
+      )}
+
+      {/* Knowledge Mine — always-available entry point with auto-tracked time */}
+      <SectionErrorBoundary section="knowledge-mine">
+        <KidMiningCard
+          todayMinedMinutes={todayMinedMinutes}
+          isLincoln={isLincoln}
+          onStart={() => navigate('/quest')}
+        />
+      </SectionErrorBoundary>
+
+      {/* Workshop game cards — gated behind must-do progress */}
       {familyId && allChildren.length > 0 && (
-        <WorkshopGameCards familyId={familyId} childId={child.id} children={allChildren} />
+        gateUnlocked ? (
+          <WorkshopGameCards familyId={familyId} childId={child.id} children={allChildren} />
+        ) : (
+          <SectionCard title="🔒 Game Workshop">
+            <Stack spacing={1} alignItems="center" sx={{ py: 2 }}>
+              <Typography variant="body2" color="text.secondary" textAlign="center">
+                Complete {gateThreshold - mustDoCompleted} more quest{gateThreshold - mustDoCompleted !== 1 ? 's' : ''} to unlock!
+              </Typography>
+              <Stack direction="row" spacing={0.5}>
+                {Array.from({ length: gateThreshold }).map((_, i) => (
+                  <Box
+                    key={i}
+                    sx={{
+                      width: 16, height: 16, borderRadius: '50%',
+                      bgcolor: i < mustDoCompleted ? 'success.main' : 'action.disabledBackground',
+                    }}
+                  />
+                ))}
+              </Stack>
+            </Stack>
+          </SectionCard>
+        )
       )}
 
       {/* MVD warm message */}
@@ -368,435 +632,197 @@ export default function KidTodayView({
         </Typography>
       )}
 
-      {/* ── MUST DO ── */}
-      <SectionCard title={isLincoln ? '⛏️ Daily Quests' : 'Must Do'}>
-        <Stack spacing={1}>
-          {mustDo.map((item) => {
-            const absIndex = checklist.indexOf(item)
-            const isBookItem = /book/i.test(item.label)
-            return (
-              <Box key={absIndex}>
-                <Stack
-                  direction="row"
-                  alignItems="center"
-                  spacing={1}
-                  sx={{
-                    p: 1,
-                    borderRadius: 2,
-                    bgcolor: item.completed ? 'success.50' : 'background.paper',
-                    border: '1px solid',
-                    borderColor: item.completed ? 'success.200' : 'divider',
-                    minHeight: 56,
-                    cursor: 'pointer',
-                  }}
-                  onClick={() => handleToggleItem(absIndex)}
-                >
-                  <Checkbox
-                    checked={item.completed}
-                    sx={{
-                      '& .MuiSvgIcon-root': { fontSize: 28 },
-                      p: 0.5,
-                    }}
-                    color="success"
-                    tabIndex={-1}
-                  />
-                  <Typography
-                    variant="body1"
-                    sx={{
-                      flex: 1,
-                      textDecoration: item.completed ? 'line-through' : 'none',
-                      color: item.completed ? 'text.secondary' : 'text.primary',
-                      fontWeight: 500,
-                    }}
-                  >
-                    {isBookItem && <MenuBookIcon sx={{ fontSize: 18, mr: 0.5, verticalAlign: 'text-bottom' }} />}
-                    {item.label}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {item.completed ? '✓' : getTimeLabel(item.estimatedMinutes ?? item.plannedMinutes)}
-                  </Typography>
-                </Stack>
-                {/* Book item quick link */}
-                {isBookItem && !item.completed && (
-                  <Box sx={{ ml: 5, mt: 0.5 }}>
-                    <Button
-                      size="small"
-                      variant="text"
-                      startIcon={<MenuBookIcon />}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        navigate(item.bookId ? `/books/${item.bookId}` : '/books')
-                      }}
-                      sx={{ minHeight: 32, textTransform: 'none' }}
-                    >
-                      Go to My Books
-                    </Button>
-                  </Box>
-                )}
-                {/* Per-item capture for kids */}
-                {item.completed && !item.evidenceArtifactId && (
-                  <Box sx={{ ml: 5, mt: 0.5 }}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      startIcon={<CameraAltIcon />}
-                      onClick={(e) => { e.stopPropagation(); handleKidCapture(absIndex) }}
-                      sx={{ minHeight: 36 }}
-                    >
-                      Show your work!
-                    </Button>
-                  </Box>
-                )}
-                {item.evidenceArtifactId && (
-                  <Typography variant="caption" color="success.main" sx={{ ml: 5, display: 'block' }}>
-                    Work captured!
-                  </Typography>
-                )}
-              </Box>
-            )
-          })}
-        </Stack>
-
-        {/* Progress message */}
-        {!mustDoDone && (
-          <Typography
-            variant="body1"
-            color="text.secondary"
-            textAlign="center"
-            sx={{ mt: 1, fontWeight: 500 }}
-          >
-            {isLincoln
-              ? `${mustDoRemaining} quest${mustDoRemaining !== 1 ? 's' : ''} to go, then you craft!`
-              : `${mustDoRemaining} to go, then you choose!`}
-          </Typography>
-        )}
-        {mustDoDone && !isMvd && choose.length > 0 && (
-          <Typography
-            variant="body1"
-            textAlign="center"
-            sx={{ mt: 1, fontWeight: 600, color: 'success.main' }}
-          >
-            {isLincoln ? 'Quests complete! Craft your adventure!' : 'Great job! Now pick your adventures!'}
-          </Typography>
-        )}
-      </SectionCard>
-
-      {/* ── CHOOSE SECTION ── */}
-      {!isMvd && choose.length > 0 && (
-        <SectionCard title={isLincoln ? `🔨 Craft ${maxChoices}` : `Choose ${maxChoices}`}>
-          {!mustDoDone && (
-            <Stack
-              direction="row"
-              alignItems="center"
-              spacing={1}
-              sx={{
-                p: 1.5,
-                borderRadius: 2,
-                bgcolor: 'action.hover',
-                mb: 1,
-              }}
-            >
-              <LockIcon sx={{ color: 'text.disabled', fontSize: 20 }} />
-              <Typography variant="body2" color="text.secondary">
-                {isLincoln
-                  ? 'Complete your quests to unlock crafting!'
-                  : 'Complete your must-do items to unlock choices!'}
-              </Typography>
-            </Stack>
-          )}
-
-          <Stack spacing={1}>
-            {choose.map((item, choiceIdx) => {
-              const isSelected = selectedChoices.has(choiceIdx)
-              const absIndex = getAbsoluteIndex(item)
-              const canSelect = mustDoDone && (isSelected || selectedChoices.size < maxChoices)
-              const isLocked = !mustDoDone
-              const isChooseBookItem = /book/i.test(item.label)
-
-              if (isSelected) {
-                // Selected choice acts like a must-do: checkable
-                return (
-                  <Box key={absIndex}>
-                    <Stack
-                      direction="row"
-                      alignItems="center"
-                      spacing={1}
-                      sx={{
-                        p: 1,
-                        borderRadius: 2,
-                        bgcolor: item.completed ? 'success.50' : 'info.50',
-                        border: '1px solid',
-                        borderColor: item.completed ? 'success.200' : 'info.200',
-                        minHeight: 56,
-                        cursor: 'pointer',
-                      }}
-                      onClick={() => handleToggleItem(absIndex)}
-                    >
-                      <Checkbox
-                        checked={item.completed}
-                        sx={{
-                          '& .MuiSvgIcon-root': { fontSize: 28 },
-                          p: 0.5,
-                        }}
-                        color="success"
-                        tabIndex={-1}
-                      />
-                      <Typography
-                        variant="body1"
-                        sx={{
-                          flex: 1,
-                          textDecoration: item.completed ? 'line-through' : 'none',
-                          color: item.completed ? 'text.secondary' : 'text.primary',
-                          fontWeight: 500,
-                        }}
-                      >
-                        {isChooseBookItem && <MenuBookIcon sx={{ fontSize: 18, mr: 0.5, verticalAlign: 'text-bottom' }} />}
-                        {item.label}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {item.completed ? '✓' : getTimeLabel(item.estimatedMinutes ?? item.plannedMinutes)}
-                      </Typography>
-                    </Stack>
-                    {/* Book item quick link */}
-                    {isChooseBookItem && !item.completed && (
-                      <Box sx={{ ml: 5, mt: 0.5 }}>
-                        <Button
-                          size="small"
-                          variant="text"
-                          startIcon={<MenuBookIcon />}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            navigate(item.bookId ? `/books/${item.bookId}` : '/books')
-                          }}
-                          sx={{ minHeight: 32, textTransform: 'none' }}
-                        >
-                          Go to My Books
-                        </Button>
-                      </Box>
-                    )}
-                    {/* Per-item capture for kids */}
-                    {item.completed && !item.evidenceArtifactId && (
-                      <Box sx={{ ml: 5, mt: 0.5 }}>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          startIcon={<CameraAltIcon />}
-                          onClick={(e) => { e.stopPropagation(); handleKidCapture(absIndex) }}
-                          sx={{ minHeight: 36 }}
-                        >
-                          Show your work!
-                        </Button>
-                      </Box>
-                    )}
-                    {item.evidenceArtifactId && (
-                      <Typography variant="caption" color="success.main" sx={{ ml: 5, display: 'block' }}>
-                        Work captured!
-                      </Typography>
-                    )}
-                  </Box>
-                )
-              }
-
-              // Unselected choice: radio-style selector
-              return (
-                <Stack
-                  key={absIndex}
-                  direction="row"
-                  alignItems="center"
-                  spacing={1}
-                  sx={{
-                    p: 1,
-                    borderRadius: 2,
-                    bgcolor: 'background.paper',
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    minHeight: 56,
-                    opacity: isLocked ? 0.45 : 1,
-                    cursor: canSelect ? 'pointer' : 'default',
-                  }}
-                  onClick={() => {
-                    if (canSelect) handleToggleChoice(choiceIdx)
-                  }}
-                >
-                  <Box
-                    sx={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: '50%',
-                      border: '2px solid',
-                      borderColor: isLocked ? 'text.disabled' : 'primary.main',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      ml: 0.5,
-                    }}
-                  />
-                  <Typography
-                    variant="body1"
-                    sx={{
-                      flex: 1,
-                      color: isLocked ? 'text.disabled' : 'text.primary',
-                      fontWeight: 500,
-                    }}
-                  >
-                    {isChooseBookItem && <MenuBookIcon sx={{ fontSize: 18, mr: 0.5, verticalAlign: 'text-bottom' }} />}
-                    {item.label}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {getTimeLabel(item.estimatedMinutes ?? item.plannedMinutes)}
-                  </Typography>
-                </Stack>
-              )
-            })}
-          </Stack>
-        </SectionCard>
+      {/* ── I DID MORE MINING! (Lincoln only) ── */}
+      {isLincoln && (
+        <KidExtraLogger
+          dayLog={dayLog}
+          persistDayLogImmediate={persistDayLogImmediate}
+          familyId={familyId}
+          childId={child.id}
+          today={today}
+        />
       )}
 
-      {/* ── CONTINUE YOUR BOOK ── */}
+      {/* ── CHECKLIST (Must-Do + Choose) ── */}
+      <SectionErrorBoundary section="checklist">
+        <KidChecklist
+          mustDo={mustDo}
+          choose={choose}
+          checklist={checklist}
+          maxChoices={maxChoices}
+          isLincoln={isLincoln}
+          isMvd={!!isMvd}
+          gateUnlocked={gateUnlocked}
+          gateThreshold={gateThreshold}
+          mustDoCompleted={mustDoCompleted}
+          mustDoSkipped={mustDoSkipped}
+          mustDoDone={mustDoDone}
+          mustDoRemaining={mustDoRemaining}
+          dailyXp={dailyXp}
+          selectedChoices={selectedChoices}
+          onToggleChoice={handleToggleChoice}
+          dayLog={dayLog}
+          child={child}
+          familyId={familyId}
+          today={today}
+          persistDayLogImmediate={persistDayLogImmediate}
+          onCaptureOpen={handleKidCapture}
+          onXpToast={setXpToast}
+        />
+      </SectionErrorBoundary>
+
+      {/* ── CONUNDRUM RESPONSE ── */}
+      {weekFocus?.conundrum && (
+        <KidConundrumResponse
+          conundrum={weekFocus.conundrum}
+          isLincoln={isLincoln}
+          child={child}
+          familyId={familyId}
+        />
+      )}
+
+      {/* ── TEACH-BACK (Lincoln only) ── */}
+      {showTeachBackSection && (
+        <SectionErrorBoundary section="teach-back">
+          <KidTeachBack
+            child={child}
+            familyId={familyId}
+            today={today}
+            dayLog={dayLog}
+            persistDayLogImmediate={persistDayLogImmediate}
+          />
+        </SectionErrorBoundary>
+      )}
+
+      {/* ── CONTINUE YOUR BOOK (gated) ── */}
       {draftBook && (
-        <Box
-          onClick={() => navigate(`/books/${draftBook.id}`)}
-          sx={{
-            p: 2,
-            borderRadius: 2,
-            border: '1px solid',
-            borderColor: isLincoln ? 'grey.700' : 'info.200',
-            bgcolor: isLincoln ? 'rgba(0,0,0,0.6)' : 'info.50',
-            cursor: 'pointer',
-            '&:hover': { borderColor: 'primary.main' },
-          }}
-        >
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <MenuBookIcon sx={{ color: isLincoln ? '#FCDB5B' : 'info.main', fontSize: 28 }} />
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography
-                variant="body1"
-                sx={{
-                  fontWeight: 600,
-                  ...(isLincoln
-                    ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.55rem', color: '#FFFFFF' }
-                    : {}),
-                }}
-              >
-                {isLincoln ? 'Continue crafting your book' : 'Continue your book'}
-              </Typography>
+        gateUnlocked ? (
+          <Box
+            onClick={() => navigate(`/books/${draftBook.id}`)}
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              border: '1px solid',
+              borderColor: isLincoln ? 'grey.700' : 'info.200',
+              bgcolor: isLincoln ? 'rgba(0,0,0,0.6)' : 'info.50',
+              cursor: 'pointer',
+              '&:hover': { borderColor: 'primary.main' },
+            }}
+          >
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <MenuBookIcon sx={{ color: isLincoln ? '#FCDB5B' : 'info.main', fontSize: 28 }} />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography
+                  variant="body1"
+                  sx={{
+                    fontWeight: 600,
+                    ...(isLincoln
+                      ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.55rem', color: '#FFFFFF' }
+                      : {}),
+                  }}
+                >
+                  {isLincoln ? 'Continue crafting your book' : 'Continue your book'}
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.secondary',
+                    ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.4rem' } : {}),
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  &ldquo;{draftBook.title}&rdquo; — {draftBook.pages.length} page{draftBook.pages.length !== 1 ? 's' : ''}
+                </Typography>
+              </Box>
               <Typography
                 variant="body2"
                 sx={{
-                  color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.secondary',
-                  ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.4rem' } : {}),
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  color: isLincoln ? '#FCDB5B' : 'info.main',
+                  fontWeight: 600,
+                  ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.45rem' } : {}),
                 }}
               >
-                &ldquo;{draftBook.title}&rdquo; — {draftBook.pages.length} page{draftBook.pages.length !== 1 ? 's' : ''}
+                Open
               </Typography>
-            </Box>
-            <Typography
-              variant="body2"
-              sx={{
-                color: isLincoln ? '#FCDB5B' : 'info.main',
-                fontWeight: 600,
-                ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.45rem' } : {}),
-              }}
-            >
-              Open
-            </Typography>
-          </Stack>
-        </Box>
+            </Stack>
+          </Box>
+        ) : (
+          <Chip label="🔒 Finish quests first" variant="outlined" />
+        )
+      )}
+
+      {/* ── READ YOUR BOOKS (gated, only if no draft) ── */}
+      {!draftBook && completedBook && (
+        gateUnlocked ? (
+          <Box
+            onClick={() => navigate(`/books/${completedBook.id}/read`)}
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              border: '1px solid',
+              borderColor: isLincoln ? 'grey.700' : 'success.200',
+              bgcolor: isLincoln ? 'rgba(0,0,0,0.6)' : 'success.50',
+              cursor: 'pointer',
+              '&:hover': { borderColor: 'primary.main' },
+            }}
+          >
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <MenuBookIcon sx={{ color: isLincoln ? '#5BFCEE' : 'success.main', fontSize: 28 }} />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography
+                  variant="body1"
+                  sx={{
+                    fontWeight: 600,
+                    ...(isLincoln
+                      ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.55rem', color: '#FFFFFF' }
+                      : {}),
+                  }}
+                >
+                  {isLincoln ? 'Read your book' : 'Read your book'}
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.secondary',
+                    ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.4rem' } : {}),
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  &ldquo;{completedBook.title}&rdquo;
+                </Typography>
+              </Box>
+              <Typography
+                variant="body2"
+                sx={{
+                  color: isLincoln ? '#5BFCEE' : 'success.main',
+                  fontWeight: 600,
+                  ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.45rem' } : {}),
+                }}
+              >
+                Read
+              </Typography>
+            </Stack>
+          </Box>
+        ) : (
+          <Chip label="🔒 Finish quests first" variant="outlined" />
+        )
       )}
 
       {/* ── CELEBRATION ── */}
-      {allDone && (
-        <Box
-          sx={{
-            textAlign: 'center',
-            py: isLincoln ? 3 : 4,
-            px: 2,
-            bgcolor: isLincoln ? 'rgba(0,0,0,0.85)' : 'success.50',
-            borderRadius: isLincoln ? 0 : 3,
-            border: isLincoln ? '3px solid #FCDB5B' : '2px solid',
-            borderColor: isLincoln ? '#FCDB5B' : 'success.200',
-            my: 2,
-          }}
-        >
-          {isLincoln && (
-            <Typography
-              sx={{
-                fontFamily: '"Press Start 2P", monospace',
-                fontSize: '0.6rem',
-                color: '#FCDB5B',
-                mb: 1,
-                letterSpacing: 1,
-              }}
-            >
-              Achievement Get!
-            </Typography>
-          )}
-          <Typography
-            variant="h4"
-            sx={{
-              mb: 1,
-              ...(isLincoln
-                ? {
-                    fontFamily: '"Press Start 2P", monospace',
-                    fontSize: '0.7rem',
-                    color: '#FFFFFF',
-                    lineHeight: 1.6,
-                  }
-                : {}),
-            }}
-          >
-            {celebrationMessage}
-          </Typography>
-          <Typography
-            variant="body1"
-            sx={{
-              color: isLincoln ? 'rgba(255,255,255,0.6)' : 'text.secondary',
-              ...(isLincoln
-                ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.45rem' }
-                : {}),
-            }}
-          >
-            {isLincoln
-              ? 'Respawn tomorrow for more XP!'
-              : `${child.name}'s journey continues tomorrow!`}
-          </Typography>
-        </Box>
-      )}
-
-      {/* MVD completion */}
-      {isMvd && mustDoDone && (
-        <Box
-          sx={{
-            textAlign: 'center',
-            py: 3,
-            px: 2,
-            bgcolor: isLincoln ? 'rgba(0,0,0,0.85)' : 'success.50',
-            borderRadius: isLincoln ? 0 : 3,
-            border: isLincoln ? '3px solid #5A8C32' : '2px solid',
-            borderColor: isLincoln ? '#5A8C32' : 'success.200',
-            my: 2,
-          }}
-        >
-          <Typography
-            variant="h5"
-            sx={{
-              mb: 1,
-              ...(isLincoln
-                ? {
-                    fontFamily: '"Press Start 2P", monospace',
-                    fontSize: '0.65rem',
-                    color: '#7EFC20',
-                  }
-                : {}),
-            }}
-          >
-            {isLincoln ? 'Base camp secured! Rest well.' : 'Done! Rest well today. 🌟'}
-          </Typography>
-        </Box>
-      )}
+      <SectionErrorBoundary section="celebration">
+        <KidCelebration
+          allDone={allDone}
+          mustDoDone={mustDoDone}
+          isMvd={!!isMvd}
+          celebrationMessage={celebrationMessage}
+          isLincoln={isLincoln}
+          child={child}
+        />
+      </SectionErrorBoundary>
 
       {/* ── EXPLORER MAP ── */}
       <ExplorerMap
@@ -894,25 +920,65 @@ export default function KidTodayView({
       </SectionCard>
 
       {/* --- Per-item capture dialog for kids --- */}
-      <Dialog open={captureItemIndex !== null} onClose={() => setCaptureItemIndex(null)} maxWidth="sm" fullWidth>
+      <Dialog open={captureItemIndex !== null} onClose={() => !captureLoading && setCaptureItemIndex(null)} maxWidth="sm" fullWidth>
         <DialogTitle>
           {captureItemIndex !== null ? dayLog.checklist?.[captureItemIndex]?.label?.replace(/\s*\(\d+m\)/, '') : ''}
         </DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <PhotoCapture onCapture={(file: File) => { void handleKidPhotoCapture(file) }} />
-            <TextField
-              label="How did it go? (optional)"
-              placeholder={isLincoln ? 'I got the hard one!' : 'It was fun!'}
-              value={captureReflection}
-              onChange={(e) => setCaptureReflection(e.target.value)}
-              size="small"
-              multiline
-              rows={2}
-            />
-          </Stack>
+          {captureLoading ? (
+            <Stack spacing={2} alignItems="center" sx={{ py: 4 }}>
+              <CircularProgress size={48} />
+              <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                {isLincoln ? 'Analyzing your work...' : 'Saving your work...'}
+              </Typography>
+            </Stack>
+          ) : (
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <PhotoCapture onCapture={(file: File) => { void handleKidPhotoCapture(file) }} />
+              <TextField
+                label="How did it go? (optional)"
+                placeholder={isLincoln ? 'I got the hard one!' : 'It was fun!'}
+                value={captureReflection}
+                onChange={(e) => setCaptureReflection(e.target.value)}
+                size="small"
+                multiline
+                rows={2}
+              />
+            </Stack>
+          )}
         </DialogContent>
       </Dialog>
+      {/* Kid-friendly capture feedback (no scan analysis details) */}
+      <Snackbar
+        open={captureMessage !== null}
+        autoHideDuration={2500}
+        onClose={() => setCaptureMessage(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setCaptureMessage(null)}
+          severity={captureMessage?.severity ?? 'success'}
+          variant="filled"
+          sx={{ width: '100%', fontWeight: 'bold' }}
+        >
+          {captureMessage?.text}
+        </Alert>
+      </Snackbar>
+      <Snackbar
+        open={xpToast !== null}
+        autoHideDuration={2000}
+        onClose={() => setXpToast(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setXpToast(null)}
+          severity="success"
+          variant="filled"
+          sx={{ width: '100%', fontWeight: 'bold' }}
+        >
+          +{xpToast?.amount} XP — {xpToast?.reason}
+        </Alert>
+      </Snackbar>
     </Page>
   )
 }

@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Typography from '@mui/material/Typography'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import VolumeOffIcon from '@mui/icons-material/VolumeOff'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import type {
@@ -73,6 +79,7 @@ export default function AdventurePlayView({
   const [showConfetti, setShowConfetti] = useState(false)
   const [fadeIn, setFadeIn] = useState(true)
   const [hasReadNarrative, setHasReadNarrative] = useState(false)
+  const [showExitDialog, setShowExitDialog] = useState(false)
 
   const currentNode = adventure.nodes[currentNodeId]
 
@@ -172,10 +179,12 @@ export default function AdventurePlayView({
     [currentNode, currentNodeId, voiceRecordings, sounds.muted],
   )
 
-  const handleChallengeDismiss = useCallback(() => {
-    setChallengeResults((prev) => [...prev, { nodeId: currentNodeId, passed: true }])
+  const handleChallengeDismiss = useCallback((correct?: boolean) => {
+    setChallengeResults((prev) => [...prev, { nodeId: currentNodeId, passed: correct !== false }])
     setShowChallenge(false)
-    sounds.playSuccess()
+    if (correct !== false) {
+      sounds.playSuccess()
+    }
     setShowChoices(true)
   }, [currentNodeId, sounds])
 
@@ -209,6 +218,18 @@ export default function AdventurePlayView({
       endingType: currentNode?.endingType,
     })
   }, [onFinished, storyPlayers, pathTaken, choicesMade, challengeResults, currentNode])
+
+  const handleExit = useCallback(() => {
+    const durationMinutes = Math.max(Math.round((Date.now() - startTimeRef.current) / 60000), 1)
+    onFinished({
+      durationMinutes,
+      playerIds: storyPlayers?.map((p) => p.id) ?? [],
+      pathTaken,
+      choicesMade,
+      challengeResults,
+      endingType: undefined,
+    })
+  }, [onFinished, storyPlayers, pathTaken, choicesMade, challengeResults])
 
   // Show confetti on victory ending
   useEffect(() => {
@@ -255,6 +276,38 @@ export default function AdventurePlayView({
   return (
     <Box sx={{ position: 'relative' }}>
       <Confetti active={showConfetti} />
+
+      {/* Exit button */}
+      <IconButton
+        onClick={() => setShowExitDialog(true)}
+        size="medium"
+        sx={{
+          position: 'absolute',
+          top: 8,
+          left: 8,
+          zIndex: 20,
+          bgcolor: 'rgba(255,255,255,0.9)',
+          boxShadow: 2,
+          '&:hover': { bgcolor: 'rgba(255,255,255,1)' },
+        }}
+        aria-label="Exit game"
+      >
+        <ArrowBackIcon />
+      </IconButton>
+
+      {/* Exit confirmation dialog */}
+      <Dialog open={showExitDialog} onClose={() => setShowExitDialog(false)}>
+        <DialogTitle>Leave adventure?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Your progress is saved. You can come back and continue later.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowExitDialog(false)}>Keep Playing</Button>
+          <Button onClick={handleExit} variant="contained">Leave Game</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Mute toggle */}
       <IconButton

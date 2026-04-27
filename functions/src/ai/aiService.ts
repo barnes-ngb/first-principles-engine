@@ -60,6 +60,16 @@ export interface ImageOptions {
   outputFormat?: "png" | "jpeg" | "webp";
 }
 
+/** Options for image editing (sketch enhancement). */
+export interface ImageEditOptions {
+  model?: string;
+  size?: string;
+  /** Output format: 'png' (default), 'jpeg', 'webp' */
+  outputFormat?: "png" | "jpeg" | "webp";
+  /** For gpt-image-1: 'transparent', 'opaque', or 'auto' */
+  background?: "transparent" | "opaque" | "auto";
+}
+
 /** Response from image generation. */
 export interface ImageResponse {
   url: string;

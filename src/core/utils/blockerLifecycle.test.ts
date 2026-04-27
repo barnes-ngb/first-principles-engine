@@ -1,0 +1,530 @@
+import { describe, it, expect } from 'vitest'
+import type { ConceptualBlock } from '../types/evaluation'
+import {
+  generateBlockId,
+  mergeBlock,
+  effectiveStatus,
+  updateBlockerLifecycle,
+  sessionEvidenceFromQuestions,
+} from './blockerLifecycle'
+
+describe('generateBlockId', () => {
+  it('slugifies a multi-word skill name', () => {
+    expect(generateBlockId('Short vowel i vs e discrimination')).toBe(
+      'short-vowel-i-vs-e-discrimination',
+    )
+  })
+
+  it('is stable (same input → same id)', () => {
+    const a = generateBlockId('CVC blending')
+    const b = generateBlockId('CVC blending')
+    expect(a).toBe(b)
+    expect(a).toBe('cvc-blending')
+  })
+
+  it('collapses whitespace, punctuation, and casing', () => {
+    expect(generateBlockId('  Short-I / E!  ')).toBe('short-i-e')
+  })
+
+  it('returns a non-empty id for empty input', () => {
+    expect(generateBlockId('')).toBe('unknown-block')
+    expect(generateBlockId('    ')).toBe('unknown-block')
+    expect(generateBlockId('!!!')).toBe('unknown-block')
+  })
+
+  it('truncates overly long inputs', () => {
+    const long = 'a'.repeat(500)
+    expect(generateBlockId(long).length).toBeLessThanOrEqual(80)
+  })
+})
+
+describe('mergeBlock — new block insertion', () => {
+  it('appends a new block when no matching ID exists', () => {
+    const existing: ConceptualBlock[] = []
+    const result = mergeBlock(existing, {
+      id: 'short-i-vs-e',
+      name: 'Short vowel i vs e',
+      source: 'quest',
+      rationale: 'Got bed vs bid wrong twice',
+      evidence: '2 wrong at short-i vs short-e',
+      specificWords: ['bed', 'bid'],
+    })
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('short-i-vs-e')
+    expect(result[0].sessionCount).toBe(1)
+    expect(result[0].source).toBe('quest')
+    expect(result[0].lastSource).toBe('quest')
+    expect(result[0].firstDetectedAt).toBeDefined()
+    expect(result[0].lastReinforcedAt).toBeDefined()
+    expect(result[0].status).toBe('ADDRESS_NOW')
+    expect(result[0].recommendation).toBe('ADDRESS_NOW')
+  })
+
+  it('does not mutate the input array', () => {
+    const existing: ConceptualBlock[] = []
+    mergeBlock(existing, { id: 'x', name: 'X' })
+    expect(existing).toHaveLength(0)
+  })
+
+  it('defaults DEFER status correctly', () => {
+    const result = mergeBlock([], {
+      id: 'working-memory',
+      name: 'Working Memory',
+      status: 'DEFER',
+      deferNote: 'Revisit at age 8',
+    })
+    expect(result[0].status).toBe('DEFER')
+    expect(result[0].recommendation).toBe('DEFER')
+    expect(result[0].deferNote).toBe('Revisit at age 8')
+  })
+})
+
+describe('mergeBlock — reinforcement', () => {
+  const baseBlock: ConceptualBlock = {
+    id: 'short-i-vs-e',
+    name: 'Short vowel i vs e',
+    affectedSkills: ['phonics.short-vowels'],
+    recommendation: 'ADDRESS_NOW',
+    status: 'ADDRESS_NOW',
+    rationale: 'Initial detection',
+    detectedAt: '2026-04-01T12:00:00Z',
+    firstDetectedAt: '2026-04-01T12:00:00Z',
+    lastReinforcedAt: '2026-04-01T12:00:00Z',
+    sessionCount: 1,
+    source: 'evaluation',
+    lastSource: 'evaluation',
+    evaluationSessionId: 'session-1',
+    evidence: 'Initial evidence',
+    specificWords: ['bed', 'bid'],
+  }
+
+  it('increments sessionCount when an existing block is reinforced', () => {
+    const result = mergeBlock([baseBlock], {
+      id: 'short-i-vs-e',
+      source: 'quest',
+      evidence: 'Quest session reinforcement',
+      specificWords: ['ten', 'tin'],
+    })
+    expect(result).toHaveLength(1)
+    expect(result[0].sessionCount).toBe(2)
+  })
+
+  it('refreshes lastReinforcedAt and lastSource', () => {
+    const result = mergeBlock([baseBlock], {
+      id: 'short-i-vs-e',
+      source: 'quest',
+      lastReinforcedAt: '2026-04-15T09:00:00Z',
+    })
+    expect(result[0].lastReinforcedAt).toBe('2026-04-15T09:00:00Z')
+    expect(result[0].lastSource).toBe('quest')
+    // source (original) is preserved
+    expect(result[0].source).toBe('evaluation')
+    // firstDetectedAt is preserved
+    expect(result[0].firstDetectedAt).toBe('2026-04-01T12:00:00Z')
+  })
+
+  it('merges specificWords without duplicates', () => {
+    const result = mergeBlock([baseBlock], {
+      id: 'short-i-vs-e',
+      source: 'quest',
+      specificWords: ['ten', 'tin', 'bed'], // bed already present
+    })
+    expect(result[0].specificWords).toEqual(['bed', 'bid', 'ten', 'tin'])
+  })
+
+  it('appends evidence without duplicating identical strings', () => {
+    const result = mergeBlock([baseBlock], {
+      id: 'short-i-vs-e',
+      source: 'quest',
+      evidence: 'Quest: got 2 wrong',
+    })
+    expect(result[0].evidence).toContain('Initial evidence')
+    expect(result[0].evidence).toContain('Quest: got 2 wrong')
+
+    // Re-adding identical evidence is a no-op
+    const result2 = mergeBlock(result, {
+      id: 'short-i-vs-e',
+      evidence: 'Quest: got 2 wrong',
+    })
+    expect((result2[0].evidence?.match(/Quest: got 2 wrong/g) ?? []).length).toBe(1)
+  })
+
+  it('regresses RESOLVING to ADDRESS_NOW on new wrong-answer signal', () => {
+    const resolving: ConceptualBlock = { ...baseBlock, status: 'RESOLVING' }
+    const result = mergeBlock([resolving], {
+      id: 'short-i-vs-e',
+      status: 'ADDRESS_NOW',
+      source: 'quest',
+    })
+    expect(result[0].status).toBe('ADDRESS_NOW')
+  })
+
+  it('does not change RESOLVED blocks on reinforcement', () => {
+    const resolved: ConceptualBlock = {
+      ...baseBlock,
+      status: 'RESOLVED',
+      resolvedAt: '2026-04-10T10:00:00Z',
+    }
+    const result = mergeBlock([resolved], {
+      id: 'short-i-vs-e',
+      status: 'RESOLVING',
+      source: 'quest',
+    })
+    // RESOLVED stays RESOLVED
+    expect(result[0].status).toBe('RESOLVED')
+  })
+
+  it('never removes blocks', () => {
+    const two: ConceptualBlock[] = [
+      baseBlock,
+      { ...baseBlock, id: 'cvc-blending', name: 'CVC blending' },
+    ]
+    const result = mergeBlock(two, {
+      id: 'short-i-vs-e',
+      status: 'RESOLVED',
+    })
+    expect(result).toHaveLength(2)
+  })
+
+  it('preserves other blocks in the array', () => {
+    const other: ConceptualBlock = {
+      ...baseBlock,
+      id: 'digraph-oo',
+      name: 'Digraph /oo/',
+    }
+    const result = mergeBlock([baseBlock, other], {
+      id: 'short-i-vs-e',
+      source: 'quest',
+    })
+    expect(result.find((b) => b.id === 'digraph-oo')).toBeTruthy()
+  })
+})
+
+describe('updateBlockerLifecycle', () => {
+  const addressNow: ConceptualBlock = {
+    id: 'short-i-vs-e',
+    name: 'Short vowel i vs e',
+    affectedSkills: ['phonics.short-i-vs-e'],
+    recommendation: 'ADDRESS_NOW',
+    status: 'ADDRESS_NOW',
+    rationale: 'Base',
+    detectedAt: '2026-04-01T12:00:00Z',
+    firstDetectedAt: '2026-04-01T12:00:00Z',
+    lastReinforcedAt: '2026-04-01T12:00:00Z',
+    sessionCount: 1,
+    source: 'quest',
+    lastSource: 'quest',
+    evaluationSessionId: '',
+  }
+
+  it('ADDRESS_NOW → RESOLVING after 3 cumulative correct with no wrong in the session', () => {
+    const result = updateBlockerLifecycle([addressNow], [
+      { blockId: 'short-i-vs-e', correctCount: 3, totalCount: 3 },
+    ])
+    expect(result[0].status).toBe('RESOLVING')
+    expect(result[0].correctAttempts).toBe(3)
+    expect(result[0].totalAttempts).toBe(3)
+  })
+
+  it('ADDRESS_NOW stays ADDRESS_NOW below the threshold', () => {
+    const result = updateBlockerLifecycle([addressNow], [
+      { blockId: 'short-i-vs-e', correctCount: 2, totalCount: 2 },
+    ])
+    expect(result[0].status).toBe('ADDRESS_NOW')
+    expect(result[0].correctAttempts).toBe(2)
+  })
+
+  it('ADDRESS_NOW does not advance to RESOLVING if the session contained any wrong answers', () => {
+    const result = updateBlockerLifecycle([addressNow], [
+      { blockId: 'short-i-vs-e', correctCount: 3, totalCount: 4 },
+    ])
+    expect(result[0].status).toBe('ADDRESS_NOW')
+    expect(result[0].correctAttempts).toBe(3)
+    expect(result[0].totalAttempts).toBe(4)
+  })
+
+  it('RESOLVING → RESOLVED after 5+ cumulative correct across multiple sessions', () => {
+    const resolving: ConceptualBlock = {
+      ...addressNow,
+      status: 'RESOLVING',
+      sessionCount: 2,
+      correctAttempts: 3,
+      totalAttempts: 3,
+    }
+    const result = updateBlockerLifecycle([resolving], [
+      { blockId: 'short-i-vs-e', correctCount: 2, totalCount: 2 },
+    ])
+    expect(result[0].status).toBe('RESOLVED')
+    expect(result[0].resolvedAt).toBeTruthy()
+    expect(result[0].correctAttempts).toBe(5)
+  })
+
+  it('RESOLVING stays RESOLVING when sessionCount is too low', () => {
+    const resolving: ConceptualBlock = {
+      ...addressNow,
+      status: 'RESOLVING',
+      sessionCount: 1,
+      correctAttempts: 4,
+      totalAttempts: 4,
+    }
+    const result = updateBlockerLifecycle([resolving], [
+      { blockId: 'short-i-vs-e', correctCount: 2, totalCount: 2 },
+    ])
+    expect(result[0].status).toBe('RESOLVING')
+  })
+
+  it('RESOLVING → ADDRESS_NOW on regression (new wrong answer)', () => {
+    const resolving: ConceptualBlock = {
+      ...addressNow,
+      status: 'RESOLVING',
+      sessionCount: 3,
+      correctAttempts: 4,
+      totalAttempts: 4,
+    }
+    const result = updateBlockerLifecycle([resolving], [
+      { blockId: 'short-i-vs-e', correctCount: 1, totalCount: 2 },
+    ])
+    expect(result[0].status).toBe('ADDRESS_NOW')
+  })
+
+  it('RESOLVED is immutable — stays RESOLVED even with more evidence', () => {
+    const resolved: ConceptualBlock = {
+      ...addressNow,
+      status: 'RESOLVED',
+      resolvedAt: '2026-04-10T10:00:00Z',
+      correctAttempts: 6,
+      totalAttempts: 6,
+    }
+    const result = updateBlockerLifecycle([resolved], [
+      { blockId: 'short-i-vs-e', correctCount: 0, totalCount: 3 },
+    ])
+    expect(result[0].status).toBe('RESOLVED')
+    expect(result[0].resolvedAt).toBe('2026-04-10T10:00:00Z')
+  })
+
+  it('DEFER is not auto-transitioned, but attempt counters still accumulate', () => {
+    const defer: ConceptualBlock = {
+      ...addressNow,
+      status: 'DEFER',
+      recommendation: 'DEFER',
+    }
+    const result = updateBlockerLifecycle([defer], [
+      { blockId: 'short-i-vs-e', correctCount: 5, totalCount: 5 },
+    ])
+    expect(result[0].status).toBe('DEFER')
+    expect(result[0].correctAttempts).toBe(5)
+  })
+
+  it('passes through blocks that have no session evidence', () => {
+    const other: ConceptualBlock = { ...addressNow, id: 'digraph-oo', name: 'Digraph oo' }
+    const result = updateBlockerLifecycle([addressNow, other], [
+      { blockId: 'short-i-vs-e', correctCount: 3, totalCount: 3 },
+    ])
+    expect(result[0].status).toBe('RESOLVING')
+    expect(result[1].status).toBe('ADDRESS_NOW')
+    expect(result[1].correctAttempts).toBeUndefined()
+  })
+
+  it('never removes blocks', () => {
+    const result = updateBlockerLifecycle([addressNow], [
+      { blockId: 'short-i-vs-e', correctCount: 5, totalCount: 5 },
+    ])
+    expect(result).toHaveLength(1)
+  })
+})
+
+describe('sessionEvidenceFromQuestions', () => {
+  it('groups questions by skill → blockId and counts correct vs total', () => {
+    const ev = sessionEvidenceFromQuestions([
+      { skill: 'phonics.short-i-vs-e', correct: true },
+      { skill: 'phonics.short-i-vs-e', correct: false },
+      { skill: 'phonics.short-i-vs-e', correct: true },
+      { skill: 'phonics.digraph-oo', correct: true },
+    ])
+    expect(ev).toHaveLength(2)
+    const shortI = ev.find((e) => e.blockId === 'phonics-short-i-vs-e')
+    expect(shortI).toEqual({
+      blockId: 'phonics-short-i-vs-e',
+      correctCount: 2,
+      totalCount: 3,
+      targetedCorrect: undefined,
+      targetedTotal: undefined,
+    })
+  })
+
+  it('ignores skipped and flaggedAsError questions', () => {
+    const ev = sessionEvidenceFromQuestions([
+      { skill: 'phonics.short-i-vs-e', correct: true },
+      { skill: 'phonics.short-i-vs-e', correct: false, skipped: true },
+      { skill: 'phonics.short-i-vs-e', correct: false, flaggedAsError: true },
+    ])
+    expect(ev[0].totalCount).toBe(1)
+    expect(ev[0].correctCount).toBe(1)
+  })
+
+  it('returns empty array when no questions have skills', () => {
+    const ev = sessionEvidenceFromQuestions([{ correct: true }])
+    expect(ev).toHaveLength(0)
+  })
+
+  it('tags targeted counts when targetedBlockerId matches the skill-derived id', () => {
+    const ev = sessionEvidenceFromQuestions([
+      {
+        skill: 'phonics.short-i-vs-e',
+        correct: true,
+        targetedBlockerId: 'phonics-short-i-vs-e',
+      },
+      { skill: 'phonics.short-i-vs-e', correct: false },
+      {
+        skill: 'phonics.short-i-vs-e',
+        correct: true,
+        targetedBlockerId: 'phonics-short-i-vs-e',
+      },
+    ])
+    expect(ev).toHaveLength(1)
+    expect(ev[0]).toEqual({
+      blockId: 'phonics-short-i-vs-e',
+      correctCount: 2,
+      totalCount: 3,
+      targetedCorrect: 2,
+      targetedTotal: 2,
+    })
+  })
+
+  it('attributes targeted evidence to the targeted block and incidental evidence to the skill block when they differ', () => {
+    const ev = sessionEvidenceFromQuestions([
+      {
+        skill: 'phonics.digraph-oo',
+        correct: true,
+        targetedBlockerId: 'short-vowel-i-vs-e',
+      },
+    ])
+    const targeted = ev.find((e) => e.blockId === 'short-vowel-i-vs-e')
+    const incidental = ev.find((e) => e.blockId === 'phonics-digraph-oo')
+    expect(targeted).toMatchObject({
+      blockId: 'short-vowel-i-vs-e',
+      correctCount: 1,
+      totalCount: 1,
+      targetedCorrect: 1,
+      targetedTotal: 1,
+    })
+    expect(incidental).toMatchObject({
+      blockId: 'phonics-digraph-oo',
+      correctCount: 1,
+      totalCount: 1,
+      targetedCorrect: undefined,
+      targetedTotal: undefined,
+    })
+  })
+
+  it('records targeted evidence when skill is missing but targetedBlockerId is set', () => {
+    const ev = sessionEvidenceFromQuestions([
+      { correct: true, targetedBlockerId: 'my-block' },
+      { correct: false, targetedBlockerId: 'my-block' },
+    ])
+    expect(ev).toHaveLength(1)
+    expect(ev[0]).toEqual({
+      blockId: 'my-block',
+      correctCount: 1,
+      totalCount: 2,
+      targetedCorrect: 1,
+      targetedTotal: 2,
+    })
+  })
+})
+
+describe('updateBlockerLifecycle — targeted evidence weighting', () => {
+  const addressNow: ConceptualBlock = {
+    id: 'short-i-vs-e',
+    name: 'Short vowel i vs e',
+    affectedSkills: ['phonics.short-i-vs-e'],
+    recommendation: 'ADDRESS_NOW',
+    status: 'ADDRESS_NOW',
+    rationale: 'Base',
+    detectedAt: '2026-04-01T12:00:00Z',
+    firstDetectedAt: '2026-04-01T12:00:00Z',
+    lastReinforcedAt: '2026-04-01T12:00:00Z',
+    sessionCount: 1,
+    source: 'quest',
+    lastSource: 'quest',
+    evaluationSessionId: '',
+  }
+
+  it('advances ADDRESS_NOW → RESOLVING on 2 targeted-correct (weighted = 4) even though incidental would fall short', () => {
+    const result = updateBlockerLifecycle([addressNow], [
+      {
+        blockId: 'short-i-vs-e',
+        correctCount: 2,
+        totalCount: 2,
+        targetedCorrect: 2,
+        targetedTotal: 2,
+      },
+    ])
+    expect(result[0].status).toBe('RESOLVING')
+    // Weighted delta = 2 * TARGETED_EVIDENCE_WEIGHT(2) = 4
+    expect(result[0].correctAttempts).toBe(4)
+    expect(result[0].totalAttempts).toBe(4)
+  })
+
+  it('still blocks advancement if the targeted question was wrong (session has any wrong)', () => {
+    const result = updateBlockerLifecycle([addressNow], [
+      {
+        blockId: 'short-i-vs-e',
+        correctCount: 1,
+        totalCount: 2,
+        targetedCorrect: 1,
+        targetedTotal: 2,
+      },
+    ])
+    expect(result[0].status).toBe('ADDRESS_NOW')
+  })
+
+  it('targeted correct accelerates RESOLVING → RESOLVED when sessions and no wrong allow it', () => {
+    const resolving: ConceptualBlock = {
+      ...addressNow,
+      status: 'RESOLVING',
+      sessionCount: 2,
+      correctAttempts: 3,
+      totalAttempts: 3,
+    }
+    const result = updateBlockerLifecycle([resolving], [
+      {
+        blockId: 'short-i-vs-e',
+        correctCount: 1,
+        totalCount: 1,
+        targetedCorrect: 1,
+        targetedTotal: 1,
+      },
+    ])
+    expect(result[0].status).toBe('RESOLVED')
+    // 3 + (1 * 2 weight) = 5, meets RESOLVED_THRESHOLD
+    expect(result[0].correctAttempts).toBe(5)
+  })
+})
+
+describe('effectiveStatus', () => {
+  it('prefers new status over legacy recommendation', () => {
+    const block: ConceptualBlock = {
+      name: 'x',
+      affectedSkills: [],
+      recommendation: 'ADDRESS_NOW',
+      status: 'RESOLVING',
+      rationale: '',
+      detectedAt: '',
+      evaluationSessionId: '',
+    }
+    expect(effectiveStatus(block)).toBe('RESOLVING')
+  })
+
+  it('falls back to recommendation when status is absent', () => {
+    const block: ConceptualBlock = {
+      name: 'x',
+      affectedSkills: [],
+      recommendation: 'DEFER',
+      rationale: '',
+      detectedAt: '',
+      evaluationSessionId: '',
+    }
+    expect(effectiveStatus(block)).toBe('DEFER')
+  })
+})

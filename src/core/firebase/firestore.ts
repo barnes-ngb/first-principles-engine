@@ -8,10 +8,15 @@ import {
 } from 'firebase/firestore'
 
 import type {
+  ActivityConfig,
   AIUsageEntry,
   Artifact,
   AvatarProfile,
   Book,
+  BookProgress,
+  BookThemeConfig,
+  ChapterBook,
+  ChapterResponse,
   Child,
   DadLabReport,
   DailyArmorSession,
@@ -21,26 +26,20 @@ import type {
   EvaluationSession,
   HoursAdjustment,
   HoursEntry,
-  LabSession,
-  Ladder,
   LadderProgress,
   LessonCard,
-  MilestoneProgress,
   PlannerConversation,
-  PlannerSession,
-  Project,
-  Session,
-  SightWordList,
+  ScanRecord,
   SightWordProgress,
   SkillSnapshot,
   Sticker,
   StoryGame,
   WeekPlan,
   WeeklyReview,
-  WeeklyScore,
   WorkbookConfig,
   XpLedger,
 } from '../types'
+import type { ChildSkillMap } from '../curriculum/skillStatus'
 import { app } from './firebase'
 
 export const db = getFirestore(app)
@@ -51,11 +50,13 @@ export function stripUndefined(obj: Record<string, unknown>): Record<string, unk
   for (const [key, value] of Object.entries(obj)) {
     if (value === undefined) continue
     if (Array.isArray(value)) {
-      result[key] = value.map((item) =>
-        typeof item === 'object' && item !== null
-          ? stripUndefined(item as Record<string, unknown>)
-          : item,
-      )
+      result[key] = value
+        .filter((item) => item !== undefined)
+        .map((item) =>
+          typeof item === 'object' && item !== null
+            ? stripUndefined(item as Record<string, unknown>)
+            : item,
+        )
     } else if (typeof value === 'object' && value !== null) {
       result[key] = stripUndefined(value as Record<string, unknown>)
     } else {
@@ -124,17 +125,6 @@ export const evaluationsCollection = (
 ): CollectionReference<Evaluation> =>
   collection(db, `families/${familyId}/evaluations`) as CollectionReference<Evaluation>
 
-export const laddersCollection = (familyId: string): CollectionReference<Ladder> =>
-  collection(db, `families/${familyId}/ladders`) as CollectionReference<Ladder>
-
-export const milestoneProgressCollection = (
-  familyId: string,
-): CollectionReference<MilestoneProgress> =>
-  collection(
-    db,
-    `families/${familyId}/milestoneProgress`,
-  ) as CollectionReference<MilestoneProgress>
-
 export const hoursAdjustmentsCollection = (
   familyId: string,
 ): CollectionReference<HoursAdjustment> =>
@@ -142,9 +132,6 @@ export const hoursAdjustmentsCollection = (
     db,
     `families/${familyId}/hoursAdjustments`,
   ) as CollectionReference<HoursAdjustment>
-
-export const sessionsCollection = (familyId: string): CollectionReference<Session> =>
-  collection(db, `families/${familyId}/sessions`) as CollectionReference<Session>
 
 /** Normalize legacy planType values: 'A' → 'normal', 'B' → 'mvd'. */
 function normalizePlanType(raw: string): DailyPlan['planType'] {
@@ -175,36 +162,6 @@ export const dailyPlansCollection = (
 /** Daily plan doc ID: {date}_{childId} */
 export const dailyPlanDocId = (date: string, childId: string): string =>
   `${date}_${childId}`
-
-export const projectsCollection = (familyId: string): CollectionReference<Project> =>
-  collection(db, `families/${familyId}/projects`) as CollectionReference<Project>
-
-export const weeklyScoresCollection = (
-  familyId: string,
-): CollectionReference<WeeklyScore> =>
-  collection(db, `families/${familyId}/weeklyScores`) as CollectionReference<WeeklyScore>
-
-const labSessionConverter: FirestoreDataConverter<LabSession> = {
-  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
-  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
-    const data = snapshot.data(options) as LabSession
-    return {
-      ...data,
-      id: snapshot.id,
-    }
-  },
-}
-
-/** Lab session doc ID: {weekKey}_{childId}_{projectId} (or {weekKey}_{childId} for legacy sessions). */
-export const labSessionDocId = (weekKey: string, childId: string, projectId?: string): string =>
-  projectId ? `${weekKey}_${childId}_${projectId}` : `${weekKey}_${childId}`
-
-export const labSessionsCollection = (
-  familyId: string,
-): CollectionReference<LabSession> =>
-  collection(db, `families/${familyId}/labSessions`).withConverter(
-    labSessionConverter,
-  ) as CollectionReference<LabSession>
 
 const dadLabReportConverter: FirestoreDataConverter<DadLabReport> = {
   toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
@@ -250,30 +207,6 @@ export const skillSnapshotsCollection = (
   collection(db, `families/${familyId}/skillSnapshots`).withConverter(
     skillSnapshotConverter,
   ) as CollectionReference<SkillSnapshot>
-
-// ── Planner Sessions (Shelly Planner) ───────────────────────────
-
-const plannerSessionConverter: FirestoreDataConverter<PlannerSession> = {
-  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
-  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
-    const data = snapshot.data(options) as PlannerSession
-    return {
-      ...data,
-      id: snapshot.id,
-    }
-  },
-}
-
-export const plannerSessionsCollection = (
-  familyId: string,
-): CollectionReference<PlannerSession> =>
-  collection(db, `families/${familyId}/plannerSessions`).withConverter(
-    plannerSessionConverter,
-  ) as CollectionReference<PlannerSession>
-
-/** Planner session doc ID: {weekKey}_{childId} */
-export const plannerSessionDocId = (weekKey: string, childId: string): string =>
-  `${weekKey}_${childId}`
 
 // ── Lesson Cards ────────────────────────────────────────────────
 
@@ -327,6 +260,43 @@ export const workbookConfigsCollection = (
 export const workbookConfigDocId = (childId: string, workbookName: string): string =>
   `${childId}_${workbookName.toLowerCase().replace(/\s+/g, '-')}`
 
+// ── Activity Configs (structured routine + workbook replacement) ──
+
+const activityConfigConverter: FirestoreDataConverter<ActivityConfig> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as ActivityConfig
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/** Activity configs per family. One doc per activity. */
+export const activityConfigsCollection = (
+  familyId: string,
+): CollectionReference<ActivityConfig> =>
+  collection(db, `families/${familyId}/activityConfigs`).withConverter(
+    activityConfigConverter,
+  ) as CollectionReference<ActivityConfig>
+
+/** Normalize curriculum names for consistent matching.
+ * "GATB LA", "Good and the Beautiful Language Arts", "TGTB Level 1" all → "gatb-la" base key.
+ */
+export function normalizeCurriculumKey(name: string): string {
+  const lower = name.toLowerCase()
+  // GATB variants
+  if (/good.*beautiful|gatb|tgtb/.test(lower)) {
+    if (/math/.test(lower)) return 'gatb-math'
+    if (/lang|la\b|reading|phonics/.test(lower)) return 'gatb-la'
+    if (/science/.test(lower)) return 'gatb-science'
+    if (/handwriting/.test(lower)) return 'gatb-handwriting'
+    return 'gatb'
+  }
+  // Reading Eggs
+  if (/reading.*egg/.test(lower)) return 'reading-eggs'
+  // Fallback: slugify
+  return lower.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
 // ── Weekly Reviews (AI-generated adaptive reviews) ──────────────
 
 export const weeklyReviewsCollection = (
@@ -354,6 +324,9 @@ export const booksCollection = (familyId: string): CollectionReference<Book> =>
 export const stickerLibraryCollection = (familyId: string): CollectionReference<Sticker> =>
   collection(db, `families/${familyId}/stickerLibrary`) as CollectionReference<Sticker>
 
+export const bookThemesCollection = (familyId: string): CollectionReference<BookThemeConfig> =>
+  collection(db, `families/${familyId}/bookThemes`) as CollectionReference<BookThemeConfig>
+
 // ── Sight Word Progress ──────────────────────────────────────────
 
 /** Sight word progress: families/{familyId}/sightWordProgress/{childId_word} */
@@ -364,10 +337,6 @@ export const sightWordProgressCollection = (familyId: string) =>
 export const sightWordProgressDocId = (childId: string, word: string): string =>
   `${childId}_${word.toLowerCase().replace(/\s+/g, '-')}`
 
-/** Sight word lists: families/{familyId}/sightWordLists/{listId} */
-export const sightWordListsCollection = (familyId: string) =>
-  collection(db, `families/${familyId}/sightWordLists`) as CollectionReference<SightWordList>
-
 // ── AI Usage ────────────────────────────────────────────────────
 
 export const aiUsageCollection = (
@@ -377,11 +346,19 @@ export const aiUsageCollection = (
 
 // ── Avatar Profiles ────────────────────────────────────────────
 
+const avatarProfileConverter: FirestoreDataConverter<AvatarProfile> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) =>
+    snapshot.data(options) as AvatarProfile,
+}
+
 /** Avatar profile per child. Doc ID: {childId} */
 export const avatarProfilesCollection = (
   familyId: string,
 ): CollectionReference<AvatarProfile> =>
-  collection(db, `families/${familyId}/avatarProfiles`) as CollectionReference<AvatarProfile>
+  collection(db, `families/${familyId}/avatarProfiles`).withConverter(
+    avatarProfileConverter,
+  ) as CollectionReference<AvatarProfile>
 
 /** Build a dedup doc ID for XP ledger event entries. */
 export const xpLedgerDocId = (childId: string, dedupKey: string): string =>
@@ -429,9 +406,60 @@ const storyGameConverter: FirestoreDataConverter<StoryGame> = {
   },
 }
 
+// ── Curriculum Scans ──────────────────────────────────────────
+
+export const scansCollection = (
+  familyId: string,
+): CollectionReference<ScanRecord> =>
+  collection(db, `families/${familyId}/scans`) as CollectionReference<ScanRecord>
+
+// ── Story Games (Game Workshop) ─────────────────────────────────
+
 export const storyGamesCollection = (
   familyId: string,
 ): CollectionReference<StoryGame> =>
   collection(db, `families/${familyId}/storyGames`).withConverter(
     storyGameConverter,
   ) as CollectionReference<StoryGame>
+
+// ── Shelly Chat ─────────────────────────────────────────────────
+
+export const shellyChatThreadsCollection = (familyId: string) =>
+  collection(db, 'families', familyId, 'shellyChatThreads')
+
+export const shellyChatMessagesCollection = (familyId: string, threadId: string) =>
+  collection(db, 'families', familyId, 'shellyChatThreads', threadId, 'messages')
+
+// ── Child Skill Maps (Learning Map) ─────────────────────────────
+
+/** Skill map per child. Doc ID: {childId} */
+export const childSkillMapsCollection = (
+  familyId: string,
+): CollectionReference<ChildSkillMap> =>
+  collection(db, `families/${familyId}/childSkillMaps`) as CollectionReference<ChildSkillMap>
+
+// ── Chapter Responses (Read-Aloud Discussion Evidence) ──────────
+
+/** Chapter responses per child. Auto-ID documents. */
+export const chapterResponsesCollection = (
+  familyId: string,
+): CollectionReference<ChapterResponse> =>
+  collection(db, `families/${familyId}/chapterResponses`) as CollectionReference<ChapterResponse>
+
+// ── Chapter Books (Global Curriculum Library) ───────────────────
+
+/** Global chapter book library. Path: chapterBooks/{bookId} */
+export const chapterBooksCollection = (): CollectionReference<ChapterBook> =>
+  collection(db, 'chapterBooks') as CollectionReference<ChapterBook>
+
+// ── Book Progress (Per-Family Read-Aloud Tracking) ──────────────
+
+/** Book progress per child. Doc ID: {childId}_{bookId} */
+export const bookProgressCollection = (
+  familyId: string,
+): CollectionReference<BookProgress> =>
+  collection(db, `families/${familyId}/bookProgress`) as CollectionReference<BookProgress>
+
+/** Book progress doc ID: {childId}_{bookId} */
+export const bookProgressDocId = (childId: string, bookId: string): string =>
+  `${childId}_${bookId}`

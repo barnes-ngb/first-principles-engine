@@ -231,10 +231,10 @@ export const MasteryGateLabel: Record<MasteryGate, string> = {
 }
 
 export const PaceStatus = {
-  Ahead: 'ahead',
-  OnTrack: 'on_track',
-  Behind: 'behind',
-  Critical: 'critical',
+  Explored: 'explored',
+  Current: 'current',
+  Upcoming: 'upcoming',
+  NotStarted: 'not_started',
 } as const
 export type PaceStatus = (typeof PaceStatus)[keyof typeof PaceStatus]
 
@@ -305,6 +305,56 @@ export const RoutineItemKey = {
 } as const
 export type RoutineItemKey = (typeof RoutineItemKey)[keyof typeof RoutineItemKey]
 
+export const ActivityType = {
+  Formation: 'formation',
+  Workbook: 'workbook',
+  Routine: 'routine',
+  Activity: 'activity',
+  App: 'app',
+  Evaluation: 'evaluation',
+} as const
+export type ActivityType = (typeof ActivityType)[keyof typeof ActivityType]
+
+export const ActivityFrequency = {
+  Daily: 'daily',
+  ThreePerWeek: '3x',
+  TwoPerWeek: '2x',
+  OnePerWeek: '1x',
+  AsNeeded: 'as-needed',
+} as const
+export type ActivityFrequency = (typeof ActivityFrequency)[keyof typeof ActivityFrequency]
+
+/** Human-readable label for each activity frequency. */
+export const ActivityFrequencyLabel: Record<ActivityFrequency, string> = {
+  [ActivityFrequency.Daily]: 'daily',
+  [ActivityFrequency.ThreePerWeek]: '3x/week',
+  [ActivityFrequency.TwoPerWeek]: '2x/week',
+  [ActivityFrequency.OnePerWeek]: '1x/week',
+  [ActivityFrequency.AsNeeded]: 'as needed',
+}
+
+export const ScheduleBlock = {
+  Formation: 'formation',
+  ReadAloud: 'readaloud',
+  Choice: 'choice',
+  CoreReading: 'core-reading',
+  CoreMath: 'core-math',
+  Flex: 'flex',
+  Independent: 'independent',
+} as const
+export type ScheduleBlock = (typeof ScheduleBlock)[keyof typeof ScheduleBlock]
+
+/** Human-readable label for each schedule block. */
+export const ScheduleBlockLabel: Record<ScheduleBlock, string> = {
+  [ScheduleBlock.Formation]: 'Formation',
+  [ScheduleBlock.ReadAloud]: 'Read-Aloud + Handwriting',
+  [ScheduleBlock.Choice]: "Lincoln's Choice",
+  [ScheduleBlock.CoreReading]: 'Core Reading',
+  [ScheduleBlock.CoreMath]: 'Core Math',
+  [ScheduleBlock.Flex]: 'Flex',
+  [ScheduleBlock.Independent]: 'Independent',
+}
+
 export const StickerCategory = {
   Animals: 'animals',
   Minecraft: 'minecraft',
@@ -330,3 +380,19 @@ export const DadLabStatus = {
   Complete: 'complete',
 } as const
 export type DadLabStatus = (typeof DadLabStatus)[keyof typeof DadLabStatus]
+
+export const SkipReason = {
+  TooHard: 'too-hard',
+  NotRelevant: 'not-relevant',
+  AiRecommended: 'ai-recommended',
+} as const
+export type SkipReason = (typeof SkipReason)[keyof typeof SkipReason]
+
+export const QuestionType = {
+  Comprehension: 'comprehension',
+  Application: 'application',
+  Connection: 'connection',
+  Opinion: 'opinion',
+  Prediction: 'prediction',
+} as const
+export type QuestionType = (typeof QuestionType)[keyof typeof QuestionType]

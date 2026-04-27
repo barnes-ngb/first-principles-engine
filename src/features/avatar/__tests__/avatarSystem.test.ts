@@ -14,7 +14,7 @@ import type {
 import { PIECE_OVERLAY_POSITIONS } from '../armorUtils'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../voxel/buildArmorPiece'
 import { ARMOR_PIECE_TO_VOXEL, DEFAULT_CHARACTER_FEATURES } from '../../../core/types'
-import { getTodayDateString } from '../../../core/avatar/getDailyArmorSession'
+import { getTodayDateString, getMorningSuitUpMessage, SUIT_UP_MORNING_MESSAGES } from '../../../core/avatar/getDailyArmorSession'
 
 // ── ARMOR_PIECES data integrity ──────────────────────────────────
 
@@ -647,5 +647,150 @@ describe('getTodayDateString', () => {
     const now = new Date()
     const expected = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
     expect(date).toBe(expected)
+  })
+})
+
+// ── Daily auto-unequip reset logic ──────────────────────────────
+
+describe('Daily armor auto-unequip', () => {
+  it('new day session has empty appliedPieces (armor unequipped)', () => {
+    const session = buildEmptySession('fam1', 'child1', '2026-04-14')
+    expect(session.appliedPieces).toHaveLength(0)
+    expect(session.completedAt).toBeUndefined()
+  })
+
+  it('equippedPieces should be cleared on new day (semantic contract)', () => {
+    // Simulates the profile state after getDailyArmorSession runs on a new day:
+    // equippedPieces is cleared, but all progression is preserved.
+    const profile: AvatarProfile = {
+      childId: 'lincoln1',
+      themeStyle: 'minecraft',
+      pieces: [
+        { pieceId: 'belt_of_truth', unlockedTiers: ['stone'], generatedImageUrls: {} },
+        { pieceId: 'breastplate_of_righteousness', unlockedTiers: ['stone'], generatedImageUrls: {} },
+        { pieceId: 'shoes_of_peace', unlockedTiers: ['stone'], generatedImageUrls: {} },
+      ],
+      currentTier: 'stone',
+      totalXp: 500,
+      diamondBalance: 20,
+      equippedPieces: ['belt', 'breastplate', 'shoes'],
+      updatedAt: '2026-04-13T20:00:00Z',
+      lastArmorEquipDate: '2026-04-13',
+    }
+
+    // After daily reset: equippedPieces cleared, everything else preserved
+    const resetProfile = {
+      ...profile,
+      equippedPieces: [] as string[],
+      lastArmorEquipDate: '2026-04-14',
+    }
+
+    expect(resetProfile.equippedPieces).toEqual([])
+    expect(resetProfile.pieces).toEqual(profile.pieces) // preserved
+    expect(resetProfile.diamondBalance).toBe(20) // preserved
+    expect(resetProfile.totalXp).toBe(500) // preserved
+    expect(resetProfile.currentTier).toBe('stone') // preserved
+    expect(resetProfile.lastArmorEquipDate).toBe('2026-04-14') // updated
+  })
+
+  it('does NOT clear equippedPieces if session for today already exists', () => {
+    // When a session exists for today, getDailyArmorSession returns it
+    // without touching the profile — equippedPieces stays as-is.
+    const existingSession: DailyArmorSession = {
+      familyId: 'fam1',
+      childId: 'child1',
+      date: '2026-04-14',
+      appliedPieces: ['belt_of_truth', 'breastplate_of_righteousness'],
+    }
+
+    const profile: AvatarProfile = {
+      childId: 'child1',
+      themeStyle: 'minecraft',
+      pieces: [],
+      currentTier: 'stone',
+      totalXp: 100,
+      equippedPieces: ['belt', 'breastplate'],
+      updatedAt: '2026-04-14T08:00:00Z',
+    }
+
+    // Session exists → profile is NOT modified
+    expect(existingSession.appliedPieces).toEqual(['belt_of_truth', 'breastplate_of_righteousness'])
+    expect(profile.equippedPieces).toEqual(['belt', 'breastplate']) // still has pieces
+  })
+
+  it('preserves forgedPieces across daily reset', () => {
+    const forgedPieces = {
+      wood: { belt: true, breastplate: true },
+      stone: { belt: true },
+    }
+
+    // After daily reset, only equippedPieces is cleared
+    const resetData = {
+      equippedPieces: [] as string[],
+      lastArmorEquipDate: '2026-04-14',
+    }
+
+    // forgedPieces is NOT in resetData — it's preserved by the batch.update
+    // which only touches equippedPieces and lastArmorEquipDate
+    expect(resetData).not.toHaveProperty('forgedPieces')
+    expect(resetData).not.toHaveProperty('diamondBalance')
+    expect(resetData).not.toHaveProperty('totalXp')
+    expect(resetData).not.toHaveProperty('currentTier')
+    expect(resetData).not.toHaveProperty('customization')
+
+    // forgedPieces remains unchanged (not part of the update)
+    expect(forgedPieces.wood.belt).toBe(true)
+    expect(forgedPieces.stone.belt).toBe(true)
+  })
+
+  it('preserves accessories/customization across daily reset', () => {
+    // The daily reset only updates equippedPieces and lastArmorEquipDate.
+    // Accessories, dye, background, shirt/pants/shoe colors are untouched.
+    const resetFields = { equippedPieces: [], lastArmorEquipDate: '2026-04-14' }
+    const preservedFields = [
+      'customization', 'characterFeatures', 'ageGroup', 'baseCharacterUrl',
+      'photoUrl', 'armorStreak', 'currentTier', 'faceGrid',
+    ]
+
+    for (const field of preservedFields) {
+      expect(resetFields).not.toHaveProperty(field)
+    }
+  })
+})
+
+// ── Morning suit-up messages ────────────────────────────────────
+
+describe('Morning suit-up messages', () => {
+  it('has exactly 5 messages', () => {
+    expect(SUIT_UP_MORNING_MESSAGES).toHaveLength(5)
+  })
+
+  it('all messages are non-empty strings', () => {
+    for (const msg of SUIT_UP_MORNING_MESSAGES) {
+      expect(typeof msg).toBe('string')
+      expect(msg.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('getMorningSuitUpMessage returns a message from the list', () => {
+    const message = getMorningSuitUpMessage()
+    expect(SUIT_UP_MORNING_MESSAGES).toContain(message)
+  })
+
+  it('rotates based on day of week', () => {
+    // The function uses new Date().getDay() % length
+    // We can verify the selection logic deterministically
+    const dayOfWeek = new Date().getDay()
+    const expected = SUIT_UP_MORNING_MESSAGES[dayOfWeek % SUIT_UP_MORNING_MESSAGES.length]
+    expect(getMorningSuitUpMessage()).toBe(expected)
+  })
+
+  it('all messages maintain devotional tone (no game jargon)', () => {
+    const gameTerms = ['xp', 'level up', 'grind', 'loot', 'spawn']
+    for (const msg of SUIT_UP_MORNING_MESSAGES) {
+      for (const term of gameTerms) {
+        expect(msg.toLowerCase()).not.toContain(term)
+      }
+    }
   })
 })

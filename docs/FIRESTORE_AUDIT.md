@@ -1,3 +1,5 @@
+> **STALE** — does not reflect `chapterBooks` (global, top-level) and `bookProgress` (family-scoped) collections added Apr 10, 2026. Chapter Pool P3 (Apr 12, 2026) added real-time `bookProgress` subscription via `useBookProgress` hook and continued `chapterResponses` writes from the new `ChapterQuestionPool` component.
+
 # Firestore Audit — 2026-03-21
 
 ## Summary
@@ -49,9 +51,50 @@ All collections live under `families/{familyId}/`. No subcollections go deeper t
 | 28 | `aiUsage` | auto | 50+/yr | Range by `createdAt` |
 | 29 | `avatarProfiles` | `{childId}` | 2–5 | Single doc listener |
 | 30 | `dailyArmorSessions` | `{childId}-{date}` | ~360/yr | Single doc listener |
-| 31 | `evaluationSessions` | auto | 20–50 | Filtered by `childId` + `domain`/`status`, ordered by `evaluatedAt` |
+| 31 | `evaluationSessions` | auto | 20–50 | Filtered by `childId` + `domain`/`status`, ordered by `evaluatedAt`. Status values: `in-progress`, `complete`, `resumed`, `abandoned`. Interactive sessions may include `savedQuestState`, `savedCurrentQuestion`, `bonusRoundUsed` for resume support. |
 
 > **Note:** 31 collections found (28 in `firestore.ts` + `sightWordLists`, `sightWordProgress`, and `aiUsage` are in `firestore.ts` but the CLAUDE.md table lists only 18 named collections). The CLAUDE.md collection table is outdated.
+
+> **Update (Apr 8, 2026):** The `scans` collection (not listed above — added post-audit) stores AI-analyzed curriculum evidence (workbook pages, worksheets, tests). The `artifacts` collection stores non-curriculum evidence (creative builds, drawings, etc.). As of the unified capture pipeline, checklist items have an `evidenceCollection` field (`'scans' | 'artifacts'`) alongside `evidenceArtifactId` to indicate which collection the evidence doc lives in. Legacy items without `evidenceCollection` are in `artifacts`.
+
+> **Update (Apr 14, 2026):** Child documents now support an optional `dispositionOverrides` field (separate from `dispositionCache`):
+> ```typescript
+> dispositionOverrides?: {
+>   curiosity?: DispositionNarrativeOverride
+>   persistence?: DispositionNarrativeOverride
+>   articulation?: DispositionNarrativeOverride
+>   selfAwareness?: DispositionNarrativeOverride
+>   ownership?: DispositionNarrativeOverride
+> }
+>
+> interface DispositionNarrativeOverride {
+>   text: string               // Shelly's corrected narrative
+>   overriddenBy: string       // 'parent'
+>   overriddenAt: string       // ISO timestamp
+>   note?: string              // reason for the edit
+> }
+> ```
+> Stored as a **separate field** from `dispositionCache` so AI regeneration (which overwrites `dispositionCache.result` + `generatedAt`) cannot blow away parent overrides. The canonical way to read the current narrative for a disposition is `effectiveDispositionText(entry, override)` from `src/core/types/disposition.ts`, which returns `override?.text ?? entry.narrative`. When no overrides remain, the field is deleted via `deleteField()`.
+
+> **Update (Apr 14, 2026):** ChecklistItem (on `days` collection `DayLog.checklist[]`) gains four optional fields for the skip/rollover system:
+> ```typescript
+> activityConfigId?: string       // doc ID into activityConfigs collection
+> skipReason?: 'too-hard' | 'not-relevant' | 'ai-recommended'
+> rolledOver?: boolean            // true on items carried forward from a previous school day
+> rolledOverFrom?: string         // YYYY-MM-DD of the original day
+> ```
+> `activityConfigId` links checklist items to their originating `ActivityConfig`, enabling deduplication during rollover and auto-complete on scan-advance. `skipReason` augments the existing `skipped: boolean` field — when `skipped: true` and `skipReason` is absent, it's a legacy kid-side skip. `rolledOver`/`rolledOverFrom` mark items that were auto-carried from a previous school day's incomplete checklist. Hours computation is unaffected (it filters on `completed`, never touches `skipped` or `skipReason`).
+
+> **Update (Apr 9, 2026):** Scan documents now support an optional `parentOverride` field:
+> ```typescript
+> parentOverride?: {
+>   recommendation: 'do' | 'skip' | 'quick-review' | 'modify'
+>   overriddenBy: string
+>   overriddenAt: string  // ISO timestamp
+>   note?: string
+> }
+> ```
+> When present, the parent's recommendation takes precedence over the AI's original in `results.recommendation`. The canonical way to read the current recommendation is `effectiveRecommendation(scan)` from `src/core/types/planning.ts`, which returns `parentOverride.recommendation ?? results.recommendation`. The AI's original is never mutated.
 
 ---
 
@@ -226,6 +269,46 @@ These queries filter/sort on multiple fields and likely need composite indexes. 
 ### 4. `skillSnapshots` + `avatarProfiles` — Merge Into One Per-Child Profile
 
 **Observation:** Both are keyed by `{childId}` (one doc per child). They represent per-child metadata. `avatarProfiles` has XP/level data; `skillSnapshots` has evaluation data.
+
+**Extended `ConceptualBlock` shape (2026-04 Phase 1):** `SkillSnapshot.conceptualBlocks` remains the canonical array of raw blocker signals, now fed by four writers (evaluation, quest, scan, parent) with a lifecycle.
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | Human label. |
+| `affectedSkills` | string[] | Tags this block gates. |
+| `recommendation` | `'ADDRESS_NOW' \| 'DEFER'` | Legacy, preserved for old blocks. |
+| `rationale` | string | Why this is a block. |
+| `strategies?` | string[] | Interventions (ADDRESS_NOW). |
+| `deferNote?` | string | When to revisit (DEFER). |
+| `detectedAt` | string (ISO) | First write timestamp. |
+| `evaluationSessionId` | string | Linking session; empty for non-eval sources. |
+| `id?` | string | Stable slug ID (e.g. `short-vowel-i-vs-e`). Enables merge-by-ID. |
+| `status?` | `'ADDRESS_NOW' \| 'DEFER' \| 'RESOLVING' \| 'RESOLVED'` | Lifecycle state. Preferred over `recommendation` when present. |
+| `evidence?` | string | Per-block evidence string; `mergeBlock` appends on reinforcement. |
+| `firstDetectedAt?` | string (ISO) | First creation time. |
+| `lastReinforcedAt?` | string (ISO) | Most recent reinforcement. |
+| `sessionCount?` | number | How many sessions have seen this block. |
+| `resolvedAt?` | string (ISO) | Set when status transitions to RESOLVED. |
+| `source?` | `'evaluation' \| 'quest' \| 'scan' \| 'parent'` | First detector. |
+| `lastSource?` | same | Most recent reinforcement source. |
+| `specificWords?` | string[] | Words the child struggles with (e.g. `['bed','bid']`). |
+| `specificQuestions?` | string[] | Question IDs that triggered detection. |
+| `correctAttempts?` | number | Cumulative correct answers observed on this skill. |
+| `totalAttempts?` | number | Cumulative total attempts observed on this skill. |
+
+Writes are always via `updateDoc` so unrelated snapshot fields are preserved. `blocksUpdatedAt` is refreshed on every write. All new fields are optional — legacy blocks without them continue to work and surface as ADDRESS_NOW (via `recommendation` fallback) in AI context.
+
+**New field (2026-04):** `workingLevels?: WorkingLevels` — per-domain working levels for Knowledge Mine progression.
+
+```
+workingLevels: {
+  phonics?: { level: number, updatedAt: string, source: 'quest'|'evaluation'|'curriculum'|'manual', evidence?: string }
+  comprehension?: { ... same shape }
+  math?: { ... same shape }
+}
+```
+
+Written by: quest session end (`source: 'quest'`), guided evaluation apply (`source: 'evaluation'`), curriculum scan (`source: 'curriculum'`), future parent UI (`source: 'manual'`). Manual overrides are protected from automated overwrites for 48 hours. Optional field — absence means "no data, use default Level 2."
 
 **Option:** Merge into a single `childProfiles` collection or embed both as subcollections of `children`.
 

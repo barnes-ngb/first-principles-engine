@@ -1,34 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import AddIcon from '@mui/icons-material/Add'
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
-import DeleteIcon from '@mui/icons-material/Delete'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
-import PrintIcon from '@mui/icons-material/Print'
 import SendIcon from '@mui/icons-material/Send'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import Checkbox from '@mui/material/Checkbox'
-import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogContentText from '@mui/material/DialogContentText'
 import DialogTitle from '@mui/material/DialogTitle'
-import FormControl from '@mui/material/FormControl'
-import FormControlLabel from '@mui/material/FormControlLabel'
 import IconButton from '@mui/material/IconButton'
-import InputLabel from '@mui/material/InputLabel'
-import MenuItem from '@mui/material/MenuItem'
-import Select from '@mui/material/Select'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
-import ToggleButton from '@mui/material/ToggleButton'
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
-import { addDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
+import { addDoc, deleteField, doc, getDoc, getDocs, limit as fsLimit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { useNavigate } from 'react-router-dom'
 import ChildSelector from '../../components/ChildSelector'
@@ -39,13 +26,16 @@ import type { ChatMessage as AIChatMessage, GeneratedActivity } from '../../core
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
+  bookProgressCollection,
+  bookProgressDocId,
+  chapterBooksCollection,
   daysCollection,
+  evaluationSessionsCollection,
   lessonCardsCollection,
   plannerConversationDocId,
   plannerConversationsCollection,
   skillSnapshotsCollection,
   weeksCollection,
-  workbookConfigsCollection,
   db,
 } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
@@ -54,11 +44,13 @@ import { useDebounce } from '../../core/hooks/useDebounce'
 import type {
   AppBlock,
   AssignmentCandidate,
+  BookProgress,
+  ChapterBook,
+  ChapterQuestionPoolItem,
   ChatMessage,
   ChecklistItem,
   DayBlock,
   DayLog,
-  DraftDayPlan,
   DraftPlanItem,
   DraftWeeklyPlan,
   LessonCard,
@@ -80,13 +72,17 @@ import {
   PlannerConversationStatus,
   SubjectBucket,
 } from '../../core/types/enums'
-import { fixUnicodeEscapes, formatDateYmd } from '../../core/utils/format'
+import { SKILL_TAG_MAP } from '../../core/types/skillTags'
+import { todayKey } from '../../core/utils/dateKey'
+import { formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { dayLogDocId } from '../today/daylog.model'
-import { defaultAppBlocks, defaultDailyRoutine } from '../planner/planner.logic'
+import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
+import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
-  buildMinimumWinText,
   buildPlannerPrompt,
+  dateKeyForDayPlan,
+  ensureEvaluationItems,
   fillMissingDaysFromRoutine,
   generateDraftPlanFromInputs,
   generateItemId,
@@ -96,14 +92,17 @@ import {
 import type { AdjustmentIntent } from './chatPlanner.logic'
 import { describeAdjustment, parseAdjustmentIntent } from './intentParser'
 import { formatCoverageSummaryText, buildCoverageSummary } from './coverageSummary'
-import { clonePlanWithAdvancedLessons } from './repeatWeek.logic'
 import ContextDrawer from './ContextDrawer'
 import LessonCardPreview from './LessonCardPreview'
-import PlanPreviewCard from './PlanPreviewCard'
 import PlanSummaryPanel from './PlanSummaryPanel'
-import PhotoLabelForm from './PhotoLabelForm'
+import { useScan } from '../../core/hooks/useScan'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
 import { buildMaterialsPrompt, openPrintWindow } from './generateMaterials'
+import ChapterBookPicker from './ChapterBookPicker'
+import PlannerSetupWizard from './PlannerSetupWizard'
+import WeekFocusPanel from './WeekFocusPanel'
+import PlanDayCards from './PlanDayCards'
+import PlannerChatMessages from './PlannerChatMessages'
 
 
 /** Detect if an AI response looks like it was trying to return plan JSON (contains days/items structure). */
@@ -173,6 +172,28 @@ function buildPhotoContextSection(labels: PhotoLabel[]): string {
   return lines.join('\n')
 }
 
+const LIGHTER_WEEK_BUDGET_MULTIPLIER = 0.7
+const TOUGH_WEEK_FIXED_MINUTES = 90
+
+function formatSkillLabel(tag: string): string {
+  const mapped = SKILL_TAG_MAP[tag]?.label
+  if (mapped) return mapped
+  const fallback = tag.split('.').pop() ?? tag
+  return fallback
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+type MasteryCounts = { gotIt: number; working: number; stuck: number }
+type PlannerMasterySummary = {
+  rangeStart: string
+  rangeEnd: string
+  gotIt: string[]
+  stillWorking: string[]
+  needsFocus: string[]
+  bySkillTag: Record<string, MasteryCounts>
+}
+
 export default function PlannerChatPage() {
   const familyId = useFamilyId()
   const { isEnabled } = useAIFeatureFlags()
@@ -190,6 +211,7 @@ export default function PlannerChatPage() {
   const navigate = useNavigate()
   const weekRange = useMemo(() => getWeekRange(new Date()), [])
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const autoSuggestTriggered = useRef(false)
 
   // State
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -201,19 +223,21 @@ export default function PlannerChatPage() {
   const [uploading, setUploading] = useState(false)
   const [currentDraft, setCurrentDraft] = useState<DraftWeeklyPlan | null>(null)
   const [adjustments, setAdjustments] = useState<AdjustmentIntent[]>([])
-  const [showPhotos, setShowPhotos] = useState(false)
+  // showPhotos state removed — photo upload now lives in setup phase accordion
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [applied, setApplied] = useState(false)
-  const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' | 'warning' } | null>(null)
+  const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' | 'warning'; action?: { label: string; onClick: () => void } } | null>(null)
 
   // Week plan state (theme/virtue/scripture/heartQuestion)
   const [weekPlan, setWeekPlan] = useState<WeekPlan | null>(null)
-
+  const phase = useMemo<'setup' | 'review' | 'active'>(() => {
+    if (applied) return 'active'
+    if (weekPlan && currentDraft) return 'review'
+    return 'setup'
+  }, [weekPlan, currentDraft, applied])
   // Confirmation dialog state
   const [confirmNewPlan, setConfirmNewPlan] = useState(false)
 
-  // Print materials state
-  const [generatingMaterials, setGeneratingMaterials] = useState<string | null>(null)
 
   // Generate activity state
   const [generatingItemId, setGeneratingItemId] = useState<string | null>(null)
@@ -221,83 +245,176 @@ export default function PlannerChatPage() {
   const [generatedPlanItem, setGeneratedPlanItem] = useState<DraftPlanItem | null>(null)
   const [lessonCardSaved, setLessonCardSaved] = useState(false)
   const [lessonCardSaving, setLessonCardSaving] = useState(false)
+  const [printingMaterials, setPrintingMaterials] = useState(false)
 
-  // Workbook configs for active child (for photo label matching)
-  const [workbookConfigs, setWorkbookConfigs] = useState<WorkbookConfig[]>([])
+  // Scan hook for workbook page analysis
+  const {
+    scan: runScan,
+    recordAction: recordScanAction,
+    scanResult: scanRecord,
+    scanning: scanLoading,
+    error: scanError,
+    clearScan,
+  } = useScan()
 
   // Setup wizard state
-  const [conversationLoaded, setConversationLoaded] = useState(false)
   const [setupComplete, setSetupComplete] = useState(false)
   const [weekEnergy, setWeekEnergy] = useState<'full' | 'lighter' | 'mvd'>('full')
-  const [readAloud, setReadAloud] = useState('')
+  const [readAloudBook, setReadAloudBook] = useState('')
+  const [readAloudChapters, setReadAloudChapters] = useState('')
   const [weekNotes, setWeekNotes] = useState('')
-  const [selectedWorkbookIds, setSelectedWorkbookIds] = useState<Set<string>>(new Set())
 
-  // Quick workbook add state (inline in setup wizard)
-  const [quickWorkbooks, setQuickWorkbooks] = useState<Array<{ name: string; subject: string }>>([
-    { name: '', subject: 'Reading' },
-  ])
+  // Chapter book library + selection
+  const [chapterBooks, setChapterBooks] = useState<ChapterBook[]>([])
+  const [selectedBook, setSelectedBook] = useState<ChapterBook | null>(null)
+  const [bookProgress, setBookProgress] = useState<BookProgress | null>(null)
 
   // Per-subject default time overrides (minutes per day)
   const [subjectTimeDefaults, setSubjectTimeDefaults] = useState<SubjectTimeDefaults>({})
+  const [generatingWeek, setGeneratingWeek] = useState(false)
+  const [masterySummary, setMasterySummary] = useState<PlannerMasterySummary | null>(null)
 
-  // Returning-user compact setup toggles
-  const [showRoutineEdit, setShowRoutineEdit] = useState(false)
-  const [showWorkbookEdit, setShowWorkbookEdit] = useState(false)
-  const [showTimeEdit, setShowTimeEdit] = useState(false)
+  // Activity configs → routine text (replaces old free-text dailyRoutine)
+  const { configs: activityConfigs } = useActivityConfigs(activeChildId ?? '')
+  const dailyRoutine = useMemo(
+    () => activityConfigsToRoutineText(activityConfigs),
+    [activityConfigs],
+  )
+  const workbookConfigs = useMemo<WorkbookConfig[]>(
+    () =>
+      activityConfigs
+        .filter((cfg) => cfg.type === 'workbook' && !cfg.completed)
+        .map((cfg) => ({
+          id: cfg.id,
+          childId: cfg.childId === 'both' ? activeChildId ?? '' : cfg.childId,
+          name: cfg.name,
+          subjectBucket: cfg.subjectBucket,
+          totalUnits: cfg.totalUnits ?? 0,
+          currentPosition: cfg.currentPosition ?? 0,
+          unitLabel: cfg.unitLabel ?? 'lesson',
+          targetFinishDate: '',
+          schoolDaysPerWeek: 5,
+          defaultMinutes: cfg.defaultMinutes,
+          curriculum: cfg.curriculumMeta,
+          completed: cfg.completed,
+          completedDate: cfg.completedDate,
+          createdAt: cfg.createdAt,
+          updatedAt: cfg.updatedAt,
+        })),
+    [activityConfigs, activeChildId],
+  )
 
-  // Daily routine state — initialized with default template
-  const [dailyRoutine, setDailyRoutine] = useState(defaultDailyRoutine)
-
-  // Suggest focus state
-  const [suggestingFocus, setSuggestingFocus] = useState(false)
-  const [focusWasSuggested, setFocusWasSuggested] = useState(false)
-  const autoSuggestTriggered = useRef(false)
+  // Adjust hoursPerDay based on energy selection and routine total
+  useEffect(() => {
+    const routineTotal = parseRoutineTotalMinutes(dailyRoutine)
+    if (weekEnergy === 'full') {
+      setHoursPerDay(routineTotal > 0 ? Math.round((routineTotal / 60) * 10) / 10 : 3)
+    } else if (weekEnergy === 'lighter') {
+      setHoursPerDay(routineTotal > 0 ? Math.round((routineTotal * LIGHTER_WEEK_BUDGET_MULTIPLIER / 60) * 10) / 10 : 2)
+    } else {
+      setHoursPerDay(TOUGH_WEEK_FIXED_MINUTES / 60)
+    }
+  }, [weekEnergy, dailyRoutine])
 
   const conversationDocId = useMemo(
     () => (activeChildId ? plannerConversationDocId(weekRange.start, activeChildId) : ''),
     [weekRange.start, activeChildId],
   )
 
-  // Quick workbook handlers
-  const updateQuickWorkbook = useCallback((i: number, field: string, value: string) => {
-    setQuickWorkbooks(prev => prev.map((qw, idx) => idx === i ? { ...qw, [field]: value } : qw))
-  }, [])
-  const removeQuickWorkbook = useCallback((i: number) => {
-    setQuickWorkbooks(prev => prev.filter((_, idx) => idx !== i))
-  }, [])
-  const addQuickWorkbook = useCallback(() => {
-    setQuickWorkbooks(prev => [...prev, { name: '', subject: 'Reading' }])
+  // Load chapter book library
+  useEffect(() => {
+    void getDocs(chapterBooksCollection()).then((snap) => {
+      const books = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
+      books.sort((a, b) => a.title.localeCompare(b.title))
+      setChapterBooks(books)
+    }).catch((err) => {
+      console.warn('Failed to load chapter book library:', err)
+    })
   }, [])
 
-  // Load planner defaults (hoursPerDay, readAloud — family-level)
+  // Load planner defaults (family-level) and initialize selectedBook from readAloudBookId
+  const plannerDefaultsBookIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (!familyId) return
     const settingsRef = doc(db, `families/${familyId}/settings/plannerDefaults`)
     void getDoc(settingsRef).then((snap) => {
       if (snap.exists()) {
         const data = snap.data()
-        if (data.hoursPerDay) setHoursPerDay(data.hoursPerDay)
-        if (data.readAloud) setReadAloud(data.readAloud)
+        if (data.weekEnergy) setWeekEnergy(data.weekEnergy)
+        if (data.readAloudBook) setReadAloudBook(data.readAloudBook)
+        if (data.readAloudChapters) setReadAloudChapters(data.readAloudChapters)
+        if (data.readAloudBookId) plannerDefaultsBookIdRef.current = data.readAloudBookId as string
       }
     })
   }, [familyId])
 
-  // Load per-child daily routine (falls back to default template)
+  // Initialize selectedBook once chapterBooks are loaded and plannerDefaults has been read
   useEffect(() => {
-    if (!familyId || !activeChildId) {
-      setDailyRoutine(defaultDailyRoutine)
+    if (chapterBooks.length === 0 || !plannerDefaultsBookIdRef.current) return
+    const match = chapterBooks.find((b) => b.id === plannerDefaultsBookIdRef.current)
+    if (match) {
+      setSelectedBook(match)
+      setReadAloudBook(match.title)
+      plannerDefaultsBookIdRef.current = null // Only initialize once
+    }
+  }, [chapterBooks])
+
+  // Load BookProgress for selected book + active child
+  useEffect(() => {
+    if (!familyId || !activeChildId || !selectedBook) {
+      setBookProgress(null)
       return
     }
-    const childSettingsRef = doc(db, `families/${familyId}/settings/plannerDefaults_${activeChildId}`)
-    void getDoc(childSettingsRef).then((snap) => {
-      if (snap.exists() && snap.data().dailyRoutine) {
-        setDailyRoutine(snap.data().dailyRoutine)
+    const progressId = bookProgressDocId(activeChildId, selectedBook.id)
+    const progressRef = doc(bookProgressCollection(familyId), progressId)
+    void getDoc(progressRef).then((snap) => {
+      if (snap.exists()) {
+        setBookProgress({ ...snap.data(), id: snap.id })
       } else {
-        setDailyRoutine(defaultDailyRoutine)
+        setBookProgress(null)
       }
     })
-  }, [familyId, activeChildId])
+  }, [familyId, activeChildId, selectedBook])
+
+  // When selectedBook changes, sync legacy readAloudBook field and clear chapters
+  const handleSelectedBookChange = useCallback((book: ChapterBook | null) => {
+    setSelectedBook(book)
+    if (book) {
+      setReadAloudBook(book.title)
+      setReadAloudChapters('')
+    } else {
+      setReadAloudBook('')
+      setReadAloudChapters('')
+    }
+  }, [])
+
+  // When a new book is added via ChapterBookPicker, include it in the local library list
+  const handleBookAdded = useCallback((book: ChapterBook) => {
+    setChapterBooks((prev) => {
+      if (prev.some((b) => b.id === book.id)) return prev
+      const next = [...prev, book]
+      next.sort((a, b) => a.title.localeCompare(b.title))
+      return next
+    })
+  }, [])
+
+  // dailyRoutine is now derived from activity configs (already filtered for completed)
+  // No need to filter for completed programs — activity configs handle that via `completed` flag
+  const filteredDailyRoutine = dailyRoutine
+  const filteredAppBlocks = useMemo(
+    () => {
+      const completed = snapshot?.completedPrograms ?? []
+      if (!completed.length) return appBlocks
+      return appBlocks.filter(block => {
+        const blockLower = block.label.toLowerCase().replace(/[^a-z0-9]/g, '')
+        return !completed.some(prog => {
+          const progLower = prog.toLowerCase().replace(/[^a-z0-9]/g, '')
+          return blockLower.includes(progLower)
+        })
+      })
+    },
+    [appBlocks, snapshot?.completedPrograms],
+  )
 
   // Load per-child subject time defaults
   useEffect(() => {
@@ -327,7 +444,6 @@ export default function PlannerChatPage() {
         if (data.currentDraft) setCurrentDraft(data.currentDraft)
         if (data.status === PlannerConversationStatus.Applied) setApplied(true)
         if (data.messages.length > 0) {
-          setConversationLoaded(true)
           setSetupComplete(true)
         }
       }
@@ -347,26 +463,131 @@ export default function PlannerChatPage() {
     return unsubscribe
   }, [familyId, activeChildId])
 
-  // Load workbook configs for active child
+  // Check for recent evaluation sessions (for nudge suppression)
+  const [recentEvalDate, setRecentEvalDate] = useState<string | null>(null)
   useEffect(() => {
     if (!activeChildId) {
-      setWorkbookConfigs([])
+      setRecentEvalDate(null)
       return
     }
-    const col = workbookConfigsCollection(familyId)
-    const q = query(col, where('childId', '==', activeChildId))
+    const q = query(
+      evaluationSessionsCollection(familyId),
+      where('childId', '==', activeChildId),
+      orderBy('evaluatedAt', 'desc'),
+      fsLimit(1),
+    )
     void getDocs(q).then((snap) => {
-      const configs = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
-      setWorkbookConfigs(configs)
+      if (!snap.empty) {
+        const latest = snap.docs[0].data()
+        setRecentEvalDate(latest.evaluatedAt)
+      } else {
+        setRecentEvalDate(null)
+      }
     })
   }, [familyId, activeChildId])
 
-  // Initialize selected workbooks when configs load
+  // Load recent mastery states from last 2 weeks of day logs for active child
   useEffect(() => {
-    if (workbookConfigs.length > 0) {
-      setSelectedWorkbookIds(new Set(workbookConfigs.map((c) => c.id ?? '')))
+    if (!activeChildId) {
+      setMasterySummary(null)
+      return
     }
-  }, [workbookConfigs])
+
+    const end = new Date()
+    const start = new Date(end)
+    start.setDate(end.getDate() - 13)
+    const rangeStart = formatDateYmd(start)
+    const rangeEnd = formatDateYmd(end)
+    const daysQuery = query(
+      daysCollection(familyId),
+      where('date', '>=', rangeStart),
+      where('date', '<=', rangeEnd),
+    )
+
+    void getDocs(daysQuery).then((snap) => {
+      const bySkillTag: Record<string, MasteryCounts> = {}
+      for (const docSnap of snap.docs) {
+        const day = docSnap.data() as DayLog
+        if (day.childId !== activeChildId) continue
+        for (const item of day.checklist ?? []) {
+          if (!item.mastery || !item.skillTags || item.skillTags.length === 0) continue
+          for (const tag of item.skillTags) {
+            const counts = bySkillTag[tag] ?? { gotIt: 0, working: 0, stuck: 0 }
+            if (item.mastery === 'got-it') counts.gotIt += 1
+            else if (item.mastery === 'working') counts.working += 1
+            else if (item.mastery === 'stuck') counts.stuck += 1
+            bySkillTag[tag] = counts
+          }
+        }
+      }
+
+      const gotIt: string[] = []
+      const stillWorking: string[] = []
+      const needsFocus: string[] = []
+      for (const [tag, counts] of Object.entries(bySkillTag)) {
+        if (counts.gotIt >= 3) gotIt.push(tag)
+        else if (counts.stuck >= 2) needsFocus.push(tag)
+        else stillWorking.push(tag)
+      }
+
+      setMasterySummary({
+        rangeStart,
+        rangeEnd,
+        gotIt: gotIt.sort(),
+        stillWorking: stillWorking.sort(),
+        needsFocus: needsFocus.sort(),
+        bySkillTag,
+      })
+    }).catch(() => {
+      setMasterySummary(null)
+    })
+  }, [familyId, activeChildId])
+
+  const masteryPromptContext = useMemo(() => {
+    if (!masterySummary) return ''
+    const formatSkillLabel = (tag: string) => {
+      const mapped = SKILL_TAG_MAP[tag]?.label
+      if (mapped) return mapped
+      const fallback = tag.split('.').pop() ?? tag
+      return fallback
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase())
+    }
+    const formatTags = (tags: string[]) =>
+      tags
+        .slice(0, 8)
+        .map((tag) => formatSkillLabel(tag))
+        .join(', ') || 'none'
+
+    return [
+      `Recent checklist mastery summary (${masterySummary.rangeStart} to ${masterySummary.rangeEnd}):`,
+      `- Needs focus (stuck >=2): ${formatTags(masterySummary.needsFocus)}`,
+      `- Still working: ${formatTags(masterySummary.stillWorking)}`,
+      `- Got it / skip candidates (got-it >=3): ${formatTags(masterySummary.gotIt)}`,
+      'Use this to prioritize "needs focus", keep "still working" in rotation, and reduce or review-only "got it" skills.',
+    ].join('\n')
+  }, [masterySummary])
+
+  const masteryReviewLine = useMemo(() => {
+    if (!masterySummary) return ''
+    const formatSkillLabel = (tag: string) => {
+      const mapped = SKILL_TAG_MAP[tag]?.label
+      if (mapped) return mapped
+      const fallback = tag.split('.').pop() ?? tag
+      return fallback
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase())
+    }
+    const short = (tags: string[]) =>
+      tags.slice(0, 2).map((tag) => formatSkillLabel(tag)).join(', ')
+    const hasFocus = masterySummary.needsFocus.length > 0
+    const hasSkip = masterySummary.gotIt.length > 0
+    if (!hasFocus && !hasSkip) return ''
+    const parts: string[] = []
+    if (hasFocus) parts.push(`Focus: ${short(masterySummary.needsFocus)}`)
+    if (hasSkip) parts.push(`Skip candidates: ${short(masterySummary.gotIt)}`)
+    return parts.join(' · ')
+  }, [masterySummary])
 
   // Load week plan (theme/virtue/scripture/heartQuestion)
   const weekPlanRef = useMemo(
@@ -413,10 +634,26 @@ export default function PlannerChatPage() {
     [weekPlan, debouncedWriteWeekField],
   )
 
+  // Persist book change to plannerDefaults + weekPlan (used in review/active phases)
+  const handleBookChangeAndPersist = useCallback((book: ChapterBook | null) => {
+    handleSelectedBookChange(book)
+    // Persist to plannerDefaults
+    void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
+      readAloudBook: book?.title ?? '',
+      readAloudBookId: book?.id ?? null,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true })
+    // If plan is already applied, also update the week document
+    if (applied) {
+      void updateDoc(weekPlanRef, {
+        ...(book ? { readAloudBookId: book.id } : { readAloudBookId: null }),
+      })
+    }
+  }, [handleSelectedBookChange, familyId, applied, weekPlanRef])
+
   // Add welcome message on first load when child is selected (only after setup wizard is complete)
   useEffect(() => {
     if (!activeChildId || messages.length > 0 || !setupComplete) return
-    const minimumWin = buildMinimumWinText(snapshot)
     const welcomeParts = [
       `Planning week of ${weekRange.start} for ${activeChild?.name ?? 'your child'}.`,
     ]
@@ -425,7 +662,6 @@ export default function PlannerChatPage() {
         `\nSkill focus: ${snapshot.prioritySkills.map((s) => `${s.label} (${s.level})`).join(', ')}.`,
       )
     }
-    welcomeParts.push(`\nMinimum Win: ${minimumWin}`)
     welcomeParts.push('\nUpload workbook photos and label them, or type assignments. I\'ll build your week plan.')
 
     const welcomeMsg: ChatMessage = {
@@ -441,6 +677,25 @@ export default function PlannerChatPage() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Auto-suggest weekly focus: skip regeneration if focus was generated this week
+  useEffect(() => {
+    if (!weekPlan || !activeChildId || setupComplete) return
+    if (autoSuggestTriggered.current) return
+
+    const isEmpty = !weekPlan.theme && !weekPlan.virtue && !weekPlan.scriptureRef && !weekPlan.heartQuestion
+    const focusAge = weekPlan.focusGeneratedAt
+      ? Date.now() - new Date(weekPlan.focusGeneratedAt).getTime()
+      : Infinity
+    const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
+    const isStale = focusAge > SEVEN_DAYS
+
+    // If focus already exists and is fresh, no auto-trigger needed — wizard will reuse it
+    if (!isEmpty && !isStale) {
+      autoSuggestTriggered.current = true
+      return
+    }
+  }, [weekPlan, activeChildId, setupComplete])
 
   // Persist conversation
   const persistConversation = useCallback(
@@ -458,7 +713,7 @@ export default function PlannerChatPage() {
           status: PlannerConversationStatus.Draft,
           messages: [],
           availableHoursPerDay: hoursPerDay,
-          appBlocks,
+          appBlocks: filteredAppBlocks,
           assignments: [],
           createdAt: now,
           updatedAt: now,
@@ -467,7 +722,7 @@ export default function PlannerChatPage() {
         await setDoc(ref, conversation)
       }
     },
-    [familyId, conversationDocId, activeChildId, weekRange.start, hoursPerDay, appBlocks],
+    [familyId, conversationDocId, activeChildId, weekRange.start, hoursPerDay, filteredAppBlocks],
   )
 
   // Cached base64 images for vision API (cleared after plan generation)
@@ -531,6 +786,57 @@ export default function PlannerChatPage() {
     },
     [activeChildId, familyId],
   )
+
+  // Scan a workbook page (upload + AI skill analysis)
+  const handleScanCapture = useCallback(
+    async (file: File) => {
+      if (!activeChildId) return
+      await runScan(file, familyId, activeChildId)
+    },
+    [activeChildId, familyId, runScan],
+  )
+
+  // Accept a scan result — add as a photo label with auto-filled fields
+  const handleScanAccept = useCallback(() => {
+    if (!scanRecord?.results) return
+    const r = scanRecord.results
+    // Only worksheet/workbook scans can become photo labels — skip certificates
+    if (r.pageType === 'certificate') return
+    // Map scan subject to SubjectBucket
+    const subjectMap: Record<string, SubjectBucket> = {
+      math: SubjectBucket.Math,
+      reading: SubjectBucket.Reading,
+      writing: SubjectBucket.LanguageArts,
+      spelling: SubjectBucket.LanguageArts,
+      phonics: SubjectBucket.Reading,
+      science: SubjectBucket.Science,
+    }
+    const subject = subjectMap[r.subject] ?? SubjectBucket.Other
+    const newLabel: PhotoLabel = {
+      artifactId: scanRecord.id ?? `scan-${Date.now()}`,
+      subjectBucket: subject,
+      lessonOrPages: r.specificTopic,
+      estimatedMinutes: r.estimatedMinutes,
+      extractedContent: {
+        subject: r.subject,
+        lessonNumber: '',
+        topic: r.specificTopic,
+        estimatedMinutes: r.estimatedMinutes,
+        difficulty: r.estimatedDifficulty,
+        modifications: r.teacherNotes,
+        rawDescription: `${r.specificTopic} (${r.recommendation}: ${r.recommendationReason})`,
+      },
+    }
+    setPhotoLabels((prev) => {
+      // Deduplicate by artifactId
+      if (prev.some((l) => l.artifactId === newLabel.artifactId)) {
+        return prev
+      }
+      return [...prev, newLabel]
+    })
+    void recordScanAction(familyId, scanRecord, 'added')
+    clearScan()
+  }, [scanRecord, familyId, recordScanAction, clearScan])
 
   // Extract photo content using AI vision (analyzes actual image) with text-only fallback
   const extractPhotoContent = useCallback(async (
@@ -662,7 +968,7 @@ Return as JSON:
     }
 
     const mergedPhotoDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine, subjectTimeDefaults: mergedPhotoDefaults }
+    const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedPhotoDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
@@ -670,7 +976,7 @@ Return as JSON:
       // AI path: send context to Cloud Function
       const prompt = buildPlannerPrompt(inputs)
       const photoContext = buildPhotoContextSection(photoLabels)
-      const fullPrompt = photoContext ? `${prompt}\n\n${photoContext}` : prompt
+      const fullPrompt = [prompt, masteryPromptContext, photoContext].filter(Boolean).join('\n\n')
       const aiMessages: AIChatMessage[] = [{ role: 'user', content: fullPrompt }]
       const response = await aiChat({
         familyId,
@@ -680,18 +986,24 @@ Return as JSON:
       })
 
       const rawAiDraft = response ? parseAIResponse(response) : null
-      const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, dailyRoutine, hoursPerDay) : null
-      if (aiDraft) {
-        draft = aiDraft
+      if (rawAiDraft) {
+        const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
+        draft = ensureEvaluationItems(fillResult.plan)
         usedAI = true
+        if (fillResult.filledDays.length > 0) {
+          setSnack({
+            text: `AI plan was incomplete — ${fillResult.filledDays.join(', ')} filled from routine. Consider regenerating.`,
+            severity: 'warning',
+          })
+        }
       } else {
         // Fallback to local logic
-        draft = generateDraftPlanFromInputs(inputs)
+        draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
         setSnack({ text: 'AI planning unavailable — used local planner.', severity: 'info' })
       }
     } else {
       // Local path (flag off)
-      draft = generateDraftPlanFromInputs(inputs)
+      draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
     }
 
     setCurrentDraft(draft)
@@ -708,14 +1020,13 @@ Return as JSON:
 
     const updatedMessages = [...messages, userMsg, assistantMsg]
     setMessages(updatedMessages)
-    setShowPhotos(false)
 
     void persistConversation({
       messages: updatedMessages,
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults])
+  }, [photoLabels, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -732,14 +1043,14 @@ Return as JSON:
     }
 
     const mergedDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
-    const inputs = { snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine, subjectTimeDefaults: mergedDefaults }
+    const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
 
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       const prompt = buildPlannerPrompt(inputs)
       const photoContext = buildPhotoContextSection(photoLabels)
-      const fullPrompt = photoContext ? `${prompt}\n\n${photoContext}` : prompt
+      const fullPrompt = [prompt, masteryPromptContext, photoContext].filter(Boolean).join('\n\n')
       const aiMessages: AIChatMessage[] = [
         ...messages.map((m) => ({
           role: m.role as 'user' | 'assistant',
@@ -764,12 +1075,18 @@ Return as JSON:
       }
 
       const rawAiDraft = response ? parseAIResponse(response) : null
-      const aiDraft = rawAiDraft ? fillMissingDaysFromRoutine(rawAiDraft, dailyRoutine, hoursPerDay) : null
-      if (aiDraft) {
-        draft = aiDraft
+      if (rawAiDraft) {
+        const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
+        draft = ensureEvaluationItems(fillResult.plan)
         usedAI = true
+        if (fillResult.filledDays.length > 0) {
+          setSnack({
+            text: `AI plan was incomplete — ${fillResult.filledDays.join(', ')} filled from routine. Consider regenerating.`,
+            severity: 'warning',
+          })
+        }
       } else {
-        draft = generateDraftPlanFromInputs(inputs)
+        draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
         if (!response) {
           // AI call threw — snack already set above
         } else {
@@ -781,7 +1098,7 @@ Return as JSON:
         }
       }
     } else {
-      draft = generateDraftPlanFromInputs(inputs)
+      draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
     }
 
     setCurrentDraft(draft)
@@ -797,14 +1114,13 @@ Return as JSON:
 
     const updatedMessages = [...messages, userMsg, assistantMsg]
     setMessages(updatedMessages)
-    setShowPhotos(false)
 
     void persistConversation({
       messages: updatedMessages,
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, appBlocks, adjustments, dailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults])
+  }, [photoLabels, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -856,7 +1172,7 @@ Return as JSON:
           'Do NOT just delete activities — move them to days with remaining capacity.',
           '',
           `Apply the adjustment and return the COMPLETE updated plan as valid JSON with this schema:`,
-          `{ "days": [{ "day": "Monday", "timeBudgetMinutes": 150, "items": [{ "title": "string", "subjectBucket": "Reading|Math|LanguageArts|Science|SocialStudies|Other", "estimatedMinutes": 15, "skillTags": [], "isAppBlock": false, "accepted": true }] }], "skipSuggestions": [], "minimumWin": "string" }`,
+          `{ "days": [{ "day": "Monday", "timeBudgetMinutes": ${Math.round(hoursPerDay * 60)}, "items": [{ "title": "string", "subjectBucket": "Reading|Math|LanguageArts|Science|SocialStudies|Other", "estimatedMinutes": 15, "skillTags": [], "isAppBlock": false, "accepted": true }] }], "skipSuggestions": [], "minimumWin": "string" }`,
           `Respect hours budget of ${hoursPerDay} hours/day. No markdown, no preamble — only valid JSON.`,
         ].join('\n')
       }
@@ -876,11 +1192,11 @@ Return as JSON:
       })
 
       // Try to parse as structured DraftWeeklyPlan JSON
-      const aiDraft = response ? parseAIResponse(response) : null
+      const rawAiDraft = response ? parseAIResponse(response) : null
+      const aiDraft = rawAiDraft ? ensureEvaluationItems(rawAiDraft) : null
       let assistantMsg: ChatMessage
       if (aiDraft) {
         setCurrentDraft(aiDraft)
-        if (applied) setApplied(false)
         assistantMsg = {
           id: generateItemId(),
           role: ChatMessageRole.Assistant,
@@ -890,19 +1206,19 @@ Return as JSON:
         }
       } else if (response?.message && looksLikePlanJson(response.message)) {
         // AI returned plan-like JSON but parseAIResponse failed — try aggressive recovery
-        let recovered: DraftWeeklyPlan | null = null
+        let rawRecovered: DraftWeeklyPlan | null = null
         try {
           const msg = response.message.trim()
           const stripped = msg.replace(/```(?:json)?\s*/g, '').replace(/\s*```/g, '').trim()
           const directParse = JSON.parse(stripped)
           if (directParse.days && Array.isArray(directParse.days)) {
-            recovered = parseAIResponse({ ...response, message: JSON.stringify(directParse) })
+            rawRecovered = parseAIResponse({ ...response, message: JSON.stringify(directParse) })
           }
         } catch { /* fall through to local planner */ }
 
+        const recovered = rawRecovered ? ensureEvaluationItems(rawRecovered) : null
         if (recovered) {
           setCurrentDraft(recovered)
-          if (applied) setApplied(false)
           assistantMsg = {
             id: generateItemId(),
             role: ChatMessageRole.Assistant,
@@ -913,12 +1229,11 @@ Return as JSON:
         } else {
           // Recovery failed — fall back to local planner
           const assignments = photoLabelsToAssignments(photoLabels)
-          const localDraft = generateDraftPlanFromInputs({
-            snapshot, hoursPerDay, appBlocks, assignments, adjustments, dailyRoutine,
+          const localDraft = ensureEvaluationItems(generateDraftPlanFromInputs({
+            snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine,
             subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
-          })
+          }))
           setCurrentDraft(localDraft)
-          if (applied) setApplied(false)
           assistantMsg = {
             id: generateItemId(),
             role: ChatMessageRole.Assistant,
@@ -940,7 +1255,7 @@ Return as JSON:
 
       const final = [...updatedWithUser, assistantMsg]
       setMessages(final)
-      const persistStatus = aiDraft && applied ? { status: PlannerConversationStatus.Draft } : {}
+      const persistStatus = applied ? { status: PlannerConversationStatus.Applied } : {}
       void persistConversation({ messages: final, currentDraft: aiDraft ?? currentDraft ?? undefined, ...persistStatus })
       return
     }
@@ -969,19 +1284,17 @@ Return as JSON:
       // Apply adjustment and regenerate
       const newAdjustments = [...adjustments, intent]
       const assignments = photoLabelsToAssignments(photoLabels)
-      const draft = generateDraftPlanFromInputs({
+      const draft = ensureEvaluationItems(generateDraftPlanFromInputs({
         snapshot,
         hoursPerDay,
-        appBlocks,
+        appBlocks: filteredAppBlocks,
         assignments,
         adjustments: newAdjustments,
         subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
-      })
+      }))
 
       setCurrentDraft(draft)
       setAdjustments(newAdjustments)
-      if (applied) setApplied(false)
-
       assistantMsg = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
@@ -1022,81 +1335,137 @@ Return as JSON:
     void persistConversation({
       messages: updatedMessages,
       currentDraft: currentDraft ?? undefined,
-      ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
+      ...(applied ? { status: PlannerConversationStatus.Applied } : {}),
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, dailyRoutine, handleGeneratePlan, subjectTimeDefaults])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, filteredAppBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, filteredDailyRoutine, handleGeneratePlan, subjectTimeDefaults])
 
-  // Toggle workbook selection in setup wizard
-  const handleWorkbookToggle = useCallback((wbId: string, checked: boolean) => {
-    setSelectedWorkbookIds((prev) => {
-      const next = new Set(prev)
-      if (checked) {
-        next.add(wbId)
-      } else {
-        next.delete(wbId)
+  const buildWeekFocusContext = useCallback(() => {
+    const contextParts: string[] = []
+    if (readAloudBook) {
+      contextParts.push(`Read-aloud book this week: ${readAloudBook}${readAloudChapters ? ` (${readAloudChapters})` : ''}. Connect the readingTieIn to this book's themes.`)
+    }
+    if (weekNotes) {
+      contextParts.push(`Parent notes: ${weekNotes}`)
+    }
+    if (workbookConfigs.length > 0) {
+      contextParts.push('Configured workbooks this week:')
+      contextParts.push(...workbookConfigs.map((wb) => `- ${wb.name}: ${wb.unitLabel} ${wb.currentPosition + 1} (${wb.subjectBucket})`))
+    }
+    return contextParts.join('\n')
+  }, [readAloudBook, readAloudChapters, weekNotes, workbookConfigs])
+
+  const parsePlanThemeFields = useCallback((message: string): Partial<WeekPlan> | null => {
+    try {
+      let json = message.trim()
+      const fenceMatch = json.match(/```(?:json)?\s*([\s\S]*?)```/)
+      if (fenceMatch) json = fenceMatch[1].trim()
+      const firstBrace = json.indexOf('{')
+      const lastBrace = json.lastIndexOf('}')
+      if (firstBrace >= 0 && lastBrace > firstBrace) json = json.slice(firstBrace, lastBrace + 1)
+      const parsed = JSON.parse(json)
+      const payload = parsed?.plan && typeof parsed.plan === 'object' ? parsed.plan : parsed
+      return {
+        ...(payload.theme ? { theme: payload.theme } : {}),
+        ...(payload.virtue ? { virtue: payload.virtue } : {}),
+        ...(payload.scriptureRef ? { scriptureRef: payload.scriptureRef } : {}),
+        ...(payload.scriptureText ? { scriptureText: payload.scriptureText } : {}),
+        ...(payload.heartQuestion ? { heartQuestion: payload.heartQuestion } : {}),
+        ...(payload.formationPrompt ? { formationPrompt: payload.formationPrompt } : {}),
+        ...(payload.conundrum?.title && payload.conundrum?.scenario ? { conundrum: payload.conundrum } : {}),
       }
-      return next
-    })
+    } catch (parseErr) {
+      console.error('[PlanTheme] Failed to parse:', parseErr, '\nRaw response:', message)
+      return null
+    }
   }, [])
 
-  // Suggest weekly focus via AI
-  const handleSuggestFocus = useCallback(async () => {
-    if (!activeChildId) return
-    setSuggestingFocus(true)
+  const handleGenerateWeek = useCallback(async (kickoffText?: string, forceRefreshFocus?: boolean) => {
+    if (!activeChildId || !weekPlan) return
+    setGeneratingWeek(true)
+
+    // Check if weekly focus (theme/virtue/scripture) is still fresh
+    const hasFocus = !!(weekPlan.theme && weekPlan.virtue && weekPlan.scriptureRef)
+    const focusAge = weekPlan.focusGeneratedAt
+      ? Date.now() - new Date(weekPlan.focusGeneratedAt).getTime()
+      : Infinity
+    const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
+    const focusIsFresh = hasFocus && focusAge < SEVEN_DAYS
+    const skipFocusGeneration = focusIsFresh && !forceRefreshFocus
+
     try {
-      const response = await aiChat({
-        familyId,
-        childId: activeChildId,
-        taskType: TaskType.Chat,
-        messages: [{
-          role: 'user',
-          content: `Suggest a weekly focus for a Christian homeschool family. Return ONLY a JSON object:
-{
-  "theme": "a one-word or short phrase theme for the week",
-  "virtue": "a character virtue to focus on",
-  "scriptureRef": "a Bible verse reference (book chapter:verse)",
-  "heartQuestion": "a discussion question for the family related to the theme"
-}
-
-Make it age-appropriate for kids 6-10. Rotate through different virtues and themes — don't repeat common ones. Today's date is ${new Date().toLocaleDateString()}.
-Return ONLY valid JSON, no markdown.`,
-        }],
-      })
-
-      if (response?.message) {
-        try {
-          let json = response.message.trim()
-          const fenceMatch = json.match(/```(?:json)?\s*([\s\S]*?)```/)
-          if (fenceMatch) json = fenceMatch[1].trim()
-          const firstBrace = json.indexOf('{')
-          const lastBrace = json.lastIndexOf('}')
-          if (firstBrace >= 0 && lastBrace > firstBrace) json = json.slice(firstBrace, lastBrace + 1)
-
-          const parsed = JSON.parse(json)
-          if (parsed.theme) updateWeekField('theme', parsed.theme)
-          if (parsed.virtue) updateWeekField('virtue', parsed.virtue)
-          if (parsed.scriptureRef) updateWeekField('scriptureRef', parsed.scriptureRef)
-          if (parsed.heartQuestion) updateWeekField('heartQuestion', parsed.heartQuestion)
-        } catch { /* AI didn't return valid JSON, ignore */ }
+      const assignments = photoLabelsToAssignments(photoLabels)
+      const userMsg: ChatMessage = {
+        id: generateItemId(),
+        role: ChatMessageRole.User,
+        text: kickoffText ?? '✨ Generate this week\'s focus and plan.',
+        createdAt: new Date().toISOString(),
       }
-    } finally {
-      setSuggestingFocus(false)
-    }
-  }, [activeChildId, familyId, aiChat, updateWeekField])
+      const mergedDefaults = { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults }
+      const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
+      let draft: DraftWeeklyPlan
+      let usedAI = false
 
-  // Auto-suggest week focus when fields are empty on first visit
-  useEffect(() => {
-    if (!weekPlan || !activeChildId || conversationLoaded || setupComplete) return
-    if (autoSuggestTriggered.current) return
-    const isEmpty = !weekPlan.theme && !weekPlan.virtue && !weekPlan.scriptureRef && !weekPlan.heartQuestion
-    if (isEmpty) {
-      autoSuggestTriggered.current = true
-      const timer = setTimeout(() => {
-        void handleSuggestFocus().then(() => setFocusWasSuggested(true))
-      }, 500)
-      return () => clearTimeout(timer)
+      if (isEnabled(AIFeatureFlag.AiPlanning)) {
+        const prompt = buildPlannerPrompt(inputs)
+        const focusInstruction = skipFocusGeneration
+          ? `Reuse this existing weekly focus (do NOT regenerate theme fields):\ntheme: ${weekPlan.theme}\nvirtue: ${weekPlan.virtue}\nscriptureRef: ${weekPlan.scriptureRef}\nheartQuestion: ${weekPlan.heartQuestion}\nGenerate ONLY the daily plan schedule (days[].items[]).`
+          : 'Return one JSON payload that includes BOTH weekly themed content and the complete daily plan.\nInclude fields: theme, virtue, scriptureRef, scriptureText, heartQuestion, formationPrompt, conundrum, weekSkipSummary, days[].items[].'
+        const fullPrompt = [
+          prompt,
+          masteryPromptContext,
+          `Weekly focus context:\n${buildWeekFocusContext()}`,
+          `Daily routine context:\n${filteredDailyRoutine}`,
+          focusInstruction,
+        ].filter(Boolean).join('\n\n')
+        const response = await aiChat({
+          familyId,
+          childId: activeChildId,
+          taskType: TaskType.Plan,
+          messages: [{ role: 'user', content: fullPrompt }],
+        })
+        const rawAiDraft = response ? parseAIResponse(response) : null
+        if (rawAiDraft) {
+          const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
+          draft = ensureEvaluationItems(fillResult.plan)
+          usedAI = true
+          if (fillResult.filledDays.length > 0) {
+            setSnack({
+              text: `AI plan was incomplete — ${fillResult.filledDays.join(', ')} filled from routine. Consider regenerating.`,
+              severity: 'warning',
+            })
+          }
+          if (!skipFocusGeneration) {
+            const themedFields = response ? parsePlanThemeFields(response.message) : null
+            if (themedFields) {
+              const withTimestamp = { ...themedFields, focusGeneratedAt: new Date().toISOString() }
+              const nextWeekPlan = { ...weekPlan, ...withTimestamp }
+              setWeekPlan(nextWeekPlan)
+              await setDoc(weekPlanRef, withTimestamp, { merge: true })
+            }
+          }
+        } else {
+          draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
+        }
+      } else {
+        draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
+      }
+
+      setCurrentDraft(draft)
+      setSetupComplete(true)
+      const assistantMsg: ChatMessage = {
+        id: generateItemId(),
+        role: ChatMessageRole.Assistant,
+        text: `Here's your draft plan${usedAI ? ' (AI-powered)' : ''}.`,
+        draftPlan: draft,
+        createdAt: new Date().toISOString(),
+      }
+      const updatedMessages = [...messages, userMsg, assistantMsg]
+      setMessages(updatedMessages)
+      await persistConversation({ messages: updatedMessages, currentDraft: draft, assignments })
+    } finally {
+      setGeneratingWeek(false)
     }
-  }, [weekPlan, activeChildId, conversationLoaded, setupComplete, handleSuggestFocus])
+  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
@@ -1107,46 +1476,24 @@ Return ONLY valid JSON, no markdown.`,
           ? 'lighter week, reduce load'
           : 'MVD week, minimum items only'
 
-    // Save quick workbooks to Firestore if any are filled in
-    if (activeChildId) {
-      for (const qw of quickWorkbooks) {
-        if (!qw.name.trim()) continue
-        await addDoc(workbookConfigsCollection(familyId), {
-          childId: activeChildId,
-          name: qw.name.trim(),
-          subjectBucket: qw.subject as SubjectBucket,
-          totalUnits: 100,
-          currentPosition: 0,
-          unitLabel: 'lesson',
-          targetFinishDate: '2026-06-30',
-          schoolDaysPerWeek: 5,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        })
-      }
-    }
-
-    // Build workbook lines including both existing selected and quick-added
+    // Build workbook lines from configured existing workbooks
     const allWorkbookLines = [
       ...workbookConfigs
-        .filter((wb) => selectedWorkbookIds.has(wb.id ?? ''))
         .map((wb) => `- ${wb.name}: ${wb.unitLabel} ${wb.currentPosition + 1} (${wb.subjectBucket})`),
-      ...quickWorkbooks
-        .filter((qw) => qw.name.trim())
-        .map((qw) => `- ${qw.name} (${qw.subject})`),
     ].join('\n')
 
-    // Save family-level planner defaults (hoursPerDay, readAloud)
+    // Save family-level planner defaults (weekEnergy drives hoursPerDay via useEffect)
     void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
-      hoursPerDay,
-      readAloud,
+      weekEnergy,
+      readAloudBook,
+      readAloudChapters,
+      readAloudBookId: selectedBook?.id ?? null,
       updatedAt: new Date().toISOString(),
     }, { merge: true })
 
-    // Save per-child daily routine and subject time defaults
+    // Save per-child subject time defaults (dailyRoutine no longer saved — activity configs are the source of truth)
     if (activeChildId) {
       void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults_${activeChildId}`), {
-        dailyRoutine,
         subjectTimeDefaults,
         updatedAt: new Date().toISOString(),
       }, { merge: true })
@@ -1168,8 +1515,7 @@ Hours/day: ${hoursPerDay}
 
 Workbooks:
 ${allWorkbookLines || '(none configured)'}
-${readAloud ? `Read-aloud: ${readAloud}` : ''}
-${dailyRoutine ? `\nDaily routine (use this as the base template for each day — keep these activities and times, vary them across the week as appropriate):\n${dailyRoutine}` : ''}
+${readAloudBook ? `\nRead-aloud book: ${readAloudBook}${readAloudChapters ? ` (${readAloudChapters})` : ''}` : ''}
 
 Subject time defaults (use these as the baseline for estimatedMinutes per item):
 ${subjectDefaultsLines}
@@ -1177,22 +1523,8 @@ ${weekNotes ? `\nNotes: ${weekNotes}` : ''}
 
 Generate a plan for Monday through Friday.`.trim()
 
-    setSetupComplete(true)
-
-    // Add context message to chat for visual display
-    const userMsg: ChatMessage = {
-      id: generateItemId(),
-      role: ChatMessageRole.User,
-      text: contextMessage,
-      createdAt: new Date().toISOString(),
-    }
-    setMessages(prev => [...prev, userMsg])
-
-    // Generate through the proper path with full context (not handleSend which lacks structured prompt)
-    setTimeout(() => {
-      void handleGeneratePlan()
-    }, 100)
-  }, [weekEnergy, hoursPerDay, workbookConfigs, selectedWorkbookIds, readAloud, weekNotes, activeChild, handleGeneratePlan, quickWorkbooks, dailyRoutine, activeChildId, familyId, subjectTimeDefaults])
+    await handleGenerateWeek(contextMessage, true)
+  }, [weekEnergy, hoursPerDay, workbookConfigs, readAloudBook, readAloudChapters, weekNotes, activeChild, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek, selectedBook])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -1207,6 +1539,52 @@ Generate a plan for Monday through Friday.`.trim()
             item.id === itemId ? { ...item, accepted: !item.accepted } : item,
           ),
         }
+      }),
+    }
+    setCurrentDraft(updated)
+  }, [currentDraft])
+
+  const handleMoveItem = useCallback((dayIndex: number, itemIndex: number, direction: -1 | 1) => {
+    if (!currentDraft) return
+    const newIndex = itemIndex + direction
+    const items = currentDraft.days[dayIndex].items
+    if (newIndex < 0 || newIndex >= items.length) return
+    const updated: DraftWeeklyPlan = {
+      ...currentDraft,
+      days: currentDraft.days.map((day, i) => {
+        if (i !== dayIndex) return day
+        const newItems = [...day.items]
+        ;[newItems[itemIndex], newItems[newIndex]] = [newItems[newIndex], newItems[itemIndex]]
+        return { ...day, items: newItems }
+      }),
+    }
+    setCurrentDraft(updated)
+  }, [currentDraft])
+
+  const handleRemoveItem = useCallback((dayIndex: number, itemIndex: number) => {
+    if (!currentDraft) return
+    const updated: DraftWeeklyPlan = {
+      ...currentDraft,
+      days: currentDraft.days.map((day, i) => {
+        if (i !== dayIndex) return day
+        const newItems = day.items.filter((_, idx) => idx !== itemIndex)
+        return { ...day, items: newItems }
+      }),
+    }
+    setCurrentDraft(updated)
+  }, [currentDraft])
+
+  const handleUpdateTime = useCallback((dayIndex: number, itemIndex: number, newMinutes: number) => {
+    if (!currentDraft) return
+    const clamped = Math.max(5, Math.min(120, newMinutes))
+    const updated: DraftWeeklyPlan = {
+      ...currentDraft,
+      days: currentDraft.days.map((day, i) => {
+        if (i !== dayIndex) return day
+        const newItems = day.items.map((item, idx) =>
+          idx === itemIndex ? { ...item, estimatedMinutes: clamped } : item,
+        )
+        return { ...day, items: newItems }
       }),
     }
     setCurrentDraft(updated)
@@ -1317,21 +1695,31 @@ Generate a plan for Monday through Friday.`.trim()
         } else {
           updatedGoals.push({ childId: activeChildId, goals: planGoals })
         }
-        await setDoc(weekRef, { ...existing, childGoals: updatedGoals })
+        const { readAloudBookId: _existingReadAloudBookId, ...existingWithoutBook } = existing
+        void _existingReadAloudBookId
+        await setDoc(weekRef, {
+          ...existingWithoutBook,
+          childGoals: updatedGoals,
+          ...(selectedBook ? { readAloudBookId: selectedBook.id } : {}),
+        })
       }
+
+      // Persist readAloudBookId to plannerDefaults so it carries to the next week
+      void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
+        readAloudBook: selectedBook?.title ?? '',
+        ...(selectedBook
+          ? { readAloudBookId: selectedBook.id }
+          : { readAloudBookId: deleteField() }),
+        updatedAt: new Date().toISOString(),
+      }, { merge: true })
 
       // Write DayLog checklist items for each day
       for (const dayPlan of currentDraft.days) {
         const dayItems = dayPlan.items.filter((item) => item.accepted)
         if (dayItems.length === 0) continue
+        if (!WEEK_DAYS.includes(dayPlan.day as typeof WEEK_DAYS[number])) continue
 
-        const dayIndex = WEEK_DAYS.indexOf(dayPlan.day as typeof WEEK_DAYS[number])
-        if (dayIndex < 0) continue
-
-        const startDate = new Date(weekRange.start + 'T00:00:00')
-        const targetDate = new Date(startDate)
-        targetDate.setDate(startDate.getDate() + dayIndex)
-        const dateKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`
+        const dateKey = dateKeyForDayPlan(weekRange.start, dayPlan.day as typeof WEEK_DAYS[number])
 
         const docId = dayLogDocId(dateKey, activeChildId)
         const dayLogRef = doc(daysCollection(familyId), docId)
@@ -1348,6 +1736,11 @@ Generate a plan for Monday through Friday.`.trim()
           estimatedMinutes: item.estimatedMinutes,
           subjectBucket: item.subjectBucket,
           ...(lessonCardMap.get(item.title) ? { lessonCardId: lessonCardMap.get(item.title) } : {}),
+          ...(item.skipGuidance ? { skipGuidance: item.skipGuidance } : {}),
+          ...(item.itemType ? { itemType: item.itemType } : {}),
+          ...(item.evaluationMode ? { evaluationMode: item.evaluationMode } : {}),
+          ...(item.link ? { link: item.link } : {}),
+          ...(item.bookId ? { bookId: item.bookId } : {}),
         }))
 
         const blocks: DayBlock[] = dayItems
@@ -1362,6 +1755,9 @@ Generate a plan for Monday through Friday.`.trim()
             source: 'planner' as const,
           }))
 
+        // Persist the day's time budget so rollover/budget enforcement can trim overflow.
+        const dailyBudgetMinutes = Math.round(dayPlan.timeBudgetMinutes)
+
         if (dayLogSnap.exists()) {
           const existing = dayLogSnap.data()
           // Replace planner-generated items, keep manually-added ones
@@ -1375,6 +1771,7 @@ Generate a plan for Monday through Friday.`.trim()
             ...existing,
             checklist: [...existingChecklist, ...checklist],
             blocks: [...existingBlocks, ...blocks],
+            dailyBudgetMinutes,
             updatedAt: new Date().toISOString(),
           })
         } else {
@@ -1383,6 +1780,7 @@ Generate a plan for Monday through Friday.`.trim()
             date: dateKey,
             blocks,
             checklist,
+            dailyBudgetMinutes,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }
@@ -1408,13 +1806,118 @@ Generate a plan for Monday through Friday.`.trim()
       })
 
       setSnack({ text: 'Plan applied! Check This Week and Today.', severity: 'success' })
+
+      // Non-blocking: generate chapter question pool for selected library book
+      if (selectedBook && activeChildId) {
+        const generatePool = async () => {
+          try {
+            setSnack({ text: `Generating chapter questions for ${selectedBook.title}...`, severity: 'info' })
+
+            const progressId = bookProgressDocId(activeChildId, selectedBook.id)
+            const progressRef = doc(bookProgressCollection(familyId), progressId)
+            const progressSnap = await getDoc(progressRef)
+            const existing = progressSnap.exists() ? (progressSnap.data() as BookProgress) : null
+
+            const existingChapters = existing?.questionPool?.map((q) => q.chapter) ?? []
+            const missingChapters = selectedBook.chapters?.filter(
+              (c) => !existingChapters.includes(c.number),
+            ) ?? []
+
+            if (missingChapters.length === 0) {
+              setSnack({ text: 'Chapter questions already generated.', severity: 'info' })
+              return
+            }
+
+            const result = await aiChat({
+              familyId,
+              childId: activeChildId,
+              taskType: TaskType.ChapterQuestions,
+              messages: [{
+                role: 'user',
+                content: JSON.stringify({
+                  bookTitle: selectedBook.title,
+                  author: selectedBook.author,
+                  chapters: missingChapters,
+                  childName: activeChild?.name,
+                  weekTheme: weekPlan?.theme,
+                  weekVirtue: weekPlan?.virtue,
+                }),
+              }],
+            })
+
+            if (!result?.message) {
+              setSnack({
+                text: "Couldn't generate chapter questions.",
+                severity: 'warning',
+                action: { label: 'Retry', onClick: () => void generatePool() },
+              })
+              return
+            }
+
+            let questions: Array<{ chapter: number; questionType: string; question: string }> = []
+            try {
+              const parsed = JSON.parse(result.message) as unknown
+              questions = Array.isArray(parsed) ? parsed as typeof questions : []
+            } catch {
+              setSnack({
+                text: "Couldn't parse chapter questions.",
+                severity: 'warning',
+                action: { label: 'Retry', onClick: () => void generatePool() },
+              })
+              return
+            }
+
+            const newPoolItems: ChapterQuestionPoolItem[] = questions.map((q) => ({
+              chapter: q.chapter,
+              chapterTitle: selectedBook.chapters?.find((c) => c.number === q.chapter)?.title,
+              questionType: q.questionType as ChapterQuestionPoolItem['questionType'],
+              question: q.question,
+              answered: false,
+            }))
+
+            if (existing) {
+              await updateDoc(progressRef, {
+                questionPool: [...existing.questionPool, ...newPoolItems],
+                updatedAt: new Date().toISOString(),
+              })
+            } else {
+              const newProgress: BookProgress = {
+                bookId: selectedBook.id,
+                childId: activeChildId,
+                bookTitle: selectedBook.title,
+                author: selectedBook.author,
+                totalChapters: selectedBook.totalChapters,
+                questionPool: newPoolItems,
+                startedAt: todayKey(),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              }
+              await setDoc(progressRef, newProgress)
+            }
+
+            setSnack({ text: `Chapter questions ready for ${selectedBook.title}!`, severity: 'success' })
+
+            // Refresh bookProgress state
+            const refreshed = await getDoc(progressRef)
+            if (refreshed.exists()) {
+              setBookProgress({ ...refreshed.data() as BookProgress, id: refreshed.id })
+            }
+          } catch (err) {
+            console.error('Failed to generate chapter questions', err)
+            setSnack({
+              text: "Couldn't generate chapter questions.",
+              severity: 'warning',
+              action: { label: 'Retry', onClick: () => void generatePool() },
+            })
+          }
+        }
+        void generatePool()
+      }
     } catch (err) {
       console.error('Failed to apply plan', err)
       setSnack({ text: 'Failed to apply plan.', severity: 'error' })
     }
-  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType])
-
-  const minimumWin = buildMinimumWinText(snapshot)
+  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat])
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
@@ -1437,17 +1940,16 @@ Generate a plan for Monday through Friday.`.trim()
     if (intent && currentDraft) {
       const newAdjustments = [...adjustments, intent]
       const assignments = photoLabelsToAssignments(photoLabels)
-      const draft = generateDraftPlanFromInputs({
+      const draft = ensureEvaluationItems(generateDraftPlanFromInputs({
         snapshot,
         hoursPerDay,
-        appBlocks,
+        appBlocks: filteredAppBlocks,
         assignments,
         adjustments: newAdjustments,
         subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
-      })
+      }))
       setCurrentDraft(draft)
       setAdjustments(newAdjustments)
-      if (applied) setApplied(false)
       assistantReply = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
@@ -1470,48 +1972,9 @@ Generate a plan for Monday through Friday.`.trim()
     void persistConversation({
       messages: updatedMessages,
       currentDraft: currentDraft ?? undefined,
-      ...(applied ? { status: PlannerConversationStatus.Draft } : {}),
+      ...(applied ? { status: PlannerConversationStatus.Applied } : {}),
     })
-  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, appBlocks, messages, persistConversation, applied, subjectTimeDefaults, isEnabled, activeChildId, handleSend])
-
-  // Generate printable materials for a day
-  const handleGenerateMaterials = useCallback(async (day: DraftDayPlan) => {
-    if (!activeChildId) return
-    setGeneratingMaterials(day.day)
-
-    try {
-      const prompt = buildMaterialsPrompt(
-        day,
-        activeChild?.name ?? 'Student',
-        snapshot,
-        weekPlan?.theme,
-      )
-
-      const response = await aiChat({
-        familyId,
-        childId: activeChildId,
-        taskType: TaskType.Workshop,
-        messages: [{ role: 'user', content: prompt }],
-      })
-
-      if (response?.message) {
-        openPrintWindow(response.message, `${activeChild?.name ?? 'Student'} - ${day.day}`)
-      }
-    } catch (err) {
-      console.error('Material generation failed:', err)
-      setSnack({ text: 'Failed to generate materials. Try again.', severity: 'error' })
-    } finally {
-      setGeneratingMaterials(null)
-    }
-  }, [activeChildId, activeChild, snapshot, weekPlan, aiChat, familyId])
-
-  const handleGenerateAllMaterials = useCallback(async () => {
-    if (!currentDraft) return
-    for (const day of currentDraft.days) {
-      await handleGenerateMaterials(day)
-      await new Promise((r) => setTimeout(r, 1000))
-    }
-  }, [currentDraft, handleGenerateMaterials])
+  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, filteredAppBlocks, messages, persistConversation, applied, subjectTimeDefaults, isEnabled, activeChildId, handleSend])
 
   // Generate activity for a plan item
   const handleGenerateActivity = useCallback(async (item: DraftPlanItem) => {
@@ -1579,6 +2042,79 @@ Generate a plan for Monday through Friday.`.trim()
     setLessonCardSaved(false)
   }, [])
 
+  const handlePrintWeekMaterials = useCallback(async () => {
+    if (!activeChildId || !currentDraft) return
+
+    const routineWorkbookPattern = /(workbook|practice page|lesson\s*\d+|daily review|drill)/i
+    const printableDays = currentDraft.days
+      .map((day) => {
+        const focusItems = day.items.filter((item) => (
+          item.accepted
+          && !item.isAppBlock
+          && !routineWorkbookPattern.test(item.title)
+        ))
+        return { ...day, items: focusItems }
+      })
+      .filter((day) => day.items.length > 0)
+
+    if (printableDays.length === 0) {
+      setSnack({
+        text: 'No themed/focus activities found to print yet. Try accepting a few focus items first.',
+        severity: 'warning',
+      })
+      return
+    }
+
+    const childName = activeChild?.name ?? 'Student'
+    const dayPrompts = printableDays.map((day) => {
+      return `===== ${day.day} =====
+${buildMaterialsPrompt(
+  day,
+  childName,
+  snapshot,
+  weekPlan?.theme,
+  weekPlan?.conundrum,
+  weekPlan?.virtue,
+  weekPlan?.scriptureRef,
+  weekPlan?.scriptureText,
+)}
+`
+    }).join('\n\n')
+
+    const packetPrompt = `Create ONE weekly printable packet in valid HTML (single <html> document) using the day-by-day prompts below.
+
+PACKET REQUIREMENTS:
+- Focus on themed/focus work (Stonebridge theme, conundrum tie-ins, reflection/discussion prompts).
+- Do NOT generate routine workbook blocks or repetitive daily drill sheets.
+- Keep each day in its own section with clear ${childName}-friendly headings.
+- Include concise answer keys where appropriate.
+- Return ONLY HTML.
+
+${dayPrompts}`
+
+    try {
+      setPrintingMaterials(true)
+      setSnack({ text: 'Generating print packet...', severity: 'info' })
+      const response = await aiChat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.Generate,
+        messages: [{ role: 'user', content: packetPrompt }],
+      })
+      if (!response?.message) {
+        setSnack({ text: 'Could not generate print packet. Please try again.', severity: 'error' })
+        return
+      }
+      openPrintWindow(response.message, `${childName} Week Materials`)
+      setSnack({ text: 'Print packet ready.', severity: 'success' })
+    } catch (err) {
+      console.error('Failed to print week materials', err)
+      setSnack({ text: 'Failed to generate print packet.', severity: 'error' })
+    } finally {
+      setPrintingMaterials(false)
+    }
+  }, [activeChildId, currentDraft, activeChild?.name, snapshot, weekPlan, aiChat, familyId])
+
   // Reset conversation state (shared by both Start New Plan and Clear Applied Plan)
   const resetConversationState = useCallback(async () => {
     setMessages([])
@@ -1587,9 +2123,8 @@ Generate a plan for Monday through Friday.`.trim()
     setPhotoLabels([])
     setAdjustments([])
     setSetupComplete(false)
-    setConversationLoaded(false)
+    autoSuggestTriggered.current = false
     setWeekEnergy('full')
-    setReadAloud('')
     setWeekNotes('')
 
     if (conversationDocId) {
@@ -1600,57 +2135,13 @@ Generate a plan for Monday through Friday.`.trim()
         status: PlannerConversationStatus.Draft,
         messages: [],
         availableHoursPerDay: hoursPerDay,
-        appBlocks,
+        appBlocks: filteredAppBlocks,
         assignments: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       })
     }
-  }, [conversationDocId, familyId, activeChildId, weekRange.start, hoursPerDay, appBlocks])
-
-  // Repeat Last Week handler: clone previous week's plan with advanced lesson numbers
-  const handleRepeatLastWeek = useCallback(async () => {
-    if (!activeChildId) return
-    try {
-      // Compute previous week start by subtracting 7 days
-      const startDate = new Date(weekRange.start + 'T00:00:00')
-      startDate.setDate(startDate.getDate() - 7)
-      const previousWeekStart = formatDateYmd(startDate)
-
-      const prevDocId = plannerConversationDocId(previousWeekStart, activeChildId)
-      const prevRef = doc(plannerConversationsCollection(familyId), prevDocId)
-      const prevSnap = await getDoc(prevRef)
-
-      if (!prevSnap.exists() || !prevSnap.data().currentDraft) {
-        setSnack({ text: 'No plan found for last week. Try planning with AI instead.', severity: 'info' })
-        return
-      }
-
-      const previousDraft = prevSnap.data().currentDraft!
-      const clonedDraft = clonePlanWithAdvancedLessons(previousDraft)
-
-      setCurrentDraft(clonedDraft)
-
-      const assistantMsg: ChatMessage = {
-        id: generateItemId(),
-        role: ChatMessageRole.Assistant,
-        text: "Here's last week's plan carried forward with workbook lessons advanced. Review and adjust, then Apply.",
-        draftPlan: clonedDraft,
-        createdAt: new Date().toISOString(),
-      }
-
-      const updatedMessages = [...messages, assistantMsg]
-      setMessages(updatedMessages)
-
-      void persistConversation({
-        messages: updatedMessages,
-        currentDraft: clonedDraft,
-      })
-    } catch (err) {
-      console.error('Failed to repeat last week', err)
-      setSnack({ text: 'Failed to load last week\'s plan.', severity: 'error' })
-    }
-  }, [activeChildId, weekRange.start, familyId, messages, persistConversation])
+  }, [conversationDocId, familyId, activeChildId, weekRange.start, hoursPerDay, filteredAppBlocks])
 
   // Redo Plan handler: clears applied plan from Today/Week AND resets conversation
   const handleRedoPlan = useCallback(async () => {
@@ -1659,13 +2150,9 @@ Generate a plan for Monday through Friday.`.trim()
     try {
       // Remove planner-generated blocks and checklist from each day's DayLog
       for (const dayPlan of currentDraft.days) {
-        const dayIndex = WEEK_DAYS.indexOf(dayPlan.day as typeof WEEK_DAYS[number])
-        if (dayIndex < 0) continue
+        if (!WEEK_DAYS.includes(dayPlan.day as typeof WEEK_DAYS[number])) continue
 
-        const startDate = new Date(weekRange.start + 'T00:00:00')
-        const targetDate = new Date(startDate)
-        targetDate.setDate(startDate.getDate() + dayIndex)
-        const dateKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`
+        const dateKey = dateKeyForDayPlan(weekRange.start, dayPlan.day as typeof WEEK_DAYS[number])
 
         const docId = dayLogDocId(dateKey, activeChildId)
         const dayLogRef = doc(daysCollection(familyId), docId)
@@ -1731,584 +2218,96 @@ Generate a plan for Monday through Friday.`.trim()
           {/* Plan Summary Panel (pinned above chat) */}
           <PlanSummaryPanel
             hoursPerDay={hoursPerDay}
-            appBlocks={appBlocks}
+            appBlocks={filteredAppBlocks}
             prioritySkills={snapshot?.prioritySkills ?? []}
             currentDraft={currentDraft}
+            masteryReviewLine={masteryReviewLine}
           />
 
-          {/* Week theme / virtue / scripture */}
-          {weekPlan && (
-            <Box
-              sx={{
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: 2,
-                p: 2,
-                bgcolor: 'background.paper',
-              }}
-            >
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                <Typography variant="subtitle2">
-                  Week Focus
-                </Typography>
-                <Button
-                  size="small"
-                  variant="text"
-                  startIcon={suggestingFocus ? <CircularProgress size={14} /> : <AutoAwesomeIcon />}
-                  onClick={handleSuggestFocus}
-                  disabled={suggestingFocus}
-                >
-                  {suggestingFocus ? 'Generating...' : 'Suggest'}
-                </Button>
-              </Stack>
-              {suggestingFocus && (
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                  <CircularProgress size={16} />
-                  <Typography variant="caption" color="text.secondary">Generating suggestions...</Typography>
-                </Stack>
-              )}
-              {focusWasSuggested && !suggestingFocus && (
-                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-                  AI suggested — tap to edit
-                </Typography>
-              )}
-              <Stack spacing={1.5}>
-                <TextField
-                  label="Theme"
-                  size="small"
-                  value={weekPlan.theme}
-                  onChange={(e) => updateWeekField('theme', e.target.value)}
-                />
-                <TextField
-                  label="Virtue"
-                  size="small"
-                  value={weekPlan.virtue}
-                  onChange={(e) => updateWeekField('virtue', e.target.value)}
-                />
-                <TextField
-                  label="Scripture reference"
-                  size="small"
-                  value={weekPlan.scriptureRef}
-                  onChange={(e) => updateWeekField('scriptureRef', e.target.value)}
-                />
-                <TextField
-                  label="Heart question"
-                  size="small"
-                  multiline
-                  minRows={2}
-                  value={weekPlan.heartQuestion}
-                  onChange={(e) => updateWeekField('heartQuestion', e.target.value)}
-                />
-              </Stack>
-            </Box>
-          )}
-
-          {/* Setup wizard — shown when no conversation exists for this week */}
-          {messages.length === 0 && !setupComplete && !conversationLoaded && (() => {
-            const isReturningUser = workbookConfigs.length > 0 || dailyRoutine !== defaultDailyRoutine
-
-            return isReturningUser ? (
-              /* ── Compact returning-user setup ── */
-              <Stack spacing={2} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
-                <Typography variant="h6">Plan {activeChild?.name ?? 'your child'}&apos;s Week</Typography>
-
-                {/* Energy — always show, it's the main weekly decision */}
-                <Box>
-                  <Typography variant="subtitle2" gutterBottom>How&apos;s your week looking?</Typography>
-                  <ToggleButtonGroup value={weekEnergy} exclusive onChange={(_, v) => { if (v) setWeekEnergy(v) }} size="small">
-                    <ToggleButton value="full">Full Week</ToggleButton>
-                    <ToggleButton value="lighter">Lighter Week</ToggleButton>
-                    <ToggleButton value="mvd">Tough Week (MVD)</ToggleButton>
-                  </ToggleButtonGroup>
-                </Box>
-
-                {/* Routine — show as read-only summary with edit button */}
-                <Box>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                    <Typography variant="subtitle2">Your usual routine</Typography>
-                    <Button size="small" onClick={() => setShowRoutineEdit(!showRoutineEdit)}>
-                      {showRoutineEdit ? 'Done' : 'Edit'}
-                    </Button>
-                  </Stack>
-                  {!showRoutineEdit ? (
-                    <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-line', mt: 0.5 }}>
-                      {dailyRoutine || 'No routine saved yet'}
-                    </Typography>
-                  ) : (
-                    <TextField
-                      size="small"
-                      value={dailyRoutine}
-                      onChange={e => setDailyRoutine(e.target.value)}
-                      fullWidth
-                      multiline
-                      rows={4}
-                      sx={{ mt: 0.5 }}
-                    />
-                  )}
-                </Box>
-
-                {/* Workbooks — show as chips, not checkboxes */}
-                <Box>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                    <Typography variant="subtitle2">Workbooks</Typography>
-                    <Button size="small" onClick={() => setShowWorkbookEdit(!showWorkbookEdit)}>
-                      {showWorkbookEdit ? 'Done' : 'Edit'}
-                    </Button>
-                  </Stack>
-                  {!showWorkbookEdit ? (
-                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
-                      {workbookConfigs.map(wb => (
-                        <Chip key={wb.id} label={`${wb.name} — ${wb.unitLabel} ${wb.currentPosition + 1}`} size="small" />
-                      ))}
-                    </Stack>
-                  ) : (
-                    <Box sx={{ mt: 0.5 }}>
-                      {workbookConfigs.map((wb) => (
-                        <FormControlLabel
-                          key={wb.id ?? wb.name}
-                          control={
-                            <Checkbox
-                              checked={selectedWorkbookIds.has(wb.id ?? '')}
-                              onChange={(e) => handleWorkbookToggle(wb.id ?? '', e.target.checked)}
-                            />
-                          }
-                          label={`${wb.name} — next: ${wb.unitLabel} ${wb.currentPosition + 1}`}
-                        />
-                      ))}
-                    </Box>
-                  )}
-                </Box>
-
-                {/* Subject times — compact with edit toggle */}
-                <Box>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                    <Typography variant="subtitle2">Subject times (per day)</Typography>
-                    <Button size="small" onClick={() => setShowTimeEdit(!showTimeEdit)}>
-                      {showTimeEdit ? 'Done' : 'Edit'}
-                    </Button>
-                  </Stack>
-                  {showTimeEdit && (
-                    <Stack spacing={1} sx={{ mt: 1 }}>
-                      {Object.entries(DEFAULT_SUBJECT_MINUTES).map(([subject, fallback]) => {
-                        const current = subjectTimeDefaults[subject] ?? fallback
-                        return (
-                          <Stack key={subject} direction="row" spacing={1} alignItems="center">
-                            <Typography variant="body2" sx={{ flex: 1 }}>
-                              {subject === 'Other' ? 'Formation' : subject === 'LanguageArts' ? 'Language Arts' : subject === 'SocialStudies' ? 'Social Studies' : subject}
-                            </Typography>
-                            <Stack direction="row" spacing={0.5} alignItems="center">
-                              <IconButton size="small" onClick={() => setSubjectTimeDefaults(prev => ({ ...prev, [subject]: Math.max(5, (prev[subject] ?? fallback) - 5) }))}>
-                                <Typography variant="body2">-</Typography>
-                              </IconButton>
-                              <Typography variant="body2" sx={{ minWidth: 40, textAlign: 'center' }}>{current}m</Typography>
-                              <IconButton size="small" onClick={() => setSubjectTimeDefaults(prev => ({ ...prev, [subject]: Math.min(60, (prev[subject] ?? fallback) + 5) }))}>
-                                <Typography variant="body2">+</Typography>
-                              </IconButton>
-                            </Stack>
-                          </Stack>
-                        )
-                      })}
-                    </Stack>
-                  )}
-                </Box>
-
-                {/* Special notes — always show, it changes weekly */}
-                <TextField
-                  size="small"
-                  label="Anything special this week?"
-                  placeholder="Field trip Tuesday, appointment Thursday..."
-                  value={weekNotes}
-                  onChange={(e) => setWeekNotes(e.target.value)}
-                  fullWidth
-                  multiline
-                  rows={2}
-                />
-
-                {/* Generate button — big and primary */}
-                <Button
-                  variant="contained"
-                  size="large"
-                  onClick={handleSetupComplete}
-                  fullWidth
-                  startIcon={<AutoAwesomeIcon />}
-                  sx={{ py: 1.5, fontWeight: 'bold', fontSize: '1rem' }}
-                >
-                  Generate Plan
-                </Button>
-
-                <Button variant="outlined" size="small" onClick={handleRepeatLastWeek}>
-                  Or repeat last week&apos;s plan
-                </Button>
-              </Stack>
-            ) : (
-              /* ── Full first-time user setup ── */
-              <Stack spacing={3} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
-                <Typography variant="h6">Plan {activeChild?.name ?? 'your child'}&apos;s Week</Typography>
-
-                {/* Step 1: Energy */}
-                <Box>
-                  <Typography variant="subtitle2" gutterBottom>
-                    How&apos;s your week looking?
-                  </Typography>
-                  <ToggleButtonGroup
-                    value={weekEnergy}
-                    exclusive
-                    onChange={(_, v) => { if (v) setWeekEnergy(v) }}
-                    size="small"
-                  >
-                    <ToggleButton value="full">Full Week</ToggleButton>
-                    <ToggleButton value="lighter">Lighter Week</ToggleButton>
-                    <ToggleButton value="mvd">Tough Week (MVD)</ToggleButton>
-                  </ToggleButtonGroup>
-                </Box>
-
-                {/* Step 2: Workbooks */}
-                <Box>
-                  <Typography variant="subtitle2" gutterBottom>
-                    This week&apos;s workbooks
-                  </Typography>
-                  <Box>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                      No workbooks yet. Add your curricula:
-                    </Typography>
-                    <Stack spacing={1}>
-                      {quickWorkbooks.map((qw, i) => (
-                        <Stack key={i} direction="row" spacing={1} alignItems="center">
-                          <TextField
-                            size="small"
-                            placeholder="Curriculum name (e.g., Good and the Beautiful)"
-                            value={qw.name}
-                            onChange={e => updateQuickWorkbook(i, 'name', e.target.value)}
-                            sx={{ flex: 2 }}
-                          />
-                          <FormControl size="small" sx={{ flex: 1, minWidth: 100 }}>
-                            <InputLabel>Subject</InputLabel>
-                            <Select
-                              value={qw.subject}
-                              label="Subject"
-                              onChange={e => updateQuickWorkbook(i, 'subject', e.target.value)}
-                            >
-                              <MenuItem value="Reading">Reading</MenuItem>
-                              <MenuItem value="Math">Math</MenuItem>
-                              <MenuItem value="LanguageArts">Language Arts</MenuItem>
-                              <MenuItem value="Science">Science</MenuItem>
-                              <MenuItem value="Other">Other</MenuItem>
-                            </Select>
-                          </FormControl>
-                          <IconButton size="small" onClick={() => removeQuickWorkbook(i)}>
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Stack>
-                      ))}
-                      <Button
-                        size="small"
-                        variant="text"
-                        onClick={addQuickWorkbook}
-                        startIcon={<AddIcon />}
-                      >
-                        Add curriculum
-                      </Button>
-                    </Stack>
-                  </Box>
-                  <TextField
-                    size="small"
-                    placeholder="Read-aloud book + chapter (e.g., Charlotte's Web Ch 5)"
-                    value={readAloud}
-                    onChange={(e) => setReadAloud(e.target.value)}
-                    fullWidth
-                    sx={{ mt: 1 }}
-                  />
-                </Box>
-
-                {/* Per-subject default times */}
-                <Box>
-                  <Typography variant="subtitle2" gutterBottom>
-                    How long does each subject usually take?
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    Set per-day defaults so the AI knows your family&apos;s pace.
-                  </Typography>
-                  <Stack spacing={1}>
-                    {Object.entries(DEFAULT_SUBJECT_MINUTES).map(([subject, fallback]) => {
-                      const current = subjectTimeDefaults[subject] ?? fallback
-                      return (
-                        <Stack key={subject} direction="row" spacing={1} alignItems="center">
-                          <Typography variant="body2" sx={{ width: 120 }}>
-                            {subject === 'Other' ? 'Formation' : subject === 'LanguageArts' ? 'Language Arts' : subject === 'SocialStudies' ? 'Social Studies' : subject}
-                          </Typography>
-                          <Select
-                            size="small"
-                            value={current}
-                            onChange={(e) => {
-                              const val = Number(e.target.value)
-                              setSubjectTimeDefaults((prev) => ({ ...prev, [subject]: val }))
-                            }}
-                            sx={{ minWidth: 90 }}
-                          >
-                            {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60].map((m) => (
-                              <MenuItem key={m} value={m}>{m} min</MenuItem>
-                            ))}
-                          </Select>
-                        </Stack>
-                      )
-                    })}
-                  </Stack>
-                </Box>
-
-                {/* Daily Routine */}
-                <Box>
-                  <Typography variant="subtitle2" gutterBottom>
-                    What does a typical school day look like?
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    List the activities and approximate times. The AI will use this as the starting template.
-                  </Typography>
-                  <TextField
-                    size="small"
-                    placeholder={`Example:\nHandwriting while I read aloud (20 min)\nBooster cards (15 min)\nGood and the Beautiful reading (30 min)\nSight word games (15 min)\nReading Eggs on tablet (45 min)\nMath workbook (30 min)`}
-                    value={dailyRoutine}
-                    onChange={e => setDailyRoutine(e.target.value)}
-                    fullWidth
-                    multiline
-                    rows={6}
-                  />
-                </Box>
-
-                {/* Special notes */}
-                <Box>
-                  <Typography variant="subtitle2" gutterBottom>
-                    Anything special this week?
-                  </Typography>
-                  <TextField
-                    size="small"
-                    placeholder="Field trip Tuesday, appointment Thursday, etc."
-                    value={weekNotes}
-                    onChange={(e) => setWeekNotes(e.target.value)}
-                    fullWidth
-                    multiline
-                    rows={2}
-                  />
-                </Box>
-
-                {/* Generate button */}
-                <Button
-                  variant="contained"
-                  size="large"
-                  onClick={handleSetupComplete}
-                  fullWidth
-                  startIcon={<AutoAwesomeIcon />}
-                  sx={{ py: 1.5, fontWeight: 'bold', fontSize: '1rem' }}
-                >
-                  Generate Plan
-                </Button>
-
-                {/* Repeat last week shortcut */}
-                <Button variant="outlined" size="small" onClick={handleRepeatLastWeek}>
-                  Or repeat last week&apos;s plan
-                </Button>
-              </Stack>
-            )
+          {phase === 'setup' && (!snapshot || snapshot.prioritySkills.length === 0) && (() => {
+            const hasRecentEval = recentEvalDate &&
+              (Date.now() - new Date(recentEvalDate).getTime()) < 7 * 24 * 60 * 60 * 1000
+            return !hasRecentEval ? (
+              <Alert severity="info" sx={{ mb: 1 }}>
+                No skill snapshot yet for {activeChild?.name ?? 'this child'}. Run a Knowledge Mine evaluation first for better plan personalization.
+              </Alert>
+            ) : null
           })()}
 
-          {/* Quick Start buttons — shown when no conversation yet (only welcome message) */}
-          {setupComplete && messages.length <= 1 && !currentDraft && !applied && (
-            <Stack spacing={1.5} sx={{ mb: 2 }}>
-              <Typography variant="subtitle2" color="text.secondary">
-                Quick Start
-              </Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap">
-                <Button variant="outlined" size="small" onClick={handleRepeatLastWeek}>
-                  Repeat Last Week
-                </Button>
-                <Button variant="outlined" size="small" onClick={() => setInputText('Help me plan this week')}>
-                  Plan with AI
-                </Button>
-              </Stack>
-            </Stack>
-          )}
-
-          {/* Plan Preview — full width, outside chat */}
-          {currentDraft && !applied && (
-            <Box sx={{
-              border: '1px solid',
-              borderColor: 'divider',
-              borderRadius: 2,
-              bgcolor: 'background.paper',
-              p: 2,
-            }}>
-              <Typography variant="h6" gutterBottom>Your Week Plan</Typography>
-              <PlanPreviewCard
-                plan={currentDraft}
-                hoursPerDay={hoursPerDay}
-                onToggleItem={handleToggleItem}
-                onGenerateActivity={!applied ? handleGenerateActivity : undefined}
-                generatingItemId={generatingItemId ?? undefined}
-              />
-            </Box>
-          )}
-
-          {/* Chat area — shown below plan for adjustments, or as main area before plan exists */}
-          {(setupComplete || conversationLoaded) && (
-            <Box
-              sx={{
-                overflowY: 'auto',
-                maxHeight: currentDraft ? '30vh' : '50vh',
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: 2,
-                p: 2,
-                bgcolor: 'grey.50',
-              }}
-            >
-              {/* Adjustment label when plan exists */}
-              {currentDraft && (
-                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-                  Need changes? Type below or tap a quick tweak.
-                </Typography>
-              )}
-              <Stack spacing={1.5}>
-                {messages.map((msg) => (
-                  <Box
-                    key={msg.id}
-                    sx={{
-                      alignSelf: msg.role === ChatMessageRole.User ? 'flex-end' : 'flex-start',
-                      maxWidth: '85%',
-                      bgcolor: msg.role === ChatMessageRole.User ? 'primary.main' : 'background.paper',
-                      color: msg.role === ChatMessageRole.User ? 'primary.contrastText' : 'text.primary',
-                      px: 2,
-                      py: 1,
-                      borderRadius: 2,
-                      boxShadow: 1,
-                    }}
-                  >
-                    {msg.text && (
-                      <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
-                        {fixUnicodeEscapes(msg.text)}
-                      </Typography>
-                    )}
-                    {msg.photoLabels && msg.photoLabels.length > 0 && (
-                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
-                        {msg.photoLabels.map((label, i) => (
-                          <Typography key={i} variant="caption">
-                            {label.subjectBucket}: {label.lessonOrPages || 'page'} ({label.estimatedMinutes}m)
-                          </Typography>
-                        ))}
-                      </Stack>
-                    )}
-                  </Box>
-                ))}
-                <div ref={chatEndRef} />
-              </Stack>
-            </Box>
-          )}
-
-          {/* Photo upload area */}
-          {showPhotos && (
-            <Box
-              sx={{
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: 2,
-                p: 2,
-                bgcolor: 'background.paper',
-              }}
-            >
-              <Typography variant="subtitle2" gutterBottom>
-                Upload & Label Photos
-              </Typography>
-              <PhotoLabelForm
-                labels={photoLabels}
-                onLabelsChange={setPhotoLabels}
-                onPhotoCapture={handlePhotoCapture}
-                uploading={uploading}
-                workbookConfigs={workbookConfigs}
-              />
-              {photoLabels.length > 0 && (
-                <Button
-                  variant="contained"
-                  onClick={handleSubmitPhotos}
-                  sx={{ mt: 1.5 }}
-                  fullWidth
-                >
-                  Generate Plan ({photoLabels.length} photo{photoLabels.length > 1 ? 's' : ''})
-                </Button>
-              )}
-            </Box>
-          )}
-
-          {/* Input area */}
-          <Stack direction="row" spacing={1} alignItems="flex-end">
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => setShowPhotos(!showPhotos)}
-              sx={{ whiteSpace: 'nowrap' }}
-            >
-              {showPhotos ? 'Hide Photos' : 'Add Photos'}
-            </Button>
-            <TextField
-              fullWidth
-              size="small"
-              placeholder={
-                currentDraft
-                  ? 'Type an adjustment (e.g. "make Wed light")...'
-                  : 'Upload photos first, or type a message...'
-              }
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSend()
-                }
-              }}
+          {phase === 'setup' && (
+            <PlannerSetupWizard
+              childName={activeChild?.name ?? 'your child'}
+              weekEnergy={weekEnergy}
+              onWeekEnergyChange={setWeekEnergy}
+              hoursPerDay={hoursPerDay}
+              chapterBooks={chapterBooks}
+              selectedBook={selectedBook}
+              onSelectedBookChange={handleSelectedBookChange}
+              onBookAdded={handleBookAdded}
+              bookProgress={bookProgress}
+              weekNotes={weekNotes}
+              onWeekNotesChange={setWeekNotes}
+              masterySummary={masterySummary}
+              formatSkillLabel={formatSkillLabel}
+              photoLabels={photoLabels}
+              onLabelsChange={setPhotoLabels}
+              onPhotoCapture={handlePhotoCapture}
+              uploading={uploading}
+              workbookConfigs={workbookConfigs}
+              onScanCapture={handleScanCapture}
+              scanLoading={scanLoading}
+              scanResult={scanRecord?.results ?? null}
+              scanError={scanError ?? null}
+              onScanClear={clearScan}
+              onScanAccept={handleScanAccept}
+              activityConfigs={activityConfigs}
+              onSubmitPhotos={handleSubmitPhotos}
+              onSetupComplete={handleSetupComplete}
+              generatingWeek={generatingWeek}
             />
-            <IconButton onClick={() => handleSend()} color="primary" disabled={!inputText.trim() || aiLoading}>
-              {aiLoading ? <CircularProgress size={24} /> : <SendIcon />}
-            </IconButton>
-          </Stack>
-
-          {/* Generate Plan button — visible after setup is complete (or conversation loaded), before a draft exists */}
-          {(setupComplete || conversationLoaded) && !currentDraft && !applied && (
-            <Button
-              variant="contained"
-              color="primary"
-              size="large"
-              onClick={handleGeneratePlan}
-              disabled={aiLoading}
-              startIcon={aiLoading ? <CircularProgress size={20} color="inherit" /> : <AutoAwesomeIcon />}
-              fullWidth
-              sx={{ py: 1.5, fontWeight: 'bold', fontSize: '1rem' }}
-            >
-              {aiLoading ? 'Generating Plan...' : 'Generate Plan'}
-            </Button>
           )}
 
-          {/* Quick suggestion buttons */}
-          <QuickSuggestionButtons
-            onSelect={handleQuickSuggestion}
-            visible={currentDraft !== null && !applied}
-          />
-
-          {/* Apply plan button */}
-          {currentDraft && !applied && (
-            <Button
-              variant="contained"
-              color="success"
-              size="large"
-              onClick={handleApplyPlan}
-              fullWidth
-            >
-              Lock In This Plan
-            </Button>
+          {phase === 'review' && weekPlan && (
+            <WeekFocusPanel weekPlan={weekPlan} onUpdateField={updateWeekField} />
           )}
 
-          {applied && (
+          {phase === 'review' && (
+            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+              <Typography variant="subtitle2" gutterBottom>Read-Aloud Book</Typography>
+              <ChapterBookPicker
+                chapterBooks={chapterBooks}
+                selectedBook={selectedBook}
+                onSelectedBookChange={handleBookChangeAndPersist}
+                onBookAdded={handleBookAdded}
+                bookProgress={bookProgress}
+                variant="card"
+              />
+            </Box>
+          )}
+
+          {phase === 'review' && currentDraft && (
+            <PlanDayCards
+              draft={currentDraft}
+              hoursPerDay={hoursPerDay}
+              masteryReviewLine={masteryReviewLine}
+              readAloudBook={readAloudBook}
+              onToggleItem={handleToggleItem}
+              onGenerateActivity={handleGenerateActivity}
+              generatingItemId={generatingItemId}
+              applied={applied}
+              onMoveItem={handleMoveItem}
+              onRemoveItem={handleRemoveItem}
+              onUpdateTime={handleUpdateTime}
+            />
+          )}
+
+          {phase === 'active' && (
             <>
+              {/* Applied plan alert + navigation */}
               <Alert severity="success" sx={{ display: 'flex', alignItems: 'center' }}>
                 <Box sx={{ flex: 1 }}>
-                  <Typography variant="body2" fontWeight={600}>Plan locked in!</Typography>
-                  <Typography variant="body2">Head to Today to start your week.</Typography>
+                  <Typography variant="body2" fontWeight={600}>Plan applied!</Typography>
+                  <Typography variant="body2">{activeChild?.name ?? 'Your child'}&apos;s week is ready.</Typography>
                 </Box>
                 <Button
                   variant="contained"
@@ -2316,49 +2315,94 @@ Generate a plan for Monday through Friday.`.trim()
                   onClick={() => navigate('/today')}
                   sx={{ ml: 2, whiteSpace: 'nowrap' }}
                 >
-                  Go to Today →
+                  Go to Today
                 </Button>
               </Alert>
 
-              {currentDraft && (
-                <Box sx={{ mt: 2 }}>
-                  <Typography variant="subtitle1" gutterBottom>Print Materials</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    Generate printable worksheets for each day's activities.
-                  </Typography>
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    {currentDraft.days.map((day) => (
-                      <Button
-                        key={day.day}
-                        variant="outlined"
-                        size="small"
-                        onClick={() => handleGenerateMaterials(day)}
-                        disabled={generatingMaterials === day.day}
-                        startIcon={generatingMaterials === day.day ? <CircularProgress size={16} /> : <PrintIcon />}
-                      >
-                        {generatingMaterials === day.day ? 'Generating...' : `Print ${day.day}`}
-                      </Button>
-                    ))}
-                    <Button
-                      variant="contained"
-                      size="small"
-                      onClick={handleGenerateAllMaterials}
-                      disabled={!!generatingMaterials}
-                      startIcon={<PrintIcon />}
-                    >
-                      Print All Week
-                    </Button>
-                  </Stack>
-                </Box>
-              )}
+              {/* Read-aloud book picker (active phase) */}
+              <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+                <Typography variant="subtitle2" gutterBottom>Read-Aloud Book</Typography>
+                <ChapterBookPicker
+                  chapterBooks={chapterBooks}
+                  selectedBook={selectedBook}
+                  onSelectedBookChange={handleBookChangeAndPersist}
+                  onBookAdded={handleBookAdded}
+                  bookProgress={bookProgress}
+                  variant="card"
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  Changing the book updates your Today page. Re-lock the plan to generate questions for this book.
+                </Typography>
+              </Box>
 
+              {/* Chat history (scrollable) */}
+              <PlannerChatMessages messages={messages} messagesEndRef={chatEndRef} />
+
+              {/* Chat input for in-week adjustments */}
+              <Typography variant="caption" color="text.secondary">
+                Need to make changes during the week?
+              </Typography>
+              <Stack direction="row" spacing={1} alignItems="flex-end">
+                <TextField
+                  fullWidth
+                  size="small"
+                  placeholder="e.g. &quot;Cancel Wednesday&quot;, &quot;make Thursday light&quot;, &quot;add extra reading Friday&quot;..."
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleSend()
+                    }
+                  }}
+                />
+                <IconButton onClick={() => handleSend()} color="primary" disabled={!inputText.trim() || aiLoading}>
+                  {aiLoading ? <CircularProgress size={24} /> : <SendIcon />}
+                </IconButton>
+              </Stack>
+            </>
+          )}
+
+          {phase === 'review' && currentDraft && (
+            <>
+              <Typography variant="caption" color="text.secondary">
+                Want to adjust anything?
+              </Typography>
+              <QuickSuggestionButtons onSelect={handleQuickSuggestion} visible />
+
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                <Button
+                  variant="contained"
+                  color="success"
+                  size="large"
+                  onClick={handleApplyPlan}
+                  fullWidth
+                >
+                  Apply This Week&apos;s Plan
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="large"
+                  onClick={handlePrintWeekMaterials}
+                  disabled={printingMaterials || aiLoading}
+                  fullWidth
+                >
+                  {printingMaterials ? 'Generating print packet...' : 'Print Week Materials'}
+                </Button>
+              </Stack>
+            </>
+          )}
+
+          {phase === 'active' && (
+            <>
               <Button
-                variant="contained"
+                variant="outlined"
                 color="primary"
                 onClick={() => setConfirmNewPlan(true)}
                 fullWidth
+                size="small"
               >
-                Redo Plan
+                Start Over (Redo Plan)
               </Button>
 
               <Dialog open={confirmNewPlan} onClose={() => setConfirmNewPlan(false)}>
@@ -2384,14 +2428,13 @@ Generate a plan for Monday through Friday.`.trim()
         child={activeChild ?? null}
         weekKey={weekRange.start}
         hoursPerDay={hoursPerDay}
-        appBlocks={appBlocks}
+        appBlocks={filteredAppBlocks}
         snapshot={snapshot}
-        minimumWin={minimumWin}
       />
 
       <Snackbar
         open={snack !== null}
-        autoHideDuration={4000}
+        autoHideDuration={snack?.action ? 10000 : 4000}
         onClose={() => setSnack(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
@@ -2400,6 +2443,11 @@ Generate a plan for Monday through Friday.`.trim()
           severity={snack?.severity ?? 'error'}
           variant="filled"
           sx={{ width: '100%' }}
+          action={snack?.action ? (
+            <Button color="inherit" size="small" onClick={() => { snack.action!.onClick(); setSnack(null) }}>
+              {snack.action.label}
+            </Button>
+          ) : undefined}
         >
           {snack?.text}
         </Alert>

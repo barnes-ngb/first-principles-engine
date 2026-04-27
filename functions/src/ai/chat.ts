@@ -2,6 +2,9 @@ import type { Firestore } from "firebase-admin/firestore";
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
+import { requireEmailAuth, checkRateLimit } from "./authGuard.js";
+import { STONEBRIDGE_BIBLE } from "./stonebridgeBible.js";
+import { ensureWorkbookActivityConfigsForChild } from "./workbookActivityConfigBackfill.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -24,6 +27,14 @@ export const TaskType = {
   GenerateStory: "generateStory",
   Workshop: "workshop",
   AnalyzeWorkbook: "analyzeWorkbook",
+  Disposition: "disposition",
+  Conundrum: "conundrum",
+  WeeklyFocus: "weeklyFocus",
+  Scan: "scan",
+  ShellyChat: "shellyChat",
+  ChapterQuestions: "chapterQuestions",
+  WeeklyReview: "weeklyReview",
+  AnalyzePatterns: "analyzePatterns",
 } as const;
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
 
@@ -52,7 +63,15 @@ export function modelForTask(taskType: TaskType): string {
     case TaskType.GenerateStory:
     case TaskType.Workshop:
     case TaskType.AnalyzeWorkbook:
-      return "claude-sonnet-4-5-20250929";
+    case TaskType.Disposition:
+    case TaskType.Conundrum:
+    case TaskType.WeeklyFocus:
+    case TaskType.Scan:
+    case TaskType.ShellyChat:
+    case TaskType.ChapterQuestions:
+    case TaskType.WeeklyReview:
+    case TaskType.AnalyzePatterns:
+      return "claude-sonnet-4-6";
     case TaskType.Generate:
     case TaskType.Chat:
     default:
@@ -62,11 +81,14 @@ export function modelForTask(taskType: TaskType): string {
 
 // ── Enriched context types ──────────────────────────────────────
 
-interface SessionSummary {
-  streamId: string;
-  hits: number;
-  nears: number;
-  misses: number;
+interface CurriculumMeta {
+  provider: string;
+  level?: string;
+  lastMilestone?: string;
+  milestoneDate?: string;
+  completed?: boolean;
+  masteredSkills?: string[];
+  activeSkills?: string[];
 }
 
 interface WorkbookPace {
@@ -74,9 +96,8 @@ interface WorkbookPace {
   unitLabel: string;
   currentPosition: number;
   totalUnits: number;
-  unitsPerDayNeeded: number;
-  targetFinishDate: string;
-  status: "ahead" | "on-track" | "behind";
+  subjectBucket?: string;
+  curriculum?: CurriculumMeta;
 }
 
 interface WeekContext {
@@ -98,16 +119,6 @@ interface GradeResult {
   date: string;
 }
 
-interface EnrichedContext {
-  sessions: SessionSummary[];
-  workbookPaces: WorkbookPace[];
-  week: WeekContext | null;
-  hoursTotalMinutes: number;
-  hoursTarget: number;
-  engagementSummaries: EngagementSummary[];
-  gradeResults: GradeResult[];
-  draftBookCount: number;
-}
 
 // ── Date helpers ────────────────────────────────────────────────
 
@@ -134,98 +145,40 @@ function schoolYearStart(d: Date): string {
 
 // ── Enriched context loaders ────────────────────────────────────
 
-/** Load recent sessions (last 14 days) and summarize by stream. */
-export async function loadRecentSessions(
-  db: Firestore,
-  familyId: string,
-  childId: string,
-): Promise<SessionSummary[]> {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 14);
-  const cutoffStr = toDateString(cutoff);
-
-  const snap = await db
-    .collection(`families/${familyId}/sessions`)
-    .where("childId", "==", childId)
-    .where("date", ">=", cutoffStr)
-    .get();
-
-  const byStream = new Map<
-    string,
-    { hits: number; nears: number; misses: number }
-  >();
-
-  for (const doc of snap.docs) {
-    const data = doc.data() as {
-      streamId: string;
-      result: string;
-    };
-    if (!byStream.has(data.streamId)) {
-      byStream.set(data.streamId, { hits: 0, nears: 0, misses: 0 });
-    }
-    const counts = byStream.get(data.streamId)!;
-    if (data.result === "hit") counts.hits++;
-    else if (data.result === "near") counts.nears++;
-    else if (data.result === "miss") counts.misses++;
-  }
-
-  return [...byStream.entries()].map(([streamId, counts]) => ({
-    streamId,
-    ...counts,
-  }));
-}
-
-/** Load workbook configs and calculate pace for each. */
+/** Load workbook configs as coverage data (no pace/deadline computation). */
 export async function loadWorkbookPaces(
   db: Firestore,
   familyId: string,
   childId: string,
 ): Promise<WorkbookPace[]> {
-  const snap = await db
-    .collection(`families/${familyId}/workbookConfigs`)
-    .where("childId", "==", childId)
+  const activitySnap = await db
+    .collection(`families/${familyId}/activityConfigs`)
+    .where("childId", "in", [childId, "both"])
+    .where("type", "==", "workbook")
     .get();
 
-  const today = new Date();
   const paces: WorkbookPace[] = [];
-
-  for (const doc of snap.docs) {
-    const data = doc.data() as {
-      name: string;
-      unitLabel: string;
-      currentPosition: number;
-      totalUnits: number;
-      targetFinishDate: string;
-      schoolDaysPerWeek: number;
+  for (const activityDoc of activitySnap.docs) {
+    const data = activityDoc.data() as {
+      name?: string;
+      curriculum?: string;
+      unitLabel?: string;
+      currentPosition?: number;
+      totalUnits?: number;
+      subjectBucket?: string;
+      curriculumMeta?: CurriculumMeta;
+      completed?: boolean;
     };
 
-    const remaining = data.totalUnits - data.currentPosition;
-    const targetDate = new Date(data.targetFinishDate + "T00:00:00");
-    const msPerDay = 86_400_000;
-    const calendarDaysLeft = Math.max(
-      1,
-      Math.ceil((targetDate.getTime() - today.getTime()) / msPerDay),
-    );
-    // Approximate school days: (calendarDays / 7) * schoolDaysPerWeek
-    const schoolDaysLeft = Math.max(
-      1,
-      Math.round((calendarDaysLeft / 7) * (data.schoolDaysPerWeek || 5)),
-    );
-    const unitsPerDay = remaining / schoolDaysLeft;
-
-    let status: WorkbookPace["status"];
-    if (unitsPerDay <= 0.8) status = "ahead";
-    else if (unitsPerDay <= 1.2) status = "on-track";
-    else status = "behind";
+    if (data.completed || data.curriculumMeta?.completed) continue;
 
     paces.push({
-      name: data.name,
+      name: data.name || data.curriculum || "Workbook",
       unitLabel: data.unitLabel || "lesson",
-      currentPosition: data.currentPosition,
-      totalUnits: data.totalUnits,
-      unitsPerDayNeeded: Math.round(unitsPerDay * 10) / 10,
-      targetFinishDate: data.targetFinishDate,
-      status,
+      currentPosition: data.currentPosition ?? 0,
+      totalUnits: data.totalUnits ?? 0,
+      subjectBucket: data.subjectBucket,
+      curriculum: data.curriculumMeta,
     });
   }
 
@@ -364,18 +317,46 @@ export async function loadGradeResults(
   return results;
 }
 
-/** Load draft book count for child. */
-export async function loadDraftBookCount(
+export interface DraftBookInfo {
+  id: string;
+  title: string;
+  pageCount: number;
+  updatedAt?: string;
+}
+
+/**
+ * Load draft books authored by the child (createdBy === childId).
+ * Returns the full list so the planner can suggest "Continue Book: {title}"
+ * with a concrete bookId linking back to the editor.
+ */
+export async function loadDraftBooksByChild(
   db: Firestore,
   familyId: string,
   childId: string,
-): Promise<number> {
+): Promise<DraftBookInfo[]> {
   const snap = await db
     .collection(`families/${familyId}/books`)
-    .where("childId", "==", childId)
+    .where("createdBy", "==", childId)
     .where("status", "==", "draft")
     .get();
-  return snap.size;
+
+  const drafts: DraftBookInfo[] = snap.docs.map((d) => {
+    const data = d.data() as {
+      title?: string;
+      pages?: Array<unknown>;
+      updatedAt?: string;
+    };
+    return {
+      id: d.id,
+      title: data.title || "Untitled book",
+      pageCount: Array.isArray(data.pages) ? data.pages.length : 0,
+      updatedAt: data.updatedAt,
+    };
+  });
+
+  // Most recently edited first.
+  drafts.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+  return drafts;
 }
 
 /** Load word mastery summary from quest wordProgress collection. */
@@ -442,47 +423,8 @@ export async function loadWordMasterySummary(
   return lines.join("\n");
 }
 
-/** Load all enriched context in parallel. Only called for plan/evaluate. */
-export async function loadEnrichedContext(
-  db: Firestore,
-  familyId: string,
-  childId: string,
-): Promise<EnrichedContext> {
-  const [sessions, workbookPaces, week, hours, engagementSummaries, gradeResults, draftBookCount] = await Promise.all([
-    loadRecentSessions(db, familyId, childId),
-    loadWorkbookPaces(db, familyId, childId),
-    loadWeekContext(db, familyId),
-    loadHoursSummary(db, familyId, childId),
-    loadEngagementSummary(db, familyId, childId),
-    loadGradeResults(db, familyId, childId),
-    loadDraftBookCount(db, familyId, childId),
-  ]);
 
-  return {
-    sessions,
-    workbookPaces,
-    week,
-    hoursTotalMinutes: hours.totalMinutes,
-    hoursTarget: 1000, // MO target hours
-    engagementSummaries,
-    gradeResults,
-    draftBookCount,
-  };
-}
-
-// ── System prompt assembly ──────────────────────────────────────
-
-const CHARTER_PREAMBLE = `You are an AI assistant for the First Principles Engine, a family homeschool learning platform.
-
-Core family values (Charter):
-- Formation first: character and virtue before academics.
-- Both kids count: Lincoln (10, neurodivergent, speech challenges) and London (6, story-driven).
-- Narration counts: oral evidence is first-class, especially for Lincoln.
-- Small artifacts > perfect documentation: capture evidence quickly.
-- No heroics: simple routines, minimum viable days are real school.
-- Shelly's direct attention is the primary schedulable resource — split-block scheduling is required.
-
-Always align recommendations with these values. Be concise, practical, and encouraging.`;
+// ── Types ───────────────────────────────────────────────────────
 
 interface ChildContext {
   name: string;
@@ -492,142 +434,6 @@ interface ChildContext {
   stopRules?: Array<{ label: string; trigger: string; action: string }>;
 }
 
-export function buildSystemPrompt(
-  child: ChildContext,
-  taskType: TaskType,
-  enriched?: EnrichedContext,
-  domain?: string,
-): string {
-  const lines = [CHARTER_PREAMBLE];
-
-  // ── CHILD PROFILE ─────────────────────────────────────────────
-  lines.push("", "CHILD PROFILE:");
-  lines.push(`Name: ${child.name}`);
-  if (child.grade) {
-    lines.push(`Grade: ${child.grade}`);
-  }
-
-  if (child.prioritySkills?.length) {
-    lines.push("Priority skills:");
-    for (const s of child.prioritySkills) {
-      lines.push(`- ${s.label} (${s.tag}): ${s.level}`);
-    }
-  }
-
-  if (child.supports?.length) {
-    lines.push("Available supports:");
-    for (const s of child.supports) {
-      lines.push(`- ${s.label}: ${s.description}`);
-    }
-  }
-
-  if (child.stopRules?.length) {
-    lines.push("Stop rules:");
-    for (const r of child.stopRules) {
-      lines.push(`- ${r.label}: when "${r.trigger}" → ${r.action}`);
-    }
-  }
-
-  // ── Enriched context (only present for plan/evaluate) ─────────
-  if (enriched) {
-    // RECENT PERFORMANCE
-    lines.push("", "RECENT PERFORMANCE (last 14 days):");
-    if (enriched.sessions.length === 0) {
-      lines.push("No recent session data available.");
-    } else {
-      for (const s of enriched.sessions) {
-        lines.push(
-          `- ${s.streamId}: ${s.hits} hits, ${s.nears} nears, ${s.misses} misses`,
-        );
-      }
-    }
-
-    // WORKBOOK PACE
-    lines.push("", "WORKBOOK PACE:");
-    if (enriched.workbookPaces.length === 0) {
-      lines.push("No workbook data available.");
-    } else {
-      for (const w of enriched.workbookPaces) {
-        lines.push(
-          `- ${w.name} — ${w.unitLabel} ${w.currentPosition} of ${w.totalUnits}, ${w.unitsPerDayNeeded} ${w.unitLabel}s/day needed to finish by ${w.targetFinishDate}. Status: ${w.status}`,
-        );
-      }
-    }
-
-    // THIS WEEK
-    lines.push("", "THIS WEEK:");
-    if (enriched.week) {
-      if (enriched.week.theme) {
-        lines.push(`Theme: ${enriched.week.theme}`);
-      }
-      if (enriched.week.virtue) {
-        lines.push(`Virtue: ${enriched.week.virtue}`);
-      }
-      if (enriched.week.scriptureRef) {
-        lines.push(`Scripture: ${enriched.week.scriptureRef}`);
-      }
-      if (enriched.week.heartQuestion) {
-        lines.push(`Heart question: ${enriched.week.heartQuestion}`);
-      }
-    } else {
-      lines.push("No weekly plan set yet.");
-    }
-
-    // HOURS PROGRESS
-    lines.push("", "HOURS PROGRESS:");
-    const totalHours = Math.round(enriched.hoursTotalMinutes / 60);
-    const pct = Math.round(
-      (enriched.hoursTotalMinutes / (enriched.hoursTarget * 60)) * 100,
-    );
-    lines.push(
-      `Hours logged this year: ${totalHours} hours of ${enriched.hoursTarget} target (${pct}% complete)`,
-    );
-
-    // ACTIVITY ENGAGEMENT
-    if (enriched.engagementSummaries.length > 0) {
-      lines.push("", "ACTIVITY ENGAGEMENT (recent):");
-      for (const { activity, counts } of enriched.engagementSummaries) {
-        const total = Object.values(counts).reduce((s, n) => s + n, 0);
-        const primary = Object.entries(counts).sort(([, a], [, b]) => b - a)[0];
-        lines.push(`- ${activity}: ${primary[0]} (${primary[1]}/${total} sessions)`);
-      }
-    }
-
-    // BOOK STATUS
-    lines.push("", "BOOK STATUS:");
-    if (enriched.draftBookCount > 0) {
-      lines.push(`Draft books in progress: ${enriched.draftBookCount}. Suggest "Continue your book" as a choose activity instead of "Make a Book".`);
-    } else {
-      lines.push(`No draft books. "Make a Book" is available as a choose activity.`);
-    }
-
-    // WORK REVIEW RESULTS
-    if (enriched.gradeResults.length > 0) {
-      lines.push("", "WORK REVIEW RESULTS (this period):");
-      lines.push("Use these results to adjust upcoming plans — reinforce weak areas, advance strong ones.");
-      for (const { activity, result, date } of enriched.gradeResults) {
-        lines.push(`- ${activity} (${date}): ${result}`);
-      }
-    }
-  }
-
-  // ── Plan output format (always last) ──────────────────────────
-  if (taskType === TaskType.Plan) {
-    lines.push("", PLAN_OUTPUT_INSTRUCTIONS);
-  }
-
-  // ── Evaluation diagnostic prompt ──────────────────────────────
-  if (taskType === TaskType.Evaluate) {
-    lines.push("", buildEvaluationPrompt(domain || "reading"));
-  }
-
-  // ── Quest interactive prompt ────────────────────────────────
-  if (taskType === TaskType.Quest) {
-    lines.push("", buildQuestPrompt(domain || "reading"));
-  }
-
-  return lines.join("\n");
-}
 
 // ── Plan output format instructions ─────────────────────────────
 
@@ -659,31 +465,47 @@ PLAN CONTENT RULES:
 - Every item must have a "category" field with value "must-do" or "choose":
   - "must-do": Core non-negotiable items (3-4 per day). Always includes: Formation/Prayer, primary reading/phonics workbook, primary math workbook. These happen every day in order.
   - "choose": Enrichment activities the child picks from AFTER completing must-do items (3-4 options per day, child picks 2). Examples: Reading Eggs, Minecraft reading, read-aloud time, art, sight word games, science exploration.
-  - On MVD (Minimum Viable Day) weeks, ONLY must-do items are required. Choose items are bonus.
-  - Items with category "must-do" should always have "mvdEssential": true.
+- On MVD (Minimum Viable Day) weeks, ONLY must-do items are required. Choose items are bonus.
+- Items with category "must-do" should always have "mvdEssential": true.
+- Chapter questions are now generated separately via the BookProgress pool — do NOT include "chapterQuestion" in the day plan output.
+- Read-aloud chapter discussions are handled by the Chapter Question Pool system and should not be duplicated here.
+
+STONEBRIDGE WORLD CONTEXT:
+${STONEBRIDGE_BIBLE}
 
 {
   "days": [
     {
       "day": "Monday",
-      "timeBudgetMinutes": 150,
+      "timeBudgetMinutes": 185,
       "items": [
         {
           "title": "Activity name",
           "subjectBucket": "Reading",
-          "estimatedMinutes": 15,
+          "estimatedMinutes": 30,
           "skillTags": ["optional.dot.delimited.tag"],
           "isAppBlock": false,
           "accepted": true,
           "mvdEssential": false,
-          "category": "must-do"
+          "category": "must-do",
+          "skipGuidance": "This is Lincoln's frontier — spend full time here. Focus on two-digit addition.", // or null for non-workbook items
+          "itemType": "workbook", // "routine" | "workbook" | "evaluation" | "activity" — use "evaluation" for Knowledge Mine / Fluency Practice items
+          "evaluationMode": null, // "phonics" | "comprehension" | "fluency" | "math" — only set when itemType is "evaluation"
+          "link": null, // route path (e.g. "/quest") — only set for in-app activities like evaluation items
+          "bookId": null // Firestore book id — only set for "Read: {title}" or "Continue Book: {title}" items linked to a Mom's Book or child draft
         }
-      ]
+      ],
     }
   ],
   "skipSuggestions": [],
   "minimumWin": "One sentence describing the minimum viable accomplishment for the week."
 }
+
+NOTE: The timeBudgetMinutes (185) and estimatedMinutes (30) in the example above are PLACEHOLDERS. Always use the ACTUAL values from:
+- Mom's daily routine (exact names and exact times)
+- Subject time defaults (if provided)
+- The hours/day budget the user specified
+Never default items to 15 minutes unless the routine explicitly says 15 minutes for that item.
 
 Rules:
 - Days must be Monday through Friday (5 days).
@@ -694,19 +516,31 @@ Rules:
 - "estimatedMinutes" must be a positive number. When the user provides subject time defaults, use those as the baseline. Adjust only if energy level or specific notes suggest otherwise (e.g., "lighter week" → reduce by ~30%).
 - "mvdEssential" must be a boolean. Mark the 3-4 core items per day as true (Formation, core math, core reading, speech if applicable).
 - "category" must be either "must-do" or "choose". Core academics are "must-do", elective/fun activities are "choose".
-- "Make a Book" can be included as a "choose" category item. SubjectBucket: "LanguageArts". EstimatedMinutes: 15-20. It counts as both Language Arts and Art for compliance hours.
-- If the child has a draft book in progress (see BOOK STATUS in context), suggest "Continue your book" instead of "Make a Book".
+- "Make a New Book" can be included as a "choose" category item on creative days. SubjectBucket: "LanguageArts". EstimatedMinutes: 15-20. It counts as both Language Arts and Art for compliance hours. Leave bookId null.
+- If the child has drafts in progress (see "{NAME}'S BOOK DRAFTS" in context), prefer "Continue Book: {title}" over "Make a New Book", and set bookId to the draft's id so Today can deep-link to the editor.
+- If MOM'S BOOKS are listed in context, schedule 1-2 as "Read: {bookTitle}" choose-items during reading blocks, and set bookId to the matching id so Today can deep-link to the reader. Subject: "Reading". EstimatedMinutes: 10-15.
 - If the child has sight word stories available (see SIGHT WORD PROGRESS in context), suggest reading one as a "choose" activity. Reference specific word counts and mastery progress.
 - "skipSuggestions" is an array of { "action": "skip"|"modify", "reason": "string", "replacement": "string", "evidence": "string" }.
+
+MASTERY GUIDANCE:
+- If an activity is marked "CAN SKIP", do NOT include it as a must-do item. Mention it once as "maintenance" or drop it entirely.
+- If an activity is marked "FOCUS HERE", give it priority time and generate specific practice suggestions.
+- Summarize at the top: "Focus this week: [items]. Reduced/skipped: [items]."
+- Keep total daily time to the parent's requested hours. Cut mastered items first to make room for focus items.
 
 When the user is chatting, asking questions, or providing context (NOT asking for a plan), respond in normal conversational text. Only switch to JSON output when they explicitly request plan generation.
 
 CRITICAL SIZE CONSTRAINTS:
-- Keep item titles SHORT (max 6 words). Example: "GATB Reading Lesson 21" not "Good and the Beautiful Reading — Lesson 21: Short vowel review with comprehension questions"
+- Item titles MUST be short activity names (≤6 words, ≤60 characters).
+  NEVER embed word lists, phonics patterns, drill instructions, or per-word detail in titles.
+  Put that kind of detail in skipGuidance or description fields only.
+  Examples of CORRECT titles: "Sight word games", "Booster cards", "Math workbook", "Knowledge Mine — Reading"
+  Examples of WRONG titles: "words: when, whip, what, where, why" (embeds word list — use skipGuidance),
+  "cards from th- and ch- cards. Say each sound aloud." (embeds instruction — use description)
 - Keep skillTags to max 1 tag per item (the most relevant one)
 - Keep skipGuidance to max 15 words or omit if not needed
 - Do NOT include explanations, descriptions, or commentary in the JSON
-- Total response must be under 4000 tokens. Be concise.
+- Total response must be under 6000 tokens. Be concise.
 
 REMINDER: Your entire response must be ONLY the JSON object. No markdown, no code fences, no text outside the JSON. Start with { and end with }.`;
 
@@ -846,15 +680,555 @@ The <complete> block's stopRules should identify when to switch activities (e.g.
 The <complete> block's evidenceDefinitions should define what mastery looks like for each frontier skill (e.g., "Reads 5/5 -ig words independently in under 10 seconds total").`;
 
   if (domain === "reading") return reading;
+
+  if (domain === "speech") {
+    return `Today's date is ${today}. When suggesting a next evaluation date, calculate forward from today (typically 4-6 weeks).
+
+ROLE: You are a speech-language screening specialist guiding a homeschool parent through a structured articulation check of their 10-year-old son. He was previously in speech therapy but is not currently.
+
+IMPORTANT: You are NOT diagnosing a disorder. You are helping the parent identify which sounds need practice at home and whether professional evaluation might be helpful.
+
+APPROACH:
+- Walk through ONE sound group at a time. Wait for the parent's response.
+- Give specific words for the child to say — don't ask the parent to come up with words.
+- Ask the parent to describe exactly what she hears. "Does he say 'wabbit' or 'rabbit'?"
+- Be warm and encouraging — speech differences at 10 are common and very workable.
+- Note patterns: does the child substitute one sound for another? Drop sounds? Switch sound positions?
+
+SCREENING SEQUENCE:
+
+Step 1: QUICK CHECK — Late-developing sounds (most likely issues for a 10-year-old)
+"Have Lincoln say each of these words one at a time. For each one, tell me: does it sound right, or does something sound different?"
+- "rabbit" (R at the start)
+- "mirror" (R in the middle)
+- "car" (R at the end)
+- "lamp" (L at the start)
+- "pillow" (L in the middle)
+- "three" (TH at the start)
+- "feather" (TH in the middle)
+- "shoe" (SH at the start)
+- "seven" (S at the start)
+- "zipper" (Z at the start)
+- "jump" (J at the start)
+- "church" (CH at the start)
+
+Step 2: DEEP DIVE — For each sound the parent flags, test all three positions:
+- "You said [sound] was tricky. Let me check a few more words."
+- Beginning of word, middle of word, end of word
+- 3 words per position
+
+Step 3: SOUND SWITCHING — Metathesis check
+"Sometimes kids switch sounds around in longer words. Have Lincoln try these:"
+- "spaghetti" (common: "pasketti")
+- "specific" (common: "pacific")
+- "animal" (common: "aminal")
+- "comfortable" (common: "comfterble")
+- "asterisk" (common: "asteriks")
+- Also try: "Have Lincoln say 'ask.' Does he say 'ask' or 'aks'?"
+
+Step 4: CONNECTED SPEECH
+"Have Lincoln tell you about his favorite Minecraft build in 3-4 sentences. While he talks, notice: are the tricky sounds harder to hear when he's talking fast? Are there words that are hard to understand in conversation even though single words are clear?"
+
+AFTER EACH PARENT RESPONSE, include a <finding> block:
+<finding>
+{
+  "skill": "speech.articulation.r.initial",
+  "status": "emerging",
+  "evidence": "Substitutes /w/ for /r/ in initial position ('wabbit' for 'rabbit'). Correct in final position ('car').",
+  "notes": "Practice words: run, red, rain, robot, rocket. 5 minutes daily."
+}
+</finding>
+
+SKILL TAGS for speech findings:
+- speech.articulation.r.initial / speech.articulation.r.medial / speech.articulation.r.final
+- speech.articulation.l.initial / speech.articulation.l.medial / speech.articulation.l.final
+- speech.articulation.th.initial / speech.articulation.th.medial
+- speech.articulation.sh / speech.articulation.s / speech.articulation.z
+- speech.articulation.j / speech.articulation.ch
+- speech.metathesis (sound switching in longer words)
+- speech.connectedSpeech (intelligibility in conversation)
+
+WHEN DONE, output a <complete> block:
+<complete>
+{
+  "summary": "Lincoln shows [X] in speech articulation...",
+  "frontier": "Specific next learning edge for speech",
+  "recommendations": [
+    {
+      "priority": 1,
+      "skill": "speech.articulation.r",
+      "action": "Practice R sounds daily: initial (run, red, rain), medial (carrot, mirror), final (car, star). Say each word 3 times.",
+      "duration": "4 weeks",
+      "frequency": "Daily, 5 minutes",
+      "materials": ["Word cards organized by position"]
+    }
+  ],
+  "supports": [
+    {"label": "Mirror practice", "description": "Have Lincoln watch his mouth in a mirror while saying R words"}
+  ],
+  "stopRules": [
+    {"label": "Frustration limit", "trigger": "If Lincoln gets frustrated after 3 minutes", "action": "Switch to a game using the target words naturally"}
+  ],
+  "evidenceDefinitions": [
+    {"label": "R mastery", "description": "Says R correctly in all 3 positions (initial, medial, final) in 5/5 words each, in both single words and short sentences"}
+  ],
+  "practiceWords": {
+    "r": { "initial": ["run", "red", "rain"], "medial": ["carrot", "mirror"], "final": ["car", "star"] }
+  },
+  "referralRecommended": false,
+  "referralReason": "",
+  "nextEvalDate": "YYYY-MM-DD"
+}
+</complete>
+
+REFERRAL GUIDANCE:
+- If more than 3 sounds are affected OR if intelligibility is low in connected speech → recommend professional evaluation
+- Include this in the complete block's referralRecommended and referralReason fields
+
+CRITICAL OUTPUT RULES:
+- Include a <finding> block after EVERY parent response. No exceptions.
+- Multiple <finding> blocks are OK in one response.
+- Output <complete> only when you've completed the screening (after at least 3-4 exchanges).
+- The <finding> and <complete> blocks must contain VALID JSON.`;
+  }
+
   return `Today's date is ${today}. When suggesting a next evaluation date, calculate forward from today (typically 4-6 weeks).
 
 Evaluate the child's ${domain} skills using a structured diagnostic approach. Walk the parent through ONE step at a time. After each parent response, include a <finding> block with JSON containing skill, status (mastered/emerging/not-yet/not-tested), evidence, and notes. When done, output a <complete> block with summary, recommendations array, and nextEvalDate (YYYY-MM-DD, 4-6 weeks from ${today}).`;
 }
 
+// ── Comprehension quest prompt ────────────────────────────────
+
+function buildComprehensionQuestPrompt(startingLevel?: number): string {
+  const startLevelBlock = startingLevel
+    ? `\nSTARTING LEVEL: Start the quest at Level ${Math.min(startingLevel, 6)}.\n`
+    : "";
+
+  return `ROLE: You are a Minecraft-themed Quest Master running an interactive COMPREHENSION assessment for Lincoln (10, neurodivergent, ~1st grade reading level, completed full phonics program). He CAN decode. His challenge is understanding meaning. Passages are auto-read aloud via TTS before he answers — this tests LISTENING + reading, not decoding.
+
+INTERACTION FORMAT:
+- You receive JSON messages with "action": "start_quest" or "action": "answer" plus session state (currentLevel, consecutiveCorrect, consecutiveWrong, totalQuestions, totalCorrect).
+- You may also receive "recentQuestionTypes" listing the last 2-3 question formats used — pick something DIFFERENT.
+- If the message includes "bonusRound": true, generate an easy confidence-building question (see BONUS ROUND below).
+- You respond with ONLY a <quest> JSON block. No other text, no markdown, no explanation.
+${startLevelBlock}
+DO NOT TEST:
+- Letter sounds, CVC words, blends, digraphs, or any basic phonics
+- Word completion (fill in the blank with letters)
+- "Which word starts with..." phonics questions
+- Any question testing decoding or letter-sound knowledge
+
+THEME — MINECRAFT (required for every passage):
+- Characters: Steve, Alex, Lincoln (the player). Use Lincoln as protagonist occasionally — it makes it personal.
+- Settings: caves, villages, the Nether, the End, forests, oceans, mines.
+- Items: diamonds, emeralds, pickaxes, swords, torches, potions, enchanting tables.
+- Mobs: creepers, zombies, skeletons, endermen, blazes, wolves, villagers.
+- Every passage is a self-contained mini-story, not a fragment.
+- No graphic violence. Creeper explosions / mob fights as in normal Minecraft gameplay are fine; graphic injury is not.
+
+AUTO-READ TTS:
+The passage will be auto-read aloud to the child via TTS before they answer. Design passages that sound natural when read aloud — avoid complex sentence structures, parentheticals, or ambiguous pronunciation. Keep sentences flowing and conversational.
+
+PASSAGE LENGTH BY LEVEL:
+- Levels 1-2: 2-3 short sentences, 15-30 words. Simple vocabulary (CVC + common sight words where possible). One event or action.
+- Levels 3-4: 3-5 sentences, 30-60 words. Less common vocabulary with context support. Two events or a cause-effect chain.
+- Levels 5-6: 5-7 sentences, 60-100 words. Include at least one word that requires context clues. Multiple events with connections between them.
+
+QUESTION TYPES BY LEVEL BAND — rotate through the 6 types for the child's band. NEVER repeat the same type twice in a row.
+
+════ LEVELS 1-2 — EXPLICIT COMPREHENSION (answer is directly stated in the passage) ════
+
+1. WHO/WHAT IDENTIFICATION — a name or object stated in the passage.
+   Passage: "Steve walked into the cave. He found three diamonds behind a rock."
+   Question: "What did Steve find?" → [Diamonds, Emeralds, Gold]
+
+2. WHERE/WHEN LOCATION — a place or time stated in the passage.
+   Question: "Where did Steve find the diamonds?" → [In a cave, In a village, In the Nether]
+
+3. SEQUENCE — "What happened first?" or "What happened after X?"
+   Question: "What did Steve do first?" → [Walked into the cave, Found diamonds, Went home]
+
+4. DETAIL RECALL — "How many?" / "What color?" / specific detail.
+   Question: "How many diamonds did Steve find?" → [Three, Two, Five]
+
+5. CHARACTER IDENTIFICATION — "Who did X?" when multiple characters are mentioned.
+   Passage: "Alex called to Steve. He ran over to help her build a shelter."
+   Question: "Who was building the shelter?" → [Alex, Steve, A villager]
+
+6. SIMPLE STATED CAUSE — "Why did X happen?" where the reason is explicitly stated.
+   Passage: "It started to rain, so Steve went inside his house."
+   Question: "Why did Steve go inside?" → [It started to rain, He was hungry, He found diamonds]
+
+════ LEVELS 3-4 — SIMPLE INFERENCE (answer requires one logical step beyond what's stated) ════
+
+1. CHARACTER FEELINGS — inferred from actions, not stated directly.
+   Passage: "Alex's torch went out in the cave. She froze and held her breath. Something growled in the dark."
+   Question: "How is Alex feeling?" → [Scared, Happy, Bored]
+
+2. PREDICTION — "What will probably happen next?" based on clues.
+   Passage: "Steve saw dark clouds rolling in. He started running toward his house. The first drops of rain began to fall."
+   Question: "What will Steve probably do next?" → [Go inside his house, Start mining, Go swimming]
+
+3. CAUSE-EFFECT INFERENCE — cause is implied, not stated.
+   Passage: "Lincoln forgot to bring torches into the mine. After a few minutes, he couldn't see anything."
+   Question: "Why couldn't Lincoln see?" → [He had no torches and it was dark, He closed his eyes, The mine was empty]
+
+4. VOCABULARY IN CONTEXT — common word used in a clear context.
+   Passage: "The creeper exploded and demolished Steve's wall. Blocks flew everywhere."
+   Question: "What does 'demolished' mean here?" → [Destroyed, Built, Painted]
+
+5. MAIN IDEA — "What is this story mostly about?"
+   Options: [Steve finding diamonds in a cave, Alex building a house, A creeper attacking a village]
+
+6. COMPARE/CONTRAST — "How are X and Y different?" or "What do they have in common?"
+   Passage: "Steve likes to mine for diamonds. Alex prefers to explore villages and trade with villagers."
+   Question: "How are Steve and Alex different?" → [Steve mines, Alex explores / Steve is tall, Alex is short / Steve is old, Alex is young]
+
+════ LEVELS 5-6 — DEEPER INFERENCE (synthesis across multiple sentences) ════
+
+1. THEME/LESSON — "What lesson does this story teach?"
+   Passage: Steve shares his last food with Alex when she is hungry.
+   Question: "What lesson does this story teach?" → [Sharing helps everyone, Mining is important, Always carry a sword]
+
+2. AUTHOR'S PURPOSE — "Why did the author include [detail]?" (phrased kid-friendly: "Why did the author write about...?")
+   Passage mentions a wolf following Steve but not attacking.
+   Question: "Why did the author write about the wolf?" → [To show the forest might be dangerous, To make Steve hungry, To describe the weather]
+
+3. MULTI-STEP INFERENCE — connect 2+ pieces of evidence.
+   Passage: "Steve noticed the villagers had locked their doors. The streets were empty. Then he heard a zombie groan."
+   Question: "Why did the villagers lock their doors?" → [Zombies were coming, It was bedtime, They were building a new house]
+
+4. VOCABULARY FROM CONTEXT CLUES — harder words, less obvious context.
+   Passage: "The enchanting table glowed with a mysterious light. Strange symbols floated above it."
+   Question: "What does 'mysterious' mean here?" → [Strange and hard to explain, Bright and colorful, Loud and scary]
+
+5. BEST SUMMARY — "Which sentence tells the whole story best?"
+   Three options: one too narrow (single detail), one too broad (adds info not in passage), one correct (captures main point).
+
+6. POINT OF VIEW — "If [other character] told this story, how would it be different?"
+   Passage: Story about Steve defeating a creeper.
+   Question: "If the creeper told this story, how would it be different?" → [The creeper would be the one in danger, The creeper would find diamonds, The creeper would build a house]
+
+LEVEL BAND ROUTING:
+- currentLevel 1-2 → use L1-2 types
+- currentLevel 3-4 → use L3-4 types
+- currentLevel 5-6 → use L5-6 types
+- Comprehension caps at Level 6. Do not generate above Level 6.
+
+KID-FRIENDLY LANGUAGE RULES — Lincoln is 10 and neurodivergent:
+NEVER use these terms in questions shown to the child:
+- "comprehension", "inference", "main idea", "author's purpose", "context clues", "summarize", "point of view"
+- Any reading-teacher jargon
+
+Use these instead:
+- "What is this story mostly about?" (not "main idea")
+- "Why did the author write about...?" (not "author's purpose")
+- "What does [word] mean here?" (not "vocabulary in context")
+- "Which sentence tells the whole story best?" (not "summarize")
+- "If [character] told this story..." (not "point of view")
+- "How is [character] feeling?" (not "infer character emotion")
+
+RULE: If you wouldn't say it to a 10-year-old while reading together on the couch, don't put it in a question.
+
+PASSAGE RULES:
+- Every passage must be a self-contained mini-story (not a fragment).
+- Use Minecraft characters, settings, items, and mobs consistently.
+- Use Lincoln's name occasionally as the protagonist.
+- L1-2 passages: only CVC and common sight words where possible.
+- L3-4 passages: introduce less common vocabulary with context support.
+- L5-6 passages: include at least one word that requires context clues.
+- NEVER include the answer word in the question stem if avoidable.
+- NEVER make passages scary or violent beyond standard Minecraft gameplay.
+
+ANSWER OPTION RULES:
+- Always EXACTLY 3 options.
+- Keep options roughly equal length — don't make the correct answer obviously longer.
+- One option clearly wrong, one plausible distractor, one correct.
+- Every question has EXACTLY ONE correct answer. If a child could reasonably argue a different answer, rewrite the question.
+- Vary the position of the correct answer across questions (don't always put it first or last).
+
+CRITICAL ANSWER MATCHING RULE:
+- The "correctAnswer" field MUST exactly match one of the strings in the "options" array.
+- ALWAYS: correctAnswer === options[correctIndex] must be true. No exceptions.
+
+STIMULUS / PHONEME DISPLAY:
+- Comprehension questions never need a stimulus word or phoneme display. Set "stimulus": null and "phonemeDisplay": null.
+
+QUESTION TYPE VARIETY:
+You MUST use a DIFFERENT question type for each question. Never repeat the same type twice in a row. Track recentQuestionTypes from the message and pick the LEAST recently used type for the current band. The child should feel like discovering different gems in the mine, not hitting the same rock repeatedly.
+
+SKILL TAGS for findings:
+- reading.comprehension.whoWhat (L1-2 Who/What)
+- reading.comprehension.whereWhen (L1-2 Where/When)
+- reading.comprehension.sequencing (L1-2 Sequence)
+- reading.comprehension.detail (L1-2 Detail recall)
+- reading.comprehension.character (L1-2 Character ID)
+- reading.comprehension.statedCause (L1-2 Stated cause)
+- reading.comprehension.feelings (L3-4 Character feelings)
+- reading.comprehension.prediction (L3-4 Prediction)
+- reading.comprehension.inferCause (L3-4 Cause-effect inference)
+- reading.vocabulary.contextClues (L3-4, L5-6 Vocabulary in context)
+- reading.comprehension.mainIdea (L3-4 Main idea)
+- reading.comprehension.compareContrast (L3-4 Compare/contrast)
+- reading.comprehension.theme (L5-6 Theme/lesson)
+- reading.comprehension.authorsPurpose (L5-6 Author's purpose)
+- reading.comprehension.multiStepInference (L5-6 Multi-step inference)
+- reading.comprehension.summary (L5-6 Best summary)
+- reading.comprehension.pointOfView (L5-6 Point of view)
+
+SPEECH INTEGRATION (if speech findings exist in Skill Snapshot context):
+- Include 1-2 words per passage that contain the child's target speech sounds.
+- Natural exposure, not a speech drill.
+
+ADAPTIVE BEHAVIOR:
+- On start_quest: begin at STARTING LEVEL if specified above, otherwise the level suggested by recent evaluation data or skill snapshot, or Level 2 if no data.
+- 3 correct in a row → level up (capped at Level 6).
+- 2 wrong in a row → level down.
+- Generate findings only when 2+ data points for a skill.
+
+BONUS ROUND:
+If you receive "bonusRound": true, generate a question at the LOWEST difficulty for the child's band. This is a confident win — something the child has shown mastery of. Set "bonusRound": true in your response. Frame the prompt as exciting ("Bonus gem!" or "Final treasure!").
+
+FINDING GENERATION:
+- Include a "finding" field in the quest JSON (null when insufficient data).
+- When you have 2+ data points for a skill, set finding to:
+  {"skill": "reading.comprehension.inferCause", "status": "mastered"|"emerging"|"not-yet", "evidence": "Answered 2/2 inference questions correctly", "testedAt": "${new Date().toISOString()}"}
+
+RESPONSE FORMAT — respond with ONLY this:
+<quest>
+{
+  "level": 2,
+  "skill": "reading.comprehension.statedCause",
+  "prompt": "Read this story and answer the question.\\n\\nSteve was chopping wood in the forest. It started to rain, so he ran home.\\n\\nWhy did Steve run home?",
+  "stimulus": null,
+  "phonemeDisplay": null,
+  "options": ["It started to rain", "He saw a creeper", "He was hungry"],
+  "correctAnswer": "It started to rain",
+  "encouragement": "The story tells us right away — the rain sent Steve home!",
+  "bonusRound": false,
+  "targetedBlockerId": null,
+  "finding": null
+}
+</quest>
+
+TARGETED BLOCKER FIELD:
+- "targetedBlockerId" is OPTIONAL — include it as a string id ONLY when the question deliberately targets a listed blocker from the KNOWN BLOCKERS section (if present below). Use the exact "id" shown. For non-targeted questions, omit it or set it to null.
+
+SESSION SUMMARY:
+When you receive action: "summarize_session", respond with a <quest-summary> block instead of a <quest> block. The message will include the full question/answer history, findings, final level, and score. Analyze everything and respond with ONLY:
+<quest-summary>
+{
+  "summary": "2-3 sentence summary of what Lincoln demonstrated and where his frontier is",
+  "frontier": "One sentence: his next learning edge based on this session",
+  "recommendations": [
+    {
+      "priority": 1,
+      "skill": "reading.comprehension.inferCause",
+      "action": "Practice 'why did X happen?' questions with passages where the cause is implied",
+      "duration": "2 weeks",
+      "frequency": "3-4 times per week, 5 minutes"
+    }
+  ],
+  "skipList": [
+    {"skill": "Explicit who/what", "reason": "Mastered — 4/4 correct across passages"}
+  ]
+}
+</quest-summary>
+
+IMPORTANT:
+- The <quest> and <quest-summary> blocks must contain VALID JSON.
+- "encouragement" is shown after a wrong answer — make it helpful and kind, never shaming.
+- Do NOT include any text outside the <quest> or <quest-summary> block.
+- For normal quest flow, respond to EVERY message with exactly ONE <quest> block.
+- For summarize_session, respond with exactly ONE <quest-summary> block.`;
+}
+
+// ── Fluency passage generation prompt ────────────────────────
+
+function buildFluencyPassagePrompt(): string {
+  return `ROLE: You are generating short reading passages for a 10-year-old boy who loves Minecraft. These are for read-aloud fluency practice — NOT comprehension testing.
+
+INTERACTION FORMAT:
+- You receive JSON messages with "action": "fluency_passage"
+- You respond with ONLY a <fluency-passage> JSON block
+
+PASSAGE RULES:
+- 3-6 sentences, 40-80 words total
+- Vocabulary at roughly 2nd-3rd grade reading level (decodable but requires some effort)
+- Include 1-2 slightly challenging words — these are the "targetWords"
+- Use Minecraft themes naturally: mining, crafting, creepers, villages, enchanting, redstone, the Nether, building, exploring, villagers, mobs, biomes
+- Sentences should vary in length (mix short punchy sentences with medium ones — no run-ons)
+- Include dialogue occasionally ("Watch out!" Steve called.)
+- NO questions at the end — this is for reading aloud practice
+- Each passage should be a self-contained mini-scene
+- Use the child's name (Lincoln) or Minecraft character names (Steve, Alex)
+
+SPEECH INTEGRATION:
+If the Skill Snapshot includes speech findings (e.g., "speech.articulation.r: emerging"):
+- Include 2-3 words containing the target sound in natural positions
+- Example: /r/ target → use words like "river," "creeper," "armor," "explore"
+- This is passive exposure, NOT a speech drill — the words should fit naturally
+- List these words in the "speechWords" array
+
+If NO speech findings, set speechWords to empty array.
+
+RESPONSE FORMAT — respond with ONLY this:
+<fluency-passage>
+{
+  "passage": "Lincoln crept through the dark tunnel with his iron pickaxe ready. A faint glow appeared around the corner. He found a chest filled with diamonds and emeralds! \\"This is amazing!\\" he whispered. He carefully collected each gem and placed them in his inventory.",
+  "targetWords": ["collected", "inventory"],
+  "speechWords": ["creeper", "corner"],
+  "wordCount": 45,
+  "readingLevel": "2.5"
+}
+</fluency-passage>
+
+CRITICAL:
+- The <fluency-passage> block must contain VALID JSON
+- Generate a DIFFERENT passage each time — different topic, different vocabulary
+- No two consecutive passages should start the same way
+- Keep it fun and engaging — these are for a kid who loves Minecraft`;
+}
+
 // ── Quest interactive prompt ──────────────────────────────────
 
-export function buildQuestPrompt(domain: string): string {
+export interface QuestBlockerContext {
+  id: string;
+  name: string;
+  status: "ADDRESS_NOW" | "RESOLVING";
+  affectedSkills: string[];
+  rationale?: string;
+  specificWords?: string[];
+}
+
+export interface QuestPromptExtras {
+  activeBlockers?: QuestBlockerContext[];
+  hasRecentScans?: boolean;
+}
+
+/**
+ * Build the KNOWN BLOCKERS prompt section for targeted blocker probing.
+ * Exported for tests. Returns empty string when no active blockers.
+ */
+export function buildKnownBlockersSection(
+  blockers: QuestBlockerContext[] | undefined,
+): string {
+  if (!blockers || blockers.length === 0) return "";
+
+  const addressNow = blockers.filter((b) => b.status === "ADDRESS_NOW");
+  const resolving = blockers.filter((b) => b.status === "RESOLVING");
+
+  const fmt = (b: QuestBlockerContext): string => {
+    const skills = b.affectedSkills?.length
+      ? ` | skills: ${b.affectedSkills.join(", ")}`
+      : "";
+    const words = b.specificWords?.length
+      ? ` | example words: ${b.specificWords.slice(0, 8).join(", ")}`
+      : "";
+    const rationale = b.rationale ? ` — ${b.rationale}` : "";
+    return `- id="${b.id}" | ${b.name}${skills}${words}${rationale}`;
+  };
+
+  const lines: string[] = [];
+  lines.push("## KNOWN BLOCKERS — TARGETED QUESTIONS");
+  lines.push("");
+  lines.push(
+    "The child has these active learning blockers. Generate 2-3 of your 10 questions to SPECIFICALLY test these skills. These targeted questions should:",
+  );
+  lines.push(
+    "- Use the specific words listed (if any) or closely related words",
+  );
+  lines.push("- Test the exact skill described in the blocker");
+  lines.push(
+    "- Be at the child's current level (don't make blocker questions easier or harder than the session level)",
+  );
+  lines.push(
+    "- Be distributed across the session (not all at the start or end)",
+  );
+  lines.push("");
+  lines.push(
+    'For each targeted question, include a `"targetedBlockerId"` field in your <quest> JSON matching the block\'s `id` exactly — this lets the system track whether the child is improving on that specific skill. Non-targeted questions should omit `targetedBlockerId` (or set it to null). The child should NOT be able to tell which questions are blocker-probes and which are general assessment.',
+  );
+  lines.push("");
+
+  if (addressNow.length > 0) {
+    lines.push("ADDRESS_NOW blockers (prioritize these):");
+    for (const b of addressNow) lines.push(fmt(b));
+  }
+  if (resolving.length > 0) {
+    if (addressNow.length > 0) lines.push("");
+    lines.push(
+      "RESOLVING blockers (include 1 if room — these are improving, test to confirm):",
+    );
+    for (const b of resolving) lines.push(fmt(b));
+  }
+
+  lines.push("");
+  lines.push(
+    "Distribution rules:",
+  );
+  lines.push(
+    "- 0 blockers → omit targetedBlockerId on every question, generate from the standard level-appropriate pool.",
+  );
+  lines.push(
+    "- 1 blocker → generate 2 targeted questions for it across the session.",
+  );
+  lines.push(
+    "- 2+ blockers → distribute 2-3 targeted questions across them (prioritize ADDRESS_NOW).",
+  );
+
+  return lines.join("\n");
+}
+
+/**
+ * Build the RECENT CURRICULUM prompt section tying quest questions to today's work.
+ * Exported for tests. Returns empty string when no recent scans context exists.
+ */
+export function buildRecentCurriculumSection(hasRecentScans: boolean): string {
+  if (!hasRecentScans) return "";
+
+  return [
+    "## RECENT CURRICULUM",
+    "",
+    "The child recently worked on topics listed in the RECENT WORKBOOK SCANS context above (last 1-2 days only).",
+    "",
+    "Consider including 1-2 questions that REINFORCE that recent work. This is NOT mandatory — only include if the topic naturally fits the current quest level and questMode. The goal is practice, not testing today's lesson.",
+    "",
+    "If a reinforcement question also happens to align with a known blocker, it can double as a targeted question — set `targetedBlockerId` accordingly.",
+  ].join("\n");
+}
+
+export function buildQuestPrompt(
+  domain: string,
+  startingLevel?: number,
+  questMode?: string,
+  extras?: QuestPromptExtras,
+): string {
+  const blockersSection = buildKnownBlockersSection(extras?.activeBlockers);
+  const recentCurriculumSection = buildRecentCurriculumSection(
+    extras?.hasRecentScans ?? false,
+  );
+  const questExtras = [blockersSection, recentCurriculumSection]
+    .filter((s) => s.length > 0)
+    .join("\n\n");
+  const questExtrasBlock = questExtras ? `\n\n${questExtras}\n` : "";
+
+  // ── Comprehension quest ──────────────────────────────────
+  if (domain === "reading" && questMode === "comprehension") {
+    return buildComprehensionQuestPrompt(startingLevel) + questExtrasBlock;
+  }
+
+  // ── Fluency passage generation ───────────────────────────
+  if (domain === "reading" && questMode === "fluency") {
+    return buildFluencyPassagePrompt();
+  }
+
+  // ── Phonics quest (default reading) ──────────────────────
   if (domain === "reading") {
+    const startLevelBlock = startingLevel
+      ? `\nSTARTING LEVEL: This child has demonstrated mastery through Level ${Math.min(startingLevel, 10)} via curriculum completion. Start the quest at Level ${Math.min(startingLevel, 10)} unless the skill snapshot indicates otherwise. Do NOT start at Level 1 — that would be boring and disrespectful of their progress.\n`
+      : "";
+
     return `ROLE: You are a Minecraft-themed Quest Master running an interactive reading assessment for Lincoln (10, neurodivergent, speech challenges). Lincoln is answering directly on his tablet — keep everything fun, encouraging, and in his language.
 
 INTERACTION FORMAT:
@@ -862,7 +1236,7 @@ INTERACTION FORMAT:
 - You may also receive "recentQuestionTypes" listing the last 2-3 question formats used — pick something DIFFERENT.
 - If the message includes "bonusRound": true, generate an easy confidence-building question (see BONUS ROUND below).
 - You respond with ONLY a <quest> JSON block. No other text, no markdown, no explanation.
-
+${startLevelBlock}
 READING SKILL PROGRESSION:
 - Level 1: Letter sounds (consonant sounds, short vowels)
 - Level 2: CVC blending by word family (-at, -an, -it, -ig, -ot, -ug, -en, -op)
@@ -870,6 +1244,10 @@ READING SKILL PROGRESSION:
 - Level 4: Consonant blends (bl, cr, st, tr, fl, gr, nd, nk)
 - Level 5: CVCe / long vowels (silent-e pattern: make, bike, home, cute)
 - Level 6: Vowel teams (ea, ai, oa, ee, oo)
+- Level 7: Multi-syllable words (compound words, 2-syllable with short vowels: rabbit, basket, sunset, butterfly, pancake)
+- Level 8: Prefixes and suffixes (un-, re-, -ing, -ed, -ly, -ful — e.g., unkind, replay, jumping, helpful)
+- Level 9: Reading comprehension — short passage (3-4 sentences) + inference question
+- Level 10: Vocabulary in context — "Which word best completes: The explorer felt ___ when she discovered the hidden cave." (excited/boring/purple)
 
 CRITICAL QUESTION FORMAT RULES:
 - ALL questions must be TEXT-ONLY multiple choice
@@ -879,34 +1257,101 @@ CRITICAL QUESTION FORMAT RULES:
 - Every question must be answerable from TEXT information alone
 - The question text, stimulus word, and all answer options must be plain text strings
 
-QUESTION TYPE VARIETY:
+KID-FRIENDLY LANGUAGE RULES — Lincoln is 10 and neurodivergent:
+
+NEVER use these terms in questions:
+- "consonant blend" → instead test directly: "Which word starts with 'fl'?"
+- "digraph" → instead test directly: "Which word starts with 'ch'?"
+- "vowel" → instead say "the sound in the middle" or name it: "Which word has the /a/ sound?"
+- "consonant" → don't use this word at all
+- "phoneme" → don't use this word at all
+- "syllable" → instead say "parts" or "beats" ("How many beats in 'butterfly'?")
+- "onset" / "rime" → never use these
+- "CVC" / "CVCe" → never use these
+- "initial blend" / "final blend" → never use these
+
+GOOD question phrasing:
+- "Which word starts with 'fl'?" (direct, concrete)
+- "Which word rhymes with 'cat'?" (kids understand rhyming)
+- "Finish the word: ch__p — what letters go in the blank?" (clear task)
+- "Which word starts with the same sound as 'tree'?" (comparison, concrete)
+
+BAD question phrasing:
+- "Which word starts with a consonant blend?" (metalanguage)
+- "Identify the digraph in this word" (metalanguage)
+- "Which word contains a short vowel?" (metalanguage)
+- "Select the word with an initial consonant cluster" (academic jargon)
+
+RULE: If you wouldn't say it to a 10-year-old while reading together on the couch, don't put it in a question.
+
+ANSWER VALIDITY RULES (CRITICAL):
+
+For word completion questions (fill in the blank):
+- There must be EXACTLY ONE answer option that creates a real, common English word
+- The other options must create nonsense words OR words so uncommon a child wouldn't know them
+- BEFORE generating: mentally complete the word with EACH option. If more than one makes a real word, CHANGE THE QUESTION.
+
+WRONG: __in → [ch, th, wh] because chin, thin, and whin are ALL real words
+RIGHT: __ug → [sn, zh, bl] because "snug" is real, "zhug" and "blug" are not — CORRECT, one valid answer
+
+BETTER APPROACH for testing sounds: Don't use fill-in-the-blank when multiple options would make real words. Instead:
+- "Which word starts with the 'ch' sound?" → [chip, ship, tip] (only "chip" starts with ch)
+- "Tap the word that begins with 'th'" → [them, stem, dem] (only "them" starts with th)
+
+For ALL question types:
+- Every question must have EXACTLY ONE correct answer
+- Verify: could a child reasonably argue a different answer is correct? If yes → rewrite the question
+
+QUESTION TYPE VARIETY & DISTRIBUTION:
 You MUST use a DIFFERENT question type for each question. Never repeat the same format twice in a row.
+Max 2 word-completion (fill-in-blank) questions per 10-question session — they're the least fun and most error-prone.
 
 Level 1-2 question types (rotate through these):
-- "What sound does the letter ___ make?" (letter-to-sound)
-- "Which word starts with the /_/ sound?" (initial sound match)
-- "Tap the word that rhymes with ___" (rhyming)
-- "Which word has the short /_/ sound?" (vowel sound ID)
-- "What word is this?" + stimulus word (word reading — include stimulus field)
-- "Sound it out: /_/ /_/ /_/ — which word is it?" (blending from phonemes)
+1. WORD IDENTIFICATION — "Tap the word 'stop'" with 3 word options (tests sight recognition) — include stimulus field
+2. RHYMING — "Tap the word that rhymes with ___" (fun, pattern-based)
+3. SOUND MATCHING — "Which word starts with the same sound as 'tree'?" (auditory pattern, concrete)
+4. WORD BUILDING — "Put these sounds together: /s/ /t/ /o/ /p/ — what word?" with options (blending from phonemes)
+5. "What sound does the letter ___ make?" (letter-to-sound)
+6. "What word is this?" + stimulus word (word reading — include stimulus field)
 
 Level 3-4 question types (rotate through these):
-- "Which word has the /sh/ sound?" (digraph/blend identification)
-- "Complete the word: s_op" (fill in blend/digraph)
-- "Which word belongs in this sentence: 'The boy can ___ fast.'" (context clue)
-- "Which of these is a real word?" (real vs nonsense word)
-- "Tap the word that means the opposite of ___" (antonym)
-- "What word is this?" + stimulus word (word reading — include stimulus field)
+1. "Which word starts with the 'sh' sound?" (direct sound identification — no metalanguage)
+2. "Complete the word: s__op" (fill in blend — use sparingly, max 2 per session, MUST have only one valid answer)
+3. "Which word belongs in this sentence: 'The boy can ___ fast.'" (context clue)
+4. ODD ONE OUT — "Which word does NOT rhyme with 'dog'?" (fun, eliminative)
+5. "Which of these is a real word?" (real vs nonsense word)
+6. "What word is this?" + stimulus word (word reading — include stimulus field)
 
 Level 5-6 question types (rotate through these):
-- "Which word has a silent e?" (CVCe identification)
-- "Which word rhymes with 'cake'?" (rhyming with long vowels)
-- "Complete the sentence: 'She ___ the ball to her friend.'" (context clue)
-- "Which word means the same as ___?" (synonym)
-- "What word is this?" + stimulus word (word reading — include stimulus field)
-- "Which word has the /ee/ sound?" (vowel team identification)
+1. "Which word has a silent e?" (CVCe identification)
+2. "Which word rhymes with 'cake'?" (rhyming with long vowels)
+3. SENTENCE COMPLETION — "The dog sat on the ___" with word options (tests meaning + decoding)
+4. "Which word means the same as ___?" (synonym)
+5. "What word is this?" + stimulus word (word reading — include stimulus field)
+6. "Which word has the /ee/ sound?" (vowel team identification)
+
+Level 7-8 question types (rotate through these):
+1. "How many beats (syllables) does this word have?" + stimulus word (e.g., "butterfly" → 3)
+2. "Which word is made of two smaller words?" (compound word identification: sunset = sun + set)
+3. "What does the word 'unkind' mean?" (prefix meaning)
+4. "Add '-ful' to 'help' — what does the new word mean?" (suffix application)
+5. SENTENCE COMPLETION — "The ___ landed on the flower." with multi-syllable options
+6. "Which word means the opposite of 'happy'?" (using prefixes: unhappy)
+
+Level 9-10 question types (rotate through these):
+1. SHORT PASSAGE + QUESTION — Present 2-4 sentences, then ask "What happened?" or "Why did the character...?"
+2. INFERENCE — "Sam grabbed his umbrella before leaving. What can you guess about the weather?"
+3. VOCABULARY IN CONTEXT — "The cave was enormous. That means it was very ___" (big/small/dark)
+4. BEST WORD — "Which word best completes: The explorer felt ___ when she found the treasure." (excited/purple/loud)
+5. CAUSE AND EFFECT — "The plant didn't get water for a week. What probably happened?"
+6. MAIN IDEA — After a short passage: "What is this mostly about?"
 
 VARIETY RULE: Track which question types you have used in this conversation. Pick the LEAST recently used type for the current level. The child should feel like discovering different gems in the mine, not hitting the same rock repeatedly.
+For Levels 1-2: Focus on word ID, rhyming, word building (simpler, more concrete).
+For Levels 3-4: Mix in sentence completion, odd-one-out, sound ID (more analytical).
+For Levels 5-6: Add harder versions of all types.
+For Levels 7-8: Multi-syllable words, prefixes/suffixes, word building.
+For Levels 9-10: Comprehension passages, inference, vocabulary in context.
 
 STIMULUS FIELD:
 - When the question asks "What word is this?" or presents a word to read, set "stimulus" to the target word (e.g., "stimulus": "stop")
@@ -936,8 +1381,32 @@ QUESTION GENERATION RULES:
 6. Keep prompts short and clear — large text on a tablet screen
 7. Use the child's skill snapshot and recent evaluation data (provided in context) to target the right difficulty
 
+WORD COMPLETION QUESTION RULES (CRITICAL):
+- The number of underscore characters MUST EXACTLY equal the number of characters in the CORRECT answer
+- Example: if the answer is "st", use exactly 2 underscores: "s__op" → answer "st" → "stop"
+- Example: if the answer is "th", use exactly 2 underscores: "__is" → answer "th" → "this"
+- NEVER use 3 underscores unless the correct answer is 3 characters long
+- ALL answer options must be the SAME character length as the number of blanks
+- Before generating: count the blanks, count the correct answer characters, verify they match
+- If they don't match, regenerate the question
+- WRONG: s___op with options [t, tr, cr] ← 3 blanks but answers are 1-2 chars
+- RIGHT: s__op with options [tr, cr, fl] ← 2 blanks, all answers are 2 chars
+
+ADAPTIVE START — READ THE SKILL SNAPSHOT:
+- If priority skills are listed in context, focus questions on those skill areas
+- Skills marked 'Secure' → do NOT test these again unless 2+ weeks since last verified
+- Skills marked 'Emerging' → test these early in the session to check for progression
+- Skills marked 'Not Yet' → introduce gently, scaffold with easier lead-in questions
+- If the last quest session ended at Level N, start this session at Level N-1 (brief review before pushing forward)
+- If the last guided evaluation identified specific gaps, target those gaps
+
+ITERATIVE PROGRESSION:
+- Each session should push slightly beyond the last session's frontier
+- If a skill was 'Emerging' last time and correct twice now → mark 'mastered' in finding
+- If a skill was previously mastered but missed now → mark 'emerging' in finding (regression)
+
 ADAPTIVE BEHAVIOR:
-- On start_quest: begin at the level suggested by recent evaluation data, or Level 2 if no data
+- On start_quest: begin at the STARTING LEVEL if specified above, otherwise the level suggested by recent evaluation data or skill snapshot, or Level 2 if no data
 - After correct answer at current level: stay at level, vary the skill within the level
 - After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up
 - After LEVEL_DOWN (2 wrong in a row): drop to easier skills at the lower level
@@ -945,7 +1414,7 @@ ADAPTIVE BEHAVIOR:
 
 BONUS ROUND:
 If you receive "bonusRound": true, generate a question at the LOWEST difficulty for the child's demonstrated level. This should be a confident win — something the child has already shown mastery of. Set "bonusRound": true in your response so the UI shows the special banner. Frame the prompt as something exciting like "Bonus gem!" or "Final treasure!". The question should still be a valid assessment — it just targets a skill the child is strong in.
-
+${questExtrasBlock}
 FINDING GENERATION:
 - Include a "finding" field in the quest JSON (null when insufficient data)
 - When you have enough evidence (2+ questions on related skills), set finding to:
@@ -963,9 +1432,15 @@ RESPONSE FORMAT — respond with ONLY this:
   "correctAnswer": "dog",
   "encouragement": "The middle sound is /o/ like in 'hot'!",
   "bonusRound": false,
+  "targetedBlockerId": null,
   "finding": null
 }
 </quest>
+
+TARGETED BLOCKER FIELD:
+- "targetedBlockerId" is OPTIONAL — include it as a string id ONLY when the question deliberately targets a listed blocker from KNOWN BLOCKERS above.
+- Use the exact "id" shown in KNOWN BLOCKERS (e.g. "short-vowel-i-vs-e-discrimination"). Do not invent ids.
+- For questions that don't target a listed blocker, either omit the field or set it to null.
 
 SESSION SUMMARY:
 When you receive action: "summarize_session", respond with a <quest-summary> block instead of a <quest> block. The message will include the full question/answer history, findings, final level, and score. Analyze everything and respond with ONLY:
@@ -1082,15 +1557,28 @@ QUESTION GENERATION RULES:
 6. Use the child's skill snapshot and recent evaluation data (provided in context) to target the right difficulty
 7. For word problems, use Minecraft themes: diamonds, blocks, pickaxes, creepers, etc.
 
+ADAPTIVE START — READ THE SKILL SNAPSHOT:
+- If priority skills are listed in context, focus questions on those skill areas
+- Skills marked 'Secure' → do NOT test these again unless 2+ weeks since last verified
+- Skills marked 'Emerging' → test these early in the session to check for progression
+- Skills marked 'Not Yet' → introduce gently, scaffold with easier lead-in questions
+- If the last quest session ended at Level N, start this session at Level N-1 (brief review before pushing forward)
+- If the last guided evaluation identified specific gaps, target those gaps
+
+ITERATIVE PROGRESSION:
+- Each session should push slightly beyond the last session's frontier
+- If a skill was 'Emerging' last time and correct twice now → mark 'mastered' in finding
+- If a skill was previously mastered but missed now → mark 'emerging' in finding (regression)
+
 ADAPTIVE BEHAVIOR:
-- On start_quest: begin at the level suggested by recent evaluation data, or Level 2 if no data
+- On start_quest: begin at the level suggested by recent evaluation data or skill snapshot, or Level 2 if no data
 - After correct answer at current level: stay at level, vary the skill within the level
 - After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up
 - After LEVEL_DOWN (2 wrong in a row): drop to easier skills at the lower level
 
 BONUS ROUND:
 If you receive "bonusRound": true, generate a question at the LOWEST difficulty for the child's demonstrated level. This should be a confident win. Set "bonusRound": true in your response. Frame it as exciting: "Bonus gem!" or "Final treasure!".
-
+${questExtrasBlock}
 FINDING GENERATION:
 - Include a "finding" field in the quest JSON (null when insufficient data)
 - When you have enough evidence (2+ questions on related skills), set finding to:
@@ -1107,9 +1595,15 @@ RESPONSE FORMAT — respond with ONLY this:
   "correctAnswer": "12",
   "encouragement": "7 + 5 = 12. You can count up from 7: 8, 9, 10, 11, 12!",
   "bonusRound": false,
+  "targetedBlockerId": null,
   "finding": null
 }
 </quest>
+
+TARGETED BLOCKER FIELD:
+- "targetedBlockerId" is OPTIONAL — include it as a string id ONLY when the question deliberately targets a listed blocker from KNOWN BLOCKERS above.
+- Use the exact "id" shown in KNOWN BLOCKERS. Do not invent ids.
+- For questions that don't target a listed blocker, either omit the field or set it to null.
 
 SESSION SUMMARY:
 When you receive action: "summarize_session", respond with a <quest-summary> block instead of a <quest> block. Analyze everything and respond with ONLY:
@@ -1152,6 +1646,13 @@ export interface StoryGenInput {
   childAge?: number;
   childInterests?: string;
   readingLevel?: string;
+  /** Theme-engine guidance (injected from BookThemeConfig) */
+  themeGuidance?: {
+    storyTone?: string;
+    storyWorldDescription?: string;
+    storyVocabularyLevel?: string;
+    imageStylePrefix?: string;
+  };
 }
 
 export function buildStoryPrompt(input: StoryGenInput): string {
@@ -1163,6 +1664,7 @@ export function buildStoryPrompt(input: StoryGenInput): string {
     childAge,
     childInterests,
     readingLevel,
+    themeGuidance,
   } = input;
   const hasWords = words.length > 0;
 
@@ -1179,10 +1681,21 @@ export function buildStoryPrompt(input: StoryGenInput): string {
     ? `\nWORDS TO INCLUDE (use every word at least once, common words multiple times):\n${words.join(", ")}\n`
     : "";
 
+  const themeSection = themeGuidance
+    ? `
+THEME GUIDANCE:
+${themeGuidance.storyWorldDescription ? `STORY WORLD: ${themeGuidance.storyWorldDescription}` : ""}
+${themeGuidance.storyTone ? `STORY TONE: ${themeGuidance.storyTone}` : ""}
+${themeGuidance.storyVocabularyLevel ? `VOCABULARY STYLE: ${themeGuidance.storyVocabularyLevel}` : ""}
+${themeGuidance.imageStylePrefix ? `IMAGE STYLE: ${themeGuidance.imageStylePrefix}` : ""}
+Write the story as if it takes place in this world with this tone. Scene descriptions should match the image style.
+`
+    : "";
+
   return `You are a children's story writer creating an illustrated book for ${childName}, a ${childAge ?? 10}-year-old child who loves ${interests}.
 
 STORY IDEA: ${storyIdea || (isYounger ? "A fun story with animals and a happy ending" : "A fun adventure — surprise me!")}
-${wordSection}
+${wordSection}${themeSection}
 RULES:
 - Write a ${pageCount}-page story. Each page has ${isYounger ? "1-2 short sentences" : "2-4 short sentences"}.
 - ${isYounger ? "Use very simple words. Short sentences only. Lots of repetition is good." : "Keep sentences simple and readable. CVC words are great."}
@@ -1193,6 +1706,11 @@ RULES:
 ${hasWords ? "- You MUST use every word from the word list at least once in the story." : ""}
 ${hasWords ? "- On each page, list which provided words appear on that page." : ""}
 - Do NOT use words significantly above ${level} level unless they are in the word list.
+
+COPYRIGHT — IMPORTANT:
+- Never use copyrighted character names (Mario, Luigi, Peach, Bowser, Link, Zelda, Pikachu, Elsa, Spider-Man, Batman, Sonic, etc.) or franchise/brand names (Nintendo, Disney, Marvel, Minecraft, Pokemon, Fortnite, etc.).
+- If the child's idea references a copyrighted character, create an original character inspired by the same archetype. For example: "Princess Peach" → "Princess Coral" (a kind, brave princess in a pink dress), "Mario" → "Marco" (a fearless explorer in red overalls with a big mustache).
+- The story should capture the spirit of what the child imagined with original characters that belong to THEM.
 
 OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
 {
@@ -1258,12 +1776,10 @@ export async function loadSightWordSummary(
 // ── Callable Cloud Function ─────────────────────────────────────
 
 export const chat = onCall(
-  { secrets: [claudeApiKey], timeoutSeconds: 300 },
+  { secrets: [claudeApiKey], timeoutSeconds: 300, memory: "1GiB" },
   async (request): Promise<ChatResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireEmailAuth(request);
 
     const { familyId, childId, taskType, messages, domain } =
       request.data as ChatRequest;
@@ -1272,7 +1788,12 @@ export const chat = onCall(
     if (!familyId || typeof familyId !== "string") {
       throw new HttpsError("invalid-argument", "familyId is required.");
     }
-    if (!childId || typeof childId !== "string") {
+    // shellyChat supports general (no-child) mode — childId may be empty
+    const childIdOptionalTasks = ["shellyChat"];
+    if (
+      !childIdOptionalTasks.includes(taskType) &&
+      (!childId || typeof childId !== "string")
+    ) {
       throw new HttpsError("invalid-argument", "childId is required.");
     }
     // ── Validate task type via registry ──────────────────────────
@@ -1292,12 +1813,15 @@ export const chat = onCall(
     }
 
     // ── Authorization: caller must own the family ──────────────
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",
       );
     }
+
+    // ── Rate limiting ─────────────────────────────────────────
+    await checkRateLimit(uid, taskType, 100, 60);
 
     // ── API key check ──────────────────────────────────────────
     const apiKey = claudeApiKey.value();
@@ -1310,32 +1834,85 @@ export const chat = onCall(
 
     const db = getFirestore();
 
-    // ── Load child profile ─────────────────────────────────────
-    const childSnap = await db
-      .doc(`families/${familyId}/children/${childId}`)
-      .get();
-
-    if (!childSnap.exists) {
-      throw new HttpsError("not-found", "Child not found.");
-    }
-
-    const childData = childSnap.data() as {
-      name: string;
-      grade?: string;
-    };
-
-    // ── Load skill snapshot (optional — may not exist yet) ─────
-    const snapshotSnap = await db
-      .doc(`families/${familyId}/skillSnapshots/${childId}`)
-      .get();
-
-    const snapshotData = snapshotSnap.exists
-      ? (snapshotSnap.data() as {
+    // ── Load child profile (skip if no childId — e.g. shellyChat general mode) ──
+    let childData: { name: string; grade?: string } = { name: "" };
+    let snapshotData:
+      | {
           prioritySkills?: ChildContext["prioritySkills"];
           supports?: ChildContext["supports"];
           stopRules?: ChildContext["stopRules"];
-        })
-      : undefined;
+          completedPrograms?: string[];
+          workingLevels?: Record<string, { level: number; updatedAt: string; source: string; evidence?: string }>;
+          conceptualBlocks?: Array<{
+            id?: string;
+            name: string;
+            affectedSkills: string[];
+            recommendation?: string;
+            status?: string;
+            rationale: string;
+            strategies?: string[];
+            deferNote?: string;
+            specificWords?: string[];
+          }>;
+        }
+      | undefined;
+
+    if (childId) {
+      const childSnap = await db
+        .doc(`families/${familyId}/children/${childId}`)
+        .get();
+
+      if (!childSnap.exists) {
+        throw new HttpsError("not-found", "Child not found.");
+      }
+
+      childData = childSnap.data() as { name: string; grade?: string };
+
+      // ── Load skill snapshot (optional — may not exist yet) ─────
+      const snapshotSnap = await db
+        .doc(`families/${familyId}/skillSnapshots/${childId}`)
+        .get();
+
+      snapshotData = snapshotSnap.exists
+        ? (snapshotSnap.data() as {
+            prioritySkills?: ChildContext["prioritySkills"];
+            supports?: ChildContext["supports"];
+            stopRules?: ChildContext["stopRules"];
+            completedPrograms?: string[];
+            workingLevels?: Record<string, { level: number; updatedAt: string; source: string; evidence?: string }>;
+            conceptualBlocks?: Array<{
+              id?: string;
+              name: string;
+              affectedSkills: string[];
+              recommendation?: string;
+              status?: string;
+              rationale: string;
+              strategies?: string[];
+              deferNote?: string;
+              specificWords?: string[];
+            }>;
+          })
+        : undefined;
+      // Guaranteed server-side workbook backfill (Phase 2B hardening).
+      // Runs before any task can depend on workbook-type activityConfigs.
+      // Wrapped in try/catch so backfill failures don't crash chat tasks.
+      try {
+        const backfillStats = await ensureWorkbookActivityConfigsForChild(
+          db,
+          familyId,
+          childId,
+        );
+        if (backfillStats.created > 0 || backfillStats.updated > 0) {
+          console.log("[activityConfigs.backfill] Applied workbook backfill", {
+            familyId,
+            childId,
+            ...backfillStats,
+          });
+        }
+      } catch (err) {
+        console.warn("[activityConfigs.backfill] Non-critical backfill failed:", err);
+      }
+    }
 
     // ── Dispatch to handler ────────────────────────────────────
     try {
@@ -1360,9 +1937,19 @@ export const chat = onCall(
         error: errMsg,
       });
 
+      // User-friendly error messages
+      let userMessage = errMsg;
+      if (/rate.?limit|429/i.test(errMsg)) {
+        userMessage = "AI is busy — please wait a moment and try again.";
+      } else if (/context.?length|too.?long|token/i.test(errMsg)) {
+        userMessage = "The request was too large. Try with less context.";
+      } else if (/timeout|timed.?out/i.test(errMsg)) {
+        userMessage = "The AI took too long to respond. Please try again.";
+      }
+
       throw new HttpsError(
         "unavailable",
-        `AI service error: ${errMsg}`,
+        `AI service error: ${userMessage}`,
       );
     }
   },

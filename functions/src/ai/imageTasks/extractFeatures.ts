@@ -1,5 +1,6 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireApprovedUser } from "../authGuard.js";
 import { claudeApiKey } from "../aiConfig.js";
 
 // ── Feature Extraction (Photo → Character Features) ────────────────
@@ -62,9 +63,7 @@ Respond with ONLY the JSON object, nothing else.`;
 export const extractFeatures = onCall(
   { secrets: [claudeApiKey], timeoutSeconds: 60 },
   async (request): Promise<ExtractFeaturesResponse> => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireApprovedUser(request);
 
     const { familyId, childId, photoBase64, photoMimeType } =
       request.data as ExtractFeaturesRequest;
@@ -72,7 +71,7 @@ export const extractFeatures = onCall(
     if (!familyId || !childId || !photoBase64 || !photoMimeType) {
       throw new HttpsError("invalid-argument", "Missing required fields.");
     }
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",
@@ -91,7 +90,7 @@ export const extractFeatures = onCall(
         : "image/jpeg";
 
       const result = await claude.messages.create({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 500,
         messages: [
           {
@@ -184,7 +183,7 @@ export const extractFeatures = onCall(
         totalXp: 0,
         pieces: [],
         themeStyle: "minecraft",
-        currentTier: "stone",
+        currentTier: "wood",
         equippedPieces: [],
         unlockedPieces: [],
         updatedAt: new Date().toISOString(),
@@ -194,7 +193,7 @@ export const extractFeatures = onCall(
     // ── Log usage ─────────────────────────────────────────────────
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "feature-extraction",
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       inputTokens: 0,
       outputTokens: 0,
       childId,

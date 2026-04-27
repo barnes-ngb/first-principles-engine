@@ -1,67 +1,165 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ChangeEvent } from 'react'
-import { arrayRemove, deleteField, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore'
-import { getFunctions, httpsCallable } from 'firebase/functions'
-import Alert from '@mui/material/Alert'
+import { addDoc, arrayRemove, deleteField, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
 import Box from '@mui/material/Box'
-import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
-import LinearProgress from '@mui/material/LinearProgress'
-import Typography from '@mui/material/Typography'
-import CameraAltIcon from '@mui/icons-material/CameraAlt'
+import Dialog from '@mui/material/Dialog'
+import DialogContent from '@mui/material/DialogContent'
+import SaveAltIcon from '@mui/icons-material/SaveAlt'
+import ShareIcon from '@mui/icons-material/Share'
+import FolderIcon from '@mui/icons-material/Folder'
 
+import { useNavigate } from 'react-router-dom'
 import Page from '../../components/Page'
-import { app } from '../../core/firebase/firebase'
+import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import {
+  artifactsCollection,
   avatarProfilesCollection,
   dailyArmorSessionsCollection,
   dailyArmorSessionDocId,
+  daysCollection,
+  stripUndefined,
+  weeksCollection,
 } from '../../core/firebase/firestore'
+import { uploadArtifactFile, generateFilename } from '../../core/firebase/upload'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { addXpEvent } from '../../core/xp/addXpEvent'
-import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
-import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
-import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, VOXEL_TO_ARMOR_PIECE, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
+import { getDailyArmorSession, getMorningSuitUpMessage, getTodayDateString } from '../../core/avatar/getDailyArmorSession'
+import { normalizeAvatarProfile } from './normalizeProfile'
+import { useAvatarProfile } from './useAvatarProfile'
+import { safeUpdateProfile, safeSetProfile } from './safeProfileWrite'
+import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, DEFAULT_PROPORTIONS, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
+import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type {
+  AccessoryId,
   ArmorPiece,
+  ArmorTier,
+  Artifact,
+  AvatarBackground,
   AvatarProfile,
-  CharacterFeatures,
+  CharacterProportions,
   DailyArmorSession,
+  HelmetCrest,
+  OutfitCustomization,
+  ShieldEmblem,
   VoxelArmorPieceId,
 } from '../../core/types'
+import { ACCESSORY_SLOTS } from '../../core/types'
 
-import VolumeUpIcon from '@mui/icons-material/VolumeUp'
-import { ArmorIcon } from './icons/ArmorIcons'
-import type { ArmorTierColor } from './icons/ArmorIcons'
-import VoxelCharacter from './VoxelCharacter'
-import PoseButtons from './PoseButtons'
+import type { VoxelCharacterHandle } from './VoxelCharacter'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from './voxel/buildArmorPiece'
+import { getActiveForgeTier, getAppliedVoxelPieces, getArmorPieceState, getForgedPiecesForTier, getPieceLockReason, getVisiblePieces } from './armorPieceState'
 import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
+import ArmorVerseCard from './ArmorVerseCard'
+import { speakStatus, speakVerse } from './speakVerse'
+import { forgeArmorPiece } from '../../core/xp/forgeArmorPiece'
+import { getForgeCost } from '../../core/xp/forgeCosts'
+import XpDiamondBar from '../../components/XpDiamondBar'
+import PortalTransition from './PortalTransition'
+import { getNextTierKey } from './tierBiomes'
+import ArmorPieceGallery from './ArmorPieceGallery'
+import TierRevealBanner from './TierRevealBanner'
 import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
-import { calculateTier, getTierBadgeColor, getTierTextColor, TIERS } from './voxel/tierMaterials'
+import TierUpCeremony from '../../components/avatar/TierUpCeremony'
+import { deriveUnlockedTiersFromForged, getDisplayArmorTier, getTierLockReason } from './armorTierProgress'
+import { calculateTier } from './voxel/tierMaterials'
+import AvatarCharacterDisplay from './AvatarCharacterDisplay'
+import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
+import { ARMOR_DEBUG_DEFAULTS, type ArmorDebugOverrides } from './voxel/armorDebugTuning'
+import ArmorSuitUpPanel from './ArmorSuitUpPanel'
+import AvatarCustomizer from './AvatarCustomizer'
+import { getDailyArmorStatusFromSession, getBestOfSlotForgedPieces } from './armorStatus'
+import { getWeekRange } from '../../core/utils/time'
+import { dayLogDocId } from '../today/daylog.model'
+import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
+import StonebridgePreviewCard from './StonebridgePreviewCard'
+
+type NextRecommendedAction =
+  | { type: 'forge'; label: string }
+  | { type: 'suit_up'; label: string }
+  | { type: 'start_day'; label: string }
+  | { type: 'earn_xp'; label: string }
+
+type HeroHubWeekData = {
+  weekNumber?: number
+  conundrum?: { title: string; answered: boolean }
+  chapterQuestion?: { answered: boolean }
+  chapterTitle?: string
+  chapterIntro?: string
+}
 
 // ── Helpers ───────────────────────────────────────────────────────
 
-function getUnlockedVoxelPieces(profile: AvatarProfile): VoxelArmorPieceId[] {
-  const xp = profile.totalXp
-  return VOXEL_ARMOR_PIECES
-    .filter((p) => xp >= XP_THRESHOLDS[p.id])
-    .map((p) => p.id)
+/** Normalize raw Firestore DailyArmorSession data — guards against non-array fields */
+function normalizeDailyArmorSession(raw: DailyArmorSession): DailyArmorSession {
+  return {
+    ...raw,
+    appliedPieces: Array.isArray(raw.appliedPieces) ? raw.appliedPieces : [],
+    manuallyUnequipped: Array.isArray(raw.manuallyUnequipped) ? raw.manuallyUnequipped : [],
+  }
 }
 
 function getNextUnlock(profile: AvatarProfile): { piece: ArmorPieceMeta; xpNeeded: number } | null {
-  const unlocked = new Set(getUnlockedVoxelPieces(profile))
-  const next = VOXEL_ARMOR_PIECES.find((p) => !unlocked.has(p.id))
+  const visible = new Set(getVisiblePieces(profile))
+  const next = VOXEL_ARMOR_PIECES.find((p) => !visible.has(p.id))
   if (!next) return null
   return { piece: next, xpNeeded: Math.max(XP_THRESHOLDS[next.id] - profile.totalXp, 0) }
 }
 
-/** Map ArmorPiece IDs from daily session to VoxelArmorPieceId */
-function sessionToVoxelPieces(appliedPieces: ArmorPiece[]): string[] {
-  return appliedPieces.map((p) => ARMOR_PIECE_TO_VOXEL[p])
+/** Returns the next forgeable piece with diamond cost info, or null if nothing to forge. */
+function getNextForgeAction(profile: AvatarProfile): {
+  piece: ArmorPieceMeta
+  diamondCost: number
+  canAfford: boolean
+  tier: string
+  tierLocked: boolean
+  lockReason: string
+} | null {
+  const activeTier = getActiveForgeTier(profile)
+  const forgedInTier = getForgedPiecesForTier(profile, activeTier)
+  const forgedSet = new Set(forgedInTier)
+
+  // Find next unforged piece in active tier that's XP-visible.
+  // Per-piece XP thresholds only apply in Wood tier. Higher tiers unlock all 6 pieces.
+  const nextPiece = VOXEL_ARMOR_PIECES.find(
+    (p) => !forgedSet.has(p.id) && (activeTier !== 'wood' || profile.totalXp >= XP_THRESHOLDS[p.id]),
+  )
+  if (!nextPiece) return null
+
+  const unlockedTiers = deriveUnlockedTiersFromForged(profile)
+  const tierUnlocked = unlockedTiers.includes(activeTier as ArmorTier)
+  const cost = getForgeCost(activeTier, nextPiece.id)
+  const balance = profile.diamondBalance ?? 0
+
+  if (!tierUnlocked) {
+    return {
+      piece: nextPiece,
+      diamondCost: cost,
+      canAfford: false,
+      tier: activeTier,
+      tierLocked: true,
+      lockReason: getTierLockReason(profile, activeTier),
+    }
+  }
+
+  return {
+    piece: nextPiece,
+    diamondCost: cost,
+    canAfford: balance >= cost,
+    tier: activeTier,
+    tierLocked: false,
+    lockReason: '',
+  }
+}
+
+/** Check if yesterday's date string is exactly one day before today */
+function isConsecutiveDay(prev: string, current: string): boolean {
+  const prevDate = new Date(prev + 'T00:00:00')
+  const currentDate = new Date(current + 'T00:00:00')
+  const diffMs = currentDate.getTime() - prevDate.getTime()
+  return Math.round(diffMs / (1000 * 60 * 60 * 24)) === 1
 }
 
 // ── Fanfare (Web Audio API) ────────────────────────────────────────
@@ -88,30 +186,10 @@ function playArmorFanfare(delaySeconds = 0) {
   }
 }
 
-// ── TTS for inline verse card ────────────────────────────────────
-
-function speakVerse(pieceName: string, verseText: string) {
-  if (!('speechSynthesis' in window)) return
-  window.speechSynthesis.cancel()
-
-  const text = `${pieceName}. ${verseText}`
-  const utterance = new SpeechSynthesisUtterance(text)
-  utterance.rate = 0.85
-  utterance.pitch = 1.0
-  utterance.volume = 1.0
-
-  const voices = window.speechSynthesis.getVoices()
-  const preferred = voices.find((v) =>
-    v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Moira'),
-  ) || voices.find((v) => v.lang.startsWith('en-US')) || voices[0]
-  if (preferred) utterance.voice = preferred
-
-  window.speechSynthesis.speak(utterance)
-}
-
 // ── Component ─────────────────────────────────────────────────────
 
 export default function MyAvatarPage() {
+  const navigate = useNavigate()
   const familyId = useFamilyId()
   const { activeChild, children, setActiveChildId, isChildProfile } = useActiveChild()
   const childId = activeChild?.id ?? ''
@@ -121,37 +199,79 @@ export default function MyAvatarPage() {
   const [session, setSession] = useState<DailyArmorSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedPiece, setSelectedPiece] = useState<ArmorPieceMeta | null>(null)
+  const [selectedTier, setSelectedTier] = useState<string | null>(null)
+  // Armor gallery tab preview: when set, the 3D character shows all 6 pieces
+  // at this tier. Null = default (show equipped pieces at forged tiers).
+  const [previewTier, setPreviewTier] = useState<string | null>(null)
+  const [optimisticDiamondBalance, setOptimisticDiamondBalance] = useState<number | null>(null)
   const [, setUnequipPiece] = useState<VoxelArmorPieceId | null>(null)
 
   const [celebrationPiece, setCelebrationPiece] = useState<ArmorPiece | null>(null)
   const [tierCelebration, setTierCelebration] = useState<{ from: string; to: string } | null>(null)
+  const [portalPrompt, setPortalPrompt] = useState<{ from: string; to: string } | null>(null)
+  const [portalTransition, setPortalTransition] = useState<{ from: string; to: string } | null>(null)
   const [ceremonyActive, setCeremonyActive] = useState(false)
-
-  // Card scroll ref — reset to start on load
-  const cardScrollRef = useRef<HTMLDivElement>(null)
+  const [ceremonyTier, setCeremonyTier] = useState<string | null>(null)
 
   // Photo feature extraction
-  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null)
-  const [photoExtracting, setPhotoExtracting] = useState(false)
-  const [photoError, setPhotoError] = useState<string | null>(null)
-  const photoInputRef = useRef<HTMLInputElement>(null)
 
   // Animation state
   const [animateEquipId, setAnimateEquipId] = useState<string | null>(null)
   const [animateUnequipId, setAnimateUnequipId] = useState<string | null>(null)
   const [particles, setParticles] = useState<{ x: number; y: number } | null>(null)
 
+  // Animated XP display (count-up effect)
+  const [displayXp, setDisplayXp] = useState(0)
+  const xpAnimRef = useRef<number>(0)
+  useEffect(() => {
+    const targetXp = profile?.totalXp ?? 0
+    const startXp = displayXp
+    const diff = targetXp - startXp
+    if (diff === 0) return
+    const duration = 500
+    const startTime = performance.now()
+    function tick(now: number) {
+      const t = Math.min((now - startTime) / duration, 1)
+      const eased = t * (2 - t)
+      setDisplayXp(Math.round(startXp + diff * eased))
+      if (t < 1) xpAnimRef.current = requestAnimationFrame(tick)
+    }
+    xpAnimRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(xpAnimRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.totalXp])
+
   // Pose state
   const [activePoseId, setActivePoseId] = useState<string | null>(null)
+
+  // Screenshot state
+  const voxelRef = useRef<VoxelCharacterHandle>(null)
+  const [screenshotData, setScreenshotData] = useState<string | null>(null)
+  const [showScreenshotModal, setShowScreenshotModal] = useState(false)
+  const [savingToPortfolio, setSavingToPortfolio] = useState(false)
+
+  // Brothers mode state
+  const [brothersMode, setBrothersMode] = useState(false)
+  // Background mode (persisted in profile customization)
+  const [bgMode, setBgMode] = useState<AvatarBackground>('night')
+  // Character tuner state
+  const [tunerOpen, setTunerOpen] = useState(false)
+  const [childCustomizerExpanded, setChildCustomizerExpanded] = useState(false)
+  const [weekData, setWeekData] = useState<HeroHubWeekData | null>(null)
+  const [localProportions, setLocalProportions] = useState<CharacterProportions>(DEFAULT_PROPORTIONS)
+  const heroDebugEnabled = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('heroDebug') === '1'
+  const [heroAnimationTuning, setHeroAnimationTuning] = useState<HeroAnimationTuningOverride>({})
+  const armorDebugEnabled = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('armorDebug') === '1'
+  const [armorDebugValues, setArmorDebugValues] = useState<ArmorDebugOverrides>(ARMOR_DEBUG_DEFAULTS)
+  const siblingChild = children.find((c) => c.id !== childId)
+  const siblingId = brothersMode ? siblingChild?.id : undefined
+  const siblingProfile = useAvatarProfile(familyId, siblingId)
 
   // Track previous state for celebrations
   const prevPiecesCountRef = useRef(0)
   const prevTierRef = useRef<string | null>(null)
-
-  // Reset card scroll to start (Belt first) on load
-  useEffect(() => {
-    if (cardScrollRef.current) cardScrollRef.current.scrollLeft = 0
-  }, [profile])
 
   // Pre-load TTS voices (Chrome loads async)
   useEffect(() => {
@@ -185,15 +305,22 @@ export default function MyAvatarPage() {
           childId,
           themeStyle: isLincoln ? 'minecraft' : 'platformer',
           pieces: [],
-          currentTier: isLincoln ? 'stone' : 'basic',
+          currentTier: isLincoln ? 'wood' : 'basic',
           characterFeatures: isLincoln ? LINCOLN_FEATURES : LONDON_FEATURES,
           ageGroup,
           equippedPieces: [],
           unlockedPieces: [],
           totalXp: 0,
           updatedAt: new Date().toISOString(),
+          ...(isLincoln ? {} : {
+            customization: {
+              shirtColor: '#E8A838',   // mustard yellow
+              pantsColor: '#C4B998',   // khaki/tan
+              shoeColor: '#8B7355',    // brown
+            },
+          }),
         }
-        await setDoc(profileRef, newProfile)
+        await safeSetProfile(profileRef, newProfile as unknown as Record<string, unknown>)
       }
     }
     void ensureProfile()
@@ -208,13 +335,23 @@ export default function MyAvatarPage() {
       profileRef,
       (snap) => {
         if (snap.exists()) {
-          const data = ensureNewProfileStructure(snap.data() as unknown as Record<string, unknown>)
+          const data = normalizeAvatarProfile(snap.data())
           setProfile(data)
+          // Sync background preference from profile
+          if (data.customization?.background) {
+            setBgMode(data.customization.background)
+          }
+          // Sync proportions from profile
+          if (data.customization?.proportions) {
+            setLocalProportions({ ...DEFAULT_PROPORTIONS, ...data.customization.proportions })
+          } else {
+            setLocalProportions(DEFAULT_PROPORTIONS)
+          }
 
-          const unlockedCount = getUnlockedVoxelPieces(data).length
+          const unlockedCount = getVisiblePieces(data).length
           if (unlockedCount > prevPiecesCountRef.current && prevPiecesCountRef.current > 0) {
             // A new piece was unlocked
-            const unlocked = getUnlockedVoxelPieces(data)
+            const unlocked = getVisiblePieces(data)
             const newPieceVoxel = unlocked[unlocked.length - 1]
             // Map back to ArmorPiece for celebration component compatibility
             const armorPieceId = ARMOR_PIECES.find(
@@ -224,10 +361,11 @@ export default function MyAvatarPage() {
           }
           prevPiecesCountRef.current = unlockedCount
 
-          if (prevTierRef.current && data.currentTier !== prevTierRef.current) {
-            setTierCelebration({ from: prevTierRef.current, to: data.currentTier })
+          const dataDisplayTier = getDisplayArmorTier(data)
+          if (prevTierRef.current && dataDisplayTier !== prevTierRef.current) {
+            setTierCelebration({ from: prevTierRef.current, to: dataDisplayTier })
           }
-          prevTierRef.current = data.currentTier
+          prevTierRef.current = dataDisplayTier
         }
         setLoading(false)
       },
@@ -236,7 +374,32 @@ export default function MyAvatarPage() {
     return unsub
   }, [familyId, childId])
 
-  // ── Real-time session listener ─────────────────────────────────
+  // Clear optimistic diamond override once live profile catches up.
+  useEffect(() => {
+    if (optimisticDiamondBalance === null) return
+    if (profile?.diamondBalance === optimisticDiamondBalance) {
+      setOptimisticDiamondBalance(null)
+    }
+  }, [optimisticDiamondBalance, profile?.diamondBalance])
+
+  // ── Real-time session listener + daily armor reset ──────────────
+  // "Put on the full armor of God" — Ephesians 6:11
+  // Each day is a fresh opportunity to suit up. When a new day's session is
+  // created, equippedPieces is cleared atomically so the character appears
+  // bare and the kid re-equips each piece as a morning devotional ritual.
+  const resetRanRef = useRef(false)
+  const resetChildRef = useRef(childId)
+  const [morningReset, setMorningReset] = useState(false)
+
+  // Reset flags when switching children
+  if (resetChildRef.current !== childId) {
+    resetRanRef.current = false
+    resetChildRef.current = childId
+    setMorningReset(false)
+    prevPiecesCountRef.current = 0
+    prevTierRef.current = null
+  }
+
   useEffect(() => {
     if (!familyId || !childId) return
     const docId = dailyArmorSessionDocId(childId, today)
@@ -244,137 +407,293 @@ export default function MyAvatarPage() {
 
     const unsub = onSnapshot(sessionRef, async (snap) => {
       if (snap.exists()) {
-        setSession(snap.data())
-      } else {
-        const newSession: DailyArmorSession = {
-          familyId,
-          childId,
-          date: today,
-          appliedPieces: [],
+        const sessionData = normalizeDailyArmorSession(snap.data())
+        setSession(sessionData)
+
+        // First load: if no pieces applied yet, this is a morning reset
+        if (!resetRanRef.current) {
+          resetRanRef.current = true
+          if (sessionData.appliedPieces.length === 0) {
+            setMorningReset(true)
+            // Morning TTS greeting
+            if ('speechSynthesis' in window) {
+              setTimeout(() => {
+                const utterance = new SpeechSynthesisUtterance(
+                  'Good morning warrior! Time to put on the armor of God.',
+                )
+                utterance.rate = 0.85
+                const voices = window.speechSynthesis.getVoices()
+                const preferred = voices.find((v) =>
+                  v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Moira'),
+                ) || voices.find((v) => v.lang.startsWith('en-US')) || voices[0]
+                if (preferred) utterance.voice = preferred
+                window.speechSynthesis.speak(utterance)
+              }, 1000)
+            }
+          }
         }
-        await setDoc(sessionRef, newSession)
-        setSession(newSession)
+      } else {
+        // New day — getDailyArmorSession atomically creates session
+        // AND clears equippedPieces on the avatar profile
+        await getDailyArmorSession(familyId, childId)
+        // onSnapshot will fire again with the new doc
       }
     })
     return unsub
   }, [familyId, childId, today])
 
-  // ── Auto-equip unlocked pieces on page load ────────────────────
-  // Only runs once per child on initial load — does NOT re-fire on every session change.
-  const autoEquipRanRef = useRef(false)
-  const autoEquipChildRef = useRef(childId)
-
-  // Reset auto-equip when switching children
-  if (autoEquipChildRef.current !== childId) {
-    autoEquipRanRef.current = false
-    autoEquipChildRef.current = childId
-  }
-
   useEffect(() => {
-    if (!profile || !session || !familyId || !childId) return
-    if (autoEquipRanRef.current) return
-    autoEquipRanRef.current = true
+    if (!familyId || !childId) return
+    let cancelled = false
 
-    const unlockedVoxel = getUnlockedVoxelPieces(profile)
-    const currentApplied = session.appliedPieces ?? []
-    const currentAppliedVoxel = sessionToVoxelPieces(currentApplied)
-    const manuallyRemoved = new Set(session.manuallyUnequipped ?? [])
+    const loadHeroHubWeekData = async () => {
+      const weekRange = getWeekRange(new Date())
+      const dayLogRef = doc(daysCollection(familyId), dayLogDocId(today, childId))
+      const [dayLogSnap, weekSnap] = await Promise.all([
+        getDoc(dayLogRef),
+        getDocs(query(weeksCollection(familyId), where('startDate', '==', weekRange.start))),
+      ])
+      if (cancelled) return
 
-    // Find pieces that are unlocked but not in today's session and not manually removed
-    const missingVoxel = unlockedVoxel.filter(
-      (vid) => !currentAppliedVoxel.includes(vid) && !manuallyRemoved.has(vid),
-    )
-    if (missingVoxel.length === 0) return
+      const dayLog = dayLogSnap.exists() ? dayLogSnap.data() : null
+      const weekPlan = weekSnap.docs[0]?.data()
+      const weekStart = new Date(`${weekRange.start}T00:00:00Z`)
+      const currentWeek = Math.max(1, Math.floor((Date.now() - weekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1)
 
-    // Map voxel IDs back to ArmorPiece IDs for the session
-    const missingArmor = missingVoxel
-      .map((vid) => ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id)
-      .filter((id): id is ArmorPiece => !!id)
-
-    if (missingArmor.length === 0) return
-
-    const updatedApplied = [...currentApplied, ...missingArmor]
-    const docId = dailyArmorSessionDocId(childId, today)
-    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
-    void setDoc(sessionRef, { ...session, appliedPieces: updatedApplied })
-    // Also update equippedPieces on avatar profile
-    const profileRef = doc(avatarProfilesCollection(familyId), childId)
-    void updateDoc(profileRef, {
-      equippedPieces: [...new Set([...sessionToVoxelPieces(updatedApplied)])],
-      updatedAt: new Date().toISOString(),
-    })
-  }, [profile, session, familyId, childId, today])
-
-  // ── Photo select ───────────────────────────────────────────────
-  const handlePhotoSelect = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      const img = new Image()
-      img.onload = () => {
-        const size = Math.min(img.width, img.height)
-        const x = (img.width - size) / 2
-        const y = (img.height - size) / 2
-        const targetSize = Math.min(size, 1024)
-        const canvas = document.createElement('canvas')
-        canvas.width = targetSize
-        canvas.height = targetSize
-        const ctx = canvas.getContext('2d')!
-        ctx.drawImage(img, x, y, size, size, 0, 0, targetSize, targetSize)
-        setPhotoPreviewUrl(canvas.toDataURL('image/jpeg', 0.92))
-        setPhotoError(null)
-      }
-      img.src = ev.target?.result as string
+      setWeekData({
+        weekNumber: currentWeek,
+        conundrum: weekPlan?.conundrum
+          ? { title: weekPlan.conundrum.title, answered: !!weekPlan.conundrum.discussed }
+          : undefined,
+        chapterQuestion: dayLog?.chapterQuestion
+          ? { answered: !!dayLog.chapterQuestion.responded }
+          : undefined,
+        chapterTitle: dayLog?.chapterQuestion
+          ? `${dayLog.chapterQuestion.book} ${dayLog.chapterQuestion.chapter}`
+          : undefined,
+        chapterIntro: dayLog?.chapterQuestion?.question,
+      })
     }
-    reader.readAsDataURL(file)
+
+    void loadHeroHubWeekData()
+    return () => {
+      cancelled = true
+    }
+  }, [familyId, childId, today])
+
+  // ── Outfit color change ──────────────────────────────────────────
+  const handleOutfitColorChange = useCallback(
+    async (slot: 'shirt' | 'pants' | 'shoes', hexColor: string) => {
+      if (!familyId || !childId || !profile) return
+      const customization: OutfitCustomization = { ...profile.customization }
+      switch (slot) {
+        case 'shirt': customization.shirtColor = hexColor; break
+        case 'pants': customization.pantsColor = hexColor; break
+        case 'shoes': customization.shoeColor = hexColor; break
+      }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, {
+        customization,
+      })
+    },
+    [familyId, childId, profile],
+  )
+
+  // ── Armor dye color change ──────────────────────────────────────
+  const handleArmorDyeChange = useCallback(
+    async (pieceId: VoxelArmorPieceId, hexColor: string) => {
+      if (!familyId || !childId || !profile) return
+      const customization: OutfitCustomization = { ...profile.customization }
+      customization.armorColors = { ...customization.armorColors, [pieceId]: hexColor }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile],
+  )
+
+  const handleArmorDyeReset = useCallback(async () => {
+    if (!familyId || !childId || !profile) return
+    const customization: OutfitCustomization = { ...profile.customization }
+    delete customization.armorColors
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    await safeUpdateProfile(profileRef, { customization })
+  }, [familyId, childId, profile])
+
+  // ── Shield emblem change ────────────────────────────────────────────
+  const handleEmblemChange = useCallback(
+    async (emblem: ShieldEmblem) => {
+      if (!familyId || !childId || !profile) return
+      const customization: OutfitCustomization = { ...profile.customization, shieldEmblem: emblem }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile],
+  )
+
+  // ── Helmet crest change ─────────────────────────────────────────────
+  const handleCrestChange = useCallback(
+    async (crest: HelmetCrest) => {
+      if (!familyId || !childId || !profile) return
+      const customization: OutfitCustomization = { ...profile.customization, helmetCrest: crest }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile],
+  )
+
+  const handleBackgroundToggle = useCallback(
+    async () => {
+      if (!familyId || !childId || !profile) return
+      const newBg: AvatarBackground = bgMode === 'night' ? 'room' : 'night'
+      setBgMode(newBg)
+      const customization: OutfitCustomization = { ...profile.customization, background: newBg }
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile, bgMode],
+  )
+
+  // ── Accessory toggle ──────────────────────────────────────────────
+  const handleAccessoryToggle = useCallback(
+    async (accId: AccessoryId) => {
+      if (!familyId || !childId || !profile) return
+      const current = profile.customization?.accessories ?? []
+      let updated: AccessoryId[]
+
+      if (current.includes(accId)) {
+        // Unequip
+        updated = current.filter((id) => id !== accId)
+      } else {
+        // Equip — enforce slot exclusivity (remove any other item in the same slot)
+        const slot = Object.entries(ACCESSORY_SLOTS).find(
+          ([, ids]) => (ids as readonly string[]).includes(accId),
+        )?.[0]
+        const slotItems = slot ? ACCESSORY_SLOTS[slot as keyof typeof ACCESSORY_SLOTS] : []
+        updated = [
+          ...current.filter((id) => !(slotItems as readonly string[]).includes(id)),
+          accId,
+        ]
+      }
+
+      const customization: OutfitCustomization = { ...profile.customization, accessories: updated }
+
+      // Optimistic local update — prevents stale reads on rapid taps.
+      // Without this, the next tap could read pre-update state from the
+      // onSnapshot listener and overwrite this change.
+      setProfile((prev) => prev ? { ...prev, customization } : prev)
+
+      const profileRef = doc(avatarProfilesCollection(familyId), childId)
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile],
+  )
+
+  // ── Character tuner handlers ─────────────────────────────────────
+  const handleTunerToggle = useCallback(() => {
+    setTunerOpen((prev) => !prev)
   }, [])
 
-  // ── Photo transform → feature extraction ────────────────────────
-  const handlePhotoTransform = useCallback(async () => {
-    if (!familyId || !childId || !photoPreviewUrl || !profile) return
-    setPhotoExtracting(true)
-    setPhotoError(null)
+  const handleTunerProportionsChange = useCallback((newProportions: CharacterProportions) => {
+    setLocalProportions(newProportions)
+  }, [])
 
-    try {
-      const fns = getFunctions(app)
-      const extractFn = httpsCallable<
-        { familyId: string; childId: string; photoBase64: string; photoMimeType: string },
-        { features: CharacterFeatures }
-      >(fns, 'extractFeatures')
-
-      const [header, base64] = photoPreviewUrl.split(',')
-      const mimeType = header.split(':')[1].split(';')[0]
-
-      const result = await extractFn({
-        familyId,
-        childId,
-        photoBase64: base64,
-        photoMimeType: mimeType,
-      })
-
-      // Save features to profile
+  const handleTunerCapeColorChange = useCallback(
+    async (hex: string) => {
+      if (!familyId || !childId || !profile) return
+      const customization: OutfitCustomization = { ...profile.customization, capeColor: hex }
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
-      const { getDoc } = await import('firebase/firestore')
-      const snap = await getDoc(profileRef)
-      const current = snap.exists() ? (snap.data() as AvatarProfile) : profile
-      await setDoc(profileRef, {
-        ...current,
-        characterFeatures: result.data.features,
-        photoUrl: photoPreviewUrl,
-        updatedAt: new Date().toISOString(),
-      })
+      await safeUpdateProfile(profileRef, { customization })
+    },
+    [familyId, childId, profile],
+  )
 
-      setPhotoPreviewUrl(null)
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Feature extraction failed — try a different photo.'
-      setPhotoError(msg)
-    } finally {
-      setPhotoExtracting(false)
+  const handleTunerDone = useCallback(async () => {
+    if (!familyId || !childId || !profile) return
+    const customization: OutfitCustomization = {
+      ...profile.customization,
+      proportions: localProportions,
     }
-  }, [familyId, childId, photoPreviewUrl, profile])
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    await safeUpdateProfile(profileRef, { customization })
+    setTunerOpen(false)
+  }, [familyId, childId, profile, localProportions])
+
+  const handleTunerReset = useCallback(() => {
+    setLocalProportions(DEFAULT_PROPORTIONS)
+  }, [])
+
+  // ── Streak tracking ─────────────────────────────────────────────
+  const checkArmorStreak = useCallback(async (prof: AvatarProfile) => {
+    if (!familyId || !childId) return
+    const lastFull = prof.lastFullArmorDate
+    let newStreak = 1
+    if (lastFull) {
+      if (lastFull === today) {
+        newStreak = prof.armorStreak ?? 1 // Same day, keep streak
+      } else if (isConsecutiveDay(lastFull, today)) {
+        newStreak = (prof.armorStreak ?? 0) + 1 // Consecutive day
+      }
+      // else streak broken, reset to 1
+    }
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    await safeUpdateProfile(profileRef, {
+      armorStreak: newStreak,
+      lastFullArmorDate: today,
+    })
+  }, [familyId, childId, today])
+
+  // ── Forge a piece (spend diamonds) ─────────────────────────────
+  const handleForgePiece = useCallback(
+    async (voxelPieceId: VoxelArmorPieceId, verseResponse?: string, verseResponseAudio?: string): Promise<boolean> => {
+      if (!profile || !familyId || !childId) return false
+
+      const activeTier = getActiveForgeTier(profile)
+
+      // Per-piece XP thresholds only apply in Wood tier (staggered unlock).
+      // Higher tiers use tier-level gates — once a tier is unlocked, all 6 pieces are forgeable.
+      if (activeTier === 'wood' && profile.totalXp < XP_THRESHOLDS[voxelPieceId]) {
+        console.warn(`[Forge] XP locked: ${voxelPieceId}`)
+        return false
+      }
+      const appliedTodayVoxel = getAppliedVoxelPieces(session?.appliedPieces ?? [])
+      const pieceState = getArmorPieceState({
+        profile,
+        pieceId: voxelPieceId,
+        activeForgeTier: activeTier,
+        appliedTodayVoxel: appliedTodayVoxel,
+      })
+      if (pieceState !== 'forgeable') {
+        console.warn(`[Forge] Piece not forgeable: ${voxelPieceId} (${pieceState})`)
+        return false
+      }
+
+      const result = await forgeArmorPiece(familyId, childId, activeTier, voxelPieceId, verseResponse, verseResponseAudio)
+      if (result.success) {
+        setSelectedPiece(null)
+        setSelectedTier(null)
+        if (typeof result.newBalance === 'number') {
+          setOptimisticDiamondBalance(result.newBalance)
+        }
+
+        // Use server-side tier completion result (includes milestone bonus)
+        if (result.tierCompleted) {
+          if (result.tierBonus) {
+            console.info(`[Forge] Tier ${activeTier} complete! +${result.tierBonus} diamond bonus`)
+          }
+          const nextTier = getNextTierKey(activeTier)
+          if (nextTier && profile.lastPortalTier !== activeTier) {
+            // Delay prompt to let forge animation play, then let child confirm before transition
+            setTimeout(() => setPortalPrompt({ from: activeTier, to: nextTier }), 1500)
+          }
+        }
+        return true
+      } else {
+        console.warn(`[Forge] Failed: ${result.error}`)
+        return false
+      }
+    },
+    [profile, familyId, childId, session?.appliedPieces],
+  )
 
   // ── Apply a piece (equip) ───────────────────────────────────────
   const handleApplyPiece = useCallback(
@@ -385,20 +704,28 @@ export default function MyAvatarPage() {
         (p) => ARMOR_PIECE_TO_VOXEL[p.id] === voxelPieceId,
       )?.id
       if (!armorPieceId) return
-      if (session.appliedPieces.includes(armorPieceId)) return
+      if ((session.appliedPieces ?? []).includes(armorPieceId)) return
 
       // Trigger equip animation
       setAnimateEquipId(voxelPieceId)
 
-      const updatedApplied = [...session.appliedPieces, armorPieceId]
-      const unlockedVoxel = getUnlockedVoxelPieces(profile)
-      const allApplied = unlockedVoxel.every((vid) => {
-        const aid = ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id
-        return aid && updatedApplied.includes(aid)
-      })
+      const updatedApplied = [...(session.appliedPieces ?? []), armorPieceId]
+      // Use unified status for completion check (active-tier gate, not cross-tier)
+      const status = getDailyArmorStatusFromSession(profile, { appliedPieces: updatedApplied })
+      const allApplied = status.isSuitedUp
 
       if (allApplied) {
         playArmorFanfare(1.5)
+        // TTS "Ready for battle!" announcement
+        if ('speechSynthesis' in window) {
+          setTimeout(() => {
+            const utterance = new SpeechSynthesisUtterance(
+              "Full armor on! You're ready for battle, warrior!",
+            )
+            utterance.rate = 0.85
+            window.speechSynthesis.speak(utterance)
+          }, 1800) // After fanfare completes
+        }
       }
 
       // Remove from manuallyUnequipped if re-equipping
@@ -408,27 +735,32 @@ export default function MyAvatarPage() {
       // Write to Firestore
       const docId = dailyArmorSessionDocId(childId, today)
       const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
-      await setDoc(sessionRef, {
+      await setDoc(sessionRef, stripUndefined({
         ...session,
         appliedPieces: updatedApplied,
         manuallyUnequipped: updatedManual,
         ...(allApplied ? { completedAt: new Date().toISOString() } : {}),
-      })
+      }) as unknown as DailyArmorSession)
 
       // Also update equippedPieces on avatar profile
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
-      const equippedVoxel = [...sessionToVoxelPieces(updatedApplied)]
-      await updateDoc(profileRef, {
+      const equippedVoxel = [...getAppliedVoxelPieces(updatedApplied)]
+      await safeUpdateProfile(profileRef, {
         equippedPieces: equippedVoxel,
         lastEquipAnimation: voxelPieceId,
-        updatedAt: new Date().toISOString(),
+        lastArmorEquipDate: today,
       })
 
       if (allApplied) {
         void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
+          .catch((err) => console.error('[XP] Award failed:', err))
+        void checkArmorStreak(profile)
       }
+
+      // Clear morning reset message once a piece is equipped
+      setMorningReset(false)
     },
-    [profile, familyId, childId, session, today],
+    [profile, familyId, childId, session, today, checkArmorStreak],
   )
 
   // ── Unequip a piece (direct — no dialog) ──────────────────────
@@ -449,56 +781,154 @@ export default function MyAvatarPage() {
 
     const docId = dailyArmorSessionDocId(childId, today)
     const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
-    await updateDoc(sessionRef, {
+    await updateDoc(sessionRef, stripUndefined({
       appliedPieces: arrayRemove(armorPieceId),
       manuallyUnequipped: updatedManual,
       completedAt: deleteField(),
-    })
+    }))
 
     // Also update equippedPieces on avatar profile
     const profileRef = doc(avatarProfilesCollection(familyId), childId)
-    const remainingVoxel = sessionToVoxelPieces(
+    const remainingVoxel = getAppliedVoxelPieces(
       (session.appliedPieces ?? []).filter((p) => p !== armorPieceId),
     )
-    await updateDoc(profileRef, {
+    await safeUpdateProfile(profileRef, {
       equippedPieces: remainingVoxel,
-      updatedAt: new Date().toISOString(),
     })
 
     setUnequipPiece(null)
   }, [familyId, childId, session, today])
 
+  // ── Tier-up ceremony complete: reset equipped pieces ────────────
+  const handleCeremonyDone = useCallback(async () => {
+    setCeremonyTier(null)
+    setCeremonyActive(false)
+    if (!familyId || !childId || !profile) return
+
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    await safeUpdateProfile(profileRef, {
+      equippedPieces: [],
+    })
+  }, [familyId, childId, profile])
+
   // ── Piece tap handler — single tap to equip/unequip ────────────
   const handlePieceTap = useCallback(
-    (piece: ArmorPieceMeta) => {
+    (piece: ArmorPieceMeta, displayTier: string) => {
       if (!profile || !session || ceremonyActive) return
       const armorPieceId = ARMOR_PIECES.find(
         (p) => ARMOR_PIECE_TO_VOXEL[p.id] === piece.id,
       )?.id
 
-      const isUnlocked = profile.totalXp >= XP_THRESHOLDS[piece.id]
-      const isApplied = armorPieceId && session.appliedPieces.includes(armorPieceId)
+      const isApplied = armorPieceId && (session.appliedPieces ?? []).includes(armorPieceId)
+      // Use the gallery's displayed tier so the state matches what the user sees
+      const pieceState = getArmorPieceState({
+        profile,
+        pieceId: piece.id,
+        activeForgeTier: displayTier,
+        appliedTodayVoxel: getAppliedVoxelPieces(session.appliedPieces ?? []),
+      })
 
       if (isApplied) {
-        // Tap equipped piece → directly unequip (toggle off)
+        // Equipped → unequip (toggle off)
         setUnequipPiece(piece.id)
-        // Immediately trigger unequip without dialog
         void handleUnequipDirect(piece.id)
-      } else if (isUnlocked) {
-        // Tap unlocked piece → equip immediately + read verse aloud
+      } else if (pieceState === 'forged_not_equipped_today') {
+        // Forged → equip immediately + read verse aloud
         speakVerse(piece.name, piece.verseText)
         void handleApplyPiece(piece.id)
       } else {
-        // Locked pieces: show verse card (info only), read aloud
+        // Locked/forgeable/equipped state details are shown in verse card
         setSelectedPiece((prev) => {
-          if (prev?.id === piece.id) return null
+          if (prev?.id === piece.id) {
+            setSelectedTier(null)
+            return null
+          }
           speakVerse(piece.name, piece.verseText)
+          setSelectedTier(displayTier)
           return piece
         })
       }
     },
     [profile, session, ceremonyActive, handleApplyPiece, handleUnequipDirect],
   )
+
+  // ── Suit Up! — equip all forged pieces with staggered animation ──
+  const suitUpAll = useCallback(async () => {
+    if (!profile || !session || !familyId || !childId) return
+    // Use getBestOfSlotForgedPieces to equip the highest-tier version of each slot
+    const bestOfSlot = getBestOfSlotForgedPieces(profile)
+    const allSlots = bestOfSlot.map((b) => b.pieceId)
+    const currentVoxel = getAppliedVoxelPieces(session.appliedPieces ?? [])
+    // Canonical equip order: belt → breastplate → shoes → shield → helmet → sword
+    const equipOrder: VoxelArmorPieceId[] = ['belt', 'breastplate', 'shoes', 'shield', 'helmet', 'sword']
+    const toEquip = equipOrder.filter((vid) => allSlots.includes(vid) && !currentVoxel.includes(vid))
+    if (toEquip.length === 0) return
+
+    const pieceCount = toEquip.length
+    const pieceLabel = pieceCount === 1 ? 'piece' : 'pieces'
+    speakStatus(`Suiting up ${pieceCount} ${pieceLabel}. Great choice!`)
+
+    // Map voxel IDs to ArmorPiece IDs for the session
+    const toEquipArmorIds = toEquip
+      .map((vid) => ARMOR_PIECES.find((p) => ARMOR_PIECE_TO_VOXEL[p.id] === vid)?.id)
+      .filter((id): id is ArmorPiece => Boolean(id))
+
+    // Build the complete applied list atomically (avoids stale closure overwrites)
+    const updatedApplied = [...(session.appliedPieces ?? []), ...toEquipArmorIds]
+    const allEquippedVoxel = [...getAppliedVoxelPieces(updatedApplied)]
+    // Gate completion uses active-tier pieces (matches gallery), not cross-tier union
+    const status = getDailyArmorStatusFromSession(profile, { appliedPieces: updatedApplied })
+    const allApplied = status.isSuitedUp
+
+    // Single Firestore write for the session — all pieces at once
+    const docId = dailyArmorSessionDocId(childId, today)
+    const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+    await setDoc(sessionRef, stripUndefined({
+      ...session,
+      appliedPieces: updatedApplied,
+      manuallyUnequipped: [],
+      ...(allApplied ? { completedAt: new Date().toISOString() } : {}),
+    }) as unknown as DailyArmorSession)
+
+    // Update profile equippedPieces in one write
+    const profileRef = doc(avatarProfilesCollection(familyId), childId)
+    await safeUpdateProfile(profileRef, {
+      equippedPieces: allEquippedVoxel,
+      lastArmorEquipDate: today,
+    })
+
+    // Stagger visual equip animations for cascading effect
+    toEquip.forEach((voxelId, i) => {
+      setTimeout(() => setAnimateEquipId(voxelId), i * 200)
+    })
+
+    if (allApplied) {
+      playArmorFanfare(1.5)
+      if ('speechSynthesis' in window) {
+        setTimeout(() => {
+          const utterance = new SpeechSynthesisUtterance(
+            "Full armor on! You're ready for battle, warrior!",
+          )
+          utterance.rate = 0.85
+          window.speechSynthesis.speak(utterance)
+        }, 1800)
+      }
+      void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
+        .catch((err) => console.error('[XP] Award failed:', err))
+      void checkArmorStreak(profile)
+    }
+
+    setMorningReset(false)
+  }, [profile, session, familyId, childId, today, checkArmorStreak])
+
+  // ── Verse card scroll-into-view ─────────────────────────────────
+  const verseCardRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (selectedPiece && verseCardRef.current) {
+      // Small delay so the verse card renders before scrolling
+      setTimeout(() => verseCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100)
+    }
+  }, [selectedPiece])
 
   // ── Screen flash on equip ──────────────────────────────────────
   const flashContainerRef = useRef<HTMLDivElement>(null)
@@ -510,7 +940,7 @@ export default function MyAvatarPage() {
     setParticles({ x: window.innerWidth / 2, y: window.innerHeight / 3 })
     setTimeout(() => setParticles(null), 600)
 
-    // Screen flash
+    // Screen flash + subtle camera shake
     const container = flashContainerRef.current
     if (container) {
       const flash = document.createElement('div')
@@ -524,6 +954,26 @@ export default function MyAvatarPage() {
       `
       container.appendChild(flash)
       setTimeout(() => flash.remove(), 600)
+
+      // Subtle camera shake — 2px random offset for 200ms
+      const el = container
+      const origTransform = el.style.transform
+      let shakeFrame = 0
+      const shakeStart = performance.now()
+      function shake(now: number) {
+        const elapsed = now - shakeStart
+        if (elapsed > 200) {
+          el.style.transform = origTransform
+          return
+        }
+        const intensity = 2 * (1 - elapsed / 200)
+        const dx = (Math.random() - 0.5) * intensity
+        const dy = (Math.random() - 0.5) * intensity
+        el.style.transform = `translate(${dx}px, ${dy}px)`
+        shakeFrame = requestAnimationFrame(shake)
+      }
+      shakeFrame = requestAnimationFrame(shake)
+      setTimeout(() => cancelAnimationFrame(shakeFrame), 250)
     }
   }, [isLincoln])
 
@@ -531,26 +981,222 @@ export default function MyAvatarPage() {
     setAnimateUnequipId(null)
   }, [])
 
-  // ── Computed values ────────────────────────────────────────────
-  const appliedPieces = session?.appliedPieces ?? []
-  const appliedVoxel = sessionToVoxelPieces(appliedPieces)
-  const unlockedVoxel = profile ? getUnlockedVoxelPieces(profile) : []
-  const allEarnedApplied = unlockedVoxel.length > 0 && unlockedVoxel.every((v) => appliedVoxel.includes(v))
+  // ── Computed values (unified via getDailyArmorStatus) ────────────
+  const appliedPieces = Array.isArray(session?.appliedPieces) ? session.appliedPieces : []
+  const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
+  const unlockedVoxel = profile ? getVisiblePieces(profile) : []
+  const armorStatus = profile ? getDailyArmorStatusFromSession(profile, session) : null
+  const allEarnedApplied = armorStatus?.isSuitedUp ?? false
   const nextUnlock = profile ? getNextUnlock(profile) : null
   const allSixUnlocked = unlockedVoxel.length === 6
+  const nextUnlockProgress = (() => {
+    if (!profile || !nextUnlock) return 0
+    const nextIdx = VOXEL_ARMOR_PIECES.findIndex((piece) => piece.id === nextUnlock.piece.id)
+    const prevThreshold = nextIdx > 0 ? XP_THRESHOLDS[VOXEL_ARMOR_PIECES[nextIdx - 1].id] : 0
+    const nextThreshold = XP_THRESHOLDS[nextUnlock.piece.id]
+    const unlockRange = Math.max(nextThreshold - prevThreshold, 1)
+    const unlockProgress = profile.totalXp - prevThreshold
+    return Math.min(Math.max((unlockProgress / unlockRange) * 100, 0), 100)
+  })()
 
-  // Calculate XP progress within the current tier range
+  // Always compute display tier from totalXp so it stays honest (not stale stored value).
   const currentTierName = profile ? calculateTier(profile.totalXp) : 'WOOD'
-  const tierEntries = Object.entries(TIERS)
-  const currentTierIdx = tierEntries.findIndex(([k]) => k === currentTierName)
-  const tierMinXp = TIERS[currentTierName]?.minXp ?? 0
-  const nextTierEntry = currentTierIdx < tierEntries.length - 1 ? tierEntries[currentTierIdx + 1] : null
-  const tierMaxXp = nextTierEntry ? nextTierEntry[1].minXp : tierMinXp + 1000
-  const tierRange = tierMaxXp - tierMinXp
-  const xpInTier = profile ? profile.totalXp - tierMinXp : 0
-  const tierProgress = tierRange > 0 ? Math.min((xpInTier / tierRange) * 100, 100) : 100
+  const forgedCount = armorStatus?.gateTotal ?? 0
+  const nextForgeAction = profile ? getNextForgeAction(profile) : null
 
+  // Show tier reveal banner when active tier just unlocked and no pieces forged in it yet
+  const activeForgeTierComputed = profile ? getActiveForgeTier(profile) : 'wood'
+  const showTierRevealBanner = (() => {
+    if (!profile || activeForgeTierComputed === 'wood') return false
+    const unlockedTiers = deriveUnlockedTiersFromForged(profile)
+    if (!unlockedTiers.includes(activeForgeTierComputed as ArmorTier)) return false
+    const forgedInActive = getForgedPiecesForTier(profile, activeForgeTierComputed)
+    return forgedInActive.length === 0
+  })()
 
+  const nextRecommendedAction: NextRecommendedAction = (() => {
+    // All gate-required pieces equipped → ready to go
+    if (allEarnedApplied && armorStatus?.hasForgedPieces) {
+      return { type: 'start_day', label: 'Start your day' }
+    }
+    // Forged pieces exist but not all equipped today → suit up
+    if (armorStatus && armorStatus.hasForgedPieces && !armorStatus.isSuitedUp) {
+      return { type: 'suit_up', label: 'Suit up' }
+    }
+    // Next forge action: show diamond cost / tier lock reason
+    if (nextForgeAction) {
+      if (nextForgeAction.tierLocked) {
+        return { type: 'earn_xp', label: nextForgeAction.lockReason }
+      }
+      if (nextForgeAction.canAfford) {
+        return { type: 'forge', label: `Forge ${nextForgeAction.piece.shortName} — ${nextForgeAction.diamondCost} ◆` }
+      }
+      const needed = nextForgeAction.diamondCost - (profile?.diamondBalance ?? 0)
+      return { type: 'earn_xp', label: `Earn ${needed} more ◆ to forge ${nextForgeAction.piece.shortName}` }
+    }
+    return { type: 'start_day', label: 'Start your day' }
+  })()
+
+  const mission: HeroMission = (() => {
+    if (!allEarnedApplied) {
+      return {
+        icon: '⚡',
+        title: "Today's Mission",
+        text: getMorningSuitUpMessage(),
+        cta: 'Suit Up & Begin',
+        action: () => {
+          document.getElementById('hero-hub-customize')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        },
+      }
+    }
+    if (weekData?.conundrum && !weekData.conundrum.answered) {
+      return {
+        icon: '🤔',
+        title: "Today's Mission",
+        text: `${weekData.conundrum.title} — the village needs your wisdom.`,
+        cta: 'Join the Discussion',
+        action: () => navigate('/today#conundrum'),
+      }
+    }
+    if (weekData?.chapterQuestion && !weekData.chapterQuestion.answered) {
+      return {
+        icon: '📖',
+        title: "Today's Mission",
+        text: 'A new chapter awaits in Stonebridge.',
+        cta: 'Read & Discuss',
+        action: () => navigate('/today#chapter'),
+      }
+    }
+    return {
+      icon: '⚔️',
+      title: 'Hero Ready',
+      text: 'Your armor is on. The village is counting on you.',
+      cta: 'Start Your Day',
+      action: () => navigate('/today'),
+    }
+  })()
+
+  // ── Screenshot capture ──────────────────────────────────────────
+  const playShutterSound = useCallback(() => {
+    try {
+      const ctx = new AudioContext()
+      const bufferSize = ctx.sampleRate * 0.1 // 100ms
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+      const data = buffer.getChannelData(0)
+      for (let i = 0; i < bufferSize; i++) {
+        const t = i / bufferSize
+        data[i] = (Math.random() * 2 - 1) * Math.max(0, 1 - t * 6) * 0.3
+      }
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'highpass'
+      filter.frequency.value = 2000
+      source.connect(filter)
+      filter.connect(ctx.destination)
+      source.start()
+    } catch { /* Web Audio not available */ }
+  }, [])
+
+  const captureAvatar = useCallback(() => {
+    const rawDataUrl = voxelRef.current?.capture()
+    if (!rawDataUrl) return
+
+    // Composite the 3D canvas with a text overlay bar
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(img, 0, 0)
+
+      // Semi-transparent bar at the bottom
+      const barHeight = Math.round(img.height * 0.08)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)'
+      ctx.fillRect(0, img.height - barHeight, img.width, barHeight)
+
+      // Text
+      const fontSize = Math.round(barHeight * 0.45)
+      ctx.font = `bold ${fontSize}px "Press Start 2P", monospace`
+      ctx.fillStyle = '#ffffff'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      const tierLabel = profile ? getDisplayArmorTier(profile).toUpperCase() : ''
+      const xp = profile?.totalXp ?? 0
+      const name = activeChild?.name ?? ''
+      const text = `${name}  •  ${tierLabel} Tier  •  ${xp} XP`
+      ctx.fillText(text, img.width / 2, img.height - barHeight / 2, img.width - 20)
+
+      // Small watermark
+      const wmSize = Math.round(barHeight * 0.3)
+      ctx.font = `${wmSize}px monospace`
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)'
+      ctx.textAlign = 'right'
+      ctx.fillText('Armor of God', img.width - 8, img.height - barHeight - 6)
+
+      playShutterSound()
+      setScreenshotData(canvas.toDataURL('image/png'))
+      setShowScreenshotModal(true)
+    }
+    img.src = rawDataUrl
+  }, [profile, activeChild, playShutterSound])
+
+  const saveToDevice = useCallback((dataUrl: string) => {
+    const link = document.createElement('a')
+    link.download = `${activeChild?.name ?? 'avatar'}-armor-of-god.png`
+    link.href = dataUrl
+    link.click()
+  }, [activeChild])
+
+  const shareImage = useCallback(async (dataUrl: string) => {
+    const response = await fetch(dataUrl)
+    const blob = await response.blob()
+    const file = new File([blob], `${activeChild?.name ?? 'avatar'}-armor-of-god.png`, { type: 'image/png' })
+
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      await navigator.share({
+        title: `${activeChild?.name}'s Armor of God`,
+        text: `Check out ${activeChild?.name}'s armor! ${currentTierName} tier, ${profile?.totalXp ?? 0} XP!`,
+        files: [file],
+      })
+    } else {
+      saveToDevice(dataUrl)
+    }
+  }, [activeChild, profile, currentTierName, saveToDevice])
+
+  const saveToPortfolio = useCallback(async (dataUrl: string) => {
+    if (!familyId || !childId || !profile) return
+    setSavingToPortfolio(true)
+    try {
+      const response = await fetch(dataUrl)
+      const blob = await response.blob()
+
+      const artifact: Omit<Artifact, 'id'> = {
+        childId,
+        title: `${activeChild?.name ?? 'Avatar'} - ${currentTierName} Tier Armor`,
+        type: EvidenceType.Photo,
+        createdAt: new Date().toISOString(),
+        content: `Avatar screenshot: ${currentTierName} tier, ${profile.totalXp} XP, ${appliedVoxel.length}/${forgedCount} pieces equipped`,
+        tags: {
+          engineStage: EngineStage.Share,
+          domain: 'Character',
+          subjectBucket: SubjectBucket.Other,
+          location: 'Home',
+        },
+      }
+      const docRef = await addDoc(artifactsCollection(familyId), artifact)
+
+      const filename = generateFilename('png')
+      const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, blob, filename)
+      await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+
+      setShowScreenshotModal(false)
+      setScreenshotData(null)
+    } finally {
+      setSavingToPortfolio(false)
+    }
+  }, [familyId, childId, profile, activeChild, currentTierName, appliedVoxel.length, forgedCount])
 
   if (loading) {
     return (
@@ -567,40 +1213,109 @@ export default function MyAvatarPage() {
   const features = profile.characterFeatures ?? childDefaults
 
   return (
-    <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3 }}>
+    <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3, maxWidth: '100vw', overflowX: 'hidden', boxSizing: 'border-box' }}>
+      {/* ── Portal Transition Overlay ────────────────────────── */}
+      {portalPrompt && (
+        <Dialog
+          open
+          onClose={() => undefined}
+          maxWidth="xs"
+          fullWidth
+          PaperProps={{
+            sx: {
+              borderRadius: 3,
+              border: '2px solid rgba(155,89,182,0.5)',
+              bgcolor: isLincoln ? 'rgba(13,17,23,0.96)' : '#1a0033',
+              color: '#fff',
+              textAlign: 'center',
+              px: 1,
+            },
+          }}
+        >
+          <DialogContent sx={{ py: 3 }}>
+            <Box sx={{ fontFamily: '"Press Start 2P", monospace', fontSize: '12px', color: '#BB86FC', mb: 1.5 }}>
+              A portal opens to the next biome.
+            </Box>
+            <Box sx={{ fontFamily: '"Press Start 2P", monospace', fontSize: '10px', color: 'rgba(255,255,255,0.7)', mb: 3 }}>
+              Tap to continue your adventure.
+            </Box>
+            <Box
+              component="button"
+              onClick={() => {
+                if (familyId && childId) {
+                  const profileRef = doc(avatarProfilesCollection(familyId), childId)
+                  void safeUpdateProfile(profileRef, { lastPortalTier: portalPrompt.from })
+                }
+                setPortalTransition(portalPrompt)
+                setPortalPrompt(null)
+              }}
+              sx={{
+                border: 0,
+                px: 2.5,
+                py: 1.2,
+                borderRadius: 2,
+                cursor: 'pointer',
+                fontFamily: '"Press Start 2P", monospace',
+                fontSize: '10px',
+                color: '#fff',
+                bgcolor: '#7B1FA2',
+                boxShadow: '0 0 16px rgba(123,31,162,0.45)',
+                '&:hover': { bgcolor: '#9C27B0' },
+              }}
+            >
+              Enter portal
+            </Box>
+          </DialogContent>
+        </Dialog>
+      )}
+      {portalTransition && (
+        <PortalTransition
+          fromTier={portalTransition.from}
+          toTier={portalTransition.to}
+          onComplete={() => {
+            setPortalTransition(null)
+          }}
+        />
+      )}
       <Page>
-        {/* ── Child Switcher + XP Subtitle with Tier Badge ────── */}
-        <Box sx={{ textAlign: 'center', py: 1 }}>
+        {/* ── Hero Hub Header ────── */}
+        <Box sx={{ textAlign: 'center', pt: 1.5, pb: 0.5 }}>
           {/* Child switcher — only for parent profiles with multiple children */}
           {!isChildProfile && children.length > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', gap: '4px', mb: '6px' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', gap: '8px', mb: 2 }}>
               {children.map((child) => {
                 const isActive = child.id === childId
                 const childIsLincoln = child.name.toLowerCase() === 'lincoln'
+                const childAccent = childIsLincoln ? '#7EFC20' : '#E8A0BF'
                 return (
                   <Box
                     key={child.id}
                     component="button"
                     onClick={() => setActiveChildId(child.id)}
                     sx={{
-                      px: '14px',
-                      py: '5px',
+                      px: '20px',
+                      py: '10px',
                       border: isActive
-                        ? `2px solid ${childIsLincoln ? '#7EFC20' : '#E8A0BF'}`
-                        : '2px solid transparent',
-                      borderRadius: childIsLincoln ? '2px' : '14px',
-                      bgcolor: isActive
-                        ? (childIsLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.15)')
+                        ? `2px solid ${childAccent}`
+                        : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'}`,
+                      borderRadius: childIsLincoln ? '6px' : '20px',
+                      background: isActive
+                        ? (childIsLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
                         : 'transparent',
                       color: isActive
-                        ? (childIsLincoln ? '#7EFC20' : '#E8A0BF')
-                        : (isLincoln ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'),
+                        ? childAccent
+                        : (isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)'),
                       fontFamily: childIsLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                      fontSize: childIsLincoln ? '0.4rem' : '14px',
+                      fontSize: childIsLincoln ? '12px' : '16px',
                       fontWeight: isActive ? 700 : 400,
                       cursor: 'pointer',
                       transition: 'all 0.2s ease',
-                      background: 'none',
+                      boxShadow: isActive ? `0 0 12px ${childAccent}22` : 'none',
+                      '&:hover': {
+                        borderColor: childAccent,
+                        background: childIsLincoln ? 'rgba(126,252,32,0.08)' : 'rgba(232,160,191,0.08)',
+                      },
+                      '&:active': { transform: 'scale(0.96)' },
                     }}
                   >
                     {child.name}
@@ -609,528 +1324,297 @@ export default function MyAvatarPage() {
               })}
             </Box>
           )}
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', mb: '4px' }}>
-            {/* Show name only when switcher is not visible (child profiles or single child) */}
-            {(isChildProfile || children.length <= 1) && (
-              <Typography
-                sx={{
-                  fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                  fontSize: isLincoln ? '0.45rem' : '14px',
-                  color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)',
-                }}
-              >
-                {activeChild?.name}
-              </Typography>
-            )}
-            <Box
-              component="span"
-              sx={{
-                fontFamily: 'monospace',
-                fontSize: '12px',
-                px: '8px',
-                py: '2px',
-                borderRadius: '4px',
-                background: getTierBadgeColor(calculateTier(profile.totalXp)),
-                color: getTierTextColor(calculateTier(profile.totalXp)),
-                fontWeight: 500,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-              }}
-            >
-              {calculateTier(profile.totalXp)}
+
+          <Box
+            sx={{
+              mx: 1,
+              px: 2,
+              py: 1.5,
+              borderRadius: isLincoln ? '8px' : '16px',
+              border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.14)' : 'rgba(232,160,191,0.2)'}`,
+              background: isLincoln ? 'rgba(14,20,28,0.9)' : 'rgba(255,245,251,0.9)',
+            }}
+          >
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
+              <Box sx={{ fontFamily: titleFont, fontSize: isLincoln ? '14px' : '18px', fontWeight: 700 }}>
+                Hero Hub
+              </Box>
+              <Box sx={{ fontFamily: titleFont, fontSize: isLincoln ? '10px' : '14px', opacity: 0.72 }}>
+                {activeChild?.name ?? 'Hero'}
+              </Box>
             </Box>
-            <Typography
-              component="span"
-              sx={{
-                fontFamily: 'monospace',
-                fontSize: '13px',
-                color: '#4caf50',
-              }}
-            >
-              {profile.totalXp} XP
-            </Typography>
           </Box>
         </Box>
 
         {/* ── 3D Character Display ─────────────────────────────── */}
+        <AvatarCharacterDisplay
+          profile={profile}
+          isLincoln={isLincoln}
+          childId={childId}
+          children={children}
+          siblingProfile={siblingProfile}
+          features={features}
+          ageGroup={ageGroup}
+          appliedVoxel={appliedVoxel}
+          brothersMode={brothersMode}
+          onBrothersModeToggle={() => setBrothersMode((prev) => !prev)}
+          bgMode={bgMode}
+          onBgToggle={handleBackgroundToggle}
+          activePoseId={activePoseId}
+          onPoseChange={setActivePoseId}
+          voxelRef={voxelRef}
+          flashContainerRef={flashContainerRef}
+          onCapture={captureAvatar}
+          accentColor={accentColor}
+          animateEquipId={animateEquipId}
+          animateUnequipId={animateUnequipId}
+          onEquipAnimDone={handleEquipAnimDone}
+          onUnequipAnimDone={handleUnequipAnimDone}
+          onTierUpStart={() => setCeremonyActive(true)}
+          proportions={localProportions}
+          onEditCharacter={handleTunerToggle}
+          tunerOpen={tunerOpen}
+          heroDebugEnabled={heroDebugEnabled}
+          heroAnimationTuning={heroAnimationTuning}
+          onHeroAnimationTuningChange={setHeroAnimationTuning}
+          armorDebugEnabled={armorDebugEnabled}
+          armorDebugValues={armorDebugValues}
+          onArmorDebugChange={setArmorDebugValues}
+          previewTier={previewTier}
+          onTierUp={async (_oldTier, newTier) => {
+            setCeremonyActive(false)
+            if (!familyId || !childId) return
+            const profileRef = doc(avatarProfilesCollection(familyId), childId)
+            await safeUpdateProfile(profileRef, {
+              equippedPieces: [],
+              currentTier: newTier.toLowerCase(),
+              pendingTierUpgrade: deleteField(),
+            } as Record<string, unknown>)
+            const docId = dailyArmorSessionDocId(childId, today)
+            const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+            await updateDoc(sessionRef, {
+              appliedPieces: [],
+              manuallyUnequipped: [],
+              completedAt: deleteField(),
+            })
+          }}
+        />
+
+        <HeroMissionCard mission={mission} isLincoln={isLincoln} />
+        <StonebridgePreviewCard
+          isLincoln={isLincoln}
+          weekData={{
+            weekNumber: weekData?.weekNumber,
+            chapterTitle: weekData?.chapterTitle,
+            chapterIntro: weekData?.chapterIntro,
+            conundrumTitle: weekData?.conundrum?.title,
+          }}
+        />
         <Box
-          ref={flashContainerRef}
           sx={{
-            mb: 1.5,
-            position: 'relative',
-            '@keyframes flashFade': {
-              '0%': { opacity: 1 },
-              '100%': { opacity: 0 },
-            },
+            mx: 1,
+            mt: 1,
+            mb: 1,
+            px: 1.5,
+            py: 1,
+            borderRadius: isLincoln ? '6px' : '12px',
+            border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.16)' : 'rgba(232,160,191,0.2)'}`,
+            background: isLincoln ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.6)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 1,
+            overflowX: 'auto',
+            whiteSpace: 'nowrap',
           }}
         >
-          <VoxelCharacter
-            features={features}
-            ageGroup={ageGroup}
-            equippedPieces={appliedVoxel}
-            totalXp={profile.totalXp}
-            animateEquipPiece={animateEquipId}
-            animateUnequipPiece={animateUnequipId}
-            onEquipAnimDone={handleEquipAnimDone}
-            onUnequipAnimDone={handleUnequipAnimDone}
-            photoUrl={profile.photoUrl}
-            activePoseId={activePoseId}
-            onPoseComplete={() => setActivePoseId(null)}
-            onSwipePose={(poseId) => setActivePoseId(poseId)}
-            onTierUpStart={() => setCeremonyActive(true)}
-            onTierUp={async (_oldTier, newTier) => {
-              setCeremonyActive(false)
-              if (!familyId || !childId) return
-              // Reset equipped pieces for the new tier and clear pendingTierUpgrade
-              const profileRef = doc(avatarProfilesCollection(familyId), childId)
-              await updateDoc(profileRef, {
-                equippedPieces: [],
-                currentTier: newTier.toLowerCase(),
-                pendingTierUpgrade: deleteField(),
-                updatedAt: new Date().toISOString(),
-              })
-              // Clear today's session applied pieces
-              const docId = dailyArmorSessionDocId(childId, today)
-              const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
-              await updateDoc(sessionRef, {
-                appliedPieces: [],
-                manuallyUnequipped: [],
-                completedAt: deleteField(),
-              })
-            }}
-          />
-          <PoseButtons
-            onPose={(poseId) => setActivePoseId(poseId)}
-            currentPose={activePoseId}
-          />
+          <Box sx={{ fontFamily: titleFont, fontSize: isLincoln ? '10px' : '14px' }}>
+            ◆ {optimisticDiamondBalance ?? profile.diamondBalance ?? 0}
+          </Box>
+          <Box sx={{ fontFamily: titleFont, fontSize: isLincoln ? '10px' : '14px' }}>
+            XP {displayXp}
+          </Box>
+          <Box sx={{ fontFamily: titleFont, fontSize: isLincoln ? '10px' : '14px' }}>
+            {currentTierName} tier
+          </Box>
         </Box>
 
-        {/* ── Armor status text ────────────────────────────────── */}
-        {allEarnedApplied && unlockedVoxel.length > 0 ? (
-          <Box sx={{ textAlign: 'center', py: 1, mb: 1 }}>
-            <Typography
-              sx={{
-                fontFamily: titleFont,
-                fontSize: isLincoln ? '0.65rem' : '22px',
-                fontWeight: 700,
-                color: isLincoln ? '#FFD700' : '#9C27B0',
-              }}
-            >
-              {allSixUnlocked
-                ? 'Full armor on! Ready for today.'
-                : `${unlockedVoxel.length} of 6 ${currentTierName.toLowerCase()} pieces equipped — keep going!`}
-            </Typography>
+        {/* ── XP + Diamond HUD ────────────────────────────────── */}
+        {familyId && childId && (
+          <Box sx={{ mx: 2, mb: 1 }}>
+            <XpDiamondBar
+              familyId={familyId}
+              childId={childId}
+              diamondBalanceOverride={optimisticDiamondBalance}
+            />
           </Box>
-        ) : unlockedVoxel.length > 0 && appliedVoxel.length < unlockedVoxel.length ? (
-          <Box sx={{ textAlign: 'center', py: 1, mb: 1 }}>
-            <Typography
-              sx={{
-                fontFamily: titleFont,
-                fontSize: isLincoln ? '0.5rem' : '18px',
-                fontWeight: 600,
-                color: isLincoln ? '#aaa' : 'text.secondary',
-              }}
-            >
-              {`${appliedVoxel.length} of 6 ${currentTierName.toLowerCase()} pieces`}
-            </Typography>
-          </Box>
-        ) : (
-          <Box sx={{ mb: 2, px: 1 }}>
-            {!allSixUnlocked && nextUnlock ? (
-              <>
-                <Typography
-                  sx={{
-                    display: 'block',
-                    mb: 0.75,
-                    color: isLincoln ? '#aaa' : 'text.primary',
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.38rem' : '15px',
-                    fontWeight: 500,
-                  }}
-                >
-                  Next: {nextUnlock.piece.name} — {nextUnlock.xpNeeded} XP away
-                </Typography>
-                <LinearProgress
-                  variant="determinate"
-                  value={tierProgress}
-                  sx={{
-                    height: 10,
-                    borderRadius: isLincoln ? 0 : 5,
-                    bgcolor: isLincoln ? '#222' : '#eee',
-                    '& .MuiLinearProgress-bar': {
-                      bgcolor: getTierTextColor(currentTierName),
-                      borderRadius: isLincoln ? 0 : 5,
-                    },
-                  }}
-                />
-              </>
-            ) : allSixUnlocked ? (
-              <Typography
-                sx={{
-                  textAlign: 'center',
-                  fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.4rem' : '0.85rem',
-                  color: accentColor,
-                  fontWeight: 700,
-                }}
-              >
-                Full set unlocked!
-              </Typography>
-            ) : null}
-          </Box>
+        )}
+        <Box id="hero-hub-customize" sx={{ mx: 2, my: 1.5, textAlign: 'center', opacity: 0.7, fontFamily: titleFont, fontSize: isLincoln ? '10px' : '14px' }}>
+          ── Customize ──
+        </Box>
+
+        {/* ── Morning reset + Armor status + Suit Up ────────────── */}
+        <ArmorSuitUpPanel
+          profile={profile}
+          morningReset={morningReset}
+          unlockedVoxel={unlockedVoxel}
+          appliedVoxel={appliedVoxel}
+          allEarnedApplied={allEarnedApplied}
+          allSixUnlocked={allSixUnlocked}
+          forgedCount={forgedCount}
+          nextUnlock={nextUnlock}
+          currentTierName={currentTierName}
+          nextUnlockProgress={nextUnlockProgress}
+          isLincoln={isLincoln}
+          isChildProfile={isChildProfile}
+          accentColor={accentColor}
+          nextRecommendedAction={nextRecommendedAction}
+          onSuitUpAll={suitUpAll}
+          onForgeNext={() => {
+            if (!nextForgeAction) return
+            setSelectedPiece(nextForgeAction.piece)
+          }}
+          onStartDay={() => navigate('/today')}
+        />
+
+        {/* ── New tier reveal banner ─────────────────────────── */}
+        {showTierRevealBanner && (
+          <TierRevealBanner tierName={activeForgeTierComputed} isLincoln={isLincoln} />
         )}
 
         {/* ── Armor Piece Cards (horizontal scroll) ────────────── */}
-        <Box
-          ref={cardScrollRef}
-          sx={{
-            overflowX: 'auto',
-            display: 'flex',
-            gap: '12px',
-            pb: 1,
-            px: '16px',
-            scrollSnapType: 'x mandatory',
-            scrollbarWidth: 'thin',
-            '&::-webkit-scrollbar': { height: 4 },
-            '&::-webkit-scrollbar-thumb': { bgcolor: isLincoln ? '#333' : '#ddd', borderRadius: 2 },
-          }}
-        >
-          {VOXEL_ARMOR_PIECES.map((piece) => {
-            const isUnlocked = profile.totalXp >= XP_THRESHOLDS[piece.id]
-            const armorPieceId = VOXEL_TO_ARMOR_PIECE[piece.id]
-            const isApplied = armorPieceId ? appliedPieces.includes(armorPieceId) : false
-            const isSelected = selectedPiece?.id === piece.id
-
-            return (
-              <Box
-                key={piece.id}
-                onClick={() => handlePieceTap(piece)}
-                sx={{
-                  minWidth: 130,
-                  maxWidth: 130,
-                  height: 160,
-                  scrollSnapAlign: 'start',
-                  p: '12px 8px',
-                  borderRadius: isLincoln ? '2px' : '12px',
-                  border: isSelected
-                    ? `2px solid ${accentColor}`
-                    : isApplied
-                      ? `2px solid ${accentColor}`
-                      : isUnlocked
-                        ? `1.5px solid ${isLincoln ? 'rgba(126,252,32,0.4)' : 'rgba(232,160,191,0.4)'}`
-                        : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
-                  bgcolor: isApplied
-                    ? (isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.15)')
-                    : isUnlocked
-                      ? (isLincoln ? 'rgba(126,252,32,0.06)' : 'rgba(232,160,191,0.06)')
-                      : (isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'),
-                  cursor: 'pointer',
-                  opacity: isUnlocked ? 1 : 0.45,
-                  transition: 'all 0.2s ease',
-                  textAlign: 'center',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  position: 'relative',
-                  flexShrink: 0,
-                }}
-              >
-                {/* Equipped badge */}
-                {isApplied && (
-                  <Box sx={{
-                    position: 'absolute', top: 8, right: 8,
-                    width: 22, height: 22, borderRadius: '50%',
-                    bgcolor: isLincoln ? '#7EFC20' : '#E8A0BF',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>
-                    <Typography sx={{ color: isLincoln ? '#000' : '#fff', fontSize: 14, fontWeight: 500, lineHeight: 1 }}>
-                      ✓
-                    </Typography>
-                  </Box>
-                )}
-
-                {/* Lock badge */}
-                {!isUnlocked && (
-                  <Box sx={{
-                    position: 'absolute', top: 8, right: 8,
-                    fontSize: 16, opacity: 0.5,
-                  }}>
-                    🔒
-                  </Box>
-                )}
-
-                {/* SVG icon */}
-                <Box sx={{ width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <ArmorIcon
-                    pieceId={armorPieceId}
-                    size={48}
-                    tier={(profile.currentTier ?? 'stone') as ArmorTierColor}
-                    locked={!isUnlocked}
-                  />
-                </Box>
-
-                {/* Piece name */}
-                <Typography
-                  sx={{
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                    fontSize: isLincoln ? '0.28rem' : '13px',
-                    fontWeight: 500,
-                    color: isUnlocked ? textColor : (isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'),
-                    lineHeight: 1.2,
-                    textAlign: 'center',
-                  }}
-                >
-                  {piece.shortName}
-                </Typography>
-
-                {/* Status text */}
-                <Typography
-                  sx={{
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.22rem' : '11px',
-                    fontWeight: isApplied ? 600 : 400,
-                    color: isApplied
-                      ? '#4caf50'
-                      : isUnlocked
-                        ? '#FFA726'
-                        : (isLincoln ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'),
-                  }}
-                >
-                  {isApplied
-                    ? '✓ Equipped'
-                    : isUnlocked
-                      ? 'Tap to equip'
-                      : `${XP_THRESHOLDS[piece.id] - profile.totalXp > 0 ? `${XP_THRESHOLDS[piece.id] - profile.totalXp} XP away` : `${XP_THRESHOLDS[piece.id]} XP`}`}
-                </Typography>
-              </Box>
-            )
-          })}
-        </Box>
+        <SectionErrorBoundary section="armor gallery">
+          <ArmorPieceGallery
+            profile={profile}
+            appliedPieces={appliedPieces}
+            selectedPiece={selectedPiece}
+            activeForgeTier={getActiveForgeTier(profile)}
+            unlockedTiers={deriveUnlockedTiersFromForged(profile)}
+            isLincoln={isLincoln}
+            accentColor={accentColor}
+            textColor={textColor}
+            bgColor={bgColor}
+            onPieceTap={handlePieceTap}
+            onViewingTierChange={setPreviewTier}
+          />
+        </SectionErrorBoundary>
 
         {/* ── Verse Card (for selected piece) ──────────────────── */}
-        {selectedPiece && (
-          <Box
-            sx={{
-              mt: 1.5,
-              mx: 1,
-              p: '16px 20px',
-              bgcolor: isLincoln ? 'rgba(26, 26, 46, 0.95)' : 'rgba(255, 254, 249, 0.95)',
-              border: `1.5px solid ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(232,160,191,0.3)'}`,
-              borderRadius: '12px',
-              position: 'relative',
-              animation: 'slideUp 0.3s ease-out',
-              '@keyframes slideUp': {
-                '0%': { opacity: 0, transform: 'translateY(8px)' },
-                '100%': { opacity: 1, transform: 'translateY(0)' },
-              },
-            }}
-          >
-            {/* Speaker button */}
+        {selectedPiece && (() => {
+          const verseTier = selectedTier ?? getActiveForgeTier(profile)
+          return (
+            <div ref={verseCardRef}>
+              <ArmorVerseCard
+                piece={selectedPiece}
+                pieceState={getArmorPieceState({
+                  profile,
+                  pieceId: selectedPiece.id,
+                  activeForgeTier: verseTier,
+                  appliedTodayVoxel: appliedVoxel,
+                })}
+                forgeCost={getForgeCost(verseTier, selectedPiece.id)}
+                isLincoln={isLincoln}
+                accentColor={accentColor}
+                textColor={textColor}
+                lockReason={getPieceLockReason(profile, verseTier)}
+                onEquip={() => void handleApplyPiece(selectedPiece.id)}
+                onForge={(verseResponse, verseResponseAudio) => handleForgePiece(selectedPiece.id, verseResponse, verseResponseAudio)}
+                onClose={() => { setSelectedPiece(null); setSelectedTier(null) }}
+              />
+            </div>
+          )
+        })()}
+
+        {/* ── Customizer (outfit, dye, accessories, emblem, crest, skin, photo) ── */}
+        {isChildProfile ? (
+          <Box sx={{ px: 2, mt: 1 }}>
             <Box
               component="button"
-              onClick={(e: React.MouseEvent) => {
-                e.stopPropagation()
-                speakVerse(selectedPiece.name, selectedPiece.verseText)
-              }}
+              onClick={() => setChildCustomizerExpanded((prev) => !prev)}
               sx={{
-                position: 'absolute', top: 8, left: 12,
-                background: isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.15)',
-                border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(232,160,191,0.3)'}`,
-                borderRadius: '50%',
-                width: 32, height: 32,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', p: 0, color: accentColor,
-              }}
-              aria-label="Read verse aloud"
-            >
-              <VolumeUpIcon sx={{ fontSize: 18 }} />
-            </Box>
-
-            {/* Close button */}
-            <Box
-              component="button"
-              onClick={(e: React.MouseEvent) => { e.stopPropagation(); setSelectedPiece(null) }}
-              sx={{
-                position: 'absolute', top: 8, right: 12,
-                background: 'none', border: 'none',
-                color: isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.3)',
-                fontSize: 18, cursor: 'pointer', p: '4px',
+                width: '100%',
+                py: 1.25,
+                borderRadius: isLincoln ? '6px' : '14px',
+                border: `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
+                background: isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                color: isLincoln ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.75)',
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '12px' : '15px',
+                fontWeight: 600,
+                cursor: 'pointer',
               }}
             >
-              ✕
+              {childCustomizerExpanded ? 'Hide customize options' : 'Customize warrior'}
             </Box>
-
-            {/* Piece name */}
-            <Typography sx={{
-              fontFamily: titleFont,
-              fontSize: isLincoln ? '0.55rem' : '16px',
-              fontWeight: 500,
-              color: accentColor,
-              mb: 0.5,
-            }}>
-              {selectedPiece.name}
-            </Typography>
-
-            {/* Verse reference */}
-            <Typography sx={{
-              fontFamily: 'monospace',
-              fontSize: isLincoln ? '0.35rem' : '12px',
-              color: isLincoln ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)',
-              mb: 1.25,
-            }}>
-              {selectedPiece.verse}
-            </Typography>
-
-            {/* Verse text */}
-            <Typography sx={{
-              fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-              fontSize: isLincoln ? '0.45rem' : '15px',
-              color: textColor,
-              lineHeight: 1.6,
-              fontStyle: 'italic',
-            }}>
-              &ldquo;{selectedPiece.verseText}&rdquo;
-            </Typography>
-
-            {/* Equip button — only for unlocked, unequipped pieces */}
-            {profile.totalXp >= XP_THRESHOLDS[selectedPiece.id] && (
-              <Button
-                variant="contained"
-                fullWidth
-                onClick={() => {
-                  void handleApplyPiece(selectedPiece.id)
-                  setSelectedPiece(null)
+            {childCustomizerExpanded && (
+              <AvatarCustomizer
+                profile={profile}
+                familyId={familyId}
+                childId={childId}
+                childName={activeChild?.name}
+                isLincoln={isLincoln}
+                ageGroup={ageGroup}
+                appliedPieces={appliedPieces}
+                unlockedVoxel={unlockedVoxel}
+                appliedVoxel={appliedVoxel}
+                currentTierName={currentTierName}
+                accentColor={accentColor}
+                textColor={textColor}
+                onOutfitColorChange={handleOutfitColorChange}
+                onArmorDyeChange={handleArmorDyeChange}
+                onArmorDyeReset={handleArmorDyeReset}
+                onEmblemChange={handleEmblemChange}
+                onCrestChange={handleCrestChange}
+                onAccessoryToggle={handleAccessoryToggle}
+                tunerOpen={tunerOpen}
+                tunerProportions={localProportions}
+                tunerOutfitColors={{
+                  shirtColor: profile.customization?.shirtColor ?? (isLincoln ? '#CC5500' : '#E8A838'),
+                  pantsColor: profile.customization?.pantsColor ?? (isLincoln ? '#2A3A52' : '#C4B998'),
+                  shoeColor: profile.customization?.shoeColor ?? '#3D2B1F',
+                  capeColor: profile.customization?.capeColor ?? (isLincoln ? '#8B0000' : '#2255AA'),
                 }}
-                sx={{
-                  mt: 2,
-                  bgcolor: accentColor,
-                  color: isLincoln ? '#000' : '#fff',
-                  fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.45rem' : '16px',
-                  fontWeight: 700,
-                  py: 1.25,
-                  borderRadius: isLincoln ? 0 : 3,
-                  '&:hover': { bgcolor: accentColor, opacity: 0.85 },
-                }}
-              >
-                Put it on!
-              </Button>
+                onTunerProportionsChange={handleTunerProportionsChange}
+                onTunerCapeColorChange={handleTunerCapeColorChange}
+                onTunerDone={handleTunerDone}
+                onTunerReset={handleTunerReset}
+              />
             )}
           </Box>
-        )}
-
-        {/* ── Photo Upload Section ──────────────────────────────── */}
-        <Box
-          sx={{
-            mt: 3,
-            p: 2,
-            borderRadius: isLincoln ? 0 : 3,
-            border: `2px solid ${isLincoln ? '#333' : '#e0d0f0'}`,
-            bgcolor: isLincoln ? 'rgba(255,255,255,0.03)' : 'rgba(232,160,191,0.06)',
-          }}
-        >
-          <input
-            ref={photoInputRef}
-            type="file"
-            accept="image/*"
-            style={{ display: 'none' }}
-            onChange={handlePhotoSelect}
+        ) : (
+          <AvatarCustomizer
+            profile={profile}
+            familyId={familyId}
+            childId={childId}
+            childName={activeChild?.name}
+            isLincoln={isLincoln}
+            ageGroup={ageGroup}
+            appliedPieces={appliedPieces}
+            unlockedVoxel={unlockedVoxel}
+            appliedVoxel={appliedVoxel}
+            currentTierName={currentTierName}
+            accentColor={accentColor}
+            textColor={textColor}
+            onOutfitColorChange={handleOutfitColorChange}
+            onArmorDyeChange={handleArmorDyeChange}
+            onArmorDyeReset={handleArmorDyeReset}
+            onEmblemChange={handleEmblemChange}
+            onCrestChange={handleCrestChange}
+            onAccessoryToggle={handleAccessoryToggle}
+            tunerOpen={tunerOpen}
+            tunerProportions={localProportions}
+            tunerOutfitColors={{
+              shirtColor: profile.customization?.shirtColor ?? (isLincoln ? '#CC5500' : '#E8A838'),
+              pantsColor: profile.customization?.pantsColor ?? (isLincoln ? '#2A3A52' : '#C4B998'),
+              shoeColor: profile.customization?.shoeColor ?? '#3D2B1F',
+              capeColor: profile.customization?.capeColor ?? (isLincoln ? '#8B0000' : '#2255AA'),
+            }}
+            onTunerProportionsChange={handleTunerProportionsChange}
+            onTunerCapeColorChange={handleTunerCapeColorChange}
+            onTunerDone={handleTunerDone}
+            onTunerReset={handleTunerReset}
           />
-
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-            <CameraAltIcon sx={{ color: accentColor, fontSize: 20 }} />
-            <Typography
-              sx={{
-                fontFamily: titleFont,
-                fontSize: isLincoln ? '0.42rem' : '0.95rem',
-                fontWeight: 600,
-                color: accentColor,
-              }}
-            >
-              Transform YOUR Photo
-            </Typography>
-          </Box>
-
-          {!photoPreviewUrl ? (
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<CameraAltIcon />}
-              onClick={() => photoInputRef.current?.click()}
-              sx={{
-                borderColor: accentColor,
-                color: accentColor,
-                borderRadius: isLincoln ? 0 : 2,
-                fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                fontSize: isLincoln ? '0.38rem' : '0.85rem',
-              }}
-            >
-              {profile.photoUrl ? 'Change Photo' : 'Upload a Photo'}
-            </Button>
-          ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <Box
-                component="img"
-                src={photoPreviewUrl}
-                alt="Preview"
-                sx={{
-                  width: 120,
-                  height: 120,
-                  objectFit: 'cover',
-                  borderRadius: isLincoln ? 0 : 2,
-                  border: `2px solid ${accentColor}`,
-                }}
-              />
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button
-                  variant="contained"
-                  size="small"
-                  onClick={() => void handlePhotoTransform()}
-                  disabled={photoExtracting}
-                  sx={{
-                    bgcolor: accentColor,
-                    color: isLincoln ? '#000' : '#fff',
-                    borderRadius: isLincoln ? 0 : 2,
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.35rem' : '0.85rem',
-                    '&:hover': { bgcolor: accentColor, opacity: 0.85 },
-                  }}
-                >
-                  {photoExtracting ? 'Extracting...' : 'Transform!'}
-                </Button>
-                <Button
-                  variant="text"
-                  size="small"
-                  onClick={() => { setPhotoPreviewUrl(null); setPhotoError(null) }}
-                  sx={{
-                    color: isLincoln ? '#666' : '#aaa',
-                    fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
-                    fontSize: isLincoln ? '0.35rem' : '0.85rem',
-                  }}
-                >
-                  Cancel
-                </Button>
-              </Box>
-            </Box>
-          )}
-
-          {photoError && (
-            <Alert severity="error" sx={{ mt: 1, fontSize: '0.8rem' }}>
-              {photoError}
-            </Alert>
-          )}
-
-          {profile.characterFeatures && !photoPreviewUrl && (
-            <Typography
-              variant="caption"
-              sx={{ display: 'block', mt: 0.5, color: isLincoln ? '#555' : '#aaa', fontSize: '12px' }}
-            >
-              Character features extracted from photo — 3D character reflects your look
-            </Typography>
-          )}
-        </Box>
+        )}
       </Page>
 
       {/* Unequip dialog removed — tap toggles directly */}
@@ -1160,6 +1644,154 @@ export default function MyAvatarPage() {
         profile={profile}
         onDismiss={() => setTierCelebration(null)}
       />
+
+      {/* ── Tier-up ceremony (flash + banner + sound) ──────────── */}
+      <TierUpCeremony
+        active={!!ceremonyTier}
+        newTierName={ceremonyTier}
+        onComplete={handleCeremonyDone}
+      />
+
+      {/* ── Screenshot Preview Modal ────────────────────────────── */}
+      <Dialog
+        open={showScreenshotModal}
+        onClose={() => { setShowScreenshotModal(false); setScreenshotData(null) }}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: isLincoln ? '#0d1117' : '#faf5ef',
+            borderRadius: isLincoln ? '8px' : '20px',
+            border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(232,160,191,0.2)'}`,
+          },
+        }}
+      >
+        <DialogContent sx={{ p: 2, position: 'relative' }}>
+          {/* Close button */}
+          <Box
+            component="button"
+            onClick={() => { setShowScreenshotModal(false); setScreenshotData(null) }}
+            sx={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              background: 'none',
+              border: 'none',
+              color: isLincoln ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.25)',
+              fontSize: 22,
+              cursor: 'pointer',
+              zIndex: 1,
+              '&:hover': { color: isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)' },
+            }}
+          >
+            ✕
+          </Box>
+
+          {/* Preview image */}
+          {screenshotData && (
+            <Box
+              component="img"
+              src={screenshotData}
+              alt="Avatar screenshot"
+              sx={{
+                width: '100%',
+                borderRadius: isLincoln ? '6px' : '14px',
+                border: `1px solid ${isLincoln ? 'rgba(126,252,32,0.1)' : 'rgba(232,160,191,0.15)'}`,
+                mb: 2,
+              }}
+            />
+          )}
+
+          {/* Action buttons */}
+          <Box sx={{ display: 'flex', gap: 1.5, flexDirection: 'column' }}>
+            <Box
+              component="button"
+              onClick={() => screenshotData && saveToDevice(screenshotData)}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 1,
+                width: '100%',
+                py: 1.5,
+                borderRadius: isLincoln ? '6px' : '14px',
+                border: `2px solid ${accentColor}`,
+                background: isLincoln
+                  ? 'linear-gradient(135deg, rgba(126,252,32,0.12) 0%, rgba(126,252,32,0.06) 100%)'
+                  : 'linear-gradient(135deg, rgba(232,160,191,0.12) 0%, rgba(232,160,191,0.06) 100%)',
+                color: accentColor,
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '12px' : '16px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                minHeight: '48px',
+                '&:hover': { transform: 'translateY(-1px)', boxShadow: `0 4px 16px ${accentColor}33` },
+                '&:active': { transform: 'scale(0.96)' },
+              }}
+            >
+              <SaveAltIcon sx={{ fontSize: 20 }} />
+              Save to Device
+            </Box>
+
+            <Box
+              component="button"
+              onClick={() => screenshotData && void shareImage(screenshotData)}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 1,
+                width: '100%',
+                py: 1.5,
+                borderRadius: isLincoln ? '6px' : '14px',
+                border: `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`,
+                background: isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
+                color: isLincoln ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '12px' : '16px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                '&:hover': { borderColor: accentColor, color: accentColor },
+                '&:active': { transform: 'scale(0.96)' },
+              }}
+            >
+              <ShareIcon sx={{ fontSize: 20 }} />
+              Share
+            </Box>
+
+            <Box
+              component="button"
+              onClick={() => screenshotData && void saveToPortfolio(screenshotData)}
+              disabled={savingToPortfolio}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 1,
+                width: '100%',
+                py: 1.5,
+                borderRadius: isLincoln ? '6px' : '14px',
+                border: `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`,
+                background: isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
+                color: isLincoln ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '12px' : '16px',
+                fontWeight: 600,
+                cursor: savingToPortfolio ? 'default' : 'pointer',
+                opacity: savingToPortfolio ? 0.5 : 1,
+                transition: 'all 0.2s ease',
+                '&:hover': savingToPortfolio ? {} : { borderColor: accentColor, color: accentColor },
+                '&:active': savingToPortfolio ? {} : { transform: 'scale(0.96)' },
+              }}
+            >
+              <FolderIcon sx={{ fontSize: 20 }} />
+              {savingToPortfolio ? 'Saving...' : 'Save to Portfolio'}
+            </Box>
+          </Box>
+        </DialogContent>
+      </Dialog>
     </Box>
   )
 }

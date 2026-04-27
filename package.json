@@ -13,7 +13,8 @@
     "deploy": "npm run build && firebase deploy --except extensions",
     "deploy:hosting": "npm run build && firebase deploy --only hosting",
     "deploy:rules": "firebase deploy --only firestore:rules,storage",
-    "deploy:functions": "npm --prefix functions run lint && npm --prefix functions run build && firebase deploy --only functions"
+    "deploy:functions": "npm --prefix functions run lint && npm --prefix functions run build && firebase deploy --only functions",
+    "set:lincoln-level": "cross-env NODE_PATH=functions/node_modules tsx scripts/setLincolnPhonicsLevel.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -22,11 +23,11 @@
     "@mui/material": "^7.3.7",
     "date-fns": "^4.1.0",
     "firebase": "^12.9.0",
-    "html2canvas": "^1.4.1",
     "jspdf": "^4.2.0",
     "jszip": "^3.10.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.13.0",
     "three": "^0.128.0",
     "zod": "^4.3.6"
@@ -41,11 +42,14 @@
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.128.0",
     "@vitejs/plugin-react-swc": "^4.2.2",
+    "cross-env": "^10.1.0",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
+    "firebase-admin": "^13.8.0",
     "globals": "^16.5.0",
     "jsdom": "^27.0.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4",

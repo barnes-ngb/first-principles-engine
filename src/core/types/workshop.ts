@@ -150,6 +150,7 @@ export interface StoryPlayer {
   name: string
   avatarUrl?: string
   isCreator: boolean
+  isGuest?: boolean
 }
 
 export interface StoryChallenge {
@@ -457,10 +458,16 @@ export type GamePhase = (typeof GamePhase)[keyof typeof GamePhase]
 export const TurnPhase = {
   Roll: 'roll',
   Move: 'move',
+  SpecialMove: 'special-move',
   Card: 'card',
   Resolve: 'resolve',
 } as const
 export type TurnPhase = (typeof TurnPhase)[keyof typeof TurnPhase]
+
+export interface SpaceEffect {
+  type: 'forward' | 'backward' | 'teleport'
+  amount: number
+}
 
 export const GameType = {
   Board: 'board',

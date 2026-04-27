@@ -7,12 +7,14 @@ import {
   applySnapshotSuggestions,
   buildMinimumWinText,
   buildPlannerPrompt,
+  dateKeyForDayPlan,
   dayTotalMinutes,
   fillMissingDaysFromRoutine,
   generateDraftPlanFromInputs,
   parseAIResponse,
   planTotalMinutes,
   resetIdCounter,
+  WEEK_DAYS,
 } from './chatPlanner.logic'
 import type { PlanGeneratorInputs } from './chatPlanner.logic'
 
@@ -114,13 +116,15 @@ describe('generateDraftPlanFromInputs', () => {
     }
   })
 
-  it('generates daily micro reps for emerging skills', () => {
+  it('consolidates emerging skills into one daily item', () => {
     const plan = generateDraftPlanFromInputs(baseInputs)
     for (const day of plan.days) {
-      const microReps = day.items.filter((item) => item.title.includes('micro rep'))
-      // 2 emerging skills = 2 micro reps per day
-      expect(microReps).toHaveLength(2)
-      expect(microReps[0].estimatedMinutes).toBe(8)
+      const skillItems = day.items.filter((item) => item.title.includes('Skill practice'))
+      // 2 emerging skills = 1 consolidated item per day
+      expect(skillItems).toHaveLength(1)
+      expect(skillItems[0].estimatedMinutes).toBe(10) // 2 skills × 5min, capped at 15
+      expect(skillItems[0].skillTags).toHaveLength(2)
+      expect(skillItems[0].category).toBe('choose')
     }
   })
 
@@ -934,6 +938,25 @@ describe('buildPlannerPrompt size constraints', () => {
   })
 })
 
+describe('buildPlannerPrompt hard budget rule', () => {
+  it('emits a hard budget rule that forbids overflow plans', () => {
+    const prompt = buildPlannerPrompt(baseInputs)
+    expect(prompt).toContain('HARD BUDGET RULE')
+    expect(prompt).toMatch(/SUM of estimatedMinutes per day MUST be/)
+    expect(prompt).toContain('fewer-item plan that fits is ALWAYS better')
+  })
+
+  it('treats subject time defaults as totals per subject, not per item', () => {
+    const inputs: PlanGeneratorInputs = {
+      ...baseInputs,
+      subjectTimeDefaults: { Reading: 30 },
+    }
+    const prompt = buildPlannerPrompt(inputs)
+    expect(prompt).toContain('TOTAL minutes per subject per day')
+    expect(prompt).toContain('Do NOT add multiple items in the same subject')
+  })
+})
+
 describe('parseAIResponse — severely truncated JSON', () => {
   const makeResponse = (message: string): ChatResponse => ({
     message,
@@ -990,7 +1013,8 @@ describe('fillMissingDaysFromRoutine', () => {
       minimumWin: 'test',
     }
     const result = fillMissingDaysFromRoutine(plan, 'Handwriting — 20 min — LanguageArts', 2.5)
-    expect(result.days).toHaveLength(5)
+    expect(result.plan.days).toHaveLength(5)
+    expect(result.filledDays).toHaveLength(0)
   })
 
   it('fills missing days from routine text', () => {
@@ -1011,15 +1035,16 @@ describe('fillMissingDaysFromRoutine', () => {
       minimumWin: 'test',
     }
     const result = fillMissingDaysFromRoutine(plan, 'Handwriting — 20 min — LanguageArts', 2.5)
-    expect(result.days).toHaveLength(5)
+    expect(result.plan.days).toHaveLength(5)
+    expect(result.filledDays).toEqual(['Wednesday', 'Thursday', 'Friday'])
     // Monday/Tuesday should keep AI items
-    expect(result.days[0].items[0].title).toBe('AI item')
-    expect(result.days[1].items[0].title).toBe('AI item 2')
+    expect(result.plan.days[0].items[0].title).toBe('AI item')
+    expect(result.plan.days[1].items[0].title).toBe('AI item 2')
     // Wed/Thu/Fri should have routine items
-    expect(result.days[2].day).toBe('Wednesday')
-    expect(result.days[2].items[0].title).toBe('Handwriting')
-    expect(result.days[3].day).toBe('Thursday')
-    expect(result.days[4].day).toBe('Friday')
+    expect(result.plan.days[2].day).toBe('Wednesday')
+    expect(result.plan.days[2].items[0].title).toBe('Handwriting')
+    expect(result.plan.days[3].day).toBe('Thursday')
+    expect(result.plan.days[4].day).toBe('Friday')
   })
 
   it('returns plan unchanged when no routine provided', () => {
@@ -1029,7 +1054,8 @@ describe('fillMissingDaysFromRoutine', () => {
       minimumWin: 'test',
     }
     const result = fillMissingDaysFromRoutine(plan, undefined, 2.5)
-    expect(result.days).toHaveLength(1)
+    expect(result.plan.days).toHaveLength(1)
+    expect(result.filledDays).toHaveLength(0)
   })
 
   it('maintains weekday order after filling', () => {
@@ -1041,9 +1067,45 @@ describe('fillMissingDaysFromRoutine', () => {
       minimumWin: 'test',
     }
     const result = fillMissingDaysFromRoutine(plan, 'Math — 30 min — Math', 2.5)
-    expect(result.days).toHaveLength(5)
-    expect(result.days.map(d => d.day)).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])
+    expect(result.plan.days).toHaveLength(5)
+    expect(result.plan.days.map(d => d.day)).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])
     // Friday should still have the AI item
-    expect(result.days[4].items[0].title).toBe('Friday item')
+    expect(result.plan.days[4].items[0].title).toBe('Friday item')
+    expect(result.filledDays).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday'])
+  })
+})
+
+describe('dateKeyForDayPlan', () => {
+  it('returns Monday date from Sunday-based week start', () => {
+    expect(dateKeyForDayPlan('2026-04-05', 'Monday')).toBe('2026-04-06')
+  })
+
+  it('returns Friday date from Sunday-based week start', () => {
+    expect(dateKeyForDayPlan('2026-04-05', 'Friday')).toBe('2026-04-10')
+  })
+
+  it('returns correct dates for all 5 weekdays', () => {
+    const results = WEEK_DAYS.map((day) => dateKeyForDayPlan('2026-04-05', day))
+    expect(results).toEqual([
+      '2026-04-06',
+      '2026-04-07',
+      '2026-04-08',
+      '2026-04-09',
+      '2026-04-10',
+    ])
+  })
+
+  it('handles month boundary (March → April)', () => {
+    expect(dateKeyForDayPlan('2026-03-29', 'Friday')).toBe('2026-04-03')
+  })
+
+  it('handles year boundary (December → January)', () => {
+    expect(dateKeyForDayPlan('2025-12-28', 'Friday')).toBe('2026-01-02')
+  })
+
+  it('throws on invalid day name', () => {
+    expect(() => dateKeyForDayPlan('2026-04-05', 'Saturday' as typeof WEEK_DAYS[number])).toThrow(
+      /Invalid day/,
+    )
   })
 })

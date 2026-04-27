@@ -29,8 +29,26 @@ interface UseDayLogResult {
     theme?: string
     virtue?: string
     scriptureRef?: string
+    scriptureText?: string
     heartQuestion?: string
+    formationPrompt?: string
+    conundrum?: {
+      title: string
+      scenario: string
+      question: string
+      quickPicks?: string[]
+      lincolnPrompt: string
+      londonPrompt: string
+      virtueConnection: string
+      readingTieIn?: string
+      mathContext?: string
+      londonDrawingPrompt?: string
+      dadLabSuggestion?: string
+      discussed?: boolean
+      discussedAt?: string
+    }
   } | null
+  readAloudBookId: string | undefined
   snackMessage: { text: string; severity: 'success' | 'error' } | null
   setSnackMessage: React.Dispatch<
     React.SetStateAction<{ text: string; severity: 'success' | 'error' } | null>
@@ -56,11 +74,29 @@ export function useDayLog({
   }
 
   const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
+  const [readAloudBookId, setReadAloudBookId] = useState<string | undefined>()
   const [weekFocus, setWeekFocus] = useState<{
     theme?: string
     virtue?: string
     scriptureRef?: string
+    scriptureText?: string
     heartQuestion?: string
+    formationPrompt?: string
+    conundrum?: {
+      title: string
+      scenario: string
+      question: string
+      quickPicks?: string[]
+      lincolnPrompt: string
+      londonPrompt: string
+      virtueConnection: string
+      readingTieIn?: string
+      mathContext?: string
+      londonDrawingPrompt?: string
+      dadLabSuggestion?: string
+      discussed?: boolean
+      discussedAt?: string
+    }
   } | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
@@ -227,11 +263,16 @@ export function useDayLog({
             theme: data.theme || undefined,
             virtue: data.virtue || undefined,
             scriptureRef: data.scriptureRef || undefined,
+            scriptureText: data.scriptureText || undefined,
             heartQuestion: data.heartQuestion || undefined,
+            formationPrompt: data.formationPrompt || undefined,
+            conundrum: data.conundrum || undefined,
           })
+          setReadAloudBookId(data.readAloudBookId || undefined)
         } else {
           setWeekPlanId(undefined)
           setWeekFocus(null)
+          setReadAloudBookId(undefined)
         }
       },
       (err) => {
@@ -252,6 +293,7 @@ export function useDayLog({
     lastSavedAt,
     weekPlanId,
     weekFocus,
+    readAloudBookId,
     snackMessage,
     setSnackMessage,
     persistDayLog,

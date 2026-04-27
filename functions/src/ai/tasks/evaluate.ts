@@ -3,6 +3,12 @@ import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 
+/**
+ * Task: evaluate
+ * Context: charter + childProfile + sightWords + wordMastery (via buildContextForTask)
+ * Model: Sonnet
+ */
+
 // Import evaluation-specific prompt builder from chat.ts
 import { buildEvaluationPrompt } from "../chat.js";
 

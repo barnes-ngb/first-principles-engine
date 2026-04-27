@@ -1,8 +1,10 @@
-# First Principles Engine — System Prompts Reference (v2)
+# First Principles Engine — System Prompts Reference (v4)
 
-> Generated from source: `functions/src/ai/chat.ts`, `generate.ts`, `evaluate.ts`, `imageGen.ts`, `aiConfig.ts`
+> **STALE** — does not reflect `chapterQuestions` task handler added Apr 10, 2026. Needs update.
+
+> Generated from source: `functions/src/ai/` — chat.ts, chatTypes.ts, contextSlices.ts, tasks/\*, evaluate.ts, generate.ts, imageGen.ts
 >
-> Last updated: 2026-03-07
+> Last updated: 2026-04-01
 
 ---
 
@@ -10,673 +12,517 @@
 
 1. [Architecture Overview](#1-architecture-overview)
 2. [Model Selection](#2-model-selection)
-3. [Chat Function — System Prompt Structure](#3-chat-function--system-prompt-structure)
-4. [Generate Function — System Prompt Structure](#4-generate-function--system-prompt-structure)
-5. [Evaluate Function — Weekly Review Prompt](#5-evaluate-function--weekly-review-prompt)
-6. [Image Generation — DALL-E Prompts](#6-image-generation--dall-e-prompts)
-7. [Output Schemas](#7-output-schemas)
-8. [AI Guardrails](#8-ai-guardrails)
+3. [Context Slices](#3-context-slices)
+4. [Task Handlers](#4-task-handlers)
+5. [Output Schemas](#5-output-schemas)
+6. [AI Guardrails](#6-ai-guardrails)
 
 ---
 
 ## 1. Architecture Overview
 
+### Task Dispatch Flow
+
 ```
 Client (React)                    Cloud Functions (Firebase)
 ─────────────────                 ──────────────────────────
-src/core/ai/                      functions/src/ai/
-  featureFlags.ts                   chat.ts          ← plan / evaluate / generate / chat
-  prompts/                          generate.ts      ← activity generation
-    plannerPrompts.ts               evaluate.ts      ← weekly adaptive review
-                                    imageGen.ts      ← DALL-E 3 image proxy
-                                    aiConfig.ts      ← secret management
-                                    health.ts        ← health check
-                                    index.ts         ← function exports
+src/core/ai/useAI.ts              functions/src/ai/
+  → calls 'chat' CF                 chat.ts
+     with taskType,                   → validates request
+     messages,                        → loads child profile + snapshot
+     childId,                         → dispatches to CHAT_TASKS[taskType]
+     familyId                              ↓
+                                  tasks/index.ts
+                                    CHAT_TASKS registry:
+                                      plan       → handlePlan
+                                      chat       → handleChat
+                                      generate   → handleChat
+                                      evaluate   → handleEvaluate
+                                      quest      → handleQuest
+                                      generateStory → handleGenerateStory
+                                      workshop   → handleWorkshop
+                                      analyzeWorkbook → handleAnalyzeWorkbook
+                                      disposition → handleDisposition
+                                      conundrum  → handleConundrum
+                                      weeklyFocus → handleWeeklyFocus
+                                      scan       → handleScan
+                                      shellyChat → handleShellyChat
+                                           ↓
+                                  tasks/<handler>.ts
+                                    → buildContextForTask(taskType, ...)  [contextSlices.ts]
+                                    → assembles system prompt from sections
+                                    → callClaude({ apiKey, model, systemPrompt, messages })
+                                    → logAiUsage(db, familyId, ...)
+                                    → returns { message, model, usage }
 ```
 
-**Key principle:** No API keys in client code. All AI calls route through Cloud Functions. Keys are managed via Google Cloud Secret Manager (`defineSecret`).
+### Standalone Cloud Functions (not task-dispatched)
 
-**Exported Cloud Functions:**
-
-| Function | Trigger | Source |
-|----------|---------|--------|
-| `healthCheck` | `onCall` | `health.ts` |
-| `chat` | `onCall` | `chat.ts` |
-| `generateActivity` | `onCall` | `generate.ts` |
-| `generateWeeklyReviewNow` | `onCall` | `evaluate.ts` |
-| `weeklyReview` | `onSchedule` (Sun 7pm CT) | `evaluate.ts` |
-| `generateImage` | `onCall` | `imageGen.ts` |
+| Function | File | Trigger |
+|----------|------|---------|
+| `generateActivity` | generate.ts | onCall — lesson card generation |
+| `weeklyReview` | evaluate.ts | onSchedule — automated weekly review |
+| `generateWeeklyReviewNow` | evaluate.ts | onCall — manual weekly review |
+| `analyzeEvaluationPatterns` | tasks/analyzePatterns.ts | onCall — cross-session pattern analysis |
+| `generateImage` | imageGen.ts → imageTasks/ | onCall — image generation routing |
+| `generateAvatarPiece` | imageTasks/avatarPiece.ts | onCall |
+| `generateStarterAvatar` | imageTasks/starterAvatar.ts | onCall |
+| `transformAvatarPhoto` | imageTasks/photoTransform.ts | onCall |
+| `generateArmorPiece` | imageTasks/armorPiece.ts | onCall |
+| `generateBaseCharacter` | imageTasks/baseCharacter.ts | onCall |
+| `generateArmorSheet` | imageTasks/armorSheet.ts | onCall |
+| `generateArmorReference` | imageTasks/armorReference.ts | onCall |
+| `extractFeatures` | imageTasks/extractFeatures.ts | onCall |
+| `generateMinecraftSkin` | imageTasks/minecraftSkin.ts | onCall |
+| `generateMinecraftFace` | imageTasks/minecraftFace.ts | onCall |
+| `enhanceSketch` | imageTasks/enhanceSketch.ts | onCall |
+| `healthCheck` | health.ts | onCall |
 
 ---
 
 ## 2. Model Selection
 
-### Per-task routing (chat.ts)
+### `modelForTask()` (chat.ts)
 
-| Task Type | Model | Max Tokens | Use Case |
-|-----------|-------|------------|----------|
-| `plan` | `claude-sonnet-4-5-20250929` | 4096 | Weekly plan generation — complex reasoning |
-| `evaluate` | `claude-sonnet-4-5-20250929` | 4096 | Diagnostic skill evaluation — adaptive walkthrough |
-| `generate` | `claude-haiku-4-5-20251001` | 1024 | Routine content generation |
-| `chat` | `claude-haiku-4-5-20251001` | 1024 | Conversational Q&A |
+| Task Type | Model | Use Case |
+|-----------|-------|----------|
+| `plan` | `claude-sonnet-4-6` | Weekly plan generation |
+| `evaluate` | `claude-sonnet-4-6` | Reading/math diagnostic evaluation |
+| `quest` | `claude-sonnet-4-6` | Interactive Knowledge Mine quests |
+| `generateStory` | `claude-sonnet-4-6` | Sight word story generation |
+| `workshop` | `claude-sonnet-4-6` | Story Game Workshop |
+| `analyzeWorkbook` | `claude-sonnet-4-6` | Workbook page analysis |
+| `disposition` | `claude-sonnet-4-6` | Learning disposition narrative |
+| `conundrum` | `claude-sonnet-4-6` | Weekly conundrum generation |
+| `weeklyFocus` | `claude-sonnet-4-6` | Unified weekly focus + conundrum |
+| `scan` | `claude-sonnet-4-6` | Curriculum photo analysis (vision) |
+| `shellyChat` | `claude-sonnet-4-6` | Parent AI assistant (family context) |
+| `generate` | `claude-haiku-4-5-20251001` | Activity/lesson generation |
+| `chat` | `claude-haiku-4-5-20251001` | General chat |
 
-### Other functions
+### Standalone Functions
 
-| Function | Model | Max Tokens | Use Case |
-|----------|-------|------------|----------|
-| `generateActivity` | `claude-haiku-4-5-20251001` | 1024 | Activity generation for a specific skill |
-| `weeklyReview` | `claude-sonnet-4-20250514` | 2048 | Weekly adaptive review generation |
-| `generateImage` | `dall-e-3` | N/A | Image generation (schedule cards, rewards, etc.) |
-
----
-
-## 3. Chat Function — System Prompt Structure
-
-**Source:** `functions/src/ai/chat.ts` — `buildSystemPrompt()`
-
-The chat system prompt is assembled in layers:
-
-### Layer 1: Charter Preamble (always present)
-
-```
-You are an AI assistant for the First Principles Engine, a family homeschool learning platform.
-
-Core family values (Charter):
-- Formation first: character and virtue before academics.
-- Both kids count: Lincoln (10, neurodivergent, speech challenges) and London (6, story-driven).
-- Narration counts: oral evidence is first-class, especially for Lincoln.
-- Small artifacts > perfect documentation: capture evidence quickly.
-- No heroics: simple routines, minimum viable days are real school.
-- Shelly's direct attention is the primary schedulable resource — split-block scheduling is required.
-
-Always align recommendations with these values. Be concise, practical, and encouraging.
-```
-
-### Layer 2: Child Profile (always present)
-
-Loaded from `families/{familyId}/children/{childId}` and `families/{familyId}/skillSnapshots/{childId}`.
-
-```
-CHILD PROFILE:
-Name: {name}
-Grade: {grade}
-Priority skills:
-- {label} ({tag}): {level}
-Available supports:
-- {label}: {description}
-Stop rules:
-- {label}: when "{trigger}" → {action}
-```
-
-### Layer 3: Enriched Context (plan + evaluate only)
-
-Loaded in parallel from Firestore via `loadEnrichedContext()`:
-
-**RECENT PERFORMANCE (last 14 days):**
-- Aggregated from `families/{familyId}/sessions` — grouped by `streamId` with hit/near/miss counts.
-
-**WORKBOOK PACE:**
-- From `families/{familyId}/workbookConfigs` — calculates `unitsPerDayNeeded` and status (`ahead` / `on-track` / `behind`).
-- Formula: `remaining / schoolDaysLeft` where schoolDaysLeft = `(calendarDaysLeft / 7) * schoolDaysPerWeek`
-- Status: `<=0.8` = ahead, `<=1.2` = on-track, `>1.2` = behind.
-
-**THIS WEEK:**
-- From `families/{familyId}/weeks/{weekId}` — theme, virtue, scripture reference, heart question.
-
-**HOURS PROGRESS:**
-- From `families/{familyId}/hours` since school year start (Aug 1).
-- Shows `{totalHours} hours of {target} target ({pct}% complete)`. Target: **1000 hours** (MO requirement).
-
-### Layer 4a: Plan Output Instructions (taskType === 'plan')
-
-Appended when the user requests weekly plan generation:
-
-```
-OUTPUT FORMAT INSTRUCTIONS:
-When the user asks you to generate, create, or build a plan, respond with ONLY
-the raw JSON object. CRITICAL FORMAT RULES:
-- Do NOT wrap the JSON in markdown code fences (no ``` or ```json)
-- Do NOT include any preamble, explanation, or text before or after the JSON
-- Start your response with the opening { and end with the closing }
-- The response must be parseable by JSON.parse() directly
-
-PLAN CONTENT RULES:
-- Every day MUST start with a Formation block: prayer, scripture reading, and/or
-  gratitude. 5-10 minutes. SubjectBucket: "Other".
-- Include Speech practice if the child has speech targets. 5 minutes.
-  SubjectBucket: "LanguageArts".
-- Include ALL app blocks the user specified (Reading Eggs, Math app, etc.) as
-  daily items with "isAppBlock": true.
-- Reading should include BOTH structured phonics/workbook AND read-aloud time
-  as separate items.
-- Mark the 3-4 most essential items with "mvdEssential": true — these are the
-  Minimum Viable Day items.
-- Total daily minutes should not exceed the hours budget.
-- Vary activities slightly across days to avoid monotony.
-- Every item must have a "category" field with value "must-do" or "choose":
-  - "must-do": Core non-negotiable items (3-4 per day). Always includes: Formation/Prayer, primary reading/phonics workbook, primary math workbook. These happen every day in order.
-  - "choose": Enrichment activities the child picks from AFTER completing must-do items (3-4 options per day, child picks 2). Examples: Reading Eggs, Minecraft reading, read-aloud time, art, sight word games, science exploration.
-  - On MVD weeks, ONLY must-do items are required. Choose items are bonus.
-  - Items with category "must-do" should always have "mvdEssential": true.
-
-{DraftWeeklyPlan JSON schema — see Output Schemas section}
-
-Rules:
-- Days must be Monday through Friday (5 days).
-- Respect the hours-per-day budget the user specifies.
-- Valid subjectBucket values: Reading, LanguageArts, Math, Science,
-  SocialStudies, Other.
-- Include app blocks with "isAppBlock": true.
-- Every item must have "accepted": true.
-- "estimatedMinutes" must be a positive number.
-- "mvdEssential" must be a boolean. Mark the 3-4 core items per day as true.
-- "category" must be either "must-do" or "choose".
-- "skipSuggestions" is an array of skip/modify objects.
-
-When the user is chatting (NOT asking for a plan), respond in normal
-conversational text.
-```
-
-### Subject Time Defaults (injected when available)
-
-When the child has per-subject default times configured, they are injected into the system prompt:
-
-```
-── SUBJECT TIME DEFAULTS ──
-Use these as the baseline for estimatedMinutes on each item:
-* Reading: 30 min/day
-* Math: 30 min/day
-* LanguageArts: 25 min/day
-...
-Only adjust from these baselines when energy level, daily routine, or special
-notes suggest otherwise. If the user specified a daily routine with specific
-times, those times take priority.
-```
-
-Source: `families/{familyId}/settings/plannerDefaults_{childId}` → `subjectDefaults` map.
-
-### Layer 4b: Evaluation Diagnostic Prompt (taskType === 'evaluate')
-
-Appended when running skill evaluation. Two modes:
-
-#### Reading domain (full structured diagnostic)
-
-```
-Today's date is {YYYY-MM-DD}. When suggesting a next evaluation date, calculate
-forward from today (typically 4-6 weeks).
-
-ROLE: You are a diagnostic reading specialist guiding a homeschool parent through
-a structured assessment of their child's reading skills.
-
-APPROACH:
-- Walk the parent through ONE step at a time. Never give multiple steps at once.
-- After each step, wait for the parent's response before proceeding.
-- Adapt: if the child clearly knows something, skip ahead. If they struggle, go
-  deeper into that area.
-- Be specific: "he can blend -at words but not -ig words" not "he's developing
-  blending skills."
-- Be encouraging about the child.
-- Keep each step to 2-3 minutes of actual testing with the child.
-
-DIAGNOSTIC SEQUENCE FOR READING:
-
-Level 0: Phonemic Awareness
-- Rhymes, first sounds, segmentation, blending
-
-Level 1: Letter-Sound Knowledge
-- Consonant sounds (groups of 6), short vowels, reversals (b/d, p/q)
-
-Level 2: CVC Blending (test by word family)
-- -at, -an, -it, -ig, -ot, -ug, -en, -op
-
-Level 3: Digraphs (sh, ch, th, wh)
-Level 4: Consonant Blends (bl, cr, st, tr, fl, gr, nd, nk)
-Level 5: Long Vowels & Silent-E (CVCe)
-Level 6: Vowel Teams (ea, ai, oa, ee, oo)
-
-INSTRUCTIONS FOR EACH STEP:
-1. Tell the parent exactly what to show/ask the child
-2. Use specific words — don't say "test some CVC words"
-3. Wait for the parent to report results
-4. Record findings in a <finding> block
-5. Decide whether to go deeper, skip ahead, or move to next level
-
-{See Output Schemas section for <finding> and <complete> block formats}
-
-CRITICAL OUTPUT RULES:
-- After EVERY parent response, MUST include a <finding> block.
-- Multiple <finding> blocks allowed per response.
-- After 3-4+ exchanges, end with a <complete> block.
-- <complete> must include: summary, frontier, recommendations, skipList,
-  supports, stopRules, evidenceDefinitions, nextEvalDate.
-- The <finding> and <complete> blocks must contain VALID JSON.
-```
-
-#### Other domains (generic diagnostic)
-
-```
-Today's date is {YYYY-MM-DD}. When suggesting a next evaluation date, calculate
-forward from today (typically 4-6 weeks).
-
-Evaluate the child's {domain} skills using a structured diagnostic approach.
-Walk the parent through ONE step at a time. After each parent response, include
-a <finding> block with JSON containing skill, status, evidence, and notes. When
-done, output a <complete> block with summary, recommendations array, and
-nextEvalDate.
-```
-
-### Layer 5: Recent Evaluation Context (plan only, appended after system prompt)
-
-When `taskType === 'plan'`, the function queries the most recent completed evaluation session from `families/{familyId}/evaluationSessions` and appends:
-
-```
-RECENT EVALUATION:
-Domain: {domain}
-Date: {evaluatedAt}
-Summary: {summary}
-Recommendations:
-- Priority {n}: {skill} — {action} ({frequency}, {duration})
-```
+| Function | Model |
+|----------|-------|
+| `weeklyReview` / `generateWeeklyReviewNow` | `claude-sonnet-4-6` |
+| `analyzeEvaluationPatterns` | `claude-sonnet-4-6` |
+| `extractFeatures` | `claude-sonnet-4-6` |
+| Image generation | `gpt-image-1` or `dall-e-3` |
+| `enhanceSketch` | `gpt-image-1` (image editing) |
+| Image prompts (Claude describes scene) | `claude-sonnet-4-6` |
 
 ---
 
-## 4. Generate Function — System Prompt Structure
+## 3. Context Slices
 
-**Source:** `functions/src/ai/generate.ts` — `buildGenerateSystemPrompt()`
+### How It Works
 
-### Layer 1: Charter Preamble
+`contextSlices.ts` defines a `TASK_CONTEXT` mapping that specifies which data slices each task type needs. `buildContextForTask(taskType, ctx)` loads only the relevant slices in parallel and returns an array of prompt sections.
 
-Same charter preamble text as chat.ts (identical verbatim).
+### Slice Definitions
 
-### Layer 2: Task Description
+| Slice | Loader | Data |
+|-------|--------|------|
+| `charter` | (constant) | CHARTER_PREAMBLE — family values, both kids, formation-first principles |
+| `childProfile` | formatChildProfile() | Name, grade, priority skills, supports, stop rules from skill snapshot |
+| `workbookPaces` | loadWorkbookPaces() | Current position, units/day needed, ahead/on-track/behind status |
+| `weekFocus` | loadWeekContext() | Current week's theme, virtue, scripture reference, heart question |
+| `hoursProgress` | loadHoursSummary() | Total hours logged since school year start vs 1000-hour MO target |
+| `engagement` | loadEngagementSummary() | Activity engagement patterns (engaged/okay/struggled/refused) compressed |
+| `gradeResults` | loadGradeResults() | Recent work review results (grades, corrections) |
+| `bookStatus` | loadDraftBooksByChild() | Child's draft books (createdBy === childId, status=draft) — title + page count + `bookId`. Prompts "Continue Book: {title}" with the matching bookId. Renders as `{NAME}'S BOOK DRAFTS:` section. |
+| `sightWords` | loadSightWordSummary() | Mastered/familiar/practicing/new word counts + weak words list |
+| `recentEval` | loadRecentEvalContext() | Most recent evaluation findings for the child |
+| `wordMastery` | loadWordMasterySummary() | Quest word progress — mastery levels, struggling patterns |
+| `generatedContent` | loadGeneratedContent() | Two buckets: **MOM'S BOOKS** (createdBy='parent' + createdFor=childId, last 30 days) prompts "Read: {title}" as a reading choose-item, and AVAILABLE GENERATED CONTENT (legacy / AI-generated books the child owns, de-duped) with the same pattern. Both include `bookId` inline so the AI can echo it on plan items for deep-linking. |
+| `workshopGames` | (from chatTypes) | Workshop game state for story continuation |
 
-```
-## Task
+### Task → Slice Mapping
 
-Generate a {activityType} activity for {childName}.
-Target skill: {skillTag}
-Duration: ~{estimatedMinutes} minutes
-Grade level: {grade}
-```
-
-### Layer 3: Skill Ladder Position (if matched)
-
-Loaded from `families/{familyId}/ladders` where `domain` matches the first segment of the skill tag, plus `families/{familyId}/ladderProgress/{childId}_{ladderId}`.
-
-```
-## Current Skill Ladder Position
-
-Ladder: {ladderTitle}
-Current rung: {rungTitle}
-Rung description: {rungDescription}
-```
-
-### Layer 4: Matching Priority Skills (from skill snapshot)
-
-Only includes skills where the skill tag overlaps (prefix match in either direction):
-
-```
-## Matching Priority Skills
-
-- {label} [{tag}]: level={level}
-```
-
-### Layer 5: Supports & Stop Rules (from skill snapshot)
-
-```
-## Available Supports
-
-- {label}: {description}
-
-## Stop Rules
-
-- {label}: when "{trigger}" → {action}
-```
-
-### Layer 6: Weekly Theme (if set)
-
-```
-## Weekly Theme
-
-This week's theme is: "{theme}". Weave it in naturally where possible.
-```
-
-### Layer 7: Output Format
-
-```
-## Output Format
-
-Respond with ONLY valid JSON matching this schema (no markdown fences, no commentary):
-
-{GeneratedActivity JSON schema — see Output Schemas section}
-```
-
-### Layer 8: Activity Guidelines (per activity type)
-
-| Activity Type | Guidelines Focus |
-|---------------|-----------------|
-| `phonics` | Phonemic awareness, multi-sensory, 3-5 target words, clear instructions for speech challenges |
-| `story-prompt` | Open-ended starter, visual/drawing elements, book-making, narration alternative |
-| `math` | Concrete manipulatives, warm-up review, 5-8 problems, oral/manipulative evidence |
-| `reading` | Instructional-level text, pre-reading vocab, narration (oral retelling), short passages |
-| `*formation*` / `*prayer*` / `*scripture*` | Short devotional, prayer/scripture, gratitude/character, 5-10 min max |
-| `*art*` / `*draw*` / `*creative*` | Creative activity, specific materials, open-ended, process over product |
-| `*read*aloud*` | Read-aloud session, 2-3 predictions/vocab, 2-3 narration prompts, parent reads |
-| `*speech*` | Speech practice, clear articulation, conversational/low-pressure, specific words/sounds |
-| `*science*` / `*explore*` | Hands-on, observation + narration, household materials, questions + predictions |
-| (default) | Structured hands-on, clear sequential instructions, observable success criteria, oral demonstration preferred |
-
-### User Message
-
-```
-Generate a {estimatedMinutes}-minute {activityType} activity for {childName}
-targeting skill "{skillTag}". Return JSON only.
-```
+| Task Type | Slices Loaded |
+|-----------|--------------|
+| `plan` | charter, childProfile, workbookPaces, weekFocus, hoursProgress, engagement, gradeResults, bookStatus, sightWords, recentEval, wordMastery, generatedContent, workshopGames |
+| `chat` | charter, childProfile |
+| `generate` | charter, childProfile |
+| `evaluate` | charter, childProfile, sightWords, wordMastery |
+| `quest` | childProfile, sightWords, recentEval, wordMastery |
+| `generateStory` | childProfile, sightWords, wordMastery |
+| `workshop` | charter, childProfile, workshopGames |
+| `analyzePatterns` | childProfile |
+| `scan` | childProfile, recentEval |
+| `disposition` | _(self-loading)_ charter preamble + 4 weeks day logs + 3 recent evals + 5 recent lab reports |
+| `conundrum` | _(self-loading)_ charter preamble + week focus + recent subjects + child profiles |
+| `weeklyFocus` | _(self-loading)_ charter preamble + previous 4 weeks' themes + recent subjects + user input |
+| `shellyChat` | _(self-loading)_ family charter summary + all children profiles + week theme/virtue + conundrum title |
 
 ---
 
-## 5. Evaluate Function — Weekly Review Prompt
+## 4. Task Handlers
 
-**Source:** `functions/src/ai/evaluate.ts`
+### `plan` (tasks/plan.ts)
 
-### System Prompt (BASE_SYSTEM_PROMPT)
+**System prompt assembly:**
+1. Context slices for "plan" (all slices — richest context)
+2. Per-child subject time defaults (from `plannerDefaults_{childId}` Firestore doc)
+3. Daily routine promotion: extracts routine from user message and re-inserts it in the system prompt with emphasis (CRITICAL INSTRUCTION banner)
+4. `PLAN_OUTPUT_INSTRUCTIONS` (JSON schema, rules, size constraints)
 
-This is a **separate** charter prompt used specifically for weekly reviews, distinct from the chat/generate charter:
+**Key behaviors:**
+- Outputs raw JSON (no markdown fences) for a 5-day weekly plan
+- Each day has must-do (3-4 core items) and choose (enrichment) categories
+- Formation block required every day
+- MVD-essential items marked for Minimum Viable Day mode
+- Token budget: max 6000 tokens, item titles max 6 words
 
-```
-You are the learning assistant for the Barnes family homeschool. You serve
-two parents (Shelly and Nathan) and two boys (Lincoln, 10, and London, 6).
+### `evaluate` (tasks/evaluate.ts)
 
-CHARTER VALUES (non-negotiable):
-- Faith first: identity comes from God, not performance.
-- No shame: correct behavior without attacking identity. Fast repair.
-- Courage + perseverance: hard things in small steps; mistakes are feedback.
-- Rest by design: margin and pacing are part of the plan, not signs of failure.
-- Portfolio over grades: evidence of growth matters more than scores.
-- Adventure matters: movement, building, discovery are core curriculum.
+**System prompt assembly:**
+1. Context slices for "evaluate"
+2. `buildEvaluationPrompt(domain)` — structured diagnostic sequence
 
-OPERATING PRINCIPLES:
-- Shelly has fibromyalgia. Energy management is real. Never frame a low-energy
-  day as failure. The Minimum Viable Day is real school.
-- Lincoln has speech and neurodivergence challenges. Keep instructions short,
-  visual, and predictable. Celebrate small wins. Never pressure reading aloud.
-- London is story-driven and attention-seeking. Activities must be interactive
-  and engaging. Passive busywork will fail.
-- Shelly's direct attention is the primary resource. Plans must account for
-  split-block scheduling.
+**Domains:**
+- **reading**: 7-level diagnostic sequence (phonemic awareness → vowel teams), step-by-step guided assessment
+- **math**: 6-level sequence (counting → word problems/reasoning)
+- **generic**: Simplified for other domains
 
-TONE:
-- Warm, encouraging, practical. Never clinical or condescending.
-- Speak as a knowledgeable partner, not an authority figure.
-- When suggesting changes, explain the "why" briefly.
-- Default to "both modes count as real school" framing.
-```
+**Output protocol:**
+- `<finding>` blocks after each parent response (skill, status, evidence, notes)
+- `<complete>` block when frontier is identified (summary, frontier, recommendations, skipList, supports, stopRules, evidenceDefinitions, nextEvalDate)
 
-### User Prompt (assembled per child per week)
+### `quest` (tasks/quest.ts)
 
-Built by `buildEvaluationPrompt()` with assembled week context from:
-- `sessions` — grouped by `streamId` (hit/near/miss counts)
-- `hours` — grouped by `subjectBucket`
-- `dailyPlans` — energy states and plan types
-- `missedDays` — Mon-Fri with no sessions or plans
+**System prompt assembly:**
+1. Context slices for "quest" (includes `skillSnapshot` with ADDRESS_NOW / RESOLVING / DEFER conceptual blocks + `recentScans`)
+2. `buildQuestPrompt(domain, startingLevel?, questMode?, extras?)` — Minecraft-themed interactive assessment
+3. Recent evaluation findings injected for adaptive starting level
+4. **Phase 2 (Apr 21, 2026):** `extras.activeBlockers` (ADDRESS_NOW + RESOLVING blocks from the snapshot) and `extras.hasRecentScans` (derived from the `recentScans` slice) pulled in by `tasks/quest.ts` before assembly. `buildKnownBlockersSection` and `buildRecentCurriculumSection` inject just before RESPONSE FORMAT in the reading-phonics, math, and comprehension branches.
 
-```
-Generate a weekly review for {childName} for the week of {weekKey}.
+**Key behaviors:**
+- Generates ONE multiple-choice question at a time as `<quest>` JSON block
+- 3 options, plausible distractors, text-only (no images)
+- Adaptive: level up after 3 correct, level down after 2 wrong
+- Question type variety required (never repeat same format consecutively)
+- Bonus rounds for confidence building
+- `<quest-summary>` block for session summaries
+- Findings generated after 2+ data points on a skill
+- **KNOWN BLOCKERS (Phase 2):** when the snapshot has ADDRESS_NOW or RESOLVING blocks, 2-3 of the 10 session questions deliberately probe them. Each probe carries `"targetedBlockerId"` matching the block's stable id so `updateBlockerLifecycle` can weight targeted evidence 2× when advancing lifecycle state. Omit or null for non-targeted questions.
+- **RECENT CURRICULUM (Phase 2):** when `recentScans` provides a "RECENT WORKBOOK SCANS" section, the AI may (optionally) include 1-2 reinforcement questions tied to the scanned topic. Connection is framed as practice, not a test of today's lesson.
 
-DATA PROVIDED:
-- Sessions completed: {count}
-  - {streamId}: {hits} hits, {nears} nears, {misses} misses
-- Total hours logged: {hours} hours ({minutes} min)
-  - {subjectBucket}: {minutes} min
-- Energy states: {energySummary}
-- Plan types: {planTypeSummary}
-- Missed school days (Mon-Fri): {missedDays}
-- Daily plans recorded: {count}
+### `generateStory` (tasks/generateStory.ts)
 
-GENERATE a JSON object with these fields:
-1. "progressSummary": 2-3 sentence narrative (warm, encouraging, specific)
-2. "paceAdjustments": array of { "subject", "currentPace", "suggestedChange" }
-3. "planModifications": array of { "area", "observation", "recommendation" }
-4. "energyPattern": one sentence on energy trends
-5. "celebration": one specific thing to celebrate
+**System prompt assembly:**
+1. Context slices for "generateStory"
+2. `buildStoryPrompt(input)` — sight word story generator
 
-TONE: Speak to the parent as a trusted partner. Frame everything constructively.
-Never use language that implies failure. "We might try..." not "You should..."
+**Input:** storyIdea, words[], pageCount, childName, childAge, childInterests, readingLevel
 
-Respond ONLY with valid JSON.
-```
+**Output:** JSON with title, pages[] (pageNumber, text, sceneDescription, wordsOnPage), allWordsUsed, missedWords
 
-### Scheduling
+### `workshop` (tasks/workshop.ts)
 
-- `weeklyReview`: `onSchedule("every sunday 19:00")`, timezone `America/Chicago`
-- Iterates all families → all children → generates review for each
-- `generateWeeklyReviewNow`: on-demand callable for manual trigger
-- Week key: previous completed Monday-Sunday window (calculated by `lastWeekKey()`)
+**System prompt assembly:**
+1. Context slices for "workshop"
+2. Workshop-specific system prompt (board games, adventure games, card games)
+
+**Key behaviors:**
+- Story Game Workshop — generates interactive game content
+- Adapts to child's reading level and interests
+
+### `analyzeWorkbook` (tasks/analyzeWorkbook.ts)
+
+**System prompt assembly:**
+1. Context slices (minimal — uses modelForTask)
+2. Analyzes workbook page images for grading/feedback
+
+### `chat` / `generate` (tasks/chatHandler.ts)
+
+**System prompt assembly:**
+1. Context slices for "chat" (charter + childProfile only)
+
+**Key behaviors:**
+- Generic conversational handler
+- Used for both "chat" and "generate" task types
+- Lightest context — just charter values and child profile
+
+### `disposition` (tasks/disposition.ts)
+
+**System prompt assembly:**
+1. CHARTER_PREAMBLE (self-loaded, does not use buildContextForTask)
+2. Custom narrative prompt: assess HOW a child approaches learning (portfolio over grades)
+3. 5 dispositions: Curiosity, Persistence, Articulation, Self-Awareness, Ownership
+4. Levels: growing / steady / emerging / not-yet-visible; Trends: up / stable / down / insufficient-data
+
+**Data loading (4-week window):**
+- Recent day logs (4 weeks) aggregated by week: completion rates, engagement patterns, evidence, subject minutes
+- Recent evaluation sessions (3 most recent completed)
+- Recent Dad Lab reports (5 most recent) with child contributions
+
+**Output:** JSON with `profileDate`, `periodWeeks`, 5 disposition objects (level, narrative, trend), `celebration`, `nudge`, `parentNote`
+
+**Tokens:** 4096
+
+### `conundrum` (tasks/conundrum.ts)
+
+**System prompt assembly:**
+1. CHARTER_PREAMBLE (self-loaded)
+2. Open-ended scenario design principles (no single right answer, for family discussion)
+3. Age context: Lincoln (10), London (6)
+
+**Data loading:**
+- Current week's focus (theme, virtue, scripture, heart question)
+- Recent subjects from last 7 days of day logs
+- All children profiles
+
+**Output:** JSON with `title`, `scenario` (2-3 paragraphs, readable by 6-year-old), `question`, `angles` (3 valid perspectives), `lincolnPrompt` (deeper), `londonPrompt` (simpler), `virtueConnection`, `subjectConnection`
+
+**Tokens:** 2048
+
+### `weeklyFocus` (tasks/weeklyFocus.ts)
+
+**System prompt assembly:**
+1. CHARTER_PREAMBLE (self-loaded)
+2. 4 recurring Stonebridge characters (Mayor Oakley, Tinkerer Maple, Story Keeper Wren, Elder Ironroot)
+3. Lincoln → engineering/building, London → stories/drawing
+4. Cohesion requirement: theme → virtue → scripture → conundrum → connections
+
+**Data loading:**
+- User input (read-aloud book, subjects, notes)
+- Previous 4 weeks' themes/virtues/conundrums (for continuity, no repeats)
+- Recent subjects from last 7 days
+
+**Output:** Large JSON with `theme`, `virtue`, `scriptureRef`, `scriptureText`, `heartQuestion`, `formationPrompt`, and nested conundrum object with Stonebridge scenario, `lincolnPrompt`, `londonPrompt`, `readingTieIn`, `mathContext`, `londonDrawingPrompt`, `dadLabSuggestion`
+
+**Tokens:** 4096
+
+### `enhanceSketch` (imageTasks/enhanceSketch.ts)
+
+**Standalone onCall function** (image generation, not task-dispatched).
+
+- Downloads child's sketch from Firebase Storage
+- Enhances into polished children's book illustration via gpt-image-1 `editImage()`
+- 4 style options: storybook (default), comic, realistic, minecraft
+- Saves enhanced image back to Storage, returns download URL
+- Logs usage to aiUsage collection
+
+### `scan` (tasks/scan.ts)
+
+**System prompt assembly:**
+1. Context slices for "scan" (childProfile + recentEval via buildContextForTask)
+2. `buildScanSystemPrompt(childName, childGrade, contextSections)` — workbook/worksheet photo analysis
+
+**Key behaviors:**
+- Uses `callClaudeWithVision` — accepts image data in the first message
+- Analyzes page type, subject, specific topic, skills targeted
+- Compares against child's skill snapshot for level alignment
+- Outputs JSON with `pageType`, `subject`, `specificTopic`, `skillsTargeted[]`, `estimatedDifficulty`, `recommendation` (do/skip/quick-review/modify), `estimatedMinutes`, `teacherNotes`
+- Notes neurodivergent-friendly concerns (dense text, too many problems)
+
+### `shellyChat` (tasks/shellyChat.ts)
+
+**System prompt assembly:**
+1. Self-loaded context (does not use buildContextForTask)
+2. Loads: family charter summary, all children profiles, current week theme/virtue, conundrum title
+3. Builds a parent-focused assistant prompt with full family context
+
+**Key behaviors:**
+- General-purpose AI assistant for Shelly (parent user)
+- Has family context: charter values, children profiles, weekly focus
+- Thread-based conversation stored in `shellyChatThreads` collection
+- Sonnet model for complex reasoning and contextual advice
+
+### `analyzeEvaluationPatterns` (tasks/analyzePatterns.ts)
+
+**Standalone onCall function** (not dispatched through CHAT_TASKS).
+
+- Loads historical evaluation sessions for a child
+- Builds a pattern analysis prompt asking Claude to identify conceptual blocks
+- Returns structured analysis of learning patterns across sessions
 
 ---
 
-## 6. Image Generation — DALL-E Prompts
+## 5. Output Schemas
 
-**Source:** `functions/src/ai/imageGen.ts`
-
-### Style Prefixes
-
-| Style | Prefix |
-|-------|--------|
-| `schedule-card` | "A friendly, colorful visual schedule card for a child's daily routine. Simple, clear imagery with large icons. " |
-| `reward-chart` | "A cheerful, motivating reward chart illustration for a child. Bright colors, fun characters, encouraging tone. " |
-| `theme-illustration` | "A warm, educational illustration for a homeschool family learning theme. Kid-friendly, inviting art style. " |
-| `general` | (none) |
-
-### Safety Postfix
-
-All prompts end with: `" Safe for children, family-friendly, no text overlays."`
-
-### Final prompt format
-
-```
-{stylePrefix}{userPrompt}. Safe for children, family-friendly, no text overlays.
-```
-
-### Image Options
-
-- Size: `1024x1024` (default), `1024x1792`, `1792x1024`
-- Quality: `standard`
-- Images uploaded to Firebase Storage: `families/{familyId}/generated-images/{timestamp}.png`
-- Signed URL valid for 7 days
-
----
-
-## 7. Output Schemas
-
-### DraftWeeklyPlan (chat.ts, taskType === 'plan')
+### Plan JSON
 
 ```json
 {
   "days": [
     {
       "day": "Monday",
-      "timeBudgetMinutes": 150,
+      "timeBudgetMinutes": 185,
       "items": [
         {
-          "title": "Activity name",
-          "subjectBucket": "Reading",
-          "estimatedMinutes": 15,
+          "title": "Activity name (max 6 words)",
+          "subjectBucket": "Reading | LanguageArts | Math | Science | SocialStudies | Other",
+          "estimatedMinutes": 30,
           "skillTags": ["optional.dot.delimited.tag"],
           "isAppBlock": false,
           "accepted": true,
           "mvdEssential": false,
-          "category": "must-do"
+          "category": "must-do | choose"
         }
       ]
     }
   ],
   "skipSuggestions": [
-    {
-      "action": "skip" | "modify",
-      "reason": "string",
-      "replacement": "string",
-      "evidence": "string"
-    }
+    { "action": "skip | modify", "reason": "...", "replacement": "...", "evidence": "..." }
   ],
-  "minimumWin": "One sentence describing the minimum viable accomplishment for the week."
+  "minimumWin": "One sentence describing minimum viable accomplishment."
 }
 ```
 
-**Validation rules:**
-- Days: Monday through Friday (5 days)
-- `subjectBucket`: Reading, LanguageArts, Math, Science, SocialStudies, Other
-- `estimatedMinutes`: positive number
-- `accepted`: always `true`
-- `mvdEssential`: boolean — 3-4 core items per day
-- `category`: `"must-do"` or `"choose"`
-
-### GeneratedActivity (generate.ts)
+### Evaluation Finding (`<finding>` block)
 
 ```json
-{
-  "title": "string — short, kid-friendly activity title",
-  "objective": "string — one sentence learning objective",
-  "materials": ["string — material or supply needed"],
-  "steps": ["string — numbered instruction step"],
-  "successCriteria": ["string — observable criterion indicating success"]
-}
+{ "skill": "phonics.cvc.short-a", "status": "mastered | emerging | not-yet", "evidence": "Read 5/5 -at words", "notes": "Quick and confident" }
 ```
 
-**Validation:** All 5 fields are required. `steps` must be non-empty array.
-
-### Evaluation Finding (chat.ts, taskType === 'evaluate')
-
-Embedded in response text as `<finding>` blocks:
+### Evaluation Complete (`<complete>` block)
 
 ```json
 {
-  "skill": "phonics.cvc.short-a",
-  "status": "mastered" | "emerging" | "not-yet" | "not-tested",
-  "evidence": "Read 5/5 -at words correctly",
-  "notes": "Quick and confident"
-}
-```
-
-### Evaluation Complete (chat.ts, taskType === 'evaluate')
-
-Embedded in response text as `<complete>` block:
-
-```json
-{
-  "summary": "2-3 sentence summary of what the child can and cannot do",
-  "frontier": "One sentence: the specific next learning edge",
-  "recommendations": [
-    {
-      "priority": 1,
-      "skill": "specific.skill.tag",
-      "action": "Exactly what to practice and how",
-      "duration": "2-3 weeks",
-      "frequency": "Daily, 10 minutes",
-      "materials": ["specific material 1", "specific material 2"]
-    }
-  ],
-  "skipList": [
-    {
-      "skill": "Name of skill to stop drilling",
-      "reason": "Why — already mastered or not ready yet"
-    }
-  ],
-  "supports": [
-    {
-      "label": "Support name",
-      "description": "How to apply this support"
-    }
-  ],
-  "stopRules": [
-    {
-      "label": "Rule name",
-      "trigger": "When this happens",
-      "action": "Do this instead"
-    }
-  ],
-  "evidenceDefinitions": [
-    {
-      "label": "Evidence name",
-      "description": "What mastery looks like for this skill"
-    }
-  ],
+  "summary": "2-3 sentence summary",
+  "frontier": "One sentence: next learning edge",
+  "recommendations": [{ "priority": 1, "skill": "...", "action": "...", "duration": "2 weeks", "frequency": "Daily, 10 min", "materials": ["..."] }],
+  "skipList": [{ "skill": "...", "reason": "..." }],
+  "supports": [{ "label": "...", "description": "..." }],
+  "stopRules": [{ "label": "...", "trigger": "...", "action": "..." }],
+  "evidenceDefinitions": [{ "label": "...", "description": "..." }],
   "nextEvalDate": "YYYY-MM-DD"
 }
 ```
 
-### WeeklyReview (evaluate.ts)
+### Quest Question (`<quest>` block)
 
 ```json
 {
-  "progressSummary": "2-3 sentence narrative of the week",
-  "paceAdjustments": [
-    {
-      "subject": "string",
-      "currentPace": "string",
-      "suggestedChange": "string"
-    }
-  ],
-  "planModifications": [
-    {
-      "area": "string",
-      "observation": "string",
-      "recommendation": "string"
-    }
-  ],
-  "energyPattern": "one sentence on energy trends",
-  "celebration": "one specific thing to celebrate"
+  "level": 2,
+  "skill": "phonics.cvc.short-o",
+  "prompt": "What word is this?",
+  "stimulus": "dog",
+  "phonemeDisplay": "/d/ /o/ /g/",
+  "options": ["dig", "dog", "dug"],
+  "correctAnswer": "dog",
+  "encouragement": "The middle sound is /o/ like in 'hot'!",
+  "bonusRound": false,
+  "targetedBlockerId": null,
+  "finding": null
 }
 ```
 
-Stored in Firestore at `families/{familyId}/weeklyReviews` with additional fields: `childId`, `weekKey`, `status` (`"draft"` | `"approved"`), `model`, `usage`, `createdAt`.
+`targetedBlockerId` (Phase 2) is optional and set to the exact stable id of a KNOWN BLOCKERS entry when the AI deliberately targets it; omitted or null otherwise.
+
+### Quest Summary (`<quest-summary>` block)
+
+```json
+{
+  "summary": "2-3 sentence summary",
+  "frontier": "One sentence: next learning edge",
+  "recommendations": [{ "priority": 1, "skill": "...", "action": "...", "duration": "2 weeks", "frequency": "Daily, 8-10 min" }],
+  "skipList": [{ "skill": "...", "reason": "..." }]
+}
+```
+
+### Story Generation
+
+```json
+{
+  "title": "Story Title",
+  "pages": [
+    { "pageNumber": 1, "text": "Story text...", "sceneDescription": "Scene description for image gen...", "wordsOnPage": ["the", "cat"] }
+  ],
+  "allWordsUsed": ["the", "cat"],
+  "missedWords": []
+}
+```
+
+### Disposition Profile
+
+```json
+{
+  "profileDate": "2026-03-29",
+  "periodWeeks": 4,
+  "curiosity": { "level": "growing", "narrative": "2-3 sentences...", "trend": "up" },
+  "persistence": { "level": "steady", "narrative": "...", "trend": "stable" },
+  "articulation": { "level": "emerging", "narrative": "...", "trend": "up" },
+  "selfAwareness": { "level": "emerging", "narrative": "...", "trend": "stable" },
+  "ownership": { "level": "not-yet-visible", "narrative": "...", "trend": "insufficient-data" },
+  "celebration": "Warm, specific thing to celebrate",
+  "nudge": "Gentle suggestion for next step",
+  "parentNote": "Note to Shelly about what she's doing well"
+}
+```
+
+### Conundrum
+
+```json
+{
+  "title": "The Neighborhood Garden",
+  "scenario": "2-3 paragraphs, readable by 6-year-old...",
+  "question": "What should they do?",
+  "angles": ["Perspective 1", "Perspective 2", "Perspective 3"],
+  "lincolnPrompt": "Deeper thinking prompt for Lincoln",
+  "londonPrompt": "Simpler prompt for London",
+  "virtueConnection": "How this connects to the week's virtue",
+  "subjectConnection": "How this connects to what they're studying"
+}
+```
+
+### Weekly Focus
+
+```json
+{
+  "theme": "Bridges That Connect",
+  "virtue": "Faithfulness",
+  "scriptureRef": "Proverbs 3:5-6",
+  "scriptureText": "Trust in the Lord...",
+  "heartQuestion": "What does it mean to be faithful?",
+  "formationPrompt": "Short family discussion starter",
+  "conundrum": {
+    "title": "The Bridge Builder's Choice",
+    "scenario": "Stonebridge scenario with 2-3 recurring characters...",
+    "question": "What should they do?",
+    "angles": ["...", "...", "..."],
+    "lincolnPrompt": "Engineering angle...",
+    "londonPrompt": "Story/drawing angle...",
+    "readingTieIn": "Connected to the week's read-aloud",
+    "mathContext": "Word problem for 10-year-old tied to theme",
+    "londonDrawingPrompt": "Drawing activity for London",
+    "dadLabSuggestion": "Hands-on experiment with household materials"
+  }
+}
+```
 
 ---
 
-## 8. AI Guardrails
+## 6. AI Guardrails
 
-### Authentication & Authorization
-- All Cloud Functions require Firebase Authentication (`request.auth`)
-- Family ownership check: `request.auth.uid === familyId`
-- No anonymous AI access
+### Charter Injection
 
-### Secret Management
-- API keys stored in Google Cloud Secret Manager
-- Declared via `defineSecret()` in `aiConfig.ts`
-- Functions declare secrets in `onCall({ secrets: [...] })`
-- Local dev: `functions/.secret.local` file
-- Set with: `firebase functions:secrets:set CLAUDE_API_KEY`
+Every task that includes the `charter` slice gets the CHARTER_PREAMBLE injected as the first section of the system prompt. This ensures all AI responses align with family values:
 
-### Input Validation
-- `familyId`, `childId`: required, string
-- `taskType`: must be one of `plan`, `evaluate`, `generate`, `chat`
-- `messages`: non-empty array (chat)
-- `estimatedMinutes`: 1-120 range (generate)
-- `prompt`: max 4000 chars (image)
-- `size`: must be valid DALL-E size
-- `style`: must be valid style key
+- **Formation first**: character and virtue before academics
+- **Both kids count**: Lincoln (10, neurodivergent) and London (6, story-driven)
+- **Narration counts**: oral evidence is first-class, especially for Lincoln
+- **Small artifacts > perfect documentation**
+- **No heroics**: simple routines, minimum viable days are real school
+- **Split-block scheduling**: Shelly's attention is the primary resource
+
+### Safety Rules
+
+- **No-shame rule**: Quest encouragement is "shown after a wrong answer — make it helpful and kind, never shaming"
+- **No images in questions**: Quest questions are text-only multiple choice — NEVER reference images or illustrations
+- **Answer matching**: `correctAnswer` must exactly match one option string
+- **Charter alignment**: All AI-generated content must be reviewable against family values
+- **No API keys in client**: All AI calls route through Cloud Functions
 
 ### Cost Controls
-- All AI usage logged to `families/{familyId}/aiUsage` with:
-  - `childId`, `taskType`, `model`, `inputTokens`, `outputTokens`, `createdAt`
-- Image generation also logs: `prompt` (truncated to 200 chars), `style`, `size`, `storagePath`
-- Usage tracking visible in Settings > AI Usage panel
 
-### Graceful Degradation
-- Enriched context loading failures are caught and logged — request proceeds without enriched context
-- Recent evaluation loading failures are caught — plan proceeds without eval context
-- AI usage logging failures don't block the response
-- JSON parse fallback: tries `sanitizeAndParseJson()` first, then regex extraction of `{...}`
+- Token usage logged to `families/{familyId}/aiUsage` for every call
+- Model selection by complexity (Haiku for routine tasks, Sonnet for reasoning)
+- Plan responses capped at 6000 tokens
+- Context slices are task-specific (lighter tasks get less context = fewer input tokens)
 
-### Charter Alignment
-- Charter preamble injected into every system prompt (chat, generate, evaluate)
-- Two variants exist:
-  1. **Chat/Generate charter** — concise, value-focused (6 bullet points)
-  2. **Evaluate charter** — expanded, includes operating principles and tone guidance
-- Family values are non-negotiable constraints on all AI output
-- "Both modes count as real school" framing is enforced
+### Feature Flags
 
-### Image Safety
-- All DALL-E prompts appended with: "Safe for children, family-friendly, no text overlays."
-- Style prefixes ensure age-appropriate context
-- Images stored in Firebase Storage with metadata tracking
+AI paths are opt-in via config. Local logic stays as fallback. The planner-chat has local draft plan generation that works without AI.

@@ -1,9 +1,11 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireApprovedUser, checkRateLimit } from "../authGuard.js";
 import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 import { createOpenAiProvider } from "../providers/openai.js";
 import type { ImageOptions } from "../aiService.js";
+import { rewriteForCopyright } from "./copyrightUtils.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -12,6 +14,8 @@ export interface ImageGenRequest {
   prompt: string;
   style?: "schedule-card" | "reward-chart" | "theme-illustration" | "book-illustration-minecraft" | "book-illustration-storybook" | "book-illustration-comic" | "book-illustration-realistic" | "book-illustration-garden-warfare" | "book-illustration-platformer" | "book-sticker" | "general";
   size?: "1024x1024" | "1024x1792" | "1792x1024";
+  /** Optional theme ID — if provided, theme's imageStylePrefix overrides the default style prefix. */
+  themeId?: string;
 }
 
 export interface ImageGenResponse {
@@ -49,12 +53,18 @@ const STYLE_PREFIXES: Record<string, string> = {
   general: "",
 };
 
-/** Build the final DALL-E prompt with style context and safety guardrails. */
+/** Build the final DALL-E prompt with style context and safety guardrails.
+ *  If a themeImagePrefix is provided (from BookThemeConfig), it takes precedence
+ *  over the default STYLE_PREFIXES for book illustrations. */
 export function buildImagePrompt(
   userPrompt: string,
   style: string | undefined,
+  themeImagePrefix?: string,
 ): string {
-  const prefix = STYLE_PREFIXES[style ?? "general"] ?? "";
+  // Theme prefix overrides default style prefix for book illustrations
+  const prefix = themeImagePrefix && style?.startsWith("book-illustration")
+    ? themeImagePrefix + " "
+    : (STYLE_PREFIXES[style ?? "general"] ?? "");
   const safetyPostfix =
     " Safe for children, family-friendly, no text overlays.";
   return `${prefix}${userPrompt}.${safetyPostfix}`;
@@ -63,14 +73,12 @@ export function buildImagePrompt(
 // ── Callable Cloud Function ─────────────────────────────────────
 
 export const generateImage = onCall(
-  { secrets: [openaiApiKey, claudeApiKey] },
+  { secrets: [openaiApiKey, claudeApiKey], timeoutSeconds: 120 },
   async (request): Promise<ImageGenResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireApprovedUser(request);
 
-    const { familyId, prompt, style, size } =
+    const { familyId, prompt, style, size, themeId } =
       request.data as ImageGenRequest;
 
     // ── Input validation ───────────────────────────────────────
@@ -116,68 +124,56 @@ export const generateImage = onCall(
     }
 
     // ── Authorization: caller must own the family ──────────────
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",
       );
     }
 
+    // ── Rate limiting ─────────────────────────────────────────
+    await checkRateLimit(uid, "image-generation", 200, 60);
+
     // ── Rewrite prompt for DALL-E safety via Claude ─────────────
-    let safePrompt = prompt;
-    try {
-      const { default: Anthropic } = await import("@anthropic-ai/sdk");
-      const claude = new Anthropic({ apiKey: claudeApiKey.value() });
+    const rewriteMode = style === "book-sticker" ? "sticker" as const : "scene" as const;
+    const safePrompt = await rewriteForCopyright(prompt, rewriteMode, claudeApiKey.value());
 
-      const rewriteSystemPrompt =
-        style === "book-sticker"
-          ? `You rewrite children's sticker descriptions to avoid copyright issues.
+    // ── Resolve theme image prefix ──────────────────────────────
+    let themeImagePrefix: string | undefined;
+    if (themeId) {
+      // Check preset themes first (server-side map)
+      const PRESET_IMAGE_PREFIXES: Record<string, string> = {
+        adventure: "A colorful adventure scene for a children's book.",
+        animals: "A warm, friendly children's book illustration of animals in nature.",
+        fantasy: "A magical fantasy scene for a children's book.",
+        minecraft: "A blocky pixel-art Minecraft-style scene. Cubic blocks, pixelated textures, bright colors.",
+        space: "A vivid space scene for a children's book. Colorful planets, stars, rockets.",
+        dinosaurs: "A prehistoric children's book illustration. Friendly dinosaurs, lush vegetation.",
+        ocean: "An underwater children's book illustration. Colorful coral reefs, friendly sea creatures.",
+        superheroes: "A bold, colorful superhero scene for a children's book.",
+        cooking: "A warm, cheerful kitchen scene for a children's book.",
+        sports: "A bright, energetic children's book illustration of kids playing sports.",
+        holidays: "A festive, joyful children's book illustration. Holiday decorations, seasonal scenes, warm family celebrations.",
+      };
+      themeImagePrefix = PRESET_IMAGE_PREFIXES[themeId];
 
-RULES:
-- NEVER include character names (Mario, Pikachu, Elsa, etc.) or franchise names
-- Instead describe the CHARACTER visually: "a red-hatted plumber with a mustache" → "a cheerful cartoon man in red overalls and a red cap"
-- Stickers CAN have characters (unlike scenes) — just describe them generically
-- Keep it cute, simple, child-friendly
-- Output just the description, no preamble
-- Under 50 words`
-          : `You rewrite children's image generation prompts to avoid copyright issues while preserving the creative intent.
-
-RULES:
-- NEVER include character names (Mario, Luigi, Pikachu, Elsa, Spider-Man, Steve, etc.)
-- NEVER include franchise names (Minecraft, Pokemon, Mario Bros, Disney, Marvel, etc.)
-- Instead, describe the VISUAL STYLE and WORLD without naming the IP:
-  - "Minecraft" → "blocky pixel art voxel world"
-  - "Mario" → "colorful platformer video game world with brick blocks, green pipes, golden coins"
-  - "Pokemon" → "cute cartoon creatures in a grassy meadow"
-  - "Frozen/Elsa" → "magical ice palace with snowflakes and northern lights"
-  - "Spider-Man" → "comic book city rooftop scene at sunset"
-- ALWAYS describe a SCENE or ENVIRONMENT, not a character doing something
-- If the kid describes a character action ("Mario jumps over a pit"), convert to a scene ("a deep pit with lava below in a colorful platformer world, brick platforms floating above")
-- Keep the output under 100 words
-- Maintain the kid's creative intent — just make it about the WORLD not the CHARACTER
-- The output should start directly with the scene description, no preamble
-
-IMPORTANT: The child will overlay their own characters on top of this scene. So generate a BACKGROUND, not a character portrait.`;
-
-      const rewriteResult = await claude.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 300,
-        system: rewriteSystemPrompt,
-        messages: [{ role: "user", content: prompt }],
-      });
-
-      const firstBlock = rewriteResult.content[0];
-      if (firstBlock?.type === "text") {
-        safePrompt = firstBlock.text;
+      // Check custom theme in Firestore if not a preset
+      if (!themeImagePrefix) {
+        try {
+          const db = getFirestore();
+          const themeDoc = await db.doc(`families/${familyId}/bookThemes/${themeId}`).get();
+          if (themeDoc.exists) {
+            themeImagePrefix = (themeDoc.data() as Record<string, unknown>).imageStylePrefix as string | undefined;
+          }
+        } catch {
+          // Ignore — use default style prefix
+        }
       }
-    } catch (rewriteErr) {
-      // If rewrite fails, proceed with the original prompt
-      console.warn("Prompt rewrite failed, using original:", rewriteErr);
     }
 
     // ── Generate image ──────────────────────────────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
-    const dallePrompt = buildImagePrompt(safePrompt, style);
+    const dallePrompt = buildImagePrompt(safePrompt, style, themeImagePrefix);
 
     // Use gpt-image-1 for stickers (native transparent bg), DALL-E 3 for everything else
     const isSticker = style === "book-sticker";

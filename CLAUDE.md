@@ -32,6 +32,27 @@ Use `import type` for type-only imports:
 import type { SomeType } from './types'
 ```
 
+## Deploy
+
+### CI/CD (preferred method)
+- **Push to `main`**: CI runs tests. If `firestore.indexes.json` changed, indexes auto-deploy.
+- **Push to `deploy` branch**: Full deploy — hosting, functions (if changed), Firestore rules + indexes, Storage rules + CORS.
+
+### How indexes deploy
+Firestore indexes deploy automatically in three ways:
+1. When `firestore.indexes.json` changes on `main` (`.github/workflows/deploy-indexes.yml`)
+2. When functions change on `deploy` branch (deployed alongside functions)
+3. Unconditionally on every `deploy` branch push (`.github/workflows/deploy.yml` line 74)
+
+You should never need to manually run `firebase deploy --only firestore:indexes`.
+
+### Manual deploy (use sparingly, from Claude Code)
+If you must deploy manually, always include indexes:
+```
+firebase deploy --only functions,firestore:indexes
+```
+Never deploy functions without indexes — new queries may require new composite indexes.
+
 ## Common Patterns
 
 ### Firestore document mapping
@@ -53,14 +74,44 @@ const items = snapshot.docs.map((doc) => ({
 ## Project Structure
 
 - `src/app/` — App shell, routing, theme provider
-- `src/components/` — Shared UI components
+- `src/components/` — Shared UI components (includes SectionErrorBoundary for per-section crash isolation)
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
-- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useDebounce, useSaveState)
-- `src/core/types/` — Domain types (`domain.ts`) and enum-like constants (`enums.ts`)
-- `src/core/utils/` — Date/time utilities, formatting, doc ID parsing
-- `src/core/ai/` — AI service layer, provider adapters, prompt templates
-- `src/features/` — Feature modules (engine, today, week, ladders, sessions, planner-chat, etc.)
+- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useSpeechRecognition, useTTS, useActivityConfigs, useScanToActivityConfig)
+- `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
+- `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns
+- `src/core/ai/` — AI service layer, feature flags, useAI hook, prompt templates
+- `src/core/profile/` — Profile context provider and hook (family + children)
+- `src/core/xp/` — XP ledger, armor tiers, armor unlock logic
+- `src/core/avatar/` — Daily armor session management (`getDailyArmorSession.ts`)
+- `src/core/curriculum/` — Curriculum knowledge map, skill mapping, finding integration (curriculumMap, mapFindingToNode, skillStatus, updateSkillMapFromFindings, useSkillMap)
+- `src/core/data/` — Database seed data
+- `src/features/auth/` — Auth guard route wrapper
+- `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, decomposed panels (ArmorPieceGallery, ArmorVerseCard, AvatarPhotoUpload, AvatarHeroBanner, AvatarCharacterDisplay, ArmorSuitUpPanel, AvatarCustomizer, speakVerse), VoxelCharacter (Three.js character, armor, poses, materials, camera), `voxel/` sub-module (armor meshes, pose definitions)
+- `src/features/books/` — Bookshelf, book editor/reader, sight word dashboard, story guide
+- `src/features/dad-lab/` — Dad Lab lifecycle (plan, start, contribute, complete)
+- `src/features/engine/` — Engine page and engine logic
+- `src/features/evaluate/` — Reading evaluation chat, findings extraction
+- `src/features/evaluation/` — Skill snapshot page, quick check panel
+- `src/features/kids/` — Kids page, ladder logic
+- `src/features/ladders/` — Skill progression ladders
+- `src/features/login/` — Profile selection
+- `src/features/not-found/` — 404 page
+- `src/features/planner/` — TeachHelperDialog (shared)
+- `src/features/planner-chat/` — Plan My Week (AI chat planner, decomposed: PlannerChatPage + PlannerSetupWizard, WeekFocusPanel, PlanDayCards, PlannerChatMessages)
+- `src/features/progress/` — Progress tabs (learning profile, ladders, engine, snapshot, milestones, word wall, armor, curriculum)
+- `src/features/progress/CurriculumTab.tsx` — Curriculum management tab (activity configs)
+- `src/features/progress/learning-map/` — Learning Map UI components (visual curriculum knowledge map)
+- `src/features/progress/DispositionProfile.tsx` — AI disposition narrative from day log data, with per-disposition parent overrides (inline edit, revert to AI)
+- `src/features/quest/` — Knowledge Mine (interactive reading quest)
+- `src/features/records/` — Hours, compliance, evaluations, portfolio
+- `src/features/settings/` — AI usage, account, avatar admin, sticker library, Dev tab (admin-only: chapter book seeding, Sunday cleanup, working levels backfill)
+- `src/features/shelly-chat/` — Shelly AI chat assistant (ShellyChatPage, ChatThreadDrawer, ChatMessageBubble, openChatWithContext, formatRelativeTime)
+- `src/components/ScanButton.tsx` — Camera capture for curriculum photo scanning
+- `src/components/ScanResultsPanel.tsx` — AI scan results display
+- `src/features/today/` — Parent Today (decomposed: TodayPage shell + TodayChecklist, WeekFocusCard, QuickCaptureSection, TeachBackSection, ChapterQuestionPool) + Kid Today (decomposed: KidTodayView shell + KidChecklist, KidTeachBack, KidChapterPool, KidConundrumResponse, KidExtraLogger, KidCelebration) + routine sync, XP
+- `src/features/weekly-review/` — Weekly review page
+- `src/features/workshop/` — Story Game Workshop (board/adventure/card games)
 - `functions/src/` — Firebase Cloud Functions (AI endpoints)
 
 ## North Star
@@ -73,6 +124,16 @@ const items = snapshot.docs.map((doc) => ({
 - tracks growth (Ladders + Milestones)
 - exports records (MO-friendly: logs + hours + portfolio + eval)
 - adapts weekly via AI-powered evaluation loop
+
+## First Principles Alignment
+
+The app's growth tracking follows the Ad Astra / Astra Nova pedagogy:
+- **Disposition over content mastery**: curiosity, persistence, articulation, self-awareness, ownership
+- **Wonder→Build→Explain→Reflect→Share** is the philosophical framework, not a counting system
+- **AI synthesizes** growth narratives from data Shelly already captures
+- **Conundrums** build ethical reasoning through weekly open-ended scenarios
+- **Teach-back** (Lincoln teaches London) is the richest learning evidence
+- **No grades, no shame**: "growing" not "passing", struggles are data not failure
 
 ## Project Principles
 
@@ -99,6 +160,9 @@ Store dates as `YYYY-MM-DD` strings for easy Firestore queries and sorting.
 - Prefer dropdowns + templates
 - Keep forms short
 
+### Terminology
+**Terminology**: Use "sight words" throughout. The `sightWordProgress` collection is the canonical store. "Heart words" (a UFLI term) is not used in this codebase.
+
 ### Plan type terminology
 Use `'normal'` / `'mvd'` (not the legacy `'A'` / `'B'`) for `DailyPlan.planType`. The `PlanType` const enum in `enums.ts` is the source of truth. Display labels come from `PlanTypeLabel` ("Normal Day" / "Minimum Viable Day"). The Firestore converter in `firestore.ts` normalizes legacy `'A'`→`'normal'` and `'B'`→`'mvd'` on read.
 
@@ -106,6 +170,13 @@ Use `'normal'` / `'mvd'` (not the legacy `'A'` / `'B'`) for `DailyPlan.planType`
 Use clear prefixes: `chore:`, `feat:`, `fix:`, `refactor:`, `docs:`, `test:`
 
 Aim for commits that implement one component/flow, can be reverted cleanly, and do not mix scope areas.
+
+### Cross-platform npm scripts
+Nathan develops on Windows PowerShell. Never use bash-style inline env vars (`FOO=bar cmd`) in npm scripts — they break on Windows. Always use `cross-env`:
+```json
+"my-script": "cross-env FOO=bar tsx scripts/my-script.ts"
+```
+See `docs/SCRIPT_CONVENTIONS.md` for full conventions.
 
 ## Firestore Collections
 
@@ -120,19 +191,42 @@ All under `families/{familyId}/`:
 | `hours` | Manual hours entries |
 | `hoursAdjustments` | Hours adjustments |
 | `evaluations` | Skill evaluations |
-| `ladders` | Skill ladder definitions |
 | `ladderProgress` | Per-child ladder progression |
-| `milestoneProgress` | Milestone achievement tracking |
-| `sessions` | Skill practice sessions |
 | `dailyPlans` | Daily session plans |
-| `projects` | Long-form projects |
-| `weeklyScores` | Weekly score summaries |
-| `labSessions` | Saturday lab sessions |
-| `dadLab` | Dad lab weeks |
+| `dadLabReports` | Dad Lab session reports |
 | `skillSnapshots` | Per-child skill snapshots |
-| `plannerSessions` | Planner workflow sessions |
+| `plannerConversations` | Planner chat conversations |
 | `lessonCards` | Lesson card definitions |
 | `weeklyReviews` | AI-generated weekly adaptive reviews |
+| `workbookConfigs` | Workbook pace/config per child (legacy — see activityConfigs) |
+| `activityConfigs` | Structured activity definitions per child (replaces routine text + workbook configs) |
+| `xpLedger` | XP event log for armor progression |
+| `books` | Kid-authored books (My Books) |
+| `stickerLibrary` | Family sticker assets |
+| `sightWordProgress` | Per-child sight word mastery tracking |
+| `aiUsage` | AI token usage and cost tracking |
+| `avatarProfiles` | Per-child avatar customization |
+| `dailyArmorSessions` | Daily armor XP session tracking |
+| `evaluationSessions` | Interactive evaluation sessions (Knowledge Mine) |
+| `storyGames` | Story Game Workshop games |
+| `scans` | Curriculum photo scan records |
+| `shellyChatThreads` | Shelly AI chat thread roots |
+| `chapterResponses` | Read-aloud chapter discussion responses per child |
+| `bookThemes` | Book theme presets and custom themes |
+| `childSkillMaps` | Per-child curriculum knowledge maps |
+| `bookProgress` | Per-child read-aloud book progress and question pools |
+
+**Global collections** (not under `families/`):
+
+| Collection | Purpose |
+|---|---|
+| `chapterBooks` | Chapter book library (global, shared across families) |
+
+**Subcollections:**
+- `shellyChatThreads/{threadId}/messages` — Messages within a Shelly chat thread
+- `children/{childId}/wordProgress` — Knowledge Mine word progress (referenced in `tasks/quest.ts` via raw Firestore path; no collection helper in `firestore.ts`)
+
+**Settings documents:** `settings/plannerDefaults_{childId}` — Per-child planner subject time defaults (used by `tasks/plan.ts`)
 
 ## AI Integration
 
@@ -152,35 +246,44 @@ All under `families/{familyId}/`:
 4. **Child context is assembled per-request** from Firestore (skill snapshot, pace data, recent sessions).
 5. **Cost tracking:** Log token usage and model used to Firestore for monitoring.
 6. **Model selection by task:**
-   - Routine generation (worksheets, prompts): Claude Haiku / GPT-4o-mini
-   - Complex planning and evaluation: Claude Sonnet
-   - Image generation: DALL-E 3
+   - Complex reasoning (plan, evaluate, quest, generateStory, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat): Claude Sonnet (`claude-sonnet-4-6`)
+   - Routine generation (generate, chat): Claude Haiku (`claude-haiku-4-5-20251001`)
+   - Image generation: DALL-E 3 (scenes, armor sheets) + gpt-image-1 (transparent stickers, photo transform)
 
 ### Testing AI Logic
-- Co-locate tests with logic files (e.g., `chatPlanner.logic.test.ts`)
+- Co-locate tests with logic files (e.g., `skipAdvisor.logic.test.ts`, `pace.logic.test.ts`)
 - Mock AI API responses in tests — never call real APIs in test suite
 - Test prompt assembly separately from API calls
 - Snapshot test system prompts to catch unintended changes
 
 ### Prompt Files
-- `src/core/ai/prompts/systemPrompts.ts` — Base charter and family context
-- `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation
-- `src/core/ai/prompts/evaluationPrompts.ts` — Progress evaluation and adaptive loop
-- `src/core/ai/prompts/tutorPrompts.ts` — Kid-facing interactions (future)
+- `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
+- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions)
+
+### Cloud Functions (18 exported)
+- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, chapterQuestions)
+- `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
+- `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
+- `generateWeeklyReviewNow` — Manual review trigger
+- `generateActivity` — Lesson card generation
+- `healthCheck` — Diagnostic endpoint
+- 12 image functions: `generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`, `enhanceSketch`
 
 ### Cloud Functions Structure
-```
-functions/
-  src/
-    ai/
-      chat.ts        — Chat/planning completion endpoint
-      generate.ts    — Content generation (worksheets, prompts)
-      evaluate.ts    — Weekly adaptive review generation
-      imageGen.ts    — Image generation proxy (OpenAI DALL-E)
-    index.ts         — Function exports
-  package.json
-  tsconfig.json
-```
+- `functions/src/index.ts` — Main entry point, exports all Cloud Functions
+- `functions/src/ai/chat.ts` — Main chat CF, task type routing, prompt builders
+- `functions/src/ai/chatTypes.ts` — callClaude helper, task handler types
+- `functions/src/ai/contextSlices.ts` — Per-task context loading (charter, child, engagement, etc.)
+- `functions/src/ai/aiConfig.ts` — AI configuration (model selection, tokens, etc.)
+- `functions/src/ai/aiService.ts` — Core AI service orchestration
+- `functions/src/ai/sanitizeJson.ts` — JSON response sanitization
+- `functions/src/ai/health.ts` — Health check endpoint
+- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions
+- `functions/src/ai/generate.ts` — Activity/lesson card generation
+- `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
+- `functions/src/ai/imageGen.ts` — Image generation routing
+- `functions/src/ai/imageTasks/` — 12 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, enhanceSketch, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar) + index
+- `functions/src/ai/providers/` — Claude + OpenAI provider adapters (with `__stubs__/` for test mocking)
 
 ## Family Context (for AI prompt reference)
 
@@ -194,3 +297,19 @@ functions/
 
 ### Scheduling Constraint
 Shelly's direct attention is the primary schedulable resource. Kids need split-block scheduling: Lincoln gets direct support while London does independent work, then swap. Running simultaneously means London's volume wins and Lincoln loses support.
+
+## Known Technical Debt
+
+- **PlannerChatPage.tsx (2,508L)** — Decomposed render (800→500L) but state management is still ~1,700L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **BookEditorPage.tsx (2,087L)** — Grew from themes + drawing flows. Handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
+- **ShellyChatPage.tsx (1,653L)** — 23+ useState hooks. Image generation, thread management, follow-up suggestions, image refinement flow. Decomposition candidate after usage patterns stabilize.
+- **WorkshopPage.tsx (1,623L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
+- **chat.ts CF (1,599L)** — Grew +420 from quest expansion. buildQuestPrompt alone is 400+ lines. Consider extracting prompt builders to separate files.
+- **useQuestSession.ts (1,763L)** — Grew from 954L. Quest, comprehension, fluency all in one hook. Consider splitting by quest domain.
+- **MyAvatarPage.tsx (1,749L)** — Decomposed from 1,862L. Grew +152 from forge + portal. State management + ceremony flow. Stable.
+- **VoxelCharacter.tsx (1,433L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
+- **Ladder system** — Partially deprecated. Disposition system replacing it. 3 files have TODO comments marking ladder references for removal.
+- **evaluate.ts (weekly review)** — Registered in `TASK_CONTEXT` as `weeklyReview` and now calls `buildContextForTask` to fetch shared slices (charter, childProfile, skillSnapshot, activityConfigs, recentHistoryByDomain, recentScans, wordMastery, dadLabReports). Still not routed through the `chat` dispatch — it's a dedicated scheduled CF + `generateWeeklyReviewNow` callable, not a chat task handler — so it composes its own systemPrompt from `[sharedSlices, WEEKLY_REVIEW_ADDENDUM]`. `assembleWeekContext` still provides the week-scoped dayLogs/hours/plans/books/missedDays that shared slices don't cover.
+- **WorkbookConfig → ActivityConfig migration** — Both systems exist. ActivityConfig is the new primary (66 refs vs 27). workbookConfigs still read by quest starting level check and certificate scan. Plan: complete migration, remove workbookConfig references.
+- **Bundle size** — Main chunk is 3.4MB (1MB gzipped). Should code-split Three.js, jsPDF, and heavy features.
+- **Hours partial-day edge** — If a day has some blocks with actualMinutes and others without, only tracked blocks count. By design but undocumented.

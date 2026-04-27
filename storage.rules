@@ -29,6 +29,36 @@ service firebase.storage {
       allow write: if isOwner(familyId) && isValidUpload();
     }
 
+    // Story Game Workshop (voice recordings + generated art)
+    match /families/{familyId}/storyGames/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if isOwner(familyId) && isValidUpload();
+    }
+
+    // Chat uploads (user-uploaded images for AI analysis/transform)
+    match /families/{familyId}/chat-uploads/{allPaths=**} {
+      allow read: if isOwner(familyId);
+      allow write: if isOwner(familyId) && isValidUpload();
+    }
+
+    // Scans (workbook page and certificate photos)
+    match /families/{familyId}/scans/{allPaths=**} {
+      allow read: if isOwner(familyId);
+      allow write: if isOwner(familyId) && isValidUpload();
+    }
+
+    // Sketches (hand-drawn sketches uploaded for book pages + portfolio)
+    match /families/{familyId}/sketches/{allPaths=**} {
+      allow read: if isOwner(familyId);
+      allow write: if isOwner(familyId) && isValidUpload();
+    }
+
+    // Chapter responses (audio recordings of kids answering read-aloud questions)
+    match /families/{familyId}/chapterResponses/{allPaths=**} {
+      allow read: if isOwner(familyId);
+      allow write: if isOwner(familyId) && isValidUpload();
+    }
+
     // Generated images (AI-created via Cloud Functions — written server-side, read client-side)
     match /families/{familyId}/generated-images/{allPaths=**} {
       allow read: if isOwner(familyId);

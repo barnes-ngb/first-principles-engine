@@ -6,6 +6,12 @@ import { handleQuest } from "./quest.js";
 import { handleGenerateStory } from "./generateStory.js";
 import { handleWorkshop } from "./workshop.js";
 import { handleAnalyzeWorkbook } from "./analyzeWorkbook.js";
+import { handleDisposition } from "./disposition.js";
+import { handleConundrum } from "./conundrum.js";
+import { handleWeeklyFocus } from "./weeklyFocus.js";
+import { handleScan } from "./scan.js";
+import { handleShellyChat } from "./shellyChat.js";
+import { handleChapterQuestions } from "./chapterQuestions.js";
 
 export { analyzeEvaluationPatterns } from "./analyzePatterns.js";
 
@@ -18,4 +24,10 @@ export const CHAT_TASKS: Record<string, ChatTaskHandler> = {
   generateStory: handleGenerateStory,
   workshop: handleWorkshop,
   analyzeWorkbook: handleAnalyzeWorkbook,
+  disposition: handleDisposition,
+  conundrum: handleConundrum,
+  weeklyFocus: handleWeeklyFocus,
+  scan: handleScan,
+  shellyChat: handleShellyChat,
+  chapterQuestions: handleChapterQuestions,
 };

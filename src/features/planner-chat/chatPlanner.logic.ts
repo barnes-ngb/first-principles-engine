@@ -1,4 +1,5 @@
 import type {
+  ActivityConfig,
   AppBlock,
   AssignmentCandidate,
   DraftDayPlan,
@@ -10,9 +11,87 @@ import type {
 import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, SubjectBucket } from '../../core/types/enums'
 import { autoSuggestTags } from '../../core/types/skillTags'
+import { formatDateYmd } from '../../core/utils/format'
+
+/** Default app blocks that run "on rails" */
+export const defaultAppBlocks: AppBlock[] = [
+  { label: 'Reading Eggs', defaultMinutes: 15 },
+  { label: 'Math app / Typing', defaultMinutes: 15 },
+]
+
+/**
+ * Shelly's real daily routine template — used as default when no custom routine is set.
+ * Each line is an activity with approximate time and curriculum source.
+ */
+export const defaultDailyRoutine = `Handwriting (while read-aloud) — 20 min — LanguageArts
+Booster cards — 15 min — Reading
+Good and the Beautiful reading — 30 min — GATB — Reading
+Sight word games — 15 min — Reading
+Memory card — 10 min — Reading
+Language arts workbook — 20 min — LanguageArts
+Reading Eggs (tablet) — 45 min — Reading Eggs (app) — Reading
+Good and the Beautiful Math — 30 min — GATB — Math`
+
+/**
+ * Convert activity configs to a routine text string suitable for the local plan generator.
+ * This replaces the old free-text dailyRoutine with structured data from activityConfigs.
+ * Only includes non-completed configs, sorted by sortOrder.
+ */
+export function activityConfigsToRoutineText(configs: ActivityConfig[]): string {
+  const active = configs
+    .filter((c) => !c.completed)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+
+  if (active.length === 0) return ''
+
+  return active
+    .map((c) => {
+      let line = `${c.name} — ${c.defaultMinutes} min — ${c.subjectBucket}`
+      if (c.currentPosition && c.totalUnits) {
+        line += ` (at ${c.unitLabel || 'lesson'} ${c.currentPosition} of ${c.totalUnits})`
+      }
+      return line
+    })
+    .join('\n')
+}
+
+/** Parse a routine string and return total minutes per day. */
+export function parseRoutineTotalMinutes(routine: string): number {
+  if (!routine) return 0
+  let total = 0
+  for (const line of routine.split('\n').filter(l => l.trim())) {
+    const dashMatch = line.match(/^(.+?)\s*[—–-]\s*(\d+)\s*min/)
+    const parenMatch = line.match(/^(.+?)\s*\((\d+)\s*min\)/)
+    const match = dashMatch || parenMatch
+    total += match ? parseInt(match[2]) : 15
+  }
+  return total
+}
 
 export const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as const
 export type WeekDay = (typeof WEEK_DAYS)[number]
+
+/**
+ * Given a week start date (Sunday-based, matching getWeekRange default)
+ * and a WEEK_DAYS day name (Monday=0), return the date key (YYYY-MM-DD)
+ * for that day.
+ *
+ * WEEK_DAYS is Monday-indexed but weekRange.start is Sunday, so Monday
+ * is +1 from weekStart, Friday is +5.
+ */
+export function dateKeyForDayPlan(
+  weekStart: string,
+  day: (typeof WEEK_DAYS)[number],
+): string {
+  const dayIndex = WEEK_DAYS.indexOf(day)
+  if (dayIndex < 0) {
+    throw new Error(`Invalid day "${day}" — must be one of ${WEEK_DAYS.join(', ')}`)
+  }
+  const start = new Date(weekStart + 'T00:00:00')
+  const target = new Date(start)
+  target.setDate(start.getDate() + dayIndex + 1)
+  return formatDateYmd(target)
+}
 
 let _nextId = 1
 export function generateItemId(): string {
@@ -254,40 +333,51 @@ export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftW
     dayBudgets.set(day, remainingPerDay)
   }
 
-  // Add skill-priority items (daily micro reps for emerging skills)
-  if (snapshot) {
-    for (const skill of snapshot.prioritySkills) {
-      if (skill.level === 'emerging') {
-        // Daily micro reps for emerging skills
-        for (const day of WEEK_DAYS) {
-          const dayPlan = dayMap.get(day)!
-          const item: DraftPlanItem = {
-            id: generateItemId(),
-            title: `${skill.label} (micro rep)`,
-            subjectBucket: skillTagToSubject(skill.tag),
-            estimatedMinutes: 8,
-            skillTags: [skill.tag],
-            accepted: true,
-          }
-          dayPlan.items.push(item)
-          dayBudgets.set(day, dayBudgets.get(day)! - 8)
+  // Add ONE consolidated skill practice item per day (not individual items per skill)
+  if (snapshot && snapshot.prioritySkills.length > 0) {
+    const emergingSkills = snapshot.prioritySkills.filter(s => s.level === 'emerging')
+    const developingSkills = snapshot.prioritySkills.filter(s => s.level === 'developing' || s.level === 'supported')
+
+    if (emergingSkills.length > 0) {
+      // ONE daily item that covers all emerging skills
+      const skillLabels = emergingSkills.map(s => s.label).join(', ')
+      const primarySubject = skillTagToSubject(emergingSkills[0].tag)
+
+      for (const day of WEEK_DAYS) {
+        const dayPlan = dayMap.get(day)!
+        const item: DraftPlanItem = {
+          id: generateItemId(),
+          title: `Skill practice: ${skillLabels.length > 50 ? emergingSkills.length + ' emerging skills' : skillLabels}`,
+          subjectBucket: primarySubject,
+          estimatedMinutes: Math.min(15, emergingSkills.length * 5), // cap at 15 min
+          skillTags: emergingSkills.map(s => s.tag),
+          accepted: true,
+          category: 'choose',  // choose, not must-do — keeps must-do list short
         }
-      } else if (skill.level === 'developing' || skill.level === 'supported') {
-        // 3x/week for developing/supported
-        const targetDays: WeekDay[] = ['Monday', 'Wednesday', 'Friday']
-        for (const day of targetDays) {
-          const dayPlan = dayMap.get(day)!
-          const item: DraftPlanItem = {
-            id: generateItemId(),
-            title: `${skill.label} practice`,
-            subjectBucket: skillTagToSubject(skill.tag),
-            estimatedMinutes: 15,
-            skillTags: [skill.tag],
-            accepted: true,
-          }
-          dayPlan.items.push(item)
-          dayBudgets.set(day, dayBudgets.get(day)! - 15)
+        dayPlan.items.push(item)
+        dayBudgets.set(day, dayBudgets.get(day)! - item.estimatedMinutes)
+      }
+    }
+
+    if (developingSkills.length > 0) {
+      // 3x/week for developing — ONE item covering all developing skills
+      const skillLabels = developingSkills.map(s => s.label).join(', ')
+      const primarySubject = skillTagToSubject(developingSkills[0].tag)
+      const targetDays: WeekDay[] = ['Monday', 'Wednesday', 'Friday']
+
+      for (const day of targetDays) {
+        const dayPlan = dayMap.get(day)!
+        const item: DraftPlanItem = {
+          id: generateItemId(),
+          title: `Practice: ${skillLabels.length > 50 ? developingSkills.length + ' developing skills' : skillLabels}`,
+          subjectBucket: primarySubject,
+          estimatedMinutes: 15,
+          skillTags: developingSkills.map(s => s.tag),
+          accepted: true,
+          category: 'choose',
         }
+        dayPlan.items.push(item)
+        dayBudgets.set(day, dayBudgets.get(day)! - 15)
       }
     }
   }
@@ -330,6 +420,27 @@ export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftW
       assignmentId: assignment.id,
     })
     dayBudgets.set(bestDay, dayBudgets.get(bestDay)! - effectiveMinutes)
+  }
+
+  // Enforce daily time budget — remove excess choose items
+  for (const day of WEEK_DAYS) {
+    const dayPlan = dayMap.get(day)!
+    const budget = minutesPerDay // from hoursPerDay input (e.g., 150 minutes)
+
+    let totalMinutes = dayPlan.items.reduce((sum, i) => sum + (i.accepted ? i.estimatedMinutes : 0), 0)
+
+    if (totalMinutes > budget) {
+      const mustDo = dayPlan.items.filter(i => i.category !== 'choose')
+      const choose = dayPlan.items.filter(i => i.category === 'choose')
+
+      // Keep removing choose items from the end until under budget
+      while (totalMinutes > budget && choose.length > 0) {
+        const removed = choose.pop()!
+        totalMinutes -= removed.estimatedMinutes
+      }
+
+      dayPlan.items = [...mustDo, ...choose]
+    }
   }
 
   // Apply adjustments
@@ -449,10 +560,44 @@ function applyCapSubjectTime(days: DraftDayPlan[], intent: CapSubjectTimeIntent)
 
 // ── Helpers ────────────────────────────────────────────────────
 
+/** Filter out daily routine lines that match completed programs (e.g., Reading Eggs). */
+export function filterRoutineForCompletedPrograms(routine: string, completedPrograms: string[]): string {
+  if (!completedPrograms || completedPrograms.length === 0) return routine
+  const lines = routine.split('\n')
+  const filtered = lines.filter(line => {
+    const lineLower = line.toLowerCase().replace(/[^a-z0-9]/g, '')
+    return !completedPrograms.some(prog => {
+      const progLower = prog.toLowerCase().replace(/[^a-z0-9]/g, '')
+      return lineLower.includes(progLower)
+    })
+  })
+  return filtered.join('\n')
+}
+
 export function dayTotalMinutes(day: DraftDayPlan): number {
-  return day.items
-    .filter((item) => item.accepted)
-    .reduce((sum, item) => sum + item.estimatedMinutes, 0)
+  let total = 0
+  const pairedCounted = new Set<string>()
+  const accepted = day.items.filter((item) => item.accepted)
+
+  for (const item of accepted) {
+    // For paired items, only count the longer one (they overlap)
+    if (item.pairedWith) {
+      if (pairedCounted.has(item.pairedWith)) continue
+      const pair = accepted.find(
+        (i) => i.id === item.pairedWith || i.pairedWith === item.id,
+      )
+      if (pair && pair !== item) {
+        total += Math.max(item.estimatedMinutes, pair.estimatedMinutes)
+        pairedCounted.add(item.pairedWith)
+        pairedCounted.add(item.id)
+        continue
+      }
+    }
+    if (pairedCounted.has(item.id)) continue
+    total += item.estimatedMinutes
+  }
+
+  return total
 }
 
 export function planTotalMinutes(plan: DraftWeeklyPlan): number {
@@ -523,13 +668,20 @@ export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
 
   lines.push(`Generate a weekly school plan (Monday–Friday) with ${timeBudgetMinutes} minutes/day budget.`)
   lines.push('')
+  lines.push('HARD BUDGET RULE:')
+  lines.push(`- The daily time budget is ${timeBudgetMinutes} minutes. The SUM of estimatedMinutes per day MUST be ≤ ${timeBudgetMinutes}.`)
+  lines.push('- If routine + app blocks alone exceed the budget, reduce routine items — do NOT generate a plan that exceeds the budget and then warn about it. The plan MUST fit the day.')
+  lines.push('- A fewer-item plan that fits is ALWAYS better than a longer plan that overflows. A 3-item day is acceptable. A 21-item day is not.')
+  lines.push('- Recent weekly reviews show 0% completion on 13-item days; aim for 8–10 items/day (fewer on MVD/low-energy days).')
+  lines.push('')
 
   if (subjectTimeDefaults && Object.keys(subjectTimeDefaults).length > 0) {
-    lines.push('Subject time defaults (use these as the baseline for estimatedMinutes per item):')
+    lines.push('Subject time defaults (use these as the TOTAL minutes per subject per day, not per item):')
     for (const [subject, minutes] of Object.entries(subjectTimeDefaults)) {
       const label = subject === 'Other' ? 'Formation/Prayer' : subject === 'LanguageArts' ? 'Language Arts' : subject === 'SocialStudies' ? 'Social Studies' : subject
       lines.push(`- ${label}: ${minutes} min/day`)
     }
+    lines.push('- Do NOT add multiple items in the same subject that collectively exceed its daily minutes.')
     lines.push('')
   }
 
@@ -934,6 +1086,13 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
         title = title.replace(/[",;]+$/, '').trim()
         // Strip leading quotes
         title = title.replace(/^["']+/, '').trim()
+        // Safety net: AI occasionally embeds context in titles despite prompt constraints.
+        // Truncate egregiously long titles at a word boundary so Today doesn't display garbage.
+        if (title.length > 80) {
+          const truncated = title.substring(0, 80).replace(/\s+\S*$/, '').trim()
+          console.warn(`[parseAIResponse] Title exceeded 80 chars, truncated from "${title}" to "${truncated}"`)
+          title = truncated
+        }
         if (!title) {
           console.warn(`[parseAIResponse] Day ${dayIdx} item ${itemIdx}: empty title, skipping`)
           continue
@@ -967,6 +1126,12 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
           mvdEssential: rawItem.mvdEssential === true ? true : rawItem.category === 'must-do' ? true : undefined,
           category: rawItem.category === 'choose' ? 'choose' as const : 'must-do' as const,
           skipGuidance: typeof rawItem.skipGuidance === 'string' ? rawItem.skipGuidance : undefined,
+          ...(typeof rawItem.itemType === 'string' && ['routine', 'workbook', 'evaluation', 'activity'].includes(rawItem.itemType)
+            ? { itemType: rawItem.itemType as 'routine' | 'workbook' | 'evaluation' | 'activity' } : {}),
+          ...(typeof rawItem.evaluationMode === 'string' && ['phonics', 'comprehension', 'fluency', 'math'].includes(rawItem.evaluationMode)
+            ? { evaluationMode: rawItem.evaluationMode as 'phonics' | 'comprehension' | 'fluency' | 'math' } : {}),
+          ...(typeof rawItem.link === 'string' ? { link: rawItem.link } : {}),
+          ...(typeof rawItem.bookId === 'string' && rawItem.bookId.length > 0 ? { bookId: rawItem.bookId } : {}),
         })
       }
 
@@ -1019,6 +1184,11 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
   }
 }
 
+export interface FillResult {
+  plan: DraftWeeklyPlan
+  filledDays: string[]
+}
+
 /**
  * If a parsed plan has fewer than 5 days (e.g., due to truncation repair),
  * fill missing days using items parsed from the daily routine text.
@@ -1027,17 +1197,17 @@ export function fillMissingDaysFromRoutine(
   plan: DraftWeeklyPlan,
   dailyRoutine: string | undefined,
   hoursPerDay: number,
-): DraftWeeklyPlan {
-  if (plan.days.length >= 5 || !dailyRoutine) return plan
+): FillResult {
+  if (plan.days.length >= 5 || !dailyRoutine) return { plan, filledDays: [] }
 
   const existingDayNames = new Set(plan.days.map(d => d.day))
   const missingDays = WEEK_DAYS.filter(d => !existingDayNames.has(d))
 
-  if (missingDays.length === 0) return plan
+  if (missingDays.length === 0) return { plan, filledDays: [] }
 
   // Parse routine items from the text (reuse the same parsing as generateDraftPlanFromInputs)
   const routineItems = parseRoutineText(dailyRoutine)
-  if (routineItems.length === 0) return plan
+  if (routineItems.length === 0) return { plan, filledDays: [] }
 
   const filledDays = [...plan.days]
   for (const day of missingDays) {
@@ -1052,9 +1222,9 @@ export function fillMissingDaysFromRoutine(
   const dayOrder = new Map(WEEK_DAYS.map((d, i) => [d, i]))
   filledDays.sort((a, b) => (dayOrder.get(a.day as WeekDay) ?? 99) - (dayOrder.get(b.day as WeekDay) ?? 99))
 
-  console.log(`[fillMissingDaysFromRoutine] Added ${missingDays.length} days from routine (AI provided ${plan.days.length})`)
+  console.warn(`[fillMissingDaysFromRoutine] Added ${missingDays.length} days from routine (AI provided ${plan.days.length})`)
 
-  return { ...plan, days: filledDays }
+  return { plan: { ...plan, days: filledDays }, filledDays: missingDays }
 }
 
 /** Parse daily routine text into DraftPlanItems (shared helper). */
@@ -1098,4 +1268,44 @@ function parseRoutineText(dailyRoutine: string): DraftPlanItem[] {
   }
 
   return items
+}
+
+/**
+ * Post-generation validator: ensure the plan includes Fluency Practice.
+ * Knowledge Mine is intentionally excluded — it's an always-available tool on
+ * Kid Today (not a checklist task) and auto-tracks its own time.
+ */
+export function ensureEvaluationItems(plan: DraftWeeklyPlan): DraftWeeklyPlan {
+  const allItems = plan.days.flatMap((d) => d.items)
+  const hasFluency = allItems.some(
+    (item) =>
+      item.evaluationMode === 'fluency' ||
+      item.title?.toLowerCase().includes('fluency'),
+  )
+
+  if (hasFluency || plan.days.length === 0) return plan
+
+  console.warn('[Planner] No fluency items in generated plan — injecting defaults')
+
+  const fluency: DraftPlanItem = {
+    id: generateItemId(),
+    title: 'Fluency Practice',
+    estimatedMinutes: 10,
+    subjectBucket: SubjectBucket.Reading,
+    skillTags: [],
+    accepted: true,
+    category: 'choose',
+    mvdEssential: false,
+    itemType: 'evaluation',
+    evaluationMode: 'fluency',
+    link: '/quest',
+  }
+
+  const days = plan.days.map((day) => ({ ...day, items: [...day.items] }))
+
+  // Spread fluency across the week: Monday + Wednesday
+  if (days.length >= 1) days[0].items.push({ ...fluency, id: generateItemId() })
+  if (days.length >= 3) days[2].items.push({ ...fluency, id: generateItemId() })
+
+  return { ...plan, days }
 }

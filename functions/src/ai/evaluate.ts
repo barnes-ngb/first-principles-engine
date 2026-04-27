@@ -1,35 +1,34 @@
 import { getFirestore } from "firebase-admin/firestore";
+import type { Firestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireEmailAuth } from "./authGuard.js";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { claudeApiKey } from "./aiConfig.js";
+import { buildContextForTask } from "./contextSlices.js";
+import type { SnapshotData } from "./chatTypes.js";
 import { sanitizeAndParseJson } from "./sanitizeJson.js";
+import { callClaude, logAiUsage } from "./chatTypes.js";
+import { modelForTask } from "./chat.js";
 
 // ── Types ───────────────────────────────────────────────────────
 
-export interface WeeklyReview {
+export interface WeeklyReviewDoc {
   childId: string;
   weekKey: string;
-  status: "draft" | "approved";
-  progressSummary: string;
-  paceAdjustments: PaceAdjustment[];
-  planModifications: PlanModification[];
-  energyPattern: string;
+  status: string;
   celebration: string;
+  summary: string;
+  wins: string[];
+  growthAreas: string[];
+  paceAdjustments: Array<{
+    id: string; area: string; currentPace: string;
+    suggestedPace: string; rationale: string; decision: string;
+  }>;
+  recommendations: string[];
+  energyPattern: string;
   model: string;
   usage: { inputTokens: number; outputTokens: number };
   createdAt: string;
-}
-
-export interface PaceAdjustment {
-  subject: string;
-  currentPace: string;
-  suggestedChange: string;
-}
-
-export interface PlanModification {
-  area: string;
-  observation: string;
-  recommendation: string;
 }
 
 interface ChildProfile {
@@ -38,12 +37,14 @@ interface ChildProfile {
   grade?: string;
 }
 
-interface SessionRecord {
-  streamId: string;
-  result: string;
+interface DayLogSummary {
   date: string;
-  durationSeconds?: number;
-  supports?: string[];
+  totalItems: number;
+  completedItems: number;
+  engagement: Record<string, number>;
+  minutesBySubject: Record<string, number>;
+  gradeResults: string[];
+  evidenceCount: number;
 }
 
 interface HoursRecord {
@@ -62,20 +63,20 @@ interface DailyPlanRecord {
 // ── Week helpers ────────────────────────────────────────────────
 
 /**
- * Return the Monday-of-week date string for the most recent completed week.
- * If today is Sunday, that week just ended. Otherwise, go back to the
- * previous Monday–Sunday window.
+ * Return the Sunday-of-week date string for the most recent completed week.
+ * The school week runs Sunday–Saturday. The scheduled review fires Sunday
+ * evening, so lastWeekKey returns the previous Sunday (7 days ago on Sunday,
+ * dayOfWeek+7 days ago otherwise).
  */
 export function lastWeekKey(today: Date): string {
-  const day = today.getDay(); // 0=Sun
-  // Days since the Monday that started last week:
-  // Sunday (0): last Monday was 6 days ago
-  // Monday (1): last Monday was 7 days ago (previous week)
-  // Tuesday–Saturday: last Monday was (day + 6) days ago
-  const daysBack = day === 0 ? 6 : day + 6;
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - daysBack);
-  return formatDate(monday);
+  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dayOfWeek = d.getDay(); // 0=Sun, 1=Mon, ...
+  // Go back to the start of the PREVIOUS Sunday-based week
+  // If today is Sunday (0), the previous week started 7 days ago
+  // If today is Monday (1), the previous week started 8 days ago
+  const offset = dayOfWeek === 0 ? 7 : dayOfWeek + 7;
+  d.setDate(d.getDate() - offset);
+  return formatDate(d);
 }
 
 function formatDate(d: Date): string {
@@ -93,13 +94,28 @@ function addDays(dateStr: string, n: number): string {
 
 // ── Context assembly ────────────────────────────────────────────
 
+interface BookActivity {
+  title: string;
+  childId: string;
+  status: string;
+  pageCount: number;
+  bookType: string;
+  theme?: string;
+  completedThisWeek: boolean;
+  /** 'parent' if Mom/Dad made it, otherwise the childId of the kid author. Absent on legacy books. */
+  createdBy?: string;
+  /** The childId this book was themed for / intended for. */
+  createdFor?: string;
+}
+
 export interface WeekContext {
   child: ChildProfile;
   weekKey: string;
-  sessions: SessionRecord[];
+  dayLogs: DayLogSummary[];
   hours: HoursRecord[];
   dailyPlans: DailyPlanRecord[];
   missedDays: number;
+  bookActivity: BookActivity[];
 }
 
 export async function assembleWeekContext(
@@ -124,24 +140,47 @@ export async function assembleWeekContext(
     grade: childData.grade,
   };
 
-  // Load sessions for the week
-  const sessionsSnap = await familyRef
-    .collection("sessions")
-    .where("childId", "==", childId)
+  // Load day logs for the week
+  const daysSnap = await familyRef
+    .collection("days")
     .where("date", ">=", weekKey)
     .where("date", "<=", weekEnd)
     .get();
 
-  const sessions: SessionRecord[] = sessionsSnap.docs.map((doc) => {
-    const d = doc.data();
-    return {
-      streamId: d.streamId,
-      result: d.result,
-      date: d.date,
-      durationSeconds: d.durationSeconds,
-      supports: d.supports,
-    };
-  });
+  const dayLogs: DayLogSummary[] = daysSnap.docs
+    .map((doc) => {
+      const d = doc.data();
+      if (d.childId !== childId) return null;
+      const checklist = (d.checklist ?? []) as Array<{
+        label: string; completed: boolean; engagement?: string;
+        subjectBucket?: string; estimatedMinutes?: number;
+        plannedMinutes?: number; gradeResult?: string;
+        evidenceArtifactId?: string;
+      }>;
+
+      const engagement: Record<string, number> = {};
+      const minutesBySubject: Record<string, number> = {};
+      const gradeResults: string[] = [];
+      let evidenceCount = 0;
+
+      for (const item of checklist) {
+        if (item.engagement) engagement[item.engagement] = (engagement[item.engagement] ?? 0) + 1;
+        if (item.completed) {
+          const mins = item.estimatedMinutes ?? item.plannedMinutes ?? 0;
+          const bucket = item.subjectBucket ?? "Other";
+          minutesBySubject[bucket] = (minutesBySubject[bucket] ?? 0) + mins;
+        }
+        if (item.gradeResult) gradeResults.push(item.label + ": " + item.gradeResult);
+        if (item.evidenceArtifactId) evidenceCount++;
+      }
+
+      return {
+        date: d.date as string, totalItems: checklist.length,
+        completedItems: checklist.filter((i) => i.completed).length,
+        engagement, minutesBySubject, gradeResults, evidenceCount,
+      } as DayLogSummary;
+    })
+    .filter((d): d is DayLogSummary => d !== null);
 
   // Load hours for the week
   const hoursSnap = await familyRef
@@ -178,9 +217,38 @@ export async function assembleWeekContext(
     };
   });
 
-  // Count school days (Mon–Fri) with no sessions and no daily plan
+  // Load book activity for the week
+  const booksSnap = await familyRef
+    .collection("books")
+    .where("updatedAt", ">=", weekKey)
+    .where("updatedAt", "<=", weekEnd + "T23:59:59")
+    .get();
+
+  const bookActivity: BookActivity[] = booksSnap.docs
+    .map((d) => {
+      const b = d.data();
+      // Include books owned by this child OR made FOR this child from parent profile
+      if (b.childId !== childId && b.createdFor !== childId) return null;
+      const activity: BookActivity = {
+        title: b.title as string,
+        childId: b.childId as string,
+        status: b.status as string,
+        pageCount: (b.pages as unknown[])?.length ?? 0,
+        bookType: (b.bookType as string) ?? "creative",
+        completedThisWeek:
+          b.status === "complete" &&
+          (b.updatedAt as string) >= weekKey,
+      };
+      if (b.theme) activity.theme = b.theme as string;
+      if (b.createdBy) activity.createdBy = b.createdBy as string;
+      if (b.createdFor) activity.createdFor = b.createdFor as string;
+      return activity;
+    })
+    .filter((b): b is BookActivity => !!b);
+
+  // Count school days (Sun–Thu) with no day logs and no daily plan
   const activeDates = new Set([
-    ...sessions.map((s) => s.date),
+    ...dayLogs.map((d) => d.date),
     ...dailyPlans.map((p) => p.date),
   ]);
   let missedDays = 0;
@@ -191,54 +259,69 @@ export async function assembleWeekContext(
     }
   }
 
-  return { child, weekKey, sessions, hours, dailyPlans, missedDays };
+  return { child, weekKey, dayLogs, hours, dailyPlans, missedDays, bookActivity };
 }
 
 // ── Prompt building ─────────────────────────────────────────────
 
-const BASE_SYSTEM_PROMPT = `You are the learning assistant for the Barnes family homeschool. You serve
-two parents (Shelly and Nathan) and two boys (Lincoln, 10, and London, 6).
+const WEEKLY_REVIEW_ADDENDUM = `
+WEEKLY REVIEW ROLE:
+You are generating a weekly review for the Barnes family homeschool. Analyze the week's data and provide actionable feedback.
 
-CHARTER VALUES (non-negotiable):
-- Faith first: identity comes from God, not performance.
-- No shame: correct behavior without attacking identity. Fast repair.
-- Courage + perseverance: hard things in small steps; mistakes are feedback.
-- Rest by design: margin and pacing are part of the plan, not signs of failure.
-- Portfolio over grades: evidence of growth matters more than scores.
-- Adventure matters: movement, building, discovery are core curriculum.
-
-OPERATING PRINCIPLES:
-- Shelly has fibromyalgia. Energy management is real. Never frame a low-energy
-  day as failure. The Minimum Viable Day is real school.
-- Lincoln has speech and neurodivergence challenges. Keep instructions short,
-  visual, and predictable. Celebrate small wins. Never pressure reading aloud.
-- London is story-driven and attention-seeking. Activities must be interactive
-  and engaging. Passive busywork will fail.
-- Shelly's direct attention is the primary resource. Plans must account for
-  split-block scheduling.
-
-TONE:
-- Warm, encouraging, practical. Never clinical or condescending.
-- Speak as a knowledgeable partner, not an authority figure.
+REVIEW-SPECIFIC GUIDANCE:
+- Never pressure Lincoln about reading aloud — celebrate willingness, not volume.
+- London is attention-seeking; note when activities successfully engaged him vs when he disengaged.
+- Look for disposition evidence in the engagement data and grade notes.
 - When suggesting changes, explain the "why" briefly.
-- Default to "both modes count as real school" framing.`;
+- Default to "both modes count as real school" framing.
+- Warm, encouraging, practical tone. Never clinical or condescending.
+- Speak as a knowledgeable partner, not an authority figure.
+- Include disposition observations in the weekly summary alongside completion data.
+- Use the Skill Snapshot, Evaluation History, and Recent Scans sections to ground wins, growth areas, and pace adjustments in concrete skill progression — not just completion counts.
+- If quest or evaluation sessions happened this week, cite them by domain (phonics / comprehension / math / fluency) and reference the working level.
+- If recent scans recommend skip or quick-review, surface that as a pace adjustment rationale.
+- If activity configs show a "daily" or "3x" frequency and this week's dayLogs didn't match, call it out gently as a growth area (not a failure).`;
+
+/** Load the child's skill snapshot (used for prioritySkills/supports/stopRules/workingLevels). */
+async function loadSnapshotData(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<SnapshotData | undefined> {
+  const snap = await db.doc(`families/${familyId}/skillSnapshots/${childId}`).get();
+  if (!snap.exists) return undefined;
+  return snap.data() as SnapshotData;
+}
 
 export function buildEvaluationPrompt(ctx: WeekContext): string {
-  // Summarize sessions by stream
-  const streamResults: Record<string, { hits: number; nears: number; misses: number }> = {};
-  for (const s of ctx.sessions) {
-    if (!streamResults[s.streamId]) {
-      streamResults[s.streamId] = { hits: 0, nears: 0, misses: 0 };
-    }
-    const bucket = streamResults[s.streamId];
-    if (s.result === "hit") bucket.hits++;
-    else if (s.result === "near") bucket.nears++;
-    else if (s.result === "miss") bucket.misses++;
-  }
+  // Compute week totals from dayLogs
+  let totalItems = 0;
+  let completedItems = 0;
+  let totalEvidence = 0;
+  const engagementTotals: Record<string, number> = {};
+  const subjectMinutes: Record<string, number> = {};
+  const allGradeResults: string[] = [];
 
-  const sessionSummary = Object.entries(streamResults)
-    .map(([stream, r]) => `  - ${stream}: ${r.hits} hits, ${r.nears} nears, ${r.misses} misses`)
-    .join("\n");
+  const perDayBreakdown: string[] = [];
+  for (const day of ctx.dayLogs) {
+    totalItems += day.totalItems;
+    completedItems += day.completedItems;
+    totalEvidence += day.evidenceCount;
+    for (const [eng, count] of Object.entries(day.engagement)) {
+      engagementTotals[eng] = (engagementTotals[eng] ?? 0) + count;
+    }
+    for (const [subj, mins] of Object.entries(day.minutesBySubject)) {
+      subjectMinutes[subj] = (subjectMinutes[subj] ?? 0) + mins;
+    }
+    allGradeResults.push(...day.gradeResults);
+
+    const completionPct = day.totalItems > 0
+      ? Math.round((day.completedItems / day.totalItems) * 100) : 0;
+    const engStr = Object.entries(day.engagement).map(([k, v]) => `${k}:${v}`).join(", ");
+    perDayBreakdown.push(
+      `  ${day.date}: ${day.completedItems}/${day.totalItems} items (${completionPct}%)${engStr ? `, engagement: ${engStr}` : ""}${day.evidenceCount > 0 ? `, ${day.evidenceCount} evidence` : ""}`
+    );
+  }
 
   // Summarize hours by subject
   const hoursBySubject: Record<string, number> = {};
@@ -252,45 +335,85 @@ export function buildEvaluationPrompt(ctx: WeekContext): string {
     .map(([subject, mins]) => `  - ${subject}: ${mins} min`)
     .join("\n");
 
-  // Summarize energy states
+  // Energy data from daily plans
   const energyCounts: Record<string, number> = {};
+  const planTypeCounts: Record<string, number> = {};
   for (const p of ctx.dailyPlans) {
     energyCounts[p.energy] = (energyCounts[p.energy] ?? 0) + 1;
+    planTypeCounts[p.planType] = (planTypeCounts[p.planType] ?? 0) + 1;
   }
   const energySummary = Object.entries(energyCounts)
     .map(([level, count]) => `${level}: ${count} days`)
     .join(", ");
-
-  // Summarize plan types
-  const planTypeCounts: Record<string, number> = {};
-  for (const p of ctx.dailyPlans) {
-    planTypeCounts[p.planType] = (planTypeCounts[p.planType] ?? 0) + 1;
-  }
   const planTypeSummary = Object.entries(planTypeCounts)
     .map(([pt, count]) => `${pt}: ${count} days`)
     .join(", ");
 
+  const subjectSummary = Object.entries(subjectMinutes)
+    .map(([subj, mins]) => `  - ${subj}: ${mins} min`)
+    .join("\n");
+
+  const engagementSummary = Object.entries(engagementTotals)
+    .map(([eng, count]) => `${eng}: ${count}`)
+    .join(", ");
+
   return `Generate a weekly review for ${ctx.child.name} for the week of ${ctx.weekKey}.
 
+The week-scoped data below shows what actually happened during the reviewed week.
+The system prompt additionally includes the child's skill snapshot, recent evaluation
+history by domain, recent curriculum scans, activity configs, word mastery, and recent
+Dad Lab reports — use those sections to ground wins, growth areas, and pace
+adjustments in concrete skill progression rather than completion counts alone.
+
 DATA PROVIDED:
-- Sessions completed: ${ctx.sessions.length}
-${sessionSummary || "  (none)"}
-- Total hours logged: ${Math.round(totalMinutes / 60 * 10) / 10} hours (${totalMinutes} min)
+- Day logs recorded: ${ctx.dayLogs.length}
+- Checklist completion: ${completedItems}/${totalItems} items
+- Evidence artifacts captured: ${totalEvidence}
+- Subject time from checklists:
+${subjectSummary || "  (none)"}
+- Engagement feedback: ${engagementSummary || "no data"}
+${allGradeResults.length > 0 ? `- Grade results:\n${allGradeResults.map((r) => `  - ${r}`).join("\n")}` : ""}
+- Hours logged: ${Math.round(totalMinutes / 60 * 10) / 10} hours (${totalMinutes} min)
 ${hoursSummary || "  (none)"}
 - Energy states: ${energySummary || "no data"}
 - Plan types: ${planTypeSummary || "no data"}
-- Missed school days (Mon–Fri): ${ctx.missedDays}
-- Daily plans recorded: ${ctx.dailyPlans.length}
+- Missed school days (Sun–Thu): ${ctx.missedDays}
 
-GENERATE a JSON object with these fields:
-1. "progressSummary": 2-3 sentence narrative of the week (warm, encouraging tone). Be specific about what ${ctx.child.name} actually did.
-2. "paceAdjustments": array of objects { "subject", "currentPace", "suggestedChange" } for any subject off-pace. Empty array if all on track.
-3. "planModifications": array of objects { "area", "observation", "recommendation" } if patterns suggest a change. Empty array if none.
-4. "energyPattern": one sentence noting energy trends and proactive suggestions. If energy data is sparse, note that.
-5. "celebration": one specific thing to celebrate with ${ctx.child.name} this week.
+## Book Activity This Week
+${(ctx.bookActivity ?? []).length === 0 ? "No book activity this week." :
+  (ctx.bookActivity ?? []).map((b) => {
+    // Attribution: 'parent' means Mom/Dad made the book (teaching material); absent = legacy (treat as parent-made)
+    const createdBy = b.createdBy ?? "parent";
+    const authorTag = createdBy === "parent"
+      ? ` [made by Mom/Dad for ${ctx.child.name}]`
+      : createdBy === ctx.child.name.toLowerCase() || createdBy === ctx.child.id
+        ? ` [made by ${ctx.child.name}]`
+        : ` [made by sibling]`;
+    return `- "${b.title}" (${b.bookType}, ${b.pageCount} pages, ${b.status}${b.completedThisWeek ? " — FINISHED THIS WEEK!" : ""})${authorTag}`;
+  }).join("\n")}
 
-TONE: Speak to the parent as a trusted partner. Frame everything constructively.
-Never use language that implies failure. "We might try..." not "You should..."
+Per-day breakdown:
+${perDayBreakdown.join("\n") || "  (no day logs)"}
+
+GENERATE a JSON object with EXACTLY these fields:
+{
+  "celebration": "one specific thing to celebrate with ${ctx.child.name} this week",
+  "summary": "2-3 sentence narrative of the week (warm, encouraging tone). Be specific about what ${ctx.child.name} actually did.",
+  "wins": ["array of 2-4 specific wins from the data"],
+  "growthAreas": ["array of 1-3 areas where gentle growth is emerging"],
+  "paceAdjustments": [{"id": "unique-id", "area": "subject or skill area", "currentPace": "what's happening now", "suggestedPace": "what we might try", "rationale": "why this change makes sense"}],
+  "recommendations": ["array of 1-3 practical next-week suggestions"],
+  "energyPattern": "one sentence noting energy trends and proactive suggestions"
+}
+
+TONE:
+- Warm partner, not authority. "We might try..." not "You should..."
+- No shame. Rest by design. MVD is real school.
+- Portfolio over grades — evidence of growth matters more than scores.
+- If data is thin, say so honestly and keep recommendations light.
+- Celebrate any books created or completed — they represent significant creative effort.
+- Mention reading sessions and book creation as evidence of language arts engagement.
+- ATTRIBUTION: Only attribute book authorship to ${ctx.child.name} when the book tag reads "made by ${ctx.child.name}". If the tag reads "made by Mom/Dad" or "made by sibling", that book is NOT ${ctx.child.name}'s creative work — reference it as a reading/learning resource, not a creative win.
 
 Respond ONLY with valid JSON. No markdown, no preamble, no explanation outside the JSON structure.`;
 }
@@ -298,34 +421,43 @@ Respond ONLY with valid JSON. No markdown, no preamble, no explanation outside t
 // ── Parse AI response ───────────────────────────────────────────
 
 interface ReviewPayload {
-  progressSummary: string;
-  paceAdjustments: PaceAdjustment[];
-  planModifications: PlanModification[];
-  energyPattern: string;
   celebration: string;
+  summary: string;
+  wins: string[];
+  growthAreas: string[];
+  paceAdjustments: Array<{
+    id: string; area: string; currentPace: string;
+    suggestedPace: string; rationale: string;
+  }>;
+  recommendations: string[];
+  energyPattern: string;
 }
 
 export function parseReviewResponse(text: string): ReviewPayload {
   const parsed = sanitizeAndParseJson<Record<string, unknown>>(text);
 
   return {
-    progressSummary: String(parsed.progressSummary ?? ""),
+    celebration: String(parsed.celebration ?? ""),
+    summary: String(parsed.summary ?? parsed.progressSummary ?? ""),
+    wins: Array.isArray(parsed.wins)
+      ? parsed.wins.map((w: unknown) => String(w))
+      : [],
+    growthAreas: Array.isArray(parsed.growthAreas)
+      ? parsed.growthAreas.map((g: unknown) => String(g))
+      : [],
     paceAdjustments: Array.isArray(parsed.paceAdjustments)
-      ? parsed.paceAdjustments.map((a: Record<string, unknown>) => ({
-          subject: String(a.subject ?? ""),
+      ? parsed.paceAdjustments.map((a: Record<string, unknown>, i: number) => ({
+          id: String(a.id ?? `adj-${i}`),
+          area: String(a.area ?? a.subject ?? ""),
           currentPace: String(a.currentPace ?? ""),
-          suggestedChange: String(a.suggestedChange ?? ""),
+          suggestedPace: String(a.suggestedPace ?? a.suggestedChange ?? ""),
+          rationale: String(a.rationale ?? ""),
         }))
       : [],
-    planModifications: Array.isArray(parsed.planModifications)
-      ? parsed.planModifications.map((m: Record<string, unknown>) => ({
-          area: String(m.area ?? ""),
-          observation: String(m.observation ?? ""),
-          recommendation: String(m.recommendation ?? ""),
-        }))
+    recommendations: Array.isArray(parsed.recommendations)
+      ? parsed.recommendations.map((r: unknown) => String(r))
       : [],
     energyPattern: String(parsed.energyPattern ?? ""),
-    celebration: String(parsed.celebration ?? ""),
   };
 }
 
@@ -335,58 +467,101 @@ export async function generateReviewForChild(
   familyId: string,
   ctx: WeekContext,
   apiKey: string,
-): Promise<WeeklyReview> {
-  const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  const client = new Anthropic({ apiKey });
-  const model = "claude-sonnet-4-20250514";
+): Promise<WeeklyReviewDoc> {
+  // Skip AI call if there's no data for the week
+  if (ctx.dayLogs.length === 0 && ctx.hours.length === 0) {
+    const db = getFirestore();
+    const emptyReview: WeeklyReviewDoc = {
+      childId: ctx.child.id,
+      weekKey: ctx.weekKey,
+      status: "no-data",
+      celebration: `No activities were logged for ${ctx.child.name} this week. That's okay — every week is different.`,
+      summary: "No day logs or hours were recorded. Use the Today page during the week to build up data for next week's review.",
+      wins: [],
+      growthAreas: [],
+      paceAdjustments: [],
+      recommendations: ["Try logging at least 3 days on the Today page this week for a more useful review."],
+      energyPattern: "No energy data recorded.",
+      model: "none",
+      usage: { inputTokens: 0, outputTokens: 0 },
+      createdAt: new Date().toISOString(),
+    };
+    const reviewDocId = `${ctx.weekKey}_${ctx.child.id}`;
+    await db
+      .collection(`families/${familyId}/weeklyReviews`)
+      .doc(reviewDocId)
+      .set(emptyReview);
+    return emptyReview;
+  }
+
+  const model = modelForTask("weeklyReview");
+
+  const db = getFirestore();
+  const snapshotData = await loadSnapshotData(db, familyId, ctx.child.id);
+
+  // Shared context slices (skillSnapshot, recentHistoryByDomain, recentScans,
+  // activityConfigs, wordMastery, dadLabReports) — augments the week-scoped
+  // dayLog/hours/plans data from assembleWeekContext with the child-level
+  // skill/progression context the review previously lacked.
+  const sharedSections = await buildContextForTask("weeklyReview", {
+    db,
+    familyId,
+    childId: ctx.child.id,
+    childData: { name: ctx.child.name, grade: ctx.child.grade },
+    snapshotData,
+  });
+
+  const systemPrompt = [...sharedSections, WEEKLY_REVIEW_ADDENDUM].join("\n\n");
 
   const userPrompt = buildEvaluationPrompt(ctx);
 
-  const completion = await client.messages.create({
+  const result = await callClaude({
+    apiKey,
     model,
-    max_tokens: 2048,
-    system: BASE_SYSTEM_PROMPT,
+    maxTokens: 2048,
+    systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
   });
 
-  const responseText =
-    completion.content[0].type === "text" ? completion.content[0].text : "";
-
-  const payload = parseReviewResponse(responseText);
+  const payload = parseReviewResponse(result.text);
 
   const usage = {
-    inputTokens: completion.usage.input_tokens,
-    outputTokens: completion.usage.output_tokens,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
   };
 
   // Store review in Firestore
-  const db = getFirestore();
-  const reviewData: WeeklyReview = {
+  const reviewData: WeeklyReviewDoc = {
     childId: ctx.child.id,
     weekKey: ctx.weekKey,
     status: "draft",
-    progressSummary: payload.progressSummary,
-    paceAdjustments: payload.paceAdjustments,
-    planModifications: payload.planModifications,
-    energyPattern: payload.energyPattern,
     celebration: payload.celebration,
+    summary: payload.summary,
+    wins: payload.wins,
+    growthAreas: payload.growthAreas,
+    paceAdjustments: payload.paceAdjustments.map((a, i) => ({
+      ...a, id: a.id || `adj-${i}`, decision: "pending",
+    })),
+    recommendations: payload.recommendations,
+    energyPattern: payload.energyPattern,
     model,
     usage,
     createdAt: new Date().toISOString(),
   };
 
+  const reviewDocId = `${ctx.weekKey}_${ctx.child.id}`;
   await db
     .collection(`families/${familyId}/weeklyReviews`)
-    .add(reviewData);
+    .doc(reviewDocId)
+    .set(reviewData);
 
   // Log AI usage
-  await db.collection(`families/${familyId}/aiUsage`).add({
+  await logAiUsage(db, familyId, {
     childId: ctx.child.id,
-    taskType: "weekly-review",
+    taskType: "weeklyReview",
     model,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
-    createdAt: new Date().toISOString(),
   });
 
   return reviewData;
@@ -397,6 +572,8 @@ export async function generateReviewForChild(
 export const generateWeeklyReviewNow = onCall(
   { secrets: [claudeApiKey] },
   async (request) => {
+    const { uid } = requireEmailAuth(request);
+
     const { familyId, childId, weekKey } = request.data as {
       familyId?: string;
       childId?: string;
@@ -410,9 +587,35 @@ export const generateWeeklyReviewNow = onCall(
       );
     }
 
+    if (uid !== familyId) {
+      throw new HttpsError(
+        "permission-denied",
+        "You do not have access to this family.",
+      );
+    }
+
     const apiKey = claudeApiKey.value();
-    const ctx = await assembleWeekContext(familyId, childId, weekKey);
-    await generateReviewForChild(familyId, ctx, apiKey);
+    if (!apiKey) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Missing CLAUDE_API_KEY secret.",
+      );
+    }
+
+    try {
+      const ctx = await assembleWeekContext(familyId, childId, weekKey);
+      await generateReviewForChild(familyId, ctx, apiKey);
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      const errMsg = err instanceof Error ? err.message : "Unknown error";
+      console.error("generateWeeklyReviewNow failed:", {
+        familyId,
+        childId,
+        weekKey,
+        error: errMsg,
+      });
+      throw new HttpsError("internal", `Weekly review failed: ${errMsg}`);
+    }
 
     return { success: true };
   },

@@ -11,7 +11,10 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import EditIcon from '@mui/icons-material/Edit'
 import DownloadIcon from '@mui/icons-material/Download'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
+import MenuBookIcon from '@mui/icons-material/MenuBook'
+import StopIcon from '@mui/icons-material/Stop'
 import CircularProgress from '@mui/material/CircularProgress'
+import Tooltip from '@mui/material/Tooltip'
 
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -20,6 +23,8 @@ import { artifactsCollection, hoursCollection } from '../../core/firebase/firest
 import type { Book, BookPage } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 import { useBook } from './useBook'
 import { printBook } from './printBook'
 import PrintSettingsDialog from './PrintSettingsDialog'
@@ -102,8 +107,8 @@ export default function BookReaderPage() {
   const { book, loading } = useBook(familyId, bookId)
   const isSightWordBook = (book?.sightWords?.length ?? 0) > 0
   const { progressMap, recordInteraction } = useSightWordProgress(
-    isSightWordBook ? familyId : '',
-    isSightWordBook ? childId : '',
+    familyId,
+    childId,
   )
 
   const childAge = isLincoln ? 10 : 6
@@ -122,14 +127,40 @@ export default function BookReaderPage() {
   const [totalWordsEncountered, setTotalWordsEncountered] = useState(0)
   const seenPagesRef = useRef<Set<number>>(new Set())
 
+  // TTS read-aloud state
+  const [isReading, setIsReading] = useState(false)
+
   // Session tracking
   const sessionStartRef = useRef<number>(Date.now())
   const pagesViewedRef = useRef<Set<number>>(new Set())
   const completedRef = useRef(false)
   const hoursLoggedRef = useRef(false)
 
-  // Total pages: cover + content pages + back cover
-  const totalPages = useMemo(() => (book ? book.pages.length + 2 : 0), [book])
+  // Compute sight words for the "Words to Watch For" vocabulary page
+  const sightWordsForPage = useMemo(() => {
+    if (!book) return []
+    // 1. Book's explicit sight words
+    const bookWords = book.sightWords ?? []
+    // 2. Child's working words that appear in this book's text
+    const allBookText = book.pages.map((p) => p.text ?? '').join(' ').toLowerCase()
+    const workingWords = [...progressMap.values()]
+      .filter((w) => w.masteryLevel === 'new' || w.masteryLevel === 'practicing')
+      .filter((w) => allBookText.includes(w.word.toLowerCase()))
+      .map((w) => w.word)
+    // 3. Combined, deduplicated
+    return [...new Set([...bookWords, ...workingWords])]
+  }, [book, progressMap])
+
+  const hasSightWordsPage = sightWordsForPage.length > 0
+
+  // Total pages: cover + (optional sight words page) + content pages + back cover
+  const totalPages = useMemo(
+    () => (book ? book.pages.length + 2 + (hasSightWordsPage ? 1 : 0) : 0),
+    [book, hasSightWordsPage],
+  )
+
+  // Content page offset: cover is 0, sight words page is 1 (if present), then content
+  const contentPageOffset = hasSightWordsPage ? 2 : 1
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     setTouchStart(e.touches[0].clientX)
@@ -160,7 +191,7 @@ export default function BookReaderPage() {
   // Record sight word encounters when viewing a page
   useEffect(() => {
     if (!isSightWordBook || !book) return
-    const contentPageIndex = currentPage - 1
+    const contentPageIndex = currentPage - contentPageOffset
     if (contentPageIndex < 0 || contentPageIndex >= book.pages.length) return
     if (seenPagesRef.current.has(contentPageIndex)) return
     seenPagesRef.current.add(contentPageIndex)
@@ -174,7 +205,7 @@ export default function BookReaderPage() {
     for (const word of uniqueWords) {
       void recordInteraction(word, 'seen')
     }
-  }, [currentPage, isSightWordBook, book, recordInteraction])
+  }, [currentPage, isSightWordBook, book, recordInteraction, contentPageOffset])
 
   // Track which pages have been viewed
   useEffect(() => {
@@ -219,7 +250,17 @@ export default function BookReaderPage() {
         'BOOK_READ',
         15,
         `book_${book.id ?? 'unknown'}_${date}`,
-      )
+      ).catch((err) => console.error('[XP] Award failed:', err))
+
+      // Award 3 diamonds for reading a book
+      void addDiamondEvent({
+        familyId,
+        childId: book.childId,
+        amount: 3,
+        type: DIAMOND_EVENTS.BOOK_READ,
+        reason: `Read: ${book.title ?? 'book'}`,
+        dedupKey: `book_${book.id ?? 'unknown'}_${date}-diamond`,
+      }).catch((err) => console.error('[Diamond] Award failed:', err))
     }
     // Only run cleanup on unmount
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -228,6 +269,42 @@ export default function BookReaderPage() {
   const handleWordTap = useCallback((word: string, action: 'help' | 'known') => {
     void recordInteraction(word, action)
   }, [recordInteraction])
+
+  // ── TTS Read Aloud ─────────────────────────────────────────────
+  const handleReadPage = useCallback(() => {
+    if (typeof speechSynthesis === 'undefined') return
+    speechSynthesis.cancel()
+
+    if (isReading) {
+      setIsReading(false)
+      return
+    }
+
+    const contentIdx = currentPage - contentPageOffset
+    if (!book || contentIdx < 0 || contentIdx >= book.pages.length) return
+    const pageText = book.pages[contentIdx].text || ''
+    if (!pageText.trim()) return
+
+    const utterance = new SpeechSynthesisUtterance(pageText)
+    utterance.rate = 0.85
+    utterance.onend = () => setIsReading(false)
+    utterance.onerror = () => setIsReading(false)
+    setIsReading(true)
+    speechSynthesis.speak(utterance)
+  }, [isReading, currentPage, book, contentPageOffset])
+
+  // Cancel TTS on page change
+  useEffect(() => {
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
+    setIsReading(false)
+  }, [currentPage])
+
+  // Cancel TTS on unmount
+  useEffect(() => {
+    return () => {
+      if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
+    }
+  }, [])
 
   const handleDownloadPdf = useCallback(async (settings: PrintSettings) => {
     if (!book) return
@@ -267,8 +344,8 @@ export default function BookReaderPage() {
   }
 
   const contentPage: BookPage | null =
-    currentPage >= 1 && currentPage <= book.pages.length
-      ? book.pages[currentPage - 1]
+    currentPage >= contentPageOffset && currentPage < contentPageOffset + book.pages.length
+      ? book.pages[currentPage - contentPageOffset]
       : null
 
   const getTextStyles = (page: BookPage) => {
@@ -387,44 +464,132 @@ export default function BookReaderPage() {
             </Stack>
           )}
 
+          {/* Sight words page */}
+          {hasSightWordsPage && currentPage === 1 && (
+            <Stack
+              alignItems="center"
+              spacing={3}
+              sx={{ textAlign: 'center', py: 4, height: '100%', justifyContent: 'center' }}
+            >
+              <Typography
+                variant="h5"
+                sx={{
+                  fontWeight: 700,
+                  fontFamily: titleFont,
+                  fontSize: isLincoln ? '0.7rem' : '1.4rem',
+                }}
+              >
+                {isLincoln ? '\u26CF\uFE0F Words to Mine' : '\u2728 Words to Watch For'}
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, justifyContent: 'center', px: 2 }}>
+                {sightWordsForPage.map((word) => (
+                  <Chip
+                    key={word}
+                    label={word}
+                    onClick={() => {
+                      if (typeof speechSynthesis !== 'undefined') {
+                        const utterance = new SpeechSynthesisUtterance(word)
+                        utterance.rate = 0.8
+                        speechSynthesis.speak(utterance)
+                      }
+                    }}
+                    sx={{
+                      fontSize: '1.1rem',
+                      py: 1,
+                      px: 2,
+                      fontWeight: 600,
+                      bgcolor: isLincoln ? 'rgba(91,252,238,0.15)' : 'rgba(232,160,191,0.2)',
+                      color: textColor,
+                      cursor: 'pointer',
+                      '&:hover': { bgcolor: isLincoln ? 'rgba(91,252,238,0.3)' : 'rgba(232,160,191,0.4)' },
+                    }}
+                  />
+                ))}
+              </Box>
+              <Typography
+                variant="body2"
+                sx={{ color: 'text.secondary', mt: 2 }}
+              >
+                Tap any word to hear it!
+              </Typography>
+            </Stack>
+          )}
+
           {/* Content pages */}
           {contentPage && (
             <Stack spacing={2}>
-              {/* Images */}
-              {contentPage.images.length > 0 && (
-                <Box
-                  sx={{
-                    position: 'relative',
-                    width: '100%',
-                    minHeight: 200,
-                    maxHeight: 350,
-                    height: 280,
-                    borderRadius: 2,
-                    overflow: 'hidden',
-                    bgcolor: isLincoln ? 'rgba(255,255,255,0.05)' : 'grey.100',
-                  }}
-                >
-                  {contentPage.images.map((img) => {
-                    const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
-                    return (
-                      <Box
-                        key={img.id}
-                        component="img"
-                        src={img.url}
-                        sx={{
-                          position: 'absolute',
-                          left: `${pos.x}%`,
-                          top: `${pos.y}%`,
-                          width: `${pos.width}%`,
-                          height: `${pos.height}%`,
-                          objectFit: img.type === 'sticker' ? 'contain' : 'cover',
-                          borderRadius: 1,
-                        }}
-                      />
-                    )
-                  })}
-                </Box>
-              )}
+              {/* Images — separated into background + sticker layers */}
+              {contentPage.images.length > 0 && (() => {
+                const bgImages = contentPage.images.filter((img) => img.type !== 'sticker')
+                const stickerImgs = contentPage.images.filter((img) => img.type === 'sticker')
+                return (
+                  <Box
+                    sx={{
+                      position: 'relative',
+                      width: '100%',
+                      aspectRatio: '3 / 2',
+                      borderRadius: 2,
+                      overflow: 'hidden',
+                      bgcolor: isLincoln ? 'rgba(255,255,255,0.05)' : 'grey.100',
+                    }}
+                  >
+                    {/* Background layer */}
+                    {bgImages.map((img) => {
+                      const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+                      const transforms: string[] = []
+                      if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
+                      if (pos.flipH) transforms.push('scaleX(-1)')
+                      if (pos.flipV) transforms.push('scaleY(-1)')
+                      return (
+                        <Box
+                          key={img.id}
+                          component="img"
+                          src={img.url}
+                          sx={{
+                            position: 'absolute',
+                            left: `${pos.x}%`,
+                            top: `${pos.y}%`,
+                            width: `${pos.width}%`,
+                            height: `${pos.height}%`,
+                            objectFit: 'cover',
+                            borderRadius: 1,
+                            zIndex: 0,
+                            transform: transforms.length > 0 ? transforms.join(' ') : undefined,
+                            transformOrigin: 'center center',
+                          }}
+                        />
+                      )
+                    })}
+                    {/* Sticker layer — always on top */}
+                    {stickerImgs.map((img) => {
+                      const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+                      const transforms: string[] = []
+                      if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
+                      if (pos.flipH) transforms.push('scaleX(-1)')
+                      if (pos.flipV) transforms.push('scaleY(-1)')
+                      return (
+                        <Box
+                          key={img.id}
+                          component="img"
+                          src={img.url}
+                          sx={{
+                            position: 'absolute',
+                            left: `${pos.x}%`,
+                            top: `${pos.y}%`,
+                            width: `${pos.width}%`,
+                            height: `${pos.height}%`,
+                            objectFit: 'contain',
+                            borderRadius: 1,
+                            zIndex: (pos.zIndex ?? 0) + 1,
+                            transform: transforms.length > 0 ? transforms.join(' ') : undefined,
+                            transformOrigin: 'center center',
+                          }}
+                        />
+                      )
+                    })}
+                  </Box>
+                )
+              })()}
 
               {/* Text — all words tappable for TTS, sight words get colored chips */}
               {contentPage.text && (
@@ -445,18 +610,34 @@ export default function BookReaderPage() {
                 </Typography>
               )}
 
-              {/* Audio */}
-              {contentPage.audioUrl && (
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ px: 1 }}>
-                  <VolumeUpIcon sx={{ color: 'primary.main' }} />
-                  <Box
-                    component="audio"
-                    controls
-                    src={contentPage.audioUrl}
-                    sx={{ flex: 1, height: 36 }}
-                  />
-                </Stack>
-              )}
+              {/* Audio + Read Aloud */}
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ px: 1 }}>
+                {contentPage.audioUrl && (
+                  <>
+                    <VolumeUpIcon sx={{ color: 'primary.main' }} />
+                    <Box
+                      component="audio"
+                      controls
+                      src={contentPage.audioUrl}
+                      sx={{ flex: 1, height: 36 }}
+                    />
+                  </>
+                )}
+                {contentPage.text?.trim() && typeof speechSynthesis !== 'undefined' && (
+                  <Tooltip title={isReading ? 'Stop reading' : 'Read aloud'}>
+                    <IconButton
+                      onClick={handleReadPage}
+                      sx={{
+                        color: isReading ? 'error.main' : accentColor,
+                        minWidth: 44,
+                        minHeight: 44,
+                      }}
+                    >
+                      {isReading ? <StopIcon /> : <MenuBookIcon />}
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Stack>
             </Stack>
           )}
 

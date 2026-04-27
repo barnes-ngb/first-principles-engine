@@ -122,7 +122,7 @@ jobs:
           # Compare functions/ against the merge base to catch all changes
           # even when multiple PRs are merged at once
           MERGE_BASE=$(git merge-base HEAD HEAD~1 2>/dev/null || echo "HEAD~1")
-          if git diff --quiet "$MERGE_BASE" HEAD -- functions/; then
+          if git diff --quiet "$MERGE_BASE" HEAD -- functions/ firestore.indexes.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -147,3 +147,7 @@ jobs:
       - name: Deploy Cloud Functions
         if: steps.functions-changed.outputs.changed == 'true'
         run: npx firebase-tools@latest deploy --only functions --project barneshome-3dfbb --non-interactive --force
+
+      - name: Deploy Firestore indexes (with functions)
+        if: steps.functions-changed.outputs.changed == 'true'
+        run: npx firebase-tools@latest deploy --only firestore:indexes --project barneshome-3dfbb --non-interactive --force

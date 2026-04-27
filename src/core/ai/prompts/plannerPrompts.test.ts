@@ -19,7 +19,6 @@ import {
   formatAppBlocksForPrompt,
   formatAssignmentsForPrompt,
   formatPaceDataForPrompt,
-  formatRecentSessionsForPrompt,
   formatSkillsForPrompt,
   formatStopRulesForPrompt,
   formatSupportsForPrompt,
@@ -92,18 +91,12 @@ const baseInputs: PlannerPromptInputs = {
   paceData: [
     {
       workbookName: 'Saxon Math 3',
-      requiredPerWeek: 5,
-      plannedPerWeek: 4,
-      delta: -1,
-      status: PaceStatus.Behind,
-      suggestion: 'Behind by ~1 lesson/week. Sprint Mon/Tue or skip review sets.',
-      projectedFinishDate: '2026-06-15',
-      bufferDays: 3,
+      currentPosition: 40,
+      totalUnits: 100,
+      unitLabel: 'lesson',
+      status: PaceStatus.Current,
+      coverageText: 'Lesson 40 of 100 covered',
     },
-  ],
-  recentSessions: [
-    { date: '2026-02-27', streamId: 'reading', result: 'near', notes: 'Struggled with digraphs' },
-    { date: '2026-02-27', streamId: 'math', result: 'hit' },
   ],
 }
 
@@ -197,26 +190,12 @@ describe('formatAppBlocksForPrompt', () => {
 
 describe('formatPaceDataForPrompt', () => {
   it('returns placeholder for empty data', () => {
-    expect(formatPaceDataForPrompt([])).toBe('No pace data available.')
+    expect(formatPaceDataForPrompt([])).toBe('No curriculum coverage data available.')
   })
 
-  it('formats pace data', () => {
+  it('formats coverage data', () => {
     const result = formatPaceDataForPrompt(baseInputs.paceData!)
-    expect(result).toContain('Saxon Math 3: status=behind')
-    expect(result).toContain('4/5 per week (delta -1)')
-    expect(result).toContain('Sprint Mon/Tue')
-  })
-})
-
-describe('formatRecentSessionsForPrompt', () => {
-  it('returns placeholder for empty sessions', () => {
-    expect(formatRecentSessionsForPrompt([])).toBe('No recent sessions.')
-  })
-
-  it('formats sessions', () => {
-    const result = formatRecentSessionsForPrompt(baseInputs.recentSessions!)
-    expect(result).toContain('2026-02-27 reading: near — Struggled with digraphs')
-    expect(result).toContain('2026-02-27 math: hit')
+    expect(result).toContain('Saxon Math 3: Lesson 40 of 100 covered')
   })
 })
 
@@ -269,18 +248,16 @@ describe('buildSkillSnapshotSection', () => {
 })
 
 describe('buildSessionContextSection', () => {
-  it('includes pace data and recent sessions', () => {
+  it('includes curriculum coverage data', () => {
     const section = buildSessionContextSection(baseInputs)
     expect(section).toContain('## Session Context')
-    expect(section).toContain('### Pace Data')
+    expect(section).toContain('### Curriculum Coverage')
     expect(section).toContain('Saxon Math 3')
-    expect(section).toContain('### Recent Sessions')
-    expect(section).toContain('Struggled with digraphs')
   })
 
   it('shows fallback when no context available', () => {
     const section = buildSessionContextSection(minimalInputs)
-    expect(section).toContain('No session history or pace data')
+    expect(section).toContain('No session history or curriculum coverage data')
   })
 })
 
@@ -329,9 +306,8 @@ describe('buildPlannerSystemPrompt', () => {
     expect(prompt).toContain('Frustration cap')
     expect(prompt).toContain('Visual checklist')
 
-    // Session context
-    expect(prompt).toContain('Saxon Math 3: status=behind')
-    expect(prompt).toContain('Struggled with digraphs')
+    // Session context (curriculum coverage)
+    expect(prompt).toContain('Saxon Math 3: Lesson 40 of 100 covered')
 
     // Assignments
     expect(prompt).toContain('Saxon Math 3 – Lesson 45')
@@ -348,7 +324,7 @@ describe('buildPlannerSystemPrompt', () => {
     expect(prompt).toContain('Formation first')
     expect(prompt).toContain('Child: London')
     expect(prompt).toContain('No skill snapshot available')
-    expect(prompt).toContain('No session history or pace data')
+    expect(prompt).toContain('No session history or curriculum coverage data')
     expect(prompt).toContain('No assignments provided')
     expect(prompt).toContain('"days"')
   })

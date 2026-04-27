@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { QuestState } from './questTypes'
+import { DEFAULT_LEVEL_CAP, QUEST_MODE_LEVEL_CAP } from './questTypes'
 import { calculateStreak, computeNextState, formatSkillLabel, shouldEndSession } from './questAdaptive'
 
 function makeState(overrides: Partial<QuestState> = {}): QuestState {
@@ -9,6 +10,7 @@ function makeState(overrides: Partial<QuestState> = {}): QuestState {
     consecutiveCorrect: 0,
     consecutiveWrong: 0,
     levelDownsInARow: 0,
+    wrongAtFloor: 0,
     totalQuestions: 0,
     totalCorrect: 0,
     questionsThisLevel: 0,
@@ -44,11 +46,38 @@ describe('computeNextState', () => {
       expect(next.levelDownsInARow).toBe(0)
     })
 
-    it('does not level up past 6', () => {
-      const state = makeState({ currentLevel: 6, consecutiveCorrect: 2 })
+    it('does not level up past default cap (10)', () => {
+      const state = makeState({ currentLevel: 10, consecutiveCorrect: 2 })
       const next = computeNextState(state, true)
+      expect(next.currentLevel).toBe(10)
+      expect(next.consecutiveCorrect).toBe(3) // streak not reset since no level-up
+    })
+
+    it('does not level up past a custom level cap', () => {
+      const state = makeState({ currentLevel: 6, consecutiveCorrect: 2 })
+      const next = computeNextState(state, true, 6)
       expect(next.currentLevel).toBe(6)
       expect(next.consecutiveCorrect).toBe(3) // streak not reset since no level-up
+    })
+
+    it('levels up when below a custom level cap', () => {
+      const state = makeState({ currentLevel: 5, consecutiveCorrect: 2 })
+      const next = computeNextState(state, true, 6)
+      expect(next.currentLevel).toBe(6)
+      expect(next.consecutiveCorrect).toBe(0)
+    })
+
+    it('respects phonics cap of 8', () => {
+      const state = makeState({ currentLevel: 8, consecutiveCorrect: 2 })
+      const next = computeNextState(state, true, 8)
+      expect(next.currentLevel).toBe(8) // capped, not 9
+      expect(next.consecutiveCorrect).toBe(3)
+    })
+
+    it('respects comprehension/math cap of 6', () => {
+      const state = makeState({ currentLevel: 6, consecutiveCorrect: 2 })
+      const next = computeNextState(state, true, 6)
+      expect(next.currentLevel).toBe(6) // capped, not 7
     })
   })
 
@@ -86,6 +115,44 @@ describe('computeNextState', () => {
     })
   })
 
+  describe('wrongAtFloor (Level 1 frustration escape)', () => {
+    it('increments wrongAtFloor when wrong at Level 1', () => {
+      const state = makeState({ currentLevel: 1, wrongAtFloor: 0 })
+      const next = computeNextState(state, false)
+      expect(next.wrongAtFloor).toBe(1)
+    })
+
+    it('does not increment wrongAtFloor when wrong above Level 1', () => {
+      const state = makeState({ currentLevel: 2, wrongAtFloor: 0 })
+      const next = computeNextState(state, false)
+      expect(next.wrongAtFloor).toBe(0)
+    })
+
+    it('increments wrongAtFloor on level-down to Level 1', () => {
+      // Level 2 with 1 consecutive wrong → next wrong triggers level-down to 1
+      const state = makeState({ currentLevel: 2, consecutiveWrong: 1, wrongAtFloor: 0 })
+      const next = computeNextState(state, false)
+      expect(next.currentLevel).toBe(1)
+      // Now at floor, the wrong answer counts
+      expect(next.wrongAtFloor).toBe(1)
+    })
+
+    it('resets wrongAtFloor on correct answer', () => {
+      const state = makeState({ currentLevel: 1, wrongAtFloor: 3 })
+      const next = computeNextState(state, true)
+      expect(next.wrongAtFloor).toBe(0)
+    })
+
+    it('accumulates wrongAtFloor across multiple wrong answers at Level 1', () => {
+      let state = makeState({ currentLevel: 1, wrongAtFloor: 0 })
+      state = computeNextState(state, false)
+      state = computeNextState(state, false)
+      state = computeNextState(state, false)
+      state = computeNextState(state, false)
+      expect(state.wrongAtFloor).toBe(4)
+    })
+  })
+
   describe('totals', () => {
     it('increments totalQuestions on every answer', () => {
       const state = makeState()
@@ -119,13 +186,33 @@ describe('shouldEndSession', () => {
     expect(shouldEndSession(state)).toEqual({ end: true, timedOut: true })
   })
 
-  it('ends when levelDownsInARow >= 2 (frustration)', () => {
-    const state = makeState({ levelDownsInARow: 2 })
+  it('ends when levelDownsInARow >= 2 after MIN_QUESTIONS reached', () => {
+    const state = makeState({ levelDownsInARow: 2, totalQuestions: 5 })
     expect(shouldEndSession(state)).toEqual({ end: true, timedOut: false })
+  })
+
+  it('does not end on frustration before MIN_QUESTIONS', () => {
+    const state = makeState({ levelDownsInARow: 2, totalQuestions: 3 })
+    expect(shouldEndSession(state)).toEqual({ end: false, timedOut: false })
+  })
+
+  it('still ends on timeout before MIN_QUESTIONS', () => {
+    const state = makeState({ totalQuestions: 2, elapsedSeconds: 480 })
+    expect(shouldEndSession(state)).toEqual({ end: true, timedOut: true })
   })
 
   it('does not end when no conditions met', () => {
     const state = makeState({ totalQuestions: 5, elapsedSeconds: 200, levelDownsInARow: 1 })
+    expect(shouldEndSession(state)).toEqual({ end: false, timedOut: false })
+  })
+
+  it('ends when wrongAtFloor >= 4 after MIN_QUESTIONS reached', () => {
+    const state = makeState({ currentLevel: 1, wrongAtFloor: 4, totalQuestions: 5 })
+    expect(shouldEndSession(state)).toEqual({ end: true, timedOut: false })
+  })
+
+  it('does not end on floor frustration before MIN_QUESTIONS', () => {
+    const state = makeState({ currentLevel: 1, wrongAtFloor: 4, totalQuestions: 3 })
     expect(shouldEndSession(state)).toEqual({ end: false, timedOut: false })
   })
 })
@@ -195,5 +282,25 @@ describe('formatSkillLabel', () => {
 
   it('handles CVCe pattern', () => {
     expect(formatSkillLabel('phonics.cvce')).toBe('Phonics \u2192 CVCe')
+  })
+})
+
+// ── QUEST_MODE_LEVEL_CAP ──────────────────────────────────────
+
+describe('QUEST_MODE_LEVEL_CAP', () => {
+  it('caps phonics at 8', () => {
+    expect(QUEST_MODE_LEVEL_CAP['phonics']).toBe(8)
+  })
+
+  it('caps comprehension at 6', () => {
+    expect(QUEST_MODE_LEVEL_CAP['comprehension']).toBe(6)
+  })
+
+  it('caps math at 6', () => {
+    expect(QUEST_MODE_LEVEL_CAP['math']).toBe(6)
+  })
+
+  it('has a default cap of 10', () => {
+    expect(DEFAULT_LEVEL_CAP).toBe(10)
   })
 })

@@ -22,6 +22,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 
 import ChildSelector from '../../components/ChildSelector'
+import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -30,7 +31,8 @@ import { weeklyReviewsCollection, weeklyReviewDocId } from '../../core/firebase/
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { PaceAdjustment, WeeklyReview } from '../../core/types'
 import { AdjustmentDecision, ReviewStatus } from '../../core/types/enums'
-import { getWeekRange } from '../../core/utils/time'
+import { lastCompletedWeekKey } from '../../core/utils/time'
+import { formatWeekShort } from '../../core/utils/dateKey'
 
 const functions = getFunctions(app)
 const generateReviewFn = httpsCallable<
@@ -49,12 +51,16 @@ export default function WeeklyReviewPage() {
     addChild,
   } = useActiveChild()
 
-  const weekRange = useMemo(() => getWeekRange(new Date()), [])
-  const weekKey = weekRange.start
+  // Review the most recently completed Sun–Sat week. Matches the
+  // scheduled Sunday 7pm CT Cloud Function's docId so the page finds
+  // the review regardless of which day of the following week it loads.
+  const weekKey = useMemo(() => lastCompletedWeekKey(new Date()), [])
+  const weekRangeLabel = useMemo(() => formatWeekShort(weekKey), [weekKey])
 
   const [review, setReview] = useState<WeeklyReview | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
 
   // Load weekly review for active child (real-time)
@@ -164,6 +170,24 @@ export default function WeeklyReviewPage() {
     setIsSaving(false)
   }, [review, activeChildId, weekKey, familyId])
 
+  const handleRegenerateReview = useCallback(async () => {
+    if (!activeChildId) return
+    const confirmed = window.confirm(
+      'This will regenerate the weekly review from scratch. Any current review data will be replaced. Continue?',
+    )
+    if (!confirmed) return
+
+    setGenerating(true)
+    try {
+      await generateReviewFn({ familyId, childId: activeChildId, weekKey })
+      setSnack({ text: 'Review regenerated!', severity: 'success' })
+    } catch (err) {
+      console.error('Failed to regenerate review', err)
+      setSnack({ text: 'Failed to regenerate. Try again.', severity: 'error' })
+    }
+    setGenerating(false)
+  }, [activeChildId, familyId, weekKey])
+
   const acceptedCount = review?.paceAdjustments.filter(
     (a) => a.decision === AdjustmentDecision.Accepted,
   ).length ?? 0
@@ -174,8 +198,13 @@ export default function WeeklyReviewPage() {
         Weekly Review
       </Typography>
       <Typography variant="body2" color="text.secondary">
-        Week of {weekKey}
+        Week of {weekRangeLabel}
       </Typography>
+      <HelpStrip
+        pageKey="weekly-review"
+        text="The weekly review analyzes everything logged on the Today page — completed items, engagement feedback, and grade notes. The more you capture during the week, the better the review."
+        maxShowCount={3}
+      />
 
       <ChildSelector
         children={children}
@@ -327,6 +356,15 @@ export default function WeeklyReviewPage() {
                   : `Apply ${acceptedCount} Adjustment${acceptedCount !== 1 ? 's' : ''}`}
               </Button>
             )}
+            <Button
+              variant="outlined"
+              color="warning"
+              onClick={handleRegenerateReview}
+              disabled={generating || isSaving}
+              startIcon={generating ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
+            >
+              {generating ? 'Regenerating…' : 'Regenerate Review'}
+            </Button>
             {review.status === ReviewStatus.Applied && (
               <Alert severity="success" sx={{ flex: 1 }}>
                 Accepted adjustments have been applied. Changes will be visible in your next
@@ -392,7 +430,7 @@ function EmptyReviewState({ childName, familyId, childId, weekKey, onSnack }: Em
       <Stack spacing={2} alignItems="center" sx={{ py: 2, textAlign: 'center' }}>
         <EventNoteIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
         <Typography color="text.secondary">
-          Your weekly review for {childName} will be generated Sunday evening at 7 PM.
+          Your weekly review for {childName} will be generated Sunday evening at 7 PM and covers the week that just ended (Sun–Sat).
         </Typography>
         <Typography variant="body2" color="text.secondary">
           For the best review, log your daily activities on the Today page throughout the week.

@@ -12,6 +12,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import RotateLeftIcon from '@mui/icons-material/RotateLeft'
 import RotateRightIcon from '@mui/icons-material/RotateRight'
+import FlipIcon from '@mui/icons-material/Flip'
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import type { PageImage } from '../../core/types'
@@ -33,6 +34,7 @@ const DEFAULT_POSITIONS: Record<PageImage['type'], { x: number; y: number; width
   'ai-generated': { x: 0, y: 0, width: 100, height: 100 },
   photo: { x: 10, y: 10, width: 40, height: 40 },
   sticker: { x: 25, y: 15, width: 30, height: 30 },
+  sketch: { x: 0, y: 0, width: 100, height: 100 },
 }
 
 /** Rotation increment per tap (degrees). */
@@ -67,6 +69,8 @@ export default function DraggableImage({
       height: base.height,
       rotation: image.position?.rotation ?? 0,
       zIndex: image.position?.zIndex ?? 0,
+      flipH: image.position?.flipH ?? false,
+      flipV: image.position?.flipV ?? false,
     }
   })
   const [dragging, setDragging] = useState(false)
@@ -247,6 +251,17 @@ export default function DraggableImage({
     [onPositionChange],
   )
 
+  const handleFlip = useCallback(
+    (axis: 'flipH' | 'flipV') => {
+      setPos((prev) => {
+        const next = { ...prev, [axis]: !prev[axis] }
+        onPositionChange?.(next)
+        return next
+      })
+    },
+    [onPositionChange],
+  )
+
   // Determine if toolbar should appear below (sticker is near top edge)
   const nearTopEdge = pos.y < 15
 
@@ -274,7 +289,13 @@ export default function DraggableImage({
         border: selected ? '2px dashed' : 'none',
         borderColor: 'primary.main',
         borderRadius: 1,
-        transform: pos.rotation ? `rotate(${pos.rotation}deg)` : undefined,
+        transform: (() => {
+          const t: string[] = []
+          if (pos.rotation) t.push(`rotate(${pos.rotation}deg)`)
+          if (pos.flipH) t.push('scaleX(-1)')
+          if (pos.flipV) t.push('scaleY(-1)')
+          return t.length > 0 ? t.join(' ') : undefined
+        })(),
         transformOrigin: 'center center',
         ...style,
       }}
@@ -409,6 +430,28 @@ export default function DraggableImage({
             <Tooltip title="Rotate right 15°">
               <IconButton size="small" onClick={() => handleRotate(1)} sx={{ p: 0.5 }}>
                 <RotateRightIcon sx={{ fontSize: 14 }} />
+              </IconButton>
+            </Tooltip>
+          </Stack>
+
+          {/* Flip row */}
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            <Tooltip title="Flip horizontal">
+              <IconButton
+                size="small"
+                onClick={() => handleFlip('flipH')}
+                sx={{ p: 0.5, bgcolor: pos.flipH ? 'action.selected' : undefined }}
+              >
+                <FlipIcon sx={{ fontSize: 14 }} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Flip vertical">
+              <IconButton
+                size="small"
+                onClick={() => handleFlip('flipV')}
+                sx={{ p: 0.5, bgcolor: pos.flipV ? 'action.selected' : undefined }}
+              >
+                <FlipIcon sx={{ fontSize: 14, transform: 'rotate(90deg)' }} />
               </IconButton>
             </Tooltip>
           </Stack>
