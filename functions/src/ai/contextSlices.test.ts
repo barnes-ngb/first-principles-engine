@@ -1,11 +1,46 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+
+vi.mock("./chat.js", () => ({
+  loadWorkbookPaces: vi.fn().mockResolvedValue([]),
+  loadWeekContext: vi.fn().mockResolvedValue(null),
+  loadHoursSummary: vi.fn().mockResolvedValue({ totalMinutes: 120 }),
+  loadEngagementSummary: vi.fn().mockResolvedValue([]),
+  loadGradeResults: vi.fn().mockResolvedValue([]),
+  loadDraftBooksByChild: vi.fn().mockResolvedValue([]),
+  loadSightWordSummary: vi.fn().mockResolvedValue(""),
+  loadWordMasterySummary: vi.fn().mockResolvedValue(""),
+  buildKnownBlockersSection: vi.fn().mockReturnValue(""),
+  buildQuestPrompt: vi.fn(),
+  buildRecentCurriculumSection: vi.fn().mockReturnValue(""),
+  getWeekMonday: vi.fn(),
+}));
+
+vi.mock("./chatTypes.js", () => ({
+  loadRecentEvalContext: vi.fn().mockResolvedValue(""),
+  loadRecentEvalHistoryByDomain: vi.fn().mockResolvedValue(""),
+  formatEvalHistoryByDomain: vi.fn().mockReturnValue(""),
+}));
+
+vi.mock("./data/gatbCurriculum.js", () => ({
+  getGatbProgress: vi.fn().mockReturnValue(null),
+}));
+
 import {
+  buildContextForTask,
   compressEngagement,
   formatChildProfile,
   formatConceptualBlocks,
   TASK_CONTEXT,
   CHARTER_PREAMBLE,
 } from "./contextSlices.js";
+import type { SliceContext } from "./contextSlices.js";
+import {
+  loadWorkbookPaces,
+  loadWeekContext,
+  loadHoursSummary,
+  loadEngagementSummary,
+} from "./chat.js";
+import { loadRecentEvalContext } from "./chatTypes.js";
 
 // ── TASK_CONTEXT registry ──────────────────────────────────────
 
@@ -237,5 +272,104 @@ describe("formatConceptualBlocks", () => {
     expect(joined).toContain("ADDRESS NOW");
     expect(joined).toContain("RESOLVING");
     expect(joined).toContain("DEFERRED");
+  });
+});
+
+// ── buildContextForTask ───────────────────────────────────────────
+
+describe("buildContextForTask", () => {
+  const mockDb = {} as SliceContext["db"];
+
+  function makeCtx(overrides: Partial<SliceContext> = {}): SliceContext {
+    return {
+      db: mockDb,
+      familyId: "fam-1",
+      childId: "child-1",
+      childData: { name: "Lincoln", grade: "3rd" },
+      snapshotData: {
+        prioritySkills: [{ tag: "reading.phonics", label: "Phonics", level: "Emerging" }],
+        supports: [{ label: "Visual checklist", description: "Step-by-step" }],
+        stopRules: [{ label: "Frustration", trigger: "3 misses", action: "Switch" }],
+      },
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("'plan' task includes charter + childProfile and fires Firestore fetches", async () => {
+    const sections = await buildContextForTask("plan", makeCtx());
+
+    const joined = sections.join("\n");
+    expect(joined).toContain("First Principles Engine");
+    expect(joined).toContain("Name: Lincoln");
+    expect(joined).toContain("Grade: 3rd");
+    expect(joined).toContain("Phonics (reading.phonics): Emerging");
+
+    // Verify plan-specific slices were fetched
+    expect(loadWorkbookPaces).toHaveBeenCalledWith(mockDb, "fam-1", "child-1");
+    expect(loadWeekContext).toHaveBeenCalledWith(mockDb, "fam-1");
+    expect(loadHoursSummary).toHaveBeenCalledWith(mockDb, "fam-1", "child-1");
+    expect(loadEngagementSummary).toHaveBeenCalledWith(mockDb, "fam-1", "child-1");
+  });
+
+  it("'chat' task includes only charter + childProfile (no Firestore fetches)", async () => {
+    const sections = await buildContextForTask("chat", makeCtx());
+
+    const joined = sections.join("\n");
+    expect(joined).toContain("First Principles Engine");
+    expect(joined).toContain("Name: Lincoln");
+
+    // No Firestore slices should be fetched for chat
+    expect(loadWorkbookPaces).not.toHaveBeenCalled();
+    expect(loadWeekContext).not.toHaveBeenCalled();
+    expect(loadHoursSummary).not.toHaveBeenCalled();
+    expect(loadEngagementSummary).not.toHaveBeenCalled();
+    expect(loadRecentEvalContext).not.toHaveBeenCalled();
+  });
+
+  it("unknown task type falls back to 'chat' slices", async () => {
+    const sections = await buildContextForTask("nonexistent_task_xyz", makeCtx());
+
+    const joined = sections.join("\n");
+    // Falls back to chat = ["charter", "childProfile"]
+    expect(joined).toContain("First Principles Engine");
+    expect(joined).toContain("Name: Lincoln");
+
+    // No Firestore slices fetched
+    expect(loadWorkbookPaces).not.toHaveBeenCalled();
+    expect(loadWeekContext).not.toHaveBeenCalled();
+  });
+
+  it("generates child profile without skills when snapshotData is undefined", async () => {
+    const sections = await buildContextForTask("chat", makeCtx({ snapshotData: undefined }));
+
+    const joined = sections.join("\n");
+    expect(joined).toContain("Name: Lincoln");
+    expect(joined).toContain("Grade: 3rd");
+    // Should not crash or include skill-related content
+    expect(joined).not.toContain("Phonics");
+  });
+
+  it("gracefully skips a failed Firestore slice (Promise.allSettled)", async () => {
+    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(loadWorkbookPaces).mockRejectedValueOnce(new Error("Firestore unavailable"));
+
+    const sections = await buildContextForTask("plan", makeCtx());
+
+    // Should still return sections (charter + childProfile + other successful slices)
+    expect(sections.length).toBeGreaterThan(0);
+    const joined = sections.join("\n");
+    expect(joined).toContain("Name: Lincoln");
+
+    // Should log the warning for the failed slice
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("workbookPaces"),
+      expect.any(Error),
+    );
+
+    consoleSpy.mockRestore();
   });
 });
