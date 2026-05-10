@@ -191,6 +191,24 @@ describe('generateDraftPlanFromInputs', () => {
     expect(plan.minimumWin).toContain('daily micro reps')
   })
 
+  it('generates a valid 5-day plan with null snapshot', () => {
+    const inputs: PlanGeneratorInputs = {
+      ...baseInputs,
+      snapshot: null,
+    }
+    const plan = generateDraftPlanFromInputs(inputs)
+    expect(plan.days).toHaveLength(5)
+    for (const day of plan.days) {
+      expect(day.timeBudgetMinutes).toBe(150) // 2.5 hours
+      expect(day.items.length).toBeGreaterThan(0)
+      // No skill practice items should exist without a snapshot
+      const skillItems = day.items.filter((i) => i.title.includes('Skill practice'))
+      expect(skillItems).toHaveLength(0)
+    }
+    // minimumWin falls back to generic text
+    expect(plan.minimumWin).toContain('Complete daily assignments')
+  })
+
   it('applies lighten day adjustment and redistributes items', () => {
     const inputs: PlanGeneratorInputs = {
       ...baseInputs,
