@@ -209,3 +209,35 @@ describe("buildQuestPrompt — childName templating (G55)", () => {
     expect(prompt).toContain("the child");
   });
 });
+
+// ── G54: math STARTING LEVEL directive ────────────────────────
+
+describe("buildQuestPrompt — math STARTING LEVEL (G54)", () => {
+  const extras = { activeBlockers: [], hasRecentScans: false };
+
+  it("injects STARTING LEVEL directive into the math prompt when startingLevel is provided", () => {
+    const prompt = buildQuestPrompt("math", 4, "math", extras, "Lincoln");
+    expect(prompt).toContain("STARTING LEVEL");
+    expect(prompt).toContain("Level 4");
+  });
+
+  it("caps the math STARTING LEVEL at 6 (QUEST_MODE_LEVEL_CAP.math)", () => {
+    const prompt = buildQuestPrompt("math", 9, "math", extras, "Lincoln");
+    expect(prompt).toContain("STARTING LEVEL");
+    expect(prompt).toContain("Level 6");
+    // The raw 9 should not appear as a level instruction
+    expect(prompt).not.toMatch(/Start the quest at Level 9/);
+  });
+
+  it("omits the STARTING LEVEL directive block when startingLevel is undefined for math", () => {
+    const prompt = buildQuestPrompt("math", undefined, "math", extras, "Lincoln");
+    // The directive block declares mastery and an explicit "Start the quest at Level N".
+    expect(prompt).not.toMatch(/STARTING LEVEL:\s*This child has demonstrated/);
+    expect(prompt).not.toMatch(/Start the quest at Level \d/);
+  });
+
+  it("references STARTING LEVEL in math ADAPTIVE BEHAVIOR (parity with phonics/comprehension)", () => {
+    const prompt = buildQuestPrompt("math", 3, "math", extras, "Lincoln");
+    expect(prompt).toMatch(/begin at the STARTING LEVEL if specified/);
+  });
+});

@@ -1477,6 +1477,10 @@ IMPORTANT:
   }
 
   if (domain === "math") {
+    const mathStartLevelBlock = startingLevel
+      ? `\nSTARTING LEVEL: This child has demonstrated mastery through Level ${Math.min(startingLevel, 6)} via curriculum completion or prior quest sessions. Start the quest at Level ${Math.min(startingLevel, 6)} unless the skill snapshot indicates otherwise. Do NOT start at Level 1 — that would be boring and disrespectful of their progress.\n`
+      : "";
+
     return `ROLE: You are a Minecraft-themed Quest Master running an interactive math assessment for ${name}. See the child profile context above for age, neurodivergence, and current math level. ${name} is answering directly on a tablet — keep everything fun, encouraging, and in kid-friendly language.
 
 INTERACTION FORMAT:
@@ -1484,7 +1488,7 @@ INTERACTION FORMAT:
 - You may also receive "recentQuestionTypes" listing the last 2-3 question formats used — pick something DIFFERENT.
 - If the message includes "bonusRound": true, generate an easy confidence-building question (see BONUS ROUND below).
 - You respond with ONLY a <quest> JSON block. No other text, no markdown, no explanation.
-
+${mathStartLevelBlock}
 MATH SKILL PROGRESSION:
 - Level 1: Counting & number recognition (count objects, identify numbers 1-100, compare numbers greater/less)
 - Level 2: Addition & subtraction facts to 20 (single-digit +/-, doubles, near-doubles, making 10)
@@ -1576,9 +1580,9 @@ ITERATIVE PROGRESSION:
 - If a skill was previously mastered but missed now → mark 'emerging' in finding (regression)
 
 ADAPTIVE BEHAVIOR:
-- On start_quest: begin at the level suggested by recent evaluation data or skill snapshot, or Level 2 if no data
+- On start_quest: begin at the STARTING LEVEL if specified above, otherwise the level suggested by recent evaluation data or skill snapshot, or Level 2 if no data
 - After correct answer at current level: stay at level, vary the skill within the level
-- After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up
+- After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up (math caps at Level 6)
 - After LEVEL_DOWN (2 wrong in a row): drop to easier skills at the lower level
 
 BONUS ROUND:
