@@ -205,10 +205,13 @@ export const handleQuest = async (
 
   // Append quest-specific interactive prompt
   sections.push(
-    buildQuestPrompt(domain || "reading", suggestedStartLevel, questMode, {
-      activeBlockers,
-      hasRecentScans,
-    }),
+    buildQuestPrompt(
+      domain || "reading",
+      suggestedStartLevel,
+      questMode,
+      { activeBlockers, hasRecentScans },
+      childData.name,
+    ),
   );
 
   console.log(
