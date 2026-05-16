@@ -47,9 +47,18 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.quest).not.toContain("engagement");
   });
 
-  it("plan still uses recentEval (backward compat)", () => {
+  it("plan adds recentHistoryByDomain while keeping recentEval (G50: additive migration)", () => {
     expect(TASK_CONTEXT.plan).toContain("recentEval");
-    expect(TASK_CONTEXT.plan).not.toContain("recentHistoryByDomain");
+    expect(TASK_CONTEXT.plan).toContain("recentHistoryByDomain");
+  });
+
+  it("scan adds recentHistoryByDomain while keeping recentEval (G50: additive migration)", () => {
+    expect(TASK_CONTEXT.scan).toContain("recentEval");
+    expect(TASK_CONTEXT.scan).toContain("recentHistoryByDomain");
+  });
+
+  it("weeklyReview uses recentHistoryByDomain (G50 closure)", () => {
+    expect(TASK_CONTEXT.weeklyReview).toContain("recentHistoryByDomain");
   });
 
   it("shellyChat still uses recentEval (backward compat)", () => {

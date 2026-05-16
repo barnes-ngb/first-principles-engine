@@ -132,6 +132,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 
 | Sprint | Date | Outcome |
 |---|---|---|
+| Prompts B | May 16, 2026 | Closed G55 (childName templating in quest + eval prompts — 24 hardcoded "Lincoln" hits in `functions/src/ai/chat.ts` removed, threaded through buildQuestPrompt / buildComprehensionQuestPrompt / buildFluencyPassagePrompt / buildEvaluationPrompt via existing `childData.name`; profile descriptors deferred to the childProfile slice), G54 (math STARTING LEVEL directive added to `buildQuestPrompt` math branch at `chat.ts:1479`, capped at 6 to match `QUEST_MODE_LEVEL_CAP.math`, ADAPTIVE BEHAVIOR updated for parity with phonics/comprehension), G50 (additive: `recentHistoryByDomain` added to `plan` and `scan` TASK_CONTEXT entries in `contextSlices.ts:46-51` and `:64` alongside existing `recentEval`; `weeklyReview` already wired). 14 new tests (Lincoln/London exclusivity across phonics/comprehension/math; math STARTING LEVEL at 4, cap at 6, absent when undefined, ADAPTIVE BEHAVIOR reference; planner + scan slice presence). All 192 functions tests pass. |
 | Phase 2-3 Polish | Apr 2026 | XP toasts, tier-up ceremony, armor detail, scene polish, London avatar with younger proportions |
 | Parent XP Mgmt | Apr 2026 | XP dashboard, award/adjust UI with presets |
 | Legends Overhaul | Apr 2026 | Lighting, materials, gradient sky, particles, pedestal, dye/enchant glow/cape/emblem |

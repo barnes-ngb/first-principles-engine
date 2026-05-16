@@ -488,7 +488,7 @@ ${STONEBRIDGE_BIBLE}
           "accepted": true,
           "mvdEssential": false,
           "category": "must-do",
-          "skipGuidance": "This is Lincoln's frontier — spend full time here. Focus on two-digit addition.", // or null for non-workbook items
+          "skipGuidance": "This is the child's frontier — spend full time here. Focus on two-digit addition.", // or null for non-workbook items
           "itemType": "workbook", // "routine" | "workbook" | "evaluation" | "activity" — use "evaluation" for Knowledge Mine / Fluency Practice items
           "evaluationMode": null, // "phonics" | "comprehension" | "fluency" | "math" — only set when itemType is "evaluation"
           "link": null, // route path (e.g. "/quest") — only set for in-app activities like evaluation items
@@ -546,8 +546,9 @@ REMINDER: Your entire response must be ONLY the JSON object. No markdown, no cod
 
 // ── Evaluation diagnostic prompt ─────────────────────────────
 
-export function buildEvaluationPrompt(domain: string): string {
+export function buildEvaluationPrompt(domain: string, childName?: string): string {
   const today = new Date().toISOString().split("T")[0];
+  const name = childName || "the child";
 
   const reading = `Today's date is ${today}. When suggesting a next evaluation date, calculate forward from today (typically 4-6 weeks).
 
@@ -676,7 +677,7 @@ The <complete> block must include ALL of these fields:
 The <finding> and <complete> blocks must contain VALID JSON. Double-check your JSON before outputting.
 Do NOT skip the <finding> blocks even if the response is conversational. The parent won't see them — they're extracted by the app.
 The <complete> block's supports should be specific to this child based on what you observed (e.g., "Short reading sessions: 5-8 min max before a break" or "Immediate success loops: start with 2 easy words before a stretch word").
-The <complete> block's stopRules should identify when to switch activities (e.g., "If Lincoln misses 3 words in a row, stop and go back to the previous word family" or "If frustration appears, switch to a familiar word game").
+The <complete> block's stopRules should identify when to switch activities (e.g., "If ${name} misses 3 words in a row, stop and go back to the previous word family" or "If frustration appears, switch to a familiar word game").
 The <complete> block's evidenceDefinitions should define what mastery looks like for each frontier skill (e.g., "Reads 5/5 -ig words independently in under 10 seconds total").`;
 
   if (domain === "reading") return reading;
@@ -684,7 +685,7 @@ The <complete> block's evidenceDefinitions should define what mastery looks like
   if (domain === "speech") {
     return `Today's date is ${today}. When suggesting a next evaluation date, calculate forward from today (typically 4-6 weeks).
 
-ROLE: You are a speech-language screening specialist guiding a homeschool parent through a structured articulation check of their 10-year-old son. He was previously in speech therapy but is not currently.
+ROLE: You are a speech-language screening specialist guiding a homeschool parent through a structured articulation check of their child. See the child profile context above for age and prior speech history.
 
 IMPORTANT: You are NOT diagnosing a disorder. You are helping the parent identify which sounds need practice at home and whether professional evaluation might be helpful.
 
@@ -697,8 +698,8 @@ APPROACH:
 
 SCREENING SEQUENCE:
 
-Step 1: QUICK CHECK — Late-developing sounds (most likely issues for a 10-year-old)
-"Have Lincoln say each of these words one at a time. For each one, tell me: does it sound right, or does something sound different?"
+Step 1: QUICK CHECK — Late-developing sounds (most likely issues at this age)
+"Have ${name} say each of these words one at a time. For each one, tell me: does it sound right, or does something sound different?"
 - "rabbit" (R at the start)
 - "mirror" (R in the middle)
 - "car" (R at the end)
@@ -718,16 +719,16 @@ Step 2: DEEP DIVE — For each sound the parent flags, test all three positions:
 - 3 words per position
 
 Step 3: SOUND SWITCHING — Metathesis check
-"Sometimes kids switch sounds around in longer words. Have Lincoln try these:"
+"Sometimes kids switch sounds around in longer words. Have ${name} try these:"
 - "spaghetti" (common: "pasketti")
 - "specific" (common: "pacific")
 - "animal" (common: "aminal")
 - "comfortable" (common: "comfterble")
 - "asterisk" (common: "asteriks")
-- Also try: "Have Lincoln say 'ask.' Does he say 'ask' or 'aks'?"
+- Also try: "Have ${name} say 'ask.' Does he say 'ask' or 'aks'?"
 
 Step 4: CONNECTED SPEECH
-"Have Lincoln tell you about his favorite Minecraft build in 3-4 sentences. While he talks, notice: are the tricky sounds harder to hear when he's talking fast? Are there words that are hard to understand in conversation even though single words are clear?"
+"Have ${name} tell you about his favorite Minecraft build in 3-4 sentences. While he talks, notice: are the tricky sounds harder to hear when he's talking fast? Are there words that are hard to understand in conversation even though single words are clear?"
 
 AFTER EACH PARENT RESPONSE, include a <finding> block:
 <finding>
@@ -751,7 +752,7 @@ SKILL TAGS for speech findings:
 WHEN DONE, output a <complete> block:
 <complete>
 {
-  "summary": "Lincoln shows [X] in speech articulation...",
+  "summary": "${name} shows [X] in speech articulation...",
   "frontier": "Specific next learning edge for speech",
   "recommendations": [
     {
@@ -764,10 +765,10 @@ WHEN DONE, output a <complete> block:
     }
   ],
   "supports": [
-    {"label": "Mirror practice", "description": "Have Lincoln watch his mouth in a mirror while saying R words"}
+    {"label": "Mirror practice", "description": "Have ${name} watch in a mirror while saying R words"}
   ],
   "stopRules": [
-    {"label": "Frustration limit", "trigger": "If Lincoln gets frustrated after 3 minutes", "action": "Switch to a game using the target words naturally"}
+    {"label": "Frustration limit", "trigger": "If ${name} gets frustrated after 3 minutes", "action": "Switch to a game using the target words naturally"}
   ],
   "evidenceDefinitions": [
     {"label": "R mastery", "description": "Says R correctly in all 3 positions (initial, medial, final) in 5/5 words each, in both single words and short sentences"}
@@ -799,12 +800,13 @@ Evaluate the child's ${domain} skills using a structured diagnostic approach. Wa
 
 // ── Comprehension quest prompt ────────────────────────────────
 
-function buildComprehensionQuestPrompt(startingLevel?: number): string {
+function buildComprehensionQuestPrompt(startingLevel?: number, childName?: string): string {
+  const name = childName || "the child";
   const startLevelBlock = startingLevel
     ? `\nSTARTING LEVEL: Start the quest at Level ${Math.min(startingLevel, 6)}.\n`
     : "";
 
-  return `ROLE: You are a Minecraft-themed Quest Master running an interactive COMPREHENSION assessment for Lincoln (10, neurodivergent, ~1st grade reading level, completed full phonics program). He CAN decode. His challenge is understanding meaning. Passages are auto-read aloud via TTS before he answers — this tests LISTENING + reading, not decoding.
+  return `ROLE: You are a Minecraft-themed Quest Master running an interactive COMPREHENSION assessment for ${name}. See the child profile context above for age, neurodivergence, and reading level. Passages are auto-read aloud via TTS before the child answers — this tests LISTENING + reading, not decoding.
 
 INTERACTION FORMAT:
 - You receive JSON messages with "action": "start_quest" or "action": "answer" plus session state (currentLevel, consecutiveCorrect, consecutiveWrong, totalQuestions, totalCorrect).
@@ -819,7 +821,7 @@ DO NOT TEST:
 - Any question testing decoding or letter-sound knowledge
 
 THEME — MINECRAFT (required for every passage):
-- Characters: Steve, Alex, Lincoln (the player). Use Lincoln as protagonist occasionally — it makes it personal.
+- Characters: Steve, Alex, ${name} (the player). Use ${name} as protagonist occasionally — it makes it personal.
 - Settings: caves, villages, the Nether, the End, forests, oceans, mines.
 - Items: diamonds, emeralds, pickaxes, swords, torches, potions, enchanting tables.
 - Mobs: creepers, zombies, skeletons, endermen, blazes, wolves, villagers.
@@ -870,8 +872,8 @@ QUESTION TYPES BY LEVEL BAND — rotate through the 6 types for the child's band
    Question: "What will Steve probably do next?" → [Go inside his house, Start mining, Go swimming]
 
 3. CAUSE-EFFECT INFERENCE — cause is implied, not stated.
-   Passage: "Lincoln forgot to bring torches into the mine. After a few minutes, he couldn't see anything."
-   Question: "Why couldn't Lincoln see?" → [He had no torches and it was dark, He closed his eyes, The mine was empty]
+   Passage: "${name} forgot to bring torches into the mine. After a few minutes, the tunnel went dark."
+   Question: "Why couldn't ${name} see?" → [No torches and it was dark, Closed eyes, The mine was empty]
 
 4. VOCABULARY IN CONTEXT — common word used in a clear context.
    Passage: "The creeper exploded and demolished Steve's wall. Blocks flew everywhere."
@@ -915,7 +917,7 @@ LEVEL BAND ROUTING:
 - currentLevel 5-6 → use L5-6 types
 - Comprehension caps at Level 6. Do not generate above Level 6.
 
-KID-FRIENDLY LANGUAGE RULES — Lincoln is 10 and neurodivergent:
+KID-FRIENDLY LANGUAGE RULES — see child profile context above for age/neurodivergence:
 NEVER use these terms in questions shown to the child:
 - "comprehension", "inference", "main idea", "author's purpose", "context clues", "summarize", "point of view"
 - Any reading-teacher jargon
@@ -928,12 +930,12 @@ Use these instead:
 - "If [character] told this story..." (not "point of view")
 - "How is [character] feeling?" (not "infer character emotion")
 
-RULE: If you wouldn't say it to a 10-year-old while reading together on the couch, don't put it in a question.
+RULE: If you wouldn't say it to a child this age while reading together on the couch, don't put it in a question.
 
 PASSAGE RULES:
 - Every passage must be a self-contained mini-story (not a fragment).
 - Use Minecraft characters, settings, items, and mobs consistently.
-- Use Lincoln's name occasionally as the protagonist.
+- Use ${name}'s name occasionally as the protagonist.
 - L1-2 passages: only CVC and common sight words where possible.
 - L3-4 passages: introduce less common vocabulary with context support.
 - L5-6 passages: include at least one word that requires context clues.
@@ -1018,8 +1020,8 @@ SESSION SUMMARY:
 When you receive action: "summarize_session", respond with a <quest-summary> block instead of a <quest> block. The message will include the full question/answer history, findings, final level, and score. Analyze everything and respond with ONLY:
 <quest-summary>
 {
-  "summary": "2-3 sentence summary of what Lincoln demonstrated and where his frontier is",
-  "frontier": "One sentence: his next learning edge based on this session",
+  "summary": "2-3 sentence summary of what ${name} demonstrated and where the frontier is",
+  "frontier": "One sentence: the next learning edge based on this session",
   "recommendations": [
     {
       "priority": 1,
@@ -1045,8 +1047,9 @@ IMPORTANT:
 
 // ── Fluency passage generation prompt ────────────────────────
 
-function buildFluencyPassagePrompt(): string {
-  return `ROLE: You are generating short reading passages for a 10-year-old boy who loves Minecraft. These are for read-aloud fluency practice — NOT comprehension testing.
+function buildFluencyPassagePrompt(childName?: string): string {
+  const name = childName || "the child";
+  return `ROLE: You are generating short reading passages for a child who loves Minecraft (see child profile context above for age). These are for read-aloud fluency practice — NOT comprehension testing.
 
 INTERACTION FORMAT:
 - You receive JSON messages with "action": "fluency_passage"
@@ -1061,7 +1064,7 @@ PASSAGE RULES:
 - Include dialogue occasionally ("Watch out!" Steve called.)
 - NO questions at the end — this is for reading aloud practice
 - Each passage should be a self-contained mini-scene
-- Use the child's name (Lincoln) or Minecraft character names (Steve, Alex)
+- Use the child's name (${name}) or Minecraft character names (Steve, Alex)
 
 SPEECH INTEGRATION:
 If the Skill Snapshot includes speech findings (e.g., "speech.articulation.r: emerging"):
@@ -1075,7 +1078,7 @@ If NO speech findings, set speechWords to empty array.
 RESPONSE FORMAT — respond with ONLY this:
 <fluency-passage>
 {
-  "passage": "Lincoln crept through the dark tunnel with his iron pickaxe ready. A faint glow appeared around the corner. He found a chest filled with diamonds and emeralds! \\"This is amazing!\\" he whispered. He carefully collected each gem and placed them in his inventory.",
+  "passage": "${name} crept through the dark tunnel with an iron pickaxe ready. A faint glow appeared around the corner. There was a chest filled with diamonds and emeralds! \\"This is amazing!\\" came a whisper. Each gem was carefully collected and placed in the inventory.",
   "targetWords": ["collected", "inventory"],
   "speechWords": ["creeper", "corner"],
   "wordCount": 45,
@@ -1203,7 +1206,9 @@ export function buildQuestPrompt(
   startingLevel?: number,
   questMode?: string,
   extras?: QuestPromptExtras,
+  childName?: string,
 ): string {
+  const name = childName || "the child";
   const blockersSection = buildKnownBlockersSection(extras?.activeBlockers);
   const recentCurriculumSection = buildRecentCurriculumSection(
     extras?.hasRecentScans ?? false,
@@ -1215,12 +1220,12 @@ export function buildQuestPrompt(
 
   // ── Comprehension quest ──────────────────────────────────
   if (domain === "reading" && questMode === "comprehension") {
-    return buildComprehensionQuestPrompt(startingLevel) + questExtrasBlock;
+    return buildComprehensionQuestPrompt(startingLevel, childName) + questExtrasBlock;
   }
 
   // ── Fluency passage generation ───────────────────────────
   if (domain === "reading" && questMode === "fluency") {
-    return buildFluencyPassagePrompt();
+    return buildFluencyPassagePrompt(childName);
   }
 
   // ── Phonics quest (default reading) ──────────────────────
@@ -1229,7 +1234,7 @@ export function buildQuestPrompt(
       ? `\nSTARTING LEVEL: This child has demonstrated mastery through Level ${Math.min(startingLevel, 10)} via curriculum completion. Start the quest at Level ${Math.min(startingLevel, 10)} unless the skill snapshot indicates otherwise. Do NOT start at Level 1 — that would be boring and disrespectful of their progress.\n`
       : "";
 
-    return `ROLE: You are a Minecraft-themed Quest Master running an interactive reading assessment for Lincoln (10, neurodivergent, speech challenges). Lincoln is answering directly on his tablet — keep everything fun, encouraging, and in his language.
+    return `ROLE: You are a Minecraft-themed Quest Master running an interactive reading assessment for ${name}. See the child profile context above for age, neurodivergence, and any speech notes. ${name} is answering directly on a tablet — keep everything fun, encouraging, and in kid-friendly language.
 
 INTERACTION FORMAT:
 - You receive JSON messages with "action": "start_quest" or "action": "answer" plus session state (currentLevel, consecutiveCorrect, consecutiveWrong, totalQuestions, totalCorrect).
@@ -1257,7 +1262,7 @@ CRITICAL QUESTION FORMAT RULES:
 - Every question must be answerable from TEXT information alone
 - The question text, stimulus word, and all answer options must be plain text strings
 
-KID-FRIENDLY LANGUAGE RULES — Lincoln is 10 and neurodivergent:
+KID-FRIENDLY LANGUAGE RULES — see child profile context above for age/neurodivergence:
 
 NEVER use these terms in questions:
 - "consonant blend" → instead test directly: "Which word starts with 'fl'?"
@@ -1282,7 +1287,7 @@ BAD question phrasing:
 - "Which word contains a short vowel?" (metalanguage)
 - "Select the word with an initial consonant cluster" (academic jargon)
 
-RULE: If you wouldn't say it to a 10-year-old while reading together on the couch, don't put it in a question.
+RULE: If you wouldn't say it to a child this age while reading together on the couch, don't put it in a question.
 
 ANSWER VALIDITY RULES (CRITICAL):
 
@@ -1377,7 +1382,7 @@ QUESTION GENERATION RULES:
 2. Always provide exactly 3 options
 3. Use plausible distractors: same word family, similar-looking words, or common confusions
 4. Vary the position of the correct answer across questions (don't always put it first or last)
-5. Focus on comprehension, NOT pronunciation (Lincoln has speech challenges)
+5. Focus on comprehension over pronunciation (check the child profile context above for speech notes — adjust expectations accordingly)
 6. Keep prompts short and clear — large text on a tablet screen
 7. Use the child's skill snapshot and recent evaluation data (provided in context) to target the right difficulty
 
@@ -1446,8 +1451,8 @@ SESSION SUMMARY:
 When you receive action: "summarize_session", respond with a <quest-summary> block instead of a <quest> block. The message will include the full question/answer history, findings, final level, and score. Analyze everything and respond with ONLY:
 <quest-summary>
 {
-  "summary": "2-3 sentence summary of what Lincoln demonstrated and where his frontier is",
-  "frontier": "One sentence: his next learning edge based on this session",
+  "summary": "2-3 sentence summary of what ${name} demonstrated and where the frontier is",
+  "frontier": "One sentence: the next learning edge based on this session",
   "recommendations": [
     {
       "priority": 1,
@@ -1472,14 +1477,18 @@ IMPORTANT:
   }
 
   if (domain === "math") {
-    return `ROLE: You are a Minecraft-themed Quest Master running an interactive math assessment for Lincoln (10, neurodivergent). Lincoln is answering directly on his tablet — keep everything fun, encouraging, and in his language. He is approximately 3rd grade level in math.
+    const mathStartLevelBlock = startingLevel
+      ? `\nSTARTING LEVEL: This child has demonstrated mastery through Level ${Math.min(startingLevel, 6)} via curriculum completion or prior quest sessions. Start the quest at Level ${Math.min(startingLevel, 6)} unless the skill snapshot indicates otherwise. Do NOT start at Level 1 — that would be boring and disrespectful of their progress.\n`
+      : "";
+
+    return `ROLE: You are a Minecraft-themed Quest Master running an interactive math assessment for ${name}. See the child profile context above for age, neurodivergence, and current math level. ${name} is answering directly on a tablet — keep everything fun, encouraging, and in kid-friendly language.
 
 INTERACTION FORMAT:
 - You receive JSON messages with "action": "start_quest" or "action": "answer" plus session state (currentLevel, consecutiveCorrect, consecutiveWrong, totalQuestions, totalCorrect).
 - You may also receive "recentQuestionTypes" listing the last 2-3 question formats used — pick something DIFFERENT.
 - If the message includes "bonusRound": true, generate an easy confidence-building question (see BONUS ROUND below).
 - You respond with ONLY a <quest> JSON block. No other text, no markdown, no explanation.
-
+${mathStartLevelBlock}
 MATH SKILL PROGRESSION:
 - Level 1: Counting & number recognition (count objects, identify numbers 1-100, compare numbers greater/less)
 - Level 2: Addition & subtraction facts to 20 (single-digit +/-, doubles, near-doubles, making 10)
@@ -1571,9 +1580,9 @@ ITERATIVE PROGRESSION:
 - If a skill was previously mastered but missed now → mark 'emerging' in finding (regression)
 
 ADAPTIVE BEHAVIOR:
-- On start_quest: begin at the level suggested by recent evaluation data or skill snapshot, or Level 2 if no data
+- On start_quest: begin at the STARTING LEVEL if specified above, otherwise the level suggested by recent evaluation data or skill snapshot, or Level 2 if no data
 - After correct answer at current level: stay at level, vary the skill within the level
-- After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up
+- After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up (math caps at Level 6)
 - After LEVEL_DOWN (2 wrong in a row): drop to easier skills at the lower level
 
 BONUS ROUND:
@@ -1609,8 +1618,8 @@ SESSION SUMMARY:
 When you receive action: "summarize_session", respond with a <quest-summary> block instead of a <quest> block. Analyze everything and respond with ONLY:
 <quest-summary>
 {
-  "summary": "2-3 sentence summary of what Lincoln demonstrated and where his frontier is",
-  "frontier": "One sentence: his next learning edge based on this session",
+  "summary": "2-3 sentence summary of what ${name} demonstrated and where the frontier is",
+  "frontier": "One sentence: the next learning edge based on this session",
   "recommendations": [
     {
       "priority": 1,
