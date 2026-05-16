@@ -383,3 +383,15 @@ All four production writers and the backfill are wired per the methodology Phase
 3. **Is the skip advisor (G4/G5/G6) intended as a structural enforcement (planner removes mastered items deterministically) or an advisory prompt to the AI?** The audit's open question line 1310 raised this; without an answer, the right fix for G6 differs (format vs wire vs delete).
 4. **Should `dispositionOverrides` be raw-injected into prompts (Shelly's literal text) or summarized?** The audit raised this in `LEARNING_ENGINE_AUDIT.md:1312`. Raw injection risks prompt length and prompt injection; summary loses fidelity.
 5. **Phase 3 (synthesis pass → `blockerDiagnosis`) and Phase 4 (planner/scan/skip blocker-awareness) are explicitly backlogged in `EVALUATION_METHODOLOGY` §5-6. Is the May sprint trying to land any part of those, or is the current Phase 1+2 state the steady-state for now?** Affects whether Chunk 6 fixes 1-4 are the priority or whether Phase 3 displaces them.
+
+---
+
+## Post-Audit Closures
+
+This audit is a historical record as of 2026-05-16. Verdicts, journey traces, gap tables, and ranked fixes above are preserved as-is. Closures of audit-flagged gaps are tracked below.
+
+| Gap ID | Closed in | Branch / Commit | Date | Brief note |
+|---|---|---|---|---|
+| G55 | Prompt B Step 1 | `claude/prompt-template-correctness-b-P2ng4` / `6a39ab8` | 2026-05-16 | `childName` templating across quest + eval prompts; 24 hardcoded "Lincoln" hits in `functions/src/ai/chat.ts` removed; threaded through `buildQuestPrompt`, `buildComprehensionQuestPrompt`, `buildFluencyPassagePrompt`, `buildEvaluationPrompt` via existing `childData.name`. Profile descriptors deferred to the `childProfile` slice. Unit tests assert Lincoln-vs-London exclusivity for phonics, comprehension, and math; neutral fallback for the no-name case. |
+| G54 | Prompt B Step 2 | `claude/prompt-template-correctness-b-P2ng4` / `a4cc49b` | 2026-05-16 | STARTING LEVEL directive added to the math quest branch at `functions/src/ai/chat.ts:1479`, mirroring the phonics shape and capped at 6 to match `QUEST_MODE_LEVEL_CAP.math` from `functions/src/ai/tasks/quest.ts:50`. ADAPTIVE BEHAVIOR section updated for parity with phonics/comprehension. Tests assert the directive appears at level 4, caps at 6 for input 9, and is absent when `startingLevel` is undefined. |
+| G50 | Prompt B Step 3 | `claude/prompt-template-correctness-b-P2ng4` / `10a39d1` | 2026-05-16 | `recentHistoryByDomain` added additively to `plan` and `scan` TASK_CONTEXT entries in `functions/src/ai/contextSlices.ts:46-51` and `:64` alongside the existing `recentEval` slice (matches the conservative pattern from R6 / `shellyChat`). `weeklyReview` already wired `recentHistoryByDomain` — verified via new test. No downstream formatter changes; the additional per-domain history section appears alongside the legacy cross-domain `recentEval` block. |
