@@ -190,16 +190,73 @@ const COMPREHENSION_SKILL_LEVEL_MAP: Record<string, number> = {
 }
 
 /**
+ * Math skill → level mapping. Aligned with MATH_CONCEPT_BANDS in
+ * functions/src/ai/levelDefinitions.ts (server-side prompt SSOT).
+ *
+ * Skill tags from the math eval prompt are matched here via substring;
+ * the longest / most specific match wins.
+ */
+const MATH_SKILL_LEVEL_MAP: Record<string, number> = {
+  'number-sense': 1,
+  'counting': 1,
+  'digit-recognition': 1,
+  'number-comparison': 1,
+  'addition.within-20': 2,
+  'addition-within-20': 2,
+  'single-digit-addition': 2,
+  'doubles': 2,
+  'making-10': 2,
+  'subtraction.within-20': 3,
+  'subtraction-within-20': 3,
+  'single-digit-subtraction': 3,
+  'fact-family': 3,
+  'missing-addend': 3,
+  'place-value': 4,
+  'two-digit.addition': 4,
+  'two-digit-addition': 4,
+  'two-digit.subtraction': 4,
+  'two-digit-subtraction': 4,
+  'word-problems.multi-step': 4,
+  'multi-step': 4,
+  'multiplication.facts': 5,
+  'multiplication-facts': 5,
+  'times-table': 5,
+  'multi-digit.multiplication': 5,
+  'multi-digit-multiplication': 5,
+  'division.basic': 5,
+  'basic-division': 5,
+  'repeated-addition': 5,
+  'fractions.recognizing': 6,
+  'fractions.comparing': 6,
+  'fractions.operations': 6,
+  'fractions': 6,
+  'measurement': 6,
+  'money': 6,
+  'time': 6,
+}
+
+/**
  * Derives a working level from evaluation findings for a given domain.
  * Returns null if no relevant findings or if ambiguous.
+ *
+ * Strategy:
+ * - For each finding with status="mastered", substring-match its skill against
+ *   the domain's skill→level map; the longest / highest-level match wins.
+ * - The working level is the highest level where a "mastered" finding lands.
+ * - For math: if a "not-yet" or "emerging" finding lands at level N+1 above
+ *   the highest mastered level, that confirms N as the real ceiling
+ *   (no change to the returned level — this is just a guard against
+ *   over-counting "mastered" findings at adjacent levels).
+ * - Capped at QUEST_MODE_LEVEL_CAP[domain].
  */
 export function deriveWorkingLevelFromEvaluation(
   findings: EvaluationFinding[],
-  domain: 'phonics' | 'comprehension',
+  domain: 'phonics' | 'comprehension' | 'math',
 ): WorkingLevel | null {
-  const skillMap = domain === 'phonics'
-    ? PHONICS_SKILL_LEVEL_MAP
-    : COMPREHENSION_SKILL_LEVEL_MAP
+  const skillMap =
+    domain === 'phonics' ? PHONICS_SKILL_LEVEL_MAP
+    : domain === 'comprehension' ? COMPREHENSION_SKILL_LEVEL_MAP
+    : MATH_SKILL_LEVEL_MAP
 
   let highestMasteredLevel = 0
   const masteredSkills: string[] = []
