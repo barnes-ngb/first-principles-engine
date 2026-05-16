@@ -577,7 +577,10 @@ export default function EvaluateChatPage() {
       }
       // Math evaluations: derive math working level if domain is math
       if (domain === 'math') {
-        // TODO: Add math skill→level mapping when math evaluations produce findings
+        const mathLevel = deriveWorkingLevelFromEvaluation(findings, 'math')
+        if (mathLevel && canOverwriteWorkingLevel(mergedWorkingLevels.math)) {
+          mergedWorkingLevels = { ...mergedWorkingLevels, math: mathLevel }
+        }
       }
 
       const now = new Date().toISOString()

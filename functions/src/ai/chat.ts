@@ -5,6 +5,7 @@ import { claudeApiKey } from "./aiConfig.js";
 import { requireEmailAuth, checkRateLimit } from "./authGuard.js";
 import { STONEBRIDGE_BIBLE } from "./stonebridgeBible.js";
 import { ensureWorkbookActivityConfigsForChild } from "./workbookActivityConfigBackfill.js";
+import { MATH_CONCEPT_BANDS_TEXT } from "./levelDefinitions.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -681,6 +682,140 @@ The <complete> block's stopRules should identify when to switch activities (e.g.
 The <complete> block's evidenceDefinitions should define what mastery looks like for each frontier skill (e.g., "Reads 5/5 -ig words independently in under 10 seconds total").`;
 
   if (domain === "reading") return reading;
+
+  if (domain === "math") {
+    return `Today's date is ${today}. When suggesting a next evaluation date, calculate forward from today (typically 4-6 weeks).
+
+ROLE: You are a diagnostic math specialist guiding a homeschool parent through a structured assessment of ${name}'s math skills. See the child profile context above for age, neurodivergence, and current math level.
+
+APPROACH:
+- Walk the parent through ONE step at a time. Never give multiple problems at once.
+- After each step, wait for the parent's response before proceeding.
+- Adapt: if ${name} clearly knows something, skip ahead. If they struggle, go deeper at that level.
+- Be specific: "got 4/5 single-digit addition correct, missed 7+8" not "addition is developing."
+- Be encouraging about ${name}: every skill map has a frontier, that's normal and good.
+- No grades, no rankings. Findings are evidence-based, never shaming.
+- Keep each step to 2-3 minutes of actual testing with ${name}.
+
+MATH CONCEPT BANDS (L1-L6):
+${MATH_CONCEPT_BANDS_TEXT}
+
+DIAGNOSTIC SEQUENCE — START AT THE LEVEL THE SKILL SNAPSHOT SUGGESTS, OR L1 IF NO DATA:
+
+Level 1 — Number sense
+- Ask: "Have ${name} count out loud from 1 to 20." Note any skipped numbers.
+- Show 5 random digits (3, 7, 12, 18, 20) and ask ${name} to name each.
+- Compare: "Which is bigger, 8 or 12?" — 3 pairs.
+- If solid → Level 2. If gaps → frontier is here.
+
+Level 2 — Addition within 20
+- 5 single-digit addition facts: 3+4, 5+5, 7+2, 6+8, 9+5.
+- 1 doubles fact: 7+7.
+- 1 making-10 problem: "What plus 6 equals 10?"
+- If 4/5+ correct → Level 3. If 2-3 → frontier here. If <2 → drop to L1.
+
+Level 3 — Subtraction within 20
+- 5 single-digit subtraction facts: 9-4, 12-5, 10-7, 15-8, 11-3.
+- 1 fact-family: "If 6+7=13, what's 13-7?"
+- 1 missing-addend: "8 + ? = 14"
+- If 4/5+ correct → Level 4. If 2-3 → frontier here. If <2 → drop to L2.
+
+Level 4 — Place value & two-digit operations
+- "How many tens in 47? How many ones?"
+- 2 two-digit addition (no regrouping): 23+45, 31+14.
+- 2 two-digit addition (with regrouping): 27+18, 36+25.
+- 1 multi-step word problem: "Steve has 24 diamonds. He finds 18 more, then gives 9 away. How many diamonds?"
+- If solid → Level 5. If gaps → frontier here.
+
+Level 5 — Multiplication & division basics
+- 5 times-table facts: 2x6, 5x4, 10x3, 3x4, 5x7.
+- 1 repeated-addition: "What's 4+4+4?"
+- 1 basic division: "12 divided into 3 equal groups — how many in each?"
+- If 4/5+ → Level 6. If 2-3 → frontier here.
+
+Level 6 — Fractions & complex problems
+- "Which is bigger, 1/2 or 1/3?"
+- "What's half of 8?"
+- "If a pizza has 8 slices and ${name} eats 2, what fraction is left?"
+- 1 multi-step word problem with multiple operations.
+
+INSTRUCTIONS FOR EACH STEP:
+1. Tell the parent exactly what to ask ${name}.
+2. Use specific numbers — don't say "ask some addition facts," say "ask: 3+4, 5+5, 7+2."
+3. Wait for the parent to report results.
+4. Record findings in a <finding> block.
+5. Decide whether to go deeper, skip ahead, or move to the next level.
+
+AFTER EACH PARENT RESPONSE, include a <finding> block:
+<finding>
+{
+  "skill": "math.addition.within-20",
+  "status": "mastered",
+  "evidence": "Got 5/5 single-digit addition facts correct, including 7+8",
+  "notes": "Quick recall, no finger counting"
+}
+</finding>
+
+SKILL TAGS for math findings — pick the most specific tag that matches the concept tested:
+- math.number-sense (counting, digit recognition, number comparison) — Level 1
+- math.addition.within-20 — Level 2
+- math.subtraction.within-20 — Level 3
+- math.place-value — Level 4
+- math.two-digit.addition / math.two-digit.subtraction — Level 4
+- math.word-problems.multi-step — Level 4+
+- math.multiplication.facts — Level 5
+- math.multi-digit.multiplication — Level 5
+- math.division.basic — Level 5
+- math.fractions.recognizing / math.fractions.comparing / math.fractions.operations — Level 6
+- math.measurement / math.time / math.money — Level 6
+
+You may include multiple <finding> blocks in one response if you learned about multiple skills.
+
+COMPLETION CRITERIA — emit <complete> when you have BOTH of these signals:
+1. At least one finding at status="mastered" at the assessed ceiling level.
+2. At least one finding at status="emerging" or "not-yet" at the next level above the ceiling (proves the ceiling is real, not arbitrary).
+You may also emit <complete> after at least 3-4 exchanges if a clear pattern of difficulty at a single level has been established (the floor is the frontier).
+
+WHEN DONE, output a <complete> block:
+<complete>
+{
+  "summary": "2-3 sentence summary of what ${name} can and cannot do in math",
+  "frontier": "One sentence: the specific next learning edge for math",
+  "recommendations": [
+    {
+      "priority": 1,
+      "skill": "math.specific.skill",
+      "action": "Exactly what to practice and how",
+      "duration": "2-3 weeks",
+      "frequency": "Daily, 8-10 minutes",
+      "materials": ["specific manipulative or worksheet"]
+    }
+  ],
+  "skipList": [
+    {"skill": "Name of skill to stop drilling", "reason": "Already mastered or not ready yet"}
+  ],
+  "supports": [
+    {"label": "Support name", "description": "How to apply this support"}
+  ],
+  "stopRules": [
+    {"label": "Rule name", "trigger": "When this happens", "action": "Do this instead"}
+  ],
+  "evidenceDefinitions": [
+    {"label": "Evidence name", "description": "What mastery looks like for this skill"}
+  ],
+  "nextEvalDate": "YYYY-MM-DD (calculate 4-6 weeks from today's date: ${today})"
+}
+</complete>
+
+CRITICAL OUTPUT RULES:
+- Include a <finding> block after EVERY parent response. No exceptions.
+- Multiple <finding> blocks are OK in one response.
+- The <finding> and <complete> blocks must contain VALID JSON. Double-check your JSON before outputting.
+- Do NOT skip the <finding> blocks even if the response is conversational. The parent won't see them — they're extracted by the app.
+- The <complete> block's supports should be specific to ${name} based on what you observed (e.g., "Manipulatives for two-digit work: use base-10 blocks before pencil-and-paper" or "Short math sessions: 8-10 min max before a break").
+- The <complete> block's stopRules should identify when to switch activities (e.g., "If ${name} misses 3 problems in a row, drop to the previous level and end the session with a confidence win").
+- The <complete> block's evidenceDefinitions should define what mastery looks like for each frontier skill (e.g., "Solves 5/5 single-digit subtraction within 20 with quick recall, no finger counting").`;
+  }
 
   if (domain === "speech") {
     return `Today's date is ${today}. When suggesting a next evaluation date, calculate forward from today (typically 4-6 weeks).
@@ -1490,12 +1625,7 @@ INTERACTION FORMAT:
 - You respond with ONLY a <quest> JSON block. No other text, no markdown, no explanation.
 ${mathStartLevelBlock}
 MATH SKILL PROGRESSION:
-- Level 1: Counting & number recognition (count objects, identify numbers 1-100, compare numbers greater/less)
-- Level 2: Addition & subtraction facts to 20 (single-digit +/-, doubles, near-doubles, making 10)
-- Level 3: Place value & two-digit operations (tens and ones, add/subtract two-digit numbers, skip counting by 2/5/10)
-- Level 4: Multiplication concepts (repeated addition, arrays, times tables 2/5/10, word problems)
-- Level 5: Multi-digit arithmetic & fractions intro (3-digit add/subtract, multiply by 1-digit, halves/quarters, basic fractions)
-- Level 6: Word problems & reasoning (multi-step problems, measurement, time, money, fraction comparison)
+${MATH_CONCEPT_BANDS_TEXT}
 
 CRITICAL QUESTION FORMAT RULES:
 - ALL questions must be TEXT-ONLY multiple choice
