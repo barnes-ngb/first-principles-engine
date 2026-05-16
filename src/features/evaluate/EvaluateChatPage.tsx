@@ -739,7 +739,12 @@ export default function EvaluateChatPage() {
 
   // ── Render ──────────────────────────────────────────────────
 
-  const isDomainReady = domain === EvaluationDomain.Reading || domain === EvaluationDomain.Speech
+  const READY_DOMAINS: EvaluationDomain[] = [
+    EvaluationDomain.Reading,
+    EvaluationDomain.Speech,
+    EvaluationDomain.Math,
+  ]
+  const isDomainReady = READY_DOMAINS.includes(domain)
   const hasMessages = messages.length > 0
 
   return (
@@ -769,8 +774,8 @@ export default function EvaluateChatPage() {
             <Tab
               key={tab.value}
               value={tab.value}
-              label={tab.value === EvaluationDomain.Reading || tab.value === EvaluationDomain.Speech ? tab.label : `${tab.label} (coming soon)`}
-              disabled={tab.value !== EvaluationDomain.Reading && tab.value !== EvaluationDomain.Speech}
+              label={READY_DOMAINS.includes(tab.value) ? tab.label : `${tab.label} (coming soon)`}
+              disabled={!READY_DOMAINS.includes(tab.value)}
             />
           ))}
         </Tabs>
@@ -809,7 +814,12 @@ export default function EvaluateChatPage() {
           {!hasMessages && (
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <Typography variant="body1" gutterBottom>
-                Ready to assess {activeChild?.name}'s reading skills? Have {activeChild?.name} nearby — you'll show letters and words, then report what you see.
+                {domain === EvaluationDomain.Math
+                  ? <>Ready to assess {activeChild?.name}'s math skills? Have {activeChild?.name} nearby — you'll pose problems and report what you see.</>
+                  : domain === EvaluationDomain.Speech
+                  ? <>Ready to assess {activeChild?.name}'s speech? Have {activeChild?.name} nearby — you'll ask them to say specific words and report what you hear.</>
+                  : <>Ready to assess {activeChild?.name}'s reading skills? Have {activeChild?.name} nearby — you'll show letters and words, then report what you see.</>
+                }
               </Typography>
               <Button
                 variant="contained"
@@ -818,7 +828,9 @@ export default function EvaluateChatPage() {
                 onClick={startEvaluation}
                 disabled={aiLoading}
               >
-                {aiLoading ? 'Starting...' : 'Start Reading Assessment'}
+                {aiLoading
+                  ? 'Starting...'
+                  : `Start ${domain.charAt(0).toUpperCase() + domain.slice(1)} Assessment`}
               </Button>
             </Box>
           )}
