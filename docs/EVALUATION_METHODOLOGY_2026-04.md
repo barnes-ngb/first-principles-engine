@@ -4,6 +4,8 @@ _Phased build plan for the blocker-driven learning engine._
 _Written 2026-04-20. Grounds in `docs/LEARNING_ENGINE_AUDIT_2026-04.md` (ConceptualBlocks Inspection)._
 _Last reconciled: 2026-05-16._
 
+**Math eval shipped:** 2026-05-16 (Prompt C — closes G26 from `EVALUATION_SYSTEM_FULL_SWEEP_2026-05.md`). The Math tab in `EvaluateChatPage` is now enabled; `buildEvaluationPrompt` has a math branch mirroring the reading-eval shape and anchored to L1-L6 concept bands from `functions/src/ai/levelDefinitions.ts`; `deriveWorkingLevelFromEvaluation` writes `workingLevels.math` on Apply.
+
 This is a methodology commitment, not an exploration. It captures the decisions we've made about how First Principles Engine evaluates Lincoln (10, neurodivergent, speech challenges, ~1st grade reading, motivated by Minecraft and Lego) and how those decisions should ship across four phases.
 
 ---
