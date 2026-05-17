@@ -181,13 +181,19 @@ All child-specific tasks use `buildContextForTask` which injects charter values 
 | `src/features/shelly-chat/` | 0 | Gap — high-usage feature, high priority for testing |
 | `src/features/weekly-review/` | 0 | Gap — weekly review page untested |
 
-**Recently improved (2026-04-19 test run):**
+**Recently improved (2026-05-17 test run):**
+- `armorTiers` — new test file: getArmorTier boundary values, getNextTierProgress fractions, all 6 tiers (19 tests)
+- `forgeCosts` — new test file: per-piece/per-tier costs, cost escalation invariant, completion bonuses (19 tests)
+- `armorTierProgress` — new test file: tier unlock derivation (dual requirement), forge tracking, display/preview tiers, lock reasons (42 tests)
+- `docId` — new test file: parseDateFromDocId and deriveChildIdFromDocId in both {date}_{childId} and legacy formats (11 tests)
+
+**Previously improved (2026-04-19 test run):**
 - `records.logic` — added mixed blocks, checklist fallback, all-3-sources aggregation tests
 - `addXpEvent` — added dedup, zero/empty guard, source bucketing, negative clamp, default avatar tests
 - `time.ts` — added getWeekRange tests (Sun/Sat/Mon start, month/year boundaries)
 - `functions/src/ai/authGuard` — new test file: email auth, allowlist, rate limiting (15 tests)
 
-**Well-tested areas:** planner-chat (8 tests), avatar (5), books (4), today (3), quest (2), workshop (2), engine (1), evaluate (1), kids (1), ladders (1), records (1)
+**Well-tested areas:** planner-chat (8 tests), avatar (6), books (4), today (3), xp (4), quest (2), workshop (2), engine (1), evaluate (1), kids (1), ladders (1), records (1), utils (3)
 
 ## Dependency Notes
 - `npm audit --production`: **0 vulnerabilities** found
