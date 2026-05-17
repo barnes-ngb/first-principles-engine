@@ -159,6 +159,10 @@ These features are working well and aligned with both Ad Astra principles and th
 
 A Lego build is artifact + hours + category, not three separate logs. The Capture card on Today adapts to what the moment actually was — sometimes a photo is enough, sometimes you log time without media, sometimes both. The form follows the activity, not the other way around. Preset chips (Lego, baking, nature, music, drawing, reading, zoo/museum, sports) cover the common shapes without locking Shelly into them: she can de-select, override, or go fully free-form.
 
+### Evidence beats narrative.
+
+The AI's weekly narrative is helpful, but the raw counts of books created/completed/read and teach-back moments captured are the unfalsifiable record of what actually happened. The "Week in Evidence" section on the Weekly Review page (`src/features/weekly-review/WeekInEvidence.tsx`) surfaces these counts directly — book activity in one column, teach-backs in the other with expandable audio playback — so Shelly always sees the data, not just the story. The narrative can miss a beat; the evidence cannot. Together they answer two different questions: "What's the pattern?" (narrative) and "What did we actually do?" (evidence).
+
 ### Worked example — "Low cognitive load for Shelly"
 
 Plan My Week's compact setup (`src/features/planner-chat/PlannerCompactSetup.tsx`, May 2026) is a concrete instance of this principle. Returning users — Sunday night, week 2+ — see a single focused card: energy toggle, read-aloud picker, workbook chips, special notes, Generate or Repeat Last Week. The full wizard and the chat thread are still available (full wizard for first-visit users; chat collapsed to a drawer for power-user adjustments), but the default surface is sized to a 60-second pass. Friction goes down without removing capability — which is what "structure as support, not control" looks like in practice.

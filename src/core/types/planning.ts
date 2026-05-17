@@ -803,6 +803,49 @@ export interface PaceAdjustment {
   decision: AdjustmentDecision
 }
 
+export interface BookCreatedEntry {
+  title: string
+  theme?: string
+  pages: number
+  isAiGenerated: boolean
+}
+
+export interface BookReadEntry {
+  title: string
+  totalMinutes: number
+}
+
+export interface BooksWeekSummary {
+  booksCreated: BookCreatedEntry[]
+  booksCompleted: Array<{ title: string }>
+  readingSessions: {
+    count: number
+    totalMinutes: number
+    booksRead: BookReadEntry[]
+  }
+}
+
+export interface TeachBackExample {
+  subject: string
+  hasAudio: boolean
+  audioUrl?: string
+  excerpt?: string
+  createdAt: string
+}
+
+export interface TeachBacksWeekSummary {
+  count: number
+  bySubject: Record<string, number>
+  audioCount: number
+  textCount: number
+  examples: TeachBackExample[]
+}
+
+export interface WeekEvidence {
+  books: BooksWeekSummary
+  teachBacks: TeachBacksWeekSummary
+}
+
 export interface WeeklyReview {
   id?: string
   childId: string
@@ -824,6 +867,12 @@ export interface WeeklyReview {
   recommendations: string[]
   /** Observed energy pattern for the week */
   energyPattern?: string
+  /**
+   * Raw evidence captured for the week — books + teach-backs. Surfaced as
+   * the "Week in Evidence" section so Shelly sees the unfalsifiable counts
+   * even if the AI narrative doesn't mention them.
+   */
+  evidence?: WeekEvidence
   reviewedAt?: string
   createdAt?: string
   updatedAt?: string

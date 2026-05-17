@@ -1,5 +1,5 @@
 import { getFirestore } from "firebase-admin/firestore";
-import type { Firestore } from "firebase-admin/firestore";
+import type { DocumentReference, Firestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { requireEmailAuth } from "./authGuard.js";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -11,6 +11,51 @@ import { callClaude, logAiUsage } from "./chatTypes.js";
 import { modelForTask } from "./chat.js";
 
 // ── Types ───────────────────────────────────────────────────────
+
+export interface BookCreatedEntry {
+  title: string;
+  theme?: string;
+  pages: number;
+  isAiGenerated: boolean;
+}
+
+export interface BookReadEntry {
+  title: string;
+  totalMinutes: number;
+}
+
+export interface BooksWeekSummary {
+  booksCreated: BookCreatedEntry[];
+  booksCompleted: Array<{ title: string }>;
+  readingSessions: {
+    /** Books touched (updatedAt in week range) with at least one logged minute. */
+    count: number;
+    /** Cumulative totalMinutes across the touched books — proxy for reading effort. */
+    totalMinutes: number;
+    booksRead: BookReadEntry[];
+  };
+}
+
+export interface TeachBackExample {
+  subject: string;
+  hasAudio: boolean;
+  audioUrl?: string;
+  excerpt?: string;
+  createdAt: string;
+}
+
+export interface TeachBacksWeekSummary {
+  count: number;
+  bySubject: Record<string, number>;
+  audioCount: number;
+  textCount: number;
+  examples: TeachBackExample[];
+}
+
+export interface WeekEvidence {
+  books: BooksWeekSummary;
+  teachBacks: TeachBacksWeekSummary;
+}
 
 export interface WeeklyReviewDoc {
   childId: string;
@@ -26,6 +71,7 @@ export interface WeeklyReviewDoc {
   }>;
   recommendations: string[];
   energyPattern: string;
+  evidence?: WeekEvidence;
   model: string;
   usage: { inputTokens: number; outputTokens: number };
   createdAt: string;
@@ -116,6 +162,8 @@ export interface WeekContext {
   dailyPlans: DailyPlanRecord[];
   missedDays: number;
   bookActivity: BookActivity[];
+  books: BooksWeekSummary;
+  teachBacks: TeachBacksWeekSummary;
 }
 
 export async function assembleWeekContext(
@@ -224,27 +272,39 @@ export async function assembleWeekContext(
     .where("updatedAt", "<=", weekEnd + "T23:59:59")
     .get();
 
-  const bookActivity: BookActivity[] = booksSnap.docs
-    .map((d) => {
-      const b = d.data();
-      // Include books owned by this child OR made FOR this child from parent profile
-      if (b.childId !== childId && b.createdFor !== childId) return null;
-      const activity: BookActivity = {
-        title: b.title as string,
-        childId: b.childId as string,
-        status: b.status as string,
-        pageCount: (b.pages as unknown[])?.length ?? 0,
-        bookType: (b.bookType as string) ?? "creative",
-        completedThisWeek:
-          b.status === "complete" &&
-          (b.updatedAt as string) >= weekKey,
-      };
-      if (b.theme) activity.theme = b.theme as string;
-      if (b.createdBy) activity.createdBy = b.createdBy as string;
-      if (b.createdFor) activity.createdFor = b.createdFor as string;
-      return activity;
-    })
-    .filter((b): b is BookActivity => !!b);
+  const weekEndIso = weekEnd + "T23:59:59";
+  const bookDocs = booksSnap.docs
+    .map((d) => d.data() as Record<string, unknown>)
+    // Include books owned by this child OR made FOR this child from parent profile
+    .filter((b) => b.childId === childId || b.createdFor === childId);
+
+  const bookActivity: BookActivity[] = bookDocs.map((b) => {
+    const activity: BookActivity = {
+      title: b.title as string,
+      childId: b.childId as string,
+      status: b.status as string,
+      pageCount: (b.pages as unknown[])?.length ?? 0,
+      bookType: (b.bookType as string) ?? "creative",
+      completedThisWeek:
+        b.status === "complete" &&
+        (b.updatedAt as string) >= weekKey,
+    };
+    if (b.theme) activity.theme = b.theme as string;
+    if (b.createdBy) activity.createdBy = b.createdBy as string;
+    if (b.createdFor) activity.createdFor = b.createdFor as string;
+    return activity;
+  });
+
+  // Structured books summary (created / completed / reading sessions)
+  const books = summarizeBooksWeek(bookDocs, weekKey, weekEndIso);
+
+  // Teach-back artifacts for the week (Explain engineStage)
+  const teachBacks = await loadTeachBacksForWeek(
+    familyRef,
+    childId,
+    weekKey,
+    weekEndIso,
+  );
 
   // Count school days (Sun–Thu) with no day logs and no daily plan
   const activeDates = new Set([
@@ -259,7 +319,204 @@ export async function assembleWeekContext(
     }
   }
 
-  return { child, weekKey, dayLogs, hours, dailyPlans, missedDays, bookActivity };
+  return {
+    child,
+    weekKey,
+    dayLogs,
+    hours,
+    dailyPlans,
+    missedDays,
+    bookActivity,
+    books,
+    teachBacks,
+  };
+}
+
+// ── Books summary (pure) ────────────────────────────────────────
+
+/**
+ * Summarize the books fetched for the week into created / completed / reading
+ * session buckets. Pure function — easy to test without Firestore.
+ *
+ * Inputs are raw Firestore doc data already filtered to books that touched
+ * the week (updatedAt in range) AND belong to / are made-for the child.
+ */
+export function summarizeBooksWeek(
+  bookDocs: Array<Record<string, unknown>>,
+  weekStart: string,
+  weekEndIso: string,
+): BooksWeekSummary {
+  const booksCreated: BookCreatedEntry[] = [];
+  const booksCompleted: Array<{ title: string }> = [];
+  const booksRead: BookReadEntry[] = [];
+  let readingTotalMinutes = 0;
+
+  for (const b of bookDocs) {
+    const title = (b.title as string) ?? "Untitled";
+    const pages = (b.pages as unknown[])?.length ?? 0;
+    const createdAt = b.createdAt as string | undefined;
+    const updatedAt = b.updatedAt as string | undefined;
+    const status = b.status as string | undefined;
+    const totalMinutes = (b.totalMinutes as number | undefined) ?? 0;
+
+    // Created this week — createdAt falls inside the week range
+    if (createdAt && createdAt >= weekStart && createdAt <= weekEndIso) {
+      const entry: BookCreatedEntry = {
+        title,
+        pages,
+        isAiGenerated:
+          b.source === "ai-generated" || b.bookType === "generated",
+      };
+      if (b.theme) entry.theme = b.theme as string;
+      booksCreated.push(entry);
+    }
+
+    // Completed this week — status is complete AND updated in week range
+    if (
+      status === "complete" &&
+      updatedAt &&
+      updatedAt >= weekStart &&
+      updatedAt <= weekEndIso
+    ) {
+      booksCompleted.push({ title });
+    }
+
+    // Reading sessions — book was touched this week with logged minutes
+    if (totalMinutes > 0) {
+      booksRead.push({ title, totalMinutes });
+      readingTotalMinutes += totalMinutes;
+    }
+  }
+
+  return {
+    booksCreated,
+    booksCompleted,
+    readingSessions: {
+      count: booksRead.length,
+      totalMinutes: readingTotalMinutes,
+      booksRead,
+    },
+  };
+}
+
+// ── Teach-backs loader ─────────────────────────────────────────
+
+/**
+ * Load teach-back artifacts for the child for the week. Teach-backs are
+ * stored in `families/{familyId}/artifacts` with engineStage === 'Explain'
+ * and a title prefixed "Teach-back" (per KidTeachBack.tsx + TeachBackSection.tsx).
+ */
+async function loadTeachBacksForWeek(
+  familyRef: DocumentReference,
+  childId: string,
+  weekStart: string,
+  weekEndIso: string,
+): Promise<TeachBacksWeekSummary> {
+  try {
+    const artifactsSnap = await familyRef
+      .collection("artifacts")
+      .where("childId", "==", childId)
+      .where("tags.engineStage", "==", "Explain")
+      .where("createdAt", ">=", weekStart)
+      .where("createdAt", "<=", weekEndIso)
+      .get();
+
+    const teachBackArtifacts = artifactsSnap.docs
+      .map((d) => d.data() as Record<string, unknown>)
+      .filter((a) =>
+        ((a.title as string | undefined) ?? "").toLowerCase().startsWith("teach-back"),
+      )
+      .map((a) => ({
+        title: a.title as string | undefined,
+        type: a.type as string | undefined,
+        notes: a.notes as string | undefined,
+        content: a.content as string | undefined,
+        createdAt: a.createdAt as string | undefined,
+        mediaUrl: a.mediaUrl as string | undefined,
+        uri: a.uri as string | undefined,
+        tags: a.tags as { subjectBucket?: string; engineStage?: string } | undefined,
+      }));
+
+    return summarizeTeachBacks(teachBackArtifacts);
+  } catch (err) {
+    console.warn("Failed to load teach-back artifacts:", err);
+    return emptyTeachBacksSummary();
+  }
+}
+
+function emptyTeachBacksSummary(): TeachBacksWeekSummary {
+  return { count: 0, bySubject: {}, audioCount: 0, textCount: 0, examples: [] };
+}
+
+/**
+ * Compress teach-back artifacts into a summary. Pure function — easy to test.
+ *
+ * The example excerpts are deliberately short (subject + first line of notes)
+ * to keep AI context cost bounded.
+ */
+export function summarizeTeachBacks(
+  artifacts: Array<{
+    title?: string;
+    type?: string;
+    notes?: string;
+    content?: string;
+    createdAt?: string;
+    mediaUrl?: string;
+    uri?: string;
+    tags?: { subjectBucket?: string; engineStage?: string };
+  }>,
+): TeachBacksWeekSummary {
+  const bySubject: Record<string, number> = {};
+  let audioCount = 0;
+  let textCount = 0;
+  const examples: TeachBackExample[] = [];
+
+  // Newest first so examples come from the most recent moments
+  const sorted = [...artifacts].sort((a, b) => {
+    const aT = a.createdAt ?? "";
+    const bT = b.createdAt ?? "";
+    return bT.localeCompare(aT);
+  });
+
+  for (const a of sorted) {
+    const subject = a.tags?.subjectBucket ?? extractSubjectFromTitle(a.title) ?? "Other";
+    bySubject[subject] = (bySubject[subject] ?? 0) + 1;
+
+    const audioUrl = a.mediaUrl ?? a.uri;
+    const isAudio = a.type === "Audio" || !!audioUrl;
+    if (isAudio) audioCount++;
+    else textCount++;
+
+    if (examples.length < 3) {
+      const excerptSource = a.content ?? a.notes ?? "";
+      const excerpt = excerptSource
+        ? excerptSource.replace(/^Teach-back:\s*/i, "").slice(0, 80).trim()
+        : undefined;
+      const example: TeachBackExample = {
+        subject,
+        hasAudio: isAudio,
+        createdAt: a.createdAt ?? "",
+      };
+      if (audioUrl) example.audioUrl = audioUrl;
+      if (excerpt) example.excerpt = excerpt;
+      examples.push(example);
+    }
+  }
+
+  return {
+    count: artifacts.length,
+    bySubject,
+    audioCount,
+    textCount,
+    examples,
+  };
+}
+
+function extractSubjectFromTitle(title?: string): string | null {
+  if (!title) return null;
+  // "Teach-back: Reading" → "Reading"; "Teach-back 2026-05-17" → null
+  const m = title.match(/^Teach-back:\s*(.+)$/i);
+  return m ? m[1].trim() : null;
 }
 
 // ── Prompt building ─────────────────────────────────────────────
@@ -280,7 +537,9 @@ REVIEW-SPECIFIC GUIDANCE:
 - Use the Skill Snapshot, Evaluation History, and Recent Scans sections to ground wins, growth areas, and pace adjustments in concrete skill progression — not just completion counts.
 - If quest or evaluation sessions happened this week, cite them by domain (phonics / comprehension / math / fluency) and reference the working level.
 - If recent scans recommend skip or quick-review, surface that as a pace adjustment rationale.
-- If activity configs show a "daily" or "3x" frequency and this week's dayLogs didn't match, call it out gently as a growth area (not a failure).`;
+- If activity configs show a "daily" or "3x" frequency and this week's dayLogs didn't match, call it out gently as a growth area (not a failure).
+- Acknowledge book activity when it's meaningful — especially when a child has been highly creative (multiple books created/completed) or read deeply (reading sessions). For Lincoln, completing a chapter is significant; for London, generating a story is significant.
+- Teach-back moments are the richest learning signal per the charter. Surface specific subjects taught and any patterns ("Lincoln taught Reading three times this week, building confidence in his strongest area"). Don't ignore the count just because none made the wins list.`;
 
 /** Load the child's skill snapshot (used for prioritySkills/supports/stopRules/workingLevels). */
 async function loadSnapshotData(
@@ -392,6 +651,10 @@ ${(ctx.bookActivity ?? []).length === 0 ? "No book activity this week." :
     return `- "${b.title}" (${b.bookType}, ${b.pageCount} pages, ${b.status}${b.completedThisWeek ? " — FINISHED THIS WEEK!" : ""})${authorTag}`;
   }).join("\n")}
 
+${formatBooksEvidence(ctx.child.name, ctx.books)}
+
+${formatTeachBacksEvidence(ctx.child.name, ctx.teachBacks)}
+
 Per-day breakdown:
 ${perDayBreakdown.join("\n") || "  (no day logs)"}
 
@@ -416,6 +679,108 @@ TONE:
 - ATTRIBUTION: Only attribute book authorship to ${ctx.child.name} when the book tag reads "made by ${ctx.child.name}". If the tag reads "made by Mom/Dad" or "made by sibling", that book is NOT ${ctx.child.name}'s creative work — reference it as a reading/learning resource, not a creative win.
 
 Respond ONLY with valid JSON. No markdown, no preamble, no explanation outside the JSON structure.`;
+}
+
+// ── Evidence formatters (books + teach-backs) ──────────────────
+
+/**
+ * Format the books summary for the AI prompt. Compressed counts + a short
+ * list of titles. No full page contents — keeps per-child cost < ~120 tokens.
+ */
+export function formatBooksEvidence(
+  childName: string,
+  books: BooksWeekSummary,
+): string {
+  const created = books.booksCreated;
+  const completed = books.booksCompleted;
+  const sessions = books.readingSessions;
+
+  if (
+    created.length === 0 &&
+    completed.length === 0 &&
+    sessions.count === 0
+  ) {
+    return `## Books for ${childName} this week\nNo book activity captured this week.`;
+  }
+
+  const lines = [`## Books for ${childName} this week`];
+
+  if (created.length > 0) {
+    const aiCount = created.filter((b) => b.isAiGenerated).length;
+    const handCount = created.length - aiCount;
+    const themes = Array.from(
+      new Set(created.map((b) => b.theme).filter((t): t is string => !!t)),
+    );
+    const parts: string[] = [
+      `${created.length} created (${aiCount} AI-generated, ${handCount} hand-built)`,
+    ];
+    if (themes.length > 0) parts.push(`themes: ${themes.join(", ")}`);
+    lines.push(`- ${parts.join(", ")}.`);
+    for (const b of created.slice(0, 4)) {
+      lines.push(`  • "${b.title}" (${b.pages} pages)`);
+    }
+  } else {
+    lines.push("- 0 created this week.");
+  }
+
+  if (completed.length > 0) {
+    lines.push(
+      `- ${completed.length} completed: ${completed
+        .slice(0, 4)
+        .map((b) => `"${b.title}"`)
+        .join(", ")}.`,
+    );
+  }
+
+  if (sessions.count > 0) {
+    const titles = sessions.booksRead
+      .slice(0, 4)
+      .map((b) => `"${b.title}"`)
+      .join(", ");
+    lines.push(
+      `- ${sessions.count} reading session${sessions.count === 1 ? "" : "s"} totaling ${sessions.totalMinutes} cumulative min on ${titles}.`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Format the teach-backs summary for the AI prompt. Counts + subject
+ * breakdown + up to 3 brief excerpts. Targets < ~100 tokens per child.
+ */
+export function formatTeachBacksEvidence(
+  childName: string,
+  teachBacks: TeachBacksWeekSummary,
+): string {
+  if (teachBacks.count === 0) {
+    return `## Teach-backs by ${childName} this week\nNo teach-back moments captured this week.`;
+  }
+
+  const lines = [`## Teach-backs by ${childName} this week`];
+  lines.push(
+    `- ${teachBacks.count} total teach-back moment${teachBacks.count === 1 ? "" : "s"} captured.`,
+  );
+
+  const subjects = Object.entries(teachBacks.bySubject);
+  if (subjects.length > 0) {
+    const subjectStr = subjects.map(([s, n]) => `${s}: ${n}`).join(", ");
+    lines.push(`- Subjects taught: ${subjectStr}.`);
+  }
+
+  lines.push(
+    `- ${teachBacks.audioCount} with audio recording${teachBacks.audioCount === 1 ? "" : "s"}, ${teachBacks.textCount} text-only.`,
+  );
+
+  if (teachBacks.examples.length > 0) {
+    lines.push("- Highlights:");
+    for (const ex of teachBacks.examples) {
+      const excerpt = ex.excerpt ? ` — "${ex.excerpt}"` : "";
+      lines.push(`  • ${ex.subject}${ex.hasAudio ? " (audio)" : ""}${excerpt}`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 // ── Parse AI response ───────────────────────────────────────────
@@ -463,25 +828,48 @@ export function parseReviewResponse(text: string): ReviewPayload {
 
 // ── Generate review for one child ───────────────────────────────
 
+/**
+ * Has-any-evidence check for the empty-week guard.
+ *
+ * Books and teach-backs count as evidence even when no checklist items
+ * were completed — a week of creative output + teach-back moments still
+ * warrants a review.
+ */
+export function hasAnyEvidence(ctx: WeekContext): boolean {
+  if (ctx.dayLogs.length > 0) return true;
+  if (ctx.hours.length > 0) return true;
+  const b = ctx.books;
+  if (
+    b.booksCreated.length > 0 ||
+    b.booksCompleted.length > 0 ||
+    b.readingSessions.count > 0
+  ) {
+    return true;
+  }
+  if (ctx.teachBacks.count > 0) return true;
+  return false;
+}
+
 export async function generateReviewForChild(
   familyId: string,
   ctx: WeekContext,
   apiKey: string,
 ): Promise<WeeklyReviewDoc> {
   // Skip AI call if there's no data for the week
-  if (ctx.dayLogs.length === 0 && ctx.hours.length === 0) {
+  if (!hasAnyEvidence(ctx)) {
     const db = getFirestore();
     const emptyReview: WeeklyReviewDoc = {
       childId: ctx.child.id,
       weekKey: ctx.weekKey,
       status: "no-data",
       celebration: `No activities were logged for ${ctx.child.name} this week. That's okay — every week is different.`,
-      summary: "No day logs or hours were recorded. Use the Today page during the week to build up data for next week's review.",
+      summary: "No day logs, hours, books, or teach-backs were recorded. Use the Today page during the week to build up data for next week's review.",
       wins: [],
       growthAreas: [],
       paceAdjustments: [],
       recommendations: ["Try logging at least 3 days on the Today page this week for a more useful review."],
       energyPattern: "No energy data recorded.",
+      evidence: { books: ctx.books, teachBacks: ctx.teachBacks },
       model: "none",
       usage: { inputTokens: 0, outputTokens: 0 },
       createdAt: new Date().toISOString(),
@@ -544,6 +932,7 @@ export async function generateReviewForChild(
     })),
     recommendations: payload.recommendations,
     energyPattern: payload.energyPattern,
+    evidence: { books: ctx.books, teachBacks: ctx.teachBacks },
     model,
     usage,
     createdAt: new Date().toISOString(),

@@ -25,6 +25,7 @@ import ChildSelector from '../../components/ChildSelector'
 import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
+import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { app } from '../../core/firebase/firebase'
 import { weeklyReviewsCollection, weeklyReviewDocId } from '../../core/firebase/firestore'
@@ -33,6 +34,7 @@ import type { PaceAdjustment, WeeklyReview } from '../../core/types'
 import { AdjustmentDecision, ReviewStatus } from '../../core/types/enums'
 import { lastCompletedWeekKey } from '../../core/utils/time'
 import { formatWeekShort } from '../../core/utils/dateKey'
+import WeekInEvidence from './WeekInEvidence'
 
 const functions = getFunctions(app)
 const generateReviewFn = httpsCallable<
@@ -270,6 +272,16 @@ export default function WeeklyReviewPage() {
               {review.summary}
             </Typography>
           </SectionCard>
+
+          {/* Week in Evidence — raw counts (books + teach-backs) */}
+          {review.evidence && (
+            <SectionErrorBoundary section="week-in-evidence">
+              <WeekInEvidence
+                childName={activeChild?.name ?? 'this child'}
+                evidence={review.evidence}
+              />
+            </SectionErrorBoundary>
+          )}
 
           {/* Wins */}
           {review.wins.length > 0 && (
