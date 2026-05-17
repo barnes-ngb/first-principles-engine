@@ -136,3 +136,46 @@ describe('getEffectiveMasteryGate', () => {
     expect(getEffectiveMasteryGate(skill)).toBe(MasteryGate.MostlyIndependent)
   })
 })
+
+describe('evaluateSkipEligibility — effective mastery gate (G4)', () => {
+  it('returns skip when masteryGate is undefined but level is secure', () => {
+    const snapshot: SkillSnapshot = {
+      childId: 'c1',
+      prioritySkills: [
+        {
+          tag: 'math.addition.facts',
+          label: 'Addition Facts',
+          level: SkillLevel.Secure,
+          // masteryGate intentionally omitted — must fall back via getEffectiveMasteryGate
+        },
+      ],
+      supports: [],
+      stopRules: [],
+      evidenceDefinitions: [],
+    }
+    const item = makeItem({ skillTags: ['math.addition.facts'] })
+    const result = evaluateSkipEligibility(item, snapshot)
+    expect(result.action).toBe('skip')
+    expect(result.evidenceLevel).toBe(MasteryGate.IndependentConsistent)
+  })
+
+  it('returns modify when masteryGate is undefined but level is practice', () => {
+    const snapshot: SkillSnapshot = {
+      childId: 'c1',
+      prioritySkills: [
+        {
+          tag: 'math.subtraction.regroup',
+          label: 'Regrouping',
+          level: SkillLevel.Practice,
+        },
+      ],
+      supports: [],
+      stopRules: [],
+      evidenceDefinitions: [],
+    }
+    const item = makeItem({ skillTags: ['math.subtraction.regroup'] })
+    const result = evaluateSkipEligibility(item, snapshot)
+    expect(result.action).toBe('modify')
+    expect(result.evidenceLevel).toBe(MasteryGate.MostlyIndependent)
+  })
+})

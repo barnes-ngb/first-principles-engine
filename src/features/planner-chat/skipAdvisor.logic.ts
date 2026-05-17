@@ -39,9 +39,9 @@ export function evaluateSkipEligibility(
     }
   }
 
-  // If any matched skill has mastery gate 3, suggest skip
+  // If any matched skill has effective mastery gate 3, suggest skip
   const masteredSkill = matchedSkills.find(
-    (s) => s.masteryGate === MasteryGate.IndependentConsistent,
+    (s) => getEffectiveMasteryGate(s) === MasteryGate.IndependentConsistent,
   )
   if (masteredSkill) {
     return {
@@ -52,9 +52,9 @@ export function evaluateSkipEligibility(
     }
   }
 
-  // If highest matched skill is mastery gate 2, suggest modify
+  // If highest matched skill has effective mastery gate 2, suggest modify
   const mostlyIndependent = matchedSkills.find(
-    (s) => s.masteryGate === MasteryGate.MostlyIndependent,
+    (s) => getEffectiveMasteryGate(s) === MasteryGate.MostlyIndependent,
   )
   if (mostlyIndependent) {
     return {
