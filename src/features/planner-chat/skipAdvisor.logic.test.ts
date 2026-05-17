@@ -3,6 +3,7 @@ import type { DraftPlanItem, SkillSnapshot } from '../../core/types'
 import { MasteryGate, SkillLevel, SubjectBucket } from '../../core/types/enums'
 import {
   batchEvaluateSkip,
+  evaluatePrioritySkillStatus,
   evaluateSkipEligibility,
   getEffectiveMasteryGate,
   skillLevelToMasteryGate,
@@ -177,5 +178,49 @@ describe('evaluateSkipEligibility — effective mastery gate (G4)', () => {
     const result = evaluateSkipEligibility(item, snapshot)
     expect(result.action).toBe('modify')
     expect(result.evidenceLevel).toBe(MasteryGate.MostlyIndependent)
+  })
+})
+
+describe('evaluatePrioritySkillStatus', () => {
+  it('returns skip for IndependentConsistent', () => {
+    const result = evaluatePrioritySkillStatus({
+      tag: 'math.addition.facts',
+      label: 'Addition Facts',
+      level: SkillLevel.Secure,
+      masteryGate: MasteryGate.IndependentConsistent,
+    })
+    expect(result.action).toBe('skip')
+    expect(result.evidenceLevel).toBe(MasteryGate.IndependentConsistent)
+    expect(result.rationale).toContain('Addition Facts')
+  })
+
+  it('returns modify for MostlyIndependent', () => {
+    const result = evaluatePrioritySkillStatus({
+      tag: 'math.subtraction.regroup',
+      label: 'Regrouping',
+      level: SkillLevel.Practice,
+      masteryGate: MasteryGate.MostlyIndependent,
+    })
+    expect(result.action).toBe('modify')
+    expect(result.evidenceLevel).toBe(MasteryGate.MostlyIndependent)
+  })
+
+  it('returns keep for NotYet / WithHelp', () => {
+    const result = evaluatePrioritySkillStatus({
+      tag: 'reading.cvc',
+      label: 'CVC',
+      level: SkillLevel.Emerging,
+      masteryGate: MasteryGate.NotYet,
+    })
+    expect(result.action).toBe('keep')
+  })
+
+  it('falls back to level-derived gate when masteryGate undefined', () => {
+    const result = evaluatePrioritySkillStatus({
+      tag: 'math.addition.facts',
+      label: 'Addition Facts',
+      level: SkillLevel.Secure,
+    })
+    expect(result.action).toBe('skip')
   })
 })

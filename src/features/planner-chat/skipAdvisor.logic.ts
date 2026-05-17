@@ -156,3 +156,36 @@ export function getEffectiveMasteryGate(skill: PrioritySkill): MasteryGate {
   if (skill.masteryGate !== undefined) return skill.masteryGate
   return skillLevelToMasteryGate(skill.level)
 }
+
+/**
+ * Per-skill advisor result for the Skill Snapshot view.
+ *
+ * Independent of plan items — evaluates a single priority skill against
+ * its effective mastery gate and produces the same SkipAdvisorResult shape
+ * planner items use, so chips/popover content stay consistent across surfaces.
+ */
+export function evaluatePrioritySkillStatus(skill: PrioritySkill): SkipAdvisorResult {
+  const gate = getEffectiveMasteryGate(skill)
+  if (gate === MasteryGate.IndependentConsistent) {
+    return {
+      action: 'skip',
+      rationale: `${skill.label} at ${MasteryGateLabel[MasteryGate.IndependentConsistent]}. Can move to background practice; reclaim time for active focus.`,
+      evidenceLevel: gate,
+      skillTag: skill.tag,
+    }
+  }
+  if (gate === MasteryGate.MostlyIndependent) {
+    return {
+      action: 'modify',
+      rationale: `${skill.label} is ${MasteryGateLabel[MasteryGate.MostlyIndependent]}. Lighter reps (1-2 problems + quick check) instead of full sets.`,
+      evidenceLevel: gate,
+      skillTag: skill.tag,
+    }
+  }
+  return {
+    action: 'keep',
+    rationale: `${skill.label} is ${MasteryGateLabel[gate]}. Active focus — keep for mastery building.`,
+    evidenceLevel: gate,
+    skillTag: skill.tag,
+  }
+}
