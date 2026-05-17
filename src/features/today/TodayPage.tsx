@@ -85,6 +85,7 @@ import { useUnifiedCapture } from './useUnifiedCapture'
 import QuickAddHours from '../records/QuickAddHours'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import WeekFocusCard from './WeekFocusCard'
+import WeekRibbon from './WeekRibbon'
 import WorkshopGameCards from './WorkshopGameCards'
 
 export default function TodayPage() {
@@ -948,6 +949,18 @@ export default function TodayPage() {
           </Stack>
         </Stack>
       </SectionCard>
+
+      {/* --- Week Ribbon: 5-dot Mon-Fri progress at-a-glance (parent only) --- */}
+      {selectedChildId && (
+        <SectionErrorBoundary section="week ribbon">
+          <WeekRibbon
+            childId={selectedChildId}
+            familyId={familyId}
+            weekStart={weekDayDates[0].dateKey}
+            today={realToday}
+          />
+        </SectionErrorBoundary>
+      )}
 
       {/* --- Week Focus + Conundrum --- */}
       {weekFocus && (
