@@ -266,6 +266,8 @@ export default function PlannerChatPage() {
 
   // Chapter book library + selection
   const [chapterBooks, setChapterBooks] = useState<ChapterBook[]>([])
+  const [chapterBooksLoading, setChapterBooksLoading] = useState(true)
+  const [chapterBooksLoadError, setChapterBooksLoadError] = useState(false)
   const [selectedBook, setSelectedBook] = useState<ChapterBook | null>(null)
   const [bookProgress, setBookProgress] = useState<BookProgress | null>(null)
 
@@ -323,12 +325,17 @@ export default function PlannerChatPage() {
 
   // Load chapter book library
   useEffect(() => {
+    setChapterBooksLoading(true)
+    setChapterBooksLoadError(false)
     void getDocs(chapterBooksCollection()).then((snap) => {
       const books = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
       books.sort((a, b) => a.title.localeCompare(b.title))
       setChapterBooks(books)
     }).catch((err) => {
       console.warn('Failed to load chapter book library:', err)
+      setChapterBooksLoadError(true)
+    }).finally(() => {
+      setChapterBooksLoading(false)
     })
   }, [])
 
@@ -2245,6 +2252,8 @@ ${dayPrompts}`
               onSelectedBookChange={handleSelectedBookChange}
               onBookAdded={handleBookAdded}
               bookProgress={bookProgress}
+              chapterBooksLoading={chapterBooksLoading}
+              chapterBooksLoadError={chapterBooksLoadError}
               weekNotes={weekNotes}
               onWeekNotesChange={setWeekNotes}
               masterySummary={masterySummary}
@@ -2280,7 +2289,9 @@ ${dayPrompts}`
                 onSelectedBookChange={handleBookChangeAndPersist}
                 onBookAdded={handleBookAdded}
                 bookProgress={bookProgress}
-                variant="card"
+                variant="compact"
+                loading={chapterBooksLoading}
+                loadError={chapterBooksLoadError}
               />
             </Box>
           )}
@@ -2329,10 +2340,12 @@ ${dayPrompts}`
                   onSelectedBookChange={handleBookChangeAndPersist}
                   onBookAdded={handleBookAdded}
                   bookProgress={bookProgress}
-                  variant="card"
+                  variant="compact"
+                  loading={chapterBooksLoading}
+                  loadError={chapterBooksLoadError}
                 />
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                  Changing the book updates your Today page. Re-lock the plan to generate questions for this book.
+                  Today&apos;s chapter question won&apos;t regenerate automatically — open the Today page and tap Refresh on the chapter question card.
                 </Typography>
               </Box>
 
