@@ -12,6 +12,7 @@ import Select from '@mui/material/Select'
 import type { SelectChangeEvent } from '@mui/material/Select'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
+import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import { addDoc } from 'firebase/firestore'
 
@@ -27,8 +28,12 @@ export interface ChapterBookPickerProps {
   onSelectedBookChange: (book: ChapterBook | null) => void
   bookProgress: BookProgress | null
   onBookAdded?: (book: ChapterBook) => void
-  /** 'wizard' embeds in setup form; 'card' is standalone with its own header */
-  variant?: 'wizard' | 'card'
+  /** 'wizard' embeds in setup form at full size; 'compact' is a slim single-row picker for review/active phases */
+  variant?: 'wizard' | 'compact'
+  /** True while the chapterBooks collection is loading. Disables the select and shows a loading placeholder. */
+  loading?: boolean
+  /** Set when the chapterBooks load failed. Falls back to a plain text input so Shelly can still type a title. */
+  loadError?: boolean
 }
 
 export default function ChapterBookPicker({
@@ -38,6 +43,8 @@ export default function ChapterBookPicker({
   bookProgress,
   onBookAdded,
   variant = 'wizard',
+  loading = false,
+  loadError = false,
 }: ChapterBookPickerProps) {
   const [addingOpen, setAddingOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -122,53 +129,115 @@ export default function ChapterBookPicker({
 
   const answeredCount = bookProgress?.questionPool.filter((q) => q.answered).length ?? 0
 
+  // Loading: show disabled placeholder so Shelly knows the picker is coming.
+  if (loading) {
+    return (
+      <FormControl
+        fullWidth
+        size="small"
+        disabled
+        sx={variant === 'compact' ? { maxWidth: 480 } : undefined}
+      >
+        <InputLabel shrink>Read-aloud book</InputLabel>
+        <Select
+          value=""
+          displayEmpty
+          notched
+          label="Read-aloud book"
+          renderValue={() => (
+            <Stack direction="row" spacing={1} alignItems="center">
+              <CircularProgress size={14} />
+              <Typography variant="body2" color="text.secondary">
+                Loading chapter books...
+              </Typography>
+            </Stack>
+          )}
+        >
+          <MenuItem value="" />
+        </Select>
+      </FormControl>
+    )
+  }
+
+  // Network/permission error: degrade to a plain text input so the input is still useful.
+  if (loadError) {
+    return (
+      <Tooltip title="Couldn't load your chapter book library. Type a title to remember what you're reading.">
+        <TextField
+          size="small"
+          label="Read-aloud book"
+          placeholder="Book title"
+          value={selectedBook?.title ?? ''}
+          fullWidth
+          sx={variant === 'compact' ? { maxWidth: 480 } : undefined}
+          onChange={(e) => {
+            const title = e.target.value.trim()
+            if (!title) onSelectedBookChange(null)
+            else onSelectedBookChange({ ...(selectedBook ?? { id: '', author: '', totalChapters: 0, chapters: [], createdAt: '' }), title })
+          }}
+        />
+      </Tooltip>
+    )
+  }
+
+  const isEmpty = chapterBooks.length === 0
+  const selectControl = (
+    <FormControl fullWidth size="small">
+      <InputLabel id="chapter-book-picker-label">Read-aloud book</InputLabel>
+      <Select
+        labelId="chapter-book-picker-label"
+        label="Read-aloud book"
+        value={currentValue}
+        onChange={handleSelectChange}
+        displayEmpty
+        renderValue={(value) => {
+          if (value === NONE_VALUE) return <em>None — no read-aloud this week</em>
+          const book = chapterBooks.find((b) => b.id === value)
+          if (!book) return <em>Select a book from your library...</em>
+          return `${book.title} — ${book.author}`
+        }}
+      >
+        <MenuItem value={NONE_VALUE}>
+          <em>None — no read-aloud this week</em>
+        </MenuItem>
+        {chapterBooks.map((book) => (
+          <MenuItem key={book.id} value={book.id}>
+            <ListItemText
+              primary={`${book.title} — ${book.author}`}
+              secondary={
+                selectedBook?.id === book.id && bookProgress
+                  ? `${answeredCount}/${bookProgress.totalChapters} chapters done`
+                  : `${book.totalChapters} chapters`
+              }
+            />
+          </MenuItem>
+        ))}
+        <MenuItem value={ADD_VALUE} sx={{ borderTop: '1px solid', borderColor: 'divider', mt: 0.5 }}>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ color: 'primary.main' }}>
+            <AddIcon fontSize="small" />
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              Add a new book
+            </Typography>
+          </Stack>
+        </MenuItem>
+      </Select>
+    </FormControl>
+  )
+
   return (
-    <Stack spacing={1.5}>
+    <Stack spacing={1.5} sx={variant === 'compact' ? { maxWidth: 480 } : undefined}>
       {variant === 'wizard' && (
         <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           Read-Aloud This Week
         </Typography>
       )}
-      <FormControl fullWidth size="small">
-        <InputLabel id="chapter-book-picker-label">Read-aloud book</InputLabel>
-        <Select
-          labelId="chapter-book-picker-label"
-          label="Read-aloud book"
-          value={currentValue}
-          onChange={handleSelectChange}
-          displayEmpty
-          renderValue={(value) => {
-            if (value === NONE_VALUE) return <em>None — no read-aloud this week</em>
-            const book = chapterBooks.find((b) => b.id === value)
-            if (!book) return <em>Select a book from your library...</em>
-            return `${book.title} — ${book.author}`
-          }}
-        >
-          <MenuItem value={NONE_VALUE}>
-            <em>None — no read-aloud this week</em>
-          </MenuItem>
-          {chapterBooks.map((book) => (
-            <MenuItem key={book.id} value={book.id}>
-              <ListItemText
-                primary={`${book.title} — ${book.author}`}
-                secondary={
-                  selectedBook?.id === book.id && bookProgress
-                    ? `${answeredCount}/${bookProgress.totalChapters} chapters done`
-                    : `${book.totalChapters} chapters`
-                }
-              />
-            </MenuItem>
-          ))}
-          <MenuItem value={ADD_VALUE} sx={{ borderTop: '1px solid', borderColor: 'divider', mt: 0.5 }}>
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ color: 'primary.main' }}>
-              <AddIcon fontSize="small" />
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                Add a new book
-              </Typography>
-            </Stack>
-          </MenuItem>
-        </Select>
-      </FormControl>
+      {isEmpty ? (
+        <Tooltip title="No chapter books yet — add one with the menu below." placement="top">
+          {selectControl}
+        </Tooltip>
+      ) : (
+        selectControl
+      )}
 
       {selectedBook && bookProgress && (
         <Chip

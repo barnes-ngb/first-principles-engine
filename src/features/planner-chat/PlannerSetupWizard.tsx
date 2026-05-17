@@ -50,6 +50,8 @@ interface PlannerSetupWizardProps {
   onLabelsChange: (labels: PhotoLabel[]) => void
   onPhotoCapture: (file: File) => Promise<string | null>
   uploading: boolean
+  chapterBooksLoading?: boolean
+  chapterBooksLoadError?: boolean
   workbookConfigs: WorkbookConfig[]
   onScanCapture: (file: File) => Promise<void>
   scanLoading: boolean
@@ -76,6 +78,8 @@ export default function PlannerSetupWizard({
   onSelectedBookChange,
   onBookAdded,
   bookProgress,
+  chapterBooksLoading,
+  chapterBooksLoadError,
   weekNotes,
   onWeekNotesChange,
   masterySummary,
@@ -119,6 +123,8 @@ export default function PlannerSetupWizard({
         onBookAdded={onBookAdded}
         bookProgress={bookProgress}
         variant="wizard"
+        loading={chapterBooksLoading}
+        loadError={chapterBooksLoadError}
       />
 
       {/* Step 1c: Notes */}
