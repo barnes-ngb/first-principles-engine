@@ -30,6 +30,7 @@ import {
   EvidenceType,
   LearningLocation,
   SubjectBucket,
+  SubjectBucketLabel,
 } from '../../core/types/enums'
 
 const MAX_DURATION_MINUTES = 240
@@ -43,11 +44,10 @@ interface CapturePreset {
 }
 
 // v1 preset list. Subject buckets match the existing `SubjectBucket` enum
-// (Reading | LanguageArts | Math | Science | SocialStudies | Music | Art | PE | Other).
-// "Lego" and "Baking" fall back to Art / Other because there is no PracticalArts bucket.
+// (Reading | LanguageArts | Math | Science | SocialStudies | Music | Art | PracticalArts | PE | Other).
 const CAPTURE_PRESETS: CapturePreset[] = [
-  { id: 'lego', label: 'Lego build', emoji: '🧱', subjectBucket: SubjectBucket.Art, suggestedMinutes: 45 },
-  { id: 'baking', label: 'Baking / cooking', emoji: '🥖', subjectBucket: SubjectBucket.Other, suggestedMinutes: 30 },
+  { id: 'lego', label: 'Lego build', emoji: '🧱', subjectBucket: SubjectBucket.PracticalArts, suggestedMinutes: 45 },
+  { id: 'baking', label: 'Baking / cooking', emoji: '🥖', subjectBucket: SubjectBucket.PracticalArts, suggestedMinutes: 30 },
   { id: 'nature', label: 'Nature / park', emoji: '🌳', subjectBucket: SubjectBucket.Science, suggestedMinutes: 45 },
   { id: 'music', label: 'Music practice', emoji: '🎵', subjectBucket: SubjectBucket.Music, suggestedMinutes: 20 },
   { id: 'drawing', label: 'Drawing / art', emoji: '🎨', subjectBucket: SubjectBucket.Art, suggestedMinutes: 30 },
@@ -396,7 +396,7 @@ export default function UnifiedCaptureCard({
           >
             {Object.values(SubjectBucket).map((bucket) => (
               <MenuItem key={bucket} value={bucket}>
-                {bucket}
+                {SubjectBucketLabel[bucket]}
               </MenuItem>
             ))}
           </TextField>
@@ -438,7 +438,7 @@ export default function UnifiedCaptureCard({
               sx={{ display: 'block', mt: 0.5 }}
             >
               {parsedDuration > 0
-                ? `Will log ${parsedDuration} minutes to ${subjectBucket}`
+                ? `Will log ${parsedDuration} minutes to ${SubjectBucketLabel[subjectBucket]}`
                 : `Counts toward ${activeChildName}'s school hours`}
             </Typography>
           </Box>

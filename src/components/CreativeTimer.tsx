@@ -22,7 +22,7 @@ const SUBJECT_OPTIONS = [
   { label: 'Art', bucket: SubjectBucket.Art, description: 'Drawing, painting, crafting' },
   { label: 'Language Arts', bucket: SubjectBucket.LanguageArts, description: 'Writing stories, book creation' },
   { label: 'Math', bucket: SubjectBucket.Math, description: 'Counting, pricing, inventory' },
-  { label: 'Practical Arts', bucket: SubjectBucket.Other, description: 'Building, assembling, making' },
+  { label: 'Practical Arts', bucket: SubjectBucket.PracticalArts, description: 'Building, assembling, making' },
 ] as const
 
 interface CreativeTimerProps {

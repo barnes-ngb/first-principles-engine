@@ -39,6 +39,7 @@ const SUBJECT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: SubjectBucket.Science, label: 'Science' },
   { value: SubjectBucket.Math, label: 'Math' },
   { value: SubjectBucket.Art, label: 'Art' },
+  { value: SubjectBucket.PracticalArts, label: 'Practical Arts' },
   { value: SubjectBucket.PE, label: 'PE' },
   { value: SubjectBucket.Reading, label: 'Reading' },
   { value: SubjectBucket.SocialStudies, label: 'Social Studies' },

@@ -31,7 +31,7 @@ import {
 import { storage } from '../../core/firebase/storage'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Artifact } from '../../core/types'
-import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { EngineStage, EvidenceType, SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import {
   generatePortfolioMarkdown,
   getMonthLabel,
@@ -279,7 +279,7 @@ export default function PortfolioPage() {
                   >
                     <MenuItem value="">All Subjects</MenuItem>
                     {Object.values(SubjectBucket).map((s) => (
-                      <MenuItem key={s} value={s}>{s}</MenuItem>
+                      <MenuItem key={s} value={s}>{SubjectBucketLabel[s]}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>

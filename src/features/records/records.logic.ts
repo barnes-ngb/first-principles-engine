@@ -471,6 +471,11 @@ const CORE_SUBJECT_LABELS: Record<string, string> = {
   Math: 'Math',
   Science: 'Science',
   SocialStudies: 'Social Studies',
+  Music: 'Music',
+  Art: 'Art',
+  PracticalArts: 'Practical Arts',
+  PE: 'PE',
+  Other: 'Other',
 }
 
 export function generateComplianceReportHtml(
