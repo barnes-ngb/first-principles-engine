@@ -42,6 +42,8 @@ import {
 import FoundationsSection from '../evaluate/FoundationsSection'
 import QuickCheckPanel from './QuickCheckPanel'
 import WorkingLevelsSection from './WorkingLevelsSection'
+import SkipAdvisorChip from '../planner-chat/SkipAdvisorChip'
+import { evaluatePrioritySkillStatus } from '../planner-chat/skipAdvisor.logic'
 
 const emptySnapshot = (childId: string): SkillSnapshot => ({
   childId,
@@ -353,7 +355,15 @@ export default function SkillSnapshotPage() {
               {snapshot.prioritySkills.length === 0 ? (
                 <Typography color="text.secondary">No priority skills set.</Typography>
               ) : (
-                snapshot.prioritySkills.map((skill, index) => (
+                snapshot.prioritySkills.map((skill, index) => {
+                  const advisorStatus = evaluatePrioritySkillStatus(skill)
+                  const statusLabel =
+                    advisorStatus.action === 'skip'
+                      ? 'Can move to background'
+                      : advisorStatus.action === 'modify'
+                        ? 'Lighter reps'
+                        : 'Active focus'
+                  return (
                   <Stack key={index} spacing={1} sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                     <Stack direction="row" spacing={1} alignItems="center">
                       <TextField
@@ -379,6 +389,9 @@ export default function SkillSnapshotPage() {
                         <DeleteIcon fontSize="small" />
                       </IconButton>
                     </Stack>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <SkipAdvisorChip result={advisorStatus} label={statusLabel} />
+                    </Stack>
                     <TextField
                       label="Skill tag"
                       size="small"
@@ -398,7 +411,8 @@ export default function SkillSnapshotPage() {
                     />
                     <Chip label={skill.tag || 'no tag'} size="small" variant="outlined" />
                   </Stack>
-                ))
+                  )
+                })
               )}
               <Button startIcon={<AddIcon />} size="small" onClick={handleAddSkill}>
                 Add Priority Skill
