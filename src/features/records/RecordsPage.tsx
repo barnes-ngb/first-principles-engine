@@ -52,7 +52,7 @@ import type {
   HoursAdjustment,
   HoursEntry,
 } from '../../core/types'
-import { SubjectBucket } from '../../core/types/enums'
+import { SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import { formatDateForInput } from '../../core/utils/format'
 import { getSchoolYearRange } from '../../core/utils/time'
 import { parseDateFromDocId } from '../today/daylog.model'
@@ -806,7 +806,7 @@ function HoursComplianceTab() {
                 <MenuItem value="">None</MenuItem>
                 {subjectBucketOptions.map((s) => (
                   <MenuItem key={s} value={s}>
-                    {s}
+                    {SubjectBucketLabel[s]}
                   </MenuItem>
                 ))}
               </Select>

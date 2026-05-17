@@ -3,10 +3,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import Accordion from '@mui/material/Accordion'
-import AccordionDetails from '@mui/material/AccordionDetails'
-import AccordionSummary from '@mui/material/AccordionSummary'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -70,19 +66,17 @@ import { getTemplateForChild } from './dailyPlanTemplates'
 import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
 import ChapterQuestionPool from './ChapterQuestionPool'
 import { useBookProgress } from './useBookProgress'
-import CreativeTimeLog from './CreativeTimeLog'
 import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
-import QuickCaptureSection from './QuickCaptureSection'
 import TeachBackSection from './TeachBackSection'
 import TodayChecklist from './TodayChecklist'
+import UnifiedCaptureCard from './UnifiedCaptureCard'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { ensureDefaultActivityConfigs } from '../../core/firebase/migrateActivityConfigs'
 import { useRolloverUnchecked } from './useRolloverUnchecked'
 import { useUnifiedCapture } from './useUnifiedCapture'
-import QuickAddHours from '../records/QuickAddHours'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import WeekFocusCard from './WeekFocusCard'
 import WeekRibbon from './WeekRibbon'
@@ -1044,39 +1038,10 @@ export default function TodayPage() {
         <WorkshopGameCards familyId={familyId} children={children} />
       )}
 
-      {/* --- Creative Time Log --- */}
-      {familyId && selectedChild && (
-        <CreativeTimeLog
-          familyId={familyId}
-          childId={selectedChild.id ?? ''}
-          childName={selectedChild.name}
-        />
-      )}
-
-      {/* Quick non-core hours — collapsed by default */}
-      {selectedChildId && (
-        <Accordion>
-          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Typography variant="subtitle1" color="text.secondary">
-              ⚡ Log Extra Activity (PE, art, cooking...)
-            </Typography>
-          </AccordionSummary>
-          <AccordionDetails>
-            <QuickAddHours
-              familyId={familyId}
-              childId={selectedChildId}
-              childName={activeChild?.name ?? 'child'}
-              date={today}
-              onSaved={(msg) => setSnackMessage({ text: msg, severity: 'success' })}
-            />
-          </AccordionDetails>
-        </Accordion>
-      )}
-
-      {/* --- Quick Capture + Artifacts --- */}
+      {/* --- Unified Capture (artifact + hours + category, single surface) --- */}
       <div ref={artifactSectionRef} />
-      <SectionErrorBoundary section="quick capture">
-        <QuickCaptureSection
+      <SectionErrorBoundary section="unified capture">
+        <UnifiedCaptureCard
           familyId={familyId}
           selectedChildId={selectedChildId}
           today={today}
