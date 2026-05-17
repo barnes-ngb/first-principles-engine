@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
-import type { DraftPlanItem, DraftWeeklyPlan } from '../../core/types'
+import type { DraftPlanItem, DraftWeeklyPlan, SkillSnapshot } from '../../core/types'
 import PlanPreviewCard from './PlanPreviewCard'
 
 interface PlanDayCardsProps {
@@ -9,6 +9,7 @@ interface PlanDayCardsProps {
   hoursPerDay: number
   masteryReviewLine: string
   readAloudBook: string
+  snapshot?: SkillSnapshot | null
   onToggleItem: (dayIndex: number, itemId: string) => void
   onGenerateActivity?: (item: DraftPlanItem) => void
   generatingItemId: string | null
@@ -22,6 +23,7 @@ export default function PlanDayCards({
   draft,
   hoursPerDay,
   masteryReviewLine,
+  snapshot,
   onToggleItem,
   onGenerateActivity,
   generatingItemId,
@@ -43,6 +45,7 @@ export default function PlanDayCards({
         plan={draft}
         hoursPerDay={hoursPerDay}
         masteryReviewLine={masteryReviewLine}
+        snapshot={snapshot ?? null}
         onToggleItem={onToggleItem}
         onGenerateActivity={!applied ? onGenerateActivity : undefined}
         generatingItemId={generatingItemId ?? undefined}
