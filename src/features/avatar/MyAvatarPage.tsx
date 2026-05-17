@@ -74,6 +74,7 @@ import { getDailyArmorStatusFromSession, getBestOfSlotForgedPieces } from './arm
 import { getWeekRange } from '../../core/utils/time'
 import { dayLogDocId } from '../today/daylog.model'
 import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
+import HeroLauncherTiles from './HeroLauncherTiles'
 import StonebridgePreviewCard from './StonebridgePreviewCard'
 
 type NextRecommendedAction =
@@ -1346,6 +1347,19 @@ export default function MyAvatarPage() {
           </Box>
         </Box>
 
+        {/* Mission and Stonebridge surface above the 3D armor row — mission
+            context comes first; armor is one pillar of the hub, not the whole page. */}
+        <HeroMissionCard mission={mission} isLincoln={isLincoln} />
+        <StonebridgePreviewCard
+          isLincoln={isLincoln}
+          weekData={{
+            weekNumber: weekData?.weekNumber,
+            chapterTitle: weekData?.chapterTitle,
+            chapterIntro: weekData?.chapterIntro,
+            conundrumTitle: weekData?.conundrum?.title,
+          }}
+        />
+
         {/* ── 3D Character Display ─────────────────────────────── */}
         <AvatarCharacterDisplay
           profile={profile}
@@ -1397,17 +1411,6 @@ export default function MyAvatarPage() {
               manuallyUnequipped: [],
               completedAt: deleteField(),
             })
-          }}
-        />
-
-        <HeroMissionCard mission={mission} isLincoln={isLincoln} />
-        <StonebridgePreviewCard
-          isLincoln={isLincoln}
-          weekData={{
-            weekNumber: weekData?.weekNumber,
-            chapterTitle: weekData?.chapterTitle,
-            chapterIntro: weekData?.chapterIntro,
-            conundrumTitle: weekData?.conundrum?.title,
           }}
         />
         <Box
@@ -1615,6 +1618,10 @@ export default function MyAvatarPage() {
             onTunerReset={handleTunerReset}
           />
         )}
+
+        {/* Launcher tiles — kid jumps from the hub to other destinations.
+            London doesn't use Knowledge Mine yet (per outline). */}
+        <HeroLauncherTiles isLincoln={isLincoln} hideMine={!isLincoln} />
       </Page>
 
       {/* Unequip dialog removed — tap toggles directly */}

@@ -17,6 +17,7 @@ import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
 import {
   artifactsCollection,
+  hoursCollection,
 } from '../../core/firebase/firestore'
 import {
   generateFilename,
@@ -29,6 +30,8 @@ import {
   LearningLocation,
   SubjectBucket,
 } from '../../core/types/enums'
+
+const MAX_DURATION_MINUTES = 240
 
 interface QuickCaptureSectionProps {
   familyId: string
@@ -52,12 +55,23 @@ export default function QuickCaptureSection({
   onSnackMessage,
 }: QuickCaptureSectionProps) {
   const [mediaUploading, setMediaUploading] = useState(false)
+  const [durationInput, setDurationInput] = useState('')
   const [artifactForm, setArtifactForm] = useState({
     childId: selectedChildId,
     evidenceType: EvidenceType.Note as EvidenceType,
     subjectBucket: SubjectBucket.Reading,
     content: '',
   })
+
+  const parsedDuration = (() => {
+    if (durationInput.trim() === '') return 0
+    const n = Math.floor(Number(durationInput))
+    if (!Number.isFinite(n) || n <= 0) return 0
+    return Math.min(n, MAX_DURATION_MINUTES)
+  })()
+
+  const activeChildName =
+    selectableChildren.find((c) => c.id === artifactForm.childId)?.name ?? 'child'
 
   // Keep artifact form childId in sync with active child
   useEffect(() => {
@@ -72,6 +86,29 @@ export default function QuickCaptureSection({
       setArtifactForm((prev) => ({ ...prev, [field]: value }))
     },
     [],
+  )
+
+  const writeQuickCaptureHours = useCallback(
+    async (minutes: number, notes: string): Promise<boolean> => {
+      if (minutes <= 0) return false
+      try {
+        await addDoc(hoursCollection(familyId), {
+          childId: artifactForm.childId,
+          date: today,
+          minutes,
+          subjectBucket: artifactForm.subjectBucket,
+          location: LearningLocation.Home,
+          source: 'quick-capture',
+          quickCapture: true,
+          notes: notes || 'Quick Capture',
+        })
+        return true
+      } catch (err) {
+        console.error('Failed to log Quick Capture hours', err)
+        return false
+      }
+    },
+    [familyId, artifactForm.childId, artifactForm.subjectBucket, today],
   )
 
   const buildArtifactBase = useCallback(
@@ -109,12 +146,33 @@ export default function QuickCaptureSection({
       const docRef = await addDoc(artifactsCollection(familyId), artifact)
       setTodayArtifacts((prev) => [{ ...artifact, id: docRef.id }, ...prev])
       setArtifactForm((prev) => ({ ...prev, content: '' }))
-      onSnackMessage({ text: 'Note saved.', severity: 'success' })
+      const minutes = parsedDuration
+      if (minutes > 0) {
+        const ok = await writeQuickCaptureHours(minutes, content)
+        setDurationInput('')
+        onSnackMessage({
+          text: ok
+            ? `Captured + ${minutes} min logged`
+            : "Captured (couldn't log hours — try again from Records)",
+          severity: ok ? 'success' : 'error',
+        })
+      } else {
+        onSnackMessage({ text: 'Captured', severity: 'success' })
+      }
     } catch (err) {
       console.error('Failed to save artifact', err)
       onSnackMessage({ text: 'Failed to save note.', severity: 'error' })
     }
-  }, [artifactForm, buildArtifactBase, familyId, today, setTodayArtifacts, onSnackMessage])
+  }, [
+    artifactForm,
+    buildArtifactBase,
+    familyId,
+    today,
+    setTodayArtifacts,
+    onSnackMessage,
+    parsedDuration,
+    writeQuickCaptureHours,
+  ])
 
   const handlePhotoCapture = useCallback(
     async (file: File) => {
@@ -131,7 +189,19 @@ export default function QuickCaptureSection({
           { ...artifact, id: docRef.id, uri: downloadUrl },
           ...prev,
         ])
-        onSnackMessage({ text: 'Photo uploaded.', severity: 'success' })
+        const minutes = parsedDuration
+        if (minutes > 0) {
+          const ok = await writeQuickCaptureHours(minutes, title)
+          setDurationInput('')
+          onSnackMessage({
+            text: ok
+              ? `Captured + ${minutes} min logged`
+              : "Captured (couldn't log hours — try again from Records)",
+            severity: ok ? 'success' : 'error',
+          })
+        } else {
+          onSnackMessage({ text: 'Captured', severity: 'success' })
+        }
       } catch (err) {
         console.error('Photo upload failed', err)
         onSnackMessage({ text: 'Photo upload failed.', severity: 'error' })
@@ -139,7 +209,15 @@ export default function QuickCaptureSection({
         setMediaUploading(false)
       }
     },
-    [buildArtifactBase, familyId, today, setTodayArtifacts, onSnackMessage],
+    [
+      buildArtifactBase,
+      familyId,
+      today,
+      setTodayArtifacts,
+      onSnackMessage,
+      parsedDuration,
+      writeQuickCaptureHours,
+    ],
   )
 
   const handleAudioCapture = useCallback(
@@ -156,7 +234,19 @@ export default function QuickCaptureSection({
           { ...artifact, id: docRef.id, uri: downloadUrl },
           ...prev,
         ])
-        onSnackMessage({ text: 'Audio uploaded.', severity: 'success' })
+        const minutes = parsedDuration
+        if (minutes > 0) {
+          const ok = await writeQuickCaptureHours(minutes, title)
+          setDurationInput('')
+          onSnackMessage({
+            text: ok
+              ? `Captured + ${minutes} min logged`
+              : "Captured (couldn't log hours — try again from Records)",
+            severity: ok ? 'success' : 'error',
+          })
+        } else {
+          onSnackMessage({ text: 'Captured', severity: 'success' })
+        }
       } catch (err) {
         console.error('Audio upload failed', err)
         onSnackMessage({ text: 'Audio upload failed.', severity: 'error' })
@@ -164,7 +254,15 @@ export default function QuickCaptureSection({
         setMediaUploading(false)
       }
     },
-    [buildArtifactBase, familyId, today, setTodayArtifacts, onSnackMessage],
+    [
+      buildArtifactBase,
+      familyId,
+      today,
+      setTodayArtifacts,
+      onSnackMessage,
+      parsedDuration,
+      writeQuickCaptureHours,
+    ],
   )
 
   return (
@@ -216,6 +314,47 @@ export default function QuickCaptureSection({
               </MenuItem>
             ))}
           </TextField>
+          <Box>
+            <TextField
+              label="How long? (optional)"
+              type="number"
+              value={durationInput}
+              onChange={(event) => {
+                const raw = event.target.value
+                if (raw === '') {
+                  setDurationInput('')
+                  return
+                }
+                const n = Math.floor(Number(raw))
+                if (!Number.isFinite(n) || n < 0) return
+                setDurationInput(String(Math.min(n, MAX_DURATION_MINUTES)))
+              }}
+              inputProps={{
+                min: 0,
+                max: MAX_DURATION_MINUTES,
+                inputMode: 'numeric',
+                'aria-label': 'Duration in minutes',
+              }}
+              InputProps={{
+                endAdornment: (
+                  <Typography variant="body2" color="text.secondary" sx={{ ml: 1 }}>
+                    minutes
+                  </Typography>
+                ),
+              }}
+              fullWidth
+            />
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              fontStyle="italic"
+              sx={{ display: 'block', mt: 0.5 }}
+            >
+              {parsedDuration > 0
+                ? `Will log ${parsedDuration} minutes to ${artifactForm.subjectBucket}`
+                : `Counts toward ${activeChildName}'s school hours`}
+            </Typography>
+          </Box>
           {artifactForm.evidenceType === EvidenceType.Note && (
             <>
               <TextField
@@ -225,8 +364,21 @@ export default function QuickCaptureSection({
                 value={artifactForm.content}
                 onChange={(event) => handleArtifactChange('content', event.target.value)}
               />
-              <Button variant="contained" onClick={handleArtifactSave}>
-                Save Note
+              <Button
+                variant="contained"
+                onClick={handleArtifactSave}
+                disabled={
+                  parsedDuration > 0 &&
+                  (!artifactForm.childId || !artifactForm.subjectBucket)
+                }
+                title={
+                  parsedDuration > 0 &&
+                  (!artifactForm.childId || !artifactForm.subjectBucket)
+                    ? 'Pick a child and subject first'
+                    : undefined
+                }
+              >
+                Save Capture
               </Button>
             </>
           )}
