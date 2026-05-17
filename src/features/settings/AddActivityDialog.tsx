@@ -29,6 +29,7 @@ const SUBJECT_BUCKETS: Array<{ value: SubjectBucket; label: string }> = [
   { value: 'Science', label: 'Science' },
   { value: 'Other', label: 'Formation / Other' },
   { value: 'Art', label: 'Art' },
+  { value: 'PracticalArts', label: 'Practical Arts' },
   { value: 'PE', label: 'PE' },
   { value: 'Music', label: 'Music' },
 ]

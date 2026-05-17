@@ -6,10 +6,25 @@ export const SubjectBucket = {
   SocialStudies: 'SocialStudies',
   Music: 'Music',
   Art: 'Art',
+  PracticalArts: 'PracticalArts',
   PE: 'PE',
   Other: 'Other',
 } as const
 export type SubjectBucket = (typeof SubjectBucket)[keyof typeof SubjectBucket]
+
+/** Human-readable label for each subject bucket. */
+export const SubjectBucketLabel: Record<SubjectBucket, string> = {
+  [SubjectBucket.Reading]: 'Reading',
+  [SubjectBucket.LanguageArts]: 'Language Arts',
+  [SubjectBucket.Math]: 'Math',
+  [SubjectBucket.Science]: 'Science',
+  [SubjectBucket.SocialStudies]: 'Social Studies',
+  [SubjectBucket.Music]: 'Music',
+  [SubjectBucket.Art]: 'Art',
+  [SubjectBucket.PracticalArts]: 'Practical Arts',
+  [SubjectBucket.PE]: 'PE',
+  [SubjectBucket.Other]: 'Other',
+}
 
 export const EngineStage = {
   Wonder: 'Wonder',

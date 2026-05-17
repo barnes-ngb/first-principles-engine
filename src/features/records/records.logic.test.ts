@@ -237,6 +237,39 @@ describe('computeHoursSummary', () => {
     expect(summary.coreHomeMinutes).toBe(30)
   })
 
+  it('classifies PracticalArts as non-core (counts toward total, not core)', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-01-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 30,
+            location: 'Home',
+          },
+          {
+            type: DayBlockType.Project,
+            subjectBucket: SubjectBucket.PracticalArts,
+            actualMinutes: 45,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+
+    expect(summary.totalMinutes).toBe(75)
+    expect(summary.coreMinutes).toBe(30)
+    expect(summary.coreHomeMinutes).toBe(30)
+    const practicalRow = summary.bySubject.find(
+      (r) => r.subjectBucket === 'PracticalArts',
+    )
+    expect(practicalRow?.totalMinutes).toBe(45)
+  })
+
   it('returns empty summary for no data', () => {
     const summary = computeHoursSummary([], [], [])
 

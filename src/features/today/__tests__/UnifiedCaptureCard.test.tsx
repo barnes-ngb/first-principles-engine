@@ -98,7 +98,7 @@ describe('UnifiedCaptureCard', () => {
     fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
     expect(getActivityNameInput().value).toBe('Lego build')
     expect(getDurationInput().value).toBe('45')
-    expect(screen.getByText(/Will log 45 minutes to Art/i)).toBeInTheDocument()
+    expect(screen.getByText(/Will log 45 minutes to Practical Arts/i)).toBeInTheDocument()
   })
 
   it('tapping the same preset again de-selects and clears the three fields', () => {
@@ -183,7 +183,7 @@ describe('UnifiedCaptureCard', () => {
     expect(addDocCalls[1].collectionKey).toBe('hours')
     expect(addDocCalls[1].data).toMatchObject({
       minutes: 45,
-      subjectBucket: 'Art',
+      subjectBucket: 'PracticalArts',
       source: 'unified-capture',
     })
     expect(onSnackMessage).toHaveBeenCalledWith({
