@@ -2,6 +2,9 @@
 
 _Phased build plan for the blocker-driven learning engine._
 _Written 2026-04-20. Grounds in `docs/LEARNING_ENGINE_AUDIT_2026-04.md` (ConceptualBlocks Inspection)._
+_Last reconciled: 2026-05-16._
+
+**Math eval shipped:** 2026-05-16 (Prompt C — closes G26 from `EVALUATION_SYSTEM_FULL_SWEEP_2026-05.md`). The Math tab in `EvaluateChatPage` is now enabled; `buildEvaluationPrompt` has a math branch mirroring the reading-eval shape and anchored to L1-L6 concept bands from `functions/src/ai/levelDefinitions.ts`; `deriveWorkingLevelFromEvaluation` writes `workingLevels.math` on Apply.
 
 This is a methodology commitment, not an exploration. It captures the decisions we've made about how First Principles Engine evaluates Lincoln (10, neurodivergent, speech challenges, ~1st grade reading, motivated by Minecraft and Lego) and how those decisions should ship across four phases.
 
@@ -21,19 +24,37 @@ This is a methodology commitment, not an exploration. It captures the decisions 
 
 **Identify what's hard, name it, unblock it.** This is the system's actual job. Not "measure Lincoln against grade level." Not "assign a score." The job is to notice that a specific sub-skill keeps tripping him up, put precise words to it ("short vowel i/e discrimination," not "reading struggles"), suggest concrete interventions Shelly can run in five minutes, and track whether the blocker is resolving. The Charter commitment — disposition over content mastery, no shame, AI suggests humans decide — shapes this: the engine names blockers without shaming Lincoln, offers interventions without mandating them, and leaves every judgment call in Shelly's hands.
 
-## 2. Current State Assessment
+## 2. Current State Assessment (as of 2026-05-16)
 
-Today the engine has the right conceptual model and almost none of the plumbing to feed it.
+Phases 1 and 2 of this methodology shipped 2026-04-21. The engine now has four `conceptualBlocks` writers and a real lifecycle. Phases 3 (synthesis) and 4 (planner/scan/skip blocker-awareness) remain backlog. This section is the post-Phase-1+2 snapshot; for the pre-Phase-1 state see §2.1 below.
 
-**What exists.** `ConceptualBlock` is defined on `SkillSnapshot` with eight fields: `name`, `affectedSkills[]`, `recommendation` (`ADDRESS_NOW` or `DEFER`), `rationale`, optional `strategies[]`, optional `deferNote`, `detectedAt`, and `evaluationSessionId`. A companion `blocksUpdatedAt` timestamp sits at the snapshot level. Pattern detection runs on the server via `analyzeEvaluationPatterns`, which takes the current session's findings plus the last five completed evaluation sessions (requires at least two historical sessions or it returns empty) and asks Claude Sonnet to produce one to three blocks.
+**What exists today.** `ConceptualBlock` lives on `SkillSnapshot` with both its original eight fields (`name`, `affectedSkills[]`, `recommendation`, `rationale`, optional `strategies[]`, optional `deferNote`, `detectedAt`, `evaluationSessionId`) and the Phase 1 lifecycle extensions: optional `id` (slugified skill — stable across writes), `status` (`ADDRESS_NOW` / `DEFER` / `RESOLVING` / `RESOLVED`), `evidence`, `firstDetectedAt`, `lastReinforcedAt`, `sessionCount`, `resolvedAt`, `source` / `lastSource` (`evaluation` / `quest` / `scan` / `parent`), plus `specificWords`, `specificQuestions`, `correctAttempts`, `totalAttempts`. Legacy blocks load untouched; `formatConceptualBlocks` treats a missing `status` as ADDRESS_NOW via the existing `recommendation` fallback. The companion `blocksUpdatedAt` doc-level timestamp is unchanged.
 
-**One writer, three readers.** The only write path is `handleSaveAndApply` in the guided evaluation chat page. It fires when Shelly clicks Save & Apply on a completed session that has enough history behind it. Three surfaces read: the Skill Snapshot page, the Foundations section card component, and — via `loadSkillSnapshotContext` — any AI task whose context bundle includes the skill snapshot slice. The AI injection is filtered: only `ADDRESS_NOW` blocks reach prompts, formatted as one line each. `DEFER` blocks are stored but invisible to every task prompt.
+**Four writers, merge semantics.** All writes route through `mergeBlock` (`src/core/utils/blockerLifecycle.ts`) + `updateDoc` — no more wholesale array replacement, no more cross-writer wipes.
 
-**No lifecycle.** There is no `resolved`, no `status` beyond the `ADDRESS_NOW`/`DEFER` recommendation, no age, no decay, no session-count persistence tracking, no merge. Every Save & Apply replaces the array wholesale. A block detected three weeks ago and still active this week is, from the data's perspective, identical to a block detected for the first time today. There is also no resolution UI — Shelly cannot dismiss a block, mark one resolved, or edit one.
+1. Guided-eval pattern analysis (`EvaluateChatPage.handleSaveAndApply`) — still runs via `analyzeEvaluationPatterns` against current + last 5 sessions, but now merges each detected block instead of overwriting the array.
+2. Quest session end (`useQuestSession.endSession` → `detectBlockersFromSession`) — emits a block when 2+ wrong answers hit the same sub-skill in a ≥5-question session. `updateBlockerLifecycle` also runs on session end so correct answers on existing blocks advance them toward RESOLVING/RESOLVED.
+3. Scan analysis (`useUnifiedCapture` → `detectBlockersFromScan`) — emits one block per `alignsWithSnapshot: 'behind'` skill on any `skip` / `modify` / `too-hard` / `challenging` scan; falls back to a topic-level block when no specific skills surface.
+4. Shelly's mastery chips on Today (`TodayChecklist` → `buildStuckBlock` / `buildGotItReinforcement`) — "Stuck" writes ADDRESS_NOW, "Got it" writes a RESOLVING nudge but only against an existing block with the same id (prevents empty reinforcement writes).
 
-**Starved for data.** The detection path gates on ≥2 prior completed sessions, which means a fresh child has zero blocks until their third evaluation. Lincoln has enough history to produce blocks, but the pipeline only runs when Shelly manually completes a guided eval session and clicks Apply. Quest sessions produce no blocks. Scans produce no blocks. Shelly's "Stuck" chips on the daily checklist produce no blocks. The model is right but it's being fed from a single narrow straw.
+**Status state machine.** `ADDRESS_NOW` → `RESOLVING` at ≥3 cumulative correct on the sub-skill. `RESOLVING` → `RESOLVED` at ≥5 correct across ≥2 sessions with no new wrong answers. Any new wrong regresses `RESOLVING` → `ADDRESS_NOW`. `DEFER` and `RESOLVED` are static. Phase 2 adds targeted-evidence weighting (`TARGETED_EVIDENCE_WEIGHT = 2`) so a deliberately probed correct answer — tagged by the AI with `targetedBlockerId` in the quest response — counts double toward the thresholds.
 
-**Honest verdict.** The shape of `ConceptualBlock` is correct. What's missing is three more writers, a real lifecycle, and a synthesis pass that turns raw signals into actionable diagnoses Shelly can act on. The next four phases add those in order.
+**AI context fix.** `formatConceptualBlocks` (extracted from `contextSlices.ts`) now emits three sections to the model: ADDRESS_NOW, RESOLVING ("trending better, keep probing gently"), and DEFER ("do NOT push on these"). RESOLVED blocks are kept in the array for history but omitted from prompts. Phase 2 also added `buildKnownBlockersSection` and `buildRecentCurriculumSection` to `buildQuestPrompt` so 2–3 of every ~10 quest questions deliberately target known blockers; quest response schemas carry `targetedBlockerId` to attribute the resulting evidence.
+
+**What still doesn't exist.** There is still no resolution UI — Shelly cannot manually dismiss a block, mark one resolved, or edit one through the app. There is no synthesis pass turning raw blocks into a structured diagnosis (Phase 3 backlog). The planner, scan recommendation engine, and skip system do not yet read active blockers to shape their own outputs (Phase 4 backlog). And several writer-adjacent gaps remain open per the May 16 full sweep audit (`docs/EVALUATION_SYSTEM_FULL_SWEEP_2026-05.md`): planner/scan/weeklyReview still consume the legacy single-doc `recentEval` slice (G50), and the math quest prompt branch silently drops its `startingLevel` argument (G54), among others.
+
+**Honest verdict.** Phase 1 + 2 closed the lifecycle and writer gaps that defined the pre-Apr-21 state. The remaining work is Phase 3's synthesis layer (so Shelly reads a diagnosis, not a raw array) and Phase 4's downstream wiring (so blockers actually shape what Lincoln does tomorrow). The shape of `ConceptualBlock` is still correct; the data-flow gap from "we know what's stuck" to "the system acts on it without Shelly having to read the raw array" is the next two phases.
+
+### 2.1 Pre-Phase-1 state (historical, for context)
+
+This is the world the methodology was written against. Pre-Apr-21:
+
+- **`ConceptualBlock` had only eight fields**, no `id`, no `status` beyond ADDRESS_NOW/DEFER, no lifecycle timestamps, no `source`, no evidence subfields. (Fields added by Phase 1 are listed above.)
+- **One writer, three readers.** The only write path was `handleSaveAndApply` in the guided evaluation chat page. Three surfaces read: the Skill Snapshot page, the Foundations section card component, and any AI task whose context bundle included `skillSnapshot`. The AI injection was filtered to ADDRESS_NOW only, one line each; DEFER blocks were stored but invisible to every task prompt.
+- **No lifecycle.** No `resolved`, no `status` beyond the ADDRESS_NOW/DEFER recommendation, no age, no decay, no session-count tracking, no merge. Every Save & Apply replaced the array wholesale — a block detected three weeks ago and still active this week was, from the data's perspective, identical to one detected for the first time today. (Phase 1 added the merge helper and lifecycle states.)
+- **Starved for data.** The detection path gated on ≥2 prior completed sessions, so a fresh child had zero blocks until their third evaluation. The pipeline only ran when Shelly manually completed a guided eval session and clicked Apply — quest sessions, scans, and the daily checklist's "Stuck" chips produced no blocks. (Phase 1 added the three additional writers.)
+
+The shape of `ConceptualBlock` was correct then; what was missing was three more writers, a real lifecycle, and a synthesis pass. Phases 1 and 2 added the first two. Phase 3 is the third.
 
 ---
 

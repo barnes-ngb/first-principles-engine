@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-04-13.
+> Where everything lives. Updated 2026-05-16.
 
 ---
 
@@ -28,9 +28,12 @@
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
 | `SCRIPT_CONVENTIONS.md` | **CURRENT** | Cross-platform npm script conventions (cross-env, path separators, admin scripts) |
 | `KNOWLEDGE_MINE_AUDIT_2026-04.md` | **NEW** | Knowledge Mine audit (Part 1/4): quest type inventory, level system analysis, Level 7 mystery resolution, difficulty progression, Lincoln constraint compliance |
-| `EVALUATION_SYSTEM_FULL_SWEEP_2026-05.md` | **NEW** | Full evaluation-engine sweep (May 16): R1-R6 verification, closed-loop journey traces, open-gap re-sweep (G4/G5/G6/G20/G34, M1-M5), quest UX, London + conceptualBlocks lifecycle, phantom-adaptation inventory. Read-only, file:line evidence required. Closures appended through Prompt D 2026-05-17. |
 | `KNOWLEDGE_MINE_CRASH_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Crash investigation: session ejection + precision TypeError + resume card failure after Level 6→7 promotion in comprehension quest. Root cause chain identified, 4 fixes landed (try/catch, WebGL safety, forceContextLoss, errorElement). |
-| `FINDINGS_PIPELINE.md` | **CURRENT** | End-to-end trace of EvaluationFinding data flow |
+| `FINDINGS_PIPELINE.md` | **CURRENT** (reconciled 2026-05-16) | End-to-end trace of EvaluationFinding data flow. Writers section + "Does NOT do" checklist refreshed for Phase 1+2 of EVALUATION_METHODOLOGY (four conceptualBlocks writers, mergeBlock semantics). |
+| `EVALUATION_METHODOLOGY_2026-04.md` | **CURRENT** (reconciled 2026-05-16) | Phased build plan for the blocker-driven learning engine. §2 rewritten as post-Phase-1+2 current state; pre-Apr-21 narrative kept in §2.1 for context. Phases 3 (synthesis) and 4 (downstream wiring) remain backlog. |
+| `LEARNING_ENGINE_AUDIT_2026-04.md` | **HISTORICAL / REFERENCE** (single-row fix 2026-05-16) | April audit of the evaluation/learning engine. Line 1179 conceptualBlocks data-flow row footnoted to reflect mergeBlock writes; rest of doc untouched as historical record. |
+| `EVALUATION_SYSTEM_FULL_SWEEP_2026-05.md` | **CURRENT** (closures appended 2026-05-16/17) | May 2026 evidence-first full sweep: R1-R6 verification, journey traces, G55 hardcoded-Lincoln finding, phantom-write tier, post-Phase-1+2 gap re-sweep. Post-Audit Closures section tracks G55 / G54 / G50 fixes from Prompt B, G26 from Prompt C, and G4 / G5 / G6 skip-advisor closures from Prompt D. |
+| `LONDON_GENDER_VERIFY_2026-05.md` | **NEW** | London gender verification sweep: codebase grep confirmed CLEAN; 3 active-doc pronoun fixes landed alongside this report. |
 | `CAPTURE_PIPELINE_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Today page capture pipeline: 3 fragmented entry points (camera icon, pre-completion scan, post-completion scan) competing for same visibility gate. Unified into single AI-routed handler. Worksheets→scans, everything else→artifacts. |
 | `CLEANUP_AUDIT_2026_04_07.md` | **HISTORICAL** | Point-in-time audit (Apr 7): ladder deprecation status, milestone reachability, WorkbookConfig→ActivityConfig migration gaps |
 | `HERO_HUB_ANIMATION_TUNING.md` | **CURRENT** | Hero Hub animation debug workflow — `?heroDebug=1` tuning panel, centralized config in `heroAnimationTuning.ts` |

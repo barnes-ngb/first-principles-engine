@@ -342,6 +342,66 @@ describe('deriveWorkingLevelFromEvaluation', () => {
     expect(result).not.toBeNull()
     expect(result!.evidence).toContain('digraph')
   })
+
+  // ── Math domain (G26) ──────────────────────────────────────
+
+  it('math: maps mastered addition within 20 to level 2', () => {
+    const findings: EvaluationFinding[] = [
+      makeFinding({ skill: 'math.addition.within-20', status: 'mastered' }),
+    ]
+    const result = deriveWorkingLevelFromEvaluation(findings, 'math')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(2)
+    expect(result!.source).toBe('evaluation')
+  })
+
+  it('math: picks highest mastered level from mixed findings (G26 ceiling rule)', () => {
+    const findings: EvaluationFinding[] = [
+      makeFinding({ skill: 'math.addition.within-20', status: 'mastered' }), // L2
+      makeFinding({ skill: 'math.subtraction.within-20', status: 'emerging' }), // L3 — not mastered
+    ]
+    const result = deriveWorkingLevelFromEvaluation(findings, 'math')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(2)
+  })
+
+  it('math: ignores struggling/not-yet findings (only mastered counts)', () => {
+    const findings: EvaluationFinding[] = [
+      makeFinding({ skill: 'math.number-sense', status: 'mastered' }), // L1
+      makeFinding({ skill: 'math.addition.within-20', status: 'not-yet' }), // L2 — not counted
+    ]
+    const result = deriveWorkingLevelFromEvaluation(findings, 'math')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(1)
+  })
+
+  it('math: caps at QUEST_MODE_LEVEL_CAP.math = 6', () => {
+    const findings: EvaluationFinding[] = [
+      makeFinding({ skill: 'math.fractions.comparing', status: 'mastered' }), // L6
+      makeFinding({ skill: 'math.measurement', status: 'mastered' }), // L6
+    ]
+    const result = deriveWorkingLevelFromEvaluation(findings, 'math')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(6)
+  })
+
+  it('math: returns null when no mastered math findings present', () => {
+    const findings: EvaluationFinding[] = [
+      makeFinding({ skill: 'math.addition.within-20', status: 'emerging' }),
+    ]
+    const result = deriveWorkingLevelFromEvaluation(findings, 'math')
+    expect(result).toBeNull()
+  })
+
+  it('math: maps multiplication and division to level 5', () => {
+    const findings: EvaluationFinding[] = [
+      makeFinding({ skill: 'math.multiplication.facts', status: 'mastered' }),
+      makeFinding({ skill: 'math.division.basic', status: 'mastered' }),
+    ]
+    const result = deriveWorkingLevelFromEvaluation(findings, 'math')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(5)
+  })
 })
 
 // ── deriveMathWorkingLevelFromScan ────────────────────────────

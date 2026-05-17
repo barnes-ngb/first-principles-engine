@@ -9,9 +9,10 @@ import type {
   SkipSuggestion,
 } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
-import { AssignmentAction, SubjectBucket } from '../../core/types/enums'
+import { AssignmentAction, MasteryGate, MasteryGateLabel, SubjectBucket } from '../../core/types/enums'
 import { autoSuggestTags } from '../../core/types/skillTags'
 import { formatDateYmd } from '../../core/utils/format'
+import { getEffectiveMasteryGate } from './skipAdvisor.logic'
 
 /** Default app blocks that run "on rails" */
 export const defaultAppBlocks: AppBlock[] = [
@@ -175,6 +176,25 @@ export function buildMinimumWinText(snapshot: SkillSnapshot | null): string {
 
 // ── Snapshot Application ───────────────────────────────────────
 
+/**
+ * Match a priority skill against an assignment by subject + label/tag mention.
+ * Conservative: requires either subject prefix match on the skill tag or
+ * a substring of the skill label/tag-leaf appearing in the lesson/workbook name.
+ */
+function assignmentMatchesPrioritySkill(
+  assignment: AssignmentCandidate,
+  skill: { tag: string; label: string },
+): boolean {
+  const subjectPrefix = assignment.subjectBucket.toLowerCase()
+  const skillTag = skill.tag.toLowerCase()
+  const haystack = `${assignment.workbookName} ${assignment.lessonName}`.toLowerCase()
+  const labelMatch = skill.label.length > 0 && haystack.includes(skill.label.toLowerCase())
+  const tagLeaf = skillTag.split('.').pop() ?? ''
+  const leafMatch = tagLeaf.length > 2 && haystack.includes(tagLeaf)
+  const subjectMatch = skillTag.startsWith(subjectPrefix) && (labelMatch || leafMatch)
+  return subjectMatch || labelMatch
+}
+
 export function applySnapshotSuggestions(
   assignments: AssignmentCandidate[],
   snapshot: SkillSnapshot | null,
@@ -184,6 +204,38 @@ export function applySnapshotSuggestions(
   }
   const skipSuggestions: SkipSuggestion[] = []
   const processed = assignments.map((assignment) => {
+    // Mastery-gate consultation: if a matching priority skill is mastered, suggest skip.
+    const masteredMatch = snapshot.prioritySkills.find(
+      (s) =>
+        getEffectiveMasteryGate(s) === MasteryGate.IndependentConsistent &&
+        assignmentMatchesPrioritySkill(assignment, s),
+    )
+    if (masteredMatch) {
+      const suggestion: SkipSuggestion = {
+        action: 'skip',
+        reason: `${masteredMatch.label} at ${MasteryGateLabel[MasteryGate.IndependentConsistent]}`,
+        replacement: 'Drop or move to background practice; reclaim time for active focus.',
+        evidence: snapshot.evidenceDefinitions[0]?.description ?? 'Mastery evidence on record',
+      }
+      skipSuggestions.push(suggestion)
+      return { ...assignment, action: AssignmentAction.Skip, skipSuggestion: suggestion }
+    }
+    // Mostly-independent: suggest modify alongside the long-task / stop-rule paths.
+    const mostlyIndependentMatch = snapshot.prioritySkills.find(
+      (s) =>
+        getEffectiveMasteryGate(s) === MasteryGate.MostlyIndependent &&
+        assignmentMatchesPrioritySkill(assignment, s),
+    )
+    if (mostlyIndependentMatch) {
+      const suggestion: SkipSuggestion = {
+        action: 'modify',
+        reason: `${mostlyIndependentMatch.label} is ${MasteryGateLabel[MasteryGate.MostlyIndependent]}`,
+        replacement: '1-2 problems + quick check, not full set.',
+        evidence: snapshot.evidenceDefinitions[0]?.description ?? 'Complete modified set',
+      }
+      skipSuggestions.push(suggestion)
+      return { ...assignment, action: AssignmentAction.Modify, skipSuggestion: suggestion }
+    }
     // Check stop rules
     for (const rule of snapshot.stopRules) {
       const matchesTrigger = assignment.difficultyCues.some(

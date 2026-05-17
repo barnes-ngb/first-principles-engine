@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import type { AssignmentCandidate, SkillSnapshot } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
-import { AssignmentAction, SkillLevel, SubjectBucket } from '../../core/types/enums'
+import { AssignmentAction, MasteryGate, SkillLevel, SubjectBucket } from '../../core/types/enums'
 import {
   AdjustmentType,
   applySnapshotSuggestions,
@@ -102,6 +102,51 @@ describe('applySnapshotSuggestions', () => {
     const result = applySnapshotSuggestions([a], baseSnapshot)
     expect(result.assignments[0].action).toBe(AssignmentAction.Modify)
     expect(result.assignments[0].skipSuggestion?.reason).toContain('attention window')
+  })
+
+  it('suggests skip when a priority skill at IndependentConsistent matches the assignment (G6)', () => {
+    const snapshot: SkillSnapshot = {
+      ...baseSnapshot,
+      prioritySkills: [
+        {
+          tag: 'math.addition.facts',
+          label: 'Addition Facts',
+          level: SkillLevel.Secure,
+          masteryGate: MasteryGate.IndependentConsistent,
+        },
+      ],
+    }
+    const a: AssignmentCandidate = {
+      ...assignment,
+      workbookName: 'Math Workbook',
+      lessonName: 'Addition Facts review',
+    }
+    const result = applySnapshotSuggestions([a], snapshot)
+    expect(result.assignments[0].action).toBe(AssignmentAction.Skip)
+    expect(result.assignments[0].skipSuggestion?.action).toBe('skip')
+    expect(result.assignments[0].skipSuggestion?.reason).toContain('Addition Facts')
+  })
+
+  it('suggests modify when a priority skill at MostlyIndependent matches the assignment (G6)', () => {
+    const snapshot: SkillSnapshot = {
+      ...baseSnapshot,
+      prioritySkills: [
+        {
+          tag: 'math.subtraction.regroup',
+          label: 'Regrouping',
+          level: SkillLevel.Practice,
+          masteryGate: MasteryGate.MostlyIndependent,
+        },
+      ],
+    }
+    const a: AssignmentCandidate = {
+      ...assignment,
+      workbookName: 'Math',
+      lessonName: 'Regrouping practice',
+    }
+    const result = applySnapshotSuggestions([a], snapshot)
+    expect(result.assignments[0].action).toBe(AssignmentAction.Modify)
+    expect(result.assignments[0].skipSuggestion?.reason).toContain('Regrouping')
   })
 })
 

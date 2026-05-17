@@ -1,5 +1,7 @@
 # Findings Pipeline
 
+_Last reconciled: 2026-05-16 — post Phase 1 + 2 of `EVALUATION_METHODOLOGY_2026-04.md`._
+
 ## Purpose
 
 EvaluationFinding objects are the system's primary learning signal. They flow from Knowledge Mine quests and guided evaluations into multiple Firestore collections and AI context windows. Without this trace, future work risks duplicating features that already exist or proposing pipelines that are already wired.
@@ -112,11 +114,18 @@ Scans don't produce `EvaluationFinding` objects directly, but `CurriculumTab.tsx
 - **File:** `src/features/quest/workingLevels.ts:85-140`
 - **Note:** This does NOT use findings directly. It uses `SessionQuestion[]` and `sessionEndLevel` to compute the next working level. Findings and working levels are sibling outputs of the same quest session, written to `skillSnapshots.workingLevels` independently.
 
-### 7. Pattern analysis (cross-session)
+### 7. ConceptualBlocks writers (post Phase 1, 2026-04-21)
 
-- **Trigger:** `useQuestSession.ts:961-986` and `EvaluateChatPage.tsx:289` — if 3+ sessions exist, calls `analyzePatterns` Cloud Function.
-- **Input:** Current session's findings plus up to 10 recent sessions loaded server-side.
-- **Output:** `ConceptualBlock[]` written to `skillSnapshots.conceptualBlocks` — identifies recurring patterns (e.g., "consistently struggles with vowel teams across 3 sessions").
+`conceptualBlocks` on `skillSnapshots/{childId}` now has **four writers**, all routing through `mergeBlock` + `updateDoc` (`src/core/utils/blockerLifecycle.ts`) — no more wholesale array overwrite. Status state machine: `ADDRESS_NOW` → `RESOLVING` at ≥3 cumulative correct → `RESOLVED` at ≥5 correct across ≥2 sessions with no new wrong; regression on any new wrong. See `docs/EVALUATION_METHODOLOGY_2026-04.md` §3 for the full landed spec.
+
+1. **Guided-eval pattern analysis** (`src/features/evaluate/EvaluateChatPage.tsx:289` → `analyzePatterns` CF → merged at `:592-595` via `mergeBlock`). Trigger: 3+ sessions exist on Save & Apply. Input: current session findings + up to 10 recent sessions. `source: 'evaluation'`.
+2. **Quest session end** (`src/features/quest/useQuestSession.ts` → `detectBlockersFromSession` in `src/features/quest/detectBlockers.ts`). Trigger: 2+ wrong answers at the same sub-skill in a ≥5-question session. DEFER if 2 wrong + 1 skipped, ADDRESS_NOW otherwise. Fluency mode skipped. `updateBlockerLifecycle` also runs on session end so correct answers on existing blocks advance them. `source: 'quest'`.
+3. **Scan analysis** (`src/features/today/useUnifiedCapture.ts` → `detectBlockersFromScan` in `src/features/today/scanBlocker.ts`). Trigger: one block per `alignsWithSnapshot: 'behind'` skill on any `skip` / `modify` / `too-hard` / `challenging` scan; falls back to a topic-level block if no specific skills surface. `source: 'scan'`.
+4. **Shelly's mastery chips** (`src/features/today/TodayChecklist.tsx` → `buildStuckBlock` / `buildGotItReinforcement` in `src/features/today/masteryBlocker.ts`). "Stuck" writes ADDRESS_NOW; "Got it" writes a RESOLVING nudge but only against an existing block with the same id. `source: 'parent'`.
+
+**Phase 2 (also Apr 21):** `buildKnownBlockersSection` + `buildRecentCurriculumSection` in `functions/src/ai/chat.ts` inject 2–3 deliberate blocker probes per ~10 quest questions. Response schemas carry `targetedBlockerId` so a targeted correct answer is weighted 2x toward RESOLVING/RESOLVED via `TARGETED_EVIDENCE_WEIGHT` in `updateBlockerLifecycle`.
+
+**AI context injection:** `formatConceptualBlocks` in `functions/src/ai/contextSlices.ts` emits three sections to the model — ADDRESS_NOW, RESOLVING ("trending better, keep probing gently"), and DEFER ("do NOT push on these"). RESOLVED blocks are kept in the array for history but omitted from prompts.
 
 ## The Practice Story Loop
 
@@ -155,15 +164,21 @@ Scans don't produce `EvaluationFinding` objects directly, but `CurriculumTab.tsx
 - [x] Book suggestions hook reads findings to recommend practice books
 - [x] Cross-session pattern detection after 3+ sessions (conceptualBlocks)
 - [x] Working level auto-updates from quest sessions and evaluations
+- [x] ConceptualBlocks written by four sources (eval, quest, scan, parent) — Phase 1 shipped 2026-04-21
+- [x] ConceptualBlocks lifecycle: ADDRESS_NOW → RESOLVING → RESOLVED with merge-not-overwrite semantics
+- [x] Quest prompt deliberately targets known blockers (2–3 of ~10 questions) — Phase 2 shipped 2026-04-21
 
 ## What This Pipeline Does NOT Do (Checklist)
 
-- [ ] Cross-session finding aggregation beyond single most-recent session in AI context
+- [ ] Cross-session finding aggregation beyond single most-recent session in AI context for plan/scan/weeklyReview (quest, disposition, and shellyChat now use `recentHistoryByDomain` at depth 3 via R2 + R3 + R6; planner and scan still on legacy `recentEval` per the May 16 audit's G50)
 - [ ] Automatic story generation without human tap
 - [ ] Reading a practice story generating new findings (loop doesn't close)
 - [ ] Findings expiring or being re-tested on a schedule
-- [ ] Scan-derived findings appearing in `recentEval` AI context
+- [ ] Scan-derived findings appearing in `recentEval` AI context (scan-derived conceptualBlocks DO reach the prompt via `skillSnapshot` slice; raw scan findings still bypass `evaluationSessions`)
 - [ ] Math-domain working level derivation from eval findings (reading domain works; math has a TODO at `EvaluateChatPage.tsx:540`)
+- [ ] Synthesis pass turning raw conceptualBlocks into a structured `blockerDiagnosis` (Phase 3 backlog)
+- [ ] Planner / scan recommendation / skip system reading active blockers to shape their outputs (Phase 4 backlog)
+- [ ] Parent UI to dismiss / edit / manually resolve a conceptual block
 
 ## File Index
 

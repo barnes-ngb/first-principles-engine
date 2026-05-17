@@ -533,7 +533,7 @@ description: 'Coming soon!',
 
 ### F3: London in Knowledge Mine — No Learner Profile
 
-London (6, kindergarten) has no evaluation sessions, no skill snapshots, no word progress data, and no workbook configs. What happens if she opens Knowledge Mine?
+London (6, kindergarten) has no evaluation sessions, no skill snapshots, no word progress data, and no workbook configs. What happens if London opens Knowledge Mine?
 
 **Step-by-step walkthrough**:
 
@@ -616,7 +616,7 @@ London (6, kindergarten) has no evaluation sessions, no skill snapshots, no word
 
 2. **Per-quest level caps or expand prompts?** Two ways to fix the Level 7+ gap: (a) cap Comprehension and Math at Level 6 in the adaptive engine, or (b) define Levels 7-10 content in their prompts. Option (a) is simpler but limits growth. Option (b) is more work but better long-term.
 
-3. ~~**Should London's starting level adapt over time?** Currently every quest session starts at Level 2 for a child with no curriculum data. After London completes several quests, should her starting level increase based on prior quest performance (not just workbook configs)?~~ **RESOLVED:** `workingLevels` now updates from quest session performance. After each session, `computeWorkingLevelFromSession` writes the new level. Next session reads it via `computeStartLevel` fallback chain.
+3. ~~**Should London's starting level adapt over time?** Currently every quest session starts at Level 2 for a child with no curriculum data. After London completes several quests, should London's starting level increase based on prior quest performance (not just workbook configs)?~~ **RESOLVED:** `workingLevels` now updates from quest session performance. After each session, `computeWorkingLevelFromSession` writes the new level. Next session reads it via `computeStartLevel` fallback chain.
 
 4. **Level 1 escape — what feels right?** Options: (a) count level-floor hits as frustration events, (b) add a "4 wrong at Level 1 → end session" rule, (c) show a parent-facing prompt ("London seems stuck — want to end the session?"). Which approach fits the "no shame" philosophy best?
 

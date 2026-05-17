@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import CloseIcon from '@mui/icons-material/Close'
@@ -18,8 +18,10 @@ import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
-import type { DraftPlanItem, DraftWeeklyPlan } from '../../core/types'
+import type { DraftPlanItem, DraftWeeklyPlan, SkillSnapshot, SkipAdvisorResult } from '../../core/types'
 import { dayTotalMinutes } from './chatPlanner.logic'
+import { batchEvaluateSkip } from './skipAdvisor.logic'
+import SkipAdvisorChip from './SkipAdvisorChip'
 
 /** Block display metadata for plan preview grouping. */
 const BLOCK_HEADER: Record<string, { label: string; color: string }> = {
@@ -36,6 +38,7 @@ interface PlanPreviewCardProps {
   plan: DraftWeeklyPlan
   hoursPerDay: number
   masteryReviewLine?: string
+  snapshot?: SkillSnapshot | null
   onToggleItem?: (dayIndex: number, itemId: string) => void
   onGenerateActivity?: (item: DraftPlanItem) => void
   generatingItemId?: string
@@ -101,9 +104,17 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
   )
 }
 
-export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime }: PlanPreviewCardProps) {
+export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, snapshot, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
   const [removeConfirm, setRemoveConfirm] = useState<{ dayIndex: number; itemIndex: number; title: string } | null>(null)
+
+  // Skip-advisor recommendations across all items. Render-time so chips
+  // stay fresh as the user edits the plan.
+  const advisorByItemId = useMemo<Map<string, SkipAdvisorResult>>(() => {
+    if (!snapshot) return new Map()
+    const allItems = plan.days.flatMap((d) => d.items)
+    return batchEvaluateSkip(allItems, snapshot)
+  }, [plan, snapshot])
 
   const isRoutineItem = (item: DraftPlanItem) => item.category === 'must-do' || item.mvdEssential === true
 
@@ -190,6 +201,16 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                 {item.isAppBlock && (
                   <Chip label="App" size="small" variant="outlined" sx={{ height: 20 }} />
                 )}
+                {(() => {
+                  const advisor = advisorByItemId.get(item.id)
+                  if (!advisor || advisor.action === 'keep') return null
+                  return (
+                    <SkipAdvisorChip
+                      result={advisor}
+                      label={advisor.action === 'skip' ? 'Skip eligible' : 'Lighter'}
+                    />
+                  )
+                })()}
                 {item.skipSuggestion && (
                   <Tooltip
                     title={`${item.skipSuggestion.reason} \u2014 ${item.skipSuggestion.replacement}`}

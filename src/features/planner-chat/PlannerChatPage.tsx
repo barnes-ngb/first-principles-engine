@@ -2291,6 +2291,7 @@ ${dayPrompts}`
               hoursPerDay={hoursPerDay}
               masteryReviewLine={masteryReviewLine}
               readAloudBook={readAloudBook}
+              snapshot={snapshot}
               onToggleItem={handleToggleItem}
               onGenerateActivity={handleGenerateActivity}
               generatingItemId={generatingItemId}

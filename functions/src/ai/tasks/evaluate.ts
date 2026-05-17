@@ -23,7 +23,7 @@ export const handleEvaluate = async (
   });
 
   // Append evaluation-specific diagnostic prompt
-  sections.push(buildEvaluationPrompt(domain || "reading"));
+  sections.push(buildEvaluationPrompt(domain || "reading", childData.name));
 
   const systemPrompt = sections.join("\n\n");
   const model = modelForTask("evaluate");

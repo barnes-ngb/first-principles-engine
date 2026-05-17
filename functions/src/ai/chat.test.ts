@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildEvaluationPrompt,
   buildKnownBlockersSection,
   buildQuestPrompt,
   buildRecentCurriculumSection,
   getWeekMonday,
 } from "./chat.js";
+import { MATH_CONCEPT_BANDS } from "./levelDefinitions.js";
 
 // ── getWeekMonday ──────────────────────────────────────────────
 
@@ -158,5 +160,141 @@ describe("buildQuestPrompt — phase 2 extras", () => {
     expect(prompt).not.toContain("## KNOWN BLOCKERS");
     // targetedBlockerId field still appears in RESPONSE FORMAT so the AI knows the schema.
     expect(prompt).toContain("targetedBlockerId");
+  });
+});
+
+// ── G55: childName templating ──────────────────────────────────
+
+describe("buildQuestPrompt — childName templating (G55)", () => {
+  const extras = { activeBlockers: [], hasRecentScans: false };
+
+  it("phonics prompt uses Lincoln when childName=Lincoln and never names another child", () => {
+    const prompt = buildQuestPrompt("reading", 4, "phonics", extras, "Lincoln");
+    expect(prompt).toContain("Lincoln");
+    expect(prompt).not.toContain("London");
+  });
+
+  it("phonics prompt uses London when childName=London and never names another child", () => {
+    const prompt = buildQuestPrompt("reading", 2, "phonics", extras, "London");
+    expect(prompt).toContain("London");
+    expect(prompt).not.toContain("Lincoln");
+  });
+
+  it("comprehension prompt addresses London (no Lincoln) when childName=London", () => {
+    const prompt = buildQuestPrompt("reading", 2, "comprehension", extras, "London");
+    expect(prompt).toContain("London");
+    expect(prompt).not.toContain("Lincoln");
+  });
+
+  it("comprehension prompt addresses Lincoln when childName=Lincoln", () => {
+    const prompt = buildQuestPrompt("reading", 4, "comprehension", extras, "Lincoln");
+    expect(prompt).toContain("Lincoln");
+    expect(prompt).not.toContain("London");
+  });
+
+  it("math prompt addresses London (no Lincoln) when childName=London", () => {
+    const prompt = buildQuestPrompt("math", 3, "math", extras, "London");
+    expect(prompt).toContain("London");
+    expect(prompt).not.toContain("Lincoln");
+  });
+
+  it("math prompt addresses Lincoln when childName=Lincoln", () => {
+    const prompt = buildQuestPrompt("math", 3, "math", extras, "Lincoln");
+    expect(prompt).toContain("Lincoln");
+    expect(prompt).not.toContain("London");
+  });
+
+  it("falls back to a neutral placeholder when childName is omitted", () => {
+    const prompt = buildQuestPrompt("reading", 2, "phonics", extras);
+    expect(prompt).not.toContain("Lincoln");
+    expect(prompt).not.toContain("London");
+    expect(prompt).toContain("the child");
+  });
+});
+
+// ── G54: math STARTING LEVEL directive ────────────────────────
+
+describe("buildQuestPrompt — math STARTING LEVEL (G54)", () => {
+  const extras = { activeBlockers: [], hasRecentScans: false };
+
+  it("injects STARTING LEVEL directive into the math prompt when startingLevel is provided", () => {
+    const prompt = buildQuestPrompt("math", 4, "math", extras, "Lincoln");
+    expect(prompt).toContain("STARTING LEVEL");
+    expect(prompt).toContain("Level 4");
+  });
+
+  it("caps the math STARTING LEVEL at 6 (QUEST_MODE_LEVEL_CAP.math)", () => {
+    const prompt = buildQuestPrompt("math", 9, "math", extras, "Lincoln");
+    expect(prompt).toContain("STARTING LEVEL");
+    expect(prompt).toContain("Level 6");
+    // The raw 9 should not appear as a level instruction
+    expect(prompt).not.toMatch(/Start the quest at Level 9/);
+  });
+
+  it("omits the STARTING LEVEL directive block when startingLevel is undefined for math", () => {
+    const prompt = buildQuestPrompt("math", undefined, "math", extras, "Lincoln");
+    // The directive block declares mastery and an explicit "Start the quest at Level N".
+    expect(prompt).not.toMatch(/STARTING LEVEL:\s*This child has demonstrated/);
+    expect(prompt).not.toMatch(/Start the quest at Level \d/);
+  });
+
+  it("references STARTING LEVEL in math ADAPTIVE BEHAVIOR (parity with phonics/comprehension)", () => {
+    const prompt = buildQuestPrompt("math", 3, "math", extras, "Lincoln");
+    expect(prompt).toMatch(/begin at the STARTING LEVEL if specified/);
+  });
+});
+
+// ── G26: math guided evaluation prompt ─────────────────────────
+
+describe("buildEvaluationPrompt — math (G26)", () => {
+  it("emits a non-empty math evaluation prompt with the diagnostic role", () => {
+    const prompt = buildEvaluationPrompt("math", "Lincoln");
+    expect(prompt.length).toBeGreaterThan(500);
+    expect(prompt).toContain("diagnostic math specialist");
+  });
+
+  it("addresses the child by templated name (Lincoln)", () => {
+    const prompt = buildEvaluationPrompt("math", "Lincoln");
+    expect(prompt).toContain("Lincoln");
+  });
+
+  it("addresses London when childName=London and never mentions Lincoln (G55 inheritance)", () => {
+    const prompt = buildEvaluationPrompt("math", "London");
+    expect(prompt).toContain("London");
+    expect(prompt).not.toContain("Lincoln");
+  });
+
+  it("includes the shared math concept bands (L1-L6) verbatim", () => {
+    const prompt = buildEvaluationPrompt("math", "Lincoln");
+    for (const band of MATH_CONCEPT_BANDS) {
+      expect(prompt).toContain(band);
+    }
+  });
+
+  it("teaches the AI to emit <finding> and <complete> blocks", () => {
+    const prompt = buildEvaluationPrompt("math", "Lincoln");
+    expect(prompt).toContain("<finding>");
+    expect(prompt).toContain("</finding>");
+    expect(prompt).toContain("<complete>");
+    expect(prompt).toContain("</complete>");
+  });
+
+  it("includes completion criteria gating on ceiling + struggle-above signal", () => {
+    const prompt = buildEvaluationPrompt("math", "Lincoln");
+    expect(prompt).toContain("COMPLETION CRITERIA");
+    expect(prompt).toMatch(/mastered.*ceiling/i);
+    expect(prompt).toMatch(/(emerging|not-yet).*next level/i);
+  });
+
+  it("includes 'no shame' evidence-based framing", () => {
+    const prompt = buildEvaluationPrompt("math", "Lincoln");
+    expect(prompt).toMatch(/No grades.*no rankings|evidence-based/i);
+  });
+
+  it("provides math-specific skill tags for findings extraction", () => {
+    const prompt = buildEvaluationPrompt("math", "Lincoln");
+    expect(prompt).toContain("math.addition.within-20");
+    expect(prompt).toContain("math.subtraction.within-20");
+    expect(prompt).toContain("math.fractions");
   });
 });
