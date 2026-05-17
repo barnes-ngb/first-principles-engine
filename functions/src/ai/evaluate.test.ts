@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildEvaluationPrompt,
+  formatBooksEvidence,
+  formatTeachBacksEvidence,
+  hasAnyEvidence,
   lastWeekKey,
   parseReviewResponse,
+  summarizeBooksWeek,
+  summarizeTeachBacks,
 } from "./evaluate.js";
 import type { WeekContext } from "./evaluate.js";
 
@@ -89,6 +94,18 @@ function makeContext(overrides?: Partial<WeekContext>): WeekContext {
     ],
     missedDays: 2,
     bookActivity: [],
+    books: {
+      booksCreated: [],
+      booksCompleted: [],
+      readingSessions: { count: 0, totalMinutes: 0, booksRead: [] },
+    },
+    teachBacks: {
+      count: 0,
+      bySubject: {},
+      audioCount: 0,
+      textCount: 0,
+      examples: [],
+    },
     ...overrides,
   };
 }
@@ -232,5 +249,398 @@ describe("parseReviewResponse", () => {
 
   it("throws on invalid JSON", () => {
     expect(() => parseReviewResponse("not json")).toThrow();
+  });
+});
+
+// ── summarizeBooksWeek ──────────────────────────────────────────
+
+describe("summarizeBooksWeek", () => {
+  const weekStart = "2026-02-23";
+  const weekEnd = "2026-03-01T23:59:59";
+
+  it("counts books created within the week", () => {
+    const result = summarizeBooksWeek(
+      [
+        {
+          title: "Forest Adventure",
+          createdAt: "2026-02-25T10:00:00",
+          updatedAt: "2026-02-26T10:00:00",
+          pages: [{}, {}, {}],
+          status: "draft",
+          theme: "fantasy",
+          source: "ai-generated",
+        },
+      ],
+      weekStart,
+      weekEnd,
+    );
+    expect(result.booksCreated).toHaveLength(1);
+    expect(result.booksCreated[0]).toEqual({
+      title: "Forest Adventure",
+      pages: 3,
+      isAiGenerated: true,
+      theme: "fantasy",
+    });
+  });
+
+  it("counts books completed within the week", () => {
+    const result = summarizeBooksWeek(
+      [
+        {
+          title: "Lion the Witch",
+          createdAt: "2026-01-01T10:00:00",
+          updatedAt: "2026-02-26T10:00:00",
+          status: "complete",
+          pages: [],
+        },
+      ],
+      weekStart,
+      weekEnd,
+    );
+    expect(result.booksCompleted).toEqual([{ title: "Lion the Witch" }]);
+    expect(result.booksCreated).toHaveLength(0);
+  });
+
+  it("counts touched books with totalMinutes as reading sessions", () => {
+    const result = summarizeBooksWeek(
+      [
+        {
+          title: "Read this",
+          createdAt: "2026-01-01T10:00:00",
+          updatedAt: "2026-02-26T10:00:00",
+          status: "draft",
+          totalMinutes: 30,
+          pages: [],
+        },
+        {
+          title: "Also read",
+          createdAt: "2026-01-15T10:00:00",
+          updatedAt: "2026-02-27T10:00:00",
+          status: "draft",
+          totalMinutes: 15,
+          pages: [],
+        },
+      ],
+      weekStart,
+      weekEnd,
+    );
+    expect(result.readingSessions.count).toBe(2);
+    expect(result.readingSessions.totalMinutes).toBe(45);
+    expect(result.readingSessions.booksRead.map((b) => b.title)).toEqual([
+      "Read this",
+      "Also read",
+    ]);
+  });
+
+  it("flags hand-built books distinct from AI-generated", () => {
+    const result = summarizeBooksWeek(
+      [
+        {
+          title: "Mom's Book",
+          createdAt: "2026-02-25T10:00:00",
+          updatedAt: "2026-02-25T10:00:00",
+          status: "draft",
+          source: "manual",
+          pages: [],
+        },
+      ],
+      weekStart,
+      weekEnd,
+    );
+    expect(result.booksCreated[0].isAiGenerated).toBe(false);
+  });
+
+  it("returns zero counts for empty input", () => {
+    const result = summarizeBooksWeek([], weekStart, weekEnd);
+    expect(result.booksCreated).toEqual([]);
+    expect(result.booksCompleted).toEqual([]);
+    expect(result.readingSessions.count).toBe(0);
+    expect(result.readingSessions.totalMinutes).toBe(0);
+  });
+});
+
+// ── summarizeTeachBacks ─────────────────────────────────────────
+
+describe("summarizeTeachBacks", () => {
+  it("counts subjects from tags.subjectBucket", () => {
+    const result = summarizeTeachBacks([
+      {
+        title: "Teach-back: Reading",
+        type: "Audio",
+        mediaUrl: "https://example.com/a.webm",
+        createdAt: "2026-02-25T10:00:00",
+        tags: { subjectBucket: "Reading", engineStage: "Explain" },
+      },
+      {
+        title: "Teach-back: Reading",
+        type: "Audio",
+        mediaUrl: "https://example.com/b.webm",
+        createdAt: "2026-02-26T10:00:00",
+        tags: { subjectBucket: "Reading", engineStage: "Explain" },
+      },
+      {
+        title: "Teach-back: Math",
+        type: "Note",
+        content: "Teach-back: I told London about adding!",
+        createdAt: "2026-02-27T10:00:00",
+        tags: { subjectBucket: "Math", engineStage: "Explain" },
+      },
+    ]);
+    expect(result.count).toBe(3);
+    expect(result.bySubject).toEqual({ Reading: 2, Math: 1 });
+    expect(result.audioCount).toBe(2);
+    expect(result.textCount).toBe(1);
+  });
+
+  it("falls back to subject parsed from title when tags missing", () => {
+    const result = summarizeTeachBacks([
+      {
+        title: "Teach-back: Science",
+        type: "Note",
+        createdAt: "2026-02-25T10:00:00",
+      },
+    ]);
+    expect(result.bySubject).toEqual({ Science: 1 });
+  });
+
+  it("defaults to Other when subject can't be determined", () => {
+    const result = summarizeTeachBacks([
+      {
+        title: "Teach-back 2026-02-25",
+        type: "Note",
+        createdAt: "2026-02-25T10:00:00",
+      },
+    ]);
+    expect(result.bySubject).toEqual({ Other: 1 });
+  });
+
+  it("caps examples at 3 and uses most recent first", () => {
+    const result = summarizeTeachBacks([
+      { title: "Teach-back: One", createdAt: "2026-02-23T10:00:00", tags: { subjectBucket: "Reading" } },
+      { title: "Teach-back: Two", createdAt: "2026-02-24T10:00:00", tags: { subjectBucket: "Reading" } },
+      { title: "Teach-back: Three", createdAt: "2026-02-25T10:00:00", tags: { subjectBucket: "Math" } },
+      { title: "Teach-back: Four", createdAt: "2026-02-26T10:00:00", tags: { subjectBucket: "Math" } },
+    ]);
+    expect(result.examples).toHaveLength(3);
+    expect(result.examples[0].subject).toBe("Math");
+    expect(result.examples[0].createdAt).toBe("2026-02-26T10:00:00");
+  });
+
+  it("returns empty summary when no artifacts", () => {
+    const result = summarizeTeachBacks([]);
+    expect(result.count).toBe(0);
+    expect(result.audioCount).toBe(0);
+    expect(result.textCount).toBe(0);
+    expect(result.examples).toEqual([]);
+  });
+});
+
+// ── formatBooksEvidence ─────────────────────────────────────────
+
+describe("formatBooksEvidence", () => {
+  it("renders a no-activity line when nothing happened", () => {
+    const out = formatBooksEvidence("Lincoln", {
+      booksCreated: [],
+      booksCompleted: [],
+      readingSessions: { count: 0, totalMinutes: 0, booksRead: [] },
+    });
+    expect(out).toContain("Books for Lincoln this week");
+    expect(out).toContain("No book activity captured this week");
+  });
+
+  it("renders created + completed + reading sessions", () => {
+    const out = formatBooksEvidence("London", {
+      booksCreated: [
+        { title: "Magic Forest", pages: 5, isAiGenerated: true, theme: "fantasy" },
+      ],
+      booksCompleted: [{ title: "Old Tale" }],
+      readingSessions: {
+        count: 2,
+        totalMinutes: 45,
+        booksRead: [
+          { title: "Lion the Witch", totalMinutes: 30 },
+          { title: "Another", totalMinutes: 15 },
+        ],
+      },
+    });
+    expect(out).toContain("1 created (1 AI-generated, 0 hand-built)");
+    expect(out).toContain("themes: fantasy");
+    expect(out).toContain('"Magic Forest"');
+    expect(out).toContain('1 completed: "Old Tale"');
+    expect(out).toContain("2 reading sessions");
+    expect(out).toContain("45 cumulative min");
+  });
+});
+
+// ── formatTeachBacksEvidence ────────────────────────────────────
+
+describe("formatTeachBacksEvidence", () => {
+  it("renders a no-activity line when nothing happened", () => {
+    const out = formatTeachBacksEvidence("Lincoln", {
+      count: 0,
+      bySubject: {},
+      audioCount: 0,
+      textCount: 0,
+      examples: [],
+    });
+    expect(out).toContain("No teach-back moments");
+  });
+
+  it("renders count, subjects, and highlights with audio markers", () => {
+    const out = formatTeachBacksEvidence("Lincoln", {
+      count: 4,
+      bySubject: { Reading: 3, Math: 1 },
+      audioCount: 3,
+      textCount: 1,
+      examples: [
+        { subject: "Reading", hasAudio: true, audioUrl: "https://a", createdAt: "2026-02-26" },
+        { subject: "Math", hasAudio: false, excerpt: "1+1 makes 2", createdAt: "2026-02-25" },
+      ],
+    });
+    expect(out).toContain("4 total teach-back moments");
+    expect(out).toContain("Reading: 3, Math: 1");
+    expect(out).toContain("3 with audio recordings, 1 text-only");
+    expect(out).toContain("Reading (audio)");
+    expect(out).toContain('Math — "1+1 makes 2"');
+  });
+});
+
+// ── hasAnyEvidence (empty-week guard) ───────────────────────────
+
+describe("hasAnyEvidence", () => {
+  const emptyBooks = {
+    booksCreated: [],
+    booksCompleted: [],
+    readingSessions: { count: 0, totalMinutes: 0, booksRead: [] },
+  };
+  const emptyTeachBacks = {
+    count: 0,
+    bySubject: {},
+    audioCount: 0,
+    textCount: 0,
+    examples: [],
+  };
+
+  function emptyCtx(overrides?: Partial<WeekContext>): WeekContext {
+    return {
+      child: { id: "c1", name: "Lincoln" },
+      weekKey: "2026-02-23",
+      dayLogs: [],
+      hours: [],
+      dailyPlans: [],
+      missedDays: 0,
+      bookActivity: [],
+      books: emptyBooks,
+      teachBacks: emptyTeachBacks,
+      ...overrides,
+    };
+  }
+
+  it("returns false when nothing exists across all sources", () => {
+    expect(hasAnyEvidence(emptyCtx())).toBe(false);
+  });
+
+  it("returns true when a day log exists", () => {
+    expect(
+      hasAnyEvidence(
+        emptyCtx({
+          dayLogs: [
+            {
+              date: "2026-02-23",
+              totalItems: 1,
+              completedItems: 0,
+              engagement: {},
+              minutesBySubject: {},
+              gradeResults: [],
+              evidenceCount: 0,
+            },
+          ],
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("returns true when only hours exist", () => {
+    expect(
+      hasAnyEvidence(
+        emptyCtx({ hours: [{ minutes: 30, date: "2026-02-23" }] }),
+      ),
+    ).toBe(true);
+  });
+
+  it("returns true when only books exist", () => {
+    expect(
+      hasAnyEvidence(
+        emptyCtx({
+          books: {
+            booksCreated: [{ title: "x", pages: 1, isAiGenerated: false }],
+            booksCompleted: [],
+            readingSessions: { count: 0, totalMinutes: 0, booksRead: [] },
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("returns true when only teach-backs exist", () => {
+    expect(
+      hasAnyEvidence(
+        emptyCtx({
+          teachBacks: {
+            count: 1,
+            bySubject: { Reading: 1 },
+            audioCount: 1,
+            textCount: 0,
+            examples: [],
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("returns true when only completed books exist (no checklist)", () => {
+    expect(
+      hasAnyEvidence(
+        emptyCtx({
+          books: {
+            booksCreated: [],
+            booksCompleted: [{ title: "Lion the Witch" }],
+            readingSessions: { count: 0, totalMinutes: 0, booksRead: [] },
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+});
+
+// ── buildEvaluationPrompt — books + teach-backs sections ────────
+
+describe("buildEvaluationPrompt — evidence sections", () => {
+  it("includes the books evidence section header", () => {
+    const prompt = buildEvaluationPrompt({
+      child: { id: "c1", name: "Lincoln", grade: "3rd" },
+      weekKey: "2026-02-23",
+      dayLogs: [],
+      hours: [],
+      dailyPlans: [],
+      missedDays: 0,
+      bookActivity: [],
+      books: {
+        booksCreated: [{ title: "New Book", pages: 4, isAiGenerated: true }],
+        booksCompleted: [],
+        readingSessions: { count: 0, totalMinutes: 0, booksRead: [] },
+      },
+      teachBacks: {
+        count: 2,
+        bySubject: { Reading: 2 },
+        audioCount: 1,
+        textCount: 1,
+        examples: [],
+      },
+    });
+    expect(prompt).toContain("Books for Lincoln this week");
+    expect(prompt).toContain("Teach-backs by Lincoln this week");
+    expect(prompt).toContain("1 created (1 AI-generated, 0 hand-built)");
+    expect(prompt).toContain("2 total teach-back moments");
   });
 });
