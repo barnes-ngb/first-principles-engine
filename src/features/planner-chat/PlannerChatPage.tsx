@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
-import SendIcon from '@mui/icons-material/Send'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -13,7 +12,6 @@ import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
-import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { addDoc, deleteField, doc, getDoc, getDocs, limit as fsLimit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
@@ -100,9 +98,11 @@ import QuickSuggestionButtons from './QuickSuggestionButtons'
 import { buildMaterialsPrompt, openPrintWindow } from './generateMaterials'
 import ChapterBookPicker from './ChapterBookPicker'
 import PlannerSetupWizard from './PlannerSetupWizard'
+import PlannerCompactSetup from './PlannerCompactSetup'
+import PlannerChatDrawer from './PlannerChatDrawer'
 import WeekFocusPanel from './WeekFocusPanel'
 import PlanDayCards from './PlanDayCards'
-import PlannerChatMessages from './PlannerChatMessages'
+import { clonePlanWithAdvancedLessons } from './repeatWeek.logic'
 
 
 /** Detect if an AI response looks like it was trying to return plan JSON (contains days/items structure). */
@@ -230,13 +230,23 @@ export default function PlannerChatPage() {
 
   // Week plan state (theme/virtue/scripture/heartQuestion)
   const [weekPlan, setWeekPlan] = useState<WeekPlan | null>(null)
+  // When true, render the setup card even if a draft exists (used by "← Edit setup")
+  const [forceSetup, setForceSetup] = useState(false)
   const phase = useMemo<'setup' | 'review' | 'active'>(() => {
     if (applied) return 'active'
+    if (forceSetup) return 'setup'
     if (weekPlan && currentDraft) return 'review'
     return 'setup'
-  }, [weekPlan, currentDraft, applied])
+  }, [weekPlan, currentDraft, applied, forceSetup])
   // Confirmation dialog state
   const [confirmNewPlan, setConfirmNewPlan] = useState(false)
+
+  // Prior-plan detection: distinguishes first-visit user (full wizard) from returning user (compact setup)
+  const [hasPriorPlan, setHasPriorPlan] = useState<boolean | null>(null)
+  const [lastPlanDraft, setLastPlanDraft] = useState<DraftWeeklyPlan | null>(null)
+  const [repeatingWeek, setRepeatingWeek] = useState(false)
+  // Workbook chips: workbooks the user has toggled OFF for this week.
+  const [excludedWorkbookIds, setExcludedWorkbookIds] = useState<Set<string>>(new Set())
 
 
   // Generate activity state
@@ -438,6 +448,36 @@ export default function PlannerChatPage() {
       }
     })
   }, [familyId, activeChildId])
+
+  // Detect whether this child has any prior planner conversation (drives compact vs full setup).
+  // Also fetch the most recent prior week's draft so "Repeat Last Week" can clone it.
+  useEffect(() => {
+    if (!familyId || !activeChildId) {
+      setHasPriorPlan(null)
+      setLastPlanDraft(null)
+      return
+    }
+    setHasPriorPlan(null)
+    setLastPlanDraft(null)
+    const q = query(
+      plannerConversationsCollection(familyId),
+      where('childId', '==', activeChildId),
+      orderBy('weekKey', 'desc'),
+      fsLimit(5),
+    )
+    void getDocs(q).then((snap) => {
+      const priorDocs = snap.docs.filter((d) => d.data().weekKey !== weekRange.start)
+      setHasPriorPlan(priorDocs.length > 0)
+      const withDraft = priorDocs.find((d) => {
+        const data = d.data() as PlannerConversation
+        return !!data.currentDraft && (data.currentDraft.days?.length ?? 0) > 0
+      })
+      setLastPlanDraft(withDraft ? ((withDraft.data() as PlannerConversation).currentDraft ?? null) : null)
+    }).catch(() => {
+      setHasPriorPlan(false)
+      setLastPlanDraft(null)
+    })
+  }, [familyId, activeChildId, weekRange.start])
 
   // Load existing conversation
   useEffect(() => {
@@ -1483,9 +1523,10 @@ Return as JSON:
           ? 'lighter week, reduce load'
           : 'MVD week, minimum items only'
 
-    // Build workbook lines from configured existing workbooks
+    // Build workbook lines from configured existing workbooks (respect any chip exclusions)
+    const includedWorkbooks = workbookConfigs.filter((wb) => !excludedWorkbookIds.has(wb.id ?? wb.name))
     const allWorkbookLines = [
-      ...workbookConfigs
+      ...includedWorkbooks
         .map((wb) => `- ${wb.name}: ${wb.unitLabel} ${wb.currentPosition + 1} (${wb.subjectBucket})`),
     ].join('\n')
 
@@ -1530,8 +1571,40 @@ ${weekNotes ? `\nNotes: ${weekNotes}` : ''}
 
 Generate a plan for Monday through Friday.`.trim()
 
+    setForceSetup(false)
     await handleGenerateWeek(contextMessage, true)
-  }, [weekEnergy, hoursPerDay, workbookConfigs, readAloudBook, readAloudChapters, weekNotes, activeChild, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek, selectedBook])
+  }, [weekEnergy, hoursPerDay, workbookConfigs, excludedWorkbookIds, readAloudBook, readAloudChapters, weekNotes, activeChild, activeChildId, familyId, subjectTimeDefaults, handleGenerateWeek, selectedBook])
+
+  // "Repeat Last Week" — clone the most recent prior plan with advanced lesson numbers
+  const handleRepeatLastWeek = useCallback(async () => {
+    if (!lastPlanDraft) return
+    setRepeatingWeek(true)
+    try {
+      const cloned = ensureEvaluationItems(clonePlanWithAdvancedLessons(lastPlanDraft))
+      setCurrentDraft(cloned)
+      setSetupComplete(true)
+      setForceSetup(false)
+      const repeatMsg: ChatMessage = {
+        id: generateItemId(),
+        role: ChatMessageRole.Assistant,
+        text: 'Repeated last week’s plan with lesson numbers advanced. Review and apply, or adjust via chat below.',
+        draftPlan: cloned,
+        createdAt: new Date().toISOString(),
+      }
+      const updatedMessages = [...messages, repeatMsg]
+      setMessages(updatedMessages)
+      await persistConversation({
+        messages: updatedMessages,
+        currentDraft: cloned,
+      })
+    } finally {
+      setRepeatingWeek(false)
+    }
+  }, [lastPlanDraft, messages, persistConversation])
+
+  const handleEditSetup = useCallback(() => {
+    setForceSetup(true)
+  }, [])
 
   // Toggle plan item
   const handleToggleItem = useCallback((dayIndex: number, itemId: string) => {
@@ -2133,6 +2206,8 @@ ${dayPrompts}`
     autoSuggestTriggered.current = false
     setWeekEnergy('full')
     setWeekNotes('')
+    setForceSetup(false)
+    setExcludedWorkbookIds(new Set())
 
     if (conversationDocId) {
       const ref = doc(plannerConversationsCollection(familyId), conversationDocId)
@@ -2241,7 +2316,13 @@ ${dayPrompts}`
             ) : null
           })()}
 
-          {phase === 'setup' && (
+          {phase === 'setup' && hasPriorPlan === null && (
+            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper', display: 'flex', justifyContent: 'center' }}>
+              <CircularProgress size={24} />
+            </Box>
+          )}
+
+          {phase === 'setup' && hasPriorPlan === false && (
             <PlannerSetupWizard
               childName={activeChild?.name ?? 'your child'}
               weekEnergy={weekEnergy}
@@ -2274,6 +2355,54 @@ ${dayPrompts}`
               onSetupComplete={handleSetupComplete}
               generatingWeek={generatingWeek}
             />
+          )}
+
+          {phase === 'setup' && hasPriorPlan === true && (
+            <PlannerCompactSetup
+              childName={activeChild?.name ?? 'your child'}
+              weekRangeLabel={`${weekRange.start} → ${weekRange.end}`}
+              weekEnergy={weekEnergy}
+              onWeekEnergyChange={setWeekEnergy}
+              hoursPerDay={hoursPerDay}
+              chapterBooks={chapterBooks}
+              selectedBook={selectedBook}
+              onSelectedBookChange={handleSelectedBookChange}
+              onBookAdded={handleBookAdded}
+              bookProgress={bookProgress}
+              chapterBooksLoading={chapterBooksLoading}
+              chapterBooksLoadError={chapterBooksLoadError}
+              workbookConfigs={workbookConfigs}
+              excludedWorkbookIds={excludedWorkbookIds}
+              onToggleWorkbook={(id) => {
+                setExcludedWorkbookIds((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(id)) next.delete(id)
+                  else next.add(id)
+                  return next
+                })
+              }}
+              onAddWorkbook={() => navigate('/progress?tab=curriculum')}
+              weekNotes={weekNotes}
+              onWeekNotesChange={setWeekNotes}
+              onGenerate={handleSetupComplete}
+              onRepeatLastWeek={handleRepeatLastWeek}
+              generatingWeek={generatingWeek}
+              repeatingWeek={repeatingWeek}
+              canRepeatLastWeek={!!lastPlanDraft}
+            />
+          )}
+
+          {phase === 'review' && (
+            <Box>
+              <Button
+                size="small"
+                variant="text"
+                onClick={handleEditSetup}
+                sx={{ textTransform: 'none', p: 0, minWidth: 0 }}
+              >
+                ← Edit setup
+              </Button>
+            </Box>
           )}
 
           {phase === 'review' && weekPlan && (
@@ -2349,33 +2478,18 @@ ${dayPrompts}`
                 </Typography>
               </Box>
 
-              {/* Chat history (scrollable) */}
-              <PlannerChatMessages messages={messages} messagesEndRef={chatEndRef} />
-
-              {/* Chat input for in-week adjustments */}
-              <Typography variant="caption" color="text.secondary">
-                Need to make changes during the week?
-              </Typography>
-              <Stack direction="row" spacing={1} alignItems="flex-end">
-                <TextField
-                  fullWidth
-                  size="small"
-                  placeholder="e.g. &quot;Cancel Wednesday&quot;, &quot;make Thursday light&quot;, &quot;add extra reading Friday&quot;..."
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSend()
-                    }
-                  }}
-                />
-                <IconButton onClick={() => handleSend()} color="primary" disabled={!inputText.trim() || aiLoading}>
-                  {aiLoading ? <CircularProgress size={24} /> : <SendIcon />}
-                </IconButton>
-              </Stack>
             </>
           )}
+
+          {/* Global chat drawer — collapsed by default, available across all phases as the power-user escape hatch */}
+          <PlannerChatDrawer
+            messages={messages}
+            inputText={inputText}
+            onInputChange={setInputText}
+            onSend={() => handleSend()}
+            loading={aiLoading}
+            messagesEndRef={chatEndRef}
+          />
 
           {phase === 'review' && currentDraft && (
             <>
