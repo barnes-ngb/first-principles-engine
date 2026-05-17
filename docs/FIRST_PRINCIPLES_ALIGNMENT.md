@@ -203,6 +203,12 @@ The daily flow stays structured. The compliance stays. The Minecraft framing sta
 
 ---
 
+## One Narrative Home for the Kid
+
+**Hero Hub** is where the threads braid — formation (armor of God), ethics (today's conundrum), curriculum (launcher to Knowledge Mine), creativity (launchers to Workshop and My Books). Three parallel mental models — Today checklist, Knowledge Mine, the old My Armor page — used to compete for Lincoln's attention. Hero Hub unifies them around identity: *here is who you are*, then *here is the work*. Today stays the daily list; Hero Hub stays the story.
+
+---
+
 ## Curriculum Tracking — Coverage, Not Pace
 
 Curriculum position data (workbook configs) is used for **skill calibration**:

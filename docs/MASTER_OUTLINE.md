@@ -21,7 +21,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 
 ## Navigation
 **Parent:** Today, Plan My Week, Weekly Review, Progress, Records, Books, Ask AI, Game Workshop, Dad Lab, Settings  
-**Kid:** Today, Knowledge Mine, Game Workshop, My Books, **Hero Hub**, Dad Lab
+**Kid:** Today, Knowledge Mine, Game Workshop, My Books, **My Hero** (Hero Hub), Dad Lab
 
 ---
 
@@ -29,10 +29,13 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 
 ### Hero Hub (formerly My Armor)
 - Reframed from a settings-style page into a **place** with identity + mission focus.
-- Above-the-fold order: hero render → mission card → Stonebridge preview → stat row.
+- Nav label: **"My Hero"**; page title: **"Hero Hub"**. Route `/avatar`; `/hero` and `/armor` redirect to `/avatar` for forward-/backward-compatibility.
+- Above-the-fold order (Phase 1A): **mission card → Stonebridge preview → 3D character → suit-up panel → armor gallery**. Armor demoted from "the whole page" to one pillar among many.
 - Mission state progression implemented for hub card logic: **Suit Up → Conundrum → Chapter → Hero Ready**.
-- Stonebridge preview surfaces current chapter/conundrum context.
+- Stonebridge preview surfaces current chapter/conundrum context. Conundrum answering remains on Today (single source of truth — mission CTA routes there).
+- **Launcher tiles** at the bottom: Knowledge Mine / Workshop / My Books. Lincoln sees all three; London sees Workshop + My Books only (Mine hidden per outline).
 - Existing customization controls are preserved below the fold.
+- Phase 1B (deferred): Stonebridge story expansion, restoration map preview, Banner Rally integration, kid-nav reduction from 6→4 items.
 
 ### 3D Avatar — Armor of God System
 - Family-tuned voxel proportions: `headSize 1.8`, `torsoW 1.7`, `armW 1.0`, `legH 2.8`, `sleeveRatio 0.7`, `bootRatio 0.3`.
@@ -141,6 +144,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 
 | Sprint | Date | Outcome |
 |---|---|---|
+| UX P2.05 | May 17, 2026 | Hero Hub Phase 1A — My Armor rebrand to **My Hero** (kid nav label) / **Hero Hub** (page title). Page identity reorder: mission card + Stonebridge preview now render **above** the 3D character display, demoting the armor row to one pillar instead of the whole page. New `HeroLauncherTiles` (`src/features/avatar/HeroLauncherTiles.tsx`) renders at the bottom of the hub — Knowledge Mine + Workshop + My Books tiles for Lincoln, Workshop + My Books only for London (Mine hidden, per outline). Tile tap routes via `useNavigate` to `/quest` / `/workshop` / `/books`. Route compatibility: `/avatar` stays the canonical path; new `/hero` and `/armor` redirects in `router.tsx` for forward-/backward-compatibility. Conundrum answering deliberately stays on Today — mission CTA routes to `/today#conundrum` so there's a single source of truth (no inline answer form duplicated on the hub). 10 new tests (`HeroLauncherTiles.test.tsx` covering Lincoln 3-tile / London 2-tile / per-tile navigation; `HeroMissionCard.test.tsx` covering suit-up / conundrum / ready states + CTA action callback + per-child rendering). 1579 tests pass (up from 1569). Phase 1B (Stonebridge expansion, restoration map preview, Banner Rally, kid nav reduction 6→4) deferred. |
 | UX P1.04 | May 17, 2026 | Quick Capture duration field — captures now count toward compliance hours when duration is filled; preserves artifact-only behavior when blank. New optional "How long? (minutes)" input below Child/Subject selectors in `QuickCaptureSection.tsx` (cap 240). On save (Note / Photo / Audio), if `durationMinutes > 0` writes an additional doc to `hoursCollection(familyId)` with `source: 'quick-capture'`, `quickCapture: true`, child + subject + `LearningLocation.Home`. Hours write is sequential after artifact write; failure is logged + surfaced via toast ("Captured (couldn't log hours — try again from Records)") but does not roll back the artifact. Helper text updates live: "Counts toward {child}'s school hours" → "Will log {N} minutes to {Subject}" once value > 0. Save Capture disabled with tooltip when duration is filled but child or subject is unset. `computeHoursSummary` in `records.logic.ts` already reads `hoursCollection` additively (no source filter), so new entries flow into Records totals + CSV exports automatically. 7 new tests (`QuickCaptureSection.test.tsx` — duration render, live helper, clamping at 240, artifact-only / artifact+hours save paths, child-name substitution, disabled state). 1569 tests pass. |
 | UX P1.03 | May 17, 2026 | Planner compact setup as default for returning users; chat moves to collapsed drawer; "Edit setup" back-link from review phase. New `PlannerCompactSetup` (`src/features/planner-chat/PlannerCompactSetup.tsx`) renders for any child with a prior `plannerConversations` doc (detected via a `where('childId','==',activeChildId)` + `orderBy('weekKey','desc')` query that skips the current week). First-visit users still see the full `PlannerSetupWizard`. Compact card layout: energy toggle, `ChapterBookPicker variant='wizard'`, workbook chips (tap to toggle exclusion, "+ Add" routes to `/progress?tab=curriculum`), special-notes textarea, Generate Plan + Repeat Last Week as peer CTAs. "Repeat Last Week" reuses `clonePlanWithAdvancedLessons` against the most recent prior draft. New `PlannerChatDrawer` (`src/features/planner-chat/PlannerChatDrawer.tsx`) replaces the active-phase inline chat input — collapsed by default, available across all phases as the power-user escape hatch. Phase-flow gained a `forceSetup` override (set by "← Edit setup" link in review phase) so a draft can be edited without being lost. Excluded workbooks filter through `handleSetupComplete` so toggling a chip off keeps that workbook out of the AI prompt. 21 new tests (`PlannerCompactSetup.test.tsx` + `PlannerChatDrawer.test.tsx`); 1562 tests pass. |
 | UX P1.02 | May 17, 2026 | Today week ribbon (parent only) — Mon-Fri progress dots, weekly hours chip, empty-state link to Plan My Week. New `WeekRibbon` (`src/features/today/WeekRibbon.tsx`) subscribes via `onSnapshot` to the active child's Mon-Fri `DayLog` docs and derives per-day state (`done` / `partial` / `in-progress` / `pending` / `skipped` / `empty`) from non-manual checklist items using the existing `plannedMinutes ?? estimatedMinutes ?? parseMinutesFromLabel` cascade. Today's dot is highlighted with a primary-color ring regardless of completion. Right-aligned hours chip totals logged/planned across the week (minutes when planned < 60, fractional hours otherwise). Empty week renders a single thin "No week planned yet. → Plan My Week" row. Dot minute fractions hide at the `xs` breakpoint; tooltip still shows full date + logged/planned + subjects on hover/tap. Pure logic split out to `weekRibbon.logic.ts` for testability. Wired into `TodayPage` above `WeekFocusCard`, wrapped in `SectionErrorBoundary`. `KidTodayView` is unchanged. 29 new tests (`weekRibbon.logic.test.ts` + `WeekRibbon.test.tsx`); 1541 tests pass. |
@@ -245,7 +249,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 | `src/features/planner-chat/PlannerChatPage.tsx` | 2,620 | Still primary planner shell/state center; compact setup + chat drawer extracted to siblings (PlannerCompactSetup, PlannerChatDrawer) |
 | `src/features/books/BookEditorPage.tsx` | 2,263 | Grew with undo/redo + contextual action bar |
 | `src/features/quest/useQuestSession.ts` | 1,870 | Largest hook; future split candidate |
-| `src/features/avatar/MyAvatarPage.tsx` | 1,797 | Grew with Hero Hub layout + mission surfaces |
+| `src/features/avatar/MyAvatarPage.tsx` | 1,804 | Grew with Hero Hub Phase 1A — mission/Stonebridge promoted above armor row, launcher tiles added |
 | `src/features/shelly-chat/ShellyChatPage.tsx` | 1,653 | Stable, still large |
 
 ### Decomposition Status
@@ -282,6 +286,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 | `src/core/xp/addDiamondEvent.ts` | Diamond event gateway |
 | `src/features/avatar/MyAvatarPage.tsx` | Hero Hub shell + avatar systems |
 | `src/features/avatar/HeroMissionCard.tsx` | Hero Hub mission card logic + rendering |
+| `src/features/avatar/HeroLauncherTiles.tsx` | Hero Hub launcher tiles (Mine/Workshop/Books); per-child filter |
 | `src/features/avatar/StonebridgePreviewCard.tsx` | Stonebridge narrative preview surface |
 | `src/features/avatar/BrothersVoxelScene.tsx` | Side-by-side brothers scene |
 | `src/features/avatar/AccessoriesPanel.tsx` | Accessories system UI + slot conflicts |

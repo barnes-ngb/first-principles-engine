@@ -57,6 +57,8 @@ const routes = [
       { path: '/books/:bookId/read', element: <BookReaderPage /> },
       { path: '/quest', element: <KnowledgeMinePage />, errorElement: <QuestErrorBoundary /> },
       { path: '/avatar', element: <MyAvatarPage /> },
+      { path: '/hero', element: <Navigate to="/avatar" replace /> },
+      { path: '/armor', element: <Navigate to="/avatar" replace /> },
       { path: '/workshop', element: <WorkshopPage /> },
       { path: '/ladders', element: <LaddersPage /> },
       { path: '/evaluation', element: <Navigate to="/progress" replace /> },
