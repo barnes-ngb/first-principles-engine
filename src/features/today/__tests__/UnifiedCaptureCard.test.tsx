@@ -38,20 +38,29 @@ const children: Child[] = [
   { id: 'london', name: 'London' } as Child,
 ]
 
-function renderCard(overrides: { selectedChildId?: string } = {}) {
+function renderCard(overrides: {
+  selectedChildId?: string
+  variant?: 'parent' | 'kid'
+  activeChild?: Child
+} = {}) {
   addDocCalls.length = 0
   const onSnackMessage = vi.fn()
   const setTodayArtifacts = vi.fn()
+  const selectedChildId = overrides.selectedChildId ?? 'lincoln'
+  const activeChild =
+    overrides.activeChild ?? children.find((c) => c.id === selectedChildId)
   const utils = render(
     <UnifiedCaptureCard
       familyId="fam-1"
-      selectedChildId={overrides.selectedChildId ?? 'lincoln'}
+      selectedChildId={selectedChildId}
       today="2026-05-17"
       weekPlanId="week-1"
       selectableChildren={children}
       todayArtifacts={[]}
       setTodayArtifacts={setTodayArtifacts}
       onSnackMessage={onSnackMessage}
+      variant={overrides.variant}
+      activeChild={activeChild}
     />,
   )
   return { ...utils, onSnackMessage, setTodayArtifacts }
@@ -66,7 +75,7 @@ function getDurationInput(): HTMLInputElement {
   return screen.getByLabelText(/duration in minutes/i) as HTMLInputElement
 }
 
-describe('UnifiedCaptureCard', () => {
+describe('UnifiedCaptureCard (parent variant)', () => {
   it('renders preset chips, free-form fields, and media tabs', () => {
     renderCard()
     expect(screen.getByText(/Quick logs/i)).toBeInTheDocument()
@@ -75,8 +84,26 @@ describe('UnifiedCaptureCard', () => {
     expect(getActivityNameInput()).toBeInTheDocument()
     expect(getDurationInput()).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^note$/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^photo$/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^audio$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /photo/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /audio/i })).toBeInTheDocument()
+  })
+
+  it('renders Creative and Active group captions with their chips', () => {
+    renderCard()
+    expect(screen.getByText(/^Creative$/)).toBeInTheDocument()
+    expect(screen.getByText(/^Active$/)).toBeInTheDocument()
+
+    // Creative chips
+    expect(screen.getByRole('button', { name: /Lego build/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Baking \/ cooking/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Drawing \/ art/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Music practice/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Reading session/i })).toBeInTheDocument()
+
+    // Active chips
+    expect(screen.getByRole('button', { name: /Nature \/ park/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Sports \/ PE/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Zoo \/ museum trip/i })).toBeInTheDocument()
   })
 
   it('helper text uses the active child name with no duration', () => {
@@ -236,13 +263,13 @@ describe('UnifiedCaptureCard', () => {
 
   it('renders the photo capture component when Photo tab is selected', () => {
     renderCard()
-    fireEvent.click(screen.getByRole('button', { name: /^photo$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /photo/i }))
     expect(screen.getByTestId('photo-capture')).toBeInTheDocument()
   })
 
   it('renders the audio recorder when Audio tab is selected', () => {
     renderCard()
-    fireEvent.click(screen.getByRole('button', { name: /^audio$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /audio/i }))
     expect(screen.getByTestId('audio-recorder')).toBeInTheDocument()
   })
 
@@ -264,4 +291,132 @@ describe('UnifiedCaptureCard', () => {
 
   // Suppress unused import warning
   void within
+})
+
+describe('UnifiedCaptureCard (kid variant)', () => {
+  function getKidDuration(): HTMLElement {
+    return screen.getByTestId('kid-duration-display')
+  }
+
+  it('hides the free-form text field and Note tab', () => {
+    renderCard({ variant: 'kid' })
+    expect(screen.queryByLabelText(/^what is this\?$/i)).not.toBeInTheDocument()
+    // Note media tab gone
+    expect(screen.queryByRole('button', { name: /^note$/i })).not.toBeInTheDocument()
+    // Photo + Audio remain
+    expect(screen.getByRole('button', { name: /photo/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /audio/i })).toBeInTheDocument()
+  })
+
+  it('hides the child select and category dropdowns', () => {
+    renderCard({ variant: 'kid' })
+    expect(screen.queryByLabelText(/^child$/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^category$/i)).not.toBeInTheDocument()
+  })
+
+  it('renders +/- duration stepper showing 0 by default', () => {
+    renderCard({ variant: 'kid' })
+    expect(getKidDuration().textContent).toBe('0')
+    expect(screen.getByLabelText(/increase duration/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/decrease duration/i)).toBeInTheDocument()
+  })
+
+  it('tapping a chip pre-fills the stepper with suggested minutes', () => {
+    renderCard({ variant: 'kid' })
+    fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
+    expect(getKidDuration().textContent).toBe('45')
+  })
+
+  it('+ steps duration by 5 minutes', () => {
+    renderCard({ variant: 'kid' })
+    fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
+    fireEvent.click(screen.getByLabelText(/increase duration/i))
+    expect(getKidDuration().textContent).toBe('50')
+    fireEvent.click(screen.getByLabelText(/decrease duration/i))
+    fireEvent.click(screen.getByLabelText(/decrease duration/i))
+    expect(getKidDuration().textContent).toBe('40')
+  })
+
+  it('disables Save Capture when no chip is selected', () => {
+    renderCard({ variant: 'kid' })
+    const saveBtn = screen.getByRole('button', { name: /save capture/i })
+    expect(saveBtn).toBeDisabled()
+    expect(screen.getByText(/tap a chip above/i)).toBeInTheDocument()
+  })
+
+  it('saves hours with chip label as activity name and proper subject bucket', async () => {
+    const { onSnackMessage } = renderCard({ variant: 'kid' })
+    fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save capture/i }))
+
+    await waitFor(() => expect(addDocCalls.length).toBe(1))
+    expect(addDocCalls[0].collectionKey).toBe('hours')
+    expect(addDocCalls[0].data).toMatchObject({
+      childId: 'lincoln',
+      date: '2026-05-17',
+      minutes: 45,
+      subjectBucket: 'PracticalArts',
+      source: 'unified-capture',
+      notes: 'Lego build',
+    })
+    expect(onSnackMessage).toHaveBeenCalledWith({
+      text: 'Logged 45 min',
+      severity: 'success',
+    })
+  })
+
+  it('resets stepper and chip selection after save', async () => {
+    renderCard({ variant: 'kid' })
+    fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save capture/i }))
+
+    await waitFor(() => expect(addDocCalls.length).toBe(1))
+    expect(getKidDuration().textContent).toBe('0')
+    // No media tab should be selected after reset
+    const photoBtn = screen.getByRole('button', { name: /photo/i })
+    expect(photoBtn.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('does not render the parent Artifacts section', () => {
+    renderCard({ variant: 'kid' })
+    expect(screen.queryByText(/No artifacts logged yet today/i)).not.toBeInTheDocument()
+  })
+
+  it('applies the Lincoln (Minecraft) accent on chips', () => {
+    renderCard({ variant: 'kid', activeChild: { id: 'lincoln', name: 'Lincoln' } as Child })
+    const lego = screen.getByRole('button', { name: /Lego build/i })
+    const styles = window.getComputedStyle(lego)
+    // Lincoln accent #7EFC20 → border rgb(126, 252, 32)
+    expect(styles.borderColor).toMatch(/rgb\(126,\s*252,\s*32\)/)
+  })
+
+  it('applies the London (story) accent on chips', () => {
+    renderCard({
+      variant: 'kid',
+      selectedChildId: 'london',
+      activeChild: { id: 'london', name: 'London' } as Child,
+    })
+    const lego = screen.getByRole('button', { name: /Lego build/i })
+    const styles = window.getComputedStyle(lego)
+    // London accent #9DC183 → border rgb(157, 193, 131)
+    expect(styles.borderColor).toMatch(/rgb\(157,\s*193,\s*131\)/)
+  })
+
+  it('+ button stops at MAX_DURATION 240', () => {
+    renderCard({ variant: 'kid' })
+    fireEvent.click(screen.getByRole('button', { name: /Zoo \/ museum trip/i }))
+    // starts at 120, click + 25 times = 245 capped to 240
+    const plus = screen.getByLabelText(/increase duration/i)
+    for (let i = 0; i < 25; i++) fireEvent.click(plus)
+    expect(getKidDuration().textContent).toBe('240')
+  })
+
+  it('- button stops at 0', () => {
+    renderCard({ variant: 'kid' })
+    fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
+    const minus = screen.getByLabelText(/decrease duration/i)
+    // 45 → -5 ten times = -5, clamped to 0
+    for (let i = 0; i < 10; i++) fireEvent.click(minus)
+    expect(getKidDuration().textContent).toBe('0')
+  })
 })

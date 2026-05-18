@@ -159,6 +159,10 @@ These features are working well and aligned with both Ad Astra principles and th
 
 A Lego build is artifact + hours + category, not three separate logs. The Capture card on Today adapts to what the moment actually was — sometimes a photo is enough, sometimes you log time without media, sometimes both. The form follows the activity, not the other way around. Preset chips (Lego, baking, nature, music, drawing, reading, zoo/museum, sports) cover the common shapes without locking Shelly into them: she can de-select, override, or go fully free-form.
 
+### Consolidation doesn't mean flattening.
+
+The Unified Capture Card collapses three logging surfaces into one — but preset chips stay grouped (Creative / Active) so categories remain visible at a glance. Reducing component count without reducing visual hierarchy. The kid variant takes the same principle further: same card, same chip grouping, but every input adapted to the kid (chip-required, +/- duration, audio-only note, per-child theme) so Lincoln and London can capture their own creative time regardless of whether a plan is locked in for the day. One mental model, two physical surfaces shaped to who is holding the phone.
+
 ### Evidence beats narrative.
 
 The AI's weekly narrative is helpful, but the raw counts of books created/completed/read and teach-back moments captured are the unfalsifiable record of what actually happened. The "Week in Evidence" section on the Weekly Review page (`src/features/weekly-review/WeekInEvidence.tsx`) surfaces these counts directly — book activity in one column, teach-backs in the other with expandable audio playback — so Shelly always sees the data, not just the story. The narrative can miss a beat; the evidence cannot. Together they answer two different questions: "What's the pattern?" (narrative) and "What did we actually do?" (evidence).
