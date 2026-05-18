@@ -56,6 +56,7 @@ import KidChapterPool from './KidChapterPool'
 import { useBookProgress } from './useBookProgress'
 import KidConundrumResponse from './KidConundrumResponse'
 import KidTeachBack from './KidTeachBack'
+import UnifiedCaptureCard from './UnifiedCaptureCard'
 import { useUnifiedCapture } from './useUnifiedCapture'
 import { calculateXp } from './xp'
 interface KidTodayViewProps {
@@ -443,6 +444,20 @@ export default function KidTodayView({
             No plan for today yet! Ask Mom or Dad to set one up.
           </Typography>
         </SectionCard>
+        <SectionErrorBoundary section="kid capture">
+          <UnifiedCaptureCard
+            familyId={familyId}
+            selectedChildId={child.id}
+            today={today}
+            weekPlanId={undefined}
+            selectableChildren={[child]}
+            todayArtifacts={artifacts}
+            setTodayArtifacts={setArtifacts}
+            onSnackMessage={setCaptureMessage}
+            variant="kid"
+            activeChild={child}
+          />
+        </SectionErrorBoundary>
         <ExplorerMap
           familyId={familyId}
           childId={child.id}
@@ -450,6 +465,21 @@ export default function KidTodayView({
           todayDate={today}
           childName={child.name}
         />
+        <Snackbar
+          open={captureMessage !== null}
+          autoHideDuration={2500}
+          onClose={() => setCaptureMessage(null)}
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        >
+          <Alert
+            onClose={() => setCaptureMessage(null)}
+            severity={captureMessage?.severity ?? 'success'}
+            variant="filled"
+            sx={{ width: '100%', fontWeight: 'bold' }}
+          >
+            {captureMessage?.text}
+          </Alert>
+        </Snackbar>
       </Page>
     )
   }
@@ -668,6 +698,22 @@ export default function KidTodayView({
           persistDayLogImmediate={persistDayLogImmediate}
           onCaptureOpen={handleKidCapture}
           onXpToast={setXpToast}
+        />
+      </SectionErrorBoundary>
+
+      {/* ── UNIFIED CAPTURE (kid variant) ── */}
+      <SectionErrorBoundary section="kid capture">
+        <UnifiedCaptureCard
+          familyId={familyId}
+          selectedChildId={child.id}
+          today={today}
+          weekPlanId={undefined}
+          selectableChildren={[child]}
+          todayArtifacts={artifacts}
+          setTodayArtifacts={setArtifacts}
+          onSnackMessage={setCaptureMessage}
+          variant="kid"
+          activeChild={child}
         />
       </SectionErrorBoundary>
 
