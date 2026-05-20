@@ -31,6 +31,8 @@ import type { BackfillResult } from './backfillWorkingLevels'
 import { backfillWorkingLevels } from './backfillWorkingLevels'
 import type { BackfillBlockIdsResult } from './backfillBlockIds'
 import { backfillBlockIds } from './backfillBlockIds'
+import type { DuplicateGroup, MergeOutcome } from './mergeDuplicateConfigs'
+import { applyMerge, fetchDuplicateGroups } from './mergeDuplicateConfigs'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
@@ -445,6 +447,60 @@ export default function DevAdminTab() {
     }
   }
 
+  // ── Section G: Merge Duplicate Curriculum Configs ────────────
+  const [dupScanning, setDupScanning] = useState(false)
+  const [dupGroups, setDupGroups] = useState<DuplicateGroup[] | null>(null)
+  const [mergingId, setMergingId] = useState<string | null>(null)
+  const [mergedOutcomes, setMergedOutcomes] = useState<MergeOutcome[]>([])
+  const [dupStatus, setDupStatus] = useState<StatusMsg | null>(null)
+
+  const handleScanDuplicates = async () => {
+    if (!familyId || !selectedChildId) return
+    setDupScanning(true)
+    setDupStatus(null)
+    setMergedOutcomes([])
+    try {
+      const groups = await fetchDuplicateGroups(familyId, selectedChildId)
+      setDupGroups(groups)
+      if (groups.length === 0) {
+        setDupStatus({ severity: 'info', text: 'No duplicates found.' })
+      } else {
+        setDupStatus({
+          severity: 'info',
+          text: `Found ${groups.length} duplicate group(s).`,
+        })
+      }
+    } catch (err) {
+      console.error('Duplicate scan failed', err)
+      setDupStatus({ severity: 'error', text: `Scan failed: ${err}` })
+    } finally {
+      setDupScanning(false)
+    }
+  }
+
+  const handleMergeGroup = async (group: DuplicateGroup) => {
+    if (!familyId) return
+    setMergingId(group.source.id)
+    setDupStatus(null)
+    try {
+      const outcome = await applyMerge(familyId, group)
+      setMergedOutcomes((prev) => [...prev, outcome])
+      setDupGroups((prev) => (prev ?? []).filter((g) => g.source.id !== group.source.id))
+      setDupStatus({
+        severity: 'success',
+        text:
+          outcome.positionAfter > outcome.positionBefore
+            ? `Merged into "${outcome.sourceName}". Position: ${outcome.positionBefore} → ${outcome.positionAfter}.`
+            : `Merged into "${outcome.sourceName}".`,
+      })
+    } catch (err) {
+      console.error('Merge failed', err)
+      setDupStatus({ severity: 'error', text: `Merge failed: ${err}` })
+    } finally {
+      setMergingId(null)
+    }
+  }
+
   const showGenButton = poolInfo?.loaded && weekInfo?.readAloudBookId &&
     (poolInfo.poolCount === 0 || poolInfo.poolCount < poolInfo.totalChapters)
 
@@ -784,6 +840,99 @@ export default function DevAdminTab() {
                     : r.blocksUpdated === 0
                       ? `${r.blocksTotal} block(s), all already have IDs.`
                       : `${r.blocksUpdated} of ${r.blocksTotal} block(s) updated with IDs.`}
+              </Typography>
+            ))}
+          </Stack>
+        )}
+      </Box>
+
+      <Divider />
+
+      {/* ── Section G: Merge Duplicate Curriculum Configs ─────── */}
+      <Box>
+        <Typography variant="h6" gutterBottom>
+          Merge Duplicate Configs
+        </Typography>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          Scan the active child&apos;s workbook configs for duplicates created by
+          earlier fuzzy-match bugs (e.g. &ldquo;Mathseeds&rdquo; vs
+          &ldquo;Mathseeds Mental Minute&rdquo;). Merge keeps the older card and
+          rolls in higher position + skills from the newer one.
+        </Typography>
+        {!selectedChildId ? (
+          <Alert severity="info">Select a child to scan for duplicates.</Alert>
+        ) : (
+          <Button
+            variant="outlined"
+            onClick={() => void handleScanDuplicates()}
+            disabled={dupScanning}
+            sx={{ minHeight: 48 }}
+          >
+            {dupScanning ? <CircularProgress size={20} /> : 'Scan for Duplicates'}
+          </Button>
+        )}
+
+        {dupStatus && (
+          <Alert severity={dupStatus.severity} sx={{ mt: 1 }}>
+            {dupStatus.text}
+          </Alert>
+        )}
+
+        {dupGroups && dupGroups.length > 0 && (
+          <Stack spacing={2} sx={{ mt: 2 }}>
+            {dupGroups.map((group) => {
+              const sourcePos = group.source.currentPosition ?? 0
+              const dupMaxPos = group.duplicates.reduce(
+                (max, d) => Math.max(max, d.currentPosition ?? 0),
+                0,
+              )
+              const willAdvance = dupMaxPos > sourcePos
+              return (
+                <Box
+                  key={group.source.id}
+                  sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}
+                >
+                  <Typography variant="subtitle2" gutterBottom>
+                    Keep: <strong>{group.source.name}</strong> (lesson {sourcePos}, updated{' '}
+                    {group.source.updatedAt?.slice(0, 10) ?? '?'})
+                  </Typography>
+                  {group.duplicates.map((d) => (
+                    <Typography key={d.id} variant="body2" color="text.secondary">
+                      Merge in &amp; delete: <em>{d.name}</em> (lesson{' '}
+                      {d.currentPosition ?? 0}, updated {d.updatedAt?.slice(0, 10) ?? '?'})
+                    </Typography>
+                  ))}
+                  {willAdvance && (
+                    <Typography variant="body2" sx={{ mt: 0.5 }}>
+                      Position will move <strong>{sourcePos} → {dupMaxPos}</strong>.
+                    </Typography>
+                  )}
+                  <Button
+                    variant="contained"
+                    color="warning"
+                    onClick={() => void handleMergeGroup(group)}
+                    disabled={mergingId !== null}
+                    sx={{ mt: 1, minHeight: 48 }}
+                  >
+                    {mergingId === group.source.id ? <CircularProgress size={20} /> : 'Merge'}
+                  </Button>
+                </Box>
+              )
+            })}
+          </Stack>
+        )}
+
+        {mergedOutcomes.length > 0 && (
+          <Stack spacing={0.5} sx={{ mt: 2 }}>
+            <Typography variant="subtitle2">Merged this session:</Typography>
+            {mergedOutcomes.map((o) => (
+              <Typography key={o.sourceId} variant="body2" color="success.main">
+                ✓ {o.sourceName} ({o.duplicateIds.length} duplicate
+                {o.duplicateIds.length === 1 ? '' : 's'} merged
+                {o.positionAfter > o.positionBefore
+                  ? `, lesson ${o.positionBefore} → ${o.positionAfter}`
+                  : ''}
+                )
               </Typography>
             ))}
           </Stack>
