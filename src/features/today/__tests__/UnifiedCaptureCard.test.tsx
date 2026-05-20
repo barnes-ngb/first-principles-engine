@@ -231,9 +231,11 @@ describe('UnifiedCaptureCard (parent variant)', () => {
     fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
     fireEvent.click(screen.getByRole('button', { name: /save capture/i }))
 
-    await waitFor(() => expect(addDocCalls.length).toBe(1))
-    expect(getActivityNameInput().value).toBe('')
-    expect(getDurationInput().value).toBe('')
+    await waitFor(() => {
+      expect(addDocCalls.length).toBe(1)
+      expect(getActivityNameInput().value).toBe('')
+      expect(getDurationInput().value).toBe('')
+    })
     const noteBtn = screen.getByRole('button', { name: /^note$/i })
     expect(noteBtn.getAttribute('aria-pressed')).toBe('true')
   })
@@ -370,8 +372,10 @@ describe('UnifiedCaptureCard (kid variant)', () => {
     fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
     fireEvent.click(screen.getByRole('button', { name: /save capture/i }))
 
-    await waitFor(() => expect(addDocCalls.length).toBe(1))
-    expect(getKidDuration().textContent).toBe('0')
+    await waitFor(() => {
+      expect(addDocCalls.length).toBe(1)
+      expect(getKidDuration().textContent).toBe('0')
+    })
     // No media tab should be selected after reset
     const photoBtn = screen.getByRole('button', { name: /photo/i })
     expect(photoBtn.getAttribute('aria-pressed')).toBe('false')
