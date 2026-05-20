@@ -266,6 +266,14 @@ const activityConfigConverter: FirestoreDataConverter<ActivityConfig> = {
   toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
   fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
     const data = snapshot.data(options) as ActivityConfig
+    // Firestore serverTimestamp() returns a Timestamp object, not a string.
+    // Coerce to ISO so date formatting in CurriculumTab doesn't render "Invalid Date".
+    for (const field of ['updatedAt', 'createdAt'] as const) {
+      const raw = data[field] as unknown
+      if (raw && typeof raw !== 'string' && typeof (raw as { toDate?: () => Date }).toDate === 'function') {
+        data[field] = (raw as { toDate: () => Date }).toDate().toISOString()
+      }
+    }
     return { ...data, id: snapshot.id }
   },
 }
