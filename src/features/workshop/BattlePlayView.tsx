@@ -4,8 +4,11 @@ import Button from '@mui/material/Button'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
 import DialogTitle from '@mui/material/DialogTitle'
+import IconButton from '@mui/material/IconButton'
 import Typography from '@mui/material/Typography'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import type {
   ActiveCardGameSession,
   CardGameCard,
@@ -16,6 +19,8 @@ import type {
 } from '../../core/types'
 import { useTTS } from '../../core/hooks/useTTS'
 import Confetti from './Confetti'
+import { useAvatarProfiles } from './useAvatarProfiles'
+import AvatarThumbnail from '../avatar/AvatarThumbnail'
 
 export interface BattlePlayResult {
   durationMinutes: number
@@ -43,6 +48,7 @@ interface RoundResult {
 
 export default function BattlePlayView({
   cardGame,
+  familyId,
   storyPlayers,
   generatedArt,
   activeSession,
@@ -50,6 +56,7 @@ export default function BattlePlayView({
   onSaveSession,
 }: BattlePlayViewProps) {
   const tts = useTTS()
+  const avatarProfiles = useAvatarProfiles(familyId, storyPlayers)
   const startTime = useRef(Date.now())
   const players = storyPlayers
   const maxRounds = 15
@@ -63,6 +70,7 @@ export default function BattlePlayView({
   const [showChallenge, setShowChallenge] = useState<{ card: CardGameCard; playerId: string } | null>(null)
   const [challengeBonus, setChallengeBonus] = useState<Record<string, number>>({})
   const [gameOver, setGameOver] = useState(false)
+  const [showExitDialog, setShowExitDialog] = useState(false)
 
   const getCardById = useCallback(
     (id: string) => cardGame.cards.find((c) => c.id === id),
@@ -250,35 +258,101 @@ export default function BattlePlayView({
     }
   }
 
+  const handleExit = useCallback(() => {
+    const elapsed = Math.max(Math.round((Date.now() - startTime.current) / 60000), 1)
+    const best = players.reduce(
+      (a, b) => ((wonCards[a.id]?.length ?? 0) >= (wonCards[b.id]?.length ?? 0) ? a : b),
+      players[0],
+    )
+    onFinished({
+      durationMinutes: elapsed,
+      playerIds: players.map((p) => p.id),
+      winner: best?.id ?? null,
+    })
+  }, [wonCards, players, onFinished])
+
   return (
-    <Box sx={{ maxWidth: 600, mx: 'auto' }}>
+    <Box sx={{ maxWidth: 600, mx: 'auto', position: 'relative' }}>
       {gameOver && <Confetti active />}
+
+      {/* Exit button */}
+      <IconButton
+        onClick={() => setShowExitDialog(true)}
+        size="medium"
+        sx={{
+          position: 'absolute',
+          top: 8,
+          left: 8,
+          zIndex: 20,
+          bgcolor: 'rgba(255,255,255,0.9)',
+          boxShadow: 2,
+          '&:hover': { bgcolor: 'rgba(255,255,255,1)' },
+        }}
+        aria-label="Exit game"
+      >
+        <ArrowBackIcon />
+      </IconButton>
+
+      {/* Exit confirmation dialog */}
+      <Dialog open={showExitDialog} onClose={() => setShowExitDialog(false)}>
+        <DialogTitle>Leave game?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Your progress is saved. You can come back and continue later.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowExitDialog(false)}>Keep Playing</Button>
+          <Button onClick={handleExit} variant="contained">Leave Game</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Scoreboard */}
       <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>
-        {players.map((p) => (
-          <Box
-            key={p.id}
-            sx={{
-              textAlign: 'center',
-              p: 1,
-              borderRadius: 2,
-              border: '2px solid',
-              borderColor: roundResult?.winnerId === p.id ? 'success.main' : 'divider',
-              bgcolor: roundResult?.winnerId === p.id ? 'success.light' : 'background.paper',
-              minWidth: 80,
-            }}
-          >
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-              {p.name}
-            </Typography>
-            <Typography variant="h6">{wonCards[p.id]?.length ?? 0}</Typography>
-            <Typography variant="caption">cards won</Typography>
-            <Typography variant="caption" display="block" color="text.secondary">
-              {playerHands[p.id]?.length ?? 0} in hand
-            </Typography>
-          </Box>
-        ))}
+        {players.map((p) => {
+          const profile = avatarProfiles[p.id]
+          return (
+            <Box
+              key={p.id}
+              sx={{
+                textAlign: 'center',
+                p: 1,
+                borderRadius: 2,
+                border: '2px solid',
+                borderColor: roundResult?.winnerId === p.id ? 'success.main' : 'divider',
+                bgcolor: roundResult?.winnerId === p.id ? 'success.light' : 'background.paper',
+                minWidth: 80,
+              }}
+            >
+              {profile ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.5 }}>
+                  <AvatarThumbnail
+                    features={profile.characterFeatures}
+                    ageGroup={profile.ageGroup ?? 'older'}
+                    faceGrid={profile.faceGrid}
+                    size={32}
+                    showArmor={false}
+                  />
+                </Box>
+              ) : p.avatarUrl ? (
+                <Box
+                  component="img"
+                  src={p.avatarUrl}
+                  alt={p.name}
+                  sx={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', mb: 0.5 }}
+                />
+              ) : null}
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                {p.name}
+              </Typography>
+              <Typography variant="h6">{wonCards[p.id]?.length ?? 0}</Typography>
+              <Typography variant="caption">cards won</Typography>
+              <Typography variant="caption" display="block" color="text.secondary">
+                {playerHands[p.id]?.length ?? 0} in hand
+              </Typography>
+            </Box>
+          )
+        })}
       </Box>
 
       {/* Round indicator */}

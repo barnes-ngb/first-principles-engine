@@ -8,7 +8,6 @@ import {
   EmailAuthProvider,
   linkWithCredential,
   onAuthStateChanged,
-  signInAnonymously,
   signInWithEmailAndPassword,
 } from 'firebase/auth'
 import { getFirebaseAuth } from '../firebase/firebase'
@@ -25,11 +24,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(firebaseUser)
         setLoading(false)
       } else {
-        // No user — sign in anonymously so the app is usable immediately.
-        signInAnonymously(firebaseAuth).catch((err) => {
-          console.error('Anonymous sign-in failed', err)
-          setLoading(false)
-        })
+        // No user — show login page (don't auto-sign-in anonymously)
+        setUser(null)
+        setLoading(false)
       }
     })
     return unsubscribe
@@ -57,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleSignOut = async () => {
     const firebaseAuth = getFirebaseAuth()
     await firebaseAuth.signOut()
-    // onAuthStateChanged will fire, triggering a new anonymous sign-in.
+    // onAuthStateChanged will fire, showing the login page.
   }
 
   return (

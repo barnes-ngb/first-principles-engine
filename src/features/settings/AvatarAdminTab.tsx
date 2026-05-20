@@ -31,21 +31,22 @@ import {
   dailyArmorSessionsCollection,
   dailyArmorSessionDocId,
   xpLedgerCollection,
-  xpLedgerDocId,
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
-import { ensureNewProfileStructure } from '../../core/xp/checkAndUnlockArmor'
+import { normalizeAvatarProfile } from '../../features/avatar/normalizeProfile'
 import { ARMOR_PIECES } from '../../core/types'
 import type {
   ArmorPiece,
-  ArmorPieceProgress,
   ArmorTier,
   AvatarProfile,
   DailyArmorSession,
   PlatformerTier,
   XpLedger,
 } from '../../core/types'
+import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -56,14 +57,17 @@ function stripUndefined<T extends object>(obj: T): Partial<T> {
 }
 
 function isPieceEarned(profile: AvatarProfile, pieceId: ArmorPiece): boolean {
-  const entry = profile.pieces.find((p) => p.pieceId === pieceId)
+  const entry = (profile.pieces ?? []).find((p) => p.pieceId === pieceId)
   if (!entry) return false
-  if (profile.themeStyle === 'minecraft') return entry.unlockedTiers.length > 0
+  if (profile.themeStyle === 'minecraft') return (entry.unlockedTiers ?? []).length > 0
   return (entry.unlockedTiersPlatformer ?? []).length > 0
 }
 
 const NEXT_TIER: Record<string, ArmorTier | PlatformerTier | null> = {
-  stone: 'diamond',
+  wood: 'stone',
+  stone: 'iron',
+  iron: 'gold',
+  gold: 'diamond',
   diamond: 'netherite',
   netherite: null,
   basic: 'powerup',
@@ -79,6 +83,10 @@ export default function AvatarAdminTab() {
   const [todaySession, setTodaySession] = useState<DailyArmorSession | null>(null)
   const [recentEvents, setRecentEvents] = useState<XpLedger[]>([])
   const [xpAmount, setXpAmount] = useState(10)
+  const [diamondAmount, setDiamondAmount] = useState(10)
+  const [diamondReason, setDiamondReason] = useState('')
+  const [diamondAwarding, setDiamondAwarding] = useState(false)
+  const [confirmDeduct, setConfirmDeduct] = useState(false)
   const [feedback, setFeedback] = useState<{ severity: 'success' | 'error'; message: string } | null>(null)
   const [upgrading, setUpgrading] = useState(false)
   const [regenBaseChar, setRegenBaseChar] = useState(false)
@@ -103,7 +111,7 @@ export default function AvatarAdminTab() {
     if (!familyId || !activeChildId) return
     const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
     const unsub = onSnapshot(profileRef, (snap) => {
-      setProfile(snap.exists() ? ensureNewProfileStructure(snap.data() as unknown as Record<string, unknown>) : null)
+      setProfile(snap.exists() ? normalizeAvatarProfile(snap.data()) : null)
     })
     return unsub
   }, [familyId, activeChildId])
@@ -114,7 +122,11 @@ export default function AvatarAdminTab() {
     const docId = dailyArmorSessionDocId(activeChildId, today)
     const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
     const unsub = onSnapshot(sessionRef, (snap) => {
-      setTodaySession(snap.exists() ? snap.data() : null)
+      setTodaySession(snap.exists() ? {
+        ...snap.data(),
+        appliedPieces: Array.isArray(snap.data().appliedPieces) ? snap.data().appliedPieces : [],
+        manuallyUnequipped: Array.isArray(snap.data().manuallyUnequipped) ? snap.data().manuallyUnequipped : [],
+      } : null)
     })
     return unsub
   }, [familyId, activeChildId, today])
@@ -139,57 +151,15 @@ export default function AvatarAdminTab() {
   const handleAdjustXp = useCallback(
     async (delta: number) => {
       if (!profile || !familyId || !activeChildId) return
-      const newXp = Math.max(0, profile.totalXp + delta)
 
-      // Recompute unlocked pieces — add newly eligible stone pieces
-      const updatedPieces: ArmorPieceProgress[] = [...profile.pieces]
-      for (const pieceDef of ARMOR_PIECES) {
-        const existing = updatedPieces.find((p) => p.pieceId === pieceDef.id)
-        const alreadyEarned = existing && (
-          profile.themeStyle === 'minecraft'
-            ? existing.unlockedTiers.length > 0
-            : (existing.unlockedTiersPlatformer ?? []).length > 0
-        )
-        if (!alreadyEarned && newXp >= pieceDef.xpToUnlockStone) {
-          if (existing) {
-            if (profile.themeStyle === 'minecraft') {
-              existing.unlockedTiers = [...existing.unlockedTiers, 'stone']
-            } else {
-              existing.unlockedTiersPlatformer = [...(existing.unlockedTiersPlatformer ?? []), 'basic']
-            }
-          } else {
-            updatedPieces.push({
-              pieceId: pieceDef.id,
-              unlockedTiers: profile.themeStyle === 'minecraft' ? ['stone'] : [],
-              ...(profile.themeStyle === 'platformer' ? { unlockedTiersPlatformer: ['basic'] as PlatformerTier[] } : {}),
-              generatedImageUrls: {},
-            })
-          }
-        }
-      }
-
-      const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
       try {
-        await setDoc(profileRef, stripUndefined({
-          ...profile,
-          totalXp: newXp,
-          pieces: updatedPieces,
-          updatedAt: new Date().toISOString(),
-        }))
+        const eventType = delta > 0 ? 'MANUAL_AWARD' : 'MANUAL_DEDUCT'
+        const dedupKey = `admin_${Date.now()}`
+        const meta = { awardedBy: 'admin', note: delta > 0 ? 'Admin added XP' : 'Admin removed XP' }
 
-        const adminDedupKey = `admin_${Date.now()}`
-        const eventRef = doc(xpLedgerCollection(familyId), xpLedgerDocId(activeChildId, adminDedupKey))
-        await setDoc(eventRef, {
-          childId: activeChildId,
-          totalXp: delta,
-          sources: { routines: delta, quests: 0, books: 0 },
-          type: 'parent_adjustment',
-          amount: delta,
-          dedupKey: adminDedupKey,
-          meta: { note: delta > 0 ? 'Parent added XP' : 'Parent removed XP' },
-          awardedAt: new Date().toISOString(),
-          lastUpdatedAt: new Date().toISOString(),
-        } satisfies XpLedger)
+        await addXpEvent(familyId, activeChildId, eventType, delta, dedupKey, meta)
+
+        // addXpEvent handles ledger, profile totalXp, tier detection, and calls checkAndUnlockArmor
 
         setFeedback({ severity: 'success', message: `XP ${delta > 0 ? 'added' : 'removed'}: ${Math.abs(delta)}` })
       } catch (err) {
@@ -198,6 +168,68 @@ export default function AvatarAdminTab() {
       }
     },
     [profile, familyId, activeChildId],
+  )
+
+  // ── Award / Deduct Diamonds ────────────────────────────────────
+  const handleAwardDiamonds = useCallback(
+    async (amount: number) => {
+      if (!profile || !familyId || !activeChildId || amount <= 0 || amount > 200) return
+      setDiamondAwarding(true)
+      try {
+        const result = await addDiamondEvent({
+          familyId,
+          childId: activeChildId,
+          amount,
+          type: DIAMOND_EVENTS.MANUAL_AWARD,
+          reason: diamondReason || `Parent awarded ${amount} diamonds`,
+          dedupKey: `manual-diamond-${Date.now()}`,
+          awardedBy: 'parent',
+        })
+        if (result.success) {
+          setDiamondReason('')
+          setFeedback({ severity: 'success', message: `+${amount} ◆ awarded` })
+        } else {
+          setFeedback({ severity: 'error', message: result.error || 'Failed to award diamonds' })
+        }
+      } catch (err) {
+        console.error('Diamond award failed:', err)
+        setFeedback({ severity: 'error', message: 'Failed to award diamonds.' })
+      } finally {
+        setDiamondAwarding(false)
+      }
+    },
+    [profile, familyId, activeChildId, diamondReason],
+  )
+
+  const handleDeductDiamonds = useCallback(
+    async (amount: number) => {
+      if (!profile || !familyId || !activeChildId || amount <= 0) return
+      setDiamondAwarding(true)
+      setConfirmDeduct(false)
+      try {
+        const result = await addDiamondEvent({
+          familyId,
+          childId: activeChildId,
+          amount: -amount,
+          type: DIAMOND_EVENTS.MANUAL_DEDUCT,
+          reason: diamondReason || `Parent deducted ${amount} diamonds`,
+          dedupKey: `manual-diamond-deduct-${Date.now()}`,
+          awardedBy: 'parent',
+        })
+        if (result.success) {
+          setDiamondReason('')
+          setFeedback({ severity: 'success', message: `−${amount} ◆ deducted` })
+        } else {
+          setFeedback({ severity: 'error', message: result.error || 'Insufficient diamonds' })
+        }
+      } catch (err) {
+        console.error('Diamond deduct failed:', err)
+        setFeedback({ severity: 'error', message: 'Failed to deduct diamonds.' })
+      } finally {
+        setDiamondAwarding(false)
+      }
+    },
+    [profile, familyId, activeChildId, diamondReason],
   )
 
   // ── Force tier upgrade (testing) ──────────────────────────────
@@ -220,7 +252,7 @@ export default function AvatarAdminTab() {
       const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
 
       // Make sure all 6 pieces exist with the stone/basic tier
-      const updatedPieces = [...profile.pieces]
+      const updatedPieces = [...(profile.pieces ?? [])]
       const themeStyle = profile.themeStyle
       for (const pieceDef of ARMOR_PIECES) {
         const existing = updatedPieces.find((p) => p.pieceId === pieceDef.id)
@@ -232,8 +264,8 @@ export default function AvatarAdminTab() {
             generatedImageUrls: {},
           })
         } else {
-          if (themeStyle === 'minecraft' && !existing.unlockedTiers.includes('stone')) {
-            existing.unlockedTiers = [...existing.unlockedTiers, 'stone']
+          if (themeStyle === 'minecraft' && !(existing.unlockedTiers ?? []).includes('stone')) {
+            existing.unlockedTiers = [...(existing.unlockedTiers ?? []), 'stone']
           }
           if (themeStyle === 'platformer' && !(existing.unlockedTiersPlatformer ?? []).includes('basic')) {
             existing.unlockedTiersPlatformer = [...(existing.unlockedTiersPlatformer ?? []), 'basic']
@@ -283,8 +315,8 @@ export default function AvatarAdminTab() {
                   ? {
                       ...p,
                       unlockedTiers: themeStyle === 'minecraft'
-                        ? [...new Set([...p.unlockedTiers, nextTier as ArmorTier])]
-                        : p.unlockedTiers,
+                        ? [...new Set([...(p.unlockedTiers ?? []), nextTier as ArmorTier])]
+                        : (p.unlockedTiers ?? []),
                       ...(themeStyle === 'platformer' ? {
                         unlockedTiersPlatformer: [...new Set([...(p.unlockedTiersPlatformer ?? []), nextTier as PlatformerTier])],
                       } : {}),
@@ -317,7 +349,7 @@ export default function AvatarAdminTab() {
     try {
       await setDoc(profileRef, stripUndefined({
         ...profile,
-        pieces: profile.pieces.filter((p) => p.pieceId !== deletePiece),
+        pieces: (profile.pieces ?? []).filter((p) => p.pieceId !== deletePiece),
         updatedAt: new Date().toISOString(),
       }))
       setFeedback({ severity: 'success', message: `Removed ${ARMOR_PIECES.find((p) => p.id === deletePiece)?.name ?? deletePiece}` })
@@ -340,7 +372,7 @@ export default function AvatarAdminTab() {
         childId: profile.childId,
         themeStyle: profile.themeStyle,
         pieces: [],
-        currentTier: profile.themeStyle === 'minecraft' ? 'stone' : 'basic',
+        currentTier: profile.themeStyle === 'minecraft' ? 'wood' : 'basic',
         ...(profile.baseCharacterUrl ? { baseCharacterUrl: profile.baseCharacterUrl } : {}),
         ...(profile.photoTransformUrl ? { photoTransformUrl: profile.photoTransformUrl } : {}),
         armorSheetUrls: {},
@@ -381,7 +413,7 @@ export default function AvatarAdminTab() {
       await setDoc(profileRef, {
         childId: profile.childId,
         themeStyle: profile.themeStyle,
-        pieces: profile.pieces,
+        pieces: profile.pieces ?? [],
         currentTier: profile.currentTier,
         totalXp: profile.totalXp,
         updatedAt: new Date().toISOString(),
@@ -447,10 +479,10 @@ export default function AvatarAdminTab() {
       const profileRef = doc(avatarProfilesCollection(familyId!), childDocId)
       const profileSnap = await getDoc(profileRef)
       if (profileSnap.exists()) {
-        const p = profileSnap.data() as AvatarProfile
-        const earned = p.pieces.filter((piece) =>
+        const p = normalizeAvatarProfile(profileSnap.data())
+        const earned = (p.pieces ?? []).filter((piece) =>
           p.themeStyle === 'minecraft'
-            ? piece.unlockedTiers.length > 0
+            ? (piece.unlockedTiers ?? []).length > 0
             : (piece.unlockedTiersPlatformer ?? []).length > 0,
         ).length
         setDeleteProfileInfo({ totalXp: p.totalXp, earnedPieces: earned })
@@ -518,8 +550,8 @@ export default function AvatarAdminTab() {
     if (isDuplicate(childId)) return true
     // For non-duplicates, check if active profile has 0 XP and 0 pieces
     if (childId === activeChildId && profile) {
-      const earned = profile.pieces.filter((p) =>
-        profile.themeStyle === 'minecraft' ? p.unlockedTiers.length > 0 : (p.unlockedTiersPlatformer ?? []).length > 0,
+      const earned = (profile.pieces ?? []).filter((p) =>
+        profile.themeStyle === 'minecraft' ? (p.unlockedTiers ?? []).length > 0 : (p.unlockedTiersPlatformer ?? []).length > 0,
       ).length
       return profile.totalXp === 0 && earned === 0
     }
@@ -532,7 +564,7 @@ export default function AvatarAdminTab() {
     setRegenPieces(true)
     try {
       const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
-      const updatedPieces = profile.pieces.map((p) => ({ ...p, generatedImageUrls: {} }))
+      const updatedPieces = (profile.pieces ?? []).map((p) => ({ ...p, generatedImageUrls: {} }))
       await setDoc(profileRef, stripUndefined({
         ...profile,
         pieces: updatedPieces,
@@ -589,8 +621,8 @@ export default function AvatarAdminTab() {
   const selectedChild = children.find((c) => c.id === activeChildId)
   const nextPiece = ARMOR_PIECES.find((p) => !profile || !isPieceEarned(profile, p.id))
   const xpToNext = nextPiece && profile ? Math.max(nextPiece.xpToUnlockStone - profile.totalXp, 0) : 0
-  const earnedCount = profile ? profile.pieces.filter((p) =>
-    profile.themeStyle === 'minecraft' ? p.unlockedTiers.length > 0 : (p.unlockedTiersPlatformer ?? []).length > 0
+  const earnedCount = profile ? (profile.pieces ?? []).filter((p) =>
+    profile.themeStyle === 'minecraft' ? (p.unlockedTiers ?? []).length > 0 : (p.unlockedTiersPlatformer ?? []).length > 0
   ).length : 0
   const canUpgradeTier = profile && NEXT_TIER[profile.currentTier] !== null
 
@@ -643,6 +675,9 @@ export default function AvatarAdminTab() {
             </Typography>
             <Typography variant="body2">
               Total XP: <strong>{profile.totalXp}</strong>
+            </Typography>
+            <Typography variant="body2">
+              Diamonds: <strong style={{ color: '#0288d1' }}>◆ {profile.diamondBalance ?? 0}</strong>
             </Typography>
             <Typography variant="body2">
               Current Tier: <strong style={{ textTransform: 'capitalize' }}>{profile.currentTier}</strong>
@@ -711,9 +746,9 @@ export default function AvatarAdminTab() {
             Today's Session ({today})
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Applied pieces: {todaySession.appliedPieces.length === 0
+            Applied pieces: {(todaySession.appliedPieces ?? []).length === 0
               ? 'None yet'
-              : todaySession.appliedPieces.map((p) =>
+              : (todaySession.appliedPieces ?? []).map((p) =>
                   ARMOR_PIECES.find((ap) => ap.id === p)?.name ?? p
                 ).join(', ')
             }
@@ -787,6 +822,69 @@ export default function AvatarAdminTab() {
 
       <Divider />
 
+      {/* ── Diamond Adjustment ──────────────────────────────────── */}
+      <Box>
+        <Typography variant="subtitle1" fontWeight={700} gutterBottom sx={{ color: 'info.main' }}>
+          ◆ Diamond Adjustment
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          Balance: <strong style={{ color: '#0288d1' }}>◆ {profile?.diamondBalance ?? 0}</strong>
+        </Typography>
+        <Stack direction="row" spacing={1} sx={{ mb: 1.5 }} flexWrap="wrap" useFlexGap>
+          {[5, 10, 25, 50].map((amt) => (
+            <Button
+              key={amt}
+              variant="outlined"
+              color="info"
+              size="small"
+              disabled={diamondAwarding}
+              onClick={() => void handleAwardDiamonds(amt)}
+            >
+              +{amt} ◆
+            </Button>
+          ))}
+        </Stack>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+          <TextField
+            type="number"
+            size="small"
+            value={diamondAmount}
+            onChange={(e) => setDiamondAmount(Math.max(1, parseInt(e.target.value) || 1))}
+            inputProps={{ min: 1, max: 200 }}
+            sx={{ width: 120 }}
+            InputProps={{
+              startAdornment: <InputAdornment position="start">◆</InputAdornment>,
+            }}
+          />
+          <Button
+            variant="contained"
+            color="info"
+            onClick={() => void handleAwardDiamonds(diamondAmount)}
+            disabled={diamondAwarding}
+          >
+            + Award
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={() => setConfirmDeduct(true)}
+            disabled={diamondAwarding || !profile || (profile.diamondBalance ?? 0) === 0}
+          >
+            − Deduct
+          </Button>
+        </Stack>
+        <TextField
+          size="small"
+          fullWidth
+          value={diamondReason}
+          onChange={(e) => setDiamondReason(e.target.value)}
+          placeholder="Reason (e.g., 'Helped with dishes')"
+          sx={{ mb: 1 }}
+        />
+      </Box>
+
+      <Divider />
+
       {/* ── Force Tier Upgrade (testing) ─────────────────────────── */}
       {canUpgradeTier && (
         <Box>
@@ -825,7 +923,7 @@ export default function AvatarAdminTab() {
             {(profile?.pieces ?? [])
               .filter((entry) =>
                 profile!.themeStyle === 'minecraft'
-                  ? entry.unlockedTiers.length > 0
+                  ? (entry.unlockedTiers ?? []).length > 0
                   : (entry.unlockedTiersPlatformer ?? []).length > 0,
               )
               .map((entry) => {
@@ -898,6 +996,21 @@ export default function AvatarAdminTab() {
           {feedback.message}
         </Alert>
       )}
+
+      {/* ── Deduct diamonds confirmation ────────────────────────── */}
+      <Dialog open={confirmDeduct} onClose={() => setConfirmDeduct(false)}>
+        <DialogTitle>Deduct Diamonds?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Remove {diamondAmount} diamonds from {selectedChild?.name ?? 'this child'}?
+            Current balance: ◆ {profile?.diamondBalance ?? 0}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDeduct(false)}>Cancel</Button>
+          <Button color="warning" onClick={() => void handleDeductDiamonds(diamondAmount)}>Deduct</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* ── Regen base character confirmation ───────────────────── */}
       <Dialog open={regenBaseCharConfirmOpen} onClose={() => setRegenBaseCharConfirmOpen(false)}>

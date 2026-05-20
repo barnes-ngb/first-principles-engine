@@ -19,8 +19,10 @@ import type { AIUsageEntry } from '../../core/types'
 // ── Display helpers ──────────────────────────────────────────────
 
 const MODEL_LABELS: Record<string, string> = {
-  'claude-sonnet-4-20250514': 'Claude Sonnet',
-  'claude-haiku-4-5-20251001': 'Claude Haiku',
+  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
+  'claude-sonnet-4-5-20250929': 'Claude Sonnet 4.5',
+  'claude-sonnet-4-20250514': 'Claude Sonnet 4',
+  'claude-haiku-4-5-20251001': 'Claude Haiku 4.5',
   'dall-e-3': 'DALL-E 3',
   'gpt-image-1': 'GPT Image',
 }
@@ -44,10 +46,14 @@ const IMAGE_COST_PER_CALL: Record<string, number> = {
 
 /** Approximate cost per 1M tokens (USD). */
 const COST_PER_M_INPUT: Record<string, number> = {
+  'claude-sonnet-4-6': 3,
+  'claude-sonnet-4-5-20250929': 3,
   'claude-sonnet-4-20250514': 3,
   'claude-haiku-4-5-20251001': 0.8,
 }
 const COST_PER_M_OUTPUT: Record<string, number> = {
+  'claude-sonnet-4-6': 15,
+  'claude-sonnet-4-5-20250929': 15,
   'claude-sonnet-4-20250514': 15,
   'claude-haiku-4-5-20251001': 4,
 }

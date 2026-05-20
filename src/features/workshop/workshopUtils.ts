@@ -1,5 +1,5 @@
 import { addDoc, getDoc, setDoc } from 'firebase/firestore'
-import { hoursCollection, artifactsCollection, storyGamesCollection, daysCollection } from '../../core/firebase/firestore'
+import { hoursCollection, artifactsCollection, storyGamesCollection, daysCollection, stripUndefined } from '../../core/firebase/firestore'
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore'
 import type { AdventureTree, CardGameData, ChallengeCard, GeneratedGame, VoiceRecordingMap } from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
@@ -391,18 +391,18 @@ export async function recordAdventurePlaySession(
   challengeResults: Array<{ nodeId: string; passed: boolean }>,
 ): Promise<void> {
   const gameRef = doc(storyGamesCollection(familyId), gameId)
-  await updateDoc(gameRef, {
+  await updateDoc(gameRef, stripUndefined({
     status: WorkshopStatus.Played,
     updatedAt: new Date().toISOString(),
-    playSessions: arrayUnion({
+    playSessions: arrayUnion(stripUndefined({
       playedAt: new Date().toISOString(),
       players,
       durationMinutes,
       pathTaken,
       choicesMade,
       challengeResults,
-    }),
-  })
+    })),
+  }))
 }
 
 // ── Record play session on the game document ──────────────────────
@@ -416,17 +416,17 @@ export async function recordPlaySession(
   cardsEncountered: string[],
 ): Promise<void> {
   const gameRef = doc(storyGamesCollection(familyId), gameId)
-  await updateDoc(gameRef, {
+  await updateDoc(gameRef, stripUndefined({
     status: WorkshopStatus.Played,
     updatedAt: new Date().toISOString(),
-    playSessions: arrayUnion({
+    playSessions: arrayUnion(stripUndefined({
       playedAt: new Date().toISOString(),
       players,
       winner,
       durationMinutes,
       cardsEncountered,
-    }),
-  })
+    })),
+  }))
 }
 
 // ── Card Game Hours Logging ──────────────────────────────────────
@@ -538,16 +538,16 @@ export async function recordCardGamePlaySession(
   durationMinutes: number,
 ): Promise<void> {
   const gameRef = doc(storyGamesCollection(familyId), gameId)
-  await updateDoc(gameRef, {
+  await updateDoc(gameRef, stripUndefined({
     status: WorkshopStatus.Played,
     updatedAt: new Date().toISOString(),
-    playSessions: arrayUnion({
+    playSessions: arrayUnion(stripUndefined({
       playedAt: new Date().toISOString(),
       players,
       winner,
       durationMinutes,
-    }),
-  })
+    })),
+  }))
 }
 
 // ── Log hours for card game playtest ─────────────────────────────

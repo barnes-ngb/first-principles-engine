@@ -9,7 +9,7 @@ export const todayKey = (): string => formatDateYmd(new Date())
 
 /**
  * Return the ISO week key (YYYY-WNN) for a given date.
- * Uses Monday-based weeks consistent with getWeekRange.
+ * Uses Sunday-based weeks consistent with getWeekRange (default weekStartsOn=0).
  */
 export const weekKeyFromDate = (date: Date): string => {
   const range = getWeekRange(date)

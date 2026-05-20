@@ -2,9 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Typography from '@mui/material/Typography'
 import { doc, updateDoc } from 'firebase/firestore'
+import { stripUndefined } from '../../core/firebase/firestore'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import VolumeOffIcon from '@mui/icons-material/VolumeOff'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents'
@@ -20,6 +28,8 @@ import type { StoryPlayer } from '../../core/types'
 import { useGameSession } from './useGameSession'
 import type { Player } from './useGameSession'
 import { useGameSounds } from './useGameSounds'
+import { useAvatarProfiles } from './useAvatarProfiles'
+import AvatarThumbnail from '../avatar/AvatarThumbnail'
 
 export interface GamePlayResult {
   winner: string | null
@@ -57,6 +67,7 @@ export default function GamePlayView({
   const session = useGameSession(game)
   const tts = useTTS()
   const sounds = useGameSounds()
+  const avatarProfiles = useAvatarProfiles(familyId, storyPlayers)
   const [hasStarted, setHasStarted] = useState(false)
   const gameStartTime = useRef<number>(Date.now())
 
@@ -68,7 +79,9 @@ export default function GamePlayView({
   const [showSmallConfetti, setShowSmallConfetti] = useState(false)
   const [showCelebration, setShowCelebration] = useState(false)
   const [showFinalCelebration, setShowFinalCelebration] = useState(false)
+  const [showFinisherBanner, setShowFinisherBanner] = useState<string | null>(null)
   const [turnTransition, setTurnTransition] = useState(false)
+  const [showExitDialog, setShowExitDialog] = useState(false)
 
   // Save activeSession to Firestore after each turn
   const saveActiveSession = useCallback(
@@ -77,7 +90,7 @@ export default function GamePlayView({
       try {
         await updateDoc(
           doc(db, `families/${familyId}/storyGames/${gameId}`),
-          { activeSession: sessionData, updatedAt: new Date().toISOString() },
+          stripUndefined({ activeSession: sessionData, updatedAt: new Date().toISOString() }),
         )
       } catch (err) {
         console.warn('Failed to save active session:', err)
@@ -157,10 +170,10 @@ export default function GamePlayView({
 
     const from = session.state.previousPosition
     const to = session.state.targetPosition
-    const steps = to - from
+    const steps = Math.abs(to - from)
+    const direction = to >= from ? 1 : -1
 
-    if (steps <= 0) {
-      // No movement needed
+    if (steps === 0) {
       session.moveComplete()
       return
     }
@@ -170,7 +183,7 @@ export default function GamePlayView({
 
     const interval = setInterval(() => {
       step++
-      const currentPos = from + step
+      const currentPos = from + (step * direction)
       setAnimatingPosition(currentPos)
       sounds.playTokenStep()
 
@@ -213,6 +226,30 @@ export default function GamePlayView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.state.turnPhase, session.state.previousPosition, session.state.targetPosition])
 
+  // ── Special move phase ──────────────────────────────────────────
+  useEffect(() => {
+    if (session.state.turnPhase !== TurnPhase.SpecialMove) return
+    const effect = session.state.pendingSpecialMove
+    if (!effect) return
+
+    // Brief pause for TTS/animation before moving
+    const timer = setTimeout(() => {
+      if (effect.type === 'forward') {
+        session.specialMove(effect.amount)
+      } else if (effect.type === 'backward') {
+        session.specialMove(-effect.amount)
+      } else if (effect.type === 'teleport') {
+        const player = session.currentPlayer
+        if (player) {
+          session.specialMove(effect.amount - player.position)
+        }
+      }
+    }, 800)
+
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.state.turnPhase])
+
   const handleRoll = useCallback(
     (value: number) => {
       session.roll(value)
@@ -220,8 +257,10 @@ export default function GamePlayView({
     [session],
   )
 
-  const handleDismissCard = useCallback(() => {
-    sounds.playSuccess()
+  const handleDismissCard = useCallback((correct?: boolean) => {
+    if (correct) {
+      sounds.playSuccess()
+    }
     session.dismissCard()
   }, [session, sounds])
 
@@ -256,18 +295,39 @@ export default function GamePlayView({
       setShowCelebration(false)
     }
 
+    // Check if the current player just finished (non-first finisher)
+    const currentP = session.currentPlayer
+    if (currentP && session.state.finishers.includes(currentP.name) && currentP.name !== session.state.winner) {
+      // Brief celebration for non-first finisher
+      setShowSmallConfetti(true)
+      setShowFinisherBanner(currentP.name)
+      sounds.playApplause()
+      tts.speak(`${currentP.name} finished! Great job!`)
+      setTimeout(() => {
+        setShowSmallConfetti(false)
+        setShowFinisherBanner(null)
+        session.nextTurn()
+      }, 2000)
+      return
+    }
+
     session.nextTurn()
   }, [session, tts, sounds, game.title, showCelebration])
 
   const handleFinishGame = useCallback(() => {
     const durationMinutes = Math.round((Date.now() - gameStartTime.current) / 60000)
+    // Save final session state
+    saveActiveSession({
+      ...buildActiveSessionData(),
+      status: 'finished',
+    })
     onFinished({
       winner: session.state.winner,
       durationMinutes: Math.max(durationMinutes, 1),
       cardsEncountered: session.state.cardsEncountered,
       playerIds: session.state.players.map((p) => p.id),
     })
-  }, [session, onFinished])
+  }, [session, onFinished, saveActiveSession, buildActiveSessionData])
 
   // Save session to Firestore after each turn completes (when turnPhase transitions to Roll for next player)
   useEffect(() => {
@@ -316,10 +376,41 @@ export default function GamePlayView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.state.turnPhase])
 
+  // Announce special move effects
+  useEffect(() => {
+    if (session.state.turnPhase === TurnPhase.SpecialMove && session.state.pendingSpecialMove) {
+      const effect = session.state.pendingSpecialMove
+      const player = session.currentPlayer
+      if (!player) return
+      const space = game.board.spaces[player.position]
+      if (space?.label) {
+        const spaceRecKey = `space-${space.index}`
+        const rec = voiceRecordings?.[spaceRecKey]
+        if (rec?.url && !sounds.muted) {
+          const audio = new Audio(rec.url)
+          audio.play().catch(() => tts.speak(space.label!))
+        } else {
+          tts.speak(space.label)
+        }
+      } else {
+        // Fallback announcement
+        if (effect.type === 'forward') {
+          tts.speak(`Move forward ${effect.amount}!`)
+        } else if (effect.type === 'backward') {
+          tts.speak(`Go back ${effect.amount}!`)
+        } else {
+          tts.speak(`Teleport to space ${effect.amount}!`)
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.state.turnPhase])
+
   const { state, currentPlayer, isGameOver } = session
 
   // Build player positions — use animating position during movement
   const displayPlayers = state.players.map((p, i) => ({
+    id: p.id,
     name: p.name,
     color: p.color,
     position:
@@ -331,11 +422,46 @@ export default function GamePlayView({
 
   const theme = game.metadata?.theme
 
+  // Game duration for stats
+  const gameDurationMinutes = Math.max(1, Math.round((Date.now() - gameStartTime.current) / 60000))
+
   return (
-    <Box>
+    <Box sx={{ position: 'relative' }}>
       {/* Confetti overlays */}
       <Confetti active={showConfetti} />
       <Confetti active={showSmallConfetti} small />
+
+      {/* Exit button */}
+      <IconButton
+        onClick={() => setShowExitDialog(true)}
+        size="medium"
+        sx={{
+          position: 'absolute',
+          top: 8,
+          left: 8,
+          zIndex: 20,
+          bgcolor: 'rgba(255,255,255,0.9)',
+          boxShadow: 2,
+          '&:hover': { bgcolor: 'rgba(255,255,255,1)' },
+        }}
+        aria-label="Exit game"
+      >
+        <ArrowBackIcon />
+      </IconButton>
+
+      {/* Exit confirmation dialog */}
+      <Dialog open={showExitDialog} onClose={() => setShowExitDialog(false)}>
+        <DialogTitle>Leave game?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Your progress is saved. You can come back and continue later.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowExitDialog(false)}>Keep Playing</Button>
+          <Button onClick={handleFinishGame} variant="contained">Leave Game</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Mute toggle */}
       <IconButton
@@ -360,41 +486,102 @@ export default function GamePlayView({
         {game.title}
       </Typography>
 
-      {/* Turn indicator */}
+      {/* Turn indicator with finish status */}
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', mb: 2, flexWrap: 'wrap' }}>
-        {state.players.map((player, i) => (
-          <Chip
-            key={player.id}
-            label={player.name}
-            size="small"
-            sx={{
-              bgcolor: player.color,
-              color: 'white',
-              fontWeight: i === state.currentPlayerIndex ? 700 : 400,
-              border: i === state.currentPlayerIndex ? '2px solid black' : 'none',
-              // Turn transition pulse
-              ...(turnTransition && i === state.currentPlayerIndex
-                ? {
-                    animation: 'turnPulse 0.6s ease-in-out 2',
-                    '@keyframes turnPulse': {
-                      '0%, 100%': { transform: 'scale(1)' },
-                      '50%': { transform: 'scale(1.15)', boxShadow: '0 0 8px rgba(0,0,0,0.3)' },
-                    },
-                  }
-                : {}),
-              '@media (prefers-reduced-motion: reduce)': {
-                animation: 'none !important',
-              },
-            }}
-          />
-        ))}
+        {state.players.map((player, i) => {
+          const isActive = i === state.currentPlayerIndex
+          const isFinished = state.finishers.includes(player.name)
+          const isWinner = player.name === state.winner
+          const profile = avatarProfiles[player.id]
+
+          return (
+            <Chip
+              key={player.id}
+              avatar={
+                profile ? (
+                  <AvatarThumbnail
+                    features={profile.characterFeatures}
+                    ageGroup={profile.ageGroup ?? 'older'}
+                    faceGrid={profile.faceGrid}
+                    size={24}
+                    showArmor={false}
+                  />
+                ) : player.avatarUrl ? (
+                  <img src={player.avatarUrl} alt={player.name} style={{ borderRadius: '50%', width: 24, height: 24 }} />
+                ) : undefined
+              }
+              icon={
+                !profile && !player.avatarUrl
+                  ? isWinner
+                    ? <EmojiEventsIcon sx={{ fontSize: 16, color: '#ffd700 !important' }} />
+                    : isFinished
+                      ? <CheckCircleIcon sx={{ fontSize: 16, color: 'rgba(255,255,255,0.8) !important' }} />
+                      : undefined
+                  : undefined
+              }
+              label={
+                <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                  {(profile || player.avatarUrl) && isWinner && (
+                    <EmojiEventsIcon sx={{ fontSize: 14, color: '#ffd700' }} />
+                  )}
+                  {(profile || player.avatarUrl) && isFinished && !isWinner && (
+                    <CheckCircleIcon sx={{ fontSize: 14, color: 'rgba(255,255,255,0.8)' }} />
+                  )}
+                  {player.name}
+                </Box>
+              }
+              size="small"
+              sx={{
+                bgcolor: player.color,
+                color: 'white',
+                fontWeight: isActive ? 700 : 400,
+                border: isActive ? '2px solid black' : 'none',
+                opacity: isFinished && !isActive ? 0.6 : 1,
+                // Turn transition pulse
+                ...(turnTransition && isActive
+                  ? {
+                      animation: 'turnPulse 0.6s ease-in-out 2',
+                      '@keyframes turnPulse': {
+                        '0%, 100%': { transform: 'scale(1)' },
+                        '50%': { transform: 'scale(1.15)', boxShadow: '0 0 8px rgba(0,0,0,0.3)' },
+                      },
+                    }
+                  : {}),
+                '@media (prefers-reduced-motion: reduce)': {
+                  animation: 'none !important',
+                },
+              }}
+            />
+          )
+        })}
       </Box>
+
+      {/* Non-first finisher banner */}
+      {showFinisherBanner && (
+        <Typography
+          variant="h6"
+          sx={{
+            textAlign: 'center',
+            fontWeight: 700,
+            mb: 1,
+            animation: 'finisherPop 0.5s ease-out',
+            '@keyframes finisherPop': {
+              '0%': { opacity: 0, transform: 'scale(0.8)' },
+              '100%': { opacity: 1, transform: 'scale(1)' },
+            },
+          }}
+        >
+          {showFinisherBanner} finished!
+        </Typography>
+      )}
 
       {/* Board */}
       <GameBoard
         game={game}
         players={displayPlayers}
+        avatarProfiles={avatarProfiles}
         activeSpaceIndex={currentPlayer?.position}
+        activePlayerIndex={state.currentPlayerIndex}
         boardBackground={generatedArt?.boardBackground}
         landingSpaceIndex={landingSpaceIndex}
         spaceAnimation={spaceAnimation}
@@ -419,6 +606,16 @@ export default function GamePlayView({
         {state.turnPhase === TurnPhase.Move && (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             Moving {state.lastRoll} spaces...
+          </Typography>
+        )}
+
+        {state.turnPhase === TurnPhase.SpecialMove && state.pendingSpecialMove && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1, fontWeight: 600 }}>
+            {state.pendingSpecialMove.type === 'forward'
+              ? `Bonus! Moving forward ${state.pendingSpecialMove.amount}...`
+              : state.pendingSpecialMove.type === 'backward'
+                ? `Setback! Going back ${state.pendingSpecialMove.amount}...`
+                : `Shortcut! Jumping to space ${state.pendingSpecialMove.amount}!`}
           </Typography>
         )}
 
@@ -449,22 +646,52 @@ export default function GamePlayView({
                 <Typography variant="body1" sx={{ mb: 2 }}>
                   Played by the Barnes Family!
                 </Typography>
+
+                {/* Game stats summary */}
+                <Box sx={{ mb: 2, p: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    {state.cardsEncountered.length} challenge cards drawn
+                    {' \u00B7 '}Game lasted {gameDurationMinutes} minute{gameDurationMinutes !== 1 ? 's' : ''}
+                  </Typography>
+                  {state.winner && (
+                    <Typography variant="body2" sx={{ fontWeight: 600, mt: 0.5 }}>
+                      Champion: {state.winner}
+                    </Typography>
+                  )}
+                  {state.finishers.length > 1 && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Finish order: {state.finishers.join(', ')}
+                    </Typography>
+                  )}
+                </Box>
+
                 <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, mb: 2, flexWrap: 'wrap' }}>
-                  {state.players.map((p) => (
-                    <Chip
-                      key={p.id}
-                      avatar={
-                        p.avatarUrl ? (
-                          <img src={p.avatarUrl} alt={p.name} style={{ borderRadius: '50%' }} />
-                        ) : undefined
-                      }
-                      label={p.name}
-                      sx={{ bgcolor: p.color, color: 'white', fontWeight: 700 }}
-                    />
-                  ))}
+                  {state.players.map((p) => {
+                    const profile = avatarProfiles[p.id]
+                    return (
+                      <Chip
+                        key={p.id}
+                        avatar={
+                          profile ? (
+                            <AvatarThumbnail
+                              features={profile.characterFeatures}
+                              ageGroup={profile.ageGroup ?? 'older'}
+                              faceGrid={profile.faceGrid}
+                              size={24}
+                              showArmor={false}
+                            />
+                          ) : p.avatarUrl ? (
+                            <img src={p.avatarUrl} alt={p.name} style={{ borderRadius: '50%' }} />
+                          ) : undefined
+                        }
+                        label={p.name}
+                        sx={{ bgcolor: p.color, color: 'white', fontWeight: 700 }}
+                      />
+                    )
+                  })}
                 </Box>
                 <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
-                  <Button variant="outlined" onClick={() => { session.reset(); setShowFinalCelebration(false) }}>
+                  <Button variant="outlined" onClick={() => { session.reset(); setShowFinalCelebration(false); setShowCelebration(false); setShowConfetti(false); setShowSmallConfetti(false); setHasStarted(false) }}>
                     Play Again!
                   </Button>
                   <Button variant="contained" onClick={handleFinishGame}>
@@ -491,11 +718,16 @@ export default function GamePlayView({
                   {state.winner} wins!
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Everyone keep going!
+                  {state.players.length - state.finishers.length} player{state.players.length - state.finishers.length !== 1 ? 's' : ''} still going!
                 </Typography>
-                <Button variant="contained" size="large" onClick={handleNextTurn}>
-                  Continue
-                </Button>
+                <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <Button variant="contained" size="large" onClick={handleNextTurn}>
+                    Keep Playing
+                  </Button>
+                  <Button variant="outlined" onClick={handleFinishGame}>
+                    End Game
+                  </Button>
+                </Box>
               </Box>
             ) : isGameOver && !showCelebration ? (
               // Game over for remaining players
@@ -531,6 +763,8 @@ export default function GamePlayView({
         voiceRecordings={voiceRecordings}
         onFlipStart={sounds.playCardFlip}
         onBossReveal={sounds.playBossReveal}
+        onCorrectAnswer={sounds.playSuccess}
+        onWrongAnswer={sounds.playSetbackSlide}
         muted={sounds.muted}
       />
     </Box>

@@ -1,21 +1,26 @@
 import Box from '@mui/material/Box'
-import type { GeneratedGame } from '../../core/types'
+import type { AvatarProfile, GeneratedGame } from '../../core/types'
 import type { BoardSpaceType } from '../../core/types/workshop'
 import BoardSpace from './BoardSpace'
 
-const COLUMNS = 6
+const COLUMNS = 5
 
 interface PlayerToken {
   name: string
   color: string
   position: number
   avatarUrl?: string
+  id?: string
 }
 
 interface GameBoardProps {
   game: GeneratedGame
   players?: PlayerToken[]
+  /** Avatar profiles keyed by player (child) ID */
+  avatarProfiles?: Record<string, AvatarProfile>
   activeSpaceIndex?: number
+  /** Index of the currently active player */
+  activePlayerIndex?: number
   /** DALL-E generated board background URL */
   boardBackground?: string
   /** Index of space that just had a token land on it */
@@ -29,38 +34,49 @@ interface GameBoardProps {
 export default function GameBoard({
   game,
   players = [],
+  avatarProfiles,
   activeSpaceIndex,
+  activePlayerIndex,
   boardBackground,
   landingSpaceIndex,
   spaceAnimation,
   theme,
 }: GameBoardProps) {
   const spaces = game.board.spaces
+  const totalSpaces = spaces.length
+
+  // Adaptive layout: use fewer columns for shorter boards
+  const columns = totalSpaces <= 15 ? COLUMNS : COLUMNS
 
   // Build a snaking grid: row 0 left→right, row 1 right→left, etc.
   const rows: typeof spaces[] = []
-  for (let i = 0; i < spaces.length; i += COLUMNS) {
-    const row = spaces.slice(i, i + COLUMNS)
-    const rowIndex = Math.floor(i / COLUMNS)
+  for (let i = 0; i < spaces.length; i += columns) {
+    const row = spaces.slice(i, i + columns)
+    const rowIndex = Math.floor(i / columns)
     // Even rows: left→right, odd rows: right→left
     rows.push(rowIndex % 2 === 0 ? row : [...row].reverse())
   }
+
+  // Space minimum size scales with board length for readability
+  const minSpaceSize = totalSpaces <= 15 ? 100 : totalSpaces <= 25 ? 90 : 80
 
   return (
     <Box
       sx={{
         position: 'relative',
         width: '100%',
-        maxWidth: 400,
         mx: 'auto',
         borderRadius: 2,
-        overflow: 'hidden',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'touch',
+        // Scrollable on mobile for larger boards
+        maxHeight: { xs: '70vh', sm: 'none' },
         ...(boardBackground
           ? {
               backgroundImage: `url(${boardBackground})`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
-              p: '4px',
+              p: '6px',
             }
           : {}),
       }}
@@ -77,19 +93,29 @@ export default function GameBoard({
           }}
         />
       )}
-      <Box sx={{ position: 'relative', zIndex: 1 }}>
+      <Box
+        sx={{
+          position: 'relative',
+          zIndex: 1,
+          minWidth: { xs: columns * minSpaceSize, sm: columns * minSpaceSize, md: 'auto' },
+          maxWidth: { md: 800 },
+          mx: 'auto',
+        }}
+      >
         {rows.map((row, rowIndex) => (
           <Box
             key={rowIndex}
             sx={{
               display: 'grid',
-              gridTemplateColumns: `repeat(${COLUMNS}, 1fr)`,
-              gap: '3px',
-              mb: '3px',
+              gridTemplateColumns: `repeat(${columns}, minmax(${minSpaceSize}px, 1fr))`,
+              gap: '5px',
+              mb: '5px',
             }}
           >
             {row.map((space) => {
-              const playersOnSpace = players.filter((p) => p.position === space.index)
+              const playersOnSpace = players
+                .map((p, i) => ({ ...p, isActivePlayer: i === activePlayerIndex }))
+                .filter((p) => p.position === space.index)
               return (
                 <BoardSpace
                   key={space.index}
@@ -98,6 +124,7 @@ export default function GameBoard({
                   label={space.label}
                   color={space.color}
                   players={playersOnSpace}
+                  avatarProfiles={avatarProfiles}
                   isFirst={space.index === 0}
                   isLast={space.index === spaces.length - 1}
                   isActive={activeSpaceIndex === space.index}

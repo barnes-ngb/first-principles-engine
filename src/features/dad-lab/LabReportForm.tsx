@@ -21,6 +21,7 @@ import { artifactsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useSaveState } from '../../core/hooks/useSaveState'
 import type { Child, ChildLabReport, DadLabReport } from '../../core/types'
+import { LAB_FRAMEWORKS } from '../../core/types/dadlab'
 import { DadLabStatus, DadLabType, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
 import { addDoc, updateDoc, doc } from 'firebase/firestore'
@@ -38,6 +39,7 @@ const SUBJECT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: SubjectBucket.Science, label: 'Science' },
   { value: SubjectBucket.Math, label: 'Math' },
   { value: SubjectBucket.Art, label: 'Art' },
+  { value: SubjectBucket.PracticalArts, label: 'Practical Arts' },
   { value: SubjectBucket.PE, label: 'PE' },
   { value: SubjectBucket.Reading, label: 'Reading' },
   { value: SubjectBucket.SocialStudies, label: 'Social Studies' },
@@ -420,6 +422,26 @@ export default function LabReportForm({
           ))}
         </ToggleButtonGroup>
       </Box>
+
+      {/* Framework guide for selected lab type */}
+      {LAB_FRAMEWORKS[labType] && (
+        <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider' }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+            {LAB_FRAMEWORKS[labType].label} Framework
+          </Typography>
+          <Stack direction="row" spacing={0.5} sx={{ mt: 0.5 }} flexWrap="wrap" useFlexGap>
+            {LAB_FRAMEWORKS[labType].steps.map((step, i) => (
+              <Chip
+                key={step}
+                label={`${i + 1}. ${step}`}
+                size="small"
+                variant="outlined"
+                color="primary"
+              />
+            ))}
+          </Stack>
+        </Box>
+      )}
 
       <TextField
         label="Duration (minutes)"

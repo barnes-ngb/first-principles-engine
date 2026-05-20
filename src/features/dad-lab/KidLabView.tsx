@@ -14,6 +14,7 @@ import SectionCard from '../../components/SectionCard'
 import { artifactsCollection, dadLabReportsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import type { DadLabReport } from '../../core/types'
+import { LAB_FRAMEWORKS } from '../../core/types/dadlab'
 import { DadLabStatus, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type { DadLabType } from '../../core/types/enums'
 import { addDoc, updateDoc, doc } from 'firebase/firestore'
@@ -40,6 +41,9 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
   const [observation, setObservation] = useState('')
   const [uploading, setUploading] = useState(false)
   const [artifactRefreshKey, setArtifactRefreshKey] = useState(0)
+
+  // Scientific method step tracking (for experiment-type labs)
+  const [activeStep, setActiveStep] = useState(0)
 
   const isLincoln = childName === 'Lincoln'
   const childKey = childName.toLowerCase()
@@ -233,48 +237,174 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
             />
           </Box>
 
+          {/* Framework steps indicator */}
+          {LAB_FRAMEWORKS[activeLab.labType] && (
+            <Box sx={{ mb: 1 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                {LAB_FRAMEWORKS[activeLab.labType].label}
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                {LAB_FRAMEWORKS[activeLab.labType].steps.map((step, i) => (
+                  <Chip
+                    key={step}
+                    label={step}
+                    size="small"
+                    variant={i <= activeStep ? 'filled' : 'outlined'}
+                    color={i === activeStep ? 'primary' : i < activeStep ? 'success' : 'default'}
+                    onClick={() => setActiveStep(i)}
+                  />
+                ))}
+              </Stack>
+            </Box>
+          )}
+
           <SectionCard title={`${childName}'s Job`}>
             {isLincoln ? (
-              <Stack spacing={1.5}>
-                {activeLab.lincolnRole && (
+              activeLab.labType === 'science' ? (
+                /* Scientific Method Steps for Lincoln */
+                <Stack spacing={2}>
+                  {activeLab.lincolnRole && (
+                    <Box>
+                      <Typography variant="subtitle2" color="primary">Your Role</Typography>
+                      <Typography variant="body2">{activeLab.lincolnRole}</Typography>
+                    </Box>
+                  )}
+
+                  {/* Step 1: The Question */}
+                  <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: activeStep === 0 ? 'primary.50' : 'transparent', border: activeStep === 0 ? '1px solid' : 'none', borderColor: 'primary.200' }}>
+                    <Typography variant="subtitle2" color={activeStep === 0 ? 'primary.main' : 'text.secondary'}>
+                      Step 1: THE QUESTION
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontStyle: 'italic', mb: 1 }}>
+                      &ldquo;{activeLab.question}&rdquo;
+                    </Typography>
+                  </Box>
+
+                  {/* Step 2: Prediction / Hypothesis */}
+                  <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: activeStep === 1 ? 'primary.50' : 'transparent', border: activeStep === 1 ? '1px solid' : 'none', borderColor: 'primary.200' }}>
+                    <Typography variant="subtitle2" color={activeStep === 1 ? 'primary.main' : 'text.secondary'}>
+                      Step 2: MY PREDICTION
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      What do you THINK will happen?
+                    </Typography>
+                    <AudioRecorder onCapture={handleAudioCapture} uploading={uploading} />
+                    <TextField
+                      placeholder="I think..."
+                      value={prediction}
+                      onChange={(e) => setPrediction(e.target.value)}
+                      onBlur={() => handleSaveField('prediction', prediction)}
+                      fullWidth
+                      multiline
+                      minRows={2}
+                      size="small"
+                      sx={{ mt: 1 }}
+                    />
+                  </Box>
+
+                  {/* Step 3: The Test */}
+                  <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: activeStep === 2 ? 'primary.50' : 'transparent', border: activeStep === 2 ? '1px solid' : 'none', borderColor: 'primary.200' }}>
+                    <Typography variant="subtitle2" color={activeStep === 2 ? 'primary.main' : 'text.secondary'}>
+                      Step 3: THE TEST
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      What did we do? Add photos!
+                    </Typography>
+                    <PhotoCapture onCapture={handlePhotoCapture} uploading={uploading} multiple />
+                  </Box>
+
+                  {/* Step 4: What Happened */}
+                  <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: activeStep === 3 ? 'primary.50' : 'transparent', border: activeStep === 3 ? '1px solid' : 'none', borderColor: 'primary.200' }}>
+                    <Typography variant="subtitle2" color={activeStep === 3 ? 'primary.main' : 'text.secondary'}>
+                      Step 4: WHAT HAPPENED
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      What did we observe? Was it what you expected?
+                    </Typography>
+                    <AudioRecorder onCapture={handleAudioCapture} uploading={uploading} />
+                  </Box>
+
+                  {/* Step 5: Conclude + Teach London */}
+                  <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: activeStep === 4 ? 'primary.50' : 'transparent', border: activeStep === 4 ? '1px solid' : 'none', borderColor: 'primary.200' }}>
+                    <Typography variant="subtitle2" color={activeStep === 4 ? 'primary.main' : 'text.secondary'}>
+                      Step 5: WHY? + TEACH LONDON
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      Why did it happen that way? Explain to London!
+                    </Typography>
+                    <AudioRecorder onCapture={handleAudioCapture} uploading={uploading} />
+                    <TextField
+                      placeholder="It happened because..."
+                      value={explanation}
+                      onChange={(e) => setExplanation(e.target.value)}
+                      onBlur={() => handleSaveField('explanation', explanation)}
+                      fullWidth
+                      multiline
+                      minRows={2}
+                      size="small"
+                      sx={{ mt: 1 }}
+                    />
+                  </Box>
+
+                  {/* Step navigation */}
+                  <Stack direction="row" justifyContent="space-between">
+                    <Chip
+                      label="Previous"
+                      onClick={() => setActiveStep(Math.max(0, activeStep - 1))}
+                      disabled={activeStep === 0}
+                      variant="outlined"
+                    />
+                    <Chip
+                      label={activeStep === 4 ? 'Done!' : 'Next Step'}
+                      onClick={() => setActiveStep(Math.min(4, activeStep + 1))}
+                      disabled={activeStep === 4}
+                      color="primary"
+                    />
+                  </Stack>
+                </Stack>
+              ) : (
+                /* Default Lincoln view for non-science labs */
+                <Stack spacing={1.5}>
+                  {activeLab.lincolnRole && (
+                    <Box>
+                      <Typography variant="subtitle2" color="primary">
+                        Your Role
+                      </Typography>
+                      <Typography variant="body2">{activeLab.lincolnRole}</Typography>
+                    </Box>
+                  )}
                   <Box>
                     <Typography variant="subtitle2" color="primary">
-                      Your Role
+                      My Prediction
                     </Typography>
-                    <Typography variant="body2">{activeLab.lincolnRole}</Typography>
+                    <TextField
+                      placeholder="What do you think will happen?"
+                      value={prediction}
+                      onChange={(e) => setPrediction(e.target.value)}
+                      onBlur={() => handleSaveField('prediction', prediction)}
+                      fullWidth
+                      multiline
+                      minRows={2}
+                      size="small"
+                    />
                   </Box>
-                )}
-                <Box>
-                  <Typography variant="subtitle2" color="primary">
-                    My Prediction
-                  </Typography>
-                  <TextField
-                    placeholder="What do you think will happen?"
-                    value={prediction}
-                    onChange={(e) => setPrediction(e.target.value)}
-                    onBlur={() => handleSaveField('prediction', prediction)}
-                    fullWidth
-                    multiline
-                    minRows={2}
-                    size="small"
-                  />
-                </Box>
-                <Box>
-                  <Typography variant="subtitle2" color="primary">
-                    Teach London
-                  </Typography>
-                  <TextField
-                    placeholder="Explain what happened to London in your own words"
-                    value={explanation}
-                    onChange={(e) => setExplanation(e.target.value)}
-                    onBlur={() => handleSaveField('explanation', explanation)}
-                    fullWidth
-                    multiline
-                    minRows={2}
-                    size="small"
-                  />
-                </Box>
-              </Stack>
+                  <Box>
+                    <Typography variant="subtitle2" color="primary">
+                      Teach London
+                    </Typography>
+                    <TextField
+                      placeholder="Explain what happened to London in your own words"
+                      value={explanation}
+                      onChange={(e) => setExplanation(e.target.value)}
+                      onBlur={() => handleSaveField('explanation', explanation)}
+                      fullWidth
+                      multiline
+                      minRows={2}
+                      size="small"
+                    />
+                  </Box>
+                </Stack>
+              )
             ) : (
               <Stack spacing={2}>
                 {activeLab.londonRole && (

@@ -2,6 +2,13 @@ import { HttpsError } from "firebase-functions/v2/https";
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
+import { buildContextForTask } from "../contextSlices.js";
+
+/**
+ * Task: workshop
+ * Context: charter + childProfile + workshopGames (via buildContextForTask)
+ * Model: Sonnet
+ */
 
 // ── Workshop prompt builder ─────────────────────────────────────
 
@@ -120,7 +127,10 @@ IMPORTANT:
 - Generate 8-16 challenge cards mixing the types ${childName} requested
 - Every challenge space on the board must have a corresponding challengeCardId
 - The first space (index 0) is Start, the last space is Finish
-- Include 2-4 bonus spaces ("Go forward!") and 1-2 setback spaces ("Oh no!")
+- Include 2-4 bonus spaces. Labels MUST include a number: "Go forward 2!" or "Boost — move ahead 3!". Type: "bonus".
+- Include 1-2 setback spaces. Labels MUST include a number: "Go back 2!" or "Oops — slip back 1!". Type: "setback".
+- Include 0-1 shortcut spaces. Labels should say where to jump: "Shortcut — jump to space 20!". Type: "special".
+- Bonus/setback/special space labels must always contain a movement number (1-3). This is critical for gameplay.
 - Each card needs both "content" and "readAloudText" — the readAloudText is what gets spoken
 - subjectBucket must be one of: Reading, LanguageArts, Math, Art, Other
 - reading cards → Reading or LanguageArts, math cards → Math, story cards → LanguageArts, action cards → Other`;
@@ -423,11 +433,23 @@ export const handleWorkshop = async (
   const isAdventure = workshopInput.gameType === "adventure";
   const isCards = workshopInput.gameType === "cards";
 
-  const systemPrompt = isCards
+  // Load shared context (charter + child profile + workshop games)
+  const contextSections = await buildContextForTask("workshop", {
+    db,
+    familyId,
+    childId,
+    childData,
+    snapshotData: ctx.snapshotData,
+  });
+  const familyContext = contextSections.join("\n\n");
+
+  const gamePrompt = isCards
     ? buildCardGamePrompt(childData.name, childData.grade, snapshotData, workshopInput)
     : isAdventure
       ? buildAdventurePrompt(childData.name, childData.grade, snapshotData, workshopInput)
       : buildWorkshopPrompt(childData.name, childData.grade, snapshotData, workshopInput);
+
+  const systemPrompt = `${familyContext}\n\n${gamePrompt}`;
 
   const model = modelForTask("workshop");
 

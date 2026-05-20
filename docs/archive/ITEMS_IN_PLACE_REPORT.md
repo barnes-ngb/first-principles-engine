@@ -76,7 +76,7 @@ All under `families/{familyId}/`:
 | Plan A / Plan B toggle | :white_check_mark: | `TodayPage.tsx:550-558` — ToggleButtonGroup for A/B; Plan B filters to only Reading + Math blocks (`TodayPage.tsx:566-568`) |
 | Kid role logging never overwrites another child's log | :white_check_mark: | Each DayLog is keyed by `${childId}_${date}` (`TodayPage.tsx:81`), so child A's writes cannot collide with child B |
 | Lincoln's "noise-cut" routine items (literacy engine) | :white_check_mark: | `RoutineSection.tsx:170-378` renders PhonemicAwareness, PhonicsLesson, DecodableReading, SpellingDictation when present in items Set; seed gives Lincoln exactly these items |
-| London's routine items configured | :large_orange_diamond: | `seed.ts:75` — London has no `routineItems` defined, so she falls back to `ALL_ROUTINE_ITEMS` (handwriting, spelling, sightWords, minecraft, readingEggs, math, speech) — these are the **legacy** items, not London-specific ones. London should have her own spec. |
+| London's routine items configured | :large_orange_diamond: | `seed.ts:75` — London has no `routineItems` defined, so he falls back to `ALL_ROUTINE_ITEMS` (handwriting, spelling, sightWords, minecraft, readingEggs, math, speech) — these are the **legacy** items, not London-specific ones. London should have his own spec. |
 | Empty state — no children | :white_check_mark: | `TodayPage.tsx:511` — `ChildSelector` shows `"Add a child to start logging."` when empty |
 | Empty state — no daylog yet | :white_check_mark: | `TodayPage.tsx:514-520` — shows loading spinner when `selectedChildId` set but `dayLog` is null; auto-creates default on first load (`TodayPage.tsx:170-179`) |
 | DayLog default creation uses child config | :white_check_mark: | `TodayPage.tsx:171-176` — `createDefaultDayLog(selectedChildId, today, selectedChild?.dayBlocks, selectedChild?.routineItems)` |
@@ -184,9 +184,9 @@ All under `families/{familyId}/`:
 
 ### 4. London has no spec'd routine items or London-specific ladders
 
-**Risk:** London falls back to legacy routine items (handwriting, spelling, sightWords, etc.) which may not match her actual curriculum. She only has 1 ladder (math, 2 rungs) vs Lincoln's 6 ladders.
+**Risk:** London falls back to legacy routine items (handwriting, spelling, sightWords, etc.) which may not match his actual curriculum. He only has 1 ladder (math, 2 rungs) vs Lincoln's 6 ladders.
 **Why:** `seed.ts:66-76` — London child has `dayBlocks` but no `routineItems`. No London-specific ladders beyond basic math.
-**Smallest fix:** Define London's `routineItems` in seed (decide which items she uses). Add at least 2-3 London ladders with age-appropriate rungs. ~60 lines in `seed.ts`. Ideally: create `docs/specs/london_engine.md` first.
+**Smallest fix:** Define London's `routineItems` in seed (decide which items he uses). Add at least 2-3 London ladders with age-appropriate rungs. ~60 lines in `seed.ts`. Ideally: create `docs/specs/london_engine.md` first.
 **Files:** `src/core/data/seed.ts`, `docs/specs/london_engine.md` (new)
 
 ### 5. "Link Evidence" button on LaddersPage is a no-op
@@ -234,7 +234,7 @@ All under `families/{familyId}/`:
 
 ### Slice 3: London routine items + starter ladders
 
-**Goal:** London has her own routine spec and at least 3 age-appropriate ladders.
+**Goal:** London has his own routine spec and at least 3 age-appropriate ladders.
 
 **Acceptance criteria (click path):**
 - Seed demo data

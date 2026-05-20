@@ -4,7 +4,7 @@
  * Assembles weekly plan generation prompts from:
  * - Base system prompt (charter values)
  * - Child context (skill snapshot, supports, stop rules)
- * - Session context (pace data, energy, recent history)
+ * - Session context (pace data, energy)
  * - Assignment candidates (from planner conversation)
  * - Output schema (DraftWeeklyPlan JSON)
  */
@@ -15,7 +15,6 @@ import type {
   Child,
   PaceGaugeResult,
   PrioritySkill,
-  Session,
   SkillSnapshot,
   StopRule,
   SupportDefault,
@@ -42,13 +41,14 @@ Always align recommendations with these values. Be concise, practical, and encou
 
 export const PLANNER_TASK_INSTRUCTIONS = `You are generating a weekly plan for a homeschool child. Your job is to distribute assignments across the school week (Monday–Friday) while respecting:
 
-1. **Time budgets**: Do not exceed the available hours per day.
+1. **Time budgets (HARD CAP)**: The sum of estimatedMinutes for each day MUST be ≤ the daily budget. If routine + app blocks alone exceed the budget, reduce routine items — do NOT generate a plan that overflows and then warn. The plan MUST fit. A shorter plan that fits beats a longer plan that overflows. Recent 13-item days had 0% completion; aim for 8–10 items/day.
 2. **Split-block scheduling**: Shelly teaches one child at a time. Direct-instruction items should alternate with independent-work items.
 3. **Stop rules**: If an assignment matches a stop-rule trigger, modify or shorten it per the rule's action.
 4. **Skill priorities**: Emerging skills get daily micro reps (5–8 min). Developing/supported skills get 3×/week practice (15 min).
-5. **Energy awareness**: On low-energy or overwhelmed days, reduce load — prefer minimum viable day items.
-6. **Pace data**: If a workbook is behind pace, front-load new lessons Mon/Tue. If ahead, allow lighter days.
+5. **Energy awareness**: On low-energy or overwhelmed days, the budget is effectively HALVED — generate a minimum viable day plan with fewer items (not the same items with a warning).
+6. **Curriculum coverage**: Use coverage data to calibrate what skills the child has covered and what's coming up next. Focus on readiness, not pace.
 7. **App blocks**: These are fixed daily items (e.g., Reading Eggs) that must appear every day.
+8. **Per-subject time caps**: When subject time defaults are provided, treat them as the TOTAL minutes per subject per day (not per item). Do not add multiple items in one subject that together exceed its daily minutes.
 
 Your output must be valid JSON matching the DraftWeeklyPlan schema.`
 
@@ -95,7 +95,6 @@ export interface PlannerPromptInputs {
   hoursPerDay: number
   energyLevel?: EnergyLevel
   paceData?: PaceGaugeResult[]
-  recentSessions?: Pick<Session, 'date' | 'streamId' | 'result' | 'notes'>[]
   energyPatterns?: EnergyPatternResult
 }
 
@@ -144,24 +143,9 @@ export function formatAppBlocksForPrompt(appBlocks: AppBlock[]): string {
 }
 
 export function formatPaceDataForPrompt(paceData: PaceGaugeResult[]): string {
-  if (paceData.length === 0) return 'No pace data available.'
+  if (paceData.length === 0) return 'No curriculum coverage data available.'
   return paceData
-    .map(
-      (p) =>
-        `- ${p.workbookName}: status=${p.status}, ${p.plannedPerWeek}/${p.requiredPerWeek} per week (delta ${p.delta > 0 ? '+' : ''}${p.delta}). ${p.suggestion}`,
-    )
-    .join('\n')
-}
-
-export function formatRecentSessionsForPrompt(
-  sessions: Pick<Session, 'date' | 'streamId' | 'result' | 'notes'>[],
-): string {
-  if (sessions.length === 0) return 'No recent sessions.'
-  return sessions
-    .map((s) => {
-      const notes = s.notes ? ` — ${s.notes}` : ''
-      return `- ${s.date} ${s.streamId}: ${s.result}${notes}`
-    })
+    .map((p) => `- ${p.workbookName}: ${p.coverageText}`)
     .join('\n')
 }
 
@@ -213,15 +197,11 @@ export function buildSessionContextSection(inputs: PlannerPromptInputs): string 
   const lines: string[] = ['## Session Context']
 
   if (inputs.paceData && inputs.paceData.length > 0) {
-    lines.push('', '### Pace Data', formatPaceDataForPrompt(inputs.paceData))
-  }
-
-  if (inputs.recentSessions && inputs.recentSessions.length > 0) {
-    lines.push('', '### Recent Sessions', formatRecentSessionsForPrompt(inputs.recentSessions))
+    lines.push('', '### Curriculum Coverage', formatPaceDataForPrompt(inputs.paceData))
   }
 
   if (lines.length === 1) {
-    lines.push('', 'No session history or pace data available.')
+    lines.push('', 'No session history or curriculum coverage data available.')
   }
 
   return lines.join('\n')

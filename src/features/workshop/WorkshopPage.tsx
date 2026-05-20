@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import CreativeTimer from '../../components/CreativeTimer'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -22,12 +23,17 @@ import type {
   VoiceRecordingMap,
 } from '../../core/types'
 import { GamePhase, GameType, PlaytestStatus, WorkshopStatus } from '../../core/types/workshop'
+import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 import type { CardRevision } from '../../core/types/workshop'
 import type { WizardState } from './useWorkshopWizard'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import type { ChatResponse } from '../../core/ai/useAI'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useProfile } from '../../core/profile/useProfile'
+import { SubjectBucket, UserProfile } from '../../core/types/enums'
 import { db, storyGamesCollection, stripUndefined } from '../../core/firebase/firestore'
 import WorkshopWizard from './WorkshopWizard'
 import GamePlayView from './GamePlayView'
@@ -57,6 +63,9 @@ import {
   recordCardGamePlaySession,
 } from './workshopUtils'
 import MyGamesGallery from './MyGamesGallery'
+import WorldMap from './WorldMap'
+import { useWorkshopGames } from './useWorkshopGames'
+import { useTTS } from '../../core/hooks/useTTS'
 import GameCreationScreen from './GameCreationScreen'
 import VoiceRecordingStep from './VoiceRecordingStep'
 import { generateAllArt, generateAdventureArt, generateCardGameArt } from './workshopArt'
@@ -114,13 +123,40 @@ export default function WorkshopPage() {
   const [activePlaytestSession, setActivePlaytestSession] = useState<PlaytestSession | null>(null)
   // Retry state: preserve last wizard inputs for retry on generation failure
   const [lastWizardInputs, setLastWizardInputs] = useState<{ inputs: StoryInputs; gameType: GameType } | null>(null)
+  // Last game result for finished screen stats
+  const [lastGameResult, setLastGameResult] = useState<{
+    winner?: string
+    durationMinutes?: number
+    cardsEncountered?: number
+    pathLength?: number
+    endingType?: string
+  } | null>(null)
 
   const { chat, generateImage } = useAI()
   const familyId = useFamilyId()
   const { activeChildId, children } = useActiveChild()
+  const { profile } = useProfile()
+  const isParent = profile === UserProfile.Parents
 
   const isAdventure = currentGame?.gameType === GameType.Adventure
   const isCards = currentGame?.gameType === GameType.Cards
+
+  // ── World Map data + TTS announcement ────────────────────────────
+  const { games: allGames } = useWorkshopGames(familyId)
+  const tts = useTTS()
+  const childGames = useMemo(
+    () => allGames.filter((g) => g.childId === activeChildId && g.status !== 'draft'),
+    [allGames, activeChildId],
+  )
+  const mapAnnouncedRef = useRef(false)
+  useEffect(() => {
+    const key = `workshop-map-announced-${activeChildId}`
+    if (childGames.length >= 3 && activeChildId && !mapAnnouncedRef.current && localStorage.getItem(key) !== 'true') {
+      mapAnnouncedRef.current = true
+      localStorage.setItem(key, 'true')
+      tts.speak("Your world is growing! You've created 3 games. Tap the map to explore your worlds!")
+    }
+  }, [childGames.length, activeChildId, tts])
 
   // ── Draft auto-save helpers ──────────────────────────────────────
 
@@ -193,7 +229,7 @@ export default function WorkshopPage() {
             storyInputs: partialInputs,
             currentWizardStep: step,
           } as Omit<StoryGame, 'id'>
-          const docRef = await addDoc(storyGamesCollection(familyId), draftDoc)
+          const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(draftDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
           setDraftDocId(docRef.id)
           return docRef.id
         } catch (err) {
@@ -211,6 +247,7 @@ export default function WorkshopPage() {
     setPhase(GamePhase.Wizard)
     setGenerateError(null)
     setDraftDocId(null)
+    setLastGameResult(null)
   }, [])
 
   const handleResumeDraft = useCallback((game: StoryGame) => {
@@ -328,7 +365,7 @@ export default function WorkshopPage() {
             playSessions: [],
             generatedArt,
           }
-          const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
+          const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(gameDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
           setCurrentGame({ ...gameDoc, id: docRef.id })
         }
 
@@ -430,7 +467,7 @@ export default function WorkshopPage() {
             playSessions: [],
             generatedArt,
           }
-          const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
+          const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(gameDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
           setCurrentGame({ ...gameDoc, id: docRef.id })
         }
 
@@ -538,7 +575,7 @@ export default function WorkshopPage() {
             playSessions: [],
             generatedArt,
           }
-          const docRef = await addDoc(storyGamesCollection(familyId), gameDoc)
+          const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(gameDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
           setCurrentGame({ ...gameDoc, id: docRef.id })
         }
 
@@ -619,7 +656,7 @@ export default function WorkshopPage() {
       try {
         await updateDoc(
           doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-          { ...clearField, updatedAt: new Date().toISOString() },
+          stripUndefined({ ...clearField, updatedAt: new Date().toISOString() }),
         )
         setCurrentGame({ ...currentGame, ...clearField })
       } catch (err) {
@@ -637,12 +674,18 @@ export default function WorkshopPage() {
   // ── Play ─────────────────────────────────────────────────────────
 
   const handlePlay = useCallback(() => {
+    setLastGameResult(null)
     setPhase(GamePhase.Playing)
   }, [])
 
   const handleGameFinished = useCallback(
     async (result: GamePlayResult) => {
       setPhase(GamePhase.Finished)
+      setLastGameResult({
+        winner: result.winner ?? undefined,
+        durationMinutes: result.durationMinutes,
+        cardsEncountered: result.cardsEncountered.length,
+      })
 
       if (!familyId || !activeChildId || !currentGame?.generatedGame || !currentGame.id) return
 
@@ -650,7 +693,7 @@ export default function WorkshopPage() {
         await Promise.all([
           updateDoc(
             doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-            { activeSession: null, updatedAt: new Date().toISOString() },
+            stripUndefined({ activeSession: null, updatedAt: new Date().toISOString() }),
           ),
           logWorkshopHours(
             familyId,
@@ -671,6 +714,20 @@ export default function WorkshopPage() {
           markWorkshopPlayed(familyId, activeChildId, currentGame.generatedGame.title),
         ])
         setCurrentGame({ ...currentGame, activeSession: null })
+
+        // Award 5 XP + 3 diamonds for workshop play
+        const dedupBase = `workshop_${currentGame.id}_${new Date().toISOString().slice(0, 10)}`
+        void addXpEvent(familyId, activeChildId, 'MANUAL_AWARD', 5, `${dedupBase}-xp`, {
+          reason: `Workshop: ${currentGame.generatedGame.title}`,
+        }).catch((err) => console.warn('[XP] Workshop award failed:', err))
+        void addDiamondEvent({
+          familyId,
+          childId: activeChildId,
+          amount: 3,
+          type: DIAMOND_EVENTS.WORKSHOP_GAME,
+          reason: `Workshop: ${currentGame.generatedGame.title}`,
+          dedupKey: `${dedupBase}-diamond`,
+        }).catch((err) => console.warn('[Diamond] Workshop award failed:', err))
       } catch (err) {
         console.warn('Failed to log workshop results:', err)
       }
@@ -681,6 +738,11 @@ export default function WorkshopPage() {
   const handleAdventureFinished = useCallback(
     async (result: AdventurePlayResult) => {
       setPhase(GamePhase.Finished)
+      setLastGameResult({
+        durationMinutes: result.durationMinutes,
+        pathLength: result.pathTaken.length,
+        endingType: result.endingType,
+      })
 
       if (!familyId || !activeChildId || !currentGame?.adventureTree || !currentGame.id) return
 
@@ -688,7 +750,7 @@ export default function WorkshopPage() {
         await Promise.all([
           updateDoc(
             doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-            { activeAdventureSession: null, updatedAt: new Date().toISOString() },
+            stripUndefined({ activeAdventureSession: null, updatedAt: new Date().toISOString() }),
           ),
           logAdventureHours(
             familyId,
@@ -716,6 +778,20 @@ export default function WorkshopPage() {
           markWorkshopPlayed(familyId, activeChildId, currentGame.storyInputs.theme + ' Adventure'),
         ])
         setCurrentGame({ ...currentGame, activeAdventureSession: null })
+
+        // Award 5 XP + 3 diamonds for adventure play
+        const dedupBase = `workshop_${currentGame.id}_${new Date().toISOString().slice(0, 10)}`
+        void addXpEvent(familyId, activeChildId, 'MANUAL_AWARD', 5, `${dedupBase}-xp`, {
+          reason: `Adventure: ${currentGame.storyInputs.theme}`,
+        }).catch((err) => console.warn('[XP] Adventure award failed:', err))
+        void addDiamondEvent({
+          familyId,
+          childId: activeChildId,
+          amount: 3,
+          type: DIAMOND_EVENTS.WORKSHOP_GAME,
+          reason: `Adventure: ${currentGame.storyInputs.theme}`,
+          dedupKey: `${dedupBase}-diamond`,
+        }).catch((err) => console.warn('[Diamond] Adventure award failed:', err))
       } catch (err) {
         console.warn('Failed to log adventure results:', err)
       }
@@ -729,7 +805,7 @@ export default function WorkshopPage() {
       try {
         await updateDoc(
           doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-          { activeAdventureSession: session, updatedAt: new Date().toISOString() },
+          stripUndefined({ activeAdventureSession: session, updatedAt: new Date().toISOString() }),
         )
       } catch (err) {
         console.warn('Failed to save adventure session:', err)
@@ -743,6 +819,10 @@ export default function WorkshopPage() {
   const handleCardGameFinished = useCallback(
     async (result: MatchingPlayResult | CollectingPlayResult | BattlePlayResult) => {
       setPhase(GamePhase.Finished)
+      setLastGameResult({
+        winner: result.winner ?? undefined,
+        durationMinutes: result.durationMinutes,
+      })
 
       if (!familyId || !activeChildId || !currentGame?.cardGame || !currentGame.id) return
 
@@ -750,7 +830,7 @@ export default function WorkshopPage() {
         await Promise.all([
           updateDoc(
             doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-            { activeCardGameSession: null, updatedAt: new Date().toISOString() },
+            stripUndefined({ activeCardGameSession: null, updatedAt: new Date().toISOString() }),
           ),
           logCardGameHours(
             familyId,
@@ -774,6 +854,20 @@ export default function WorkshopPage() {
           markWorkshopPlayed(familyId, activeChildId, currentGame.storyInputs.theme + ' Card Game'),
         ])
         setCurrentGame({ ...currentGame, activeCardGameSession: null })
+
+        // Award 5 XP + 3 diamonds for card game play
+        const dedupBase = `workshop_${currentGame.id}_${new Date().toISOString().slice(0, 10)}`
+        void addXpEvent(familyId, activeChildId, 'MANUAL_AWARD', 5, `${dedupBase}-xp`, {
+          reason: `Card Game: ${currentGame.storyInputs.theme}`,
+        }).catch((err) => console.warn('[XP] Card game award failed:', err))
+        void addDiamondEvent({
+          familyId,
+          childId: activeChildId,
+          amount: 3,
+          type: DIAMOND_EVENTS.WORKSHOP_GAME,
+          reason: `Card Game: ${currentGame.storyInputs.theme}`,
+          dedupKey: `${dedupBase}-diamond`,
+        }).catch((err) => console.warn('[Diamond] Card game award failed:', err))
       } catch (err) {
         console.warn('Failed to log card game results:', err)
       }
@@ -787,7 +881,7 @@ export default function WorkshopPage() {
       try {
         await updateDoc(
           doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-          { activeCardGameSession: session, updatedAt: new Date().toISOString() },
+          stripUndefined({ activeCardGameSession: session, updatedAt: new Date().toISOString() }),
         )
       } catch (err) {
         console.warn('Failed to save card game session:', err)
@@ -835,10 +929,10 @@ export default function WorkshopPage() {
       const existingSessions = currentGame.playtestSessions ?? []
       await updateDoc(
         doc(db, `families/${familyId}/storyGames/${currentGame.id}`),
-        {
+        stripUndefined({
           playtestSessions: [...existingSessions, session],
           updatedAt: new Date().toISOString(),
-        },
+        }),
       )
 
       // Log hours for tester
@@ -987,7 +1081,7 @@ export default function WorkshopPage() {
           const merged: GeneratedArt = { ...game.generatedArt, ...result.art }
           await updateDoc(
             doc(db, `families/${familyId}/storyGames/${game.id}`),
-            { generatedArt: merged, updatedAt: new Date().toISOString() },
+            stripUndefined({ generatedArt: merged, updatedAt: new Date().toISOString() }),
           )
           if (currentGame?.id === game.id) {
             setCurrentGame({ ...currentGame, generatedArt: merged })
@@ -1018,6 +1112,10 @@ export default function WorkshopPage() {
 
   return (
     <Box sx={{ p: 2, maxWidth: 700, mx: 'auto' }}>
+      <CreativeTimer
+        defaultSubject={SubjectBucket.Art}
+        defaultDescription="Game design"
+      />
       {phase === GamePhase.Idle && (
         <Box sx={{ textAlign: 'center', py: 6 }}>
           <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
@@ -1042,12 +1140,22 @@ export default function WorkshopPage() {
             Create a New Game
           </Button>
 
+          {/* World Map — appears after 3+ games */}
+          {familyId && activeChildId && (
+            <WorldMap
+              games={childGames}
+              childName={children.find((c) => c.id === activeChildId)?.name}
+              onSelectGame={handleSelectExistingGame}
+            />
+          )}
+
           {/* My Games gallery */}
           {familyId && activeChildId && (
             <MyGamesGallery
               familyId={familyId}
               childId={activeChildId}
               children={children}
+              isParent={isParent}
               onSelectGame={handleSelectExistingGame}
               onPlaytestGame={handleStartPlaytest}
               onReviewPlaytest={handleReviewPlaytest}
@@ -1155,13 +1263,16 @@ export default function WorkshopPage() {
             />
           )}
           {currentGame.cardGame && !currentGame.generatedGame && !currentGame.adventureTree && (
-            // Card games skip voice recording step for now — go straight to ready
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <Typography variant="h6" sx={{ mb: 2 }}>Your card game is ready!</Typography>
-              <Button variant="contained" onClick={handleRecordingSkip}>
-                Let&apos;s Play!
-              </Button>
-            </Box>
+            <VoiceRecordingStep
+              game={currentGame.cardGame}
+              gameId={currentGame.id}
+              familyId={familyId}
+              childId={activeChildId}
+              childName={children.find((c) => c.id === activeChildId)?.name ?? 'You'}
+              existingRecordings={currentGame.voiceRecordings}
+              onDone={handleRecordingDone}
+              onSkip={handleRecordingSkip}
+            />
           )}
         </>
       )}
@@ -1413,14 +1524,59 @@ export default function WorkshopPage() {
 
       {phase === GamePhase.Finished && (currentGame?.generatedGame || currentGame?.adventureTree || currentGame?.cardGame) && (
         <Box sx={{ textAlign: 'center', py: 6 }}>
+          {currentGame?.generatedArt?.titleScreen && (
+            <Box
+              component="img"
+              src={currentGame.generatedArt.titleScreen}
+              alt={gameTitle ?? ''}
+              sx={{ width: '100%', maxWidth: 300, borderRadius: 3, mb: 2, mx: 'auto', display: 'block' }}
+            />
+          )}
+
           <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
             {isCards ? 'Card Game Complete!' : isAdventure ? 'Adventure Complete!' : 'Game Over!'}
           </Typography>
-          <Typography variant="h6" color="text.secondary" sx={{ mb: 3 }}>
-            {gameTitle} — Played by the Barnes Family!
+
+          <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+            {gameTitle}
           </Typography>
-          <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-            <Button variant="contained" onClick={handlePlay}>
+
+          {lastGameResult && (
+            <Box sx={{ mb: 3 }}>
+              {lastGameResult.winner && (
+                <Typography variant="body1" sx={{ mb: 0.5 }}>
+                  Winner: <strong>{currentGame?.storyInputs.players.find((p) => p.id === lastGameResult.winner)?.name ?? lastGameResult.winner}</strong>
+                </Typography>
+              )}
+              {lastGameResult.durationMinutes != null && (
+                <Typography variant="body2" color="text.secondary">
+                  {lastGameResult.durationMinutes} minutes played
+                </Typography>
+              )}
+              {lastGameResult.cardsEncountered != null && lastGameResult.cardsEncountered > 0 && (
+                <Typography variant="body2" color="text.secondary">
+                  {lastGameResult.cardsEncountered} challenge cards faced
+                </Typography>
+              )}
+              {lastGameResult.pathLength != null && (
+                <Typography variant="body2" color="text.secondary">
+                  {lastGameResult.pathLength} story scenes explored
+                </Typography>
+              )}
+              {lastGameResult.endingType === 'victory' && (
+                <Typography variant="body2" color="success.main" sx={{ fontWeight: 600, mt: 0.5 }}>
+                  Victory ending!
+                </Typography>
+              )}
+            </Box>
+          )}
+
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Played by the Barnes Family!
+          </Typography>
+
+          <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <Button variant="contained" size="large" onClick={handlePlay}>
               Play Again
             </Button>
             <Button variant="outlined" onClick={handleBackToWorkshop}>

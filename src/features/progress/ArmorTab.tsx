@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import {
   collection,
+  doc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   where,
@@ -13,17 +15,22 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import LinearProgress from '@mui/material/LinearProgress'
+import MenuItem from '@mui/material/MenuItem'
 import Snackbar from '@mui/material/Snackbar'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 
 import { useFamilyId } from '../../core/auth/useAuth'
+import { avatarProfilesCollection, db } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import { db } from '../../core/firebase/firestore'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { checkAndUnlockArmor } from '../../core/xp/checkAndUnlockArmor'
-import { useXpLedger } from '../minecraft/useXpLedger'
+import { useXpLedger } from '../../core/xp/useXpLedger'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../avatar/voxel/buildArmorPiece'
 import {
   calculateTier,
@@ -34,28 +41,65 @@ import {
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-function formatRelativeTime(isoString: string): string {
-  const now = Date.now()
-  const then = new Date(isoString).getTime()
-  const diffMs = now - then
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHours = Math.floor(diffMin / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  const diffDays = Math.floor(diffHours / 24)
-  if (diffDays < 7) return `${diffDays}d ago`
-  return new Date(isoString).toLocaleDateString()
+function formatTime(isoString: string): string {
+  const d = new Date(isoString)
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+function getDayLabel(isoString: string): string {
+  const d = new Date(isoString)
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const eventDay = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const diffDays = Math.round((today.getTime() - eventDay.getTime()) / 86400000)
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  return eventDay.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
+}
+
+function getEventIcon(type?: string): string {
+  switch (type) {
+    case 'CHECKLIST_ITEM':
+    case 'CHECKLIST_DAY_COMPLETE':
+    case 'DAILY_ALL_COMPLETE':
+    case 'WEEKLY_ALL_COMPLETE':
+      return '⛏️'
+    case 'QUEST_DIAMOND':
+    case 'QUEST_COMPLETE':
+      return '💎'
+    case 'CHECKLIST_PRAYER':
+      return '🙏'
+    case 'DAD_LAB_COMPLETE':
+      return '🔬'
+    case 'BOOK_READ':
+    case 'BOOK_PAGE_READ':
+      return '📚'
+    case 'EVALUATION_COMPLETE':
+      return '📝'
+    case 'ARMOR_DAILY_COMPLETE':
+      return '🛡️'
+    case 'MANUAL_AWARD':
+      return '⭐'
+    default:
+      return '⭐'
+  }
 }
 
 function getEventLabel(event: XpLedgerEvent): string {
   if (event.meta?.reason) return event.meta.reason
   switch (event.type) {
-    case 'MANUAL_AWARD': return 'Parent awarded XP'
+    case 'MANUAL_AWARD': return event.meta?.awardType ? `${event.meta.awardType} — parent` : 'Parent awarded XP'
+    case 'CHECKLIST_ITEM': return 'Checklist item completed'
     case 'CHECKLIST_DAY_COMPLETE': return 'Completed daily checklist'
+    case 'CHECKLIST_PRAYER': return 'Morning prayer'
+    case 'DAILY_ALL_COMPLETE': return 'Daily bonus — all items done'
+    case 'WEEKLY_ALL_COMPLETE': return 'Weekly bonus — all 5 days!'
     case 'QUEST_DIAMOND': return 'Knowledge Mine diamonds'
+    case 'QUEST_COMPLETE': return 'Quest completed'
     case 'BOOK_READ': return 'Book reading session'
+    case 'BOOK_PAGE_READ': return 'Read a page'
     case 'EVALUATION_COMPLETE': return 'Evaluation completed'
+    case 'DAD_LAB_COMPLETE': return 'Dad Lab completed'
     case 'ARMOR_DAILY_COMPLETE': return 'Daily armor equipped'
     default: return event.type ?? 'XP awarded'
   }
@@ -173,12 +217,14 @@ function XpOverviewCard({
 
 // ── Quick Award XP ───────────────────────────────────────────────
 
-const PRESETS = [
-  { amount: 5, label: '+5', description: 'Completed an activity' },
-  { amount: 10, label: '+10', description: 'Great effort today' },
-  { amount: 25, label: '+25', description: 'Finished a quest' },
-  { amount: 50, label: '+50', description: 'Major milestone' },
-]
+const AWARD_TYPES = [
+  { value: 'Bonus', label: 'Bonus' },
+  { value: 'Kindness', label: 'Kindness' },
+  { value: 'Extra Effort', label: 'Extra Effort' },
+  { value: 'Correction', label: 'Correction' },
+] as const
+
+const MAX_AWARD = 50
 
 function QuickAwardXP({
   childId,
@@ -192,40 +238,66 @@ function QuickAwardXP({
   onAward: (amount: number, unlocks: string[], tierUp?: { from: string; to: string }) => void
 }) {
   const familyId = useFamilyId()
-  const [customAmount, setCustomAmount] = useState('')
+  const [open, setOpen] = useState(false)
+  const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
+  const [awardType, setAwardType] = useState<string>('Bonus')
   const [awarding, setAwarding] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
-  async function award(amount: number) {
-    if (amount <= 0 || awarding) return
+  const isCorrection = awardType === 'Correction'
+  const parsedAmount = parseInt(amount) || 0
+  const effectiveAmount = isCorrection ? -Math.abs(parsedAmount) : Math.abs(parsedAmount)
+  const canSubmit = parsedAmount > 0 && parsedAmount <= MAX_AWARD && reason.trim().length > 0
+
+  function resetForm() {
+    setAmount('')
+    setReason('')
+    setAwardType('Bonus')
+  }
+
+  function handleSubmit() {
+    if (!canSubmit) return
+    if (isCorrection) {
+      setConfirmOpen(true)
+    } else {
+      doAward()
+    }
+  }
+
+  async function doAward() {
+    if (awarding) return
+    setConfirmOpen(false)
     setAwarding(true)
 
     try {
       const dedupKey = `manual_${Date.now()}`
       const meta: Record<string, string> = {
         awardedBy: 'parent',
+        reason: reason.trim(),
+        awardType,
       }
-      if (reason) meta.reason = reason
 
-      // Detect tier change
       const oldTier = calculateTier(currentXp)
 
-      await addXpEvent(familyId, childId, 'MANUAL_AWARD', amount, dedupKey, meta)
+      await addXpEvent(familyId, childId, 'MANUAL_AWARD', effectiveAmount, dedupKey, meta)
 
-      // Check for new unlocks
-      const result = await checkAndUnlockArmor(familyId, childId)
-      const unlockNames = result.newlyUnlockedVoxelPieces.map((vId) => {
-        const piece = VOXEL_ARMOR_PIECES.find((p) => p.id === vId)
-        return piece ? piece.name : vId
-      })
+      // Check for new unlocks (only relevant for positive awards)
+      let unlockNames: string[] = []
+      if (effectiveAmount > 0) {
+        const result = await checkAndUnlockArmor(familyId, childId)
+        unlockNames = result.newlyUnlockedVoxelPieces.map((vId) => {
+          const piece = VOXEL_ARMOR_PIECES.find((p) => p.id === vId)
+          return piece ? piece.name : vId
+        })
+      }
 
-      // Check for tier-up
-      const newTier = calculateTier(currentXp + amount)
+      const newTier = calculateTier(Math.max(0, currentXp + effectiveAmount))
       const tierUp = newTier !== oldTier ? { from: oldTier, to: newTier } : undefined
 
-      onAward(amount, unlockNames, tierUp)
-      setReason('')
-      setCustomAmount('')
+      onAward(effectiveAmount, unlockNames, tierUp)
+      resetForm()
+      setOpen(false)
     } catch (err) {
       console.error('Failed to award XP:', err)
     } finally {
@@ -234,56 +306,179 @@ function QuickAwardXP({
   }
 
   return (
-    <Card sx={{ mb: 2 }}>
-      <CardContent>
-        <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
-          Award XP to {childName}
-        </Typography>
+    <Box sx={{ mb: 2 }}>
+      {/* Toggle button */}
+      <Button
+        variant="outlined"
+        onClick={() => setOpen(!open)}
+        fullWidth
+        sx={{
+          fontFamily: '"Press Start 2P", monospace',
+          fontSize: '0.75rem',
+          borderColor: '#d4a017',
+          color: '#d4a017',
+          '&:hover': { borderColor: '#b8860b', bgcolor: 'rgba(212,160,23,0.06)' },
+          py: 1.2,
+        }}
+      >
+        ⭐ {open ? 'Close' : 'Award XP'}
+      </Button>
 
-        {/* Preset buttons */}
-        <Box sx={{ display: 'flex', gap: 1, mb: 1.5 }}>
-          {PRESETS.map((p) => (
-            <Button
-              key={p.amount}
-              variant="outlined"
-              onClick={() => award(p.amount)}
-              disabled={awarding}
-              sx={{ flex: 1, fontFamily: 'monospace', minWidth: 0 }}
+      {/* Inline form */}
+      {open && (
+        <Card sx={{ mt: 1, border: '1px solid rgba(212,160,23,0.3)' }}>
+          <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            {/* Award type */}
+            <TextField
+              select
+              size="small"
+              label="Type"
+              value={awardType}
+              onChange={(e) => setAwardType(e.target.value)}
+              fullWidth
             >
-              {p.label}
-            </Button>
+              {AWARD_TYPES.map((t) => (
+                <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>
+              ))}
+            </TextField>
+
+            {/* Amount */}
+            <TextField
+              size="small"
+              type="number"
+              label={isCorrection ? 'Amount to remove' : 'Amount'}
+              placeholder="1–50"
+              value={amount}
+              onChange={(e) => {
+                const v = parseInt(e.target.value)
+                if (e.target.value === '' || (v >= 0 && v <= MAX_AWARD)) {
+                  setAmount(e.target.value)
+                }
+              }}
+              slotProps={{ htmlInput: { min: 1, max: MAX_AWARD } }}
+              fullWidth
+              helperText={isCorrection ? `Will remove XP from ${childName}` : undefined}
+            />
+
+            {/* Reason */}
+            <TextField
+              size="small"
+              label="Reason"
+              placeholder={isCorrection ? 'Why the adjustment?' : 'What did they do?'}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              fullWidth
+              required
+              error={reason.length > 0 && reason.trim().length === 0}
+            />
+
+            {/* Actions */}
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button
+                variant="contained"
+                onClick={handleSubmit}
+                disabled={!canSubmit || awarding}
+                fullWidth
+                sx={{
+                  fontFamily: 'monospace',
+                  fontWeight: 600,
+                  bgcolor: isCorrection ? '#e65100' : '#4caf50',
+                  '&:hover': { bgcolor: isCorrection ? '#bf360c' : '#388e3c' },
+                }}
+              >
+                {awarding
+                  ? 'Saving...'
+                  : isCorrection
+                    ? `Remove ${parsedAmount || '?'} XP from ${childName}`
+                    : `Award +${parsedAmount || '?'} XP to ${childName}`}
+              </Button>
+              <Button
+                variant="text"
+                onClick={() => { resetForm(); setOpen(false) }}
+                sx={{ minWidth: 'auto', color: 'text.secondary' }}
+              >
+                Cancel
+              </Button>
+            </Box>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Correction confirmation dialog */}
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
+        <DialogTitle>Confirm XP Correction</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Remove {parsedAmount} XP from {childName}?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Reason: {reason}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
+          <Button
+            onClick={doAward}
+            variant="contained"
+            color="error"
+            disabled={awarding}
+          >
+            {awarding ? 'Removing...' : 'Yes, remove XP'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  )
+}
+
+// ── XP Summary Stats ────────────────────────────────────────────
+
+function XpSummaryStats({
+  totalXp,
+  events,
+  armorStreak,
+  tierLabel,
+  xpToNext,
+}: {
+  totalXp: number
+  events: XpLedgerEvent[]
+  armorStreak: number
+  tierLabel: string
+  xpToNext: number
+}) {
+  // Compute XP earned this week (Mon–Sun)
+  const now = new Date()
+  const dayOfWeek = now.getDay()
+  const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+  const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset)
+  const xpThisWeek = events.reduce((sum, e) => {
+    if (!e.awardedAt) return sum
+    return new Date(e.awardedAt) >= weekStart ? sum + (e.amount ?? 0) : sum
+  }, 0)
+
+  const stats = [
+    { label: 'Total XP', value: `${totalXp}` },
+    { label: 'This week', value: `+${xpThisWeek}` },
+    { label: 'Tier', value: tierLabel },
+    ...(xpToNext > 0 ? [{ label: 'Next tier', value: `${xpToNext} XP` }] : []),
+    ...(armorStreak > 0 ? [{ label: 'Streak', value: `${armorStreak}d 🔥` }] : []),
+  ]
+
+  return (
+    <Card sx={{ mb: 2 }}>
+      <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'space-around' }}>
+          {stats.map((s) => (
+            <Box key={s.label} sx={{ textAlign: 'center', minWidth: 60 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>
+                {s.value}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {s.label}
+              </Typography>
+            </Box>
           ))}
         </Box>
-
-        {/* Custom amount */}
-        <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-          <TextField
-            size="small"
-            type="number"
-            placeholder="Custom XP"
-            value={customAmount}
-            onChange={(e) => setCustomAmount(e.target.value)}
-            sx={{ width: '120px' }}
-            slotProps={{ htmlInput: { min: 1 } }}
-          />
-          <Button
-            variant="contained"
-            onClick={() => award(parseInt(customAmount) || 0)}
-            disabled={awarding || !customAmount}
-            sx={{ fontFamily: 'monospace', bgcolor: '#4caf50', '&:hover': { bgcolor: '#388e3c' } }}
-          >
-            Award
-          </Button>
-        </Box>
-
-        {/* Reason */}
-        <TextField
-          size="small"
-          fullWidth
-          placeholder="Reason (optional) — 'Great reading today'"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-        />
       </CardContent>
     </Card>
   )
@@ -291,10 +486,25 @@ function QuickAwardXP({
 
 // ── XP History ───────────────────────────────────────────────────
 
-function XpHistory({ childId }: { childId: string }) {
+const PAGE_SIZE = 50
+
+function XpHistory({
+  childId,
+  totalXp,
+  tierLabel,
+  xpToNext,
+  armorStreak,
+}: {
+  childId: string
+  totalXp: number
+  tierLabel: string
+  xpToNext: number
+  armorStreak: number
+}) {
   const familyId = useFamilyId()
   const [events, setEvents] = useState<XpLedgerEvent[]>([])
   const [loading, setLoading] = useState(true)
+  const [visibleDays, setVisibleDays] = useState(7)
 
   useEffect(() => {
     if (!familyId || !childId) return
@@ -309,7 +519,7 @@ function XpHistory({ childId }: { childId: string }) {
           where('childId', '==', childId),
           where('dedupKey', '!=', null),
           orderBy('awardedAt', 'desc'),
-          limit(20),
+          limit(PAGE_SIZE),
         )
         const snap = await getDocs(q)
         if (cancelled) return
@@ -329,63 +539,140 @@ function XpHistory({ childId }: { childId: string }) {
     return () => { cancelled = true }
   }, [familyId, childId])
 
+  // Reset visible days when child changes
+  useEffect(() => { setVisibleDays(7) }, [childId])
+
+  // Group events by day
+  const groupedByDay: { label: string; events: XpLedgerEvent[] }[] = []
+  const dayMap = new Map<string, XpLedgerEvent[]>()
+  for (const event of events) {
+    const label = event.awardedAt ? getDayLabel(event.awardedAt) : 'Unknown'
+    if (!dayMap.has(label)) {
+      dayMap.set(label, [])
+      groupedByDay.push({ label, events: dayMap.get(label)! })
+    }
+    dayMap.get(label)!.push(event)
+  }
+
+  const visibleGroups = groupedByDay.slice(0, visibleDays)
+  const hasMore = groupedByDay.length > visibleDays
+
   return (
-    <Card sx={{ mb: 2 }}>
-      <CardContent>
-        <Typography variant="subtitle2" sx={{ mb: 1 }}>
-          Recent XP
-        </Typography>
-        {loading && (
-          <Typography variant="caption" color="text.secondary">Loading...</Typography>
-        )}
-        {!loading && events.length === 0 && (
-          <Typography variant="caption" color="text.secondary">No XP events yet</Typography>
-        )}
-        {events.map((event) => (
-          <Box
-            key={event.id}
-            sx={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              py: 1,
-              borderBottom: '1px solid rgba(0,0,0,0.06)',
-            }}
-          >
-            <Box>
-              <Typography variant="body2">{getEventLabel(event)}</Typography>
-              {event.awardedAt && (
-                <Typography variant="caption" color="text.secondary">
-                  {formatRelativeTime(event.awardedAt)}
-                </Typography>
-              )}
+    <>
+      <XpSummaryStats
+        totalXp={totalXp}
+        events={events}
+        armorStreak={armorStreak}
+        tierLabel={tierLabel}
+        xpToNext={xpToNext}
+      />
+      <Card sx={{ mb: 2 }}>
+        <CardContent>
+          <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
+            XP History
+          </Typography>
+          {loading && (
+            <Typography variant="caption" color="text.secondary">Loading...</Typography>
+          )}
+          {!loading && events.length === 0 && (
+            <Typography variant="caption" color="text.secondary">No XP events yet</Typography>
+          )}
+          {visibleGroups.map((group) => (
+            <Box key={group.label} sx={{ mb: 2 }}>
+              <Typography
+                variant="caption"
+                sx={{ fontWeight: 600, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5 }}
+              >
+                {group.label}
+              </Typography>
+              {group.events.map((event) => (
+                <Box
+                  key={event.id}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    py: 0.75,
+                    borderBottom: '1px solid rgba(0,0,0,0.06)',
+                    gap: 1.5,
+                  }}
+                >
+                  <Typography
+                    sx={{
+                      fontFamily: 'monospace',
+                      fontWeight: 600,
+                      color: (event.amount ?? 0) < 0 ? '#e53935' : '#4caf50',
+                      minWidth: 64,
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    {(event.amount ?? 0) < 0 ? '' : '+'}{event.amount ?? 0} XP
+                  </Typography>
+                  <Typography sx={{ fontSize: '1rem', lineHeight: 1 }}>
+                    {getEventIcon(event.type)}
+                  </Typography>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="body2" noWrap>
+                      {getEventLabel(event)}
+                    </Typography>
+                  </Box>
+                  {event.awardedAt && (
+                    <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                      {formatTime(event.awardedAt)}
+                    </Typography>
+                  )}
+                </Box>
+              ))}
             </Box>
-            <Typography variant="body2" sx={{ color: '#4caf50', fontWeight: 500, fontFamily: 'monospace' }}>
-              +{event.amount ?? 0} XP
-            </Typography>
-          </Box>
-        ))}
-      </CardContent>
-    </Card>
+          ))}
+          {hasMore && (
+            <Button
+              size="small"
+              onClick={() => setVisibleDays((d) => d + 7)}
+              sx={{ mt: 1 }}
+            >
+              Show more
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    </>
   )
 }
 
 // ── Main ArmorTab ────────────────────────────────────────────────
 
+function useArmorStreak(familyId: string, childId: string): number {
+  const [streak, setStreak] = useState(0)
+
+  useEffect(() => {
+    if (!familyId || !childId) return
+    const ref = doc(avatarProfilesCollection(familyId), childId)
+    return onSnapshot(ref, (snap) => {
+      setStreak(snap.exists() ? (snap.data()?.armorStreak ?? 0) : 0)
+    })
+  }, [familyId, childId])
+
+  return streak
+}
+
 export default function ArmorTab() {
   const { activeChildId, activeChild, children, setActiveChildId } = useActiveChild()
   const familyId = useFamilyId()
   const xpData = useXpLedger(familyId, activeChildId)
+  const armorStreak = useArmorStreak(familyId, activeChildId)
   const [snack, setSnack] = useState<{ message: string; severity: 'success' | 'info' } | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
   const childName = activeChild?.name ?? 'Child'
+  const tierKey = calculateTier(xpData.totalXp)
+  const tierLabel = TIERS[tierKey]?.label ?? tierKey
+  const xpToNext = xpData.nextTierProgress.xpToNext
 
   function handleAward(amount: number, unlocks: string[], tierUp?: { from: string; to: string }) {
     if (tierUp) {
-      const tierLabel = TIERS[tierUp.to]?.label ?? tierUp.to
+      const label = TIERS[tierUp.to]?.label ?? tierUp.to
       setSnack({
-        message: `${childName} reached ${tierLabel} tier!`,
+        message: `${childName} reached ${label} tier!`,
         severity: 'info',
       })
     } else if (unlocks.length > 0) {
@@ -393,9 +680,14 @@ export default function ArmorTab() {
         message: `${childName} unlocked ${unlocks.join(', ')}!`,
         severity: 'info',
       })
+    } else if (amount < 0) {
+      setSnack({
+        message: `Removed ${Math.abs(amount)} XP from ${childName}`,
+        severity: 'info',
+      })
     } else {
       setSnack({
-        message: `Awarded ${amount} XP to ${childName}`,
+        message: `Awarded +${amount} XP to ${childName}! ⭐`,
         severity: 'success',
       })
     }
@@ -425,7 +717,14 @@ export default function ArmorTab() {
         <>
           <XpOverviewCard totalXp={xpData.totalXp} childName={childName} />
           <QuickAwardXP childId={activeChildId} childName={childName} currentXp={xpData.totalXp} onAward={handleAward} />
-          <XpHistory key={`${activeChildId}-${refreshKey}`} childId={activeChildId} />
+          <XpHistory
+            key={`${activeChildId}-${refreshKey}`}
+            childId={activeChildId}
+            totalXp={xpData.totalXp}
+            tierLabel={tierLabel}
+            xpToNext={xpToNext}
+            armorStreak={armorStreak}
+          />
         </>
       )}
 

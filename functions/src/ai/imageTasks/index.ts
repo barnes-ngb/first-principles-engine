@@ -21,3 +21,19 @@ export type { ArmorSheetRequest, ArmorSheetResponse } from "./armorSheet.js";
 
 export { extractFeatures } from "./extractFeatures.js";
 export type { ExtractFeaturesRequest, ExtractFeaturesResponse } from "./extractFeatures.js";
+
+export { generateMinecraftSkin } from "./minecraftSkin.js";
+export type { MinecraftSkinRequest, MinecraftSkinResponse } from "./minecraftSkin.js";
+
+export { generateMinecraftFace } from "./minecraftFace.js";
+export type { MinecraftFaceRequest, MinecraftFaceResponse } from "./minecraftFace.js";
+
+export { enhanceSketch, buildEnhancePrompt } from "./enhanceSketch.js";
+export type { EnhanceSketchRequest, EnhanceSketchResponse } from "./enhanceSketch.js";
+
+export {
+  COPYRIGHT_NAMES,
+  fallbackCopyrightStrip,
+  rewriteForCopyright,
+} from "./copyrightUtils.js";
+export type { RewriteMode } from "./copyrightUtils.js";

@@ -3,6 +3,12 @@ import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 
+/**
+ * Task: evaluate
+ * Context: charter + childProfile + sightWords + wordMastery (via buildContextForTask)
+ * Model: Sonnet
+ */
+
 // Import evaluation-specific prompt builder from chat.ts
 import { buildEvaluationPrompt } from "../chat.js";
 
@@ -17,7 +23,7 @@ export const handleEvaluate = async (
   });
 
   // Append evaluation-specific diagnostic prompt
-  sections.push(buildEvaluationPrompt(domain || "reading"));
+  sections.push(buildEvaluationPrompt(domain || "reading", childData.name));
 
   const systemPrompt = sections.join("\n\n");
   const model = modelForTask("evaluate");

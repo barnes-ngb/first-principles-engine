@@ -11,10 +11,14 @@ import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
+import { doc, getDoc } from 'firebase/firestore'
+
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
 import type { DadLabType } from '../../core/types/enums'
+import { db } from '../../core/firebase/firestore'
+import { weekKeyFromDate } from '../../core/utils/dateKey'
 
 interface Prefill {
   title: string
@@ -36,11 +40,15 @@ interface LabSuggestionsProps {
 interface ParsedSuggestion {
   title: string
   type: string
+  framework: string
   question: string
   description: string
+  phases: string
   materials: string
   lincolnRole: string
   londonRole: string
+  teachingMoment: string
+  subjectConnection: string
   duration: string
 }
 
@@ -80,11 +88,15 @@ function parseSuggestions(text: string): ParsedSuggestion[] {
     suggestions.push({
       title,
       type: get('Type') || 'science',
+      framework: get('Framework'),
       question: get('Question'),
       description: get('Description'),
+      phases: get('Phases'),
       materials: get('Materials'),
       lincolnRole: get("Lincoln's role") || get('Lincoln'),
       londonRole: get("London's role") || get('London'),
+      teachingMoment: get('Teaching moment'),
+      subjectConnection: get('Subject connection'),
       duration: get('Duration'),
     })
   }
@@ -102,11 +114,15 @@ function parseSuggestions(text: string): ParsedSuggestion[] {
       suggestions.push({
         title,
         type: get('Type') || get('Category') || 'science',
+        framework: get('Framework'),
         question: get('Question') || get('Driving question'),
         description: get('Description') || get('Brief') || get('Overview'),
+        phases: get('Phases'),
         materials: get('Materials'),
         lincolnRole: get("Lincoln's role") || get('Lincoln'),
         londonRole: get("London's role") || get('London'),
+        teachingMoment: get('Teaching moment'),
+        subjectConnection: get('Subject connection'),
         duration: get('Duration'),
       })
     }
@@ -117,11 +133,15 @@ function parseSuggestions(text: string): ParsedSuggestion[] {
     suggestions.push({
       title: 'AI Suggested Lab',
       type: 'science',
+      framework: '',
       question: '',
       description: text.trim(),
+      phases: '',
       materials: '',
       lincolnRole: '',
       londonRole: '',
+      teachingMoment: '',
+      subjectConnection: '',
       duration: '',
     })
   }
@@ -141,6 +161,25 @@ function LabSuggestionsContent({ onClose, onSelect }: Omit<LabSuggestionsProps, 
   const [suggestions, setSuggestions] = useState<ParsedSuggestion[]>([])
   const [rawText, setRawText] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [storySuggestion, setStorySuggestion] = useState<{ title: string; text: string } | null>(null)
+
+  // Load this week's dadLabSuggestion from the conundrum
+  useEffect(() => {
+    const weekKey = weekKeyFromDate(new Date())
+    getDoc(doc(db, `families/${familyId}/weeks/${weekKey}`))
+      .then((snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as { conundrum?: { title?: string; dadLabSuggestion?: string } }
+          if (data.conundrum?.dadLabSuggestion) {
+            setStorySuggestion({
+              title: data.conundrum.title ?? "This Week's Story",
+              text: data.conundrum.dadLabSuggestion,
+            })
+          }
+        }
+      })
+      .catch(() => { /* ignore */ })
+  }, [familyId])
 
   const fetchSuggestions = useCallback(async () => {
     if (!children.length) {
@@ -165,22 +204,69 @@ Context:
 - Lincoln (10, neurodivergent, loves Minecraft/building/art)
 - London (6, loves drawing and stories)
 - Both boys
-- Lab types: science, engineering, adventure, or heart/character
 - Keep to 45-90 minutes, household materials preferred
 - Lincoln should lead hard parts and teach London after
 - London assists, observes, and creates (drawing, decorating)
 
-For each suggestion, respond in EXACTLY this format:
+DAD LAB TYPES AND FRAMEWORKS:
+
+TYPE 1: EXPERIMENT (science) — Scientific Method
+Framework: Question → Hypothesis → Test → Observe → Conclude
+- Prediction step: "Lincoln, what do you THINK will happen when we...?"
+- Testing step: Hands-on experiment with clear variables
+- Observation step: "What did we actually see? Was it what you expected?"
+- Conclusion step: "Why do you think it happened that way?"
+- Lincoln teaches London: Explain the result simply
+Example: "Does a heavy ball fall faster than a light ball?"
+
+TYPE 2: BUILD (engineering) — Engineering Design
+Framework: Problem → Design → Build → Test → Improve
+- Define the problem: "We need a bridge that holds this weight"
+- Design phase: Sketch on paper first
+- Build phase: Construct with available materials
+- Test phase: Does it work? How well?
+- Improve phase: What would you change? Build version 2.
+Example: "Build a catapult that launches a marshmallow into a cup"
+
+TYPE 3: EXPLORE (adventure) — Discovery/Nature
+Framework: Wonder → Observe → Document → Research → Share
+- Go outside or to a location
+- Observe and document (photos, sketches, notes)
+- Research what you found
+- Lincoln explains to London what they learned
+Example: "What lives in our backyard soil?"
+
+TYPE 4: CREATE (heart) — Making/Art/Character
+Framework: Inspiration → Plan → Make → Reflect → Display
+- Less rigid structure, process matters more than outcome
+- Focus on decisions and problem-solving during creation
+- Lincoln describes his creative choices
+- Connect to a virtue or character theme
+Example: "Build a Minecraft diorama with real materials"
+
+For each suggestion:
+1. STATE THE TYPE: e.g. "Type: science" (uses Scientific Method framework)
+2. LIST THE PHASES for that type with estimated time per phase
+3. INCLUDE both boys: Lincoln's role + London's role
+4. NOTE the teaching moment: "After the test, Lincoln explains to London why..."
+5. CONNECT to school: "This connects to [subject] because..."
+6. MATERIALS: List what Nathan needs, flag anything that needs advance purchase
+
+Respond in EXACTLY this format:
 
 ---
 Title: [name]
 Type: [science/engineering/adventure/heart]
+Framework: [e.g. "Question → Hypothesis → Test → Observe → Conclude"]
 Question: [the driving question to explore]
 Description: [what you'll do, 2-3 sentences]
+Phases: [Phase 1 (Xmin) → Phase 2 (Xmin) → Phase 3 (Xmin)]
 Materials: [comma-separated list of materials needed]
 Lincoln's role: [what he does — predict, build, measure, explain]
 London's role: [what he does — observe, draw, help, decorate]
-Duration: [estimated minutes]
+Teaching moment: [when/how Lincoln teaches London]
+Subject connection: [what subject this connects to and why]
+Duration: [estimated total minutes]
 ---
 
 Give exactly 3 suggestions separated by ---. Make them different types.`,
@@ -246,6 +332,38 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
           </Stack>
         )}
 
+        {storySuggestion && (
+          <Card variant="outlined" sx={{ mb: 2, border: '2px solid', borderColor: 'warning.main' }}>
+            <CardContent>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                <Chip label="From This Week's Story" size="small" color="warning" />
+              </Stack>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                {'\u{1F5FA}\u{FE0F}'} {storySuggestion.title}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                {storySuggestion.text}
+              </Typography>
+              <Button
+                variant="contained"
+                size="small"
+                color="warning"
+                sx={{ mt: 1.5 }}
+                onClick={() =>
+                  onSelect({
+                    title: `Story Lab: ${storySuggestion.title}`,
+                    question: '',
+                    labType: 'science',
+                    description: storySuggestion.text,
+                  })
+                }
+              >
+                Plan This Lab
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {!aiLoading && !childrenLoading && suggestions.length > 0 && (
           <Stack spacing={1.5} sx={{ pb: 1 }}>
             {suggestions.map((s, i) => (
@@ -280,6 +398,16 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
                       {s.description}
                     </Typography>
                   )}
+                  {s.framework && (
+                    <Typography variant="caption" color="secondary" sx={{ mt: 0.5, display: 'block' }}>
+                      {s.framework}
+                    </Typography>
+                  )}
+                  {s.phases && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      {s.phases}
+                    </Typography>
+                  )}
                   {s.materials && (
                     <Box sx={{ mt: 1 }}>
                       <Typography variant="caption" color="text.secondary">
@@ -306,6 +434,16 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
                       </Box>
                     )}
                   </Stack>
+                  {s.teachingMoment && (
+                    <Typography variant="body2" sx={{ mt: 0.5, fontStyle: 'italic' }}>
+                      {s.teachingMoment}
+                    </Typography>
+                  )}
+                  {s.subjectConnection && (
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                      {s.subjectConnection}
+                    </Typography>
+                  )}
                 </CardContent>
               </Card>
             ))}

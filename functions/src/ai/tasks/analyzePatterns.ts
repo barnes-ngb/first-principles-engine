@@ -1,6 +1,16 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireEmailAuth } from "../authGuard.js";
 import { claudeApiKey } from "../aiConfig.js";
+import { callClaude, logAiUsage } from "../chatTypes.js";
+import { modelForTask } from "../chat.js";
+
+/**
+ * Task: analyzePatterns
+ * Context: childProfile (mapped in TASK_CONTEXT but not called — separate Cloud Function)
+ *          Loads evaluation session data directly from Firestore
+ * Model: Sonnet
+ */
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -25,6 +35,19 @@ interface ConceptualBlockResult {
   deferNote?: string;
   detectedAt: string;
   evaluationSessionId: string;
+
+  // Phase 1: lifecycle + multi-writer fields (all optional for backward compat)
+  id?: string;
+  status?: "ADDRESS_NOW" | "DEFER" | "RESOLVING" | "RESOLVED";
+  evidence?: string;
+  firstDetectedAt?: string;
+  lastReinforcedAt?: string;
+  sessionCount?: number;
+  resolvedAt?: string;
+  source?: "evaluation" | "quest" | "scan" | "parent";
+  lastSource?: "evaluation" | "quest" | "scan" | "parent";
+  specificWords?: string[];
+  specificQuestions?: string[];
 }
 
 interface AnalyzePatternsResponse {
@@ -91,9 +114,7 @@ DEFER blocks must always include a non-empty deferNote string.`;
 export const analyzeEvaluationPatterns = onCall(
   { secrets: [claudeApiKey] },
   async (request): Promise<AnalyzePatternsResponse> => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireEmailAuth(request);
 
     const { familyId, childId, evaluationSessionId, currentFindings } =
       request.data as AnalyzePatternsRequest;
@@ -111,7 +132,7 @@ export const analyzeEvaluationPatterns = onCall(
       throw new HttpsError("invalid-argument", "currentFindings must be an array.");
     }
 
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",
@@ -196,7 +217,7 @@ ${historicalContext}
 Please identify any conceptual blocks in the pattern above.`;
 
     const systemPrompt = buildPatternAnalysisPrompt(childName, childAge, neurodivergentDesc);
-    const model = "claude-sonnet-4-5-20250929";
+    const model = modelForTask("analyzePatterns");
 
     const apiKey = claudeApiKey.value();
     if (!apiKey) {
@@ -206,35 +227,26 @@ Please identify any conceptual blocks in the pattern above.`;
       );
     }
 
-    const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const client = new Anthropic({ apiKey });
-
-    const completion = await client.messages.create({
+    const result = await callClaude({
+      apiKey,
       model,
-      max_tokens: 2048,
-      system: systemPrompt,
+      maxTokens: 2048,
+      systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     });
 
-    const firstBlock = completion.content[0];
-    const responseText =
-      firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
+    const responseText = result.text;
 
-    console.log(`[AI] taskType=analyzePatterns inputTokens≈${completion.usage.input_tokens} outputTokens≈${completion.usage.output_tokens}`);
+    console.log(`[AI] taskType=analyzePatterns inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`);
 
     // Log usage
-    try {
-      await db.collection(`families/${familyId}/aiUsage`).add({
-        childId,
-        taskType: "analyzePatterns",
-        model,
-        inputTokens: completion.usage.input_tokens,
-        outputTokens: completion.usage.output_tokens,
-        createdAt: new Date().toISOString(),
-      });
-    } catch (logErr) {
-      console.warn("Failed to log AI usage:", logErr);
-    }
+    await logAiUsage(db, familyId, {
+      childId,
+      taskType: "analyzePatterns",
+      model,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+    });
 
     // Parse the response
     let parsed: { blocks: ConceptualBlockResult[]; summary: string };
@@ -254,17 +266,33 @@ Please identify any conceptual blocks in the pattern above.`;
       };
       const now = new Date().toISOString();
 
+      const slugify = (s: string): string =>
+        s
+          .toLowerCase()
+          .trim()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 80) || "unknown-block";
+
       const blocks: ConceptualBlockResult[] = (raw.blocks || [])
         .slice(0, 3)
         .map((b) => {
           const rec = b.recommendation === "ADDRESS_NOW" ? "ADDRESS_NOW" : "DEFER";
+          const name = b.name || "Unknown block";
           const result: ConceptualBlockResult = {
-            name: b.name || "Unknown block",
+            name,
             affectedSkills: b.affectedSkills || [],
             recommendation: rec,
             rationale: b.rationale || "",
             detectedAt: now,
             evaluationSessionId,
+            id: slugify(name),
+            status: rec,
+            firstDetectedAt: now,
+            lastReinforcedAt: now,
+            sessionCount: 1,
+            source: "evaluation",
+            lastSource: "evaluation",
           };
           if (rec === "ADDRESS_NOW" && b.strategies?.length) {
             result.strategies = b.strategies;

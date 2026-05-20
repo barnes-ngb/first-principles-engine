@@ -17,7 +17,6 @@ interface ContextDrawerProps {
   hoursPerDay: number
   appBlocks: AppBlock[]
   snapshot: SkillSnapshot | null
-  minimumWin: string
 }
 
 export default function ContextDrawer({
@@ -28,7 +27,6 @@ export default function ContextDrawer({
   hoursPerDay,
   appBlocks,
   snapshot,
-  minimumWin,
 }: ContextDrawerProps) {
   return (
     <Drawer
@@ -125,14 +123,6 @@ export default function ContextDrawer({
           )}
         </Box>
 
-        <Divider />
-
-        <Box>
-          <Typography variant="subtitle2" gutterBottom>
-            Minimum Win
-          </Typography>
-          <Typography variant="body2">{minimumWin}</Typography>
-        </Box>
       </Stack>
     </Drawer>
   )

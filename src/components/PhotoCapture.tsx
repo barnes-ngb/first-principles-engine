@@ -21,14 +21,21 @@ export default function PhotoCapture({ onCapture, uploading, multiple }: PhotoCa
   const [preview, setPreview] = useState<string | null>(null)
   const [file, setFile] = useState<File | null>(null)
 
-  const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
     if (!files || files.length === 0) return
 
     if (multiple && files.length > 1) {
-      // Multiple mode: send all files directly without preview
+      // Multiple mode: compress and send all files directly without preview
+      const { compressIfNeeded } = await import('../core/utils/compressImage')
       for (let i = 0; i < files.length; i++) {
-        onCapture(files[i])
+        const compressed = await compressIfNeeded(files[i])
+        const compressedFile = new File(
+          [compressed],
+          files[i].name.replace(/\.\w+$/, '.jpg'),
+          { type: 'image/jpeg' }
+        )
+        onCapture(compressedFile)
       }
       if (uploadInputRef.current) uploadInputRef.current.value = ''
       return
@@ -41,9 +48,17 @@ export default function PhotoCapture({ onCapture, uploading, multiple }: PhotoCa
     setPreview(objectUrl)
   }, [multiple, onCapture])
 
-  const handleConfirm = useCallback(() => {
+  const handleConfirm = useCallback(async () => {
     if (!file) return
-    onCapture(file)
+    // Compress before uploading
+    const { compressIfNeeded } = await import('../core/utils/compressImage')
+    const compressed = await compressIfNeeded(file)
+    const compressedFile = new File(
+      [compressed],
+      file.name.replace(/\.\w+$/, '.jpg'),
+      { type: 'image/jpeg' }
+    )
+    onCapture(compressedFile)
     // Clean up preview
     if (preview) URL.revokeObjectURL(preview)
     setPreview(null)

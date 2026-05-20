@@ -32,13 +32,14 @@ import MenuBookIcon from '@mui/icons-material/MenuBook'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import DownloadIcon from '@mui/icons-material/Download'
 
+import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
-import { UserProfile } from '../../core/types/enums'
-import type { Book, BookTheme } from '../../core/types'
-import { BOOK_THEMES } from '../../core/types'
+import { SubjectBucket, UserProfile } from '../../core/types/enums'
+import type { Book, BookTheme, StickerTag } from '../../core/types'
+import { BOOK_THEMES, STICKER_TAG_LABELS } from '../../core/types'
 import { COVER_STYLES, GENERATION_STYLES } from './bookTypes'
 import { useBookshelf } from './useBook'
 import { useBookGenerator } from './useBookGenerator'
@@ -48,13 +49,15 @@ import type { PrintSettings } from './PrintSettingsDialog'
 import GenerationProgress from './GenerationProgress'
 import EvaluationBookBanner from './EvaluationBookBanner'
 import { useEvaluationBookSuggestions } from './useEvaluationBookSuggestions'
+import CreateThemeDialog from './CreateThemeDialog'
 
 type BookFilter = 'all' | 'creative' | 'generated' | 'sight-word'
+type CreatorFilter = 'all' | 'parent' | 'kids'
 
 export default function BookshelfPage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild } = useActiveChild()
+  const { activeChild, children: allChildren } = useActiveChild()
   const childName = activeChild?.name ?? ''
   const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
@@ -62,7 +65,8 @@ export default function BookshelfPage() {
   const { profile } = useProfile()
   const isParent = profile === UserProfile.Parents
 
-  const { books, loading, createBook, deleteBook } = useBookshelf(familyId, childId)
+  const { books, loading, createBook, deleteBook } = useBookshelf(familyId, childId, isParent)
+  const [childFilter, setChildFilter] = useState<string>('all')
   const { generateBook, progress, generating, resetProgress } = useBookGenerator()
   const { suggestions: evalSuggestions } = useEvaluationBookSuggestions(
     isParent ? familyId : '',
@@ -70,7 +74,9 @@ export default function BookshelfPage() {
   )
 
   const [bookFilter, setBookFilter] = useState<BookFilter>('all')
+  const [creatorFilter, setCreatorFilter] = useState<CreatorFilter>('all')
   const [themeFilter, setThemeFilter] = useState<BookTheme | 'all'>('all')
+  const [stickerTagFilter, setStickerTagFilter] = useState<StickerTag | 'all'>('all')
   const [showNewDialog, setShowNewDialog] = useState(false)
   const [dialogTab, setDialogTab] = useState(0) // 0 = Blank, 1 = Generate
 
@@ -93,6 +99,9 @@ export default function BookshelfPage() {
 
   // Delete confirmation state
   const [deleteTarget, setDeleteTarget] = useState<Book | null>(null)
+
+  // Custom theme dialog
+  const [showCreateTheme, setShowCreateTheme] = useState(false)
 
   // Print state
   const [showPrintSettings, setShowPrintSettings] = useState(false)
@@ -117,14 +126,25 @@ export default function BookshelfPage() {
     if (!newTitle.trim()) return
     setCreating(true)
     try {
-      const bookId = await createBook(newTitle.trim(), newCoverStyle)
+      const attribution = isParent && childId
+        ? { createdBy: 'parent' as const, createdFor: childId }
+        : childId
+          ? { createdBy: childId, createdFor: childId }
+          : undefined
+      const bookId = await createBook(
+        newTitle.trim(),
+        newCoverStyle,
+        undefined,
+        undefined,
+        attribution,
+      )
       setShowNewDialog(false)
       setNewTitle('')
       navigate(`/books/${bookId}`)
     } finally {
       setCreating(false)
     }
-  }, [newTitle, newCoverStyle, createBook, navigate])
+  }, [newTitle, newCoverStyle, createBook, navigate, isParent, childId])
 
   const handleGenerateBook = useCallback(async () => {
     if (!genStoryIdea.trim() && !genWords.trim()) return
@@ -135,6 +155,11 @@ export default function BookshelfPage() {
       .map((w) => w.trim().toLowerCase())
       .filter(Boolean)
 
+    const attribution = isParent && childId
+      ? { createdBy: 'parent' as const, createdFor: childId }
+      : childId
+        ? { createdBy: childId, createdFor: childId }
+        : undefined
     const bookId = await generateBook(
       familyId,
       childId,
@@ -142,6 +167,8 @@ export default function BookshelfPage() {
       words,
       genStyle,
       genPageCount,
+      undefined,
+      attribution,
     )
 
     if (bookId) {
@@ -161,6 +188,7 @@ export default function BookshelfPage() {
     generateBook,
     resetProgress,
     navigate,
+    isParent,
   ])
 
   const handleCloseNewDialog = useCallback(() => {
@@ -206,6 +234,23 @@ export default function BookshelfPage() {
     return ordered
   }, [books, isLincoln])
 
+  // Sticker tags across all books (for filter chips)
+  const availableStickerTags = useMemo(() => {
+    const tags = new Set<StickerTag>()
+    for (const book of books) {
+      for (const page of book.pages ?? []) {
+        for (const img of page.images ?? []) {
+          if (img.type === 'sticker' && img.tags) {
+            for (const tag of img.tags) {
+              tags.add(tag as StickerTag)
+            }
+          }
+        }
+      }
+    }
+    return Array.from(tags).sort()
+  }, [books])
+
   // Sort: drafts first (most recently edited), then completed
   const sortedBooks = useMemo(() => {
     let filtered = books
@@ -216,15 +261,38 @@ export default function BookshelfPage() {
     } else if (bookFilter === 'sight-word') {
       filtered = books.filter((b) => b.bookType === 'sight-word')
     }
+    if (creatorFilter === 'parent') {
+      // Absent createdBy → treated as 'parent' (legacy)
+      filtered = filtered.filter((b) => (b.createdBy ?? 'parent') === 'parent')
+    } else if (creatorFilter === 'kids') {
+      filtered = filtered.filter((b) => {
+        const by = b.createdBy ?? 'parent'
+        return by !== 'parent'
+      })
+    }
     if (themeFilter !== 'all') {
       filtered = filtered.filter((b) => b.theme === themeFilter)
+    }
+    if (childFilter === 'together') {
+      filtered = filtered.filter((b) => b.isTogetherBook)
+    } else if (childFilter !== 'all') {
+      filtered = filtered.filter((b) => b.childId === childFilter || (b.contributorIds ?? []).includes(childFilter))
+    }
+    if (stickerTagFilter !== 'all') {
+      filtered = filtered.filter((b) =>
+        (b.pages ?? []).some((page) =>
+          (page.images ?? []).some((img) =>
+            img.type === 'sticker' && (img.tags ?? []).includes(stickerTagFilter)
+          )
+        )
+      )
     }
     return [...filtered].sort((a, b) => {
       if (a.status === 'draft' && b.status !== 'draft') return -1
       if (a.status !== 'draft' && b.status === 'draft') return 1
       return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
     })
-  }, [books, bookFilter, themeFilter])
+  }, [books, bookFilter, creatorFilter, themeFilter, childFilter, stickerTagFilter])
 
   if (loading) {
     return (
@@ -254,6 +322,10 @@ export default function BookshelfPage() {
 
   return (
     <Page>
+      <CreativeTimer
+        defaultSubject={SubjectBucket.Art}
+        defaultDescription="Book creation"
+      />
       <Typography
         variant="h4"
         component="h1"
@@ -305,16 +377,16 @@ export default function BookshelfPage() {
           size="small"
         >
           <ToggleButton value="all" sx={{ textTransform: 'none', minHeight: 36 }}>
-            All Books
+            All ({books.length})
           </ToggleButton>
           <ToggleButton value="creative" sx={{ textTransform: 'none', minHeight: 36 }}>
-            My Stories
+            My Stories ({books.filter((b) => b.bookType !== 'sight-word' && b.bookType !== 'generated').length})
           </ToggleButton>
           <ToggleButton value="generated" sx={{ textTransform: 'none', minHeight: 36 }}>
-            Generated
+            Generated ({books.filter((b) => b.bookType === 'generated').length})
           </ToggleButton>
           <ToggleButton value="sight-word" sx={{ textTransform: 'none', minHeight: 36 }}>
-            Sight Words
+            Sight Words ({books.filter((b) => b.bookType === 'sight-word').length})
           </ToggleButton>
         </ToggleButtonGroup>
         <Box sx={{ flex: 1 }} />
@@ -341,6 +413,63 @@ export default function BookshelfPage() {
           </>
         )}
       </Stack>
+
+      {/* Creator filter (parent view: all / mom's books / kids' books) */}
+      {isParent && (
+        <Stack direction="row" spacing={1} sx={{ mb: 1 }} alignItems="center">
+          <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', mr: 0.5 }}>
+            Made by:
+          </Typography>
+          <Chip
+            label={`All (${books.length})`}
+            size="small"
+            onClick={() => setCreatorFilter('all')}
+            color={creatorFilter === 'all' ? 'primary' : 'default'}
+            variant={creatorFilter === 'all' ? 'filled' : 'outlined'}
+          />
+          <Chip
+            label={`Mom's Books (${books.filter((b) => (b.createdBy ?? 'parent') === 'parent').length})`}
+            size="small"
+            onClick={() => setCreatorFilter('parent')}
+            color={creatorFilter === 'parent' ? 'primary' : 'default'}
+            variant={creatorFilter === 'parent' ? 'filled' : 'outlined'}
+          />
+          <Chip
+            label={`Kids (${books.filter((b) => (b.createdBy ?? 'parent') !== 'parent').length})`}
+            size="small"
+            onClick={() => setCreatorFilter('kids')}
+            color={creatorFilter === 'kids' ? 'primary' : 'default'}
+            variant={creatorFilter === 'kids' ? 'filled' : 'outlined'}
+          />
+        </Stack>
+      )}
+
+      {/* Child filter (parent view only) */}
+      {isParent && allChildren.length > 1 && (
+        <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+          <Chip
+            label="All"
+            onClick={() => setChildFilter('all')}
+            color={childFilter === 'all' ? 'primary' : 'default'}
+            variant={childFilter === 'all' ? 'filled' : 'outlined'}
+          />
+          {allChildren.map((child) => (
+            <Chip
+              key={child.id}
+              label={`${child.name} (${books.filter((b) => b.childId === child.id).length})`}
+              onClick={() => setChildFilter(child.id)}
+              color={childFilter === child.id ? 'primary' : 'default'}
+              variant={childFilter === child.id ? 'filled' : 'outlined'}
+            />
+          ))}
+          <Chip
+            label={`Together (${books.filter((b) => b.isTogetherBook).length})`}
+            onClick={() => setChildFilter('together')}
+            color={childFilter === 'together' ? 'primary' : 'default'}
+            variant={childFilter === 'together' ? 'filled' : 'outlined'}
+          />
+        </Stack>
+      )}
 
       {/* Theme filter chips — only show when there are themed books */}
       {availableThemes.length > 0 && (
@@ -372,7 +501,42 @@ export default function BookshelfPage() {
               />
             )
           })}
+          {isParent && (
+            <Chip
+              label="+ New Theme"
+              size="small"
+              variant="outlined"
+              color="primary"
+              onClick={() => setShowCreateTheme(true)}
+            />
+          )}
         </Box>
+      )}
+
+      {/* Sticker tag filter chips */}
+      {availableStickerTags.length > 0 && (
+        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+          <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', mr: 0.5 }}>
+            Stickers:
+          </Typography>
+          <Chip
+            label="Any"
+            size="small"
+            onClick={() => setStickerTagFilter('all')}
+            color={stickerTagFilter === 'all' ? 'primary' : 'default'}
+            variant={stickerTagFilter === 'all' ? 'filled' : 'outlined'}
+          />
+          {availableStickerTags.map((tag) => (
+            <Chip
+              key={tag}
+              label={STICKER_TAG_LABELS[tag] ?? tag}
+              size="small"
+              onClick={() => setStickerTagFilter(tag)}
+              color={stickerTagFilter === tag ? 'primary' : 'default'}
+              variant={stickerTagFilter === tag ? 'filled' : 'outlined'}
+            />
+          ))}
+        </Stack>
       )}
 
       {books.length === 0 ? (
@@ -412,6 +576,10 @@ export default function BookshelfPage() {
           {sortedBooks.map((book) => {
             const coverUrl =
               book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
+            const by = book.createdBy ?? 'parent'
+            const creatorLabel = by === 'parent'
+              ? 'By Mom'
+              : `By ${allChildren.find((c) => c.id === by)?.name ?? 'Kid'}`
 
             return (
               <Box
@@ -543,6 +711,17 @@ export default function BookshelfPage() {
                       }}
                     />
                   )}
+                  <Chip
+                    label={creatorLabel}
+                    size="small"
+                    sx={{
+                      height: 20,
+                      fontSize: '0.65rem',
+                      bgcolor: by === 'parent' ? 'warning.100' : 'success.100',
+                      color: by === 'parent' ? 'warning.800' : 'success.800',
+                      fontWeight: 600,
+                    }}
+                  />
                   {(book.sightWords?.length ?? 0) > 0 && (
                     <Chip
                       label={`${book.sightWords!.length} words`}
@@ -885,6 +1064,18 @@ export default function BookshelfPage() {
           )}
         </DialogActions>
       </Dialog>
+
+      {/* Create custom theme dialog */}
+      <CreateThemeDialog
+        open={showCreateTheme}
+        onClose={() => setShowCreateTheme(false)}
+        familyId={familyId}
+        childId={childId}
+        onCreated={(themeId) => {
+          // Select the new custom theme as the filter
+          setThemeFilter(themeId)
+        }}
+      />
     </Page>
   )
 }

@@ -49,38 +49,6 @@ export interface Artifact {
   mediaUrls?: string[]
 }
 
-// ── Ladders ────────────────────────────────────────────────────
-
-export interface Ladder {
-  id?: string
-  childId?: string
-  title: string
-  description?: string
-  domain?: string
-  rungs: Rung[]
-}
-
-export interface Rung {
-  id?: string
-  title: string
-  description?: string
-  order: number
-  proofExamples?: string[]
-  milestones?: MilestoneProgress[]
-}
-
-export interface MilestoneProgress {
-  id?: string
-  childId: string
-  ladderId: string
-  rungId: string
-  label: string
-  status: 'locked' | 'active' | 'achieved'
-  achievedAt?: string
-  notes?: string
-  attemptsToAchieve?: number
-}
-
 // ── Lincoln's Ladders (card-based) ──────────────────────────────
 
 export interface LadderRungDefinition {

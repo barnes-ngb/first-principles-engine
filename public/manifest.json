@@ -1,0 +1,29 @@
+{
+  "name": "First Principles Engine",
+  "short_name": "FPE",
+  "description": "A phone-fast family learning notebook",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#4a7c59",
+  "background_color": "#4a7c59",
+  "icons": [
+    {
+      "src": "/icons/sunny-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/sunny-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/sunny-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

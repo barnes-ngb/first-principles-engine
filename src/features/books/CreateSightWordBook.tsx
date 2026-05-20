@@ -130,6 +130,8 @@ export default function CreateSightWordBook() {
         source: 'ai-generated',
         sightWords: [...new Set(wordList)],
         theme: inferBookTheme('', wordList, 'storybook'),
+        createdBy: 'parent',
+        createdFor: childId,
         generationConfig: {
           words: wordList,
           theme: theme || childDefaults.defaultTheme,
@@ -173,6 +175,8 @@ export default function CreateSightWordBook() {
         source: 'ai-generated',
         sightWords: [...new Set(wordList)],
         theme: inferBookTheme('', wordList, 'storybook'),
+        createdBy: 'parent',
+        createdFor: childId,
         generationConfig: {
           words: wordList,
           theme: theme || childDefaults.defaultTheme,

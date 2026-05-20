@@ -12,12 +12,15 @@ import {
 } from 'firebase/firestore'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
-import { artifactsCollection, booksCollection, hoursCollection } from '../../core/firebase/firestore'
+import { artifactsCollection, booksCollection, hoursCollection, stripUndefined } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { useDebounce } from '../../core/hooks/useDebounce'
-import type { Artifact, Book, BookPage, PageImage } from '../../core/types'
+import type { Artifact, Book, BookPage, ImageVersion, PageImage, StickerTag } from '../../core/types'
 import type { SaveState } from '../../components/SaveIndicator'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { addXpEvent } from '../../core/xp/addXpEvent'
+import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
+import { DIAMOND_EVENTS } from '../../core/types'
 import { createEmptyPage, generateImageId } from './bookTypes'
 import { cleanSketchBackground } from './cleanSketch'
 
@@ -25,17 +28,30 @@ interface UseBookResult {
   book: Book | null
   loading: boolean
   saveState: SaveState
+  /** When saveState is 'error', contains the actual error message for debugging. */
+  saveErrorMessage: string | null
   updatePage: (pageId: string, changes: Partial<BookPage>) => void
   addPage: () => void
   deletePage: (pageId: string) => void
   reorderPages: (fromIndex: number, toIndex: number) => void
-  updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds'>>) => void
+  updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme' | 'createdBy' | 'createdFor'>>) => void
   addImageToPage: (pageId: string, file: File, options?: { cleanBackground?: boolean }) => Promise<void>
   removeImageFromPage: (pageId: string, imageId: string) => void
   uploadAudio: (pageId: string, blob: Blob) => Promise<void>
   addAiImageToPage: (pageId: string, url: string, storagePath: string, prompt: string) => void
-  addStickerToPage: (pageId: string, stickerUrl: string, storagePath: string, label: string) => void
+  addStickerToPage: (pageId: string, stickerUrl: string, storagePath: string, label: string, tags?: StickerTag[]) => void
+  /** Upload a cleaned drawing (transparent PNG) and add it to a page as a sticker.
+   *  Returns the storage URL + path so callers can also save it to the library. */
+  addStickerFileToPage: (pageId: string, file: File, label: string) => Promise<{ url: string; storagePath: string } | undefined>
   updateImagePosition: (pageId: string, imageId: string, position: PageImage['position']) => void
+  /** Add a hand-drawn sketch photo to a page. Returns the image ID and storage path for later enhancement. */
+  addSketchToPage: (pageId: string, file: File) => Promise<{ imageId: string; storagePath: string } | undefined>
+  /** Update a sketch PageImage after AI enhancement resolves. */
+  applySketchEnhancement: (pageId: string, imageId: string, enhancedUrl: string, enhancedStoragePath: string) => void
+  /** Switch which version (original vs enhanced) is the active URL for a sketch image. */
+  pickSketchVersion: (pageId: string, imageId: string, version: 'original' | 'enhanced') => void
+  /** Restore a previous version of an image by index (0 = most recent previous). */
+  restoreImageVersion: (pageId: string, imageId: string, versionIndex: number) => void
   /** Whether this session used AI image generation (for Art hours) */
   usedAiGeneration: boolean
 }
@@ -43,8 +59,27 @@ interface UseBookResult {
 interface UseBookshelfResult {
   books: Book[]
   loading: boolean
-  createBook: (title: string, coverStyle: Book['coverStyle'], isTogetherBook?: boolean, contributorIds?: string[]) => Promise<string>
+  createBook: (
+    title: string,
+    coverStyle: Book['coverStyle'],
+    isTogetherBook?: boolean,
+    contributorIds?: string[],
+    attribution?: { createdBy: 'parent' | string; createdFor: string },
+  ) => Promise<string>
   deleteBook: (bookId: string) => Promise<void>
+}
+
+/** Push the current URL onto previousVersions (max 5). */
+function pushVersion(
+  image: PageImage,
+  replacedBy: ImageVersion['replacedBy'],
+): ImageVersion[] {
+  const entry: ImageVersion = {
+    url: image.url,
+    replacedAt: new Date().toISOString(),
+    replacedBy,
+  }
+  return [entry, ...(image.previousVersions ?? []).slice(0, 4)]
 }
 
 /** Get today as YYYY-MM-DD string. */
@@ -107,10 +142,18 @@ export async function createBookArtifact(familyId: string, book: Book): Promise<
   await addDoc(artifactsCollection(familyId), artifact)
 }
 
+export function shouldTriggerBookCompletionRewards(
+  previousStatus: Book['status'],
+  nextStatus: Book['status'] | undefined,
+): boolean {
+  return nextStatus === 'complete' && previousStatus !== 'complete'
+}
+
 export function useBook(familyId: string, bookId: string | undefined): UseBookResult {
   const [book, setBook] = useState<Book | null>(null)
   const [loading, setLoading] = useState(!!familyId && !!bookId)
   const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null)
   const [usedAiGeneration, setUsedAiGeneration] = useState(false)
 
   // Session time tracking
@@ -164,15 +207,19 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     async (updated: Book) => {
       if (!familyId || !bookId) return
       setSaveState('saving')
+      setSaveErrorMessage(null)
       try {
         const docRef = doc(booksCollection(familyId), bookId)
         const { id, ...data } = updated
         void id
-        await setDoc(docRef, { ...data, updatedAt: new Date().toISOString() })
+        const sanitized = stripUndefined(data as unknown as Record<string, unknown>) as Omit<Book, 'id'>
+        await setDoc(docRef, { ...sanitized, updatedAt: new Date().toISOString() })
         setSaveState('saved')
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Book save failed:', err)
         setSaveState('error')
+        setSaveErrorMessage(`Save failed: ${errMsg}`)
       }
     },
     [familyId, bookId],
@@ -239,17 +286,35 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   )
 
   const updateBookMeta = useCallback(
-    (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds'>>) => {
+    (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme' | 'createdBy' | 'createdFor'>>) => {
       applyUpdate((prev) => {
         const next = { ...prev, ...changes }
-        // If status changes to 'complete', create portfolio artifact
-        if (changes.status === 'complete' && prev.status !== 'complete') {
+        // If status changes to 'complete', create portfolio artifact + award XP
+        if (shouldTriggerBookCompletionRewards(prev.status, changes.status)) {
           void createBookArtifact(familyId, next)
+          // 25 XP for finishing a book (lifetime dedup per book)
+          void addXpEvent(
+            familyId,
+            prev.childId,
+            'BOOK_COMPLETE',
+            25,
+            `book_complete_${bookId}`,
+            { title: next.title },
+          )
+          // 5 diamonds for finishing a book
+          void addDiamondEvent({
+            familyId,
+            childId: prev.childId,
+            amount: 5,
+            type: DIAMOND_EVENTS.BOOK_COMPLETE,
+            reason: `Book complete: ${next.title}`,
+            dedupKey: `book_complete_${bookId}-diamond`,
+          })
         }
         return next
       })
     },
-    [applyUpdate, familyId],
+    [applyUpdate, familyId, bookId],
   )
 
   const addImageToPage = useCallback(
@@ -261,7 +326,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
       const isOverlay = (currentPage?.images.length ?? 0) > 0
 
       // If overlaying and cleanup requested, remove paper background
-      let processedFile = file
+      let processedFile: File | Blob = file
       if (isOverlay && options?.cleanBackground && file.type.startsWith('image/')) {
         try {
           processedFile = await cleanSketchBackground(file)
@@ -270,8 +335,17 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
         }
       }
 
+      // Compress before uploading
+      const { compressIfNeeded } = await import('../../core/utils/compressImage')
+      processedFile = await compressIfNeeded(processedFile, 500_000, {
+        maxWidth: 1024,
+        quality: 0.85,
+      })
+
       const imageId = generateImageId()
-      const ext = processedFile.name.split('.').pop() ?? 'jpg'
+      const ext = processedFile instanceof File
+        ? processedFile.name.split('.').pop() ?? 'jpg'
+        : 'jpg'
       const ts = new Date().toISOString().replace(/[:.]/g, '-')
       const filename = `${ts}.${ext}`
       const storagePath = `families/${familyId}/books/${bookId}/${filename}`
@@ -303,8 +377,10 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           ),
         }))
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Image upload failed:', err)
         setSaveState('error')
+        setSaveErrorMessage(`Image upload failed: ${errMsg}`)
       }
     },
     [familyId, bookId, applyUpdate, book],
@@ -394,14 +470,174 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     [applyUpdate],
   )
 
+  const addSketchToPage = useCallback(
+    async (pageId: string, file: File): Promise<{ imageId: string; storagePath: string } | undefined> => {
+      if (!familyId || !bookId) return undefined
+
+      const imageId = generateImageId()
+      const ext = file.name.split('.').pop() ?? 'jpg'
+      const ts = new Date().toISOString().replace(/[:.]/g, '-')
+      const filename = `${ts}_sketch.${ext}`
+      const storagePath = `families/${familyId}/sketches/${filename}`
+      const storageRef = ref(storage, storagePath)
+
+      // Compress sketch before uploading
+      const { compressIfNeeded: compressSketch } = await import('../../core/utils/compressImage')
+      const processedSketch = await compressSketch(file, 500_000, {
+        maxWidth: 1024,
+        quality: 0.85,
+      })
+
+      setSaveState('saving')
+      try {
+        await uploadBytes(storageRef, processedSketch)
+        const url = await getDownloadURL(storageRef)
+
+        const image: PageImage = {
+          id: imageId,
+          url,
+          storagePath,
+          type: 'sketch',
+          style: 'sketch',
+          originalSketchUrl: url,
+          label: 'Hand-drawn sketch',
+        }
+        applyUpdate((prev) => ({
+          ...prev,
+          pages: prev.pages.map((p) =>
+            p.id === pageId
+              ? { ...p, images: [...p.images, image], updatedAt: new Date().toISOString() }
+              : p,
+          ),
+        }))
+
+        // Save as portfolio artifact
+        if (book) {
+          const artifact: Omit<Artifact, 'id'> = {
+            childId: book.childId,
+            title: 'Hand-drawn sketch',
+            type: EvidenceType.Photo,
+            uri: url,
+            storagePath,
+            createdAt: new Date().toISOString(),
+            content: `Sketch captured for book "${book.title}"`,
+            tags: {
+              engineStage: EngineStage.Build,
+              domain: 'art',
+              subjectBucket: SubjectBucket.Art,
+              location: 'Home',
+            },
+          }
+          void addDoc(artifactsCollection(familyId), artifact)
+        }
+
+        return { imageId, storagePath }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
+        console.error('Sketch upload failed:', err)
+        setSaveState('error')
+        setSaveErrorMessage(`Sketch upload failed: ${errMsg}`)
+        return undefined
+      }
+    },
+    [familyId, bookId, applyUpdate, book],
+  )
+
+  const applySketchEnhancement = useCallback(
+    (pageId: string, imageId: string, enhancedUrl: string, enhancedStoragePath: string) => {
+      setUsedAiGeneration(true)
+      applyUpdate((prev) => ({
+        ...prev,
+        pages: prev.pages.map((p) =>
+          p.id === pageId
+            ? {
+                ...p,
+                images: p.images.map((img) => {
+                  if (img.id !== imageId) return img
+                  return {
+                    ...img,
+                    enhancedUrl,
+                    enhancedStoragePath,
+                    previousVersions: pushVersion(img, 'reimagine'),
+                  }
+                }),
+                updatedAt: new Date().toISOString(),
+              }
+            : p,
+        ),
+      }))
+    },
+    [applyUpdate],
+  )
+
+  const pickSketchVersion = useCallback(
+    (pageId: string, imageId: string, version: 'original' | 'enhanced') => {
+      applyUpdate((prev) => ({
+        ...prev,
+        pages: prev.pages.map((p) =>
+          p.id === pageId
+            ? {
+                ...p,
+                images: p.images.map((img) => {
+                  if (img.id !== imageId) return img
+                  const newUrl = version === 'enhanced' && img.enhancedUrl
+                    ? img.enhancedUrl
+                    : img.originalSketchUrl ?? img.url
+                  const newStyle = version === 'enhanced' ? 'ai-enhanced' as const : 'sketch' as const
+                  return {
+                    ...img,
+                    url: newUrl,
+                    style: newStyle,
+                    previousVersions: pushVersion(img, 'reimagine'),
+                  }
+                }),
+                updatedAt: new Date().toISOString(),
+              }
+            : p,
+        ),
+      }))
+    },
+    [applyUpdate],
+  )
+
+  const restoreImageVersion = useCallback(
+    (pageId: string, imageId: string, versionIndex: number) => {
+      applyUpdate((prev) => ({
+        ...prev,
+        pages: prev.pages.map((p) =>
+          p.id === pageId
+            ? {
+                ...p,
+                images: p.images.map((img) => {
+                  if (img.id !== imageId) return img
+                  const versions = img.previousVersions ?? []
+                  const target = versions[versionIndex]
+                  if (!target) return img
+                  // Push current to front, remove the restored one
+                  const newVersions = [
+                    { url: img.url, replacedAt: new Date().toISOString(), replacedBy: 'reimagine' as const },
+                    ...versions.filter((_, i) => i !== versionIndex),
+                  ].slice(0, 5)
+                  return { ...img, url: target.url, previousVersions: newVersions }
+                }),
+                updatedAt: new Date().toISOString(),
+              }
+            : p,
+        ),
+      }))
+    },
+    [applyUpdate],
+  )
+
   const addStickerToPage = useCallback(
-    (pageId: string, stickerUrl: string, storagePath: string, label: string) => {
+    (pageId: string, stickerUrl: string, storagePath: string, label: string, tags?: StickerTag[]) => {
       const image: PageImage = {
         id: generateImageId(),
         url: stickerUrl,
         storagePath,
         type: 'sticker',
         label,
+        ...(tags?.length ? { tags } : {}),
       }
       applyUpdate((prev) => ({
         ...prev,
@@ -415,10 +651,52 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     [applyUpdate],
   )
 
+  const addStickerFileToPage = useCallback(
+    async (pageId: string, file: File, label: string) => {
+      if (!familyId || !bookId) return undefined
+      const ts = new Date().toISOString().replace(/[:.]/g, '-')
+      const ext = (file.name.split('.').pop() ?? 'png').toLowerCase()
+      const filename = `sticker_${ts}.${ext}`
+      const storagePath = `families/${familyId}/books/${bookId}/${filename}`
+      const storageRef = ref(storage, storagePath)
+      setSaveState('saving')
+      try {
+        await uploadBytes(storageRef, file)
+        const url = await getDownloadURL(storageRef)
+        const image: PageImage = {
+          id: generateImageId(),
+          url,
+          storagePath,
+          type: 'sticker',
+          label,
+          // Sticker default position: small + centered so it's clearly a movable sticker
+          position: { x: 30, y: 30, width: 40, height: 40 },
+        }
+        applyUpdate((prev) => ({
+          ...prev,
+          pages: prev.pages.map((p) =>
+            p.id === pageId
+              ? { ...p, images: [...p.images, image], updatedAt: new Date().toISOString() }
+              : p,
+          ),
+        }))
+        return { url, storagePath }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
+        console.error('Sticker upload failed:', err)
+        setSaveState('error')
+        setSaveErrorMessage(`Sticker upload failed: ${errMsg}`)
+        return undefined
+      }
+    },
+    [familyId, bookId, applyUpdate],
+  )
+
   return {
     book,
     loading,
     saveState,
+    saveErrorMessage,
     updatePage,
     addPage,
     deletePage,
@@ -429,19 +707,38 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     uploadAudio,
     addAiImageToPage,
     addStickerToPage,
+    addStickerFileToPage,
     updateImagePosition,
+    addSketchToPage,
+    applySketchEnhancement,
+    pickSketchVersion,
+    restoreImageVersion,
     usedAiGeneration,
   }
 }
 
-export function useBookshelf(familyId: string, childId: string): UseBookshelfResult {
+export function useBookshelf(familyId: string, childId: string, loadAll?: boolean): UseBookshelfResult {
   const [books, setBooks] = useState<Book[]>([])
-  const [loading, setLoading] = useState(!!familyId && !!childId)
+  const [loading, setLoading] = useState(!!familyId && (!!childId || !!loadAll))
 
   useEffect(() => {
-    if (!familyId || !childId) return
+    if (!familyId || (!childId && !loadAll)) return
     let cancelled = false
     const load = async () => {
+      if (loadAll) {
+        // Parent view: load ALL books for the family
+        const allQ = query(
+          booksCollection(familyId),
+          orderBy('updatedAt', 'desc'),
+        )
+        const snap = await getDocs(allQ)
+        if (cancelled) return
+        const all = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
+        setBooks(all)
+        setLoading(false)
+        return
+      }
+
       // Load books where childId matches OR child is a contributor (Together Books)
       const ownQ = query(
         booksCollection(familyId),
@@ -473,13 +770,20 @@ export function useBookshelf(familyId: string, childId: string): UseBookshelfRes
     }
     void load()
     return () => { cancelled = true }
-  }, [familyId, childId])
+  }, [familyId, childId, loadAll])
 
   const createBook = useCallback(
-    async (title: string, coverStyle: Book['coverStyle'], isTogetherBook?: boolean, contributorIds?: string[]): Promise<string> => {
+    async (
+      title: string,
+      coverStyle: Book['coverStyle'],
+      isTogetherBook?: boolean,
+      contributorIds?: string[],
+      attribution?: { createdBy: 'parent' | string; createdFor: string },
+    ): Promise<string> => {
       const now = new Date().toISOString()
+      const targetChildId = attribution?.createdFor ?? childId
       const newBook: Omit<Book, 'id'> = {
-        childId,
+        childId: targetChildId,
         title,
         coverStyle,
         pages: [createEmptyPage(1)],
@@ -487,6 +791,9 @@ export function useBookshelf(familyId: string, childId: string): UseBookshelfRes
         createdAt: now,
         updatedAt: now,
         subjectBuckets: ['LanguageArts'],
+        ...(attribution
+          ? { createdBy: attribution.createdBy, createdFor: attribution.createdFor }
+          : { createdBy: childId, createdFor: childId }),
         ...(isTogetherBook ? { isTogetherBook: true, contributorIds: contributorIds ?? [] } : {}),
       }
       const docRef = await addDoc(booksCollection(familyId), newBook as Book)
@@ -537,4 +844,34 @@ export function useDraftBook(familyId: string, childId: string): { draftBook: Bo
   }, [familyId, childId])
 
   return { draftBook, loading }
+}
+
+/** Hook to load the most recent completed book for a child (for "Read your books" card). */
+export function useCompletedBook(familyId: string, childId: string): { completedBook: Book | null; loading: boolean } {
+  const [completedBook, setCompletedBook] = useState<Book | null>(null)
+  const [loading, setLoading] = useState(!!familyId && !!childId)
+
+  useEffect(() => {
+    if (!familyId || !childId) return
+    let cancelled = false
+    const load = async () => {
+      const q = query(
+        booksCollection(familyId),
+        where('childId', '==', childId),
+        where('status', '==', 'complete'),
+        orderBy('updatedAt', 'desc'),
+      )
+      const snap = await getDocs(q)
+      if (cancelled) return
+      if (!snap.empty) {
+        const d = snap.docs[0]
+        setCompletedBook({ ...d.data(), id: d.id })
+      }
+      setLoading(false)
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [familyId, childId])
+
+  return { completedBook, loading }
 }

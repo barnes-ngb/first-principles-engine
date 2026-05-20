@@ -134,6 +134,105 @@ export function shouldFlagAsError(question: QuestQuestion): boolean {
   return false
 }
 
+// ── Question validation ───────────────────────────────────────
+
+/**
+ * Validate that a word-completion question's blank count matches the answer length,
+ * and that a correct answer exists in the options.
+ * Returns null if the question is invalid and should be skipped.
+ */
+export function validateQuestion(question: QuestQuestion): QuestQuestion | null {
+  // Check correct answer exists in options
+  if (!question.options || question.options.length === 0) return null
+  const hasCorrect = question.options.some(
+    (o) => o.trim().toLowerCase() === question.correctAnswer.trim().toLowerCase(),
+  )
+  if (!hasCorrect) {
+    console.warn('Question has no correct answer in options:', question.correctAnswer, question.options)
+    return null
+  }
+
+  // Validate blank count matches answer length for fill-in-blank questions
+  const stimulus = question.stimulus || question.prompt || ''
+  const blankMatch = /_+/.exec(stimulus)
+  if (blankMatch) {
+    const blankCount = blankMatch[0].length
+    const correctAnswer = question.correctAnswer.trim()
+    if (correctAnswer.length !== blankCount) {
+      console.warn(
+        `Question blank validation failed: ${blankCount} blanks but answer "${correctAnswer}" is ${correctAnswer.length} chars`,
+      )
+      return null
+    }
+
+    // Also check all options are the same length as blanks
+    const wrongLengthOptions = question.options.filter((o) => o.trim().length !== blankCount)
+    if (wrongLengthOptions.length > 0) {
+      console.warn(
+        `Question options have wrong lengths for ${blankCount} blanks:`,
+        wrongLengthOptions,
+      )
+      return null
+    }
+  }
+
+  return question
+}
+
+// ── Fallback question generator ───────────────────────────────
+
+/**
+ * Generate a simple client-side fallback question when AI validation
+ * fails repeatedly. Guaranteed to pass validateQuestion().
+ */
+export function generateFallbackQuestion(level: number, domain: string): QuestQuestion {
+  if (domain === 'math') {
+    const a = Math.floor(Math.random() * 10) + 1
+    const b = Math.floor(Math.random() * (level + 2)) + 1
+    const correct = a + b
+    const distractors = [correct + 1, correct - 1, correct + 2]
+      .filter((d) => d !== correct && d > 0)
+      .slice(0, 2)
+    const options = [String(correct), ...distractors.map(String)]
+      .sort(() => Math.random() - 0.5)
+    return {
+      id: `q_fallback_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      type: 'multiple-choice',
+      level,
+      skill: 'math.addition',
+      prompt: `What is ${a} + ${b}?`,
+      options,
+      correctAnswer: String(correct),
+    }
+  }
+
+  // Reading fallback: simple word identification
+  const wordSets: Record<number, string[]> = {
+    1: ['cat', 'dog', 'sun', 'hat', 'pig', 'cup', 'bed', 'map'],
+    2: ['stop', 'frog', 'clap', 'drum', 'grin', 'step', 'jump', 'help'],
+    3: ['ship', 'chat', 'thin', 'wish', 'much', 'them', 'bath', 'when'],
+    4: ['cake', 'bike', 'home', 'tune', 'lake', 'hide', 'rope', 'cute'],
+    5: ['train', 'sleep', 'float', 'cream', 'snail', 'beach', 'toast', 'green'],
+    6: ['night', 'bright', 'could', 'would', 'friend', 'caught', 'thought', 'through'],
+  }
+  const words = wordSets[Math.min(level, 6)] || wordSets[1]
+  const shuffled = [...words].sort(() => Math.random() - 0.5)
+  const target = shuffled[0]
+  const distractors = shuffled.slice(1, 3)
+  const options = [target, ...distractors].sort(() => Math.random() - 0.5)
+
+  return {
+    id: `q_fallback_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    type: 'multiple-choice',
+    level,
+    skill: 'phonics.word-reading',
+    prompt: 'What word is this?',
+    stimulus: target,
+    options,
+    correctAnswer: target,
+  }
+}
+
 // ── Word extraction helpers ────────────────────────────────────
 
 /**

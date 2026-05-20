@@ -104,13 +104,3 @@ export const weekPlanSchema = z
   })
   .passthrough()
 
-export type SubjectBucketSchema = z.infer<typeof subjectBucketSchema>
-export type EngineStageSchema = z.infer<typeof engineStageSchema>
-export type EvidenceTypeSchema = z.infer<typeof evidenceTypeSchema>
-export type DayBlockTypeSchema = z.infer<typeof dayBlockTypeSchema>
-export type ChecklistItemSchema = z.infer<typeof checklistItemSchema>
-export type DayBlockSchema = z.infer<typeof dayBlockSchema>
-export type DayLogSchema = z.infer<typeof dayLogSchema>
-export type ArtifactTagsSchema = z.infer<typeof artifactTagsSchema>
-export type ArtifactSchema = z.infer<typeof artifactSchema>
-export type WeekPlanSchema = z.infer<typeof weekPlanSchema>

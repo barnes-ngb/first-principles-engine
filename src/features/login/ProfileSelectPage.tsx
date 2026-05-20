@@ -4,8 +4,8 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { UserProfile } from '../../core/types/enums'
 import { useProfile } from '../../core/profile/useProfile'
-import MinecraftAvatar from '../minecraft/MinecraftAvatar'
-import { ARMOR_TIERS } from '../minecraft/armorTiers'
+import MinecraftAvatar from '../avatar/MinecraftAvatar'
+import { ARMOR_TIERS } from '../../core/xp/armorTiers'
 
 const profiles = [
   {

@@ -1,4 +1,4 @@
-/** Extended position including rotation (degrees) and zIndex. */
+/** Extended position including rotation (degrees), zIndex, and flip flags. */
 export interface ImagePosition {
   x: number
   y: number
@@ -6,6 +6,8 @@ export interface ImagePosition {
   height: number
   rotation: number
   zIndex: number
+  flipH: boolean
+  flipV: boolean
 }
 
 export function clampPosition(

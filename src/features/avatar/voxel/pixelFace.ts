@@ -26,31 +26,40 @@ export function buildPaintedFace(features: Partial<CharacterFeatures>): HTMLCanv
   const hair = features.hairColor || '#6B4C32'
   const eyeColor = features.eyeColor || '#3D5A6B'
 
-  // Cheek color: skin blended slightly pink
+  // Cheek color: skin blended with rosy pink
   const skinC = new THREE.Color(skin)
-  const cheek = '#' + skinC.clone().lerp(new THREE.Color('#FFB0B0'), 0.2).getHexString()
+  const cheek = '#' + skinC.clone().lerp(new THREE.Color('#FFAAAA'), 0.15).getHexString()
 
   // Mouth: skin darkened 15%
   const mouth = '#' + skinC.clone().multiplyScalar(0.85).getHexString()
 
-  // Build the face pixel by pixel — clean Minecraft style
+  // Nose shadow: very subtle darkening
+  const noseShadow = '#' + skinC.clone().lerp(new THREE.Color('#000000'), 0.08).getHexString()
+
+  // Mouth corners: hint of smile shape
+  const mouthCorner = '#' + skinC.clone().lerp(new THREE.Color('#000000'), 0.05).getHexString()
+
+  // Chin shadow: slight shadow under chin
+  const chinShadow = '#' + skinC.clone().lerp(new THREE.Color('#000000'), 0.06).getHexString()
+
+  // Build the face pixel by pixel — clean Minecraft style with more expression
   const grid = [
-    // Row 1: hair
+    // Row 0: hair
     [hair, hair, hair, hair, hair, hair, hair, hair],
-    // Row 2: hair
+    // Row 1: hair with slight skin showing (part)
     [hair, hair, hair, hair, hair, hair, hair, hair],
-    // Row 3: hair + forehead
-    [hair, hair, skin, skin, skin, skin, hair, hair],
-    // Row 4: eyes
-    [hair, '#FFFFFF', eyeColor, skin, skin, '#FFFFFF', eyeColor, hair],
-    // Row 5: cheeks + nose
-    [skin, cheek, skin, skin, skin, skin, cheek, skin],
-    // Row 6: mouth
-    [skin, skin, skin, mouth, mouth, skin, skin, skin],
-    // Row 7: chin
+    // Row 2: forehead
+    [hair, skin, skin, skin, skin, skin, skin, hair],
+    // Row 3: eyes — bigger whites, colored pupils, slight gap between
+    [skin, '#FFFFFF', eyeColor, skin, skin, '#FFFFFF', eyeColor, skin],
+    // Row 4: nose + rosy cheeks
+    [skin, cheek, skin, noseShadow, noseShadow, skin, cheek, skin],
+    // Row 5: mouth — wider, slight smile shape
+    [skin, skin, mouthCorner, mouth, mouth, mouthCorner, skin, skin],
+    // Row 6: chin
     [skin, skin, skin, skin, skin, skin, skin, skin],
-    // Row 8: chin/neck
-    [skin, skin, skin, skin, skin, skin, skin, skin],
+    // Row 7: chin bottom with subtle shadow
+    [skin, skin, skin, chinShadow, chinShadow, skin, skin, skin],
   ]
 
   grid.forEach((row, y) => {
@@ -158,6 +167,44 @@ export function showFaceMeshes(character: THREE.Group) {
   })
 }
 
+// ── Apply AI-generated skin texture from URL ────────────────────────
+
+/**
+ * Load an AI-generated skin texture from a URL and apply it to the head mesh.
+ * Uses NearestFilter for crisp Minecraft-style pixels.
+ */
+export async function applyAISkinToHead(
+  headMesh: THREE.Mesh,
+  skinImageUrl: string,
+  skinColor: number,
+): Promise<boolean> {
+  try {
+    const loader = new THREE.TextureLoader()
+    const texture = await new Promise<THREE.Texture>((resolve, reject) => {
+      loader.load(skinImageUrl, resolve, undefined, reject)
+    })
+
+    texture.magFilter = THREE.NearestFilter
+    texture.minFilter = THREE.NearestFilter
+
+    const skinMat = new THREE.MeshLambertMaterial({ color: skinColor })
+    const faceMat = new THREE.MeshLambertMaterial({ map: texture })
+
+    // [+X right, -X left, +Y top, -Y bottom, +Z front, -Z back]
+    headMesh.material = [
+      skinMat, // right
+      skinMat, // left
+      skinMat, // top (hair covers)
+      skinMat, // bottom
+      faceMat, // front — THE FACE
+      skinMat, // back
+    ]
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ── Face generation strategy ────────────────────────────────────────
 
 /**
@@ -174,4 +221,28 @@ export function applyPaintedFace(
   const faceCanvas = buildPaintedFace(features)
   applyCanvasToHead(headMesh, faceCanvas, skinColor)
   hideFaceMeshes(character)
+}
+
+/**
+ * Apply face texture to head mesh, trying AI skin first, then painted fallback.
+ * Hides 3D face meshes when any texture is applied to prevent Z-fighting.
+ */
+export async function applyFaceWithAIFallback(
+  headMesh: THREE.Mesh,
+  character: THREE.Group,
+  features: Partial<CharacterFeatures>,
+  skinColor: number,
+  skinTextureUrl?: string,
+): Promise<void> {
+  // Try AI skin texture first
+  if (skinTextureUrl) {
+    const applied = await applyAISkinToHead(headMesh, skinTextureUrl, skinColor)
+    if (applied) {
+      hideFaceMeshes(character)
+      return
+    }
+  }
+
+  // Fallback: painted face from features
+  applyPaintedFace(headMesh, character, features, skinColor)
 }

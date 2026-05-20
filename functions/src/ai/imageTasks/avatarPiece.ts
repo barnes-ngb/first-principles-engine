@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireApprovedUser } from "../authGuard.js";
 import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 import { createOpenAiProvider } from "../providers/openai.js";
 
@@ -41,11 +42,9 @@ function buildAvatarPiecePrompt(
 }
 
 export const generateAvatarPiece = onCall(
-  { secrets: [openaiApiKey, claudeApiKey] },
+  { secrets: [openaiApiKey, claudeApiKey], timeoutSeconds: 120, memory: "512MiB" },
   async (request): Promise<AvatarPieceResponse> => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireApprovedUser(request);
 
     const { familyId, childId, pieceId, themeStyle, pieceDescription } =
       request.data as AvatarPieceRequest;
@@ -54,7 +53,7 @@ export const generateAvatarPiece = onCall(
       throw new HttpsError("invalid-argument", "Missing required fields.");
     }
 
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError("permission-denied", "You do not have access to this family.");
     }
 

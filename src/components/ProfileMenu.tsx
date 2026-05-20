@@ -52,7 +52,7 @@ function ChildAvatar({ profileType, size = 28 }: { profileType: UserProfile; siz
     <AvatarThumbnail
       features={avatarProfile.characterFeatures}
       ageGroup={avatarProfile.ageGroup}
-      equippedPieces={avatarProfile.equippedPieces}
+      equippedPieces={avatarProfile.equippedPieces ?? []}
       totalXp={avatarProfile.totalXp}
       size={size}
     />

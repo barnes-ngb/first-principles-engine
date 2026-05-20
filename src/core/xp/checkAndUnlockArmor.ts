@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore'
 
 import { avatarProfilesCollection, xpLedgerCollection } from '../firebase/firestore'
 import { ARMOR_PIECES } from '../types'
@@ -12,6 +12,9 @@ import type {
 } from '../types'
 import { ARMOR_PIECE_TO_VOXEL } from '../types'
 import { XP_THRESHOLDS } from '../../features/avatar/voxel/buildArmorPiece'
+import { normalizeAvatarProfile } from '../../features/avatar/normalizeProfile'
+import { deriveUnlockedTiersFromForged, getActiveForgeTierFromProgress } from '../../features/avatar/armorTierProgress'
+import { safeSetProfile } from '../../features/avatar/safeProfileWrite'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -29,13 +32,35 @@ function hasStoneTier(
   themeStyle: 'minecraft' | 'platformer',
 ): boolean {
   if (!progress) return false
-  if (themeStyle === 'minecraft') return progress.unlockedTiers.includes('stone')
+  if (themeStyle === 'minecraft') return (progress.unlockedTiers ?? []).includes('stone')
   return (progress.unlockedTiersPlatformer ?? []).includes('basic')
 }
 
 /** Migrate a profile from the old unlockedPieces/generatedImageUrls shape if needed. */
 export function ensureNewProfileStructure(raw: Record<string, unknown>): AvatarProfile {
-  if (Array.isArray(raw.pieces)) return raw as unknown as AvatarProfile
+  if (Array.isArray(raw.pieces)) {
+    const profile = raw as unknown as AvatarProfile
+    // Ensure ALL array fields are never null/undefined from Firestore
+    if (!Array.isArray(profile.equippedPieces)) profile.equippedPieces = []
+    if (!Array.isArray(profile.pieces)) profile.pieces = []
+    // Guard sub-arrays inside each piece
+    profile.pieces = profile.pieces.map((p) => {
+      if (!p) return { pieceId: 'unknown' as ArmorPiece, unlockedTiers: [] as ArmorTier[], generatedImageUrls: {} }
+      return {
+        ...p,
+        unlockedTiers: Array.isArray(p.unlockedTiers) ? p.unlockedTiers : [],
+        unlockedTiersPlatformer: p.unlockedTiersPlatformer != null
+          ? (Array.isArray(p.unlockedTiersPlatformer) ? p.unlockedTiersPlatformer : [])
+          : undefined,
+      }
+    })
+    return profile
+  }
+
+  // pieces exists but is not an array (e.g. Firestore map) — treat as missing
+  if (raw.pieces != null && !Array.isArray(raw.pieces)) {
+    raw.pieces = undefined
+  }
 
   // Legacy migration: convert unlockedPieces + generatedImageUrls → pieces
   const unlockedPieces = (raw.unlockedPieces as ArmorPiece[] | undefined) ?? []
@@ -55,9 +80,9 @@ export function ensureNewProfileStructure(raw: Record<string, unknown>): AvatarP
     childId: raw.childId as string,
     themeStyle,
     pieces,
-    currentTier: themeStyle === 'minecraft' ? 'stone' : 'basic',
-    baseCharacterUrl: (raw.starterImageUrl as string | undefined),
-    photoTransformUrl: (raw.photoTransformUrl as string | undefined),
+    currentTier: themeStyle === 'minecraft' ? 'wood' : 'basic',
+    ...(raw.starterImageUrl ? { baseCharacterUrl: raw.starterImageUrl as string } : {}),
+    ...(raw.photoTransformUrl ? { photoTransformUrl: raw.photoTransformUrl as string } : {}),
     totalXp: (raw.totalXp as number) ?? 0,
     updatedAt: (raw.updatedAt as string) ?? new Date().toISOString(),
   }
@@ -70,6 +95,8 @@ export interface ArmorUnlockResult {
   newlyUnlockedPieces: ArmorPiece[]
   /** Voxel piece IDs newly unlocked */
   newlyUnlockedVoxelPieces: VoxelArmorPieceId[]
+  /** Tiers newly unlocked by forge completion */
+  newlyUnlockedTiers?: string[]
   /** Set if a full-set tier upgrade happened */
   tierUpgrade?: {
     from: ArmorTier | PlatformerTier
@@ -93,13 +120,13 @@ export async function checkAndUnlockArmor(
   const profileRef = doc(avatarProfilesCollection(familyId), childId)
   const profileSnap = await getDoc(profileRef)
 
-  if (!profileSnap.exists()) return { newlyUnlockedPieces: [], newlyUnlockedVoxelPieces: [] }
+  const profile: AvatarProfile = profileSnap.exists()
+    ? normalizeAvatarProfile(profileSnap.data())
+    : normalizeAvatarProfile({ childId })
 
-  const profile = ensureNewProfileStructure(
-    profileSnap.data() as unknown as Record<string, unknown>,
-  )
-
-  // Read XP from xpLedger (source of truth) when not passed explicitly
+  // Read XP from xpLedger cumulative doc (source of truth) when not passed explicitly.
+  // The cumulative doc only includes XP entries (diamond entries are event-only),
+  // so this correctly excludes diamonds from tier/armor calculations.
   let xp = totalXp ?? 0
   if (totalXp === undefined) {
     const ledgerRef = doc(xpLedgerCollection(familyId), childId)
@@ -108,7 +135,7 @@ export async function checkAndUnlockArmor(
   }
 
   const { themeStyle } = profile
-  const pieces = [...profile.pieces]
+  const pieces = [...(profile.pieces ?? [])]
 
   // ── Find newly eligible stone/basic pieces ───────────────────
   const newlyUnlocked: ArmorPiece[] = []
@@ -118,7 +145,7 @@ export async function checkAndUnlockArmor(
       newlyUnlocked.push(pieceDef.id)
       if (existing) {
         if (themeStyle === 'minecraft') {
-          existing.unlockedTiers = [...existing.unlockedTiers, 'stone']
+          existing.unlockedTiers = [...(existing.unlockedTiers ?? []), 'stone']
         } else {
           existing.unlockedTiersPlatformer = [
             ...(existing.unlockedTiersPlatformer ?? []),
@@ -129,40 +156,64 @@ export async function checkAndUnlockArmor(
         pieces.push({
           pieceId: pieceDef.id,
           unlockedTiers: themeStyle === 'minecraft' ? ['stone'] : [],
-          unlockedTiersPlatformer: themeStyle === 'platformer' ? ['basic'] : undefined,
+          ...(themeStyle === 'platformer' ? { unlockedTiersPlatformer: ['basic'] as PlatformerTier[] } : {}),
           generatedImageUrls: {},
         })
       }
     }
   }
 
+  // ── Compute unlocked tiers from forge progression ──────────────
+  const prevUnlockedTiers = profile.unlockedTiers ?? ['wood']
+
   // ── Compute unlocked voxel pieces from XP thresholds ──────────
+  // Legacy: still track unlockedPieces for backward compat
   const unlockedVoxelPieces: VoxelArmorPieceId[] = []
   const equippedPieces: string[] = profile.equippedPieces ?? []
   for (const [voxelId, threshold] of Object.entries(XP_THRESHOLDS)) {
     if (xp >= threshold) {
       unlockedVoxelPieces.push(voxelId as VoxelArmorPieceId)
-      // Auto-equip newly unlocked pieces
-      if (!equippedPieces.includes(voxelId)) {
+      // Auto-equip newly unlocked pieces (only if already forged or legacy)
+      const isForged = Boolean(profile.forgedPieces?.[profile.currentTier ?? 'wood']?.[voxelId])
+      const isLegacyUnlocked = (profile.unlockedPieces ?? []).includes(voxelId) && !profile.forgedPieces
+      if ((isForged || isLegacyUnlocked) && !equippedPieces.includes(voxelId)) {
         equippedPieces.push(voxelId)
       }
     }
   }
 
+  // ── Migrate existing unlocked pieces to forgedPieces if needed ─
+  let forgedPieces = profile.forgedPieces ?? {}
+  if (!profile.forgedPieces && (profile.unlockedPieces ?? []).length > 0) {
+    // Legacy migration: treat already-unlocked pieces as forged at wood tier
+    const woodForged: Record<string, { forgedAt: string }> = {}
+    for (const pieceId of profile.unlockedPieces ?? []) {
+      woodForged[pieceId] = { forgedAt: profile.updatedAt || new Date().toISOString() }
+    }
+    forgedPieces = { wood: woodForged }
+  }
+  const progressionProfile = { ...profile, forgedPieces, totalXp: xp } as AvatarProfile
+  const unlockedTiers = deriveUnlockedTiersFromForged(progressionProfile)
+  const activeTier = getActiveForgeTierFromProgress(progressionProfile)
+
   const newlyUnlockedVoxel = newlyUnlocked.map((id) => ARMOR_PIECE_TO_VOXEL[id])
+  const newlyUnlockedTiers = unlockedTiers.filter((t) => !prevUnlockedTiers.includes(t))
 
   // ── Save updated profile (no image generation needed!) ────────
-  await setDoc(profileRef, {
+  await safeSetProfile(profileRef, {
     ...profile,
     pieces,
     totalXp: xp,
     unlockedPieces: unlockedVoxelPieces,
+    unlockedTiers,
+    currentTier: activeTier,
+    forgedPieces,
     equippedPieces,
-    updatedAt: new Date().toISOString(),
-  })
+  } as unknown as Record<string, unknown>)
 
   return {
     newlyUnlockedPieces: newlyUnlocked,
     newlyUnlockedVoxelPieces: newlyUnlockedVoxel,
+    ...(newlyUnlockedTiers.length > 0 ? { newlyUnlockedTiers } : {}),
   }
 }

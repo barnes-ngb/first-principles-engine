@@ -8,9 +8,11 @@ export type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 interface SaveIndicatorProps {
   state: SaveState
+  /** When state is 'error', show the actual error message instead of generic "Save failed". */
+  errorMessage?: string | null
 }
 
-export default function SaveIndicator({ state }: SaveIndicatorProps) {
+export default function SaveIndicator({ state, errorMessage }: SaveIndicatorProps) {
   if (state === 'idle') return null
 
   return (
@@ -24,6 +26,7 @@ export default function SaveIndicator({ state }: SaveIndicatorProps) {
         borderRadius: 1,
         bgcolor: 'action.hover',
         transition: 'opacity 0.2s ease',
+        ...(state === 'error' ? { maxWidth: '100%', flexWrap: 'wrap' } : {}),
       }}
     >
       {state === 'saving' && (
@@ -45,8 +48,8 @@ export default function SaveIndicator({ state }: SaveIndicatorProps) {
       {state === 'error' && (
         <>
           <ErrorOutlineIcon sx={{ fontSize: 16, color: 'error.main' }} />
-          <Typography variant="caption" color="error.main">
-            Save failed
+          <Typography variant="caption" color="error.main" sx={{ wordBreak: 'break-word' }}>
+            {errorMessage || 'Save failed'}
           </Typography>
         </>
       )}

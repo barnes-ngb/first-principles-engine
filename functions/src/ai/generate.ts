@@ -1,7 +1,11 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
+import { requireEmailAuth } from "./authGuard.js";
+import { CHARTER_PREAMBLE } from "./contextSlices.js";
 import { sanitizeAndParseJson } from "./sanitizeJson.js";
+import { callClaude, logAiUsage } from "./chatTypes.js";
+import { modelForTask } from "./chat.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -57,18 +61,6 @@ interface LadderProgressDoc {
 
 // ── Prompt assembly ─────────────────────────────────────────────
 
-const CHARTER_PREAMBLE = `You are an AI assistant for the First Principles Engine, a family homeschool learning platform.
-
-Core family values (Charter):
-- Formation first: character and virtue before academics.
-- Both kids count: Lincoln (10, neurodivergent, speech challenges) and London (6, story-driven).
-- Narration counts: oral evidence is first-class, especially for Lincoln.
-- Small artifacts > perfect documentation: capture evidence quickly.
-- No heroics: simple routines, minimum viable days are real school.
-- Shelly's direct attention is the primary schedulable resource — split-block scheduling is required.
-
-Always align recommendations with these values. Be concise, practical, and encouraging.`;
-
 const ACTIVITY_OUTPUT_SCHEMA = `{
   "title": "string — short, kid-friendly activity title",
   "objective": "string — one sentence learning objective",
@@ -86,6 +78,9 @@ interface PromptContext {
   currentRung: { title: string; description?: string } | undefined;
   ladderTitle: string | undefined;
   weekTheme: string | undefined;
+  weekVirtue: string | undefined;
+  weekStoryTitle: string | undefined;
+  weekReadAloud: string | undefined;
 }
 
 function buildGenerateSystemPrompt(ctx: PromptContext): string {
@@ -147,13 +142,18 @@ function buildGenerateSystemPrompt(ctx: PromptContext): string {
     }
   }
 
-  // Weekly theme
-  if (ctx.weekTheme) {
+  // Weekly theme and story context
+  if (ctx.weekTheme || ctx.weekVirtue || ctx.weekStoryTitle || ctx.weekReadAloud) {
+    lines.push("", "## Weekly Context", "");
+    if (ctx.weekTheme) lines.push(`Theme: "${ctx.weekTheme}"`);
+    if (ctx.weekVirtue) lines.push(`Virtue: ${ctx.weekVirtue}`);
+    if (ctx.weekStoryTitle) lines.push(`Story: ${ctx.weekStoryTitle}`);
+    if (ctx.weekReadAloud) lines.push(`Read-aloud book: ${ctx.weekReadAloud}`);
     lines.push(
       "",
-      "## Weekly Theme",
-      "",
-      `This week's theme is: "${ctx.weekTheme}". Weave it in naturally where possible.`,
+      "Tie the activity to this week's theme/story when the connection is natural.",
+      "For example, use the story scenario as context for math problems or the virtue as a discussion thread.",
+      "Don't force it if the connection is unnatural.",
     );
   }
 
@@ -353,9 +353,7 @@ export const generateActivity = onCall(
   { secrets: [claudeApiKey] },
   async (request): Promise<GenerateResponse> => {
     // ── Auth gate ──────────────────────────────────────────────
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    const { uid } = requireEmailAuth(request);
 
     const { familyId, childId, activityType, skillTag, estimatedMinutes } =
       request.data as GenerateRequest;
@@ -385,7 +383,7 @@ export const generateActivity = onCall(
     }
 
     // ── Authorization: caller must own the family ──────────────
-    if (request.auth.uid !== familyId) {
+    if (uid !== familyId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have access to this family.",
@@ -456,16 +454,27 @@ export const generateActivity = onCall(
       }
     }
 
-    // ── Load current week theme (optional) ─────────────────────
+    // ── Load current week context (optional) ────────────────────
     let weekTheme: string | undefined;
+    let weekVirtue: string | undefined;
+    let weekStoryTitle: string | undefined;
+    let weekReadAloud: string | undefined;
     const weekKey = currentWeekKey();
     const weekSnap = await db
       .doc(`families/${familyId}/weeks/${weekKey}`)
       .get();
 
     if (weekSnap.exists) {
-      const weekData = weekSnap.data() as { theme?: string };
+      const weekData = weekSnap.data() as {
+        theme?: string;
+        virtue?: string;
+        conundrum?: { title?: string };
+        readAloudBook?: string;
+      };
       weekTheme = weekData.theme;
+      weekVirtue = weekData.virtue;
+      weekStoryTitle = weekData.conundrum?.title;
+      weekReadAloud = weekData.readAloudBook;
     }
 
     // ── Assemble prompt ────────────────────────────────────────
@@ -478,34 +487,33 @@ export const generateActivity = onCall(
       currentRung,
       ladderTitle,
       weekTheme,
+      weekVirtue,
+      weekStoryTitle,
+      weekReadAloud,
     };
 
     const systemPrompt = buildGenerateSystemPrompt(ctx);
     const userMessage = buildGenerateUserMessage(ctx);
 
     // ── Call Claude (Haiku for routine generation) ──────────────
-    const model = "claude-haiku-4-5-20251001";
+    const model = modelForTask("generate");
 
     let responseText: string;
     let usage: { inputTokens: number; outputTokens: number };
 
     try {
-      const { default: Anthropic } = await import("@anthropic-ai/sdk");
-      const client = new Anthropic({ apiKey: claudeApiKey.value() });
-
-      const completion = await client.messages.create({
+      const result = await callClaude({
+        apiKey: claudeApiKey.value(),
         model,
-        max_tokens: 1024,
-        system: systemPrompt,
+        maxTokens: 1024,
+        systemPrompt,
         messages: [{ role: "user", content: userMessage }],
       });
 
-      const textBlock = completion.content.find((c) => c.type === "text");
-      responseText = textBlock?.text ?? "";
-
+      responseText = result.text;
       usage = {
-        inputTokens: completion.usage.input_tokens,
-        outputTokens: completion.usage.output_tokens,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
       };
     } catch (err: unknown) {
       const msg =
@@ -533,7 +541,7 @@ export const generateActivity = onCall(
     }
 
     // ── Log usage to Firestore ─────────────────────────────────
-    await db.collection(`families/${familyId}/aiUsage`).add({
+    await logAiUsage(db, familyId, {
       childId,
       taskType: "generate",
       activityType,
@@ -541,7 +549,6 @@ export const generateActivity = onCall(
       model,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      createdAt: new Date().toISOString(),
     });
 
     return { activity, model, usage };

@@ -58,3 +58,21 @@ export type {
   ExtractFeaturesRequest,
   ExtractFeaturesResponse,
 } from "./imageTasks/extractFeatures.js";
+
+export { generateMinecraftSkin } from "./imageTasks/minecraftSkin.js";
+export type {
+  MinecraftSkinRequest,
+  MinecraftSkinResponse,
+} from "./imageTasks/minecraftSkin.js";
+
+export { generateMinecraftFace } from "./imageTasks/minecraftFace.js";
+export type {
+  MinecraftFaceRequest,
+  MinecraftFaceResponse,
+} from "./imageTasks/minecraftFace.js";
+
+export { enhanceSketch } from "./imageTasks/enhanceSketch.js";
+export type {
+  EnhanceSketchRequest,
+  EnhanceSketchResponse,
+} from "./imageTasks/enhanceSketch.js";

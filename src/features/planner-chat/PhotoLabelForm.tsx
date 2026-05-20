@@ -1,7 +1,9 @@
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import DeleteIcon from '@mui/icons-material/Delete'
 import Box from '@mui/material/Box'
+import Alert from '@mui/material/Alert'
 import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
 import IconButton from '@mui/material/IconButton'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
@@ -9,7 +11,9 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 
 import PhotoCapture from '../../components/PhotoCapture'
-import type { PhotoLabel, WorkbookConfig } from '../../core/types'
+import ScanButton from '../../components/ScanButton'
+import ScanResultsPanel from '../../components/ScanResultsPanel'
+import type { PhotoLabel, ScanResult, WorkbookConfig } from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
 
 interface PhotoLabelFormProps {
@@ -18,6 +22,18 @@ interface PhotoLabelFormProps {
   onPhotoCapture: (file: File) => Promise<string | null>
   uploading: boolean
   workbookConfigs?: WorkbookConfig[]
+  /** Scan a workbook page: upload + AI analysis. */
+  onScanCapture?: (file: File) => Promise<void>
+  /** Whether a scan is currently in progress. */
+  scanLoading?: boolean
+  /** Result of the most recent scan. */
+  scanResult?: ScanResult | null
+  /** Error from the most recent scan. */
+  scanError?: string | null
+  /** Clear the current scan result. */
+  onScanClear?: () => void
+  /** Add the scan result as a photo label with auto-filled fields. */
+  onScanAccept?: () => void
 }
 
 /**
@@ -82,10 +98,18 @@ export default function PhotoLabelForm({
   onPhotoCapture,
   uploading,
   workbookConfigs = [],
+  onScanCapture,
+  scanLoading,
+  scanResult,
+  scanError,
+  onScanClear,
+  onScanAccept,
 }: PhotoLabelFormProps) {
   const handleCapture = async (file: File) => {
     const artifactId = await onPhotoCapture(file)
     if (artifactId) {
+      // Deduplicate — skip if this artifact is already in the list
+      if (labels.some((l) => l.artifactId === artifactId)) return
       onLabelsChange([
         ...labels,
         {
@@ -228,6 +252,40 @@ export default function PhotoLabelForm({
           </Typography>
         )}
       </Box>
+
+      {/* Scan Page section */}
+      {onScanCapture && (
+        <Box sx={{ borderTop: '1px solid', borderColor: 'divider', pt: 1.5 }}>
+          <Stack spacing={1}>
+            <ScanButton
+              onCapture={onScanCapture}
+              loading={scanLoading}
+              variant="button"
+            />
+            {scanLoading && (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <CircularProgress size={16} />
+                <Typography variant="caption" color="text.secondary">
+                  Analyzing workbook page...
+                </Typography>
+              </Stack>
+            )}
+            {scanResult && onScanAccept && onScanClear && (
+              <ScanResultsPanel
+                results={scanResult}
+                onAddToPlan={onScanAccept}
+                onSkip={onScanClear}
+                onScanAnother={onScanClear}
+              />
+            )}
+            {scanError && onScanClear && (
+              <Alert severity="error" onClose={onScanClear}>
+                {scanError}
+              </Alert>
+            )}
+          </Stack>
+        </Box>
+      )}
     </Stack>
   )
 }

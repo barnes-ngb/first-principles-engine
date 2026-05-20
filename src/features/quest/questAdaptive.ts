@@ -1,21 +1,32 @@
 import type { QuestState } from './questTypes'
 import {
+  DEFAULT_LEVEL_CAP,
+  FLOOR_WRONG_LIMIT,
   FRUSTRATION_LIMIT,
   LEVEL_DOWN_STREAK,
   LEVEL_UP_STREAK,
   MAX_QUESTIONS,
   MAX_SECONDS,
+  MIN_QUESTIONS,
 } from './questTypes'
 
 /**
  * Compute the next adaptive state after an answer.
  * Pure function — no side effects.
+ *
+ * @param levelCap - Per-quest-mode ceiling (e.g. 8 for phonics, 6 for comprehension/math).
+ *                   Defaults to DEFAULT_LEVEL_CAP (10) if not provided.
  */
-export function computeNextState(prev: QuestState, correct: boolean): QuestState {
+export function computeNextState(
+  prev: QuestState,
+  correct: boolean,
+  levelCap: number = DEFAULT_LEVEL_CAP,
+): QuestState {
   let currentLevel = prev.currentLevel
   let consecutiveCorrect = prev.consecutiveCorrect
   let consecutiveWrong = prev.consecutiveWrong
   let levelDownsInARow = prev.levelDownsInARow
+  let wrongAtFloor = prev.wrongAtFloor
   let questionsThisLevel = prev.questionsThisLevel + 1
   const totalCorrect = prev.totalCorrect + (correct ? 1 : 0)
   const totalQuestions = prev.totalQuestions + 1
@@ -24,7 +35,8 @@ export function computeNextState(prev: QuestState, correct: boolean): QuestState
     consecutiveCorrect = prev.consecutiveCorrect + 1
     consecutiveWrong = 0
     levelDownsInARow = 0
-    if (consecutiveCorrect >= LEVEL_UP_STREAK && currentLevel < 6) {
+    wrongAtFloor = 0
+    if (consecutiveCorrect >= LEVEL_UP_STREAK && currentLevel < levelCap) {
       currentLevel = prev.currentLevel + 1
       consecutiveCorrect = 0
       questionsThisLevel = 0
@@ -38,6 +50,10 @@ export function computeNextState(prev: QuestState, correct: boolean): QuestState
       questionsThisLevel = 0
       levelDownsInARow = prev.levelDownsInARow + 1
     }
+    // Track wrong answers at Level 1 (floor) for frustration escape
+    if (currentLevel === 1) {
+      wrongAtFloor = prev.wrongAtFloor + 1
+    }
   }
 
   return {
@@ -46,6 +62,7 @@ export function computeNextState(prev: QuestState, correct: boolean): QuestState
     consecutiveCorrect,
     consecutiveWrong,
     levelDownsInARow,
+    wrongAtFloor,
     totalQuestions,
     totalCorrect,
     questionsThisLevel,
@@ -57,10 +74,13 @@ export function computeNextState(prev: QuestState, correct: boolean): QuestState
  */
 export function shouldEndSession(state: QuestState): { end: boolean; timedOut: boolean } {
   const timedOut = state.elapsedSeconds >= MAX_SECONDS
+  // Hard minimum: never end before MIN_QUESTIONS unless timed out
+  const pastMinimum = state.totalQuestions >= MIN_QUESTIONS
   const end =
     state.totalQuestions >= MAX_QUESTIONS ||
     timedOut ||
-    state.levelDownsInARow >= FRUSTRATION_LIMIT
+    (pastMinimum && state.levelDownsInARow >= FRUSTRATION_LIMIT) ||
+    (pastMinimum && state.wrongAtFloor >= FLOOR_WRONG_LIMIT)
   return { end, timedOut }
 }
 

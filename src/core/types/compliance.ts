@@ -16,6 +16,7 @@ export interface HoursEntry {
   notes?: string
   dayLogId?: string
   blockId?: string
+  source?: string
 }
 
 export interface HoursAdjustment {

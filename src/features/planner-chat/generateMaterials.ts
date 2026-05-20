@@ -10,6 +10,10 @@ export function buildMaterialsPrompt(
   childName: string,
   snapshot: SkillSnapshot | null,
   theme?: string,
+  conundrum?: { title?: string; scenario?: string; question?: string },
+  virtue?: string,
+  scriptureRef?: string,
+  scriptureText?: string,
 ): string {
   const items = day.items.filter((i) => i.accepted && !i.isAppBlock)
 
@@ -33,7 +37,11 @@ export function buildMaterialsPrompt(
   - Writing: Letter formation, name writing, simple words. Needs large lines.`
       : ''
 
-  return `Generate printable Minecraft-themed worksheets for ${childName}'s ${day.day} activities.
+  const themeStyle = childName === 'London'
+    ? 'adventure and story themed'
+    : 'Minecraft-themed'
+
+  return `Generate printable ${themeStyle} worksheets for ${childName}'s ${day.day} activities.
 
 CHILD CONTEXT:
 ${childContext}
@@ -43,15 +51,32 @@ ${theme ? `Week theme: ${theme}` : ''}
 
 ACTIVITIES:
 ${items.map((i) => `- ${i.title} (${i.estimatedMinutes}m, ${i.subjectBucket})${i.skipSuggestion ? ` [Skip: ${i.skipSuggestion.reason}]` : ''}`).join('\n')}
+${theme || conundrum?.title ? `
+WEEKLY THEME CONTEXT — USE THIS TO CONNECT WORKSHEETS:
+${theme ? `Theme: ${theme}` : ''}
+${virtue ? `Virtue: ${virtue}` : ''}
+${scriptureRef ? `Scripture: ${scriptureRef}${scriptureText ? ` — "${scriptureText}"` : ''}` : ''}
+${conundrum?.title ? `This week's story: "${conundrum.title}"` : ''}
+${conundrum?.scenario ? `Story summary: ${conundrum.scenario.slice(0, 200)}...` : ''}
 
+IMPORTANT: Connect at least 2 worksheets to this theme:
+- Math problems should reference the story characters/setting when possible
+- Phonics word lists should include words related to the theme
+- The formation worksheet should use the scripture and virtue above
+- Writing prompts should connect to the story world
+` : ''}
 CRITICAL RULES — READ THESE CAREFULLY:
 1. Return ONLY valid HTML. No markdown fences, no backticks, no explanation outside the HTML.
 2. Start directly with <html> tag.
-3. Every worksheet must be MINECRAFT THEMED:
+${childName === 'London' ? `3. Every worksheet must be ADVENTURE/STORY THEMED:
+   - Math problems use story characters and adventure scenarios (dragons, explorers, treasure, animals)
+   - Reading/phonics uses adventure vocabulary and simple stories
+   - Prompts connect to imagination and drawing
+   - Headers use adventure emojis: 🦕 🗺️ 🌟 🎨 🏰 🐉` : `3. Every worksheet must be MINECRAFT THEMED:
    - Math problems use Minecraft items (blocks, diamonds, creepers, etc.)
    - Phonics/reading uses Minecraft vocabulary where possible
    - Story prompts set in Minecraft worlds
-   - Headers use blocky/pixel style with emojis: ⛏️ ⚔️ 🧱 💎 🏔️
+   - Headers use blocky/pixel style with emojis: ⛏️ ⚔️ 🧱 💎 🏔️`}
 4. Each activity gets its own page with page-break-before.
 5. **ABSOLUTELY NO BLANK FORMS.** Every worksheet MUST contain REAL, FILLED-IN content.
    - WRONG: "Problem 1: ___" or "Write a math problem here" or empty boxes
@@ -71,6 +96,11 @@ MATH: Generate 6-8 ACTUAL problems with REAL numbers at the child's level.
   Include 2 guided examples at top WITH SOLUTIONS SHOWN (worked out step by step).
   Show work space with place value boxes after each problem.
   Include answer key at bottom.
+${childName === 'London' ? `  For London (age 6):
+  Generate 4-6 problems at kindergarten level (addition/subtraction to 10, counting, number recognition).
+  Example: "A dragon has 3 eggs in one nest and 4 in another. How many eggs total?"
+  Use large fonts, pictures, and simple number lines.
+  Include visual counting aids (dot groups, tally marks).` : ''}
 
 PHONICS/READING: Generate ACTUAL word lists and activities with REAL words.
   Word bank: 8-10 SPECIFIC real words matching the target pattern (e.g., for CVC -at: cat, hat, sat, mat, bat, rat, fat, pat)
@@ -92,14 +122,21 @@ FORMATION/PRAYER: Generate a reflection page with ACTUAL content.
   Specific prompts: "What does this verse mean for your day today?"
   Gratitude list: "Name 3 things you're grateful for today: 1.___ 2.___ 3.___"
   Prayer space: "What do you want to talk to God about?"
-  Minecraft tie-in: "In your Minecraft world, what would you build to show gratitude?"
+${childName === 'London'
+    ? `  Drawing connection: "Draw a picture of something you want to thank God for today."`
+    : `  Minecraft tie-in: "In your Minecraft world, what would you build to show gratitude?"`}
 
-WRITING: Generate a themed writing prompt with REAL scaffolding.
+${childName === 'London' ? `DRAWING + WRITING: Generate a story-based activity.
+  Adventure prompt: "You found a baby dragon in the forest! Draw your dragon and write its name."
+  Large drawing box (at least 250px tall)
+  2-3 lined spaces for writing (large lines, 40px height)
+  Word bank: 5-6 simple words with pictures: "dragon, fly, fire, egg, cave, friend"
+  Sentence starter: "My dragon is..."` : `WRITING: Generate a themed writing prompt with REAL scaffolding.
   Minecraft scenario: "You discovered a new biome called the Crystal Caverns! It's full of glowing crystals and underground rivers. Describe what you see, hear, and feel."
   Picture area (empty box for drawing)
   Word bank with 8-10 SPECIFIC helpful vocabulary words: "glowing, crystals, underground, sparkling, echo, dripping, mysterious, cavern, stalactite, river"
   4-6 lined spaces for writing
-  Sentence starters: "When I entered the cavern, I saw..." "The most amazing thing was..."
+  Sentence starters: "When I entered the cavern, I saw..." "The most amazing thing was..."`}
 
 SPEECH: Generate a practice card with REAL target content.
   Target sounds/words listed clearly in large font (e.g., for /s/ blends: "stop, step, star, stick, stone, stamp")
@@ -115,6 +152,10 @@ SELF-CHECK BEFORE OUTPUTTING:
   ✓ Is there an answer key with ACTUAL answers?
   ✓ Could the child sit down RIGHT NOW and do this with zero teacher prep?
   If any check fails, regenerate that section with real content.
+${childName === 'London' ? `  ✓ Are fonts large enough for a 6-year-old? (minimum 16pt body, 18pt problems)
+  ✓ Is there a drawing space on every page?
+  ✓ Are word banks 5-6 words max with simple vocabulary?
+  ✓ Is there NO more than one paragraph of instructions per activity?` : ''}
 
 DESIGN:
 <html><head><style>
@@ -138,6 +179,12 @@ DESIGN:
   .word-bank { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; background: #f5f5f5; border-radius: 6px; }
   .word-bank-item { background: white; border: 1px solid #ddd; padding: 6px 14px; border-radius: 20px; font-size: 14pt; }
   .drawing-box { width: 100%; height: 200px; border: 2px dashed #aaa; border-radius: 8px; margin: 12px 0; display: flex; align-items: center; justify-content: center; color: #aaa; font-size: 14pt; }
+${childName === 'London' ? `  body { font-size: 16pt; }
+  .problem { font-size: 18pt; padding: 16px; }
+  .line { height: 45px; margin: 12px 0; }
+  .drawing-box { height: 280px; }
+  .word-box { font-size: 24pt; padding: 14px 24px; }
+  .sound-box { width: 60px; height: 60px; font-size: 26pt; line-height: 60px; }` : ''}
 </style></head><body>`
 }
 
@@ -162,6 +209,8 @@ export function openPrintWindow(rawHtml: string, title?: string): void {
   // If it doesn't start with <html or <!DOCTYPE, wrap it
   if (!html.match(/^<(!DOCTYPE|html)/i)) {
     html = `<!DOCTYPE html><html><head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>
         body { font-family: Arial, sans-serif; max-width: 7.5in; margin: 0.5in auto; }
         @media print { .page { page-break-before: always; } .page:first-child { page-break-before: auto; } }
@@ -169,13 +218,26 @@ export function openPrintWindow(rawHtml: string, title?: string): void {
     </head><body>${html}</body></html>`
   }
 
+  // Strategy 1: Try window.open (works on desktop)
   const printWindow = window.open('', '_blank')
   if (printWindow) {
     printWindow.document.write(html)
     printWindow.document.close()
     if (title) printWindow.document.title = title
     setTimeout(() => {
-      try { printWindow.print() } catch { /* print dialog blocked */ }
+      try { printWindow.print() } catch { /* blocked */ }
     }, 500)
+    return
   }
+
+  // Strategy 2: Fallback for mobile — download as HTML file
+  const blob = new Blob([html], { type: 'text/html' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${(title ?? 'worksheet').replace(/[^a-zA-Z0-9 -]/g, '')}.html`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }

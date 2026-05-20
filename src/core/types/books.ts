@@ -14,19 +14,176 @@ export type BookTheme =
   | 'science'
   | 'sight_words'
   | 'faith'
+  | 'space'
+  | 'dinosaurs'
+  | 'ocean'
+  | 'superheroes'
+  | 'cooking'
+  | 'sports'
+  | 'holidays'
   | 'other'
+  | (string & {})  // allow custom theme IDs
 
-export const BOOK_THEMES: { id: BookTheme; label: string; emoji: string }[] = [
-  { id: 'adventure',   label: 'Adventure',   emoji: '⚔️' },
-  { id: 'animals',     label: 'Animals',     emoji: '🐾' },
-  { id: 'family',      label: 'Family',      emoji: '👨‍👩‍👦' },
-  { id: 'fantasy',     label: 'Fantasy',     emoji: '✨' },
-  { id: 'minecraft',   label: 'Minecraft',   emoji: '⛏️' },
-  { id: 'science',     label: 'Science',     emoji: '🔬' },
-  { id: 'sight_words', label: 'Sight Words', emoji: '📖' },
-  { id: 'faith',       label: 'Faith',       emoji: '✝️' },
-  { id: 'other',       label: 'Other',       emoji: '📚' },
+// ── Theme Engine ─────────────────────────────────────────────
+
+export interface BookThemeConfig {
+  id: string
+  name: string
+  isPreset: boolean
+  childId?: string
+  /** Injected into DALL-E image generation prompt */
+  imageStylePrefix: string
+  /** Maps to existing coverStyle for visual theming */
+  coverStyle: string
+  /** Story tone guidance for AI story generation */
+  storyTone: string
+  /** World description injected into story generation */
+  storyWorldDescription: string
+  /** Vocabulary level guidance */
+  storyVocabularyLevel: string
+  /** Display emoji */
+  emoji: string
+  /** Optional accent color for UI */
+  colorAccent?: string
+}
+
+export const PRESET_THEMES: BookThemeConfig[] = [
+  {
+    id: 'adventure', name: 'Adventure', emoji: '🗺️', isPreset: true,
+    imageStylePrefix: 'A colorful adventure scene for a children\'s book. Exciting landscapes, treasure maps, hidden paths.',
+    coverStyle: 'realistic',
+    storyTone: 'adventurous and exciting with brave heroes',
+    storyWorldDescription: 'a world full of hidden treasures, ancient maps, and daring quests',
+    storyVocabularyLevel: 'medium complexity with action words',
+  },
+  {
+    id: 'animals', name: 'Animals', emoji: '🐾', isPreset: true,
+    imageStylePrefix: 'A warm, friendly children\'s book illustration of animals in nature. Soft colors, gentle expressions.',
+    coverStyle: 'storybook',
+    storyTone: 'gentle and heartwarming with animal friendships',
+    storyWorldDescription: 'a forest, farm, or jungle where animals talk and help each other',
+    storyVocabularyLevel: 'simple sentences with animal vocabulary',
+  },
+  {
+    id: 'family', name: 'Family', emoji: '👨‍👩‍👦', isPreset: true,
+    imageStylePrefix: 'A warm, cozy children\'s book illustration of a family together. Soft lighting, happy expressions.',
+    coverStyle: 'storybook',
+    storyTone: 'warm, loving, and relatable with family moments',
+    storyWorldDescription: 'a loving home where a family shares everyday adventures together',
+    storyVocabularyLevel: 'simple sentences about daily life and emotions',
+  },
+  {
+    id: 'fantasy', name: 'Fantasy', emoji: '✨', isPreset: true,
+    imageStylePrefix: 'A magical fantasy scene for a children\'s book. Sparkling effects, enchanted forests, mythical creatures.',
+    coverStyle: 'storybook',
+    storyTone: 'whimsical and magical with wonder and discovery',
+    storyWorldDescription: 'an enchanted realm with dragons, fairies, magic spells, and glowing forests',
+    storyVocabularyLevel: 'medium complexity with descriptive fantasy words',
+  },
+  {
+    id: 'minecraft', name: 'Minecraft', emoji: '⛏️', isPreset: true,
+    imageStylePrefix: 'A blocky pixel-art Minecraft-style scene. Cubic blocks, pixelated textures, bright colors. No character names.',
+    coverStyle: 'minecraft',
+    storyTone: 'adventurous with crafting and mining language',
+    storyWorldDescription: 'a blocky world made of cubes where heroes mine resources, craft tools, and explore caves',
+    storyVocabularyLevel: 'simple action-oriented sentences',
+  },
+  {
+    id: 'science', name: 'Science', emoji: '🔬', isPreset: true,
+    imageStylePrefix: 'A bright, educational children\'s book illustration about science. Lab equipment, nature exploration, experiments.',
+    coverStyle: 'realistic',
+    storyTone: 'curious and educational with discovery and experimentation',
+    storyWorldDescription: 'a world where young scientists explore nature, conduct experiments, and make discoveries',
+    storyVocabularyLevel: 'medium complexity with age-appropriate science vocabulary',
+  },
+  {
+    id: 'sight_words', name: 'Sight Words', emoji: '📖', isPreset: true,
+    imageStylePrefix: 'A simple, clean children\'s book illustration. Clear scenes, minimal detail, bold colors.',
+    coverStyle: 'storybook',
+    storyTone: 'simple and repetitive for reading practice',
+    storyWorldDescription: 'everyday scenes that naturally use common sight words in context',
+    storyVocabularyLevel: 'very simple with high-frequency sight words repeated throughout',
+  },
+  {
+    id: 'faith', name: 'Faith', emoji: '✝️', isPreset: true,
+    imageStylePrefix: 'A warm, reverent children\'s book illustration. Gentle light, nature scenes, peaceful atmosphere.',
+    coverStyle: 'storybook',
+    storyTone: 'gentle, reverent, and encouraging with faith themes',
+    storyWorldDescription: 'a world that reflects God\'s creation, kindness, and the beauty of faith',
+    storyVocabularyLevel: 'simple sentences with age-appropriate faith vocabulary',
+  },
+  {
+    id: 'space', name: 'Space Explorer', emoji: '🚀', isPreset: true,
+    imageStylePrefix: 'A vivid space scene for a children\'s book. Colorful planets, stars, rockets, and astronauts.',
+    coverStyle: 'realistic',
+    storyTone: 'exciting and wonder-filled with space exploration',
+    storyWorldDescription: 'outer space where astronauts visit planets, discover aliens, and float among the stars',
+    storyVocabularyLevel: 'medium complexity with space vocabulary',
+  },
+  {
+    id: 'dinosaurs', name: 'Dinosaur World', emoji: '🦕', isPreset: true,
+    imageStylePrefix: 'A prehistoric children\'s book illustration. Friendly dinosaurs, lush vegetation, volcanic landscapes.',
+    coverStyle: 'realistic',
+    storyTone: 'exciting and educational with dinosaur facts woven in',
+    storyWorldDescription: 'a prehistoric world where friendly dinosaurs roam jungles, volcanoes, and swamps',
+    storyVocabularyLevel: 'medium complexity with dinosaur names and nature words',
+  },
+  {
+    id: 'ocean', name: 'Ocean Adventure', emoji: '🌊', isPreset: true,
+    imageStylePrefix: 'An underwater children\'s book illustration. Colorful coral reefs, friendly sea creatures, sparkling water.',
+    coverStyle: 'storybook',
+    storyTone: 'adventurous and curious with ocean exploration',
+    storyWorldDescription: 'a colorful underwater world with coral reefs, dolphins, whales, and sunken ships',
+    storyVocabularyLevel: 'medium complexity with ocean and marine vocabulary',
+  },
+  {
+    id: 'superheroes', name: 'Superheroes', emoji: '🦸', isPreset: true,
+    imageStylePrefix: 'A bold, colorful superhero scene for a children\'s book. Dynamic poses, bright costumes, city skyline.',
+    coverStyle: 'comic',
+    storyTone: 'action-packed and inspiring with heroes saving the day',
+    storyWorldDescription: 'a city where kid superheroes use their powers to help people and stop villains',
+    storyVocabularyLevel: 'medium complexity with action and hero vocabulary',
+  },
+  {
+    id: 'cooking', name: 'Kitchen Adventures', emoji: '👨‍🍳', isPreset: true,
+    imageStylePrefix: 'A warm, cheerful kitchen scene for a children\'s book. Colorful ingredients, friendly chefs, tasty dishes.',
+    coverStyle: 'storybook',
+    storyTone: 'fun and sensory-rich with cooking and tasting',
+    storyWorldDescription: 'a magical kitchen where ingredients come alive and cooking is an adventure',
+    storyVocabularyLevel: 'simple sentences with food and cooking vocabulary',
+  },
+  {
+    id: 'sports', name: 'Sports & Games', emoji: '⚽', isPreset: true,
+    imageStylePrefix: 'A bright, energetic children\'s book illustration of kids playing sports. Action poses, outdoor settings.',
+    coverStyle: 'realistic',
+    storyTone: 'energetic and encouraging with teamwork themes',
+    storyWorldDescription: 'playgrounds, fields, and courts where kids play sports and learn teamwork',
+    storyVocabularyLevel: 'simple action words with sports terminology',
+  },
+  {
+    id: 'holidays', name: 'Holiday Stories', emoji: '🎄', isPreset: true,
+    imageStylePrefix: 'A festive, joyful children\'s book illustration. Holiday decorations, seasonal scenes, warm family celebrations.',
+    coverStyle: 'storybook',
+    storyTone: 'warm, festive, and joyful with celebration themes',
+    storyWorldDescription: 'a world of holiday celebrations — Christmas, Easter, Thanksgiving, birthdays, and seasonal traditions',
+    storyVocabularyLevel: 'simple sentences with holiday and celebration vocabulary',
+  },
 ]
+
+/** Resolve a theme config by ID — checks presets first, returns null for unknown/custom IDs. */
+export function getPresetTheme(themeId: string | undefined): BookThemeConfig | null {
+  if (!themeId) return null
+  return PRESET_THEMES.find((t) => t.id === themeId) ?? null
+}
+
+/** Resolve book creator. Absent createdBy → 'parent' (legacy books were Shelly's in kid profiles). */
+export function resolveBookCreator(book: { createdBy?: 'parent' | string }): 'parent' | string {
+  return book.createdBy ?? 'parent'
+}
+
+export const BOOK_THEMES: { id: BookTheme; label: string; emoji: string }[] =
+  PRESET_THEMES.map((t) => ({ id: t.id as BookTheme, label: t.name, emoji: t.emoji }))
+    .concat([{ id: 'other', label: 'Other', emoji: '📚' }])
 
 export type StickerTag =
   | 'animal'
@@ -39,6 +196,19 @@ export type StickerTag =
   | 'food'
   | 'faith'
   | 'other'
+
+export const STICKER_TAG_LABELS: Record<StickerTag, string> = {
+  animal: 'Animal',
+  nature: 'Nature',
+  minecraft: 'Minecraft',
+  fantasy: 'Fantasy',
+  character: 'Character',
+  object: 'Object',
+  vehicle: 'Vehicle',
+  food: 'Food',
+  faith: 'Faith',
+  other: 'Other',
+}
 
 export interface Book {
   id?: string
@@ -66,6 +236,10 @@ export interface Book {
   sightWords?: string[]
   /** Theme tag for this book */
   theme?: BookTheme
+  /** Who created this book. 'parent' = Mom/Dad, otherwise a childId. Absent → treat as 'parent' (legacy books were made by Shelly in kid profiles). */
+  createdBy?: 'parent' | string
+  /** Which child this book is themed for / intended for (a childId). */
+  createdFor?: string
   /** The prompt/parameters used to generate this story */
   generationConfig?: {
     storyIdea?: string
@@ -102,11 +276,25 @@ export interface BookPage {
   sightWordsOnPage?: string[]
 }
 
+export interface ImageVersion {
+  url: string
+  replacedAt: string
+  replacedBy: 'reimagine' | 'upload' | 'gallery' | 'generate'
+}
+
 export interface PageImage {
   id: string
   url: string
   storagePath?: string
-  type: 'photo' | 'ai-generated' | 'sticker'
+  type: 'photo' | 'ai-generated' | 'sticker' | 'sketch'
+  /** Image style variant */
+  style?: 'sketch' | 'ai-generated' | 'ai-enhanced' | 'photo'
+  /** Original hand-drawn sketch URL (always saved when type is 'sketch') */
+  originalSketchUrl?: string
+  /** AI-enhanced version URL (if generated via "Make it fancy") */
+  enhancedUrl?: string
+  /** Storage path for the enhanced version */
+  enhancedStoragePath?: string
   /** AI prompt used to generate this image */
   prompt?: string
   /** Label for accessibility and display */
@@ -114,7 +302,11 @@ export interface PageImage {
   /** Position and size within the page image container (percentage-based).
    *  x, y, width, height: 0–100, percentage of container dimensions.
    *  rotation: degrees (0–359). zIndex: stacking order integer. */
-  position?: { x: number; y: number; width: number; height: number; rotation?: number; zIndex?: number }
+  position?: { x: number; y: number; width: number; height: number; rotation?: number; zIndex?: number; flipH?: boolean; flipV?: boolean }
+  /** Sticker tags (copied from sticker library when placed) */
+  tags?: StickerTag[]
+  /** Previous image versions — kept when image URL is replaced (max 5). */
+  previousVersions?: ImageVersion[]
 }
 
 export interface Sticker {

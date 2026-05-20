@@ -1,0 +1,29 @@
+name: Deploy Firestore Indexes
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'firestore.indexes.json'
+
+jobs:
+  deploy-indexes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Deploy Firestore indexes
+        run: npx firebase-tools@latest deploy --only firestore:indexes --project barneshome-3dfbb --non-interactive --force
