@@ -39,10 +39,11 @@ import { scansCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import type { NewActivityConfig } from '../../core/hooks/useActivityConfigs'
+import { useCertificateProgress } from '../../core/hooks/useCertificateProgress'
 import { useScan } from '../../core/hooks/useScan'
-import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
-import type { ActivityConfig, CurriculumDetected, ScanRecord } from '../../core/types'
-import { isWorksheetScan } from '../../core/types/planning'
+import { isWorkbookMatch, useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
+import type { ActivityConfig, CertificateScanResult, CurriculumDetected, ScanRecord, ScanResult } from '../../core/types'
+import { isCertificateScan, isWorksheetScan } from '../../core/types/planning'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
 import AddActivityDialog from './AddActivityDialog'
 import EditRoutinesDialog from './EditRoutinesDialog'
@@ -157,7 +158,28 @@ export default function CurriculumTab() {
   // Scan state
   const { scan, scanResult, scanning, error: scanError, clearScan } = useScan()
   const { syncScanToConfig } = useScanToActivityConfig()
+  const {
+    buildPreview: buildCertPreview,
+    applyUpdate: applyCertUpdate,
+    preview: certPreview,
+    applying: certApplying,
+    error: certError,
+    clearState: clearCertState,
+  } = useCertificateProgress()
   const [scanSnack, setScanSnack] = useState<string | null>(null)
+  /** Which card is currently scanning (null = "Add to Curriculum" generic scan). */
+  const [scanningConfigId, setScanningConfigId] = useState<string | null>(null)
+  /** Pending certificate result awaiting confirmation, scoped to a specific card. */
+  const [certConfirm, setCertConfirm] = useState<{
+    result: CertificateScanResult
+    config: ActivityConfig
+  } | null>(null)
+  /** Mismatch warning when scan detects a different curriculum than the card. */
+  const [mismatchPrompt, setMismatchPrompt] = useState<{
+    result: ScanResult
+    config: ActivityConfig
+    detectedName: string
+  } | null>(null)
 
   // Snackbar
   const [snack, setSnack] = useState<string | null>(null)
@@ -222,6 +244,29 @@ export default function CurriculumTab() {
   }
 
   // Scan handlers
+  const feedSkillMap = useCallback(
+    async (results: ScanResult) => {
+      if (!familyId || !activeChildId) return
+      if (!isWorksheetScan(results)) return
+      const skills = results.skillsTargeted
+      if (skills.length === 0) return
+      try {
+        const findings = skills.map((s) => ({
+          skill: s.skill,
+          status: (s.alignsWithSnapshot === 'ahead' ? 'mastered' : 'emerging') as
+            | 'mastered'
+            | 'emerging',
+          evidence: `Workbook scan: ${s.skill} (${s.level})`,
+          testedAt: new Date().toISOString(),
+        }))
+        await updateSkillMapFromFindings(familyId, activeChildId, findings)
+      } catch (err) {
+        console.warn('[CurriculumTab] Failed to update skill map:', err)
+      }
+    },
+    [familyId, activeChildId],
+  )
+
   const handleCapture = useCallback(
     async (file: File) => {
       if (!familyId || !activeChildId) return
@@ -239,26 +284,101 @@ export default function CurriculumTab() {
           console.error('[CurriculumTab] Failed to sync config:', err)
         }
 
-        const skills = record.results.skillsTargeted
-        if (skills.length > 0) {
-          try {
-            const findings = skills.map((s) => ({
-              skill: s.skill,
-              status: (s.alignsWithSnapshot === 'ahead' ? 'mastered' : 'emerging') as
-                | 'mastered'
-                | 'emerging',
-              evidence: `Workbook scan: ${s.skill} (${s.level})`,
-              testedAt: new Date().toISOString(),
-            }))
-            await updateSkillMapFromFindings(familyId, activeChildId, findings)
-          } catch (err) {
-            console.warn('[CurriculumTab] Failed to update skill map:', err)
-          }
-        }
+        await feedSkillMap(record.results)
       }
     },
-    [familyId, activeChildId, scan, syncScanToConfig, setScanSnack],
+    [familyId, activeChildId, scan, syncScanToConfig, feedSkillMap],
   )
+
+  /**
+   * Apply a scan result to a specific card. Worksheet results write directly
+   * to the card's config; certificate results open a confirm dialog.
+   */
+  const applyScanToCard = useCallback(
+    async (results: ScanResult, config: ActivityConfig) => {
+      if (!familyId || !activeChildId) return
+      if (isCertificateScan(results)) {
+        try {
+          await buildCertPreview(familyId, activeChildId, results, { targetConfigId: config.id })
+          setCertConfirm({ result: results, config })
+        } catch (err) {
+          console.error('[CurriculumTab] Failed to build certificate preview', err)
+          setScanSnack('Failed to read certificate')
+        }
+        return
+      }
+      try {
+        const r = await syncScanToConfig(activeChildId, results, { targetConfigId: config.id })
+        if (r.action === 'updated' && r.position) {
+          setScanSnack(`Updated ${r.configName} to lesson ${r.position}`)
+        } else if (r.action === 'updated') {
+          setScanSnack(`Updated ${r.configName}`)
+        }
+      } catch (err) {
+        console.error('[CurriculumTab] Failed to sync config:', err)
+      }
+      await feedSkillMap(results)
+    },
+    [familyId, activeChildId, buildCertPreview, syncScanToConfig, feedSkillMap],
+  )
+
+  const handleCardCapture = useCallback(
+    async (config: ActivityConfig, file: File) => {
+      if (!familyId || !activeChildId) return
+      setScanningConfigId(config.id)
+      try {
+        const record = await scan(file, familyId, activeChildId)
+        if (!record?.results) return
+
+        const results = record.results
+        const cardName = config.curriculum || config.name
+        const detectedName = isCertificateScan(results)
+          ? results.curriculumName
+          : results.curriculumDetected?.name || results.subject
+
+        if (detectedName && cardName && !isWorkbookMatch(cardName, detectedName)) {
+          setMismatchPrompt({ result: results, config, detectedName })
+          return
+        }
+
+        await applyScanToCard(results, config)
+      } finally {
+        setScanningConfigId(null)
+      }
+    },
+    [familyId, activeChildId, scan, applyScanToCard],
+  )
+
+  const handleConfirmCertificate = useCallback(async () => {
+    if (!familyId || !activeChildId || !certConfirm) return
+    try {
+      await applyCertUpdate(familyId, activeChildId, certConfirm.result, {
+        targetConfigId: certConfirm.config.id,
+      })
+      setScanSnack(`Updated ${certConfirm.config.name}`)
+    } catch (err) {
+      console.error('[CurriculumTab] Failed to apply certificate update', err)
+    } finally {
+      setCertConfirm(null)
+      clearCertState()
+    }
+  }, [familyId, activeChildId, certConfirm, applyCertUpdate, clearCertState])
+
+  const handleCancelCertificate = useCallback(() => {
+    setCertConfirm(null)
+    clearCertState()
+  }, [clearCertState])
+
+  const handleAcceptMismatch = useCallback(async () => {
+    if (!mismatchPrompt) return
+    const { result, config } = mismatchPrompt
+    setMismatchPrompt(null)
+    await applyScanToCard(result, config)
+  }, [mismatchPrompt, applyScanToCard])
+
+  const handleCancelMismatch = useCallback(() => {
+    setMismatchPrompt(null)
+  }, [])
 
   const handleUpdatePosition = useCallback(
     async (curriculum: CurriculumDetected) => {
@@ -379,8 +499,8 @@ export default function CurriculumTab() {
                     config={config}
                     recentScans={matchedScans}
                     onOpenMenu={openMenu}
-                    onScanCapture={handleCapture}
-                    scanning={scanning}
+                    onScanCapture={(file) => void handleCardCapture(config, file)}
+                    scanning={scanning && scanningConfigId === config.id}
                   />
                 )
               })}
@@ -588,6 +708,89 @@ export default function CurriculumTab() {
         onAdd={(data) => void handleAddActivity(data)}
         onClose={() => setAddDialogOpen(false)}
       />
+
+      {/* Per-card certificate confirm dialog */}
+      <Dialog
+        open={certConfirm !== null}
+        onClose={handleCancelCertificate}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Confirm Progress Update</DialogTitle>
+        <DialogContent>
+          {certPreview && certConfirm && (
+            <Stack spacing={1.5} sx={{ mt: 1 }}>
+              <Typography variant="body2">
+                <strong>Card:</strong> {certConfirm.config.name}
+              </Typography>
+              <Typography variant="body2">
+                <strong>Milestone:</strong> {certPreview.updates.lastMilestone}
+              </Typography>
+              {certPreview.updates.level && (
+                <Typography variant="body2">
+                  <strong>Level:</strong> {certPreview.updates.level}
+                </Typography>
+              )}
+              {certPreview.updates.currentPosition !== null && (
+                <Typography variant="body2">
+                  <strong>Position:</strong>{' '}
+                  {certPreview.existingConfig
+                    ? `${certPreview.existingConfig.currentPosition} → ${certPreview.updates.currentPosition}`
+                    : certPreview.updates.currentPosition}
+                </Typography>
+              )}
+              {certPreview.updates.masteredSkills.length > 0 && (
+                <Typography variant="body2">
+                  <strong>Skills to mark mastered:</strong>{' '}
+                  {certPreview.updates.masteredSkills.join(', ')}
+                </Typography>
+              )}
+              {certError && (
+                <Alert severity="error">{certError}</Alert>
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelCertificate} disabled={certApplying}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="success"
+            onClick={() => void handleConfirmCertificate()}
+            disabled={certApplying}
+            startIcon={certApplying ? <CircularProgress size={16} /> : undefined}
+          >
+            {certApplying ? 'Updating...' : 'Confirm Update'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Curriculum mismatch warning */}
+      <Dialog
+        open={mismatchPrompt !== null}
+        onClose={handleCancelMismatch}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Curriculum mismatch?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This looks like <strong>{mismatchPrompt?.detectedName}</strong>, not{' '}
+            <strong>{mismatchPrompt?.config.name}</strong>. Update anyway?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelMismatch}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => void handleAcceptMismatch()}
+          >
+            Update anyway
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Snackbars */}
       <Snackbar

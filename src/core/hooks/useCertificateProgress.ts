@@ -1,10 +1,19 @@
 import { useCallback, useState } from 'react'
-import { doc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore'
+import { doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { activityConfigsCollection, normalizeCurriculumKey } from '../firebase/firestore'
 import type { ActivityConfig, CertificateScanResult, CurriculumMeta } from '../types'
 import { SubjectBucket } from '../types/enums'
 import type { SubjectBucket as SubjectBucketType } from '../types/enums'
+
+export interface CertificateProgressOptions {
+  /**
+   * When set, target this exact activity config doc instead of fuzzy-matching
+   * by curriculum name. Used when the certificate scan is initiated from a
+   * specific curriculum card.
+   */
+  targetConfigId?: string
+}
 
 export interface CertificatePreview {
   workbookName: string
@@ -24,12 +33,14 @@ export interface UseCertificateProgressResult {
     familyId: string,
     childId: string,
     result: CertificateScanResult,
+    options?: CertificateProgressOptions,
   ) => Promise<CertificatePreview>
   /** Apply the certificate data to the workbook config after user confirms. */
   applyUpdate: (
     familyId: string,
     childId: string,
     result: CertificateScanResult,
+    options?: CertificateProgressOptions,
   ) => Promise<void>
   /** Preview data for the confirmation dialog. */
   preview: CertificatePreview | null
@@ -50,19 +61,26 @@ export function useCertificateProgress(): UseCertificateProgressResult {
       familyId: string,
       childId: string,
       result: CertificateScanResult,
+      options: CertificateProgressOptions = {},
     ): Promise<CertificatePreview> => {
       const workbookName = result.curriculumName
       const colRef = activityConfigsCollection(familyId)
 
-      // Match by normalized curriculum key to avoid duplicates
-      const normalizedKey = normalizeCurriculumKey(workbookName)
-      const allSnap = await getDocs(
-        query(colRef, where('childId', 'in', [childId, 'both']), where('type', '==', 'workbook')),
-      )
-      const matchingDoc = allSnap.docs.find((d) =>
-        normalizeCurriculumKey(d.data().name ?? d.data().curriculum ?? '') === normalizedKey,
-      )
-      const existingConfig = matchingDoc?.data() ?? null
+      let existingConfig: ActivityConfig | null = null
+      if (options.targetConfigId) {
+        const targetSnap = await getDoc(doc(colRef, options.targetConfigId))
+        existingConfig = targetSnap.exists() ? (targetSnap.data() as ActivityConfig) : null
+      } else {
+        // Match by normalized curriculum key to avoid duplicates
+        const normalizedKey = normalizeCurriculumKey(workbookName)
+        const allSnap = await getDocs(
+          query(colRef, where('childId', 'in', [childId, 'both']), where('type', '==', 'workbook')),
+        )
+        const matchingDoc = allSnap.docs.find((d) =>
+          normalizeCurriculumKey(d.data().name ?? d.data().curriculum ?? '') === normalizedKey,
+        )
+        existingConfig = (matchingDoc?.data() as ActivityConfig | undefined) ?? null
+      }
 
       // Parse lesson range end number as new position if available
       let newPosition: number | null = null
@@ -77,7 +95,7 @@ export function useCertificateProgress(): UseCertificateProgressResult {
       }
 
       const previewData: CertificatePreview = {
-        workbookName,
+        workbookName: existingConfig?.name ?? workbookName,
         existingConfig,
         updates: {
           currentPosition: newPosition,
@@ -99,6 +117,7 @@ export function useCertificateProgress(): UseCertificateProgressResult {
       familyId: string,
       childId: string,
       result: CertificateScanResult,
+      options: CertificateProgressOptions = {},
     ): Promise<void> => {
       setApplying(true)
       setError(null)
@@ -107,14 +126,25 @@ export function useCertificateProgress(): UseCertificateProgressResult {
         const workbookName = result.curriculumName
         const colRef = activityConfigsCollection(familyId)
 
-        // Match by normalized curriculum key to find existing config
-        const normalizedKey = normalizeCurriculumKey(workbookName)
-        const allSnap = await getDocs(
-          query(colRef, where('childId', 'in', [childId, 'both']), where('type', '==', 'workbook')),
-        )
-        const matchingDoc = allSnap.docs.find((d) =>
-          normalizeCurriculumKey(d.data().name ?? d.data().curriculum ?? '') === normalizedKey,
-        )
+        let matchingDoc: { ref: ReturnType<typeof doc>; data: () => ActivityConfig } | null = null
+        if (options.targetConfigId) {
+          const targetRef = doc(colRef, options.targetConfigId)
+          const targetSnap = await getDoc(targetRef)
+          if (targetSnap.exists()) {
+            const data = targetSnap.data() as ActivityConfig
+            matchingDoc = { ref: targetRef, data: () => data }
+          }
+        } else {
+          // Match by normalized curriculum key to find existing config
+          const normalizedKey = normalizeCurriculumKey(workbookName)
+          const allSnap = await getDocs(
+            query(colRef, where('childId', 'in', [childId, 'both']), where('type', '==', 'workbook')),
+          )
+          const m = allSnap.docs.find((d) =>
+            normalizeCurriculumKey(d.data().name ?? d.data().curriculum ?? '') === normalizedKey,
+          )
+          if (m) matchingDoc = { ref: m.ref, data: () => m.data() as ActivityConfig }
+        }
 
         // Parse lesson range end number as new position
         let newPosition: number | null = null
@@ -130,6 +160,10 @@ export function useCertificateProgress(): UseCertificateProgressResult {
 
         const newMasteredSkills = result.suggestedSnapshotUpdate?.masteredSkills ?? result.skillsCovered
         const milestoneDate = result.date || new Date().toISOString().slice(0, 10)
+
+        if (!matchingDoc && options.targetConfigId) {
+          throw new Error('Target curriculum card not found. It may have been deleted.')
+        }
 
         if (matchingDoc) {
           // Update existing activity config (regardless of exact name)
