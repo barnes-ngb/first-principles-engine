@@ -93,7 +93,9 @@ export default function CertificateScanSection() {
     if (!familyId || !activeChildId || !pendingResult) return
     await applyUpdate(familyId, activeChildId, pendingResult)
     setConfirmOpen(false)
-  }, [familyId, activeChildId, pendingResult, applyUpdate])
+    setPendingResult(null)
+    clearCertState()
+  }, [familyId, activeChildId, pendingResult, applyUpdate, clearCertState])
 
   const handleDismiss = useCallback(() => {
     setConfirmOpen(false)

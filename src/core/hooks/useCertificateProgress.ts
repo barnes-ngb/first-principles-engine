@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { doc, getDocs, query, setDoc, updateDoc, where, serverTimestamp } from 'firebase/firestore'
+import { doc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { activityConfigsCollection, normalizeCurriculumKey } from '../firebase/firestore'
 import type { ActivityConfig, CertificateScanResult, CurriculumMeta } from '../types'
@@ -156,7 +156,7 @@ export function useCertificateProgress(): UseCertificateProgressResult {
 
           const updates: Record<string, unknown> = {
             curriculumMeta: curriculumUpdate,
-            updatedAt: serverTimestamp(),
+            updatedAt: new Date().toISOString(),
           }
 
           if (newPosition !== null && newPosition > (existing.currentPosition ?? 0)) {
@@ -203,7 +203,7 @@ export function useCertificateProgress(): UseCertificateProgressResult {
             updatedAt: new Date().toISOString(),
           }
 
-          await setDoc(docRef, newConfig)
+          await setDoc(docRef, newConfig, { merge: true })
         }
 
         setApplied(true)
