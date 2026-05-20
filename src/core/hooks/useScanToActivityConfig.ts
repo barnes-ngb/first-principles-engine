@@ -20,6 +20,14 @@ export interface ScanConfigResult {
   position?: number | null
 }
 
+export interface SyncScanOptions {
+  /**
+   * When set, skip fuzzy matching and target this exact config doc.
+   * Used when a scan is initiated from a specific curriculum card.
+   */
+  targetConfigId?: string
+}
+
 /**
  * Hook that creates or updates an activity config when a scan identifies a curriculum.
  * This replaces the old workbookConfigs-based position update flow.
@@ -31,6 +39,7 @@ export function useScanToActivityConfig() {
     async (
       childId: string,
       scanResult: WorksheetScanResult,
+      options: SyncScanOptions = {},
     ): Promise<ScanConfigResult> => {
       if (!familyId) return { action: 'none' }
 
@@ -39,43 +48,60 @@ export function useScanToActivityConfig() {
 
       const curriculumName = detected?.name || scanResult.subject || 'Unknown'
       const lessonNumber = detected?.lessonNumber ?? detected?.pageNumber ?? null
-
-      // Find existing activity config for this curriculum
-      const configsSnap = await getDocs(
-        query(
-          activityConfigsCollection(familyId),
-          where('childId', 'in', [childId, 'both']),
-          where('type', '==', 'workbook'),
-        ),
-      )
-
       const subject = mapSubjectBucket(curriculumName, detected?.provider ?? null)
 
-      const existing = configsSnap.docs.find((d) => {
-        const config = d.data()
-        return (
-          isWorkbookMatch(config.name ?? '', curriculumName, config.subjectBucket, subject) ||
-          isWorkbookMatch(config.curriculum ?? '', curriculumName, config.subjectBucket, subject)
+      // If a target config ID is provided, load it directly and skip fuzzy matching.
+      // This is used when scanning from a specific curriculum card — the user already
+      // chose the card, so no matching is needed and no duplicates can be created.
+      let existing: { id: string; ref: ReturnType<typeof doc>; data: () => ActivityConfig } | null = null
+      if (options.targetConfigId) {
+        const targetRef = doc(activityConfigsCollection(familyId), options.targetConfigId)
+        const targetSnap = await getDoc(targetRef)
+        if (targetSnap.exists()) {
+          const data = targetSnap.data() as ActivityConfig
+          existing = { id: targetSnap.id, ref: targetSnap.ref, data: () => data }
+        }
+      } else {
+        const configsSnap = await getDocs(
+          query(
+            activityConfigsCollection(familyId),
+            where('childId', 'in', [childId, 'both']),
+            where('type', '==', 'workbook'),
+          ),
         )
-      })
+        const match = configsSnap.docs.find((d) => {
+          const config = d.data()
+          return (
+            isWorkbookMatch(config.name ?? '', curriculumName, config.subjectBucket, subject) ||
+            isWorkbookMatch(config.curriculum ?? '', curriculumName, config.subjectBucket, subject)
+          )
+        })
+        if (match) {
+          existing = { id: match.id, ref: match.ref, data: () => match.data() as ActivityConfig }
+        }
+      }
 
       if (existing) {
         // UPDATE existing config with new position
+        const existingData = existing.data()
         const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
         if (lessonNumber != null) {
-          const current = existing.data().currentPosition ?? 0
+          const current = existingData.currentPosition ?? 0
           if (lessonNumber > current) {
             updates.currentPosition = lessonNumber
           }
         }
-        // If scan name is more specific (longer), upgrade the name
-        const existingName = existing.data().name ?? ''
-        if (curriculumName.length > existingName.length && curriculumName.length < 100) {
-          updates.name = curriculumName
-          updates.curriculum = curriculumName
+        // If scan name is more specific (longer), upgrade the name.
+        // Skip when we're targeting a specific config — preserve the user's chosen name.
+        if (!options.targetConfigId) {
+          const existingName = existingData.name ?? ''
+          if (curriculumName.length > existingName.length && curriculumName.length < 100) {
+            updates.name = curriculumName
+            updates.curriculum = curriculumName
+          }
         }
         // Use scan's estimated minutes if current is suspiciously low (5m default)
-        const existingMinutes = existing.data().defaultMinutes ?? 0
+        const existingMinutes = existingData.defaultMinutes ?? 0
         const estimatedMinutes = scanResult.estimatedMinutes ?? 0
         if (existingMinutes < 10 && estimatedMinutes >= 10) {
           updates.defaultMinutes = estimatedMinutes
@@ -88,9 +114,15 @@ export function useScanToActivityConfig() {
         return {
           action: 'updated',
           configId: existing.id,
-          configName: (updates.name as string) ?? existing.data().name,
+          configName: (updates.name as string) ?? existingData.name,
           position: lessonNumber,
         }
+      }
+
+      // If a target config ID was provided but the doc didn't exist, bail.
+      // Don't create a new doc — that would defeat the purpose of targeting.
+      if (options.targetConfigId) {
+        return { action: 'none' }
       }
 
       // CREATE new activity config from scan
@@ -202,16 +234,17 @@ async function updateWorkingLevelFromScan(
   }
 }
 
-function normalizeForMatch(name: string): string {
+export function normalizeForMatch(name: string): string {
   return normalizeCurriculumKey(
     (name || '')
       .replace(/^the\s+/i, '')
       .replace(/\s+level\s+\d+/i, '')
+      .replace(/\s+mental\s+minute/i, '')
       .replace(/\s*\(.*?\)/g, ''),
   ).replace(/-/g, '')
 }
 
-function isWorkbookMatch(
+export function isWorkbookMatch(
   configName: string,
   scanName: string,
   configSubject?: string,
