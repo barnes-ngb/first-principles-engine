@@ -115,9 +115,9 @@ describe('normalizeAvatarProfile', () => {
   it('defaults characterFeatures when missing', () => {
     const profile = normalizeAvatarProfile({ childId: 'test' })
     expect(profile.characterFeatures).toBeDefined()
-    expect(profile.characterFeatures.skinTone).toBeTruthy()
-    expect(profile.characterFeatures.hairColor).toBeTruthy()
-    expect(profile.characterFeatures.hairStyle).toBeTruthy()
+    expect(profile.characterFeatures!.skinTone).toBeTruthy()
+    expect(profile.characterFeatures!.hairColor).toBeTruthy()
+    expect(profile.characterFeatures!.hairStyle).toBeTruthy()
   })
 
   it('preserves characterFeatures when provided', () => {
@@ -132,8 +132,8 @@ describe('normalizeAvatarProfile', () => {
       childId: 'test',
       characterFeatures: features,
     })
-    expect(profile.characterFeatures.skinTone).toBe('#AA8866')
-    expect(profile.characterFeatures.hairStyle).toBe('short')
+    expect(profile.characterFeatures!.skinTone).toBe('#AA8866')
+    expect(profile.characterFeatures!.hairStyle).toBe('short')
   })
 
   it('defaults ageGroup to older', () => {
