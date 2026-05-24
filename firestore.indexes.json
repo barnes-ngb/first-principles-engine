@@ -249,6 +249,22 @@
         { "fieldPath": "chatContext", "order": "ASCENDING" },
         { "fieldPath": "updatedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "monthlyReviews",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "childId", "order": "ASCENDING" },
+        { "fieldPath": "month", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "monthlyReviews",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "month", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

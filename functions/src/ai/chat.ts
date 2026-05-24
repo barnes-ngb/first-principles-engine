@@ -36,6 +36,7 @@ export const TaskType = {
   ChapterQuestions: "chapterQuestions",
   WeeklyReview: "weeklyReview",
   AnalyzePatterns: "analyzePatterns",
+  MonthlyReview: "monthlyReview",
 } as const;
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
 
@@ -72,6 +73,7 @@ export function modelForTask(taskType: TaskType): string {
     case TaskType.ChapterQuestions:
     case TaskType.WeeklyReview:
     case TaskType.AnalyzePatterns:
+    case TaskType.MonthlyReview:
       return "claude-sonnet-4-6";
     case TaskType.Generate:
     case TaskType.Chat:

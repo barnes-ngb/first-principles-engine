@@ -1,6 +1,8 @@
 import {
   collection,
   type CollectionReference,
+  doc,
+  type DocumentReference,
   type FirestoreDataConverter,
   getFirestore,
   type QueryDocumentSnapshot,
@@ -28,6 +30,7 @@ import type {
   HoursEntry,
   LadderProgress,
   LessonCard,
+  MonthlyReview,
   PlannerConversation,
   ScanRecord,
   SightWordProgress,
@@ -315,6 +318,23 @@ export const weeklyReviewsCollection = (
 /** Weekly review doc ID: {weekKey}_{childId} */
 export const weeklyReviewDocId = (weekKey: string, childId: string): string =>
   `${weekKey}_${childId}`
+
+// ── Monthly Reviews (Monthly Review Book — auto-generated) ──────
+
+export const monthlyReviewsCollection = (
+  familyId: string,
+): CollectionReference<MonthlyReview> =>
+  collection(db, `families/${familyId}/monthlyReviews`) as CollectionReference<MonthlyReview>
+
+/** Monthly review doc ID: {childId}_{YYYY-MM} */
+export const monthlyReviewDocId = (childId: string, month: string): string =>
+  `${childId}_${month}`
+
+export const monthlyReviewDoc = (
+  familyId: string,
+  reviewId: string,
+): DocumentReference<MonthlyReview> =>
+  doc(db, 'families', familyId, 'monthlyReviews', reviewId) as DocumentReference<MonthlyReview>
 
 // ── XP Ledger (cumulative XP tracking) ──────────────────────────
 
