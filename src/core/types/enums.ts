@@ -411,3 +411,28 @@ export const QuestionType = {
   Prediction: 'prediction',
 } as const
 export type QuestionType = (typeof QuestionType)[keyof typeof QuestionType]
+
+export const MonthlyReviewStatus = {
+  Generating: 'generating',
+  Draft: 'draft',
+  Published: 'published',
+} as const
+export type MonthlyReviewStatus =
+  (typeof MonthlyReviewStatus)[keyof typeof MonthlyReviewStatus]
+
+export const SectionType = {
+  Cover: 'cover',
+  MonthInSentence: 'monthInSentence',
+  WhatYouLoved: 'whatYouLoved',
+  WorkedThrough: 'workedThrough',
+  Books: 'books',
+  DadLab: 'dadLab',
+  HowYouShowedUp: 'howYouShowedUp',
+  Teaching: 'teaching',
+  Conundrums: 'conundrums',
+  ByTheNumbers: 'byTheNumbers',
+  LookingAhead: 'lookingAhead',
+  ShellyNote: 'shellyNote',
+  BackCover: 'backCover',
+} as const
+export type SectionType = (typeof SectionType)[keyof typeof SectionType]
