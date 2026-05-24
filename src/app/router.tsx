@@ -24,6 +24,9 @@ import MyAvatarPage from '../features/avatar/MyAvatarPage'
 import LaddersPage from '../features/ladders/LaddersPage'
 import WorkshopPage from '../features/workshop/WorkshopPage'
 import ShellyChatPage from '../features/shelly-chat/ShellyChatPage'
+import MonthlyReviewReaderPage from '../features/monthly-review/MonthlyReviewReaderPage'
+import KidBooksAboutMePage from '../features/monthly-review/KidBooksAboutMePage'
+import KidBookReaderPage from '../features/monthly-review/KidBookReaderPage'
 
 const routes = [
   {
@@ -40,6 +43,9 @@ const routes = [
       { path: '/dad-lab', element: <DadLabPage /> },
       { path: '/week/lab', element: <Navigate to="/dad-lab" replace /> },
       { path: '/progress', element: <ProgressPage /> },
+      { path: '/progress/monthly-books/:reviewId', element: <MonthlyReviewReaderPage /> },
+      { path: '/books-about-me', element: <KidBooksAboutMePage /> },
+      { path: '/books-about-me/:reviewId', element: <KidBookReaderPage /> },
       {
         element: <RequireParent />,
         children: [

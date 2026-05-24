@@ -1,4 +1,4 @@
-import { getFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import type { Firestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -211,5 +211,96 @@ export const generateMonthlyReviewNow = onCall(
       });
       throw new HttpsError("internal", `Monthly review failed: ${errMsg}`);
     }
+  },
+);
+
+// ── Publish / Unpublish callables ─────────────────────────────
+
+interface PublishArgs {
+  familyId?: string;
+  childId?: string;
+  month?: string;
+}
+
+function parsePublishArgs(data: unknown, uid: string): {
+  familyId: string;
+  childId: string;
+  month: string;
+} {
+  const { familyId, childId, month } = (data ?? {}) as PublishArgs;
+  if (!familyId || !childId || !month) {
+    throw new HttpsError(
+      "invalid-argument",
+      "familyId, childId, and month are required.",
+    );
+  }
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    throw new HttpsError(
+      "invalid-argument",
+      "month must be in YYYY-MM format.",
+    );
+  }
+  if (uid !== familyId) {
+    throw new HttpsError(
+      "permission-denied",
+      "You do not have access to this family.",
+    );
+  }
+  return { familyId, childId, month };
+}
+
+export const publishMonthlyReview = onCall(
+  {
+    memory: "256MiB",
+    timeoutSeconds: 30,
+  },
+  async (request) => {
+    const { uid } = requireEmailAuth(request);
+    const { familyId, childId, month } = parsePublishArgs(request.data, uid);
+
+    const db = getFirestore();
+    const reviewId = `${childId}_${month}`;
+    const ref = db.doc(`families/${familyId}/monthlyReviews/${reviewId}`);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      throw new HttpsError("not-found", `Review ${reviewId} not found.`);
+    }
+
+    const now = new Date().toISOString();
+    await ref.update({
+      status: "published",
+      publishedAt: now,
+      lastEditedAt: now,
+    });
+
+    return { reviewId, publishedAt: now };
+  },
+);
+
+export const unpublishMonthlyReview = onCall(
+  {
+    memory: "256MiB",
+    timeoutSeconds: 30,
+  },
+  async (request) => {
+    const { uid } = requireEmailAuth(request);
+    const { familyId, childId, month } = parsePublishArgs(request.data, uid);
+
+    const db = getFirestore();
+    const reviewId = `${childId}_${month}`;
+    const ref = db.doc(`families/${familyId}/monthlyReviews/${reviewId}`);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      throw new HttpsError("not-found", `Review ${reviewId} not found.`);
+    }
+
+    const now = new Date().toISOString();
+    await ref.update({
+      status: "draft",
+      publishedAt: FieldValue.delete(),
+      lastEditedAt: now,
+    });
+
+    return { reviewId };
   },
 );

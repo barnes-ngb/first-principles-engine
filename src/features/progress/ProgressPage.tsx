@@ -11,6 +11,7 @@ import CertificateScanSection from './CertificateScanSection'
 import CurriculumTab from './CurriculumTab'
 import DispositionProfile from './DispositionProfile'
 import LearningMap from './learning-map/LearningMap'
+import MonthlyBooksTab from '../monthly-review/MonthlyBooksTab'
 import SkillSnapshotPage from '../evaluation/SkillSnapshotPage'
 import WordWall from './WordWall'
 
@@ -37,6 +38,7 @@ export default function ProgressPage() {
             scrollButtons="auto"
           >
             <Tab label="Learning Profile" />
+            <Tab label="Monthly Books" />
             <Tab label="Learning Map" />
             <Tab label="Curriculum" />
             <Tab label="Skill Snapshot" />
@@ -53,10 +55,11 @@ export default function ProgressPage() {
         </SectionCard>
       </Container>
       {tab === 0 && <DispositionProfile />}
-      {tab === 1 && <LearningMap />}
-      {tab === 2 && <CurriculumTab />}
-      {tab === 3 && <SkillSnapshotPage />}
-      {tab === 4 && <WordWall />}
+      {tab === 1 && <MonthlyBooksTab />}
+      {tab === 2 && <LearningMap />}
+      {tab === 3 && <CurriculumTab />}
+      {tab === 4 && <SkillSnapshotPage />}
+      {tab === 5 && <WordWall />}
     </>
   )
 }
