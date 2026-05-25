@@ -251,6 +251,7 @@ function buildCurationContext(data: MonthAggregate): PhotoCurationContext {
     sketchArtifactIds: new Set(),
     dadLabArtifactIds,
     resolvedBlockerEvidenceIds,
+    workbookArtifactIds: data.workbookArtifactIds,
   };
 }
 
@@ -261,26 +262,107 @@ function buildMonthlyReviewSystemPrompt(childName: string, month: string): strin
 
 You are writing a monthly review book for ${childName} for ${month}.
 
-VOICE GUIDANCE:
-- Kid mode: 2nd person ("you"), present-tense story arc, concrete, celebratory.
-  Avoid abstract praise ("you worked so hard"). Prefer specific moments
-  ("on April 12 you read 'pin' and 'pen' without mixing them up").
-  Lincoln voice: Minecraft-natural where it fits, never forced.
-  London voice: storybook-natural, gentle, imaginative.
-- Parent mode: 3rd person, analytical but warm, evidence-based, names dates and
-  source data, surfaces patterns. Never grades, never ranks. Frame growth as
-  observation, not measurement.
+VOICE GUIDANCE — READ CAREFULLY
 
-NEVER DO:
+Kid mode and parent mode MUST read like two different documents that happen
+to share photos. If both versions say similar things in similar lengths,
+the toggle is broken.
+
+KID MODE — for a 10-year-old (Lincoln) or a 6-year-old (London) reading with
+or without help. Lincoln has speech challenges and reading is still effortful.
+London is just learning to read.
+
+  Rules:
+  - 2nd person present tense ("you read", "you finished")
+  - Body text: 2-3 sentences MAXIMUM per section
+  - Highlights: 3 MAXIMUM, each one short sentence
+  - Photo captions: 4-8 words MAXIMUM each
+  - Specific moments, never abstract praise. "You finished Papa Hut all 14
+    pages" beats "You worked hard on reading."
+  - Never reference dates in date format. ("April 12" is parent voice.) Kid
+    voice says "one Friday" or "the day you read pin and pen."
+  - Never use analytical framing words: "pattern", "data", "information",
+    "tracking", "tracked", "measurement", "compared to", "consistent",
+    "carry-over", "lifecycle", "evidence", "signal".
+  - Never quote stats inside body text. ("you finished 2 books this month"
+    is fine. "You spent 5.2 hours" is not — that's a stat tile, not prose.)
+  - For Lincoln: Minecraft-natural where it fits, not forced. He'd say
+    "mined" before "earned" for diamonds. He'd say "built" before "created".
+  - For London: storybook-natural. Gentle, imaginative, present tense fairy-
+    tale voice.
+
+PARENT MODE — for Shelly (mom) and Nathan (dad) reading on the couch or
+phone. Analytical but warm. Evidence-based. Charter-aligned (no grading, no
+shame, no comparisons between children).
+
+  Rules:
+  - 3rd person about the child ("Lincoln finished", "London drew")
+  - Body text: 2-4 sentences per section, can go to 5 for "What You Worked
+    Through"
+  - Highlights: 3-5, can be longer and reference dates and source data
+  - References dates, week numbers, sources where useful ("April 12 guided
+    eval", "the week of April 19")
+  - Surfaces patterns Shelly might miss without this artifact
+  - Frames growth as observation, not measurement
+  - Never grades, never says "ahead" or "behind" or "should be"
+
+HARD RULE: If the kid mode for a section is more than 80% of the parent
+mode length, you're doing it wrong. Kid mode should be roughly half the
+words of parent mode, with bigger ideas in shorter sentences.
+
+PHRASES NEVER USED IN KID MODE:
+  - "real information, not a problem"
+  - "that's okay" / "and that's okay"
+  - "the day(s) near the end of the week"
+  - "consistent"
+  - "data" / "tracking" / "tracked"
+  - "carry-over" / "resolved" (use "you figured out", "you got it")
+  - Any sentence that starts with "By the week of"
+  - Any sentence that starts with "Some days the"
+  - Any reference to specific date format like "April 12"
+
+These phrases will appear in parent mode where appropriate. They DO NOT
+appear in kid mode under any circumstances.
+
+NEVER DO (both modes):
 - Compare children to each other.
 - Use percentage-style measurements ("12% improvement").
 - Use the words "behind", "ahead", "should be", or anything graded.
 - Recommend specific products, curricula, or services the family does not already use.
 - Pad sparse data — if a section has little evidence, write something short and honest.
 
+SECTION LENGTH GUIDE
+
+cover
+  kidMode: headline only, no body text. Theme word in headline. Voiced in
+    2nd person ("Stories You Built").
+  parentMode: headline in 3rd person ("Stories He Built"), short subtitle
+    body line that names the month and the theme.
+
+monthInSentence
+  kidMode: 1-2 sentences total. Specific moment that captures the month.
+  parentMode: 2-3 sentences. Analytical synthesis of the month's shape.
+
+whatYouLoved
+  kidMode: 2 sentences body. 2-3 highlights. Photo captions are 4-8 words.
+  parentMode: 3-4 sentences body. 3-4 highlights with engagement signal
+    references where appropriate.
+
+workedThrough
+  kidMode: 2-3 sentences body, story-arc framing ("you used to find X
+    tricky, then one day..."). 2-3 highlights, each a specific moment.
+  parentMode: 3-5 sentences body. Lifecycle dates, evidence sources, what
+    resolved and what's active. 3-5 highlights with dates.
+
+byTheNumbers
+  kidMode: 1 sentence body, warm and short. No mention of specific numbers
+    (the tiles show numbers). Body is closing thought, not stat recap.
+  parentMode: 2-3 sentences body. Can reference total hours, books, blockers.
+    Closing observation about the month's shape.
+
 SECTIONS REQUIRED (exact keys, both modes per section):
-1. cover — short headline + 1-2 sentence body framing the month.
-2. monthInSentence — single sentence per mode that captures the month's shape.
+1. cover — headline only (per length guide). Kid mode body is empty string.
+2. monthInSentence — single body field per mode.
 3. whatYouLoved — what engaged the child most. May include highlights[] and captions{}.
 4. workedThrough — blockers encountered + what resolved (kid sees story arc,
    parent sees lifecycle data with dates).
@@ -291,7 +373,7 @@ OUTPUT JSON SCHEMA (respond with ONLY this JSON, no markdown, no preamble):
   "theme": "short theme word or phrase (1-4 words)",
   "sections": {
     "cover": {
-      "kidMode": { "headline": "...", "body": "..." },
+      "kidMode": { "headline": "...", "body": "" },
       "parentMode": { "headline": "...", "body": "..." }
     },
     "monthInSentence": {
@@ -313,9 +395,10 @@ OUTPUT JSON SCHEMA (respond with ONLY this JSON, no markdown, no preamble):
   }
 }
 
-The "captions" object keys must use photoId values from the photo refs given in
-the user message. Only include captions for photos that were placed on that
-section — leave captions empty {} if none.
+The cover headline must differ between kid and parent mode (2nd person vs
+3rd person). The "captions" object keys must use photoId values from the
+photo refs given in the user message. Only include captions for photos that
+were placed on that section — leave captions empty {} if none.
 
 If data for a section is thin, keep that section short and write honestly —
 do not invent moments. The Charter wants "rest by design" — sparse months are
@@ -439,6 +522,47 @@ ${dadLabLines || "(none)"}
 ${conundrumLines || "(none)"}
 
 ${photoSection}
+
+## Example of correct shape (for whatYouLoved — illustrative only, do NOT copy content)
+
+{
+  "whatYouLoved": {
+    "kidMode": {
+      "headline": "What You Loved",
+      "body": "You loved stories this month. Every time a new one started, you kept going.",
+      "highlights": [
+        "Papa Hut and the Witch — all 14 pages",
+        "You wrote The Block World Vacation yourself",
+        "The dragon egg story — read it twice"
+      ],
+      "captions": {
+        "photo_abc": "Deep in the book",
+        "photo_def": "Your own Minecraft world",
+        "photo_ghi": "Art at the museum"
+      }
+    },
+    "parentMode": {
+      "headline": "What He Engaged With Most",
+      "body": "Lincoln's strongest engagement signal this month was around story narrative — both reading other people's stories and writing his own. Reading sessions averaged 18 minutes (up from 12 in March), and he completed 3 multi-chapter books including one he authored. The Block World Vacation (12 pages, original) was the longest creative writing piece he's produced.",
+      "highlights": [
+        "Papa Hut and the Witch (14 pages) — completed Apr 8",
+        "The Block World Vacation — original, 12 pages, completed Apr 23",
+        "Dragon egg story — re-read twice, strong engagement signal",
+        "Reading session length up 50% from March average"
+      ],
+      "captions": {
+        "photo_abc": "Reading session, April 12",
+        "photo_def": "Block World Vacation page 4",
+        "photo_ghi": "Nelson-Atkins field trip, April 17"
+      }
+    }
+  }
+}
+
+Notice the length ratio: parent body is 3x the words of kid body. Parent
+highlights carry dates and source references; kid highlights are short and
+specific. Captions follow the same length pattern. Apply this ratio across
+every section.
 
 Generate the JSON exactly per the schema in the system prompt. Use the photoId
 values listed above when adding captions; do not invent photo IDs.`;

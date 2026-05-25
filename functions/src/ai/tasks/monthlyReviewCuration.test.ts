@@ -4,6 +4,7 @@ import {
   pickHeroPhoto,
   assignPhotosToSections,
   type PhotoCurationContext,
+  type ScoredPhoto,
 } from "./monthlyReviewCuration.js";
 import type { PhotoRef } from "./monthlyReviewData.js";
 
@@ -142,6 +143,55 @@ describe("pickHeroPhoto", () => {
     );
     expect(pickHeroPhoto(scored)?.id).toBe("a");
   });
+
+  it("excludes workbook scans even if highest scored", () => {
+    const scored: ScoredPhoto[] = [
+      {
+        ...photo({ id: "workbook" }),
+        score: 100,
+        autoInclude: false,
+        isWorkbookScan: true,
+      },
+      {
+        ...photo({ id: "creative" }),
+        score: 20,
+        autoInclude: false,
+        isWorkbookScan: false,
+      },
+    ];
+    expect(pickHeroPhoto(scored)?.id).toBe("creative");
+  });
+
+  it("returns undefined when only workbook scans exist", () => {
+    const scored: ScoredPhoto[] = [
+      {
+        ...photo({ id: "wb1" }),
+        score: 100,
+        autoInclude: false,
+        isWorkbookScan: true,
+      },
+      {
+        ...photo({ id: "wb2" }),
+        score: 50,
+        autoInclude: false,
+        isWorkbookScan: true,
+      },
+    ];
+    expect(pickHeroPhoto(scored)).toBeUndefined();
+  });
+
+  it("treats Worksheet-type artifacts as workbook scans via context", () => {
+    const ctx = emptyContext();
+    ctx.workbookArtifactIds = new Set(["worksheet-doc"]);
+    const scored = scorePhotos(
+      [
+        photo({ id: "worksheet", sourceDocId: "worksheet-doc" }),
+        photo({ id: "art", sourceDocId: "other-doc" }),
+      ],
+      ctx,
+    );
+    expect(pickHeroPhoto(scored)?.id).toBe("art");
+  });
 });
 
 describe("assignPhotosToSections", () => {
@@ -155,11 +205,11 @@ describe("assignPhotosToSections", () => {
     expect(placement.more).toEqual([]);
   });
 
-  it("places top photos into whatYouLoved (max 3)", () => {
+  it("places top photos into whatYouLoved (capped at MAX_PHOTOS_PER_SECTION.whatYouLoved)", () => {
     const ctx = emptyContext();
     ctx.dayLogEngagement["2026-04-10"] = {};
     const photos: PhotoRef[] = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
       ctx.dayLogEngagement["2026-04-10"][`doc-${i}`] = "engaged";
       photos.push(photo({ id: `p${i}`, sourceDocId: `doc-${i}` }));
     }
@@ -168,8 +218,7 @@ describe("assignPhotosToSections", () => {
       hasBookCompletions: false,
       hasDadLab: false,
     });
-    expect(placement.whatYouLoved.length).toBeLessThanOrEqual(3);
-    expect(placement.whatYouLoved.length).toBe(3);
+    expect(placement.whatYouLoved.length).toBe(6);
   });
 
   it("prefers resolved-blocker evidence for workedThrough", () => {
@@ -191,17 +240,18 @@ describe("assignPhotosToSections", () => {
 
   it("applies subject diversity penalty after 3rd same-subject photo", () => {
     const ctx = emptyContext();
-    // 5 reading-tagged photos, all with engagement +3
+    // 10 reading-tagged photos + 1 math photo. After picking 3 readings the
+    // 4th+ reading photos take a diversity penalty so the Math photo wins
+    // a slot before the lowest-ranked readings.
     ctx.dayLogEngagement["2026-04-10"] = {};
     const photos: PhotoRef[] = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
       const docId = `doc-${i}`;
       ctx.dayLogEngagement["2026-04-10"][docId] = "engaged";
       photos.push(
         photo({ id: `p${i}`, sourceDocId: docId, subjectTag: "Reading" }),
       );
     }
-    // Add a math photo also engaged (same base score 3)
     ctx.dayLogEngagement["2026-04-10"]["doc-math"] = "engaged";
     photos.push(
       photo({ id: "math", sourceDocId: "doc-math", subjectTag: "Math" }),
@@ -213,10 +263,7 @@ describe("assignPhotosToSections", () => {
       hasDadLab: false,
     });
 
-    // After picking 3 reading photos, the 4th reading photo's effective score
-    // takes the diversity hit, so a Math photo should be preferred for the
-    // 2-photo workedThrough slot when ties break.
-    const subjects = placement.workedThrough.map((p) => p.subjectTag);
+    const subjects = placement.whatYouLoved.map((p) => p.subjectTag);
     expect(subjects.includes("Math")).toBe(true);
   });
 });
