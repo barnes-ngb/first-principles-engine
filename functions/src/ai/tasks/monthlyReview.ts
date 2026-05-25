@@ -12,7 +12,6 @@ import {
 } from "./monthlyReviewData.js";
 import {
   assignPhotosToSections,
-  pickHeroPhoto,
   scorePhotos,
   type PhotoCurationContext,
   type ScoredPhoto,
@@ -120,12 +119,14 @@ export async function runMonthlyReview(
   // 2. Build curation context + score photos
   const curationCtx = buildCurationContext(data);
   const scored = scorePhotos(data.photos, curationCtx);
-  const hero = pickHeroPhoto(scored);
   const placement = assignPhotosToSections(scored, {
+    ...curationCtx,
     hasBookCompletions: data.completedBooks.length > 0,
     hasDadLab: data.dadLabReports.length > 0,
-    resolvedBlockerEvidenceIds: curationCtx.resolvedBlockerEvidenceIds,
   });
+  // Top-level hero falls back from kid → parent. The cover layout
+  // re-derives per-mode photos from `placement.cover`.
+  const hero = placement.cover.kid[0] ?? placement.cover.parent[0];
 
   // 3. Compose prompts
   const systemPrompt = buildMonthlyReviewSystemPrompt(childData.name, month);
@@ -257,6 +258,7 @@ function buildCurationContext(data: MonthAggregate): PhotoCurationContext {
     dadLabArtifactIds,
     resolvedBlockerEvidenceIds,
     workbookArtifactIds: data.workbookArtifactIds,
+    classifiedScanIds: data.classifiedScanIds,
   };
 }
 
@@ -738,8 +740,11 @@ function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload {
   const pages: MonthlyReviewPage[] = SECTION_ORDER.map((sectionType, idx) => {
     const section = parsed.sections[sectionType] ?? {};
     let photoRefs: PageModePhotos = { kid: [], parent: [] };
-    if (sectionType === "cover" && hero) {
-      photoRefs = { kid: [hero], parent: [hero] };
+    if (sectionType === "cover") {
+      photoRefs = {
+        kid: placement.cover.kid,
+        parent: placement.cover.parent,
+      };
     }
     if (sectionType === "whatYouLoved") {
       photoRefs = {

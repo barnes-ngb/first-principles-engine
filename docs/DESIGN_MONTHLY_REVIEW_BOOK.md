@@ -583,6 +583,57 @@ and includes the rewrite test: would Shelly read this and feel like the AI
 saw her son, or would she feel like she's reading a curriculum vendor's
 PDF? Length was not reduced — only the voice quality.
 
+### v1.3 — May 25, 2026 — Positive curation filter, dedup, empty-section UX
+
+Three findings from Lincoln's March 2026 book surfaced after the v1.2 PR
+shipped: an incidental car-steering-wheel photo (captured during early app
+testing) ended up as the cover hero and again in "What You Loved"; the same
+photo was placed in multiple sections; and photo-less sections rendered with
+~60% empty white space below the body text.
+
+**Kid-mode positive-signal filter.** Scoring stays negative-only (penalties
+only). On top of scoring, kid-mode placement now requires at least one
+positive signal from `hasPositiveKidModeSignal`:
+
+- Engagement on the linked Today item is `engaged` (😊) or `okay` (😐)
+- Photo is a book / sketch / Dad Lab artifact
+- Photo is a scan whose AI analysis recognized curriculum content
+  (tracked in `classifiedScanIds`)
+- Photo is resolved-blocker evidence
+
+A photo that fails this filter is excluded from kid-mode placement entirely
+— cover, whatYouLoved, and workedThrough. Parent mode is unchanged; it still
+sees workbook scans on the evidence page and treats all non-workbook photos
+as eligible.
+
+**Classified vs. unclassified scans.** A scan whose `results.subject` (or
+similar analysis field) is set is now treated as classified — `isWorkbookScan`
+is false and the photo can show up in kid-mode placement. An unclassified
+scan remains a workbook capture and is excluded from kid-mode everywhere.
+
+**Cross-section deduplication.** A photo placed in cover is no longer placed
+again in `whatYouLoved` or `workedThrough` *within the same mode*. Tracking
+is per-mode (`kidPlacedIds`, `parentPlacedIds`), so a kid hero may still
+show up as parent-mode evidence on `workedThrough` and vice versa. Cover
+runs first (highest precedence), then `whatYouLoved`, then `workedThrough`.
+Resolved-blocker evidence is reserved for `workedThrough` — it's excluded
+from `whatYouLoved` so the dedup pass doesn't consume it before the
+evidence page has a chance to claim it.
+
+**Cover hero strict allowlist.** The cover hero is now selected by
+`pickHeroForMode` against a strict allowlist: book artifact, sketch
+artifact, Dad Lab artifact, or classified scan. An "incidental" photo
+(no creative tag, no classification) never lands on the cover; the layout
+falls back to the gradient theme-word treatment from PR A.
+
+**Empty-section rendering.** The Standard layout vertically centers its
+content when there are no photos so body text doesn't float in empty
+space. In parent mode, photo-less sections additionally render a soft
+info-styled notice — *"No photos for this section — consider adding one
+or regenerating."* — so Shelly can fix it before publishing. Kid mode
+shows nothing — the section reads as a clean text page rather than
+flagging a "missing" photo.
+
 ---
 
 *Last updated: May 25, 2026*
