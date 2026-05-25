@@ -27,6 +27,29 @@ function matchChildToProfile(
   )?.id
 }
 
+function childTimestamp(c: Child): number {
+  const createdAt = (c as Child & { createdAt?: string }).createdAt
+  const t = createdAt ? Date.parse(createdAt) : NaN
+  return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY
+}
+
+export function dedupeChildrenByName(children: Child[]): Child[] {
+  const byName = new Map<string, Child>()
+  for (const child of children) {
+    const key = child.name.trim().toLowerCase()
+    const existing = byName.get(key)
+    if (!existing) {
+      byName.set(key, child)
+      continue
+    }
+    // Keep the earlier-created doc so the canonical ID is stable.
+    if (childTimestamp(child) < childTimestamp(existing)) {
+      byName.set(key, child)
+    }
+  }
+  return Array.from(byName.values())
+}
+
 export interface UseChildrenResult {
   children: Child[]
   selectedChildId: string
@@ -67,6 +90,11 @@ export function useChildren(): UseChildrenResult {
         ...(d.data() as Child),
         id: d.id,
       }))
+
+      // Dedupe by lowercased name. Concurrent mounts in earlier sessions
+      // could race auto-create and produce duplicate Lincoln/London docs.
+      // Keep the oldest doc per name so the canonical ID stays stable.
+      loaded = dedupeChildrenByName(loaded)
 
       // Auto-create children that match profiles but don't exist yet
       const missing = PROFILE_CHILDREN.filter(

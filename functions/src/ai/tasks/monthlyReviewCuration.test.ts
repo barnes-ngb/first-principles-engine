@@ -200,16 +200,18 @@ describe("assignPhotosToSections", () => {
       hasBookCompletions: false,
       hasDadLab: false,
     });
-    expect(placement.whatYouLoved).toEqual([]);
-    expect(placement.workedThrough).toEqual([]);
+    expect(placement.whatYouLoved.kid).toEqual([]);
+    expect(placement.whatYouLoved.parent).toEqual([]);
+    expect(placement.workedThrough.kid).toEqual([]);
+    expect(placement.workedThrough.parent).toEqual([]);
     expect(placement.more).toEqual([]);
   });
 
-  it("places top photos into whatYouLoved (capped at MAX_PHOTOS_PER_SECTION.whatYouLoved)", () => {
+  it("kid mode whatYouLoved caps at 8 (raised from 6)", () => {
     const ctx = emptyContext();
     ctx.dayLogEngagement["2026-04-10"] = {};
     const photos: PhotoRef[] = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 12; i++) {
       ctx.dayLogEngagement["2026-04-10"][`doc-${i}`] = "engaged";
       photos.push(photo({ id: `p${i}`, sourceDocId: `doc-${i}` }));
     }
@@ -218,10 +220,58 @@ describe("assignPhotosToSections", () => {
       hasBookCompletions: false,
       hasDadLab: false,
     });
-    expect(placement.whatYouLoved.length).toBe(6);
+    expect(placement.whatYouLoved.kid.length).toBe(8);
+    expect(placement.whatYouLoved.parent.length).toBe(6);
   });
 
-  it("prefers resolved-blocker evidence for workedThrough", () => {
+  it("kid mode whatYouLoved excludes workbook scans entirely", () => {
+    const ctx = emptyContext();
+    ctx.workbookArtifactIds = new Set(["wb-doc"]);
+    const photos: PhotoRef[] = [
+      photo({ id: "art1", sourceDocId: "doc-1" }),
+      photo({ id: "wb1", sourceDocId: "wb-doc" }),
+      photo({ id: "art2", sourceDocId: "doc-2" }),
+    ];
+    const scored = scorePhotos(photos, ctx);
+    const placement = assignPhotosToSections(scored, {
+      hasBookCompletions: true,
+      hasDadLab: false,
+    });
+    const kidIds = placement.whatYouLoved.kid.map((p) => p.id);
+    expect(kidIds).toContain("art1");
+    expect(kidIds).toContain("art2");
+    expect(kidIds).not.toContain("wb1");
+  });
+
+  it("kid mode workedThrough also excludes workbook scans", () => {
+    const ctx = emptyContext();
+    const photos: PhotoRef[] = [
+      photo({ id: "scan-only", source: "scan", sourceDocId: "scan-x" }),
+    ];
+    const scored = scorePhotos(photos, ctx);
+    const placement = assignPhotosToSections(scored, {
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+    expect(placement.workedThrough.kid).toEqual([]);
+  });
+
+  it("parent mode allows workbook scans on workedThrough only", () => {
+    const ctx = emptyContext();
+    const photos: PhotoRef[] = [
+      photo({ id: "wb1", source: "scan", sourceDocId: "scan-x" }),
+      photo({ id: "art1", sourceDocId: "doc-a" }),
+    ];
+    const scored = scorePhotos(photos, ctx);
+    const placement = assignPhotosToSections(scored, {
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+    expect(placement.workedThrough.parent.map((p) => p.id)).toContain("wb1");
+    expect(placement.whatYouLoved.parent.map((p) => p.id)).not.toContain("wb1");
+  });
+
+  it("prefers resolved-blocker evidence for workedThrough (both modes)", () => {
     const ctx = emptyContext();
     ctx.resolvedBlockerEvidenceIds.add("evidence-photo");
     const photos: PhotoRef[] = [
@@ -234,8 +284,12 @@ describe("assignPhotosToSections", () => {
       hasDadLab: false,
       resolvedBlockerEvidenceIds: new Set(["evidence-photo"]),
     });
-    const workedIds = placement.workedThrough.map((p) => p.id);
-    expect(workedIds).toContain("evidence-photo");
+    expect(placement.workedThrough.kid.map((p) => p.id)).toContain(
+      "evidence-photo",
+    );
+    expect(placement.workedThrough.parent.map((p) => p.id)).toContain(
+      "evidence-photo",
+    );
   });
 
   it("applies subject diversity penalty after 3rd same-subject photo", () => {
@@ -263,7 +317,7 @@ describe("assignPhotosToSections", () => {
       hasDadLab: false,
     });
 
-    const subjects = placement.whatYouLoved.map((p) => p.subjectTag);
+    const subjects = placement.whatYouLoved.parent.map((p) => p.subjectTag);
     expect(subjects.includes("Math")).toBe(true);
   });
 });
