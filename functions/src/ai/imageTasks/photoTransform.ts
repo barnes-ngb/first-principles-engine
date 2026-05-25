@@ -75,7 +75,7 @@ RULES:
       // Proceed with original on rewrite failure
     }
 
-    // ── Call gpt-image-1 edit endpoint ──────────────────────────
+    // ── Call gpt-image-1.5 edit endpoint ────────────────────────
     const imageBuffer = Buffer.from(photoBase64, "base64");
 
     let resultBase64: string;
@@ -88,16 +88,17 @@ RULES:
       const imageBlob = new Blob([imageBuffer], { type: photoMimeType });
       const imageFile = new File([imageBlob], "photo.png", { type: photoMimeType });
 
+      // Cast: openai SDK 4.104 model union predates gpt-image-1.5.
       const response = await openai.images.edit({
-        model: "gpt-image-1",
+        model: "gpt-image-1.5",
         image: imageFile,
         prompt: `${safeInstruction}. Safe for children, family-friendly.`,
         n: 1,
         size: "1024x1024",
-      });
+      } as Parameters<typeof openai.images.edit>[0]);
 
       const b64 = response.data?.[0]?.b64_json;
-      if (!b64) throw new Error("No image data returned from gpt-image-1 edit.");
+      if (!b64) throw new Error("No image data returned from gpt-image-1.5 edit.");
       resultBase64 = b64;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -126,7 +127,7 @@ RULES:
       metadata: {
         contentType: "image/png",
         metadata: {
-          generatedBy: "gpt-image-1",
+          generatedBy: "gpt-image-1.5",
           childId,
           themeStyle,
           firebaseStorageDownloadTokens: downloadToken,
@@ -140,7 +141,7 @@ RULES:
     const db = getFirestore();
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "photo-transform",
-      model: "gpt-image-1",
+      model: "gpt-image-1.5",
       inputTokens: 0,
       outputTokens: 0,
       childId,

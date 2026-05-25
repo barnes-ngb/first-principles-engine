@@ -4,7 +4,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { requireApprovedUser } from "../authGuard.js";
 import { openaiApiKey } from "../aiConfig.js";
 
-// ── Minecraft Skin Face Generation (gpt-image-1) ──────────────────
+// ── Minecraft Skin Face Generation (gpt-image-1.5) ────────────────
 
 export interface MinecraftSkinRequest {
   familyId: string
@@ -22,7 +22,7 @@ export interface MinecraftSkinResponse {
 }
 
 /**
- * Generate a Minecraft-style 8×8 pixel face skin using gpt-image-1.
+ * Generate a Minecraft-style 8×8 pixel face skin using gpt-image-1.5.
  * The face is rendered as clean pixel art matching the child's coloring.
  * Storage path: families/{familyId}/avatars/{childId}/minecraft-skin.png
  */
@@ -62,14 +62,14 @@ Specific colors to use:
 
 Output as a clean 8x8 pixel grid image. Each cell should be exactly one flat color. The background should be transparent. This will be applied as a texture to a 3D cube face.`;
 
-    // ── Generate with gpt-image-1 ──────────────────────────────────
+    // ── Generate with gpt-image-1.5 ────────────────────────────────
     let resultBase64: string;
     try {
       const { default: OpenAI } = await import("openai");
       const openai = new OpenAI({ apiKey: openaiApiKey.value() });
 
       const response = await openai.images.generate({
-        model: "gpt-image-1",
+        model: "gpt-image-1.5",
         prompt,
         n: 1,
         size: "1024x1024",
@@ -78,7 +78,7 @@ Output as a clean 8x8 pixel grid image. Each cell should be exactly one flat col
       } as Parameters<typeof openai.images.generate>[0]);
 
       const b64 = response.data?.[0]?.b64_json;
-      if (!b64) throw new Error("No image data returned from gpt-image-1.");
+      if (!b64) throw new Error("No image data returned from gpt-image-1.5.");
       resultBase64 = b64;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -97,7 +97,7 @@ Output as a clean 8x8 pixel grid image. Each cell should be exactly one flat col
       metadata: {
         contentType: "image/png",
         metadata: {
-          generatedBy: "gpt-image-1",
+          generatedBy: "gpt-image-1.5",
           childId,
           taskType: "minecraft-skin",
           firebaseStorageDownloadTokens: downloadToken,
@@ -111,7 +111,7 @@ Output as a clean 8x8 pixel grid image. Each cell should be exactly one flat col
     const db = getFirestore();
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "minecraft-skin",
-      model: "gpt-image-1",
+      model: "gpt-image-1.5",
       inputTokens: 0,
       outputTokens: 0,
       childId,

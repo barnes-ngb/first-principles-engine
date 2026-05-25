@@ -13,9 +13,20 @@ export interface ImageGenRequest {
   familyId: string;
   prompt: string;
   style?: "schedule-card" | "reward-chart" | "theme-illustration" | "book-illustration-minecraft" | "book-illustration-storybook" | "book-illustration-comic" | "book-illustration-realistic" | "book-illustration-garden-warfare" | "book-illustration-platformer" | "book-sticker" | "general";
-  size?: "1024x1024" | "1024x1792" | "1792x1024";
+  /** gpt-image-1.5 sizes. Legacy 1024x1792 / 1792x1024 are silently remapped to 1024x1536 / 1536x1024. */
+  size?: "1024x1024" | "1024x1536" | "1536x1024" | "1024x1792" | "1792x1024";
   /** Optional theme ID — if provided, theme's imageStylePrefix overrides the default style prefix. */
   themeId?: string;
+}
+
+/** gpt-image-1.5 portrait/landscape sizes (replaced DALL-E 3's 1024x1792 / 1792x1024). */
+const LEGACY_SIZE_REMAP: Record<string, string> = {
+  "1024x1792": "1024x1536",
+  "1792x1024": "1536x1024",
+};
+
+function remapLegacySize(s: string): string {
+  return LEGACY_SIZE_REMAP[s] ?? s;
 }
 
 export interface ImageGenResponse {
@@ -23,7 +34,7 @@ export interface ImageGenResponse {
   url: string;
   /** Storage path (e.g. families/{id}/generated-images/{file}). */
   storagePath: string;
-  /** The prompt DALL-E actually used (may be revised for safety). */
+  /** The prompt the image model actually used (may be revised for safety). */
   revisedPrompt?: string;
 }
 
@@ -53,7 +64,7 @@ const STYLE_PREFIXES: Record<string, string> = {
   general: "",
 };
 
-/** Build the final DALL-E prompt with style context and safety guardrails.
+/** Build the final image prompt with style context and safety guardrails.
  *  If a themeImagePrefix is provided (from BookThemeConfig), it takes precedence
  *  over the default STYLE_PREFIXES for book illustrations. */
 export function buildImagePrompt(
@@ -95,11 +106,18 @@ export const generateImage = onCall(
       );
     }
 
-    const validSizes = new Set(["1024x1024", "1024x1792", "1792x1024"]);
+    const validSizes = new Set([
+      "1024x1024",
+      "1024x1536",
+      "1536x1024",
+      // Legacy DALL-E 3 sizes accepted from clients in flight; remapped below.
+      "1024x1792",
+      "1792x1024",
+    ]);
     if (size && !validSizes.has(size)) {
       throw new HttpsError(
         "invalid-argument",
-        `size must be one of: ${[...validSizes].join(", ")}`,
+        `size must be one of: 1024x1024, 1024x1536, 1536x1024`,
       );
     }
 
@@ -134,7 +152,7 @@ export const generateImage = onCall(
     // ── Rate limiting ─────────────────────────────────────────
     await checkRateLimit(uid, "image-generation", 200, 60);
 
-    // ── Rewrite prompt for DALL-E safety via Claude ─────────────
+    // ── Rewrite prompt for image-gen safety via Claude ──────────
     const rewriteMode = style === "book-sticker" ? "sticker" as const : "scene" as const;
     const safePrompt = await rewriteForCopyright(prompt, rewriteMode, claudeApiKey.value());
 
@@ -173,21 +191,20 @@ export const generateImage = onCall(
 
     // ── Generate image ──────────────────────────────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
-    const dallePrompt = buildImagePrompt(safePrompt, style, themeImagePrefix);
+    const imagePrompt = buildImagePrompt(safePrompt, style, themeImagePrefix);
 
-    // Use gpt-image-1 for stickers (native transparent bg), DALL-E 3 for everything else
     const isSticker = style === "book-sticker";
     const imageOpts: ImageOptions = {
-      model: isSticker ? "gpt-image-1" : "dall-e-3",
-      size: isSticker ? "1024x1024" : (size ?? "1024x1024"),
-      quality: isSticker ? undefined : "standard",
+      model: "gpt-image-1.5",
+      size: isSticker ? "1024x1024" : remapLegacySize(size ?? "1024x1024"),
+      quality: isSticker ? undefined : "medium",
       background: isSticker ? "transparent" : undefined,
       outputFormat: isSticker ? "png" : undefined,
     };
 
     let imageResponse;
     try {
-      imageResponse = await provider.generateImage(dallePrompt, imageOpts);
+      imageResponse = await provider.generateImage(imagePrompt, imageOpts);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("Image generation failed:", {
@@ -219,6 +236,16 @@ export const generateImage = onCall(
           "Image generation is not configured correctly. Ask Dad to check the API key.",
         );
       }
+      if (
+        errMsg.includes("403") ||
+        errMsg.includes("organization") ||
+        errMsg.includes("verification")
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "OpenAI org verification incomplete — ask Dad to complete API Organization Verification in the OpenAI dashboard.",
+        );
+      }
       throw new HttpsError(
         "internal",
         `Image generation failed: ${errMsg.slice(0, 200)}`,
@@ -230,10 +257,10 @@ export const generateImage = onCall(
     const contentType = "image/png";
 
     if (imageResponse.b64Data) {
-      // gpt-image-1 returns base64 — decode directly (already has transparency)
       processedBuffer = Buffer.from(imageResponse.b64Data, "base64");
     } else if (imageResponse.url) {
-      // DALL-E 3 returns a URL — download it
+      // Defensive: gpt-image-1.5 always returns b64. Branch retained in case
+      // a future provider swap reintroduces URL responses.
       try {
         const response = await fetch(imageResponse.url);
         if (!response.ok) {
@@ -265,7 +292,7 @@ export const generateImage = onCall(
       metadata: {
         contentType,
         metadata: {
-          generatedBy: imageOpts.model ?? "dall-e-3",
+          generatedBy: imageOpts.model ?? "gpt-image-1.5",
           originalPrompt: prompt,
           style: style ?? "general",
           firebaseStorageDownloadTokens: downloadToken,
@@ -279,7 +306,7 @@ export const generateImage = onCall(
     const db = getFirestore();
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "image-generation",
-      model: imageOpts.model ?? "dall-e-3",
+      model: imageOpts.model ?? "gpt-image-1.5",
       inputTokens: 0,
       outputTokens: 0,
       prompt: prompt.slice(0, 200),

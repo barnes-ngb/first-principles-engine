@@ -64,13 +64,13 @@ RECOMMENDED: Add rate limits to ALL image generation functions. Add daily caps.
 
 | Task | Auth | Rate Limit | Model | Cost/call |
 |---|---|---|---|---|
-| `generateImage` | requireApprovedUser | **20/60min** | dall-e-3 or gpt-image-1 | $0.04 or $0.02 |
+| `generateImage` | requireApprovedUser | **20/60min** | gpt-image-1.5 | $0.06 |
 | `armorPiece` | requireApprovedUser | **NONE** | gpt-image-1 | $0.02 |
-| `armorReference` | requireApprovedUser | **NONE** | dall-e-3 | $0.04 |
-| `armorSheet` | requireApprovedUser | **NONE** | dall-e-3 | $0.04 |
-| `avatarPiece` | requireApprovedUser | **NONE** | dall-e-3 | $0.04 |
+| `armorReference` | requireApprovedUser | **NONE** | gpt-image-1.5 | $0.06 |
+| `armorSheet` | requireApprovedUser | **NONE** | gpt-image-1.5 | $0.06 |
+| `avatarPiece` | requireApprovedUser | **NONE** | gpt-image-1.5 | $0.06 |
 | `baseCharacter` | requireApprovedUser | **NONE** | gpt-image-1 | $0.02 |
-| `enhanceSketch` | requireApprovedUser | **NONE** | dall-e-3 | $0.04 |
+| `enhanceSketch` | requireApprovedUser | **NONE** | gpt-image-1.5 | $0.06 |
 | `extractFeatures` | requireApprovedUser | **NONE** | gpt-image-1 | $0.02 |
 | `minecraftFace` | requireApprovedUser | **NONE** | gpt-image-1 | $0.02 |
 | `minecraftSkin` | requireApprovedUser | **NONE** | gpt-image-1 | $0.02 |
@@ -96,7 +96,7 @@ AREA: Book Generation
 STATUS: ❌ NO PER-BOOK LIMITS
 EVIDENCE: src/features/books/useBookGenerator.ts:259-319
 CURRENT BEHAVIOR: Book generation loops through all pages, generating one illustration
-  per page via generateImage(). A 20-page book = 20 API calls = $0.80 (DALL-E 3).
+  per page via generateImage(). A 20-page book = 20 API calls = $1.20 (gpt-image-1.5).
   The only limit is the shared 20/60min rate limit. No per-book illustration cap.
   Failed pages can be retried later in the editor.
 RECOMMENDED: Cap book generation at reasonable page count. Consider cheaper model
@@ -313,8 +313,9 @@ export interface AIUsageEntry {
 |---|---|---|---|
 | Claude Sonnet 4.6 | $3 | $15 | — |
 | Claude Haiku 4.5 | $0.80 | $4 | — |
-| DALL-E 3 | — | — | $0.04 |
+| GPT Image 1.5 | — | — | $0.06 |
 | GPT Image 1 | — | — | $0.02 |
+| DALL-E 3 | — | — | $0.04 |
 
 ### B. Cost per Feature
 
@@ -336,7 +337,7 @@ RECOMMENDED: Add monthly budget cap (e.g., $50/month). Alert at 80% threshold.
 - generate, chat
 
 **Image features (per-call pricing):**
-- DALL-E 3 @ $0.04/call: book illustrations, avatar pieces, armor references, armor sheets, sketch enhancement
+- gpt-image-1.5 @ $0.06/call: book illustrations, avatar pieces, armor references, armor sheets, sketch enhancement, stickers, base characters, minecraft skins, photo transforms, starter avatars (consolidated successor to dall-e-3 + gpt-image-1)
 - GPT Image 1 @ $0.02/call: stickers, armor pieces, base characters, minecraft skins/faces, photo transforms, starter avatars, feature extraction
 
 **Costly scenarios (no protection):**
