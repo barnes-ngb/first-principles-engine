@@ -323,3 +323,301 @@ This document is read-only. No production code has been touched.
 5. **Confirm teach-back loader bounds.** `last 14 days, limit 10` (recommended, matches existing reflection window) or different?
 
 Step 1 (expansion plan + prompt-edit draft) and Step 2 (implementation) are blocked until Nathan reviews this.
+
+---
+
+## Step 1 — Expansion plan
+
+**Nathan's Step 0 decisions** (baked into this plan):
+1. **Target = `shellyChat`** (not `chat`).
+2. **Window = inherit planner's `sessionsPerDomain: 3`** (no date filter).
+3. **Trajectory shape = surface all 5 weekly review narratives.**
+4. **Latent disposition bug = fix in this phase** (`dispositionProfile` → `dispositionCache`).
+5. **Teach-backs = last 14 days, limit 10.**
+
+---
+
+### ⚠️ Contradictions surfaced (read these — they alter Decision 3)
+
+Two findings discovered while drafting Step 1 contradict assumptions in Step 0 and require Nathan to confirm a small course-correction. Both are pure inventory findings, surfaced now per the prompt's guardrails.
+
+#### Contradiction A — `dispositionNarrative` is a second dead read
+
+Step 0 claimed: *"The only disposition signal reaching the model is the `RECENT GROWTH NARRATIVE` pulled from the most recent `weeklyReviews/{…}` doc."*
+
+That claim is **wrong**. Verified by re-grepping (`grep -rn "dispositionNarrative"` returns only `functions/src/ai/tasks/shellyChat.ts:143-144`, no writers anywhere in `src/`, `functions/src/`, or types). The `WeeklyReviewDoc` interface (`functions/src/ai/evaluate.ts:60-78`) has no `dispositionNarrative` field. The fields that DO exist on weekly review docs are: `celebration`, `summary`, `wins[]`, `growthAreas[]`, `paceAdjustments[]`, `recommendations[]`, `energyPattern`, `evidence{books, teachBacks}`.
+
+Net effect: today `shellyChat` reads two disposition-shaped fields (`children/{id}.dispositionProfile` and `weeklyReviews/{key}.dispositionNarrative`) and BOTH are silently always empty. The model has been getting zero disposition signal from `shellyChat`, full stop.
+
+**Impact on Decision 3.** The decision was framed as "expand from 1 to 5 weekly review narratives." There are zero narratives to expand from. Three ways forward, recommend (a):
+
+- **(a) Re-aim Decision 3 at what actually exists** — surface a compact 5-week strip from past `weeklyReviews/{…}` docs using the real fields (`weekKey + celebration + summary + top 2 growthAreas + energyPattern` per row). This is a true week-over-week trajectory of what the AI already wrote, with no schema or write-side change. Cheap, accurate, and a real improvement over today (which surfaces nothing).
+- **(b) Lean only on the now-working `dispositionCache`** (after the field-name fix) and skip the weekly-review trajectory. Current state only, no trajectory. Smallest change.
+- **(c) Both (a) and (b).** Largest signal but more tokens.
+
+Phase 1 plan below assumes (a) + (b) = essentially (c). It's still small, the two pieces serve different purposes (`dispositionCache` = current dispositional state across the 5 dimensions; weekly-review strip = what we've been seeing/doing week over week), and the combined token add is well within budget.
+
+#### Contradiction B — `dispositionCache` shape is nested
+
+Step 0 implied the fix is a one-line rename. The actual shape is nested (`src/core/types/disposition.ts:42-45`):
+
+```ts
+interface DispositionCache {
+  result: DispositionResult     // { profileDate, periodWeeks, dispositions: {…5 keys}, celebration, nudge, parentNote }
+  generatedAt: string
+}
+```
+
+So the broken iteration `for (const [key, value] of Object.entries(dp))` (`shellyChat.ts:122-125`) was over-flat — even with the field name fixed, it would dump `result` and `generatedAt` as top-level "dispositions." Fix is a 4-5 line change (rename + drill into `dispositionCache.result.dispositions` + format the 5 named entries with their `level/trend/narrative`, optionally including `celebration/nudge`). Not a one-liner. Still a tight surgical change.
+
+Also: `dispositionOverrides` should be respected on read — the UI uses `effectiveDispositionText(entry, override)` (`disposition.ts:51-56`) to pick the parent edit over the AI text. The `shellyChat` read should mirror that so we don't surface a stale AI narrative when Shelly has explicitly overridden it.
+
+---
+
+### Window length decision (Decision 2)
+
+Confirmed inherit from planner: `sessionsPerDomain: 3`, no date filter. Already passes the prompt's "4-12 weeks" sanity check — three sessions per domain in a household that logs roughly weekly comes out to ~3-12 weeks of coverage per domain naturally, without imposing a hard date cutoff (which would hide signal during stretches with fewer sessions). No flag needed.
+
+Concretely: chat will call `loadRecentEvalHistoryByDomain(db, familyId, childId, { sessionsPerDomain: 3 })` — identical to how planner calls it today, since `recentHistoryByDomain` is already in the `shellyChat` slice list (`contextSlices.ts:65-70`). **Already wired.** No code change needed for Decision 2.
+
+---
+
+### Context expansion — BEFORE vs. AFTER (`shellyChat`)
+
+**BEFORE** (verified Step 0):
+
+Shared slices (via `buildContextForTask("shellyChat", …)`, `contextSlices.ts:65-70`):
+- `charter`, `childProfile`, `engagement`, `gradeResults`, `recentEval`, `sightWords`, `weekFocus`, `wordMastery`, `workbookPaces`, `skillSnapshot`, **`recentHistoryByDomain`** ✅ (already loaded), `recentScans`, `dayToday`, `dadLabReports`.
+
+Supplemental block (`shellyChat.ts:46-233`):
+- All-children list ✅
+- "Disposition profile" — **silently empty** (Contradiction B) ❌
+- "Recent growth narrative" — **silently empty** (Contradiction A) ❌
+- Conundrum title ✅
+- Completion-by-day + most-skipped ✅
+- Conundrum response count ✅
+- Chapter response count + book set ✅
+
+**AFTER** (Phase 1):
+
+Shared slices — unchanged. `recentHistoryByDomain` already covers the eval-trajectory ask (3 sessions per domain × 4 domains, both guided and interactive, with findings on the most-recent session per domain).
+
+Supplemental block:
+- All-children list — unchanged.
+- **Disposition profile (FIXED)** — replace the broken `dispositionProfile` read with a correct `dispositionCache` read.
+  - **Source:** `families/{familyId}/children/{childId}` document, `dispositionCache.result.dispositions` (keyed: `curiosity`, `persistence`, `articulation`, `selfAwareness`, `ownership`); also `dispositionCache.result.celebration/nudge/parentNote` and `dispositionCache.generatedAt`. Apply `dispositionOverrides[key]?.text` over `entry.narrative` per `effectiveDispositionText` (`disposition.ts:51`).
+  - **Serialization:** prose block, one line per disposition, format `<Key>: <level>, trend <trend> — <effectiveText>`. Followed by an optional one-line `Profile generated <date>` and the short `celebration` / `nudge` strings if present. Total length naturally bounded by what the disposition generator wrote (~300-500 chars).
+  - **Token estimate:** ~75-125 tokens added when populated.
+- **Weekly-review trajectory (NEW; replaces broken `dispositionNarrative` read)** — surface up to 5 most recent `weeklyReviews` docs for the child as a compact strip.
+  - **Source:** same query the existing supplemental block already runs (`weeklyReviews.where(childId).limit(5)`, `shellyChat.ts:54-58`). No new query, just use more of the result instead of throwing 4 rows away.
+  - **Serialization:** one line per review: `<weekKey>: <summary>` (truncate summary to ~140 chars). Include `celebration` and up to 2 `growthAreas` only on the most-recent review (avoid bloat). Skip docs with `status === "no-data"`.
+  - **Token estimate:** ~375-625 tokens added (5 rows × ~70-100 tokens each, weighted toward the most-recent row).
+- Conundrum title, completion patterns, conundrum responses, chapter responses — unchanged.
+- **Recent teach-backs (NEW)** — load Shelly's evidence of Lincoln explaining things back.
+  - **Source:** `families/{familyId}/artifacts` where `childId == childId`, `tags.engineStage == "Explain"`, `createdAt >= today - 14d`, then in-memory filter where `title.toLowerCase().startsWith("teach-back")`. Mirrors the existing query at `functions/src/ai/evaluate.ts:415-422` exactly, with the week-bound replaced by a 14-day window. **Decision 5:** apply `limit(10)` at the Firestore layer to cap cost, then summarize via the existing `summarizeTeachBacks` reducer (`evaluate.ts:457-513`).
+  - **Reuse:** export `summarizeTeachBacks` if not already exported (it is — `evaluate.ts:457` `export function`). Add a thin new loader `loadRecentTeachBacksContext(db, familyId, childId)` that lives in `contextSlices.ts` for parity with the other slice loaders, and a small formatter that turns the `TeachBacksWeekSummary` into prompt text.
+  - **Serialization:** compact block — `RECENT TEACH-BACKS (last 14 days): N total (audio: A, text: T). By subject: Reading 3, Math 1, …. Examples: <subject> — "<excerpt, ≤80c>" (audio|text). <up to 3 examples>`. Omit the section entirely when count is zero.
+  - **Token estimate:** ~75-200 tokens added.
+
+**Total estimated token add to `shellyChat` context: ~525-950 tokens**, on top of today's ~2075-3750 tokens of `shellyChat` system prompt. That's roughly +15-30%, landing at or just below the prompt's 30% surface-for-review threshold. Tracking under threshold by design (driving the upper bound is the 5-row weekly-review strip; if Step 2 measurements come in hot we can drop the strip to 3 rows and stay clean).
+
+---
+
+### Chat prompt addendum — draft for Nathan's review
+
+**Insertion point.** Append a new paragraph to the child-scoped branch of `roleSection` (`shellyChat.ts:244-255`), right after the existing bulleted SHELLY-SPECIFIC GUIDELINES list and BEFORE the closing back-tick of the template literal. Do NOT modify the general-conversation branch (`shellyChat.ts:257-266`) — the addendum talks about per-child eval data that doesn't apply when no child is selected. Do NOT replace any existing instructions.
+
+**Proposed text** (verbatim, based on the prompt's draft, mildly tightened for the existing voice; Nathan tune freely):
+
+```
+PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading, math, fluency, and phonics (EVALUATION HISTORY BY DOMAIN above), his disposition signals (curiosity, persistence, articulation, self-awareness, ownership in DISPOSITION PROFILE), the week-over-week strip of recent reviews (RECENT WEEKLY REVIEWS), and his recent teach-backs (RECENT TEACH-BACKS). Use them to help Shelly see patterns over time — what is shifting, what is steady, what connects across signals she hasn't linked. When she shares an observation about ${childName} mid-conversation, treat it as evidence she has earned the right to add to the picture — don't argue with it, build on it.
+```
+
+Three notes on this draft:
+- It names the section headers the model will actually see in the system prompt above (`EVALUATION HISTORY BY DOMAIN`, `DISPOSITION PROFILE`, `RECENT WEEKLY REVIEWS`, `RECENT TEACH-BACKS`) so the model can ground claims rather than confabulate.
+- The "fluency, and phonics" extension comes from `EVAL_DOMAINS` (`chatTypes.ts:207`) — the actual 4 domains the loader returns. Not just reading/math/speech as the original draft said.
+- "Don't argue with it, build on it" is preserved verbatim from Nathan's original draft.
+
+---
+
+### Child scoping decision
+
+Confirmed from Step 0: `shellyChat` is single-child-scoped via the active tab in `ShellyChatPage.tsx:523`, with a separate no-child general-conversation branch.
+
+**Phase 1 rule:** all new loaders (disposition cache, weekly-review strip, recent teach-backs) take `childId` and are only invoked when `childId` is present. The no-child branch keeps today's behavior (no eval/disposition/teach-back context loaded) and does not get the PLANNING-PARTNER MODE addendum. Lincoln data never leaks into a London chat; London data never leaks into a Lincoln chat.
+
+---
+
+### Empty-state handling
+
+For each new section, define behavior when the underlying data is absent:
+
+| Section | Empty trigger | Behavior |
+|---|---|---|
+| Disposition profile | `dispositionCache` field absent on child doc | **Omit the section entirely.** Do not emit "No disposition profile yet" — the model already gets ample context and we don't want to invite confabulation about why it's missing. |
+| Weekly-review strip | No `weeklyReviews` docs for child, or all 5 have `status === "no-data"` | **Omit entirely.** Same reasoning. |
+| `recentHistoryByDomain` per-domain | A given domain has no completed sessions in `evaluationSessions` | Already-correct existing behavior in `loadRecentEvalHistoryByDomain` (`chatTypes.ts:283-284`): that domain's block is omitted. No change needed. |
+| `recentHistoryByDomain` whole | Child has zero completed sessions across all 4 domains | Existing behavior: `formatEvalHistoryByDomain` returns `""` and the section is dropped (`contextSlices.ts:569-571`). No change needed — this is London's reality today. |
+| Recent teach-backs | Zero artifacts in window | **Omit entirely** (loader returns `""`). |
+| PLANNING-PARTNER MODE addendum | When the new sections are all empty | Append unconditionally on the child-scoped branch. It costs little and primes the model to use the sections when they are present in future turns. |
+
+Rationale for "omit, don't explain absence" across the board: today's `shellyChat` prompt already includes explicit instructions for the model to tell Shelly when data is missing (`shellyChat.ts:248-249` — "If data is missing, tell her specifically what's not there yet and how to populate it"). That guidance is the right channel for "no evals yet for London"; injecting empty headers would just give the model two places to talk about absence, and risk dueling phrasings.
+
+---
+
+### Type changes needed
+
+Goal from Step 0: zero new types. Status against goal:
+
+- `recentHistoryByDomain`: no change. Already wired.
+- Disposition fix: reuse `DispositionCache` / `DispositionResult` / `DispositionOverrides` from `src/core/types/disposition.ts`. The functions side does not currently import these — they live in `src/` and the functions tree imports from its own files only. Two acceptable options: **(i)** declare a local minimal shape inside the `shellyChat` handler (mirroring the read fields), or **(ii)** add a small `functions/src/ai/types/disposition.ts` that re-declares the shape. Prefer (i) in Phase 1 — keeps the cross-tree boundary clean and matches how `shellyChat` already declares local read shapes (e.g., the inline `{ exists, data() }` shapes throughout `shellyChat.ts`).
+- Weekly-review trajectory: reuse the inline shape `shellyChat.ts:131-141` already uses for the `review.dispositionNarrative` read. Add the actual fields the doc has (`weekKey`, `status`, `celebration`, `summary`, `growthAreas`, `createdAt`). No new shared type.
+- Recent teach-backs: `TeachBacksWeekSummary` already exists and is the natural return type. Either import it from `functions/src/ai/evaluate.ts` into the new loader, or declare a minimal duplicate. Prefer **import** — keeps the reducer and the shape coupled.
+
+**Net: 0 new shared types.** Decision met.
+
+---
+
+### Test plan
+
+Tests to add/update in `functions/src/ai/contextSlices.test.ts` (and a new `shellyChat.test.ts` if no existing file — Step 0 confirmed none):
+
+1. **Slice list invariants (existing tests)** — no slice-list changes for `shellyChat`, so the existing assertion at `contextSlices.test.ts:68` ("shellyChat wires the added context slices") still passes unchanged. If we add `recentTeachBacks` as a proper slice in `TASK_CONTEXT` (vs. living only as a supplemental query in `shellyChat.ts`), extend that test.
+   - **Recommendation: keep teach-backs as a supplemental query in `shellyChat.ts`**, not a generic slice. Reasoning: only `shellyChat` needs it; we already chose the same pattern for completion-patterns and chapter responses; making it a slice forces every other consumer to consider opting out.
+
+2. **New test: `shellyChat` disposition block populates from `dispositionCache`** — mock a child doc with a realistic `dispositionCache.result.dispositions.{curiosity, …}` payload, mock `dispositionOverrides` for one disposition, run the supplemental-block formatter, assert the output contains all 5 disposition lines, the override text wins where present, and the AI text wins everywhere else.
+
+3. **New test: disposition block omitted cleanly** — mock a child doc with no `dispositionCache` field, assert the output does not contain `DISPOSITION PROFILE`.
+
+4. **New test: weekly-review strip surfaces 5 docs** — mock `weeklyReviews` returning 5 docs with `status: "draft"` and 1 with `status: "no-data"`. Assert the output contains 5 review rows (no-data skipped, replaced by the next-oldest if 6 fetched), most-recent row carries `celebration` + 2 `growthAreas`, older rows carry only `weekKey + summary`.
+
+5. **New test: weekly-review strip omitted cleanly** — empty `weeklyReviews` query → no `RECENT WEEKLY REVIEWS` header.
+
+6. **New test: recent teach-backs loader** — mock 12 `artifacts` matching the filter (more than the 10-limit), assert the loader respects `limit(10)`, asserts `summarizeTeachBacks` shape passes through, and asserts the formatter renders subject breakdown + audio/text count + ≤3 examples.
+
+7. **New test: recent teach-backs omitted cleanly** — zero matching artifacts → no `RECENT TEACH-BACKS` header.
+
+8. **New test: child-scoping for the addendum** — call the supplemental-block builder with `childId = ""` (no-child branch); assert PLANNING-PARTNER MODE addendum is not present and that the disposition/weekly-review/teach-back sections are not present.
+
+9. **No regression on existing slice tests** — re-run `contextSlices.test.ts` after changes; everything else stays green (no `TASK_CONTEXT` changes for `shellyChat`).
+
+10. **Token-budget sanity** — add a coarse test using a synthetic Lincoln-shaped fixture, assert the assembled system prompt char-count stays below a generous bound (propose ~25000 chars ≈ ~6250 tokens for the full `shellyChat` prompt post-Phase 1, well below model context limits and giving headroom for the actual user turn + conversation history).
+
+---
+
+### Token cost estimate (revised post-contradictions)
+
+| Block | Before tokens | After tokens | Delta |
+|---|---|---|---|
+| `recentHistoryByDomain` (shared slice) | ~150-400 | ~150-400 | 0 (already loaded) |
+| Disposition profile block | 0 (silently empty) | ~75-125 (when populated) | +75-125 |
+| Weekly-review trajectory (5 rows) | 0 (silently empty) | ~375-625 | +375-625 |
+| Recent teach-backs | n/a | ~75-200 | +75-200 |
+| PLANNING-PARTNER MODE addendum | n/a | ~125 | +125 |
+| **`shellyChat` system prompt total** | **~2075-3750** | **~2725-4825** | **+650-1075 (+25-29%)** |
+
+Lands at the upper edge of the prompt's "above 30%" surface-for-review threshold but under it. If Step 2 measurements come in over the line we drop the weekly-review strip to 3 rows (~225-375 token savings) before reconsidering anything else.
+
+---
+
+### What changed vs. the original prompt
+
+The original Phase 1 prompt was scoped on a partial picture of the code. Differences this plan introduces, with reasoning:
+
+1. **Target moved from `chat` task to `shellyChat` task.** The original prompt assumed `chat` was Shelly's UI chat; it isn't. (Confirmed Step 0; Decision 1.)
+2. **Disposition trajectory shape adjusted.** Original prompt proposed "expand from 1 to 5 weekly review narratives." Those narratives don't exist (Contradiction A). Replaced with a 5-row strip of actual `weeklyReviews` doc fields (`summary` + most-recent `celebration` + most-recent 2 `growthAreas`). Provides true week-over-week trajectory using what's actually written.
+3. **Disposition fix is multi-line, not one-line.** `dispositionCache` is nested (`result.dispositions`) and parent overrides need to be applied. (Contradiction B.) Same scope, just acknowledging the actual size.
+4. **Original prompt mentioned "reading, math, and speech."** Replaced with the actual 4 domains the loader returns (`phonics`, `comprehension`, `math`, `fluency` — `chatTypes.ts:207`). The addendum's section-naming is corrected.
+5. **Original prompt said the chat slice today reads curated `findings` on the skill snapshot.** Neither `chat` (which reads only `charter + childProfile`) nor `shellyChat` (which reads the full snapshot incl. `prioritySkills/supports/stopRules/conceptualBlocks` via the `skillSnapshot` slice) match that description literally. `shellyChat` already gets much more than just `findings` — the `recentHistoryByDomain` block IS where findings flow in today.
+6. **`recentHistoryByDomain` is already wired into `shellyChat`** (`contextSlices.ts:65-70`). No code change needed for that part of the prompt's data ask. The Phase 1 work concentrates on the three sections that are actually missing or broken: disposition, weekly-review strip, teach-backs.
+7. **PLANNING-PARTNER MODE addendum positioned inside the existing `roleSection`** rather than as a top-level new section, to minimize disruption to the existing prompt structure (which already has well-defined SHELLY-SPECIFIC GUIDELINES bullets).
+8. **Teach-backs implemented as a `shellyChat`-local supplemental query**, not a generic slice in `TASK_CONTEXT`. Matches the pattern already established for completion-patterns, conundrum count, and chapter responses (`shellyChat.ts:46-84`).
+9. **No new shared types** — confirmed achievable via local read shapes and importing `summarizeTeachBacks` from `evaluate.ts`.
+
+---
+
+### Scope guardrails (from the prompt, restated)
+
+This plan does NOT touch:
+- Any task type other than `shellyChat` (no changes to `plan`, `scan`, `evaluate`, `chat`, `quest`, `conundrum`, `workshop`, `weeklyFocus`, `weeklyReview`, `analyzePatterns`).
+- The schema of `evaluationSessions`, `evaluations`, `dispositionCache`, `weeklyReviews`, `artifacts`, or any other Firestore collection (read-side only).
+- Tool use in chat (deferred).
+- Write-back from chat to `skillSnapshot` (Phase 2).
+- `recentHistoryByDomain`'s window in planner or scan (chat inherits, doesn't reverse the flow).
+- Phase 1b (eval-to-eval trajectory narratives at eval-close time).
+- Any feature flag — change is additive context + a localized prompt edit + a localized bug fix. Reverting is `git revert`.
+
+---
+
+## STOP — STEP 1 GATE
+
+Step 1 is read-only. No production code touched in this commit.
+
+**Outstanding for Nathan before Step 2:**
+
+1. **Confirm Decision 3 re-aim.** OK to surface a 5-row strip of `weeklyReviews` doc fields (`weekKey + summary + most-recent celebration + most-recent 2 growthAreas`) in place of the proposed-but-non-existent disposition narratives? (Recommended: yes.)
+2. **Confirm "omit on empty, don't explain absence"** as the universal empty-state rule for the three new sections.
+3. **Confirm teach-backs stays a `shellyChat`-local supplemental query** (no new entry in `TASK_CONTEXT`).
+4. **Confirm the addendum text** — Nathan tune the PLANNING-PARTNER MODE paragraph if any wording lands wrong; the implementation will use whatever Nathan signs off on here.
+5. **Optional:** if the +25-29% token estimate is the wrong tradeoff for any reason, say so now so Step 2 can ship the 3-row weekly-review strip instead of 5.
+
+Step 2 (implementation) is blocked until Nathan reviews this.
+
+---
+
+## Step 2 — Implementation audit
+
+Implementation landed in `functions/src/ai/tasks/shellyChat.ts`. No other production files touched. Typecheck (both `functions/` and root) is clean; existing tests (57 in `chat.test.ts` + `contextSlices.test.ts`) pass unchanged.
+
+### Third dead read found by the sanity grep
+
+Nathan asked Step 2 to add a third-dead-read sanity grep. It surfaced one:
+
+- **`weeks/{weekId}.conundrumTitle`** read by `shellyChat.ts:153` was never written anywhere in the codebase. The actual field is nested at `weeks/{weekId}.conundrum.title`, written by the planner at `src/features/planner-chat/PlannerChatPage.tsx:1421` and consumed correctly by other readers (`WeekFocusPanel.tsx:55`, `WeekFocusCard.tsx:102`, `MyAvatarPage.tsx:466-467`). Same class of silent dead read as the two known disposition ones — the `CONUNDRUM THIS WEEK` block in the supplemental context was always empty.
+- **Fix:** one-line — change the type cast to `{ conundrum?: { title?: string } }` and read `data?.conundrum?.title`.
+- **Scope call (rolled into this commit, surface for revert if Nathan disagrees):** identical class of bug, adjacent to the other two fixes, no new query, no schema change. Rolling it in matches the spirit of Decision 4 ("fix the latent disposition bug as part of this phase"). If Nathan would rather isolate it, `git revert -p` the `conundrumTitle → conundrum.title` hunk on its own and re-land separately — the other fixes are independent.
+- **Other Firestore reads in `shellyChat.ts` audited:** `bookTitle` on `chapterResponses` is written by `PlannerChatPage.tsx:1918` and `DevAdminTab.tsx:282` — real. Child-doc fields (`name`, `age`, `description`, `notes`) all populated upstream. Day-log fields (`date`, `checklist[].label/completed/skipped/engagement`) match the canonical day-log schema. No further dead reads detected.
+
+### Changes shipped
+
+All in `functions/src/ai/tasks/shellyChat.ts`:
+
+1. **Header comment** updated to reflect the new supplemental context shape and the child-scoped addendum.
+2. **Import** added: `summarizeTeachBacks` from `../evaluate.js` (already exported).
+3. **Parallel query batch** (the `Promise.allSettled` array) gained an 8th query: `teachBacksResult` — `families/{familyId}/artifacts` filtered to `tags.engineStage == "Explain"`, `createdAt >= today - 14d`, `limit(10)`. Mirrors the evaluate.ts week-bounded loader but bounded to the existing 14-day reflection window.
+4. **Disposition block rewritten.** Now reads `child.dispositionCache.result.dispositions` (the field actually written by `src/features/progress/DispositionProfile.tsx:179`), drilling correctly into the nested shape per `src/core/types/disposition.ts:42-45`. Applies `dispositionOverrides[key]?.text` over `entry.narrative` per the UI's `effectiveDispositionText` helper. Emits 5 lines in fixed order (Curiosity / Persistence / Articulation / Self-Awareness / Ownership) with `level`, `trend`, and the effective narrative; appends `celebration` and `nudge` if present; prepends a `generated <date>` header. Omits the entire block when no cache exists (matches the "omit, don't explain absence" rule from Step 1 Decision 2 follow-up).
+5. **Weekly-review block rewritten.** Replaced the broken `review?.dispositionNarrative` read with a 5-row strip using actual `WeeklyReviewDoc` fields (`weekKey`, `summary`, `celebration`, `growthAreas`, `createdAt`). Filters out `status === "no-data"` rows, sorts by `createdAt` desc, truncates summary to ≤140 chars, attaches `celebration` + top 2 `growthAreas` to the most-recent row only.
+6. **Conundrum block fixed.** One-line drill into `conundrum.title` instead of the never-written `conundrumTitle`.
+7. **Recent teach-backs block added.** Filters the 10 most-recent `Explain` artifacts to those with `title` starting with `teach-back` (case-insensitive — not every Explain artifact is a teach-back), summarizes via the shared `summarizeTeachBacks` reducer, and renders count, audio/text breakdown, by-subject counts, and ≤3 short example excerpts. Omits when zero teach-backs match.
+8. **PLANNING-PARTNER MODE addendum** appended to the child-scoped `roleSection` only (the no-child branch is untouched). Names the four upstream section headers (`EVALUATION HISTORY BY DOMAIN`, `DISPOSITION PROFILE`, `RECENT WEEKLY REVIEWS`, `RECENT TEACH-BACKS`) so the model can ground claims rather than confabulate. Preserves Nathan's "don't argue with it, build on it" framing verbatim.
+
+### Scope guardrails honored
+
+- No changes to `chat`, `plan`, `scan`, `evaluate`, `quest`, `conundrum`, `workshop`, `weeklyFocus`, `weeklyReview`, `analyzePatterns`, or `disposition` task code.
+- No changes to `TASK_CONTEXT` in `contextSlices.ts`. Teach-backs live as a `shellyChat`-local supplemental query per the Step 1 plan.
+- No schema changes. No new shared types. No write-back. No feature flag.
+- `recentHistoryByDomain` slice unchanged — already loaded for `shellyChat` and already at planner's `sessionsPerDomain: 3`.
+- No-child branch unchanged: the addendum, the new sections, and the new query all require `childId`. London chat does not see Lincoln data and vice versa.
+
+### Verification status
+
+- `npx tsc -p functions/tsconfig.json --noEmit` — passes with no errors.
+- `npx tsc -b` (root) — passes with no errors.
+- `vitest run functions/src/ai/contextSlices.test.ts functions/src/ai/chat.test.ts` — 57/57 pass.
+- No new tests yet — that's Step 3.
+
+### Open items for Step 3 (tests) — NOT actioned in this commit
+
+Per Nathan's gate instruction ("Nathan reviews the implementation commit before Step 3 tests"), the new tests outlined in Step 1's test plan are deferred to Step 3:
+1. Disposition block populates from `dispositionCache` (with override application).
+2. Disposition block omits cleanly when no cache present.
+3. Weekly-review strip surfaces ≤5 rows, skips `no-data`, attaches extras to most-recent only.
+4. Weekly-review strip omits cleanly.
+5. Teach-back loader respects `limit(10)` + title filter + summarizer pass-through.
+6. Teach-back block omits cleanly.
+7. PLANNING-PARTNER addendum present on child-scoped branch, absent on no-child branch.
+8. Token-budget sanity bound on the full assembled prompt.
+
+## STOP — STEP 2 GATE
+
+Implementation pushed. Step 3 (tests) blocked until Nathan reviews the implementation commit. If the third-dead-read fix should be split out, say so before Step 3 — it's a 1-line revert with no test impact.
