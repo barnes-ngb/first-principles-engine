@@ -491,14 +491,16 @@ export async function loadPhotosForMonth(
       const storagePath = (d.storagePath as string) ?? "";
       if (!storagePath) continue;
       if (scanHasClassifiedContent(d)) classifiedScanIds.add(doc.id);
-      photos.push({
+      const subjectTag = extractScanSubject(d);
+      const ref: PhotoRef = {
         id: `scan:${doc.id}`,
         storagePath,
         source: "scan",
         sourceDocId: doc.id,
         capturedAt: (d.createdAt as string) ?? "",
-        subjectTag: extractScanSubject(d),
-      });
+      };
+      if (subjectTag) ref.subjectTag = subjectTag;
+      photos.push(ref);
     }
   } catch (err) {
     console.warn("[monthlyReview] loadPhotosForMonth scans failed:", err);
@@ -522,14 +524,15 @@ export async function loadPhotosForMonth(
       if (type !== "Photo" && type !== "Worksheet" && type !== "Video") continue;
       const tags = (d.tags ?? {}) as { subjectBucket?: string };
       if (type === "Worksheet") workbookArtifactIds.add(doc.id);
-      photos.push({
+      const ref: PhotoRef = {
         id: `artifact:${doc.id}`,
         storagePath,
         source: "artifact",
         sourceDocId: doc.id,
         capturedAt: (d.createdAt as string) ?? "",
-        subjectTag: tags.subjectBucket,
-      });
+      };
+      if (tags.subjectBucket) ref.subjectTag = tags.subjectBucket;
+      photos.push(ref);
     }
   } catch (err) {
     console.warn("[monthlyReview] loadPhotosForMonth artifacts failed:", err);
