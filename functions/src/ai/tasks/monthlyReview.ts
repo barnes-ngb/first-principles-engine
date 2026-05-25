@@ -76,7 +76,8 @@ export interface MonthlyReviewPayload {
   status: "draft";
   generatedAt: string;
   theme: string;
-  heroPhotoRef?: PhotoRef;
+  /** `null` when no qualifying photo — Firestore rejects `undefined`. */
+  heroPhotoRef: PhotoRef | null;
   pages: MonthlyReviewPage[];
   curatedPhotos: PhotoRef[];
   unplacedPhotos: PhotoRef[];
@@ -712,7 +713,7 @@ function normalizeContent(raw: unknown): PageContent | undefined {
 
 // ── Compose final document ────────────────────────────────────
 
-interface ComposeInput {
+export interface ComposeInput {
   familyId: string;
   childId: string;
   month: string;
@@ -733,7 +734,7 @@ const SECTION_ORDER: MonthlyReviewPage["sectionType"][] = [
 
 const EMPTY_CONTENT: PageContent = {};
 
-function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload {
+export function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload {
   const { familyId, childId, month, data, hero, scored, placement, parsed } = input;
   const id = `${childId}_${month}`;
 
@@ -769,15 +770,20 @@ function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload {
     };
   });
 
-  const curatedPhotos: PhotoRef[] = scored.slice(0, 30).map((p) => ({
-    id: p.id,
-    storagePath: p.storagePath,
-    source: p.source,
-    sourceDocId: p.sourceDocId,
-    capturedAt: p.capturedAt,
-    score: Number.isFinite(p.score) ? p.score : undefined,
-    subjectTag: p.subjectTag,
-  }));
+  // Build PhotoRefs without explicit `undefined` fields — Firestore rejects
+  // undefined values, so optional fields are only set when defined.
+  const curatedPhotos: PhotoRef[] = scored.slice(0, 30).map((p) => {
+    const ref: PhotoRef = {
+      id: p.id,
+      storagePath: p.storagePath,
+      source: p.source,
+      sourceDocId: p.sourceDocId,
+      capturedAt: p.capturedAt,
+    };
+    if (Number.isFinite(p.score)) ref.score = p.score;
+    if (p.subjectTag) ref.subjectTag = p.subjectTag;
+    return ref;
+  });
 
   const stats: MonthStats = {
     daysWithActivity: data.dayLogs.length,
@@ -806,7 +812,9 @@ function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload {
     status: "draft",
     generatedAt: new Date().toISOString(),
     theme: parsed.theme,
-    heroPhotoRef: hero,
+    // Coerce undefined → null at the Firestore write boundary. The picker
+    // returns `undefined` ("no qualifying photo"); Firestore rejects undefined.
+    heroPhotoRef: hero ?? null,
     pages,
     curatedPhotos,
     unplacedPhotos: placement.more,

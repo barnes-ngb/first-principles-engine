@@ -109,7 +109,8 @@ export interface MonthlyReview {
 
   /** AI-picked theme word or short phrase. */
   theme: string
-  heroPhotoRef?: PhotoRef
+  /** `null` when no qualifying photo (Firestore can't store `undefined`). */
+  heroPhotoRef?: PhotoRef | null
 
   pages: MonthlyReviewPage[]
   /** Ranked photos (top ~30 kept). */
