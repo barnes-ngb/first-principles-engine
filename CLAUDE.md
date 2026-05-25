@@ -258,13 +258,17 @@ All under `families/{familyId}/`:
 
 ### Prompt Files
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
-- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions)
+- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, monthlyReview)
 
-### Cloud Functions (18 exported)
-- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, chapterQuestions)
+### Cloud Functions (22 exported)
+- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, chapterQuestions, monthlyReview)
 - `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
 - `generateWeeklyReviewNow` — Manual review trigger
+- `generateMonthlyReview` — Scheduled monthly review (1st of month)
+- `generateMonthlyReviewNow` — Manual monthly review trigger
+- `publishMonthlyReview` — Mark a monthly review book published (visible to kids)
+- `unpublishMonthlyReview` — Revert publish
 - `generateActivity` — Lesson card generation
 - `healthCheck` — Diagnostic endpoint
 - 12 image functions: `generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`, `enhanceSketch`
@@ -278,9 +282,11 @@ All under `families/{familyId}/`:
 - `functions/src/ai/aiService.ts` — Core AI service orchestration
 - `functions/src/ai/sanitizeJson.ts` — JSON response sanitization
 - `functions/src/ai/health.ts` — Health check endpoint
-- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions
+- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, monthlyReview
+- `functions/src/ai/tasks/index.ts` — Chat task registry (CHAT_TASKS dispatch table, 15 task types)
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
+- `functions/src/ai/monthlyReview.ts` — Monthly review callables (generate / publish / unpublish)
 - `functions/src/ai/imageGen.ts` — Image generation routing
 - `functions/src/ai/imageTasks/` — 12 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, enhanceSketch, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar) + index
 - `functions/src/ai/providers/` — Claude + OpenAI provider adapters (with `__stubs__/` for test mocking)

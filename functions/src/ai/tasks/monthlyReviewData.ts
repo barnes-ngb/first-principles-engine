@@ -160,6 +160,12 @@ export interface MonthAggregate {
    * workbook scans by the curation policy.
    */
   workbookArtifactIds: Set<string>;
+  /**
+   * Scan doc IDs where the AI recognized curriculum content (`results.subject`
+   * or similar). Incidental scans without analysis fall out of kid-mode
+   * placement and cover-hero selection.
+   */
+  classifiedScanIds: Set<string>;
   conundrums: ConundrumEntry[];
   teachBacks: TeachBackEntry[];
   hours: HoursSummary;
@@ -461,10 +467,15 @@ export async function loadPhotosForMonth(
   childId: string,
   start: string,
   end: string,
-): Promise<{ photos: PhotoRef[]; workbookArtifactIds: Set<string> }> {
+): Promise<{
+  photos: PhotoRef[];
+  workbookArtifactIds: Set<string>;
+  classifiedScanIds: Set<string>;
+}> {
   const endIso = end + "T23:59:59";
   const photos: PhotoRef[] = [];
   const workbookArtifactIds = new Set<string>();
+  const classifiedScanIds = new Set<string>();
 
   // Scans
   try {
@@ -479,6 +490,7 @@ export async function loadPhotosForMonth(
       const d = doc.data() as Record<string, unknown>;
       const storagePath = (d.storagePath as string) ?? "";
       if (!storagePath) continue;
+      if (scanHasClassifiedContent(d)) classifiedScanIds.add(doc.id);
       photos.push({
         id: `scan:${doc.id}`,
         storagePath,
@@ -523,12 +535,40 @@ export async function loadPhotosForMonth(
     console.warn("[monthlyReview] loadPhotosForMonth artifacts failed:", err);
   }
 
-  return { photos, workbookArtifactIds };
+  return { photos, workbookArtifactIds, classifiedScanIds };
 }
 
 function extractScanSubject(d: Record<string, unknown>): string | undefined {
   const results = d.results as { subject?: string; subjectBucket?: string } | null | undefined;
   return results?.subject ?? results?.subjectBucket;
+}
+
+/**
+ * True when the scan has any meaningful AI analysis attached — meaning the
+ * scan pipeline actually recognized curriculum content rather than the user
+ * snapping a random photo. Used to qualify scans for kid-mode placement and
+ * the cover-hero allowlist.
+ */
+function scanHasClassifiedContent(d: Record<string, unknown>): boolean {
+  const results = d.results as
+    | {
+        subject?: string;
+        subjectBucket?: string;
+        pageType?: string;
+        specificTopic?: string;
+        curriculumDetected?: { name?: string };
+        skillsAssessed?: unknown;
+      }
+    | null
+    | undefined;
+  if (!results) return false;
+  if (results.subject && results.subject.trim()) return true;
+  if (results.subjectBucket && results.subjectBucket.trim()) return true;
+  if (results.specificTopic && results.specificTopic.trim()) return true;
+  if (results.curriculumDetected?.name) return true;
+  if (Array.isArray(results.skillsAssessed) && results.skillsAssessed.length)
+    return true;
+  return false;
 }
 
 export async function loadConundrumsForMonth(
@@ -733,6 +773,7 @@ export async function aggregateMonthData(
     dadLabReports,
     photos: photosResult.photos,
     workbookArtifactIds: photosResult.workbookArtifactIds,
+    classifiedScanIds: photosResult.classifiedScanIds,
     conundrums,
     teachBacks,
     hours,

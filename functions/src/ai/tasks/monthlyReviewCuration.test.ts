@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   scorePhotos,
   pickHeroPhoto,
+  pickHeroForMode,
+  hasPositiveKidModeSignal,
   assignPhotosToSections,
   type PhotoCurationContext,
   type ScoredPhoto,
@@ -16,6 +18,7 @@ function emptyContext(): PhotoCurationContext {
     sketchArtifactIds: new Set(),
     dadLabArtifactIds: new Set(),
     resolvedBlockerEvidenceIds: new Set(),
+    classifiedScanIds: new Set(),
   };
 }
 
@@ -197,9 +200,12 @@ describe("pickHeroPhoto", () => {
 describe("assignPhotosToSections", () => {
   it("returns empty placement for empty input", () => {
     const placement = assignPhotosToSections([], {
+      ...emptyContext(),
       hasBookCompletions: false,
       hasDadLab: false,
     });
+    expect(placement.cover.kid).toEqual([]);
+    expect(placement.cover.parent).toEqual([]);
     expect(placement.whatYouLoved.kid).toEqual([]);
     expect(placement.whatYouLoved.parent).toEqual([]);
     expect(placement.workedThrough.kid).toEqual([]);
@@ -217,6 +223,7 @@ describe("assignPhotosToSections", () => {
     }
     const scored = scorePhotos(photos, ctx);
     const placement = assignPhotosToSections(scored, {
+      ...ctx,
       hasBookCompletions: false,
       hasDadLab: false,
     });
@@ -227,6 +234,12 @@ describe("assignPhotosToSections", () => {
   it("kid mode whatYouLoved excludes workbook scans entirely", () => {
     const ctx = emptyContext();
     ctx.workbookArtifactIds = new Set(["wb-doc"]);
+    // Give the creative artifacts engagement so they pass the kid-mode
+    // positive-signal filter; the workbook scan should still be excluded.
+    ctx.dayLogEngagement["2026-04-10"] = {
+      "doc-1": "engaged",
+      "doc-2": "engaged",
+    };
     const photos: PhotoRef[] = [
       photo({ id: "art1", sourceDocId: "doc-1" }),
       photo({ id: "wb1", sourceDocId: "wb-doc" }),
@@ -234,6 +247,7 @@ describe("assignPhotosToSections", () => {
     ];
     const scored = scorePhotos(photos, ctx);
     const placement = assignPhotosToSections(scored, {
+      ...ctx,
       hasBookCompletions: true,
       hasDadLab: false,
     });
@@ -250,6 +264,7 @@ describe("assignPhotosToSections", () => {
     ];
     const scored = scorePhotos(photos, ctx);
     const placement = assignPhotosToSections(scored, {
+      ...ctx,
       hasBookCompletions: false,
       hasDadLab: false,
     });
@@ -264,6 +279,7 @@ describe("assignPhotosToSections", () => {
     ];
     const scored = scorePhotos(photos, ctx);
     const placement = assignPhotosToSections(scored, {
+      ...ctx,
       hasBookCompletions: false,
       hasDadLab: false,
     });
@@ -280,9 +296,9 @@ describe("assignPhotosToSections", () => {
     ];
     const scored = scorePhotos(photos, ctx);
     const placement = assignPhotosToSections(scored, {
+      ...ctx,
       hasBookCompletions: false,
       hasDadLab: false,
-      resolvedBlockerEvidenceIds: new Set(["evidence-photo"]),
     });
     expect(placement.workedThrough.kid.map((p) => p.id)).toContain(
       "evidence-photo",
@@ -313,11 +329,215 @@ describe("assignPhotosToSections", () => {
 
     const scored = scorePhotos(photos, ctx);
     const placement = assignPhotosToSections(scored, {
+      ...ctx,
       hasBookCompletions: false,
       hasDadLab: false,
     });
 
     const subjects = placement.whatYouLoved.parent.map((p) => p.subjectTag);
     expect(subjects.includes("Math")).toBe(true);
+  });
+});
+
+describe("hasPositiveKidModeSignal", () => {
+  it("passes photo with engaged engagement", () => {
+    const ctx = emptyContext();
+    ctx.dayLogEngagement["2026-04-10"] = { "doc-a": "engaged" };
+    expect(
+      hasPositiveKidModeSignal(
+        photo({ id: "a", sourceDocId: "doc-a" }),
+        ctx,
+      ),
+    ).toBe(true);
+  });
+
+  it("passes photo with okay engagement (😐 is still real signal)", () => {
+    const ctx = emptyContext();
+    ctx.dayLogEngagement["2026-04-10"] = { "doc-a": "okay" };
+    expect(
+      hasPositiveKidModeSignal(
+        photo({ id: "a", sourceDocId: "doc-a" }),
+        ctx,
+      ),
+    ).toBe(true);
+  });
+
+  it("fails photo with struggled engagement only", () => {
+    const ctx = emptyContext();
+    ctx.dayLogEngagement["2026-04-10"] = { "doc-a": "struggled" };
+    expect(
+      hasPositiveKidModeSignal(
+        photo({ id: "a", sourceDocId: "doc-a" }),
+        ctx,
+      ),
+    ).toBe(false);
+  });
+
+  it("passes book artifact regardless of engagement", () => {
+    const ctx = emptyContext();
+    ctx.bookArtifactIds.add("book-1");
+    expect(
+      hasPositiveKidModeSignal(
+        photo({ id: "a", sourceDocId: "book-1" }),
+        ctx,
+      ),
+    ).toBe(true);
+  });
+
+  it("passes classified scan", () => {
+    const ctx = emptyContext();
+    ctx.classifiedScanIds = new Set(["scan-x"]);
+    expect(
+      hasPositiveKidModeSignal(
+        photo({ id: "a", source: "scan", sourceDocId: "scan-x" }),
+        ctx,
+      ),
+    ).toBe(true);
+  });
+
+  it("passes resolved-blocker evidence", () => {
+    const ctx = emptyContext();
+    ctx.resolvedBlockerEvidenceIds.add("artifact:evidence-1");
+    expect(
+      hasPositiveKidModeSignal(
+        photo({ id: "artifact:evidence-1" }),
+        ctx,
+      ),
+    ).toBe(true);
+  });
+
+  it("fails incidental photo with no creative tag and no engagement", () => {
+    const ctx = emptyContext();
+    const incidental = photo({ id: "incidental", sourceDocId: "rand-doc" });
+    expect(hasPositiveKidModeSignal(incidental, ctx)).toBe(false);
+  });
+
+  it("fails unclassified scan even with good quality", () => {
+    const ctx = emptyContext();
+    ctx.scanQualityById["scan-y"] = "good";
+    expect(
+      hasPositiveKidModeSignal(
+        photo({ id: "a", source: "scan", sourceDocId: "scan-y" }),
+        ctx,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("pickHeroForMode — strict allowlist", () => {
+  it("returns undefined when only incidental photos exist", () => {
+    const ctx = emptyContext();
+    const scored = scorePhotos(
+      [photo({ id: "incidental", sourceDocId: "rand" })],
+      ctx,
+    );
+    expect(pickHeroForMode("kid", scored, new Set(), ctx)).toBeUndefined();
+  });
+
+  it("picks book artifact over higher-scoring incidental photo", () => {
+    const ctx = emptyContext();
+    ctx.bookArtifactIds.add("book-doc");
+    // Give the incidental photo a higher raw score via engagement.
+    ctx.dayLogEngagement["2026-04-10"] = { "rand-doc": "engaged" };
+    const scored = scorePhotos(
+      [
+        photo({ id: "incidental", sourceDocId: "rand-doc" }),
+        photo({ id: "book", sourceDocId: "book-doc" }),
+      ],
+      ctx,
+    );
+    expect(pickHeroForMode("kid", scored, new Set(), ctx)?.id).toBe("book");
+  });
+
+  it("picks classified scan but skips unclassified scan", () => {
+    const ctx = emptyContext();
+    ctx.classifiedScanIds = new Set(["scan-class"]);
+    const scored = scorePhotos(
+      [
+        photo({ id: "unclass", source: "scan", sourceDocId: "scan-rand" }),
+        photo({ id: "class", source: "scan", sourceDocId: "scan-class" }),
+      ],
+      ctx,
+    );
+    // The unclassified scan stays an isWorkbookScan and never qualifies; the
+    // classified scan does.
+    expect(pickHeroForMode("kid", scored, new Set(), ctx)?.id).toBe("class");
+  });
+
+  it("adds chosen hero to alreadyPlaced for dedup", () => {
+    const ctx = emptyContext();
+    ctx.bookArtifactIds.add("book-doc");
+    const scored = scorePhotos(
+      [photo({ id: "book", sourceDocId: "book-doc" })],
+      ctx,
+    );
+    const placed = new Set<string>();
+    pickHeroForMode("kid", scored, placed, ctx);
+    expect(placed.has("book")).toBe(true);
+  });
+});
+
+describe("cross-section deduplication (within mode)", () => {
+  it("does not place the same photo in both cover and whatYouLoved (kid)", () => {
+    const ctx = emptyContext();
+    ctx.bookArtifactIds.add("book-doc");
+    const scored = scorePhotos(
+      [photo({ id: "book", sourceDocId: "book-doc" })],
+      ctx,
+    );
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: true,
+      hasDadLab: false,
+    });
+    const coverId = placement.cover.kid[0]?.id;
+    expect(coverId).toBe("book");
+    expect(placement.whatYouLoved.kid.map((p) => p.id)).not.toContain(coverId);
+  });
+
+  it("does not place the same photo in both whatYouLoved and workedThrough (kid)", () => {
+    const ctx = emptyContext();
+    ctx.dayLogEngagement["2026-04-10"] = { "doc-a": "engaged" };
+    // One eligible photo + cover-disqualified (no creative tag).
+    const scored = scorePhotos(
+      [photo({ id: "p1", sourceDocId: "doc-a" })],
+      ctx,
+    );
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+    const lovedIds = placement.whatYouLoved.kid.map((p) => p.id);
+    const workedIds = placement.workedThrough.kid.map((p) => p.id);
+    for (const id of lovedIds) expect(workedIds).not.toContain(id);
+  });
+});
+
+describe("positive kid-mode filter — assignment integration", () => {
+  it("excludes incidental photos with no positive signal from kid sections", () => {
+    const ctx = emptyContext();
+    ctx.bookArtifactIds.add("real-book");
+    // "steering-wheel" is an unclassified incidental photo — no engagement,
+    // no creative tag, no resolved-blocker tag.
+    const scored = scorePhotos(
+      [
+        photo({ id: "steering-wheel", sourceDocId: "incidental-doc" }),
+        photo({ id: "real-book", sourceDocId: "real-book" }),
+      ],
+      ctx,
+    );
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: true,
+      hasDadLab: false,
+    });
+    const allKidIds = [
+      ...placement.cover.kid,
+      ...placement.whatYouLoved.kid,
+      ...placement.workedThrough.kid,
+    ].map((p) => p.id);
+    expect(allKidIds).not.toContain("steering-wheel");
+    expect(allKidIds).toContain("real-book");
   });
 });
