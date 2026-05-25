@@ -4,13 +4,18 @@
  *          + sightWords + weekFocus + wordMastery + workbookPaces
  *          + skillSnapshot + recentHistoryByDomain (cross-domain)
  *          + recentScans + dayToday + dadLabReports (via buildContextForTask)
- *          + supplemental: all children, disposition profile, weekly review, conundrum
+ *          + supplemental: all children, disposition profile (dispositionCache
+ *            with overrides), recent weekly reviews (5-row strip), conundrum
+ *            title, completion patterns, conundrum response count, chapter
+ *            responses, recent teach-backs (14d, limit 10)
+ *          + child-scoped PLANNING-PARTNER MODE addendum in roleSection
  * Model: Sonnet
  */
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import { callClaude, callClaudeWithVisionUrl, logAiUsage } from "../chatTypes.js";
 import { buildContextForTask } from "../contextSlices.js";
 import { modelForTask, getWeekMonday } from "../chat.js";
+import { summarizeTeachBacks } from "../evaluate.js";
 
 export const handleShellyChat = async (
   ctx: ChatTaskContext,
@@ -43,7 +48,7 @@ export const handleShellyChat = async (
   fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
   const reflectionStartDate = fourteenDaysAgo.toISOString().slice(0, 10);
 
-  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult] =
+  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult, teachBacksResult] =
     await Promise.allSettled([
       db.collection(`families/${familyId}/children`).get(),
       childId
@@ -81,6 +86,15 @@ export const handleShellyChat = async (
             .limit(20)
             .get()
         : Promise.resolve(null),
+      // Recent teach-backs — "Explain" artifacts last 14 days, title filter applied in-memory
+      childId
+        ? db.collection(`families/${familyId}/artifacts`)
+            .where("childId", "==", childId)
+            .where("tags.engineStage", "==", "Explain")
+            .where("createdAt", ">=", reflectionStartDate)
+            .limit(10)
+            .get()
+        : Promise.resolve(null),
     ]);
 
   // Format supplemental context
@@ -112,47 +126,149 @@ export const handleShellyChat = async (
     }
   }
 
-  // Disposition profile
+  // Disposition profile — reads dispositionCache.result.dispositions and applies
+  // dispositionOverrides per the UI's effectiveDispositionText helper. Prior code
+  // read a flat `dispositionProfile` field that is never written; the block was
+  // silently always empty.
   if (dispositionResult.status === "fulfilled" && dispositionResult.value) {
     const snap = dispositionResult.value as { exists: boolean; data: () => Record<string, unknown> | undefined };
     if (snap.exists) {
       const cd = snap.data();
-      if (cd?.dispositionProfile) {
-        const lines: string[] = [`\n\nDISPOSITION PROFILE for ${childName}:`];
-        const dp = cd.dispositionProfile as Record<string, unknown>;
-        for (const [key, value] of Object.entries(dp)) {
-          if (value) lines.push(`${key}: ${value}`);
+      const cache = cd?.dispositionCache as {
+        result?: {
+          profileDate?: string;
+          dispositions?: Record<string, { level?: string; narrative?: string; trend?: string } | undefined>;
+          celebration?: string;
+          nudge?: string;
+        };
+        generatedAt?: string;
+      } | undefined;
+      const overrides = (cd?.dispositionOverrides ?? {}) as Record<string, { text?: string } | undefined>;
+      const dispositions = cache?.result?.dispositions;
+      if (dispositions) {
+        const generatedDate = cache?.generatedAt
+          ? new Date(cache.generatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+          : (cache?.result?.profileDate || "unknown");
+        const orderedKeys = ["curiosity", "persistence", "articulation", "selfAwareness", "ownership"];
+        const labels: Record<string, string> = {
+          curiosity: "Curiosity",
+          persistence: "Persistence",
+          articulation: "Articulation",
+          selfAwareness: "Self-Awareness",
+          ownership: "Ownership",
+        };
+        const lines: string[] = [`\n\nDISPOSITION PROFILE for ${childName} (generated ${generatedDate}):`];
+        let hasAnyEntry = false;
+        for (const key of orderedKeys) {
+          const entry = dispositions[key];
+          if (!entry) continue;
+          const effective = overrides[key]?.text ?? entry.narrative ?? "";
+          if (!effective) continue;
+          hasAnyEntry = true;
+          const level = entry.level || "unknown";
+          const trend = entry.trend || "unknown";
+          lines.push(`- ${labels[key]}: ${level}, trend ${trend} — ${effective}`);
+        }
+        if (cache?.result?.celebration) lines.push(`Celebration: ${cache.result.celebration}`);
+        if (cache?.result?.nudge) lines.push(`Nudge: ${cache.result.nudge}`);
+        if (hasAnyEntry) supplementalContext += lines.join("\n");
+      }
+    }
+  }
+
+  // Recent weekly reviews — surface a 5-row strip of real review fields
+  // (weekKey + summary, with celebration + top 2 growth areas on the most-recent
+  // row only). Prior code read a `dispositionNarrative` field that is never
+  // written; the block was silently always empty.
+  if (reviewResult.status === "fulfilled" && reviewResult.value) {
+    const snap = reviewResult.value as { empty: boolean; docs: Array<{ data: () => Record<string, unknown> }> };
+    if (!snap.empty) {
+      const reviews = snap.docs
+        .map((d) => d.data() as {
+          weekKey?: string;
+          status?: string;
+          summary?: string;
+          celebration?: string;
+          growthAreas?: string[];
+          createdAt?: string;
+        })
+        .filter((r) => r.status !== "no-data" && r.summary)
+        .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+
+      if (reviews.length > 0) {
+        const lines: string[] = [`\n\nRECENT WEEKLY REVIEWS for ${childName} (most recent first):`];
+        for (let i = 0; i < reviews.length; i++) {
+          const r = reviews[i];
+          const rawSummary = r.summary ?? "";
+          const summary = rawSummary.length > 140 ? rawSummary.slice(0, 140).trim() + "…" : rawSummary;
+          let line = `- ${r.weekKey ?? "unknown week"}: ${summary}`;
+          if (i === 0) {
+            const extras: string[] = [];
+            if (r.celebration) extras.push(`celebration: ${r.celebration}`);
+            if (r.growthAreas?.length) {
+              extras.push(`growth areas: ${r.growthAreas.slice(0, 2).join("; ")}`);
+            }
+            if (extras.length > 0) line += ` [${extras.join("; ")}]`;
+          }
+          lines.push(line);
         }
         supplementalContext += lines.join("\n");
       }
     }
   }
 
-  // Weekly review narrative
-  if (reviewResult.status === "fulfilled" && reviewResult.value) {
-    const snap = reviewResult.value as { empty: boolean; docs: Array<{ data: () => Record<string, unknown> }> };
-    if (!snap.empty) {
-      const sorted = snap.docs
-        .map((d: { data: () => Record<string, unknown> }) => d.data())
-        .sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
-          ((b.createdAt as string) || "").localeCompare(
-            (a.createdAt as string) || "",
-          ),
-        );
-      const review = sorted[0];
-      if (review?.dispositionNarrative) {
-        supplementalContext += `\n\nRECENT GROWTH NARRATIVE: ${review.dispositionNarrative}`;
+  // Conundrum title — reads the nested `conundrum.title` written by the planner
+  // (src/features/planner-chat/PlannerChatPage.tsx:1421). Prior code read a flat
+  // `conundrumTitle` that is never written; the block was silently always empty.
+  if (conundrumResult.status === "fulfilled" && conundrumResult.value) {
+    const snap = conundrumResult.value as { exists: boolean; data: () => Record<string, unknown> | undefined };
+    if (snap.exists) {
+      const data = snap.data() as { conundrum?: { title?: string } } | undefined;
+      if (data?.conundrum?.title) {
+        supplementalContext += `\n\nCONUNDRUM THIS WEEK: ${data.conundrum.title}`;
       }
     }
   }
 
-  // Conundrum title
-  if (conundrumResult.status === "fulfilled" && conundrumResult.value) {
-    const snap = conundrumResult.value as { exists: boolean; data: () => Record<string, unknown> | undefined };
-    if (snap.exists) {
-      const data = snap.data() as { conundrumTitle?: string } | undefined;
-      if (data?.conundrumTitle) {
-        supplementalContext += `\n\nCONUNDRUM THIS WEEK: ${data.conundrumTitle}`;
+  // Recent teach-backs — Lincoln-explaining-things-back evidence from the last
+  // 14 days. Mirrors the evaluate.ts week-bounded loader but bounded to the
+  // shellyChat reflection window. Filtered in-memory to actual teach-back
+  // artifacts (not every Explain artifact is one) and summarized via the
+  // shared reducer.
+  if (teachBacksResult.status === "fulfilled" && teachBacksResult.value) {
+    const snap = teachBacksResult.value as { empty: boolean; docs: Array<{ data: () => Record<string, unknown> }> };
+    if (!snap.empty) {
+      const artifacts = snap.docs
+        .map((d) => d.data() as {
+          title?: string;
+          type?: string;
+          notes?: string;
+          content?: string;
+          createdAt?: string;
+          mediaUrl?: string;
+          uri?: string;
+          tags?: { subjectBucket?: string; engineStage?: string };
+        })
+        .filter((a) => (a.title ?? "").toLowerCase().startsWith("teach-back"));
+
+      if (artifacts.length > 0) {
+        const summary = summarizeTeachBacks(artifacts);
+        const lines: string[] = [
+          `\n\nRECENT TEACH-BACKS (last 14 days): ${summary.count} total (audio: ${summary.audioCount}, text: ${summary.textCount}).`,
+        ];
+        const bySubject = Object.entries(summary.bySubject);
+        if (bySubject.length > 0) {
+          lines.push(`By subject: ${bySubject.map(([s, n]) => `${s} ${n}`).join(", ")}.`);
+        }
+        if (summary.examples.length > 0) {
+          lines.push("Examples:");
+          for (const ex of summary.examples) {
+            const excerpt = ex.excerpt ? `"${ex.excerpt}"` : "(no excerpt)";
+            const medium = ex.hasAudio ? "audio" : "text";
+            lines.push(`- ${ex.subject} — ${excerpt} (${medium})`);
+          }
+        }
+        supplementalContext += lines.join("\n");
       }
     }
   }
@@ -252,7 +368,9 @@ SHELLY-SPECIFIC GUIDELINES:
 - She has chronic pain and does heroic work every day. If she's frustrated or tired, acknowledge it genuinely.
 - Keep responses concise unless she asks for detail.
 - If she asks you to generate an image, tell her to tap the image button.
-- For printable activities, format them clearly for screenshot or print.`;
+- For printable activities, format them clearly for screenshot or print.
+
+PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading (comprehension), math, fluency, and phonics (see EVALUATION HISTORY BY DOMAIN above), ${childName}'s disposition signals across curiosity, persistence, articulation, self-awareness, and ownership (see DISPOSITION PROFILE), the week-over-week strip of recent reviews (see RECENT WEEKLY REVIEWS), and recent teach-backs (see RECENT TEACH-BACKS). Use them to help Shelly see patterns over time — what is shifting, what is steady, what connects across signals she has not linked. When she shares an observation about ${childName} mid-conversation, treat it as evidence she has earned the right to add to the picture — don't argue with it, build on it.`;
   } else {
     roleSection = `ROLE: You are Shelly's homeschool assistant. This is a general conversation — not focused on a specific child.
 

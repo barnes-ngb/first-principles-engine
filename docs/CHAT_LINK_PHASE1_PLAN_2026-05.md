@@ -562,3 +562,62 @@ Step 1 is read-only. No production code touched in this commit.
 5. **Optional:** if the +25-29% token estimate is the wrong tradeoff for any reason, say so now so Step 2 can ship the 3-row weekly-review strip instead of 5.
 
 Step 2 (implementation) is blocked until Nathan reviews this.
+
+---
+
+## Step 2 — Implementation audit
+
+Implementation landed in `functions/src/ai/tasks/shellyChat.ts`. No other production files touched. Typecheck (both `functions/` and root) is clean; existing tests (57 in `chat.test.ts` + `contextSlices.test.ts`) pass unchanged.
+
+### Third dead read found by the sanity grep
+
+Nathan asked Step 2 to add a third-dead-read sanity grep. It surfaced one:
+
+- **`weeks/{weekId}.conundrumTitle`** read by `shellyChat.ts:153` was never written anywhere in the codebase. The actual field is nested at `weeks/{weekId}.conundrum.title`, written by the planner at `src/features/planner-chat/PlannerChatPage.tsx:1421` and consumed correctly by other readers (`WeekFocusPanel.tsx:55`, `WeekFocusCard.tsx:102`, `MyAvatarPage.tsx:466-467`). Same class of silent dead read as the two known disposition ones — the `CONUNDRUM THIS WEEK` block in the supplemental context was always empty.
+- **Fix:** one-line — change the type cast to `{ conundrum?: { title?: string } }` and read `data?.conundrum?.title`.
+- **Scope call (rolled into this commit, surface for revert if Nathan disagrees):** identical class of bug, adjacent to the other two fixes, no new query, no schema change. Rolling it in matches the spirit of Decision 4 ("fix the latent disposition bug as part of this phase"). If Nathan would rather isolate it, `git revert -p` the `conundrumTitle → conundrum.title` hunk on its own and re-land separately — the other fixes are independent.
+- **Other Firestore reads in `shellyChat.ts` audited:** `bookTitle` on `chapterResponses` is written by `PlannerChatPage.tsx:1918` and `DevAdminTab.tsx:282` — real. Child-doc fields (`name`, `age`, `description`, `notes`) all populated upstream. Day-log fields (`date`, `checklist[].label/completed/skipped/engagement`) match the canonical day-log schema. No further dead reads detected.
+
+### Changes shipped
+
+All in `functions/src/ai/tasks/shellyChat.ts`:
+
+1. **Header comment** updated to reflect the new supplemental context shape and the child-scoped addendum.
+2. **Import** added: `summarizeTeachBacks` from `../evaluate.js` (already exported).
+3. **Parallel query batch** (the `Promise.allSettled` array) gained an 8th query: `teachBacksResult` — `families/{familyId}/artifacts` filtered to `tags.engineStage == "Explain"`, `createdAt >= today - 14d`, `limit(10)`. Mirrors the evaluate.ts week-bounded loader but bounded to the existing 14-day reflection window.
+4. **Disposition block rewritten.** Now reads `child.dispositionCache.result.dispositions` (the field actually written by `src/features/progress/DispositionProfile.tsx:179`), drilling correctly into the nested shape per `src/core/types/disposition.ts:42-45`. Applies `dispositionOverrides[key]?.text` over `entry.narrative` per the UI's `effectiveDispositionText` helper. Emits 5 lines in fixed order (Curiosity / Persistence / Articulation / Self-Awareness / Ownership) with `level`, `trend`, and the effective narrative; appends `celebration` and `nudge` if present; prepends a `generated <date>` header. Omits the entire block when no cache exists (matches the "omit, don't explain absence" rule from Step 1 Decision 2 follow-up).
+5. **Weekly-review block rewritten.** Replaced the broken `review?.dispositionNarrative` read with a 5-row strip using actual `WeeklyReviewDoc` fields (`weekKey`, `summary`, `celebration`, `growthAreas`, `createdAt`). Filters out `status === "no-data"` rows, sorts by `createdAt` desc, truncates summary to ≤140 chars, attaches `celebration` + top 2 `growthAreas` to the most-recent row only.
+6. **Conundrum block fixed.** One-line drill into `conundrum.title` instead of the never-written `conundrumTitle`.
+7. **Recent teach-backs block added.** Filters the 10 most-recent `Explain` artifacts to those with `title` starting with `teach-back` (case-insensitive — not every Explain artifact is a teach-back), summarizes via the shared `summarizeTeachBacks` reducer, and renders count, audio/text breakdown, by-subject counts, and ≤3 short example excerpts. Omits when zero teach-backs match.
+8. **PLANNING-PARTNER MODE addendum** appended to the child-scoped `roleSection` only (the no-child branch is untouched). Names the four upstream section headers (`EVALUATION HISTORY BY DOMAIN`, `DISPOSITION PROFILE`, `RECENT WEEKLY REVIEWS`, `RECENT TEACH-BACKS`) so the model can ground claims rather than confabulate. Preserves Nathan's "don't argue with it, build on it" framing verbatim.
+
+### Scope guardrails honored
+
+- No changes to `chat`, `plan`, `scan`, `evaluate`, `quest`, `conundrum`, `workshop`, `weeklyFocus`, `weeklyReview`, `analyzePatterns`, or `disposition` task code.
+- No changes to `TASK_CONTEXT` in `contextSlices.ts`. Teach-backs live as a `shellyChat`-local supplemental query per the Step 1 plan.
+- No schema changes. No new shared types. No write-back. No feature flag.
+- `recentHistoryByDomain` slice unchanged — already loaded for `shellyChat` and already at planner's `sessionsPerDomain: 3`.
+- No-child branch unchanged: the addendum, the new sections, and the new query all require `childId`. London chat does not see Lincoln data and vice versa.
+
+### Verification status
+
+- `npx tsc -p functions/tsconfig.json --noEmit` — passes with no errors.
+- `npx tsc -b` (root) — passes with no errors.
+- `vitest run functions/src/ai/contextSlices.test.ts functions/src/ai/chat.test.ts` — 57/57 pass.
+- No new tests yet — that's Step 3.
+
+### Open items for Step 3 (tests) — NOT actioned in this commit
+
+Per Nathan's gate instruction ("Nathan reviews the implementation commit before Step 3 tests"), the new tests outlined in Step 1's test plan are deferred to Step 3:
+1. Disposition block populates from `dispositionCache` (with override application).
+2. Disposition block omits cleanly when no cache present.
+3. Weekly-review strip surfaces ≤5 rows, skips `no-data`, attaches extras to most-recent only.
+4. Weekly-review strip omits cleanly.
+5. Teach-back loader respects `limit(10)` + title filter + summarizer pass-through.
+6. Teach-back block omits cleanly.
+7. PLANNING-PARTNER addendum present on child-scoped branch, absent on no-child branch.
+8. Token-budget sanity bound on the full assembled prompt.
+
+## STOP — STEP 2 GATE
+
+Implementation pushed. Step 3 (tests) blocked until Nathan reviews the implementation commit. If the third-dead-read fix should be split out, say so before Step 3 — it's a 1-line revert with no test impact.
