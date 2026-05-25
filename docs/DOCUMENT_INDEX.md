@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-05-16.
+> Where everything lives. Updated 2026-05-24.
 
 ---
 
@@ -24,7 +24,7 @@
 | `GAME_WORLD_ECONOMY.md` | **CURRENT** | Two-currency economy design (XP + Diamonds), choice-based armor forging, Stonebridge world |
 | `HEALTH_REPORT.md` | **CURRENT** | Weekly code health metrics — line counts, test coverage, bundle size, tech debt tracking |
 | `PROFILE_LIMITS_AUDIT.md` | **CURRENT** | Profile-based rate limits and experience audit — AI usage caps, generation limits, cost controls |
-| `SYSTEM_PROMPTS.md` | **CURRENT** (v4) | Task dispatch, model selection, context slices — 13 task types including scan + shellyChat |
+| `SYSTEM_PROMPTS.md` | **CURRENT** (v4) | Task dispatch, model selection, context slices — 15 task types in `tasks/index.ts` registry (plan, chat, generate, evaluate, quest, generateStory, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview); `analyzeEvaluationPatterns` exported separately |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
 | `SCRIPT_CONVENTIONS.md` | **CURRENT** | Cross-platform npm script conventions (cross-env, path separators, admin scripts) |
 | `KNOWLEDGE_MINE_AUDIT_2026-04.md` | **NEW** | Knowledge Mine audit (Part 1/4): quest type inventory, level system analysis, Level 7 mystery resolution, difficulty progression, Lincoln constraint compliance |
@@ -35,6 +35,8 @@
 | `EVALUATION_SYSTEM_FULL_SWEEP_2026-05.md` | **CURRENT** (closures appended 2026-05-16/17) | May 2026 evidence-first full sweep: R1-R6 verification, journey traces, G55 hardcoded-Lincoln finding, phantom-write tier, post-Phase-1+2 gap re-sweep. Post-Audit Closures section tracks G55 / G54 / G50 fixes from Prompt B, G26 from Prompt C, and G4 / G5 / G6 skip-advisor closures from Prompt D. |
 | `LONDON_GENDER_VERIFY_2026-05.md` | **NEW** | London gender verification sweep: codebase grep confirmed CLEAN; 3 active-doc pronoun fixes landed alongside this report. |
 | `MODEL_UPGRADE_PROPOSAL_2026-05.md` | **NEW** (2026-05-24) | Read-only audit of Claude + OpenAI model usage with per-task UPGRADE/KEEP/EVALUATE recommendations. Flags DALL-E 3 May-12 API retirement (5 image task paths + provider default broken in production). Proposes Phase A hotfix to `gpt-image-1.5`, Phase B optional gpt-image-1 → 1.5 swap on transparent-bg paths, Phase C Opus 4.7 upgrade for weeklyReview / analyzePatterns / monthlyReview. No production code changed. |
+| `CHAT_LINK_PHASE1_PLAN_2026-05.md` | **NEW** (2026-05-24) | Chat-Link Phase 1 plan + implementation audit. Step 0 inventory (chat vs shellyChat reconciliation), Step 1 expansion plan with prompt-addendum draft, Step 2 implementation audit (3 dead-read fixes + teach-back loader + planning-partner addendum). Branch: `claude/awesome-pascal-IE9Wg` (PR #1208). |
+| `CHAT_LINK_PHASE1_VERIFY_2026-05.md` | **NEW** (2026-05-24) | Tablet-runnable manual verification checklist for Chat-Link Phase 1. 5 baseline questions + 3 dead-read recovery probes + 1 London confabulation negative test + failure-mode triage. Pairs with the plan doc above. |
 | `CAPTURE_PIPELINE_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Today page capture pipeline: 3 fragmented entry points (camera icon, pre-completion scan, post-completion scan) competing for same visibility gate. Unified into single AI-routed handler. Worksheets→scans, everything else→artifacts. |
 | `CLEANUP_AUDIT_2026_04_07.md` | **HISTORICAL** | Point-in-time audit (Apr 7): ladder deprecation status, milestone reachability, WorkbookConfig→ActivityConfig migration gaps |
 | `HERO_HUB_ANIMATION_TUNING.md` | **CURRENT** | Hero Hub animation debug workflow — `?heroDebug=1` tuning panel, centralized config in `heroAnimationTuning.ts` |
