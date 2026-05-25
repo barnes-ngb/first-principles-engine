@@ -396,3 +396,30 @@ The CLAUDE.md file lists 18 collections but the codebase defines 31. Missing fro
 ### Priority 5 — Documentation
 
 - [ ] Update CLAUDE.md collection table to include all 31 collections
+
+---
+
+## Addendum 2026-05-25 — Monthly Review Aggregation Indexes
+
+Codified the composite indexes required by
+`functions/src/ai/tasks/monthlyReviewData.ts`. Several of these were created
+manually via Firebase Console magic links after `FAILED_PRECONDITION` errors
+surfaced in production for `generateMonthlyReviewNow`. They are now in
+`firestore.indexes.json` so the repo is the source of truth.
+
+New indexes added in this PR:
+
+- **weeklyReviews**: `(childId ASC, weekKey ASC)` — `loadWeeklyReviewsForMonth`
+- **books**: `(childId ASC, status ASC, updatedAt ASC)` — `loadCompletedBooksInMonth` (a DESC variant already existed for non-range list queries)
+- **scans**: `(childId ASC, createdAt ASC)` — `loadPhotosForMonth` scans branch
+- **artifacts**: `(childId ASC, createdAt ASC)` — `loadPhotosForMonth` artifacts branch
+- **xpLedger**: `(childId ASC, awardedAt ASC)` — `loadDiamondsForMonth` (a DESC variant already existed for the ledger feed)
+- **evaluationSessions**: `(childId ASC, status ASC, evaluatedAt ASC)` — `loadQuestCountForMonth` (a DESC variant already existed for the sessions list)
+
+Range queries without an explicit `orderBy` implicitly order by the range field
+ascending, so the ASC variants are required even where a DESC composite already
+exists for other call sites.
+
+The rationale and per-query mapping is documented as a comment block at the top
+of `monthlyReviewData.ts`. If a new query is added there, add the matching index
+in `firestore.indexes.json` and update both lists.
