@@ -154,6 +154,12 @@ export interface MonthAggregate {
   completedBooks: CompletedBookEntry[];
   dadLabReports: DadLabEntry[];
   photos: PhotoRef[];
+  /**
+   * Source-doc IDs of artifacts whose original type is "Worksheet". These are
+   * curriculum captures uploaded as artifacts (not scans), and are treated as
+   * workbook scans by the curation policy.
+   */
+  workbookArtifactIds: Set<string>;
   conundrums: ConundrumEntry[];
   teachBacks: TeachBackEntry[];
   hours: HoursSummary;
@@ -455,9 +461,10 @@ export async function loadPhotosForMonth(
   childId: string,
   start: string,
   end: string,
-): Promise<PhotoRef[]> {
+): Promise<{ photos: PhotoRef[]; workbookArtifactIds: Set<string> }> {
   const endIso = end + "T23:59:59";
   const photos: PhotoRef[] = [];
+  const workbookArtifactIds = new Set<string>();
 
   // Scans
   try {
@@ -502,6 +509,7 @@ export async function loadPhotosForMonth(
       // Only image-bearing artifacts (Photo, Worksheet); skip Audio/Note
       if (type !== "Photo" && type !== "Worksheet" && type !== "Video") continue;
       const tags = (d.tags ?? {}) as { subjectBucket?: string };
+      if (type === "Worksheet") workbookArtifactIds.add(doc.id);
       photos.push({
         id: `artifact:${doc.id}`,
         storagePath,
@@ -515,7 +523,7 @@ export async function loadPhotosForMonth(
     console.warn("[monthlyReview] loadPhotosForMonth artifacts failed:", err);
   }
 
-  return photos;
+  return { photos, workbookArtifactIds };
 }
 
 function extractScanSubject(d: Record<string, unknown>): string | undefined {
@@ -693,7 +701,7 @@ export async function aggregateMonthData(
     blockers,
     completedBooks,
     dadLabReports,
-    photos,
+    photosResult,
     conundrums,
     hours,
     diamonds,
@@ -723,7 +731,8 @@ export async function aggregateMonthData(
     resolvedBlockers: blockers.resolved,
     completedBooks,
     dadLabReports,
-    photos,
+    photos: photosResult.photos,
+    workbookArtifactIds: photosResult.workbookArtifactIds,
     conundrums,
     teachBacks,
     hours,

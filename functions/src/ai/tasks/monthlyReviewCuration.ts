@@ -17,12 +17,25 @@ export interface PhotoCurationContext {
   dadLabArtifactIds: Set<string>;
   /** Photo IDs (PhotoRef.id) tied to resolved-blocker evidence (boost). */
   resolvedBlockerEvidenceIds: Set<string>;
+  /**
+   * Artifact IDs that should be treated as workbook captures (e.g. uploaded
+   * with artifact type "Worksheet"). Combined with `source === "scan"` they
+   * mark the photo as `isWorkbookScan` for placement policies.
+   */
+  workbookArtifactIds?: Set<string>;
 }
 
 export interface ScoredPhoto extends PhotoRef {
   score: number;
   /** True when this photo is force-included (book/sketch). */
   autoInclude: boolean;
+  /**
+   * True when this photo represents workbook/curriculum content rather than
+   * creative work. Heuristic: `source === "scan"` or the source artifact has
+   * type "Worksheet" (tracked via `workbookArtifactIds`). Workbook scans are
+   * excluded from the cover and deprioritized on celebration sections.
+   */
+  isWorkbookScan: boolean;
 }
 
 // ── Scoring ─────────────────────────────────────────────────────
@@ -96,10 +109,16 @@ export function scorePhotos(
       score += 2;
     }
 
+    const isWorkbookScan =
+      photo.source === "scan" ||
+      (photo.source === "artifact" &&
+        !!context.workbookArtifactIds?.has(photo.sourceDocId));
+
     scored.push({
       ...photo,
       score: autoInclude ? Number.POSITIVE_INFINITY : score,
       autoInclude,
+      isWorkbookScan,
     });
   }
 
@@ -114,18 +133,23 @@ export function scorePhotos(
 
 // ── Selection / placement ───────────────────────────────────────
 
-/** Returns the highest-scored photo that is NOT a workbook scan. */
+/**
+ * Returns the highest-scored photo that is NOT a workbook scan. If the pool
+ * contains only workbook scans, returns `undefined` — the cover should render
+ * a text/decorative fallback rather than a worksheet image.
+ */
 export function pickHeroPhoto(scored: ScoredPhoto[]): PhotoRef | undefined {
   for (const p of scored) {
-    if (p.source === "scan") continue;
+    if (p.isWorkbookScan) continue;
     return strip(p);
   }
   return undefined;
 }
 
 function strip(p: ScoredPhoto): PhotoRef {
-  const { autoInclude, ...rest } = p;
+  const { autoInclude, isWorkbookScan, ...rest } = p;
   void autoInclude;
+  void isWorkbookScan;
   return rest;
 }
 
@@ -199,13 +223,37 @@ function effectiveScore(
 }
 
 export interface SectionPlacement {
-  /** Up to 3 photos for the "What You Loved" page. */
+  /** Up to MAX_PHOTOS_PER_SECTION.whatYouLoved photos for the celebration page. */
   whatYouLoved: PhotoRef[];
-  /** Up to 2 photos for "What You Worked Through" — prefer resolved-blocker evidence. */
+  /** Up to MAX_PHOTOS_PER_SECTION.workedThrough photos — prefer resolved-blocker evidence. */
   workedThrough: PhotoRef[];
   /** Remaining curated photos for the "More Photos" tray, capped at 30 total kept. */
   more: PhotoRef[];
 }
+
+/**
+ * Photo caps per section. Tuned upward from the original PR 1 values after
+ * real-use feedback that sections looked text-dominant; "What You Loved" is
+ * the photo-dominant page and benefits most from a higher cap.
+ */
+export const MAX_PHOTOS_PER_SECTION = {
+  whatYouLoved: 6,
+  workedThrough: 3,
+  cover: 1,
+} as const;
+
+/**
+ * Workbook-scan policy per section. Cover excludes them entirely (worksheet
+ * pages should never be the artifact's first impression). "What You Loved" is
+ * a celebration page so creative work wins ties. "Worked Through" allows them
+ * — workbook captures are real evidence of effort.
+ */
+export const SECTION_WORKBOOK_POLICY = {
+  cover: "exclude",
+  whatYouLoved: "deprioritize",
+  workedThrough: "allow",
+  byTheNumbers: "exclude",
+} as const;
 
 export function assignPhotosToSections(
   scored: ScoredPhoto[],
@@ -218,9 +266,14 @@ export function assignPhotosToSections(
   const resolvedIds = context.resolvedBlockerEvidenceIds ?? new Set<string>();
   const selected: ScoredPhoto[] = [];
 
-  // Workbook scans only go to parent-mode pages — exclude from "What You Loved".
-  const lovedCandidates = scored.filter((p) => p.source !== "scan");
-  const whatYouLoved = selectTopN(lovedCandidates, selected, 3);
+  // "What You Loved" deprioritizes workbook scans: prefer non-workbook photos,
+  // and only fall back to workbook scans if the non-workbook pool is empty.
+  const lovedNonWorkbook = scored.filter((p) => !p.isWorkbookScan);
+  const whatYouLoved = selectTopN(
+    lovedNonWorkbook,
+    selected,
+    MAX_PHOTOS_PER_SECTION.whatYouLoved,
+  );
   selected.push(...whatYouLoved);
 
   // Worked-through prefers resolved-blocker evidence first.
@@ -229,10 +282,15 @@ export function assignPhotosToSections(
     (p) =>
       !resolvedIds.has(p.id) && !whatYouLoved.some((w) => w.id === p.id),
   );
-  const workedPicked = selectTopN(workedPriority, selected, 2);
+  const workedCap = MAX_PHOTOS_PER_SECTION.workedThrough;
+  const workedPicked = selectTopN(workedPriority, selected, workedCap);
   selected.push(...workedPicked);
-  if (workedPicked.length < 2) {
-    const filler = selectTopN(workedRest, selected, 2 - workedPicked.length);
+  if (workedPicked.length < workedCap) {
+    const filler = selectTopN(
+      workedRest,
+      selected,
+      workedCap - workedPicked.length,
+    );
     selected.push(...filler);
     workedPicked.push(...filler);
   }
