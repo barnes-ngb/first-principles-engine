@@ -83,16 +83,16 @@ RULES:
       // Proceed with original on rewrite failure
     }
 
-    const dallePrompt = buildAvatarPiecePrompt(themeStyle, safeDescription);
+    const piecePrompt = buildAvatarPiecePrompt(themeStyle, safeDescription);
 
     // ── Generate image ───────────────────────────────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
     let imageResponse;
     try {
-      imageResponse = await provider.generateImage(dallePrompt, {
-        model: "dall-e-3",
+      imageResponse = await provider.generateImage(piecePrompt, {
+        model: "gpt-image-1.5",
         size: "1024x1024",
-        quality: "standard",
+        quality: "medium",
       });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -123,7 +123,7 @@ RULES:
       metadata: {
         contentType: "image/png",
         metadata: {
-          generatedBy: "dall-e-3",
+          generatedBy: "gpt-image-1.5",
           pieceId,
           childId,
           themeStyle,
@@ -138,7 +138,7 @@ RULES:
     const db = getFirestore();
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "avatar-piece-generation",
-      model: "dall-e-3",
+      model: "gpt-image-1.5",
       inputTokens: 0,
       outputTokens: 0,
       childId,

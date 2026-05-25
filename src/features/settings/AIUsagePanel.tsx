@@ -23,8 +23,9 @@ const MODEL_LABELS: Record<string, string> = {
   'claude-sonnet-4-5-20250929': 'Claude Sonnet 4.5',
   'claude-sonnet-4-20250514': 'Claude Sonnet 4',
   'claude-haiku-4-5-20251001': 'Claude Haiku 4.5',
-  'dall-e-3': 'DALL-E 3',
+  'gpt-image-1.5': 'GPT Image 1.5',
   'gpt-image-1': 'GPT Image',
+  'dall-e-3': 'DALL-E 3',
 }
 
 const TASK_TYPE_LABELS: Record<string, string> = {
@@ -36,12 +37,15 @@ const TASK_TYPE_LABELS: Record<string, string> = {
 }
 
 /** Models priced per-call (no token counts). */
-const IMAGE_MODELS = new Set(['dall-e-3', 'gpt-image-1'])
+const IMAGE_MODELS = new Set(['gpt-image-1.5', 'gpt-image-1', 'dall-e-3'])
 
-/** Approximate cost per image call (USD). */
+/** Approximate cost per image call (USD).
+ *  gpt-image-1.5 at medium quality ~ $0.06 (provisional — confirm in OpenAI dashboard).
+ *  gpt-image-1 + dall-e-3 retained for historical aiUsage rows. */
 const IMAGE_COST_PER_CALL: Record<string, number> = {
-  'dall-e-3': 0.04,
+  'gpt-image-1.5': 0.06,
   'gpt-image-1': 0.02,
+  'dall-e-3': 0.04,
 }
 
 /** Approximate cost per 1M tokens (USD). */
@@ -74,7 +78,7 @@ function estimateCost(entries: AIUsageEntry[]): number {
   let cost = 0
   for (const e of entries) {
     if (IMAGE_MODELS.has(e.model)) {
-      cost += IMAGE_COST_PER_CALL[e.model] ?? 0.04
+      cost += IMAGE_COST_PER_CALL[e.model] ?? 0.06
     } else {
       const inputRate = COST_PER_M_INPUT[e.model] ?? 1
       const outputRate = COST_PER_M_OUTPUT[e.model] ?? 5

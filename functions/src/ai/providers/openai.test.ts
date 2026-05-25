@@ -1,55 +1,52 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const mockGenerate = vi.fn();
+const mockEdit = vi.fn();
+const mockToFile = vi.fn(async (buf: Buffer) => buf);
 
 vi.mock("openai", () => ({
   default: vi.fn(() => ({
-    images: { generate: mockGenerate },
+    images: { generate: mockGenerate, edit: mockEdit },
   })),
+  toFile: mockToFile,
 }));
 
 import { createOpenAiProvider } from "./openai.js";
 
-describe("createOpenAiProvider", () => {
+describe("createOpenAiProvider.generateImage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("generates an image and returns url", async () => {
+  it("returns b64Data from gpt-image-1.5 response", async () => {
     mockGenerate.mockResolvedValueOnce({
-      data: [
-        {
-          url: "https://example.com/image.png",
-          revised_prompt: "A colorful illustration of a cat",
-        },
-      ],
+      data: [{ b64_json: "BASE64DATA" }],
     });
 
     const provider = createOpenAiProvider("test-key");
     const response = await provider.generateImage("a cat");
 
-    expect(response.url).toBe("https://example.com/image.png");
-    expect(response.revisedPrompt).toBe(
-      "A colorful illustration of a cat",
-    );
+    expect(response.b64Data).toBe("BASE64DATA");
+    expect(response.url).toBe("");
+    expect(response.revisedPrompt).toBeUndefined();
   });
 
-  it("uses dall-e-3 model by default", async () => {
+  it("uses gpt-image-1.5 model by default", async () => {
     mockGenerate.mockResolvedValueOnce({
-      data: [{ url: "https://example.com/img.png" }],
+      data: [{ b64_json: "BASE64DATA" }],
     });
 
     const provider = createOpenAiProvider("test-key");
     await provider.generateImage("a dog");
 
     expect(mockGenerate).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "dall-e-3" }),
+      expect.objectContaining({ model: "gpt-image-1.5" }),
     );
   });
 
-  it("uses default size 1024x1024 and standard quality", async () => {
+  it("uses default size 1024x1024 and medium quality", async () => {
     mockGenerate.mockResolvedValueOnce({
-      data: [{ url: "https://example.com/img.png" }],
+      data: [{ b64_json: "BASE64DATA" }],
     });
 
     const provider = createOpenAiProvider("test-key");
@@ -58,7 +55,7 @@ describe("createOpenAiProvider", () => {
     expect(mockGenerate).toHaveBeenCalledWith(
       expect.objectContaining({
         size: "1024x1024",
-        quality: "standard",
+        quality: "medium",
         n: 1,
       }),
     );
@@ -66,30 +63,101 @@ describe("createOpenAiProvider", () => {
 
   it("passes custom size and quality options", async () => {
     mockGenerate.mockResolvedValueOnce({
-      data: [{ url: "https://example.com/img.png" }],
+      data: [{ b64_json: "BASE64DATA" }],
     });
 
     const provider = createOpenAiProvider("test-key");
     await provider.generateImage("a portrait", {
-      size: "1024x1792",
-      quality: "hd",
+      size: "1024x1536",
+      quality: "high",
     });
 
     expect(mockGenerate).toHaveBeenCalledWith(
       expect.objectContaining({
-        size: "1024x1792",
-        quality: "hd",
+        size: "1024x1536",
+        quality: "high",
       }),
     );
   });
 
-  it("returns empty url when response data is empty", async () => {
+  it("passes background and output_format on every generate call", async () => {
+    mockGenerate.mockResolvedValueOnce({
+      data: [{ b64_json: "BASE64DATA" }],
+    });
+
+    const provider = createOpenAiProvider("test-key");
+    await provider.generateImage("a sticker", {
+      background: "transparent",
+      outputFormat: "png",
+    });
+
+    expect(mockGenerate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        background: "transparent",
+        output_format: "png",
+      }),
+    );
+  });
+
+  it("defaults background to auto and output_format to png", async () => {
+    mockGenerate.mockResolvedValueOnce({
+      data: [{ b64_json: "BASE64DATA" }],
+    });
+
+    const provider = createOpenAiProvider("test-key");
+    await provider.generateImage("default opts");
+
+    expect(mockGenerate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        background: "auto",
+        output_format: "png",
+      }),
+    );
+  });
+
+  it("returns empty data shape when response data is empty", async () => {
     mockGenerate.mockResolvedValueOnce({ data: [] });
 
     const provider = createOpenAiProvider("test-key");
     const response = await provider.generateImage("nothing");
 
     expect(response.url).toBe("");
+    expect(response.b64Data).toBeUndefined();
     expect(response.revisedPrompt).toBeUndefined();
+  });
+});
+
+describe("createOpenAiProvider.editImage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("uses gpt-image-1.5 model on the edit endpoint", async () => {
+    mockEdit.mockResolvedValueOnce({
+      data: [{ b64_json: "EDITED_BASE64" }],
+    });
+
+    const provider = createOpenAiProvider("test-key");
+    const buf = Buffer.from("fake-png-bytes");
+    await provider.editImage(buf, "make it shinier");
+
+    expect(mockEdit).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gpt-image-1.5" }),
+    );
+  });
+
+  it("returns b64Data from edit response", async () => {
+    mockEdit.mockResolvedValueOnce({
+      data: [{ b64_json: "EDITED_BASE64" }],
+    });
+
+    const provider = createOpenAiProvider("test-key");
+    const buf = Buffer.from("fake-png-bytes");
+    const response = await provider.editImage(buf, "make it shinier", {
+      background: "transparent",
+    });
+
+    expect(response.b64Data).toBe("EDITED_BASE64");
+    expect(response.url).toBe("");
   });
 });
