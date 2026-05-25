@@ -287,3 +287,50 @@ It is read-only research + decision support. The "execute upgrades" prompt comes
 - [WaveSpeed — GPT Image 2 in 2026: Worth Integrating?](https://wavespeed.ai/blog/posts/gpt-image-2-2026/) (transparent-bg limitation)
 - [DEV community — gpt-image-1 migration isn't a drop-in swap](https://dev.to/flarecanary/dalle-shuts-down-may-12-the-gpt-image-1-migration-isnt-the-drop-in-swap-it-looks-like-3p02)
 - [LaoZhang AI — ChatGPT Images 2.0 pricing](https://blog.laozhang.ai/en/posts/chatgpt-images-2-0)
+
+---
+
+## Phase A + B implementation log
+
+**Date shipped:** 2026-05-25
+**Branch:** `claude/image-gen-migration-phaseAB`
+**PR:** [#1217](https://github.com/barnes-ngb/first-principles-engine/pull/1217)
+**Plan doc:** `docs/IMAGE_MIGRATION_PLAN_2026-05.md`
+**Smoke test:** `docs/IMAGE_MIGRATION_SMOKE_TEST_2026-05.md`
+
+### Commits
+
+| SHA | Title | Files | Tests |
+|---|---|---|---|
+| `1c51b40` | docs: image migration plan — inventory (read-only) | 1 | n/a |
+| `ee8991f` | docs: image migration plan — before/after migration map | 1 | n/a |
+| `8468a5a` | feat(image-gen): Phase A — migrate dall-e-3 → gpt-image-1.5 with b64_json handling | 9 | 293 functions + 2112 root green |
+| `f4ee14b` | feat(image-gen): Phase B — migrate gpt-image-1 → gpt-image-1.5 on transparent paths | 5 | 293 functions green |
+
+### Migrated paths
+
+**Phase A (5 dall-e-3 sites → gpt-image-1.5):**
+- `providers/openai.ts` (single-path generate + edit; default model + default quality flipped; casts added)
+- `imageTasks/generateImage.ts` (model swap, legacy size remap, hard-fail on 403/org-verification, label fallback)
+- `imageTasks/avatarPiece.ts`
+- `imageTasks/baseCharacter.ts`
+- `imageTasks/armorSheet.ts`
+- `imageTasks/starterAvatar.ts`
+
+**Phase B (5 gpt-image-1 sites → gpt-image-1.5):**
+- `imageTasks/armorPiece.ts` (cast already present)
+- `imageTasks/minecraftSkin.ts` (cast already present)
+- `imageTasks/photoTransform.ts` (new edit-endpoint cast)
+- `imageTasks/armorReference.ts` (new edit-endpoint cast)
+- `imageTasks/enhanceSketch.ts` (label-only; provider edit path migrated in Phase A)
+
+**Contract surface:**
+- `aiService.ts` — `DallE3` constant dropped, `GptImage15` added, `GptImage1` retained with `@deprecated` until 2026-10-23.
+- `AIUsagePanel.tsx` — `'gpt-image-1.5'` added to `MODEL_LABELS`, `IMAGE_MODELS`, `IMAGE_COST_PER_CALL` (~$0.06/call provisional). Legacy `'dall-e-3'` + `'gpt-image-1'` rows retained so historical aiUsage entries render.
+
+### What was deferred
+
+- **Phase C (Opus 4.7 for `weeklyReview` / `analyzePatterns` / `monthlyReview`)** — separate capability bet; deserves its own read-only proposal review before any code changes. Not blocked by this migration.
+- **openai SDK bump** — `openai@4.104.0` predates `gpt-image-1.5` in its model union; 4 sites currently carry an `as Parameters<typeof openai.images.{generate,edit}>[0]` cast to bypass the strict union. A future cleanup can bump the SDK and drop the casts; defer to a separate prompt.
+- **Cost ceiling enforcement** — `IMAGE_COST_PER_CALL['gpt-image-1.5']` is set to `$0.06` as a medium-quality estimate. After 5–10 real generations, confirm against the OpenAI dashboard and adjust if materially different. No new caps were added.
+- **gpt-image-1 stale current-state refs in docs** — the May 24 grep pass on prior branch caught only `dall-e-3` strings; `gpt-image-1` references in `docs/PROFILE_LIMITS_AUDIT.md:68,72,76,77,78,341,344` and `docs/MASTER_OUTLINE.md:291` now also drift after Phase B but were out of scope for this migration's doc-alignment step. Surface in a follow-up doc-sync prompt.
