@@ -179,7 +179,7 @@ export const enhanceSketch = onCall(
 
     const [sketchBuffer] = await sketchFile.download();
 
-    // ── Enhance via gpt-image-1 edit endpoint ──────────────────
+    // ── Enhance via gpt-image-1.5 edit endpoint ────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
     const prompt = buildEnhancePrompt(style, safeCaption, theme, transparent);
 
@@ -198,7 +198,7 @@ export const enhanceSketch = onCall(
         prompt,
         {
           size: "1024x1024",
-          // gpt-image-1 edit always returns PNG; only background controls
+          // gpt-image-1.5 edit always returns PNG; only background controls
           // whether the cutout is transparent.
           outputFormat: "png",
           background: transparent ? "transparent" : "auto",
@@ -261,7 +261,7 @@ export const enhanceSketch = onCall(
       metadata: {
         contentType: "image/png",
         metadata: {
-          generatedBy: "gpt-image-1",
+          generatedBy: "gpt-image-1.5",
           sourceSketch: sketchStoragePath,
           style: style ?? "storybook",
           firebaseStorageDownloadTokens: downloadToken,
@@ -275,7 +275,7 @@ export const enhanceSketch = onCall(
     const db = getFirestore();
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "sketch-enhancement",
-      model: "gpt-image-1",
+      model: "gpt-image-1.5",
       inputTokens: 0,
       outputTokens: 0,
       prompt: prompt.slice(0, 200),

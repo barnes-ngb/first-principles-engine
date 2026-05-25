@@ -80,7 +80,7 @@ const ARMOR_REFERENCE_RAW_PROMPTS: Record<string, string> = {
 };
 
 /**
- * Generate a fully-armored version of the bare character using gpt-image-1 edit.
+ * Generate a fully-armored version of the bare character using gpt-image-1.5 edit.
  * Takes the bare character image as input and overlays armor onto it.
  * Storage path: families/{familyId}/avatars/{childId}/armor-reference-{tier}.png
  */
@@ -139,7 +139,7 @@ RULES:
       // Proceed with original on rewrite failure
     }
 
-    // ── Call gpt-image-1 edit endpoint ────────────────────────
+    // ── Call gpt-image-1.5 edit endpoint ──────────────────────
     let resultBase64: string;
     try {
       const { default: OpenAI } = await import("openai");
@@ -149,16 +149,17 @@ RULES:
       const imageBlob = new Blob([new Uint8Array(baseImageBuffer)], { type: "image/png" });
       const imageFile = new File([imageBlob], "base-character.png", { type: "image/png" });
 
+      // Cast: openai SDK 4.104 model union predates gpt-image-1.5.
       const response = await openai.images.edit({
-        model: "gpt-image-1",
+        model: "gpt-image-1.5",
         image: imageFile,
         prompt: `${safePrompt}. Safe for children, family-friendly.`,
         n: 1,
         size: "1024x1024",
-      });
+      } as Parameters<typeof openai.images.edit>[0]);
 
       const b64 = response.data?.[0]?.b64_json;
-      if (!b64) throw new Error("No image data returned from gpt-image-1 edit.");
+      if (!b64) throw new Error("No image data returned from gpt-image-1.5 edit.");
       resultBase64 = b64;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -187,7 +188,7 @@ RULES:
       metadata: {
         contentType: "image/png",
         metadata: {
-          generatedBy: "gpt-image-1",
+          generatedBy: "gpt-image-1.5",
           childId,
           themeStyle,
           tier,
@@ -214,7 +215,7 @@ RULES:
     // ── Log usage ─────────────────────────────────────────────
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "armor-reference-generation",
-      model: "gpt-image-1",
+      model: "gpt-image-1.5",
       inputTokens: 0,
       outputTokens: 0,
       childId,
