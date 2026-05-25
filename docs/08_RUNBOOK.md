@@ -33,7 +33,17 @@ npm run deploy:rules
 
 ### CI/CD (automatic)
 
-Push to the `deploy` branch to trigger the GitHub Actions pipeline. It runs lint, tests, build, then deploys to Firebase Hosting.
+Push to the `deploy` branch to trigger the GitHub Actions pipeline. It runs lint, tests, build, then deploys hosting, Firestore rules + indexes, Storage rules + CORS, and (when `functions/` or `firestore.indexes.json` changed) Cloud Functions.
+
+### CI/CD (manual trigger)
+
+Use this when functions need to be redeployed without a code push — e.g., to ship Cloud Functions that were already merged but haven't deployed yet.
+
+1. Go to https://github.com/barnes-ngb/first-principles-engine/actions
+2. Click **Deploy to Firebase** in the left sidebar
+3. Click **Run workflow** (top right), select the `deploy` branch, then click the green **Run workflow** button
+
+Manual runs always deploy Cloud Functions in addition to hosting + rules (the change-detection check is bypassed). Logs for deployed functions live at https://console.firebase.google.com/project/barneshome-3dfbb/functions.
 
 ---
 
